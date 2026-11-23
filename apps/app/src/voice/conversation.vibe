@@ -1,7 +1,9 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"
 import { readReplyStream } from "@elizaos/agent/client"
 import type { AssistantCapture, AssistantListenHandlers, CloudStreamingSpeech } from "@elizaos/os/bridges/voice"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
+import { AdvertisedCapabilities } from "../assistant/ports.vibe"
+import { deviceHeaders } from "../assistant/transport.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -77,7 +79,7 @@ export service VoiceConversation {
   /** Run the agent's screen change `go` under a claim; voice stays on only when it switched, pinned its context and `contextCurrent` still holds. True when voice stayed on. */
   followScreen(go: () => boolean!!, contextCurrent: () => boolean): boolean!!
   /** Read a message aloud the owner asked to hear: a running conversation retires first, and the reading starts once replies have stopped. */
-  readAloud(text: string): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  readAloud(text: string): void!(SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped)
 }
 
 const CLEF_PATH = "/api/v1/decisions"
@@ -124,6 +126,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   const held = try Machine
   const native = try Native
   const resident = try Resident
+  const advertised = try AdvertisedCapabilities
   const control = try ResidentControl
   const feeds = try ResidentFeeds
   const cloud = try Cloud
@@ -349,7 +352,9 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   effect function answerOf(conversationId: string, body: TurnBody, ack: Acknowledgement, microphoneClear: () => boolean, signal: AbortSignal) {
     const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`
     const hooks = voiceReplyHooks(ack, microphoneClear, () => { runFork(latency.mark("FirstToken")) })
-    const outcome = tryPromise(() => readReplyStream(Stream.toAsyncIterable(resident.stream(`${path}/stream`, body)), hooks, signal)) catch effect (error) => {
+    // A voice turn carries the device headers, read again for each turn, as the assistant's own turns do.
+    const headers = try Effect.provideService(deviceHeaders(), AdvertisedCapabilities, advertised)
+    const outcome = tryPromise(() => readReplyStream(Stream.toAsyncIterable(resident.stream(`${path}/stream`, body, headers)), hooks, signal)) catch effect (error) => {
       lastCause = error
       throw error
     }
@@ -362,7 +367,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       const done: VoiceTurnReply = { messageId: outcome.messageId, text: outcome.text, ...(outcome.action === undefined ? {} : { action: outcome.action }), ...(awaitingReview ? { awaitingReview } : {}) }
       return done
     }
-    const answer = resident.json("POST", path, body) catch effect (error) => {
+    const answer = resident.json("POST", path, body, headers) catch effect (error) => {
       lastCause = error
       throw error
     }

@@ -45,12 +45,20 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **OWNER:** These developer-only test-mock pieces are not ported: Browser's simulated agent Clock handoff and its exact-byte bookmark backup/reset dialog.
 - **OWNER:** Accept the legacy Trash import limits in Notes: imported rows get new IDs and a fresh deletedAt, and their recordings stay in the device audio trash.
 
+- **OWNER:** A message typed on a private screen (Passwords, a locked screen) is sent with no observation (`spec/assistant/context.md`, "A private screen sends the message with no observation…"), but `spec/assistant/conversation.md`'s `canSend` refuses it, and legacy refused it with "Not sent. Agent observation is paused on this screen." and kept the text. Which rule wins?
+- **OWNER:** Voice choices the port made that legacy did not:
+  - network voice (Cloud, Cartesia) listens only after a one-time disclosure of its recipient, held in memory, so it is asked again after every restart; legacy had no such gate. Keep it, persist it, or drop it? An invocation on an undisclosed route is refused silently;
+  - Clef end-of-turn scoring in Cloud is on, so every Cloud turn posts its transcript to `/api/v1/decisions`; legacy kept `CLEF_ENDPOINT_ENABLED = false` until the owner switched it on;
+  - after an approved or declined review the conversation retires, where legacy resumed listening;
+  - Stop while Alpha is thinking aborts the agent's turn (upstream's voice session posts `/api/turns/{room}/abort`), where legacy let the accepted reply finish in the chat (#1305);
+  - the browser build has no voice (no browser capture or player; `AlphaVoiceCloud` is native only), though `spec/voice/vad.md` and `spec/voice/capture.md` still describe a browser capture.
+
 ## Shell (integration)
 
 - Fill the assistant's ports in `PortCells` (declared in `src/assistant/ports.vibe`):
   - `BrowserPages` with `browserPagesFromBrowser`, `MapsViews` with `mapsViewsFromMaps`, `BrowserViews` with `browserViewsFromBrowser` (all in `src/assistant/fills.vibe`);
   - `AdvertisedCapabilities.names()` with `DeviceCapabilities.advertise(offered)`. Until then no `x-eliza-device-capabilities` header is sent.
-- `AssistantHost.peer()` (`src/shell/assistantHost.vibe`) must set `browserPage` from the fresh status. Until it does, no Browser page is ever sent.
+- `PeerFacts` (`src/assistant/host.vibe`) no longer has `browserPage`: the page goes to the peer compared for the turn (`optionalFields`), as upstream's `encodeTurnContext` gates it. A `browserPage:` field set in `AssistantHost.peer()` must be dropped.
 - Requests to `/api/client-devices/proposals` (claim, decision, receipt) and turns must carry `DeviceEnrollment.headers()`. Device actions must be refused while `AgentSession.enrollmentId` is empty, and the ChatOnly phase should show legacy's "Chat only" reason; no UI shows it yet.
 - `AppServices` must contain the Machine services of `gen/clock__notifications` and `gen/clock__reminderTaps`, plus ApprovalReviews, AgentRequests, FilePicker, Notifications and ReminderTaps; their change streams must emit the current value first (assumed by `src/shell/surfaceSheets.vibe`).
 - Browser has no always-mounted sheet; the "Browser shade sheet" was read as the browser build's notification shade in clock-notices. If another Browser sheet was meant, it needs its own surface and Back.
@@ -60,9 +68,14 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Assistant
 
-- `spokenCue`'s `replyReady()` does nothing when no cue was said, so a later `say()` would still play after the reply (`src/assistant/cue.vibe`). Voice guards against it with its own machine.
-- `metadata.clientDevice.calendarAgendaSource` is not sent, because Calendar exports no agenda source for the shown day.
-- `workflowStepDecisions` and the workflows layer each build their own WorkflowApi/WorkflowVersions. Composition may want to share one.
+- `metadata.clientDevice.calendarAgendaSource` is not sent. Legacy sent it only from the browser build, for the browser-local Calendar source (`AlphaCalendar.prepareAgentSource`), which is also the only build that advertises `calendar.agenda-read.v1` (`spec/calendar/deviceActions.md`). The port has no browser-local Calendar (see the owner item on browser-build stores), so this waits on that decision; if kept, Calendar must export the shown source and the assistant sends it beside `calendarDay`.
+- A turn names no selected record other than the Notes list, a Browser tab or a Maps object: legacy also sent Calendar events and sources, reminders, notes, Files folders, own notifications, Settings sections, the SMS subscription and workflow runs as `selectedObject`. It needs a per-area `TurnSources` member and a rule in `spec/assistant/context.md`.
+- Notes folder names (`notesFolders`, read by upstream `packages/notes/src/organize.vibe`) are not sent with a turn, so "move this note to Work" cannot resolve a folder.
+- A quoted reply is display-only: `replyToMessageId` is not sent, and upstream vibestack-dp has no turn field for it.
+- The view-delivery fields go top-level (`viewClientId`, `viewDelivery`, `uiView`); upstream's device-action turn reads `voiceUi.viewDelivery` and `voiceUi.uiClientId` for completed-action navigation (`packages/agent/src/device-actions/proposal/turn.vibe`). Check which the agent needs and send it there.
+- Chat UI behaviour legacy tested that has no spec or code: restoring the open conversation after a restart, loading older messages (`Composer.older()` has no caller), keeping the reading position and following new messages, message Copy and text selection, tappable links in messages, and naming the missing agent in an empty chat (`copy.ignored` has no caller).
+- `src/assistant/review.vibe` feeds constants for facts the custody model guards on (`exact: true`, `visible: true`), and `composer.vibe` carries on after a refused conversation `send`.
+- No `.meta.tsx` for `AgentActivity`, `AssistantDock`, `AssistantScreen`, `ChatPanel`, `ChatSearchPanel`, `ContentQuestionReview`, `ConversationControl`, `DictationControl`, `VoiceIndicator`.
 
 ## Areas consuming assistant changes
 
@@ -75,8 +88,20 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Voice
 
-- The relay's listener registration is forked with one `yieldNow` before `startCloudSpeech`; upstream awaits a real registration, so an event posted at the very first moment could be missed.
-- Pass the capability header to `Resident.stream` in `src/voice/conversation.vibe` as the assistant does through `AdvertisedCapabilities`.
+- The relay's listener registration is forked with one `yieldNow` before `startCloudSpeech`; upstream awaits a real registration, so an event posted at the very first moment could be missed. `Native.listen` (platform) gives no signal when the native listener is registered; it needs one before `src/voice/stream.vibe` can await it.
+- A message typed while voice runs is not sequenced behind it: `VoiceConversation.typedSend` has no caller. The composer's send must go through it while voice runs (voice is built before the assistant, so the composer can read `VoiceConversation` directly).
+- Sign-out, an account switch and reset do not retire voice or dictation: `voice.left()` is called only for a private app or a locked screen, and dictation has no account hook (`account/bindings.vibe`).
+- A reviewed voice request never settles (`reviewSettled` has no caller) and the Cloud relay session is not ended on review. Both wait on the upstream DoneFrame `awaitingReview` item, without which `reviewNeeded` never happens.
+- Voice failures give no reason: `failureMessage` (`src/voice/failure.vibe`) is called only from tests, a failed conversation shows "Voice stopped", and the allowance reset time is missing.
+- The duplex ignores whether the capture really cancels echo (`echoCancelled` is a constant in `conversation.vibe`), and the acknowledgement has no echo window (legacy held speech starting within 1.5 s of the cue).
+- Not ported: microphone Mute (also missing upstream), the reply spoken sentence by sentence while it is generated (`speaksEarly` unused), on-device sentence pipelining (`append`, `playbackSegmentStarted`), the interim "heard so far" line and live level bars in a conversation, "Couldn't read the rest aloud" (`replyBroke` is never sent), and the on-device readiness probe (`probeOnDevice` has no caller) and Cloud warm-up (`warmCloud` has no caller).
+- Dictation: not mounted in the Messages and Phone bars (`CommsBar` gets no `onDictate`); `DiscloseUpload` and `SayCallPaused` effects are dropped; no Cancel while transcribing; leaving the foreground does not cancel.
+- The Microphone machine is never told about the foreground or the permission (`foregroundChanged`, `permissionAnswered` have no caller).
+- #1453 voice part: a voice turn's own keypad, Contacts or Messages step runs through a plain `navigation.open`, which retires voice; it should go through `AssistantHost.openView`/`voice.followScreen`. After a kept `followScreen` the shell no longer knows voice runs, so the owner's own navigation does not retire it.
+- An invocation start is under-admitted (`integration.vibe`: no sensitive-surface or reset check, `chatCurrent: () => true`, no `voiceUi`, empty `conversationId` with no conversation), and a refused start (`FinishOrDiscard`, `MediaNotStopped`) says nothing.
+- Voice timing no longer reaches the diagnostics export (`Latency.entries()` has no consumer), and the latency release-gate scripts are retired without a budget rule in `spec/voice/latency.md`; `test/native-voice-latency.test.mjs` imports a removed script.
+- The on-device speech records disagree with the scripts: `android/embedding-host/qualified-host.json` and `NativeRuntimeEmbeddings.java` name `libelizavoicejni.so`/`ElizaVoiceNative` while the staging scripts require `libparadeevoicejni.so`/`ai/eliza/voice/VoiceNative`, and both host records carry `forkPin 5c5d6163…` with the library hashes of `6337fd4c…`. Regenerate them with a build.
+- Smaller differences: a short call that starts and ends behind the call screen is not reported on return; a 12-digit run is no longer refused as a likely card number (13 now); the developer Cartesia realtime conversation and the local voice host scripts are not ported.
 
 ## Account
 
@@ -133,8 +158,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **agent/client:**
   - `TurnTransport`, `RuntimeJsonBridge.request`/`requestStream` and `client.request`/`client.stream` take no headers, so the development host off the phone drops device headers;
   - `encodeTurnContext` must accept the `selectedObject` kinds `map-place`, `map-route` and `map-search` and the metadata keys `viewClientId`, `viewDelivery` and `uiView` (assumed, not checked);
-  - there is no `clientDevice.browserPage` (eliza#40067/#40193);
-  - voice speaks the agent's `acknowledgment` frame from the readers of elizaOS/eliza#40293 (`1ff497fc4f0`), which the vibestack-dp pin contains; this is not yet run against the pin;
+  - the acknowledgment frame and tool label of elizaOS/eliza#40293 are now the only acknowledgement path (the tool-text fallback is gone); not yet run, because the app's vitest compiles the whole tsconfig and other areas' syntax errors stop it;
   - the strict DoneFrame refuses `awaitingReview`, and DoneFrame notices are never produced;
   - there is no shared-note read-reply lease (`readReply`/`completeReadReply`);
   - `./client` does not re-export `learnPeer`/`comparePeer`/`statusRead`.

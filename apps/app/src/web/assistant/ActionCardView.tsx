@@ -55,10 +55,9 @@ export function ActionCardView({ card, emergency, busy, now, onApprove, onDeclin
       {settled === undefined && expiry !== "" && <p className="flex items-center gap-1 font-mono text-xs uppercase text-muted-foreground"><Clock aria-hidden className="size-3" />{expiry}</p>}
       {settled === undefined && (
         <CardFooter className="gap-2">
-          {card.destination !== undefined
-            ? <Button onClick={() => onOpen?.(card)} onPointerDown={keepFocus} disabled={busy}>Open</Button>
-            : <Button onClick={() => onApprove(card)} onPointerDown={keepFocus} disabled={!approvable} aria-label={emergency ? copy.emergency : `Approve ${card.title}`}><Check aria-hidden className="size-4" />Approve</Button>}
+          <Button onClick={() => onApprove(card)} onPointerDown={keepFocus} disabled={!approvable} aria-label={emergency ? copy.emergency : `Approve ${card.title}`}><Check aria-hidden className="size-4" />Approve</Button>
           <Button variant="outline" onClick={() => onDecline(card)} onPointerDown={keepFocus} disabled={!declinable} aria-label={`Decline ${card.title}`}><X aria-hidden className="size-4" />Decline</Button>
+          {card.destination !== undefined && onOpen !== undefined && <Button variant="ghost" onClick={() => onOpen(card)} onPointerDown={keepFocus} disabled={busy} aria-label={`Open what ${card.title} is about`}>Open</Button>}
         </CardFooter>
       )}
     </Card>

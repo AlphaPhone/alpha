@@ -234,7 +234,8 @@ export const nativePlugins = {
     events: [],
   },
   ElizaSense: {
-    reach: "AospImage",
+    // Registered on every Android build (MainActivity), so a listener left on can be stopped at startup off the AOSP image.
+    reach: "AnyNative",
     methods: [
       "status", "pause", "turnOff", "openSettings", "bindInvocationSession", "discardProtectedPowerInvocation", "takeInvocation",
       "claimProtectedPowerLaunch", "discardProtectedPowerLaunch",

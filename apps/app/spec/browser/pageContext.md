@@ -1,7 +1,7 @@
 # The Browser page with a message
 
 When the owner talks to Alpha while Browser shows a public page, the message carries that page
-beside its observation, as `clientDevice.browserPage`: the tab id and revision of the observation's
+beside its observation, as the turn context's `browserPage`: the tab id and revision of the observation's
 selected `browser-tab`, the address, the title, when it was read, up to 6,000 characters of visible
 text, the owner's selection and up to 20 links, or only the address and title with the reason the
 rest was withheld. On Android the native tab host reads it (`AlphaBrowser.pageContext`) with Alpha's
