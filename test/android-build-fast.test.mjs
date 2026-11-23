@@ -140,7 +140,7 @@ fixtureTest('the marker follows the last sync and reaches the APK the inspection
 
 test('the fast marker makes the production bundle audit refuse the payload', t => {
  const dir = tmp(t);
- fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><title>Alpha Phone</title>');
+ fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'wasm-unsafe-eval\'; object-src \'none\'; base-uri \'none\'"><title>Alpha Phone</title>');
  fs.writeFileSync(path.join(dir, 'build-flags.json'), JSON.stringify({testMocks: false}));
  assert.equal(auditWebBundle(dir, {testMocks: false}).ok, true);
  markFastIteration(path.join(dir, 'build-flags.json'));
