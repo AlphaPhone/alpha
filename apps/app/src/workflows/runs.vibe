@@ -57,6 +57,8 @@ export service WorkflowRuns {
   runMissedNow(runId: string): boolean!!
   /** Follow the agent's current owner, asking once to stop the previous owner's unfinished run. */
   bind(): void!!
+  /** Each run's own output as last read, by run id, for the open workflow of the current owner: a workflow's content, shown as it is. */
+  readonly outputs: Stream.Stream<ReadonlyMap<string, string>>
 }
 
 export const versions = Layer.effect(WorkflowVersions, effect {
@@ -97,6 +99,13 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   const agent = try WorkflowApi
   const seen = try WorkflowVersions
   const client = agent.workflow
+  const outputs = try SubscriptionRef.make<ReadonlyMap<string, string>>(new Map())
+
+  // spec/workflows/vocabulary.md: only a run's own output is shown as it is, never the agent's error text.
+  effect function keepOutputs(read: ReadonlyArray<WorkflowRun>) {
+    const said = read.flatMap((run) => typeof run.output === "string" && run.output.trim() !== "" ? [[run.id, run.output] as const] : [])
+    if (said.length > 0) try SubscriptionRef.update(outputs, (known) => new Map([...known, ...said]))
+  }
 
   effect function owner() {
     const scope = (agent.scope() catch () => undefined)
@@ -104,7 +113,9 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   }
 
   effect function adopt(current: string) {
-    if ((try held.get()).owner !== current) held.send({ type: "switchOwner", owner: current }) catch () => undefined
+    if ((try held.get()).owner === current) return
+    held.send({ type: "switchOwner", owner: current }) catch () => undefined
+    try SubscriptionRef.set(outputs, new Map())
   }
 
   effect function openWorkflow(workflowId: string) {
@@ -118,10 +129,12 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
     held.send({ type: "openWorkflow", owner: who.owner, workflowId: workflow.id, version, typed: workflow.phoneSpec !== undefined }) catch () => undefined
     const executions = (client.executions(workflow.id) catch () => undefined)
     if (executions !== undefined) held.send({ type: "historyRead", entries: executions.map(entryOf) }) catch () => undefined
+    if (executions !== undefined) try keepOutputs(executions)
     return true
   }
 
   effect function show(run: WorkflowRun) {
+    try keepOutputs([run])
     held.send({ type: "showRun", runId: run.id, finished: run.finished, cancelRequested: false, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
   }
 
@@ -162,6 +175,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
     if (!autoRefreshes(before)) return 0
     const run = (client.receipt(before.shown.runId, before.shown.workflowId) catch () => undefined)
     if (run === undefined) return refreshAfter(first, false, true)
+    try keepOutputs([run])
     held.send({ type: "receiptRead", runId: run.id, finished: run.finished, cancelRequested: false, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
     const after = try held.get()
     return autoRefreshes(after) ? refreshAfter(first, after.shown.status !== before.shown.status, false) : 0
@@ -172,6 +186,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   held.send({ type: "restarted" }) catch () => undefined
 
   return {
+    outputs: SubscriptionRef.changes(outputs),
     effect open(runId: string) {
       const answer = (agent.request("GET", `/api/workflow/executions/${runId}`) catch effect () => { throw new RunNotFound({ runId }) })
       const raw = typeof answer === "object" && answer !== null ? (answer as { execution?: unknown }).execution : undefined
@@ -246,6 +261,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
       const who = try owner()
       if (who === undefined || who.owner === (try held.get()).owner) return
       held.send({ type: "switchOwner", owner: who.owner }) catch () => undefined
+      try SubscriptionRef.set(outputs, new Map())
       const { previous } = try held.get()
       if (previous.runId === "") return
       held.send({ type: "cancelPrevious" }) catch () => undefined

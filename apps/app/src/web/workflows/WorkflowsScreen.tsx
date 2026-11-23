@@ -40,7 +40,7 @@ import { RunPanel } from "./RunPanel.tsx";
 import { SourceReview } from "./SourceReview.tsx";
 import { phoneSourceWords, revokeWords } from "./words.ts";
 import { usePlaceSheet } from "./connect.ts";
-import { buildInfo, perform, runtime } from "../shell/services.ts";
+import { buildInfo, perform, runtime, useServiceStream } from "../shell/services.ts";
 
 /** Workflows takes the shell's screen props; the place follows the route the shell opens it at (a run deep link, `digests`, `digests:<runId>`, `renew:<sourceId>` or `google-removal/<grantId>`). */
 export type WorkflowsScreenProps = ScreenProps;
@@ -64,6 +64,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const clockDraft = useClockDraft(runtime);
   const place = usePlace(runtime);
   const sheet = usePlaceSheet();
+  const outputs = useServiceStream("workflows.outputs", WorkflowRuns.use((r) => Effect.succeed(r.outputs)), new Map<string, string>());
   const [onPhone] = useState(() => {
     void perform(Automations.use((a) => a.refresh()));
     void perform(WorkflowClockDraft.use((c) => c.enter()));
@@ -89,6 +90,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const where = place.state ?? placeStart;
   const overlay: Overlay = where.overlay;
   const canChangeRow = (key: string) => automations.can({ type: "change", kind: "RunChange", key, target: false });
+  const runOutput = runs.state === undefined ? undefined : outputs.get(runs.state.selected);
   const workflowRow = list?.rows.find((r) => r.kind === "WorkflowRow" && r.target === where.target);
   const workflowName = workflowRow?.title ?? "";
   const row = where.view === "AutomationView" ? list?.rows.find((r) => r.key === where.target) : undefined;
@@ -197,6 +199,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
               onTap={(approve) => void perform(PhoneSteps.use((p) => p.tap(approve)))} />
           )}
           <RunPanel runs={runs.state} {...(runOutcome === undefined ? {} : { outcome: runOutcome })}
+            {...(runOutput === undefined ? {} : { output: runOutput })}
             can={{
               review: runs.can({ type: "review" }), confirm: runs.state.confirming, reviewResend: runs.can({ type: "reviewResend" }),
               resend: runs.can({ type: "resend" }), cancel: runs.can({ type: "requestCancel" }), reconcile: runs.state.custody === "Unknown",

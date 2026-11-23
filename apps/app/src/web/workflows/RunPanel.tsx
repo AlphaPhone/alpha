@@ -16,6 +16,8 @@ export interface RunPanelProps {
   can: { readonly review: boolean; readonly confirm: boolean; readonly reviewResend: boolean; readonly resend: boolean; readonly cancel: boolean; readonly reconcile: boolean };
   /** What the last run request ended as. */
   outcome?: RunOutcome;
+  /** The selected run's own output, shown as it is. */
+  output?: string;
   onReview: () => void;
   onConfirm: () => void;
   onReconcile: () => void;
@@ -45,7 +47,7 @@ function icon(word: RunWord, entry: Entry) {
  * @model spec/workflows/runs.md
  * @design design.md
  */
-export function RunPanel({ runs, can, outcome, onReview, onConfirm, onReconcile, onReviewResend, onResend, onCancel, onSelect, onRunMissedNow }: RunPanelProps) {
+export function RunPanel({ runs, can, outcome, output, onReview, onConfirm, onReconcile, onReviewResend, onResend, onCancel, onSelect, onRunMissedNow }: RunPanelProps) {
   const selected = runs.history.find((e) => e.runId === runs.selected);
   const shown = runs.shown.runId !== "" && runs.shown.runId === runs.selected ? runs.shown : undefined;
   // spec/workflows/runs.md: Stop asks once more, for the run it names, before anything is sent.
@@ -74,6 +76,11 @@ export function RunPanel({ runs, can, outcome, onReview, onConfirm, onReconcile,
           <span>{occurredSentences[selected.occurred]}</span>
           {selected.occurred === "Missed" && runs.typed && <Button size="lg" variant="outline" onClick={() => onRunMissedNow(selected.runId)}>Run now</Button>}
         </Alert>
+      )}
+      {selected !== undefined && output !== undefined && (
+        <section aria-label="Run output" className="mx-4 rounded-md border border-border p-3">
+          <p className="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{output}</p>
+        </section>
       )}
       {shown !== undefined && reconciliationText(shown.reconciliation) && <p role="status" className="px-4 text-sm">{reconciliationText(shown.reconciliation)}</p>}
       <ol aria-label="Run history" className="flex flex-col">

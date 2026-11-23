@@ -214,15 +214,17 @@ describe("Held changes (spec/workflows/automations.md, \"Story: Change an automa
 describe("Runs (spec/workflows/runs.md, \"Story: Open a workflow and see its runs\")", () => {
   it.effect("opening a workflow reads its runs, a run without the engine's missed marker reads Ran, and a missed Run now needs a missed run (spec/workflows/runs.md, \"Story: Run a missed occurrence when I choose\"; spec/workflows/vocabulary.md, \"Story: Read my workflows in Alpha's words\")", () => effect {
     const sent: Sent[] = []
-    provide workflowsOf(workflowRoutes([execution("r1", true)]), sent) {
+    provide workflowsOf(workflowRoutes([{ ...execution("r1", true), output: "Saved the brief." }]), sent) {
       const runs = try WorkflowRuns
       const held = try RunsMachine
       const opened = try runs.openWorkflow("w1")
       const state = try held.get()
       const missedNow = try runs.runMissedNow("r1")
+      // spec/workflows/vocabulary.md, "The agent's sentences are never shown; only a workflow's own output is shown as it is"
+      const outputs = Option.getOrUndefined(try Stream.runHead(runs.outputs))
       try Effect.try(() => assert.deepStrictEqual(
-        { opened, workflow: state.workflowId, history: state.history.map((e) => [e.runId, e.occurred, e.finished]), missedNow },
-        { opened: true, workflow: "w1", history: [["r1", "Ran", true]], missedNow: false },
+        { opened, workflow: state.workflowId, history: state.history.map((e) => [e.runId, e.occurred, e.finished]), missedNow, output: outputs?.get("r1") },
+        { opened: true, workflow: "w1", history: [["r1", "Ran", true]], missedNow: false, output: "Saved the brief." },
       ))
     }
   })
