@@ -31,8 +31,8 @@ export type WatchTarget = { readonly path: string; readonly volume: string } | {
 /** One call of a native plugin, decoded by its answer's schema. */
 export effect function call<S extends Schema.Top>(plugin: string, method: string, schema: S, args?: unknown) {
   const native = try Native
-  const raw = try native.invoke(plugin, method, args) catch effect (error) => { throw new FilesUnavailable({ method, reason: error._tag }) }
-  return try Schema.decodeUnknownEffect(schema)(raw) catch effect () => { throw new FilesUnavailable({ method, reason: "malformed" }) }
+  const raw = native.invoke(plugin, method, args) catch effect (error) => { throw new FilesUnavailable({ method, reason: error._tag }) }
+  return Schema.decodeUnknownEffect(schema)(raw) catch effect () => { throw new FilesUnavailable({ method, reason: "malformed" }) }
 }
 
 /** The bridge argument naming a volume other than the primary one. */

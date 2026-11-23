@@ -24,6 +24,8 @@ export interface DigestChange {
 
 /** The digest panel: its reads, its one kept change, and the brief on Home. */
 export service Digests {
+  /** The results of each read that reached the agent, as read, for the result notices and Home's brief. */
+  readonly synced: Stream.Stream<ReadonlyArray<DigestResult>>
   /** Follow the agent's current owner, restoring a change kept for it. */
   bind(): void!!
   open(): void!!
@@ -32,17 +34,17 @@ export service Digests {
   /** A poll tick: a full read when the panel is open or `full` asks for one. */
   poll(full: boolean): void!!
   /** Keep a reviewed change and send it. */
-  change(change: DigestChange): MutationReply | "busy"!!
+  change(change: DigestChange): (MutationReply | "busy")!!
   /** Send the kept change again. */
-  retry(): MutationReply | "busy"!!
+  retry(): (MutationReply | "busy")!!
   /** Discard a kept change still in review. */
   discard(): void!!
   /** Pause or resume the digest `loopId`, keeping its saved time, zone and source, under its current version. */
-  toggle(loopId: string, on: boolean): MutationReply | "busy" | "withdrawn"!!
+  toggle(loopId: string, on: boolean): (MutationReply | "busy" | "withdrawn")!!
   /** The agent's Run now offer for the missed result `runId`, as the review names it; undefined when none is offered now. */
-  runNowOffer(runId: string): MissedRunNow | undefined!!
+  runNowOffer(runId: string): (MissedRunNow | undefined)!!
   /** Keep and send the reviewed Run now of the missed result `runId`, under that offer's source, revision and mutation id. */
-  runMissedNow(runId: string, reviewed: MissedRunNow): MutationReply | "busy" | "withdrawn"!!
+  runMissedNow(runId: string, reviewed: MissedRunNow): (MutationReply | "busy" | "withdrawn")!!
   /** The loops, sources and results as last read, for the review sheets and the result notices. */
   catalog(): { readonly loops: ReadonlyArray<DigestLoop>; readonly sources: ReadonlyArray<DigestSource>; readonly results: ReadonlyArray<DigestResult> }!!
 }
@@ -93,23 +95,24 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
   const scopes = try Ref.make<{ scope?: OwnerScope; hash: string; inbox?: DigestInbox }>({ hash: "" })
   const catalog = try Ref.make<{ loops: ReadonlyArray<DigestLoop>; sources: ReadonlyArray<DigestSource>; results: ReadonlyArray<DigestResult> }>({ loops: [], sources: [], results: [] })
   const syncs = try Ref.make(0)
+  const synced = try PubSub.unbounded<ReadonlyArray<DigestResult>>()
   const android = build.info.variant !== "browser"
   const pendingKey = (hash: string) => ownerKey("device", `workflows/digest-pending/${hash}`)
 
   effect function readPending(hash: string) {
-    const raw = try (store.get(pendingKey(hash)) catch () => undefined)
+    const raw = (store.get(pendingKey(hash)) catch () => undefined)
     if (raw === undefined) return undefined
-    return try (Effect.try(() => JSON.parse(raw) as { phase?: string; change: DigestChange }) catch () => undefined)
+    return (Effect.try(() => JSON.parse(raw) as { phase?: string; change: DigestChange }) catch () => undefined)
   }
 
   effect function bind() {
-    const scope = try (agent.scope() catch () => undefined)
+    const scope = (agent.scope() catch () => undefined)
     if (scope === undefined) return
-    const hash = try (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
+    const hash = (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
     const before = try Ref.get(scopes)
     if (hash === "" || before.hash === hash) return
     if (before.inbox !== undefined) try before.inbox.retire()
-    const inbox = android ? undefined : try digestInbox(hash)
+    const inbox = android ? undefined : try Effect.provideService(digestInbox(hash), KeyValueStore.KeyValueStore, store)
     try Ref.set(scopes, { scope, hash, ...(inbox === undefined ? {} : { inbox }) })
     try Ref.set(catalog, { loops: [], sources: [], results: [] })
     const known = try Ref.get(sessions)
@@ -130,20 +133,20 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
 
   effect function inboxResults() {
     const { hash, inbox } = try Ref.get(scopes)
-    if (android) return try (nativeEntries("syncInbox", hash) catch effect () => { return try nativeEntries("inboxHistory", hash) })
+    if (android) return (nativeEntries("syncInbox", hash) catch effect () => { return try nativeEntries("inboxHistory", hash) })
     if (inbox === undefined) return []
     const id = try Ref.updateAndGet(syncs, (n) => n + 1)
     queue.send({ type: "submit", id, scope: "WebScope" }) catch () => undefined
-    const synced = try (inbox.sync(protocol, id) catch () => undefined)
+    const synced = (inbox.sync(protocol, id) catch () => undefined)
     queue.send({ type: "finish", id, replied: synced !== undefined }) catch () => undefined
-    return synced ?? try (inbox.history() catch () => [])
+    return synced ?? (inbox.history() catch () => [])
   }
 
   effect function flight() {
     const state = try panel.get()
     if (state.flight === "NoFlight") return
     const now = try Clock.currentTimeMillis
-    const read = try (effect {
+    const read = (effect {
       if (state.flight === "FullFlight") {
         const capabilities = try protocol.capabilities()
         if (!capabilities.digests) return { ok: false }
@@ -154,6 +157,7 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
       return { ok: true, results: try inboxResults() }
     } catch () => ({ ok: false }))
     const results = "results" in read ? read.results ?? [] : (try Ref.get(catalog)).results
+    if (read.ok) try PubSub.publish(synced, results)
     try Ref.update(catalog, (c) => ({ ...c, results }))
     const { loops, sources } = try Ref.get(catalog)
     const brief = briefOf(results.map((r) => ({ ran: digestRan(r), completedAt: instant(r.completedAt), cursor: r.cursor })))
@@ -169,14 +173,14 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
     if (kept === undefined) return "MutationUnconfirmed" satisfies MutationReply
     store.set(pendingKey(hash), JSON.stringify({ phase: "dispatched", change: kept.change })) catch () => undefined
     const { session } = try panel.get()
-    const reply: MutationReply = try (effect { try protocol.mutate(kept.change.path, kept.change.body); return "MutationSaved" } catch (error) =>
+    const reply: MutationReply = (effect { try protocol.mutate(kept.change.path, kept.change.body); return "MutationSaved" satisfies MutationReply as MutationReply } catch (error): MutationReply =>
       error instanceof HostedSourceRejected ? "MutationRejected"
       : error instanceof WorkflowHttpError && error.status === 409 && error.code === "WORKFLOW_TYPED_NOT_APPLIED" && error.workflowId === kept.change.body.id ? "ExactStale"
       : error instanceof WorkflowHttpError && error.status === 409 ? "ScheduleRefused"
       : error instanceof WorkflowHttpError && error.status >= 400 && error.status < 500 ? "MutationRejected" : "MutationUnconfirmed")
     panel.send({ type: "mutationReplied", session, reply }) catch () => undefined
     if (reply === "MutationUnconfirmed") return reply
-    const cleared = try (store.remove(pendingKey(hash)) catch () => "failed")
+    const cleared = (store.remove(pendingKey(hash)) catch () => "failed")
     panel.send({ type: "cleared", session, ok: cleared !== "failed" }) catch () => undefined
     panel.send({ type: "poll", full: true }) catch () => undefined
     try flight()
@@ -185,6 +189,7 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
   }
 
   return {
+    synced: Stream.fromPubSub(synced),
     bind,
     effect open() {
       try bind()
@@ -206,26 +211,26 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
       try flight()
     },
     effect change(change: DigestChange) {
-      const kept = try (panel.send({ type: "keep" }) catch () => undefined)
+      const kept = (panel.send({ type: "keep" }) catch () => undefined)
       if (kept === undefined) return "busy"
       const { hash } = try Ref.get(scopes)
-      const saved = try (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      const saved = (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
       if (saved === "failed") return "MutationUnconfirmed"
-      const started = try (panel.send({ type: "retry" }) catch () => undefined)
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
       if (started === undefined) return "busy"
       return try send()
     },
     effect retry() {
-      const started = try (panel.send({ type: "retry" }) catch () => undefined)
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
       if (started === undefined) return "busy"
       return try send()
     },
     effect discard() {
-      const asked = try (panel.send({ type: "discard" }) catch () => undefined)
+      const asked = (panel.send({ type: "discard" }) catch () => undefined)
       if (asked === undefined) return
       const { hash } = try Ref.get(scopes)
       const { session } = try panel.get()
-      const removed = try (store.remove(pendingKey(hash)) catch () => "failed")
+      const removed = (store.remove(pendingKey(hash)) catch () => "failed")
       panel.send({ type: "cleared", session, ok: removed !== "failed" }) catch () => undefined
     },
     catalog: () => Ref.get(catalog),
@@ -233,13 +238,13 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
       const { loops } = try Ref.get(catalog)
       const loop = loops.find((l) => l.id === loopId && !l.removed)
       if (loop === undefined || loop.spec.enabled === on) return "withdrawn"
-      const kept = try (panel.send({ type: "keep" }) catch () => undefined)
+      const kept = (panel.send({ type: "keep" }) catch () => undefined)
       if (kept === undefined) return "busy"
       const { hash } = try Ref.get(scopes)
       const change: DigestChange = { path: "loops", body: { spec: { ...loop.spec, enabled: on }, mutationId: newId(), confirmed: true, id: loop.id, expectedVersionId: loop.versionId } }
-      const saved = try (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      const saved = (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
       if (saved === "failed") return "MutationUnconfirmed"
-      const started = try (panel.send({ type: "retry" }) catch () => undefined)
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
       if (started === undefined) return "busy"
       return try send()
     },
@@ -255,13 +260,13 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
       const valid = runNowRequestValid(offer !== undefined, offer?.sourceId === reviewed.sourceId, offer?.sourceRevision === reviewed.sourceRevision,
         offer?.mutationId === reviewed.mutationId && reviewed.mutationId !== "")
       if (!valid || offer === undefined) return "withdrawn"
-      const kept = try (panel.send({ type: "keep" }) catch () => undefined)
+      const kept = (panel.send({ type: "keep" }) catch () => undefined)
       if (kept === undefined) return "busy"
       const { hash } = try Ref.get(scopes)
       const change: DigestChange = { path: "dossier", body: { sourceId: offer.sourceId, sourceRevision: offer.sourceRevision, mutationId: offer.mutationId, confirmed: true } }
-      const saved = try (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      const saved = (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
       if (saved === "failed") return "MutationUnconfirmed"
-      const started = try (panel.send({ type: "retry" }) catch () => undefined)
+      const started = (panel.send({ type: "retry" }) catch () => undefined)
       if (started === undefined) return "busy"
       return try send()
     },

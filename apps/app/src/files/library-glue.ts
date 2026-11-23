@@ -10,7 +10,7 @@ const PDF_LIMIT = 20 * 1024 * 1024;
 export async function renderPdfPage(blob: Blob, page: number): Promise<{ status: "rendered" | "unsupported" | "failed"; page?: number; pageCount?: number; imageUri?: string; text?: string; message?: string }> {
   if (blob.type !== "application/pdf") return { status: "unsupported", message: "This selection is not a PDF." };
   if (blob.size > PDF_LIMIT) return { status: "failed", message: "PDF preview is unavailable. It may be malformed, encrypted, or larger than 20 MiB." };
-  const task = getDocument({ data: new Uint8Array(await blob.arrayBuffer()), isEvalSupported: false });
+  const task = getDocument({ data: new Uint8Array(await blob.arrayBuffer()) });
   try {
     const pdf = await task.promise;
     if (page < 0 || page >= pdf.numPages) return { status: "failed", message: "PDF preview is unavailable." };

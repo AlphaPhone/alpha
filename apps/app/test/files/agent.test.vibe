@@ -38,7 +38,7 @@ it.live("\"find my PDFs\" from Home brings Files forward on Browse and shows onl
       const agent = try FilesAgent
       try agent.advertise(["files.browser.v1"])
       const bringForward = effect {
-        try Effect.forkScoped(browser.visit())
+        try Effect.forkDetach(browser.visit())
         return true
       }
       const result = try agent.run({ type: "files_filter", kind: "pdf" }, onHome, bringForward)

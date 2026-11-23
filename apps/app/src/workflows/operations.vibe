@@ -5,7 +5,7 @@ import type { WorkflowNoticeRoute } from "@elizaos/plugin-workflow/client"
 import { type PostedAnswer, type Presented, noticePath, postedOutcome, presentationAdmitted, spokenOutcome } from "../../gen/workflows__deviceSteps.effect.vibe"
 import { copy } from "../assistant/presentation.vibe"
 import { AssistantHost, type AgentIdentity } from "../assistant/host.vibe"
-import type { OperationPorts } from "../assistant/review.vibe"
+import { DeviceReview, type OperationPorts } from "../assistant/review.vibe"
 import { Native, NativeUnavailable } from "../platform/native.vibe"
 import { Notices } from "../shell/notices.vibe"
 import { Speech } from "../voice/speech.vibe"
@@ -47,9 +47,9 @@ export function summarizeOwned(op: Owned, result: "NoResult" | "Applied" | "Fail
   return copy.unconfirmed
 }
 
-/** The text a workflow notification's binding hashes: the owner scope, agent session, enrollment, proposal and operation it was approved for. */
-export function workflowNoticeBindingText(route: WorkflowNoticeRoute, identity: AgentIdentity, call: ExecutorCall): string {
-  return JSON.stringify([route.scope, route.ownerId, route.agentId, identity.session, route.origin, identity.installationId, identity.enrollmentId, call.proposalId, call.operationId])
+/** The text a workflow notification's binding hashes: the owner scope, agent session, enrollment, proposal (its id and the digest it was listed under) and operation it was approved for. */
+export function workflowNoticeBindingText(route: WorkflowNoticeRoute, identity: AgentIdentity, call: ExecutorCall, proposalDigest: string): string {
+  return JSON.stringify([route.scope, route.ownerId, route.agentId, identity.session, route.origin, identity.installationId, identity.enrollmentId, call.proposalId, proposalDigest, call.operationId])
 }
 
 const POSTED: Readonly<Record<string, PostedAnswer>> = { succeeded: "PostedSucceeded", failed: "PostedFailed" }
@@ -62,6 +62,7 @@ export const operationPorts = effect {
   const native = try Native
   const agent = try WorkflowApi
   const steps = try PhoneSteps
+  const review = try DeviceReview
 
   effect function admitted() {
     const exposure = (try host.screen()).exposure
@@ -72,7 +73,7 @@ export const operationPorts = effect {
     const front = try admitted()
     if (!front) return refused("screen_not_current")
     const started = try Ref.make(false)
-    const spoken = try (effect {
+    const spoken = (effect {
       try speech.speak(op.text, "AppSpeech", { onStarted: () => Ref.set(started, true) })
       return "finished"
     } catch (error) => error._tag === "SpeechInterrupted" && error.started ? "cut" : "silent")
@@ -81,7 +82,7 @@ export const operationPorts = effect {
     return outcome === "PresentedUnknown" ? lost : refused("speech_unavailable")
   }
 
-  effect function routeOf(): WorkflowNoticeRoute | undefined {
+  effect function routeOf(): (WorkflowNoticeRoute | undefined)!! {
     const review = try steps.reviewed()
     if (review === undefined) return undefined
     const scope = agent.scope() catch () => undefined
@@ -91,12 +92,13 @@ export const operationPorts = effect {
     return { scope: hash, origin: scope.origin, ownerId: scope.ownerId, agentId: scope.agentId, workflowId: review.run.workflowId, runId: review.run.id, versionId: review.run.versionId }
   }
 
-  effect function postOnPhone(op: NoticeOperation, call: ExecutorCall): { readonly offered: boolean; readonly bound: boolean; readonly outcome: Presented } {
+  effect function postOnPhone(op: NoticeOperation, call: ExecutorCall): { readonly offered: boolean; readonly bound: boolean; readonly outcome: Presented }!! {
     const unbound = { offered: true, bound: false, outcome: "PresentedRefused" as Presented }
     const route = try routeOf()
     const identity = try host.identity()
-    if (route === undefined || identity === undefined) return unbound
-    const bindingHash = tryPromise(() => sha256Hex(workflowNoticeBindingText(route, identity, call))) catch () => ""
+    const facts = try review.callFacts(call)
+    if (route === undefined || identity === undefined || facts.digest === "" || facts.workflow?.runId !== route.runId) return unbound
+    const bindingHash = tryPromise(() => sha256Hex(workflowNoticeBindingText(route, identity, call, facts.digest))) catch () => ""
     if (bindingHash === "") return unbound
     const answer = native.invoke("AlphaNotifications", "postWorkflow", { operationId: call.operationId, bindingHash, title: op.title, body: op.body, route }) catch (error) => error
     if (answer instanceof NativeUnavailable) return { offered: false, bound: true, outcome: "PresentedRefused" as Presented }

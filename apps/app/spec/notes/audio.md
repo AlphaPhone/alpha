@@ -34,7 +34,10 @@ the exact stored duration in whole milliseconds, and an offset on a 25-second bo
 duration. Before each window and before the single save the device describes the recording again: the
 same audio, the same note, the same duration and not deleted. A window past the encoded end is empty and
 never sent. A request is never retried and a recording is never deleted by this action. Windows with no
-speech add nothing; when no window had speech the recording is kept and the owner is told.
+speech add nothing; when no window had speech the recording is kept and the owner is told. The owner
+can cancel a transcription in progress, and leaving the note cancels it: no further window is sent,
+nothing is saved and the recording is kept (legacy "cancel keeps the audio and never begins another
+window or save").
 
 ```quint
 type WindowInput = { validIds: bool, exactAudio: bool, exactNote: bool, duration: int, recordedDuration: int,

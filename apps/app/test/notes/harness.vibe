@@ -8,6 +8,7 @@ import { Resident } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
+import { Notices } from "../../src/shell/notices.vibe"
 import { VoiceRoute, VoiceRouteFailed, type RouteAttempt } from "../../src/voice/route.vibe"
 import { recordingTranscriber } from "../../src/voice/transcription.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
@@ -24,6 +25,16 @@ export const inNotes: ForegroundState = { ...home, view: "notes" }
 export effect function check(run: () => void) {
   try Effect.try(run)
 }
+
+/** Every toast and persistent notice the Notes layer raised in a test, in order. */
+export const told: string[] = []
+
+/** The shell's notices, recorded in `told`. */
+const noticesFake = Layer.succeed(Notices, {
+  show: (message: string) => sync(() => { told.push(message) }),
+  persist: (message: string) => sync(() => { told.push(message) }),
+  dismiss: () => Effect.void, hold: () => Effect.void, release: () => Effect.void, takeAction: () => Effect.void, send: () => succeed(false),
+})
 
 /** The platform, account, voice and shell services the Notes layer needs, over the in-memory resident and device. */
 export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: SubscriptionRef.SubscriptionRef<ForegroundState>, routes?: Layer.Layer<Navigation>) {
@@ -52,6 +63,7 @@ export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: Subscri
     speech,
     Layer.provide(recordingTranscriber, Layer.merge(native, speech)),
     navigation,
+    noticesFake,
     Layer.succeed(Resident, {
       status: () => succeed("running" as const),
       ensureRunning: () => Effect.void,
@@ -81,10 +93,12 @@ export const notesOver = (agent: NotesAgentFake, device: DeviceFake, shown?: Sub
 /** The first snapshot of the bound collection. */
 export effect function bound() {
   const collection = try NotesCollection
-  return try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => owned !== undefined)), "5 seconds")
+  return Option.getOrUndefined(try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => owned !== undefined)), "5 seconds"))
 }
 
-/** Wait until a stream of states reaches one the test is waiting for. */
+/** Wait until a stream of states reaches one the test is waiting for; a state never reached within five seconds fails the test. */
 export effect function until<A>(changes: Stream.Stream<A>, ok: (value: A) => boolean) {
-  return try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
+  const found = try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
+  if (Option.isNone(found)) throw new Error("never reached")
+  return found.value
 }

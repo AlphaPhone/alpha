@@ -85,7 +85,7 @@ export const place = Layer.provideMerge(Layer.effect(WorkflowsPlace, effect {
   const steps = try PhoneSteps
   const sources = try DigestSourcesService
   const sheet = try SubscriptionRef.make<PlaceSheet>(emptySheet)
-  const sent = (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
+  const sent = effect (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
 
   effect function reviewStep(runId: string, workflowId: string) {
     const step = runId === "" || workflowId === "" ? undefined : try steps.review(runId, workflowId)
@@ -178,7 +178,7 @@ export const place = Layer.provideMerge(Layer.effect(WorkflowsPlace, effect {
         return
       }
       const linked = parseWorkflowRunDeepLink(route)
-      const opened = linked === undefined ? "" : try (runs.openRoute(route) catch () => "")
+      const opened = linked === undefined ? "" : (runs.openRoute(route) catch () => "")
       if (linked === undefined || opened === "") {
         try moveTo("ListView", "", true)
         return
@@ -205,7 +205,7 @@ export const place = Layer.provideMerge(Layer.effect(WorkflowsPlace, effect {
     },
     effect selectRun(runId: string) {
       const r = try runsHeld.get()
-      if ((try (runsHeld.send({ type: "selectRun", runId }) catch () => undefined)) === undefined) return
+      if (((runsHeld.send({ type: "selectRun", runId }) catch () => undefined)) === undefined) return
       try reviewStep(runId, r.workflowId)
       try follow()
     },
@@ -222,7 +222,7 @@ export const place = Layer.provideMerge(Layer.effect(WorkflowsPlace, effect {
       }
       if (now.view === "WorkflowView") {
         if (try definitions.back()) return true
-        if ((try runsHeld.get()).custody === "ConfirmingResend" && (try (runsHeld.send({ type: "leaveResend" }) catch () => undefined)) !== undefined) return true
+        if ((try runsHeld.get()).custody === "ConfirmingResend" && ((runsHeld.send({ type: "leaveResend" }) catch () => undefined)) !== undefined) return true
       }
       if (now.view === "ListView") return false
       return try moveTo("ListView", "", true)

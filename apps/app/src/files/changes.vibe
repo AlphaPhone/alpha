@@ -69,7 +69,7 @@ export service FilesChanges {
   rename(key: string, name: string): ChangeResult!!
   createFolder(parent: string, volume: string, name: string): ChangeResult!!
   /** The folders of `path`, for the Move and Copy picker. */
-  folders(path: string, volume: string): readonly Row[] | undefined!!
+  folders(path: string, volume: string): (readonly Row[] | undefined)!!
   dismiss(): void!!
 }
 

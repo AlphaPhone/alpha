@@ -9,8 +9,8 @@ claimed for its note, and [saved audio](./audio.md) owns playback and later tran
 
 ## Story: Record a voice note
 
-> As the owner, I want to record a voice note in Notes, pause it, see its words as they are transcribed,
-> and keep every second I recorded even if the app closes.
+> As the owner, I want to record a voice note in Notes, pause it, and keep every second I recorded even
+> if the app closes, with nothing I say sent anywhere until I ask for a transcript.
 
 ### A recording starts only for the current owner, after any playback has confirmed it stopped
 
@@ -73,12 +73,15 @@ pure def sometimesControlStarted(s: Recorder): bool = s.control == ControlStarte
 pure def sometimesMediaRefused(s: Recorder): bool = s.phase == RecFailed and s.error == MediaUnconfirmed
 ```
 
-### Segments are transcribed in order while the recording goes on, and never past the audio
+### A recording is audio only, and shows only text its journal already holds, never past the audio
 
-The recorder shows the transcribed prefix of finished segments, then live words for speech after it.
-Transcription stops quietly when Notes is hidden and resumes when it is shown; a route that needs the
-owner, such as sign-in, says so once; a failed route stops transcription and keeps the audio. With no
-route the recording is saved with its audio alone.
+A Notes recording sends nothing to a speech service or a local model while it records, stops or is
+saved: a transcript is the separate Generate transcript action on the saved note, on the owner's request
+([saved audio](./audio.md); legacy audio-first recording, 4ac92128d, 0b868526d). The recorder shows only
+the text the recording's journal already holds for its finished segments, such as text an earlier
+version kept, in segment order and never past the audio. A recording with no such text is saved with its
+audio alone. The failures below are kept for that journaled text only: nothing on this path asks a
+route or reports one failing.
 
 ```quint
 type TranscriptionFailure = FailedSignIn | FailedRoute | FailedNoRoute

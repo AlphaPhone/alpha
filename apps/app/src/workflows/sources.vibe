@@ -136,9 +136,9 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
   const offered = try Ref.make<ReadonlyArray<PhoneCalendar>>([])
 
   effect function sessionId() {
-    const scope = try (agent.scope() catch () => undefined)
+    const scope = (agent.scope() catch () => undefined)
     if (scope === undefined) return ""
-    return try (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
+    return (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
   }
 
   effect function now() {
@@ -153,7 +153,7 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
   }
 
   effect function identity(id: string) {
-    return try (effect { return try Schema.decodeUnknownEffect(SourceIdentity)(try native.invoke(plugin, "nativeSourceIdentity", { sessionId: id })) } catch () => undefined)
+    return (effect { return try Schema.decodeUnknownEffect(SourceIdentity)(try native.invoke(plugin, "nativeSourceIdentity", { sessionId: id })) } catch () => undefined)
   }
 
   effect function impact() {
@@ -167,14 +167,14 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
   effect function grantConsent(scope: PhoneScope) {
     try now()
     const id = try sessionId()
-    const asked = try (held.send({ type: "askConsent", expiresAt: scope.expiresAt, calendar: scope.calendars.length > 0, reminders: scope.reminders }) catch () => undefined)
+    const asked = (held.send({ type: "askConsent", expiresAt: scope.expiresAt, calendar: scope.calendars.length > 0, reminders: scope.reminders }) catch () => undefined)
     if (asked === undefined || id === "") return undefined
     const expected = try identity(id)
     if (expected === undefined) {
       held.send({ type: "consentAnswered", approved: false }) catch () => undefined
       return undefined
     }
-    const reply = try (effect {
+    const reply = (effect {
       return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke(plugin, "nativeSourceConsent", {
         sessionId: id, sourceId: scope.sourceId, expiresAt: new Date(scope.expiresAt).toISOString(), confirmed: true, expectedBinding: expected,
         scope: { calendars: scope.calendars, reminders: scope.reminders, timeZone: deviceZone(), window: "owner_day_and_overdue_reminders",
@@ -203,7 +203,7 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     if (saved === undefined) return false
     let all = true
     for (const loop of loops.filter((l) => !l.removed && l.spec.sourceId === renews)) {
-      const moved = try (effect {
+      const moved = (effect {
         try agent.digestProtocol.mutate("loops", {
           spec: { ...loop.spec, sourceId: saved.id, sourceRevision: saved.revision }, mutationId: newId(), confirmed: true, id: loop.id, expectedVersionId: loop.versionId,
         })
@@ -233,10 +233,10 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     effect startGrant(email: boolean, calendar: boolean) {
       try now()
       const mutation = newId()
-      const started = try (held.send({ type: "start", mutation, email, calendar }) catch () => undefined)
+      const started = (held.send({ type: "start", mutation, email, calendar }) catch () => undefined)
       if (started === undefined) return false
       const kinds = [...(calendar ? ["calendar"] : []), ...(email ? ["email"] : [])]
-      const request = try (delegate("start", { confirmed: true, mutationId: mutation, kinds }) catch () => undefined)
+      const request = (delegate("start", { confirmed: true, mutationId: mutation, kinds }) catch () => undefined)
       if (request === undefined || request.mutationId !== mutation || request.status !== "waiting") {
         held.send({ type: "cancelRequest" }) catch () => undefined
         return false
@@ -247,10 +247,10 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     },
     effect approveGrant() {
       try now()
-      const approved = try (held.send({ type: "approve" }) catch () => undefined)
+      const approved = (held.send({ type: "approve" }) catch () => undefined)
       if (approved === undefined) return false
       const { state } = try Ref.get(delegation)
-      const request = try (delegate("complete", { state, confirmed: true }) catch () => undefined)
+      const request = (delegate("complete", { state, confirmed: true }) catch () => undefined)
       const ok = request !== undefined && request.status === "complete" && request.grantId !== undefined
       if (ok) try Ref.update(delegation, (d) => ({ ...d, grantId: request.grantId ?? "" }))
       held.send({ type: "completed", ok }) catch () => undefined
@@ -276,7 +276,7 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
       if (!(named !== "" ? canRevokeNamedGrant(before, true) : canRevokeGrant(before, true))) return "unconfirmed" satisfies RevokeOutcome
       try digests.poll(true)
       if (!sameRows(reviewed, try impact())) return "changed" satisfies RevokeOutcome
-      const answer = try (effect {
+      const answer = (effect {
         const route = "/api/workflow/hosted/cloud-delegation/revoke"
         const reply = try decoded(RevokeReply, route, try agent.request("POST", route, { grantId, confirmed: true }))
         return reply.remoteRevocation === "confirmed"
@@ -288,9 +288,9 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     },
     effect phoneCalendars() {
       if (!android) return { status: "not-on-phone" } satisfies PhoneCalendars
-      const access = try (effect { return try Schema.decodeUnknownEffect(ReadAccess)(try native.invoke("AlphaCalendar", "requestWorkflowReadAccess", {})) } catch () => undefined)
+      const access = (effect { return try Schema.decodeUnknownEffect(ReadAccess)(try native.invoke("AlphaCalendar", "requestWorkflowReadAccess", {})) } catch () => undefined)
       if (access?.status !== "granted") return { status: "permission-denied" } satisfies PhoneCalendars
-      const list = try (effect {
+      const list = (effect {
         return try Schema.decodeUnknownEffect(PhoneCalendarList)(try native.invoke("AlphaCalendar", "availabilitySources", { timeZone: deviceZone() }))
       } catch () => undefined)
       if (list === undefined || list.status !== "ready" || list.calendars === undefined) return { status: "unavailable" } satisfies PhoneCalendars
@@ -336,7 +336,7 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
       const saved = sources.find((s) => s.id === sourceId)
       const selection = saved === undefined ? undefined : nativeOf(saved)
       if (selection === undefined || id === "") return false
-      const reply = try (effect { return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke(plugin, "nativeSourceConsent", { sessionId: id, sourceId: selection.sourceId, expectedBinding: selection, revoke: true, confirmed: true })) } catch () => undefined)
+      const reply = (effect { return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke(plugin, "nativeSourceConsent", { sessionId: id, sourceId: selection.sourceId, expectedBinding: selection, revoke: true, confirmed: true })) } catch () => undefined)
       if (reply?.revoked !== true) return false
       held.send({ type: "revokeConsent" }) catch () => undefined
       if (android) native.invoke(plugin, "clearSourceRenewal", { selection }) catch () => undefined
@@ -345,7 +345,8 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     armRenewals,
     effect checkRenewal(live: boolean) {
       if (!android) return { action: renewalAction(false, "NoRenewalTap", false, live) } satisfies RenewalOutcome
-      const tap = try (effect { return try Schema.decodeUnknownEffect(RenewalTapRecord)(try native.invoke(plugin, "pendingSourceRenewal", {})) } catch () => ({}))
+      const read = effect { return try Schema.decodeUnknownEffect(RenewalTapRecord)(try native.invoke(plugin, "pendingSourceRenewal", {})) }
+      const tap: Partial<RenewalTapRecord> = read catch () => ({})
       if (tap.token === undefined || tap.selection === undefined || tap.expiresAt === undefined) return { action: renewalAction(true, "NoRenewalTap", false, live) } satisfies RenewalOutcome
       const { sources } = try digests.catalog()
       const matched = sources.find((s) => {

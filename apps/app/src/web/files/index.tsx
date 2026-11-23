@@ -6,7 +6,7 @@ import { initial as pickerInitial } from "../../../gen/files__picker.ts";
 import { Build } from "../../platform/build.vibe";
 import { FilesBack } from "../../files/back.vibe";
 import { FilePicker } from "../../files/picker.vibe";
-import type { AppScreen, AppSurface } from "../app-screen.ts";
+import type { AppId, AppScreen, AppSurface } from "../app-screen.ts";
 import { FilePickerSheet } from "./FilePickerSheet.tsx";
 import { FilesScreen } from "./FilesScreen.tsx";
 import { ask, now, perform } from "../shell/services.ts";
@@ -14,7 +14,8 @@ import { closes, sheetBack } from "../shell/surfaceBack.ts";
 import { runtime } from "./runtime.ts";
 
 /** The picker surface takes nothing from the shell: it follows the picker machine. */
-export type FilePickerSurfaceProps = Record<string, never>;
+/** The surface props every overlay gets; the picker opens no app itself. */
+export type FilePickerSurfaceProps = { readonly open: (app: AppId, route?: string) => void };
 
 /** The picker other areas open through `FilePicker.choose`, kept mounted above every screen. */
 export function FilePickerSurface(_props: FilePickerSurfaceProps) {

@@ -5,6 +5,7 @@ import { type Event as DialogEvent, Machine as SourceDialogMachine, machine as s
 import { Native } from "../platform/native.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { type NoteRow, rowOf } from "./list.vibe"
+import { earlierNotesKept } from "./slots.vibe"
 import { NotesHandoff } from "./origins.vibe"
 
 /** What a source action did. */
@@ -40,19 +41,19 @@ const make = effect {
   const attachment = try AttachmentMachine
   const opened = try Ref.make<{ readonly noteId: string; readonly print: string } | undefined>(undefined)
 
-  effect function sendDialog(event: DialogEvent): SourceDialog | undefined!! {
-    return try (dialog.send(event) catch () => undefined)
+  effect function sendDialog(event: DialogEvent): (SourceDialog | undefined)!! {
+    return (dialog.send(event) catch () => undefined)
   }
   effect function sendAttachment(event: AttachmentEvent): void!! {
-    try (attachment.send(event) catch () => undefined)
+    attachment.send(event) catch () => undefined
   }
 
-  effect function printOf(noteId: string): string | undefined!! {
+  effect function printOf(noteId: string): (string | undefined)!! {
     const note = (try collection.current())?.snapshot.notes.find((item) => item.id === noteId)
     return note === undefined ? undefined : JSON.stringify(note)
   }
 
-  effect function fresh(): { noteId: string; row: NoteRow } | undefined!! {
+  effect function fresh(): ({ noteId: string; row: NoteRow } | undefined)!! {
     const held = try Ref.get(opened)
     if (held === undefined) return undefined
     const note = (try collection.current())?.snapshot.notes.find((item) => item.id === held.noteId)
@@ -87,7 +88,7 @@ const make = effect {
       if (current === undefined || acted === undefined || acted.op !== "RemoveAction" || note === undefined || snapshot === undefined) return "stale"
       const data: Record<string, NoteJson> = { ...(note.format?.data ?? {}) }
       delete data.webSource
-      const reply = try (collection.interact("update-note", { id: note.id, expectedRevision: snapshot.revision, format: { kind: note.format?.kind ?? "text", data } }) catch () => undefined)
+      const reply = (collection.interact("update-note", { id: note.id, expectedRevision: snapshot.revision, format: { kind: note.format?.kind ?? "text", data } }) catch () => undefined)
       const saved = reply?.target?.id === note.id
       try sendDialog({ type: "removeSettled", saved })
       return saved ? "removed" : "unconfirmed"
@@ -108,7 +109,7 @@ const make = effect {
       try sendAttachment({ type: "tap" })
       const stage = (try attachment.get()).stage
       if (stage === "AttachOpening") {
-        const ok = try (effect {
+        const ok = (effect {
           try native.invoke("AlphaMailAttachments", "openSourceReference", { reference: source.reference, sha256: source.sha256, size: source.size, mimeType: source.mimeType })
           return true
         } catch () => false)
@@ -116,29 +117,31 @@ const make = effect {
         return ok ? "opened" : "failed"
       }
       if (stage !== "AttachPick") return "failed"
-      const picked = try (effect { return try native.invoke("DailyApps", "perform", { action: "files" }) } catch () => undefined)
+      const picked = (effect { return try native.invoke("DailyApps", "perform", { action: "files" }) } catch () => undefined)
       const selection = typeof picked === "object" && picked !== null && "selectionId" in picked && typeof picked.selectionId === "string" ? picked.selectionId : undefined
       try sendAttachment({ type: "choose", selected: selection !== undefined })
       if (selection === undefined) return "failed"
-      const file = try (effect { return try native.invoke("AlphaMailAttachments", "readSelected", { selectionId: selection }) } catch () => undefined)
+      const file = (effect { return try native.invoke("AlphaMailAttachments", "readSelected", { selectionId: selection }) } catch () => undefined)
       const record = typeof file === "object" && file !== null ? file as Record<string, unknown> : {}
       const matches = record.sha256 === source.sha256 && record.size === source.size && record.mimeType === source.mimeType
       try sendAttachment({ type: "verify", matches })
       let notice: SourceNotice = matches ? "opened" : "mismatch"
       if ((try attachment.get()).stage === "AttachOpening") {
-        const ok = try (effect { try native.invoke("AlphaMailAttachments", "openReviewed", { ...record, reviewed: true }); return true } catch () => false)
+        const ok = (effect { try native.invoke("AlphaMailAttachments", "openReviewed", { ...record, reviewed: true }); return true } catch () => false)
         if (!ok) notice = "failed"
         try sendAttachment({ type: "finishOpen" })
       }
-      try (native.invoke("DailyApps", "forgetSelected", { selectionId: selection }) catch () => undefined)
+      native.invoke("DailyApps", "forgetSelected", { selectionId: selection }) catch () => undefined
       try sendAttachment({ type: "release" })
       return notice
     },
     effect releaseUnused() {
       if (!(try native.available("AlphaMailAttachments"))) return 0
       const snapshot = (try collection.current())?.snapshot
-      if (snapshot === undefined || !releasesSource(snapshot.trash !== undefined, false, false, releaseAfterMs + 1)) return 0
-      const answer = try (native.invoke("AlphaMailAttachments", "releaseSourceReferences", { keep: sourceReferences(snapshot), olderThanMs: releaseAfterMs }) catch () => undefined)
+      // spec/notes/attachment.md: the earlier device collection's notes may name a document too, so nothing is released while it may hold any.
+      const earlier = try Effect.provideService(earlierNotesKept(), Native, native)
+      if (snapshot === undefined || !releasesSource(snapshot.trash !== undefined && !earlier, false, false, releaseAfterMs + 1)) return 0
+      const answer = (native.invoke("AlphaMailAttachments", "releaseSourceReferences", { keep: sourceReferences(snapshot), olderThanMs: releaseAfterMs }) catch () => undefined)
       return typeof answer === "object" && answer !== null && "released" in answer && typeof answer.released === "number" ? answer.released : 0
     },
   }

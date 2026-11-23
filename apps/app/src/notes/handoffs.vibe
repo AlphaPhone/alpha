@@ -7,7 +7,7 @@ export effect function scannedNoteHandoff() {
   const editor = try NotesEditor
   const handoff: Pick<CameraHandoffs.Shape, "saveScannedNote"> = {
     effect saveScannedNote(text: string, id: string) {
-      const created = try (editor.createFromText(text, id) catch () => undefined)
+      const created = (editor.createFromText(text, id) catch () => undefined)
       return created !== undefined
     },
   }

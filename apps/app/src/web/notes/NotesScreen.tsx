@@ -27,6 +27,7 @@ import { NotesSources } from "../../notes/sources.vibe";
 import { NotesTrash, type TrashNotice, type TrashRow } from "../../notes/trash.vibe";
 import { copyText } from "../../notes/platform.ts";
 import { Native } from "../../platform/native.vibe";
+import { draftCopyText } from "../../notes/share.vibe";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 import { useLayer } from "../shell/useLayer.ts";
 import { FoldersSheet } from "./FoldersSheet.tsx";
@@ -165,9 +166,11 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
           setTranscribing(true);
           void call(NotesAudio, (service) => service.transcribe(openRow)).then((said) => {
             setTranscribing(false);
-            tell(said === "saved" ? "" : said === "no-speech" ? "No speech was found. Your recording is kept." : said === "unavailable" ? "Recording unavailable" : "Not saved");
+            tell(said === "saved" ? "" : said === "no-speech" ? "No speech was found. Your recording is kept."
+              : said === "cancelled" ? "Transcript cancelled. Your recording is kept." : said === "unavailable" ? "Recording unavailable" : "Not saved");
           });
         }}
+        onCancelTranscript={() => void call(NotesAudio, (service) => service.cancel())}
         onWebSource={() => void call(NotesSources, (service) => service.openDialog(editor.draftId))}
         onAttachment={() => { if (openRow) void call(NotesSources, (service) => service.openAttachment(openRow)).then((said) => tell(said === "mismatch" ? "That file doesn’t match this attachment." : said === "opened" ? "" : "Couldn’t open the linked file.")); }} />
     );
@@ -217,12 +220,12 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
             canCopy={copyDraftAllowed(editor.review || state.phase === "Review", dirty(editor), true, true, true) && draft !== undefined}
             onDiscard={() => void call(NotesEditor, (service) => service.discard())}
             onRetry={() => void call(NotesEditor, (service) => service.retry()).then((said) => tell(said === "changed-elsewhere" ? "Changed elsewhere" : said === "deleted" ? "Note was deleted" : said === "not-saved" ? "Not saved" : ""))}
-            onCopy={() => { if (draft) void copyText([draft.title, draft.body].filter(Boolean).join("\n")).then(() => tell("Draft copied."), () => tell("Draft could not be copied.")); }} />
+            onCopy={() => { if (draft) void copyText(draftCopyText(draft)).then(() => tell("Draft copied."), () => tell("Draft could not be copied.")); }} />
         )}
         {kept !== undefined && (
           <NotesReviewBar status="Kept draft" dirty canRetry={false} canCopy
             onDiscard={() => void call(NotesEditor, (service) => service.discard())}
-            onCopy={() => void copyText([kept.title, kept.body].filter(Boolean).join("\n")).then(() => tell("Draft copied."), () => tell("Draft could not be copied."))} />
+            onCopy={() => void copyText(draftCopyText(kept)).then(() => tell("Draft copied."), () => tell("Draft could not be copied."))} />
         )}
         {body}
         {earlierNotesAvailable && previousOwner === state.owner && <PreviousDeviceNotes key={state.owner} onClose={() => setPreviousOwner(undefined)} />}

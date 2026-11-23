@@ -15,7 +15,7 @@ export service WorkflowClockDraft {
   /** Hand the alarm the owner set to Clock's draft and show Clock's review; false when it is not a valid alarm or Clock offers no review. */
   prepare(request: AlarmRequest): boolean!!
   /** Approve the reviewed draft and hand it to Clock once: "opened" or "unknown" after a handoff, "failed" when the save was retired. */
-  approve(): "opened" | "unknown" | "failed" | "refused"!!
+  approve(): ("opened" | "unknown" | "failed" | "refused")!!
   /** What Clock answered a handoff made outside this service. */
   handedOver(opened: boolean): void!!
 }
@@ -26,7 +26,7 @@ export const clockDraft = Layer.unwrap(effect {
   return Layer.provideMerge(Layer.effect(WorkflowClockDraft, effect {
     const held = try Machine
     const clock = try WorkflowClockPort
-    const sent = (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
+    const sent = effect (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
     return {
       enter: effect () => { try sent({ type: "enter" }) },
       effect leave() {

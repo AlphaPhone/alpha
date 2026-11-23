@@ -20,12 +20,12 @@ export interface OwnedSnapshot { readonly owner: string; readonly snapshot: Note
 /** The canonical Notes collection of the bound owner: one read and one mutation at a time. */
 export service NotesCollection {
   readonly snapshots: Stream.Stream<OwnedSnapshot | undefined>
-  current(): OwnedSnapshot | undefined!!
+  current(): (OwnedSnapshot | undefined)!!
   bind(owner: string): void!!
   retire(): void!!
   refresh(): void!!
   invalidate(revision?: number): void!!
-  interact(capability: NotesCapability, params: Record<string, unknown>): NotesInteractResult!NotesFailure | NotesBusy | NotesRetired
+  interact(capability: NotesCapability, params: Record<string, unknown>): NotesInteractResult!(NotesFailure | NotesBusy | NotesRetired)
   needReview(): void!!
   clearReview(): void!!
   setClean(clean: boolean): void!!
@@ -41,8 +41,8 @@ const make = effect {
   const clean = try Ref.make(true)
   const reading = try Ref.make(0)
 
-  effect function send(event: CollectionEvent): Collection | undefined!! {
-    return try (machine.send(event) catch () => undefined)
+  effect function send(event: CollectionEvent): (Collection | undefined)!! {
+    return (machine.send(event) catch () => undefined)
   }
 
   effect function publish(ownerId: number, snapshot: NotesSnapshot): void!! {
@@ -54,7 +54,7 @@ const make = effect {
     const before = try machine.get()
     if (before.phase !== "Loading" || (try Ref.get(reading)) === before.ticket) return
     try Ref.set(reading, before.ticket)
-    const outcome = try (client.readState() catch (error) => error)
+    const outcome = (client.readState() catch (error) => error)
     const reply = "notes" in outcome ? outcome : undefined
     const priorUnreadable = outcome instanceof NotesRefused && priorNeedsReview(outcome)
     const after = try send({ type: "finishRead", ownerId: before.owner, ticket: before.ticket, revision: reply?.revision ?? -1,
@@ -98,10 +98,10 @@ const make = effect {
       try read()
     },
     effect interact(capability: NotesCapability, params: Record<string, unknown>) {
-      const begun = try (machine.send({ type: "beginWrite" }) catch effect () => { throw new NotesBusy() })
+      const begun = (machine.send({ type: "beginWrite" }) catch effect () => { throw new NotesBusy() })
       const finish = (revision: number, success: boolean) =>
         send({ type: "finishWrite", ownerId: begun.owner, ticket: begun.ticket, revision, success })
-      const reply = try (client.interact(capability, params) catch effect (error) => {
+      const reply = (client.interact(capability, params) catch effect (error) => {
         try finish(-1, false)
         try followUp()
         throw error

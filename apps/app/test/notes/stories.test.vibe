@@ -146,8 +146,9 @@ describe("Notes stories", () => {
       const revision = agent.revision
       try editor.openNote("kept")
       const closed = try editor.leave()
+      const open = (try editor.draft()) === undefined
       try check(() => assert.deepStrictEqual(
-        { dropped, afterDrop, saved, afterSave, closed, unchanged: agent.revision === revision, open: (try editor.draft()) === undefined },
+        { dropped, afterDrop, saved, afterSave, closed, unchanged: agent.revision === revision, open },
         { dropped: true, afterDrop: 1, saved: true, afterSave: ["\nCall Sam", "\nAs it was"], closed: true, unchanged: true, open: true },
       ))
     }
@@ -182,11 +183,11 @@ describe("Notes stories", () => {
       const machine = try CollectionMachine
       try bound()
       // spec/notes/collection.md, "One mutation runs at a time and cancels a read in flight"
-      const confirmed = try (collection.interact("create-note", { content: "Errands\nPost office", creationId: "c-errands" }) catch () => undefined)
+      const confirmed = (collection.interact("create-note", { content: "Errands\nPost office", creationId: "c-errands" }) catch () => undefined)
       const ready = (try machine.get()).phase
       // spec/notes/collection.md, "A mutation is confirmed only by its own reply, and an uncertain one stays under review"
       agent.failNextWrite = true
-      const lost = try (collection.interact("create-note", { content: "Second\nnote", creationId: "c-second" }) catch () => undefined)
+      const lost = (collection.interact("create-note", { content: "Second\nnote", creationId: "c-second" }) catch () => undefined)
       const review = try machine.get()
       // spec/notes/collection.md, "The status line says what is wrong in one word"
       const label = statusLabel(false, review)
@@ -435,17 +436,24 @@ describe("Notes stories", () => {
     }
     provide notesOver(agent, device) {
       const audio = try NotesAudio
+      const editor = try NotesEditor
       const owned = try bound()
       const row = (owned?.snapshot.notes ?? []).map(rowOf)[0]
+      try editor.openNote("long")
       // spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
       const said = row === undefined ? "unavailable" : try audio.transcribe(row)
       const lines = agent.notes[0]?.format?.data.lines
       device.speech = () => ({ text: "", local: false })
       const refreshed = (try (try NotesCollection).current())?.snapshot.notes.map(rowOf)[0]
       const silent = refreshed === undefined ? "unavailable" : try audio.transcribe(refreshed)
+      // Leaving the note cancels a transcription: no window is sent and the recording is kept.
+      device.speech = (args) => { offsets.push(args.offsetMs); return { text: "late", local: false } }
+      try editor.leave()
+      const sentBefore = offsets.length
+      const left = refreshed === undefined ? "unavailable" : try audio.transcribe(refreshed)
       try check(() => assert.deepStrictEqual(
-        { said, offsets: offsets.slice(0, 3), lines, silent, kept: device.saved.has("rec_5"), windows: windowCount(60000), last: windowEnd(50000, 60000) },
-        { said: "saved", offsets: [0, 25000, 50000], lines: [{ s: "me", at: 0, t: "part 0\npart 50000" }], silent: "no-speech", kept: true, windows: 3, last: 60000 },
+        { said, offsets: offsets.slice(0, 3), lines, silent, left, sentAfterLeaving: offsets.length - sentBefore, kept: device.saved.has("rec_5"), windows: windowCount(60000), last: windowEnd(50000, 60000) },
+        { said: "saved", offsets: [0, 25000, 50000], lines: [{ s: "me", at: 0, t: "part 0\npart 50000" }], silent: "no-speech", left: "cancelled", sentAfterLeaving: 0, kept: true, windows: 3, last: 60000 },
       ))
     }
   })
@@ -466,11 +474,11 @@ describe("Notes stories", () => {
     provide custodyMachine() {
       const custody = try CustodyMachine
       // spec/notes/audioCustody.md, "One current operation controls the trash, and an erased recording never comes back"
-      const otherOwner = try (custody.send({ type: "trashAudio", noteOwner: 2, operation: 1, metadataConfirmed: true }) catch () => undefined)
+      const otherOwner = (custody.send({ type: "trashAudio", noteOwner: 2, operation: 1, metadataConfirmed: true }) catch () => undefined)
       const trashed = try custody.send({ type: "trashAudio", noteOwner: 1, operation: 1, metadataConfirmed: true })
-      const competing = try (custody.send({ type: "trashAudio", noteOwner: 1, operation: 2, metadataConfirmed: true }) catch () => undefined)
+      const competing = (custody.send({ type: "trashAudio", noteOwner: 1, operation: 2, metadataConfirmed: true }) catch () => undefined)
       const purged = try custody.send({ type: "purgeAudio", noteOwner: 1, operation: 1, bytesGone: true, metadataConfirmed: true })
-      const restore = try (custody.send({ type: "restoreAudio", noteOwner: 1, operation: 1, metadataConfirmed: true }) catch () => undefined)
+      const restore = (custody.send({ type: "restoreAudio", noteOwner: 1, operation: 1, metadataConfirmed: true }) catch () => undefined)
       try check(() => assert.deepStrictEqual(
         { otherOwner, trashedOp: trashed.activeOp, competing, purged: purged.hasAudio, restore, receipts: purged.receiptCount },
         { otherOwner: undefined, trashedOp: 1, competing: undefined, purged: false, restore: undefined, receipts: 1 },
@@ -681,10 +689,17 @@ describe("Notes stories", () => {
       const state = try attachment.get()
       // spec/notes/attachment.md, "A document's grant is released only when neither a saved note nor Trash still refers to it"
       const released = try sources.releaseUnused()
+      const asked = device.released.length
+      device.connection = { records: JSON.stringify({ version: 1, notes: [{ id: "old", kind: "text", title: "Before" }] }) }
+      try sources.releaseUnused()
+      const heldForEarlier = device.released.length - asked
+      device.connection = {}
+      try sources.releaseUnused()
+      const afterEmpty = device.released.length - asked
       try check(() => assert.deepStrictEqual(
         { wrong, right, opened: device.opened, mismatches: state.mismatches, released, keep: device.released.at(-1),
-          trashKeeps: releasesSource(true, false, true, 259200001), unread: releasesSource(false, false, false, 259200001) },
-        { wrong: "mismatch", right: "opened", opened: ["b".repeat(64)], mismatches: 1, released: 0, keep: [], trashKeeps: false, unread: false },
+          trashKeeps: releasesSource(true, false, true, 259200001), unread: releasesSource(false, false, false, 259200001), heldForEarlier, afterEmpty },
+        { wrong: "mismatch", right: "opened", opened: ["b".repeat(64)], mismatches: 1, released: 0, keep: [], trashKeeps: false, unread: false, heldForEarlier: 0, afterEmpty: 1 },
       ))
     }
   })

@@ -19,6 +19,7 @@ import { WorkflowClockDraft } from "../../src/workflows/clock-draft.vibe"
 import { type AlarmRequest, WorkflowClockPort } from "../../src/workflows/ports.vibe"
 import { WorkflowDefinitions, typedTrigger } from "../../src/workflows/definitions.vibe"
 import { Digests } from "../../src/workflows/digests.vibe"
+import { homeBrief } from "../../src/workflows/followers.vibe"
 import { ApprovalNotices, PhoneSteps } from "../../src/workflows/notices.vibe"
 import { RequestRecovery } from "../../src/workflows/recovery.vibe"
 import { HostedResults } from "../../src/workflows/results.vibe"
@@ -27,7 +28,7 @@ import { SimulatedTriggers, SimulatedWorkflows } from "../../src/workflows/simul
 import { DigestSourcesService } from "../../src/workflows/sources.vibe"
 import { WorkflowsPlace, followRoute } from "../../src/workflows/place.vibe"
 import { Machine as PlaceMachine } from "../../gen/workflows__place.effect.vibe"
-import { type Handler, type NativeCall, type Sent, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
+import { type Handler, type NativeCall, type ReportedBrief, type Sent, engineStatus, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
 
 const alarm: AlarmRequest = { hour: 7, minute: 30, label: "Wake", days: [] }
 const definition = { id: "w1", name: "Morning", active: true, versionId: "v1", steps: [] }
@@ -70,9 +71,9 @@ describe("Requests (spec/workflows/vocabulary.md, \"Story: Send only the request
     const sent: Sent[] = []
     provide workflowsOf([], sent) {
       const api = try WorkflowApi
-      const other = try (api.request("GET", "/api/notes") catch (error) => error._tag)
-      const read = try (api.request("GET", "/api/automations", { all: true }) catch (error) => error._tag)
-      const remove = try (api.request("DELETE", "/api/automations") catch (error) => error._tag)
+      const other = (api.request("GET", "/api/notes") catch (error) => error._tag)
+      const read = (api.request("GET", "/api/automations", { all: true }) catch (error) => error._tag)
+      const remove = (api.request("DELETE", "/api/automations") catch (error) => error._tag)
       try Effect.try(() => assert.deepStrictEqual(
         { other, read, remove, reached: sent.filter((s) => s.path !== "/api/auth/me").length },
         { other: "NotSent", read: "NotSent", remove: "NotSent", reached: 0 },
@@ -178,6 +179,21 @@ describe("Scheduled items (spec/workflows/agentSchedules.md, \"Story: Answer a s
   })
 })
 
+describe("Removed workflows (spec/workflows/automations.md, \"A change is held before it is sent, one per owner, and needs the row it names\")", () => {
+  it.effect("removed workflows are read apart, only from the agent's removed list, and a refused read says so (spec/workflows/automations.md, \"A change is held before it is sent, one per owner, and needs the row it names\")", () => effect {
+    const sent: Sent[] = []
+    const gone = { id: "w9", name: "Old brief", description: "", active: false, removed: true, triggerCleanup: "complete", versionId: "v3", steps: [] }
+    const lifecycleStatus: Handler = (m, p) => m === "GET" && p === "/api/workflow/status" ? { status: 200, data: { ...engineStatus, lifecycleMutationProtocol: 1 } } : undefined
+    const listed: Handler = (m, p) => m === "GET" && p === "/api/workflow/removed-workflows" ? { status: 200, data: { workflows: [gone] } } : undefined
+    const rows = try Effect.provide(Automations.use((a) => a.removed()), workflowsOf([lifecycleStatus, listed], sent))
+    const refused = try Effect.provide(Automations.use((a) => a.removed()), workflowsOf([lifecycleStatus], []))
+    try Effect.try(() => assert.deepStrictEqual(
+      { rows: rows?.map((r) => [r.key, r.kind, r.status, r.title, r.enabled]), refused, asked: sent.some((r) => r.path === "/api/workflow/removed-workflows") },
+      { rows: [["w9", "WorkflowRow", "removed", "Old brief", false]], refused: undefined, asked: true },
+    ))
+  })
+})
+
 describe("Held changes (spec/workflows/automations.md, \"Story: Change an automation once, even when the answer is lost\")", () => {
   it.effect("a definite 404 releases the change, and Allow another releases only the change it reviewed (spec/workflows/automations.md, \"Allow another releases a held change only after the owner confirms it\")", () => effect {
     const sent: Sent[] = []
@@ -213,15 +229,17 @@ describe("Held changes (spec/workflows/automations.md, \"Story: Change an automa
 describe("Runs (spec/workflows/runs.md, \"Story: Open a workflow and see its runs\")", () => {
   it.effect("opening a workflow reads its runs, a run without the engine's missed marker reads Ran, and a missed Run now needs a missed run (spec/workflows/runs.md, \"Story: Run a missed occurrence when I choose\"; spec/workflows/vocabulary.md, \"Story: Read my workflows in Alpha's words\")", () => effect {
     const sent: Sent[] = []
-    provide workflowsOf(workflowRoutes([execution("r1", true)]), sent) {
+    provide workflowsOf(workflowRoutes([{ ...execution("r1", true), output: "Saved the brief." }]), sent) {
       const runs = try WorkflowRuns
       const held = try RunsMachine
       const opened = try runs.openWorkflow("w1")
       const state = try held.get()
       const missedNow = try runs.runMissedNow("r1")
+      // spec/workflows/vocabulary.md, "The agent's sentences are never shown; only a workflow's own output is shown as it is"
+      const outputs = Option.getOrUndefined(try Stream.runHead(runs.outputs))
       try Effect.try(() => assert.deepStrictEqual(
-        { opened, workflow: state.workflowId, history: state.history.map((e) => [e.runId, e.occurred, e.finished]), missedNow },
-        { opened: true, workflow: "w1", history: [["r1", "Ran", true]], missedNow: false },
+        { opened, workflow: state.workflowId, history: state.history.map((e) => [e.runId, e.occurred, e.finished]), missedNow, output: outputs?.get("r1") },
+        { opened: true, workflow: "w1", history: [["r1", "Ran", true]], missedNow: false, output: "Saved the brief." },
       ))
     }
   })
@@ -234,7 +252,7 @@ describe("Runs (spec/workflows/runs.md, \"Story: Open a workflow and see its run
     ]
     provide workflowsOf(handlers, sent) {
       const runs = try WorkflowRuns
-      try (runs.open("r1") catch () => "")
+      runs.open("r1") catch () => ""
       const asked = try runs.cancel()
       try Effect.try(() => assert.deepStrictEqual(
         { asked, cancels: sent.filter((s) => s.method === "POST" && s.path.includes("/cancel")).length },
@@ -330,12 +348,25 @@ describe("Digests (spec/workflows/digests.md, \"Story: See my digests and the ne
     const posts: Sent[] = []
     const missed = { ...result, cursor: 2, runId: "r10", status: "missed", completedAt: "2026-11-22T07:00:00.000Z", output: null }
     const native = (_plugin: string, method: string) => method === "syncInbox" ? { entries: [result, missed] } : undefined
-    provide workflowsOf(digestRoutes(posts), sent, { native }) {
+    const briefs: ReportedBrief[] = []
+    provide workflowsOf(digestRoutes(posts), sent, { native, briefs }) {
       try (try Digests).open()
       const panel = try (try DigestsMachine).get()
+      let waited = 0
+      while (briefs.length === 0 && waited < 100) {
+        try Effect.sleep("20 millis")
+        waited += 1
+      }
+      // spec/shell/overview.md, "The brief card shows the newest retained brief, and says when it failed or did not run"
+      const none = homeBrief([])
+      const notRun = homeBrief([missed])
       try Effect.try(() => assert.deepStrictEqual(
-        { brief: panel.brief, results: panel.results.map((r) => [r.runId, r.status]), loops: panel.loops.map((l) => l.id) },
-        { brief: "Three meetings today.", results: [["r10", "missed"], ["r9", "finished"]], loops: ["d1"] },
+        { brief: panel.brief, results: panel.results.map((r) => [r.runId, r.status]), loops: panel.loops.map((l) => l.id), home: briefs.at(-1), none, notRun: [notRun.outcome, notRun.title] },
+        {
+          brief: "Three meetings today.", results: [["r10", "missed"], ["r9", "finished"]], loops: ["d1"],
+          home: { outcome: "BriefRan", at: Date.parse(result.completedAt), title: "Three meetings today." },
+          none: { outcome: "NoBrief", at: 0, title: "" }, notRun: ["BriefNotRun", "Missed — not run"],
+        },
       ))
     }
   })
@@ -391,8 +422,9 @@ describe("Digest sources (spec/workflows/digestSources.md, \"Story: Let my diges
       const granted = (try held.get()).authorization
       const impact = try sources.revokeImpact()
       const revoked = try sources.revokeGrant(impact)
+      const after = (try held.get()).authorization
       try Effect.try(() => assert.deepStrictEqual(
-        { started, approved, granted, impact, revoked, after: (try held.get()).authorization },
+        { started, approved, granted, impact, revoked, after },
         { started: true, approved: true, granted: "Granted", impact: [], revoked: "revoked", after: "NoAuthorization" },
       ))
     }
@@ -562,10 +594,10 @@ describe("Simulator (spec/workflows/simulator.md, \"Story: Walk a workflow end t
       const simulator = try SimulatedWorkflows
       const first = try simulator.send("step-1", "MessageToMaya", "Maya", 1, "On my way")
       const again = try simulator.send("step-1", "MessageToMaya", "Maya", 1, "On my way")
-      const changed = try (simulator.send("step-1", "MessageToMaya", "Maya", 1, "Running late") catch (error) => error.reason)
+      const changed = (simulator.send("step-1", "MessageToMaya", "Maya", 1, "Running late") catch (error) => error.reason)
       return { same: first.id === again.id, changed }
     }, workflowsOf([], [], { variant: "browser", testMocks: true }))
-    const phone = try Effect.provide(effect { return try ((try SimulatedWorkflows).result("text") catch (error) => error.reason) }, workflowsOf([], []))
+    const phone = try Effect.provide(effect { return ((try SimulatedWorkflows).result("text") catch (error) => error.reason) }, workflowsOf([], []))
     try Effect.try(() => assert.deepStrictEqual({ browser, phone }, { browser: { same: true, changed: "receipt" }, phone: "not-loaded" }))
   })
 })
@@ -583,7 +615,7 @@ describe("Simulated triggers (spec/workflows/simulatedTriggers.md, \"Story: Try 
       const hidden = try triggers.check()
       return { first, leave, again, hidden }
     }, workflowsOf([], [], { variant: "browser", testMocks: true }))
-    const phone = try Effect.provide(effect { return try ((try SimulatedTriggers).check() catch (error) => error.reason) }, workflowsOf([], []))
+    const phone = try Effect.provide(effect { return ((try SimulatedTriggers).check() catch (error) => error.reason) }, workflowsOf([], []))
     try Effect.try(() => assert.deepStrictEqual(
       { fired, phone },
       { fired: { first: { queued: 0 }, leave: { queued: 1 }, again: { queued: 0 }, hidden: { stopped: true } }, phone: "not-loaded" },

@@ -4,6 +4,7 @@ import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
 import { Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Navigation } from "../shell/navigation.vibe"
+import { Notices } from "../shell/notices.vibe"
 import { audioLayer } from "./audio.vibe"
 import { cleanupLayer } from "./cleanup.vibe"
 import { clientLayer } from "./client.vibe"
@@ -26,7 +27,7 @@ const records = Layer.provideMerge(Layer.mergeAll(editorLayer, handoffLayer), La
 const devices = Layer.provideMerge(Layer.mergeAll(trashLayer, cleanupLayer, recorderLayer, audioLayer, originsLayer, shareLayer, sourcesLayer, recordingOpenLayer), records)
 const agent = Layer.provideMerge(organizeLayer, Layer.provideMerge(Layer.mergeAll(foldersLayer, listFilterLayer), devices))
 
-effect function openUnlessShown(editor: NotesEditor.Shape, noteId: string): void!! {
+effect function openUnlessShown(editor: NotesEditor.Shape, noteId: string) {
   const machine = try EditorMachine
   const state = try machine.get()
   if (state.present && state.draftId === noteId) return
@@ -41,6 +42,9 @@ const followOwner = Layer.effectDiscard(effect {
   const editor = try NotesEditor
   const handoff = try NotesHandoff
   const sources = try NotesSources
+  const notices = try Notices
+  // spec/notes/editor.md: an edit an owner change closed before it was saved is named, never dropped silently.
+  try fork.scoped Stream.runForEach(editor.unsaved, (title) => notices.show(`Your edit to “${title}” wasn’t saved because the account changed.`, { failure: true }))
   try fork.scoped Stream.runForEach(handoff.requests, (request) =>
     request.kind === "open-notes" && request.noteId !== undefined ? openUnlessShown(editor, request.noteId) : Effect.void)
   try fork.scoped Stream.runForEach(Stream.changesWith(collection.snapshots, (a, b) => a?.snapshot.revision === b?.snapshot.revision && a?.owner === b?.owner),
@@ -75,6 +79,7 @@ const followForeground = Layer.effectDiscard(effect {
   const filter = try NotesListFilter
   const editor = try NotesEditor
   const trash = try TrashMachine
+  const collection = try NotesCollection
   const inNotes = (state: ForegroundState) => state.visible && state.view === "notes"
   try fork.scoped Stream.runForEach(Stream.changesWith(foreground.changes, (a, b) => a.view === b.view && a.visible === b.visible), (state) => effect {
     const open = state.view === "notes"
@@ -84,6 +89,8 @@ const followForeground = Layer.effectDiscard(effect {
     if (inNotes(state)) {
       try filter.newVisit()
       try recorder.adopt()
+      // spec/notes/collection.md: the collection is read again when the owner enters Notes or Alpha returns on Notes.
+      try collection.refresh()
     }
   })
   const scenes = Stream.map(Stream.zipLatest(Stream.zipLatest(foreground.changes, editor.drafts), trash.changes), ([[state, draft], view]) => sceneOf(state, draft !== undefined, view.opened))
@@ -126,5 +133,5 @@ export { NotesHandoff, NotesOrigins, type NotesRequest } from "./origins.vibe"
 export { NotesOrganize } from "./organize.vibe"
 export { NotesRecordingOpen } from "./recordingOpen.vibe"
 
-/** Every Notes service and machine; it needs the platform's Native, Resident, Build and KeyValueStore, the account's CloudSession, voice's VoiceRoute and RecordingTranscriber, and the shell's Foreground and Navigation. */
+/** Every Notes service and machine; it needs the platform's Native, Resident, Build and KeyValueStore, the account's CloudSession, voice's VoiceRoute and RecordingTranscriber, and the shell's Foreground, Navigation and Notices. */
 export const layer = Layer.provideMerge(Layer.mergeAll(followOwner, followForeground, followRoutes), agent)

@@ -1,6 +1,6 @@
 // spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/editor.md, "A draft opens from a note at the current revision, or starts as a new note"; spec/notes/editor.md, "A save captures the draft, runs only on its own base, and queues a later edit"; spec/notes/editor.md, "Only a clean draft at the current revision is selected for the agent"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/editor.md, "A delete of an edited note waits for its save, and a changed draft cancels it"; spec/notes/editor.md, "A delete or restore is confirmed only when the reply moves exactly that note"; spec/notes/editor.md, "Try again confirms words already saved, rebases only onto an untouched record, and otherwise keeps the draft"; spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"
 import { parseNoteFormat } from "@elizaos/plugin-notes/format"
-import type { NoteFormat, NotesSnapshot, StickyColor, StickyNote } from "@elizaos/plugin-notes/types"
+import type { NoteFormat, NoteJson, NotesSnapshot, StickyColor, StickyNote } from "@elizaos/plugin-notes/types"
 import { textCreationAllowed } from "../../gen/notes__collection.effect.vibe"
 import {
   type Editor, type Event as EditorEvent, Machine as EditorMachine, dirty, leavePlan, machine as editorMachine, selectionCurrent,
@@ -35,13 +35,15 @@ export type RetryOutcome = "confirmed" | "saved" | "changed-elsewhere" | "delete
 export interface DeleteOutcome { readonly deleted: boolean; readonly deletedAt?: string }
 
 /** Words kept on the phone for a note that changed since they were kept: shown for Copy draft or Discard only. */
-export interface KeptReview { readonly noteId: string; readonly title: string; readonly body: string }
+export interface KeptReview { readonly noteId: string; readonly title: string; readonly body: string; readonly format?: NoteFormat }
 
 /** The one draft of the Notes editor over the canonical collection. */
 export service NotesEditor {
   readonly drafts: Stream.Stream<DraftContent | undefined>
   readonly keptReviews: Stream.Stream<KeptReview | undefined>
-  draft(): DraftContent | undefined!!
+  /** The title of each edited draft an owner change or sign-out closed before it was saved; its words were kept in the encrypted draft slot of the owner they were written for. */
+  readonly unsaved: Stream.Stream<string>
+  draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
   edit(patch: DraftPatch): boolean!!
@@ -51,8 +53,8 @@ export service NotesEditor {
   restore(id: string): boolean!!
   retry(): RetryOutcome!!
   discard(): void!!
-  createFromText(content: string, creationId: string): { readonly id: string; readonly revision: number } | undefined!NotesFailure | NotesBusy | NotesRetired
-  selection(): { readonly kind: "canonical-note"; readonly id: string; readonly revision: string } | undefined!!
+  createFromText(content: string, creationId: string): ({ readonly id: string; readonly revision: number } | undefined)!(NotesFailure | NotesBusy | NotesRetired)
+  selection(): ({ readonly kind: "canonical-note"; readonly id: string; readonly revision: string } | undefined)!!
 }
 
 function stable(value: unknown): unknown {
@@ -94,19 +96,21 @@ const make = effect {
   const content = try SubscriptionRef.make<DraftContent | undefined>(undefined)
   const keptReview = try SubscriptionRef.make<KeptReview | undefined>(undefined)
   const writing = try Semaphore.make(1)
+  const lastOwner = try Ref.make<{ owner: string; snapshot: NotesSnapshot; digest: string } | undefined>(undefined)
+  const unsaved = try PubSub.unbounded<string>()
 
-  effect function send(event: EditorEvent): Editor | undefined!! {
-    return try (machine.send(event) catch () => undefined)
+  effect function send(event: EditorEvent): (Editor | undefined)!! {
+    return (machine.send(event) catch () => undefined)
   }
 
-  effect function owned(): { owner: string; snapshot: NotesSnapshot; digest: string } | undefined!! {
+  effect function owned(): ({ owner: string; snapshot: NotesSnapshot; digest: string } | undefined)!! {
     const current = try collection.current()
     if (current === undefined) return undefined
-    const digest = try (tryPromise(() => sha256Hex(`notes-owner:${current.owner}`)) catch () => "")
+    const digest = (tryPromise(() => sha256Hex(`notes-owner:${current.owner}`)) catch () => "")
     return digest === "" ? undefined : { ...current, digest }
   }
 
-  effect function note(id: string): StickyNote | undefined!! {
+  effect function note(id: string): (StickyNote | undefined)!! {
     return (try collection.current())?.snapshot.notes.find((row) => row.id === id)
   }
 
@@ -123,17 +127,17 @@ const make = effect {
     try show({ ...held, ...fieldsOf(saved), basePrint: notePrint(saved) })
   }
 
-  effect function keepFailedDraft(state: Editor): void!! {
+  effect function keepFailedDraft(state: Editor, kept?: { owner: string; snapshot: NotesSnapshot; digest: string }): void!! {
     const held = try SubscriptionRef.get(content)
-    const owner = try owned()
+    const owner = kept ?? (try owned())
     if (held === undefined || owner === undefined || !state.present) return
     const base = state.draftId === "" ? undefined : owner.snapshot.notes.find((row) => row.id === state.draftId)
-    const basePrint = base === undefined ? "" : try (tryPromise(() => sha256Hex(notePrint(base))) catch () => "")
-    try (drafts.keep(owner.digest, {
+    const basePrint = base === undefined ? "" : (tryPromise(() => sha256Hex(notePrint(base))) catch () => "")
+    drafts.keep(owner.digest, {
       noteId: state.draftId, baseRevision: state.base, basePrint, change: state.draftId === "" ? "added" : "edited",
       title: held.title.slice(0, 256), body: held.body.slice(0, 32000), separator: held.separator,
       ...(held.format === undefined ? {} : { format: held.format }), color: held.color,
-    }) catch () => undefined)
+    }) catch () => undefined
   }
 
   effect function runMutation(): DeleteOutcome!! {
@@ -205,12 +209,22 @@ const make = effect {
   effect function publish(current: OwnedSnapshot | undefined): void!! {
     const state = try machine.get()
     if (current === undefined) {
+      // spec/notes/editor.md: an owner change or sign-out keeps an edited draft as a failed save does, and says it was not saved.
+      const held = try SubscriptionRef.get(content)
+      const previous = try Ref.get(lastOwner)
+      if (state.current && state.present && dirty(state) && held !== undefined && previous !== undefined) {
+        try keepFailedDraft(state, previous)
+        try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
+      }
+      try Ref.set(lastOwner, undefined)
       if (state.current) try send({ type: "retireOwner" })
       try show(undefined)
       try SubscriptionRef.set(keptReview, undefined)
       return
     }
     if (!state.current) try send({ type: "bindOwner" })
+    const previous = try Ref.get(lastOwner)
+    try Ref.set(lastOwner, previous !== undefined && previous.owner === current.owner ? { ...previous, snapshot: current.snapshot } : try owned())
     const after = try send({ type: "publish", revision: current.snapshot.revision, notes: [...noteIds(current.snapshot)], trashed: [...trashIds(current.snapshot)] })
     if (after === undefined) return
     const held = try SubscriptionRef.get(content)
@@ -230,13 +244,14 @@ const make = effect {
     try show({ ...words, token: after.token })
     const owner = try owned()
     if (owner === undefined) return true
-    const print = try (tryPromise(() => sha256Hex(notePrint(saved))) catch () => "")
+    const print = (tryPromise(() => sha256Hex(notePrint(saved))) catch () => "")
     const kept = try drafts.offer(owner.digest, id, print)
     if (kept.change === undefined) return true
     if (kept.offer === "ResumeKeptDraft") {
       try edit({ title: kept.change.title, body: kept.change.body, ...(kept.change.format === undefined ? {} : { format: kept.change.format }), color: kept.change.color })
     } else if (kept.offer === "ReviewKeptDraft") {
-      try SubscriptionRef.set(keptReview, { noteId: id, title: kept.change.title, body: kept.change.body })
+      const keptFormat = kept.change.format === undefined ? undefined : parseNoteFormat(kept.change.format)
+      try SubscriptionRef.set(keptReview, { noteId: id, title: kept.change.title, body: kept.change.body, ...(keptFormat === undefined ? {} : { format: keptFormat }) })
     }
     return true
   }
@@ -275,6 +290,7 @@ const make = effect {
   return {
     drafts: SubscriptionRef.changes(content),
     keptReviews: SubscriptionRef.changes(keptReview),
+    unsaved: Stream.fromPubSub(unsaved),
     draft: () => SubscriptionRef.get(content),
     openNote,
     effect newNote(kind: "text" | "list", folderId?: string) {
@@ -282,7 +298,7 @@ const make = effect {
       const current = try collection.current()
       if (current === undefined) return false
       const title = nextDefaultTitle([...current.snapshot.notes, ...(current.snapshot.trash ?? []).map((entry) => entry.note)].map((row) => row.title), "New note")
-      const folder = folderId === undefined ? {} : { folderId }
+      const folder: Record<string, NoteJson> = folderId === undefined ? {} : { folderId }
       const format: NoteFormat | undefined = kind === "list" ? { kind: "list", data: { items: [], pinned: false, ...folder } }
         : folderId === undefined ? undefined : { kind: "text", data: folder }
       const after = try send({ type: "beginNote", titled: true })

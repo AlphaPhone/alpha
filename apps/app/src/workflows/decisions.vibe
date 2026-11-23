@@ -13,17 +13,17 @@ export const stepDecisions = Layer.effect(WorkflowStepDecisions, effect {
   const client = agent.workflow
   return {
     effect decide(runId: string, approved: boolean) {
-      const answer = try (agent.request("GET", `/api/workflow/executions/${runId}`) catch () => undefined)
+      const answer = (agent.request("GET", `/api/workflow/executions/${runId}`) catch () => undefined)
       const raw = typeof answer === "object" && answer !== null ? (answer as { execution?: unknown }).execution : undefined
-      const run = raw === undefined ? undefined : try (parseWorkflowRun(raw) catch () => undefined)
+      const run = raw === undefined ? undefined : (parseWorkflowRun(raw) catch () => undefined)
       if (run === undefined || run.id !== runId || run.finished) return "unavailable" satisfies StepAnswer
-      const receipt = try (client.approvals(run) catch () => null)
+      const receipt = (client.approvals(run) catch () => null)
       if (receipt === null || receipt.finished || receipt.cancellationRequested) return "unavailable" satisfies StepAnswer
       const pending = receipt.approvals.filter((a) => decidable(a, approved))
       const [approval] = pending
       if (approval === undefined || pending.length !== 1) return "unavailable" satisfies StepAnswer
       const id = workflowApprovalProposalId(approval)
-      const decided = try (client.decideApproval(run, approval, approved) catch () => undefined)
+      const decided = (client.decideApproval(run, approval, approved) catch () => undefined)
       if (decided === undefined) return "lost" satisfies StepAnswer
       const status = approved ? "approved" : "denied"
       return decided.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === status && a.requestDigest === approval.requestDigest) ? "recorded" : "lost"

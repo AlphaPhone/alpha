@@ -4,7 +4,7 @@ import type { NoteFormat, NoteJson, NotesSnapshot } from "@elizaos/plugin-notes/
 import { legacyRowKept, legacySlotClears } from "../../gen/notes__trash.effect.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { contentOf } from "./list.vibe"
-import { decodeLegacyTrash, type LegacyTrashNote } from "./notes.schema.vibe"
+import { decodeLegacyTrash, decodeLegacyTrashEntry, type LegacyTrashNote } from "./notes.schema.vibe"
 import { compareExchangeSlot, readSlot, slots } from "./slots.vibe"
 
 /** The canonical content of an earlier device note: its title line, then its body. */
@@ -13,10 +13,13 @@ export function legacyContent(note: LegacyTrashNote): string {
   return contentOf(note.title, body === "" ? "" : "\n", body.startsWith("\n") ? body.slice(1) : body)
 }
 
+const FOLDER_ID = /^f-[A-Za-z0-9_-]{1,64}$/
+const COLORS: ReadonlySet<string> = new Set(["yellow", "green", "rose", "slate"])
+
 /** The canonical format of an earlier device note's rich data, without its recording; undefined for a plain note outside any folder. */
 export function legacyFormat(note: LegacyTrashNote): NoteFormat | undefined {
   const data: Record<string, NoteJson> = {}
-  if (note.folderId !== undefined) data.folderId = note.folderId
+  if (note.folderId !== undefined && FOLDER_ID.test(note.folderId)) data.folderId = note.folderId
   if (note.kind === "list") data.items = (note.items ?? []).map((item) => ({ t: item.t, done: item.done === true }))
   if (note.kind === "voice") {
     data.lines = (note.lines ?? []).map((line) => ({ t: line.t, at: line.at ?? 0, ...(line.s === undefined ? {} : { s: line.s }) }))
@@ -37,23 +40,26 @@ function trashed(state: NotesSnapshot, noteId: string): boolean {
 }
 
 /** Bring the rows the earlier device Trash still keeps into the canonical Trash of the bound owner, then clear its slot once every row is settled; the count of settled rows. */
-export effect function importLegacyTrash(): number!! {
+export effect function importLegacyTrash() {
   const collection = try NotesCollection
   if ((try collection.current()) === undefined) return 0
-  const raw = try (readSlot(slots.legacyTrash) catch () => undefined)
+  const raw = (readSlot(slots.legacyTrash) catch () => undefined)
   if (raw === undefined) return 0
-  const document = try (decodeLegacyTrash(raw) catch () => undefined)
+  const document = (decodeLegacyTrash(raw) catch () => undefined)
   if (document === undefined) return 0
   const now = Date.now()
   let settled = 0
-  for (const entry of document.entries) {
+  for (const row of document.entries) {
+    // A row this version cannot read is held, not dropped: it is never settled, so the slot is kept for it.
+    const entry = decodeLegacyTrashEntry(row) catch () => undefined
+    if (entry === undefined) continue
     if (!legacyRowKept({ deletedAt: entry.deletedAt, now, inCanonicalTrash: false })) {
       settled += 1
       continue
     }
     const format = legacyFormat(entry.note)
-    const created = try (collection.interact("create-note", {
-      content: legacyContent(entry.note), creationId: `legacy-trash:${entry.id}`, color: entry.note.color ?? "yellow",
+    const created = (collection.interact("create-note", {
+      content: legacyContent(entry.note), creationId: `legacy-trash:${entry.id}`, color: entry.note.color !== undefined && COLORS.has(entry.note.color) ? entry.note.color : "yellow",
       ...(format === undefined ? {} : { format }),
     }) catch () => undefined)
     const noteId = created?.target?.id
@@ -62,10 +68,10 @@ export effect function importLegacyTrash(): number!! {
       settled += 1
       continue
     }
-    const deleted = try (collection.interact("delete-note", { id: noteId }) catch () => undefined)
+    const deleted = (collection.interact("delete-note", { id: noteId }) catch () => undefined)
     if (deleted !== undefined && trashed(deleted.state, noteId)) settled += 1
   }
   if (!legacySlotClears(settled, document.entries.length)) return settled
-  try (compareExchangeSlot(slots.legacyTrash, raw, undefined) catch () => false)
+  compareExchangeSlot(slots.legacyTrash, raw, undefined) catch () => false
   return settled
 }

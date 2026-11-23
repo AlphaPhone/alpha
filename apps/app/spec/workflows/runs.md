@@ -54,6 +54,9 @@ pure val entriesValues = Set(List(), List({ runId: "r1", occurred: V::Missed, fi
 
 ### Opening a workflow reads its runs afresh, and a run of another owner is never shown
 
+The selected run shows its own output as it is, when the agent gave one; another owner's outputs are
+forgotten with their runs.
+
 ```quint
 pure def canOpenWorkflow(r: Runs, owner: str, workflowId: str, version: int, typed: bool): bool =
   owner != "" and workflowId != "" and version >= 1 and owner == r.owner
@@ -200,6 +203,9 @@ pure def sometimesUnknownAfterSwitch(r: Runs): bool = r.custody == Unknown and r
 > previous account started, the phone asks once to stop it and the new account never sees it.
 
 ### Cancel is asked only for the shown, unfinished run of the current owner
+
+Stop asks once more, naming the run, before the cancel is sent; closing that question sends nothing
+(legacy "Cancel run" then "Confirm cancel").
 
 ```quint
 pure def canRequestCancel(r: Runs): bool = autoRefreshes(r) and not(r.shown.cancelRequested)

@@ -56,7 +56,9 @@ pure def sometimesMismatchRefused(s: Attachment): bool = s.mismatches >= 1
 On Android the phone keeps a document's read grant while a note names its reference, also after the
 picker selection that granted it is gone. After a fresh read of both the saved notes and Trash, a
 reference no note names, last retained more than three days ago, is removed and its grant released, so a
-restored note still opens its source.
+restored note still opens its source. While the earlier Alpha's own device collection may still hold
+notes (its slot is not empty, or cannot be read), the notes are not all read, so nothing is released:
+those notes may name a document too.
 
 ```quint
 pure def releasesSource(readBoth: bool, liveReference: bool, trashReference: bool, retainedAgoMs: int): bool =

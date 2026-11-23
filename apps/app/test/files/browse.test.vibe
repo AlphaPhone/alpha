@@ -131,8 +131,9 @@ it.live("a tap opens a file while the folder is still being read, and the read d
       const row = listed.rows.find((r) => r.name === "notes.txt")!
       const opened = try preview.openRow(row)
       const after = try browser.get()
+      const shownName = (try preview.get()).doc.name
       try Effect.try(() => assert.deepStrictEqual(
-        { loading, opened: opened.kind, shown: (try preview.get()).doc.name, mutations: after.mutations },
+        { loading, opened: opened.kind, shown: shownName, mutations: after.mutations },
         { loading: true, opened: "shown", shown: "notes.txt", mutations: 0 },
       ))
     })

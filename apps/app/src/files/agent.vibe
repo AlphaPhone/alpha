@@ -93,13 +93,15 @@ export const layer = Layer.effect(FilesAgent, effect {
       if (resolved === undefined || after === undefined) return { kind: "failed", summary: "Files does not show those items." } satisfies Prepared
       ready = op.type === "files_move" ? { type: "files_move", paths: resolved.paths, dest: op.dest } : op.type === "files_trash" ? { type: "files_trash", paths: resolved.paths } : { type: "files_share", paths: resolved.paths }
     }
-    if (ready.type === "files_move" || ready.type === "files_trash") {
-      if (!("paths" in ready)) return { kind: "failed", summary: "Files does not show those items." } satisfies Prepared
-      const answer = storage.reviewedIdentities(ready.paths, "") catch () => undefined
+    const moving = ready
+    if (moving.type === "files_move" || moving.type === "files_trash") {
+      if (!("paths" in moving)) return { kind: "failed", summary: "Files does not show those items." } satisfies Prepared
+      const paths = moving.paths
+      const answer = storage.reviewedIdentities(paths, "") catch () => undefined
       const reviewed = answer?.status === "ready" ? answer.reviewed : undefined
-      const bound = reviewed && reviewed.length === ready.paths.length ? (proposal.send({ type: "bindIdentities" }) catch () => undefined) : undefined
+      const bound = reviewed && reviewed.length === paths.length ? (proposal.send({ type: "bindIdentities" }) catch () => undefined) : undefined
       if (reviewed === undefined || bound === undefined) return { kind: "failed", summary: "Open Files on primary storage to review these items." } satisfies Prepared
-      ready = { ...ready, reviewed }
+      ready = { ...moving, reviewed }
     }
     return { kind: "ready", op: ready } satisfies Prepared
   }
@@ -127,7 +129,7 @@ export const layer = Layer.effect(FilesAgent, effect {
     return { status: "failed", summary: "Files could not read this filter." } satisfies AgentResult
   }
 
-  effect function listedRow(path: string): Row | null | undefined!! {
+  effect function listedRow(path: string): (Row | null | undefined)!! {
     const answer = storage.list(parentOf(path), "") catch () => undefined
     const entry = answer?.status === "ready" ? (answer.entries ?? []).find((e) => e.path === path) : undefined
     if (entry !== undefined) return toRow("", entry)

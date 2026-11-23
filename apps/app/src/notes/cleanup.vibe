@@ -26,8 +26,8 @@ const make = effect {
   const machine = try CleanupMachine
   const running = try Semaphore.make(1)
 
-  effect function send(event: CleanupEvent): CleanupView | undefined!! {
-    return try (machine.send(event) catch () => undefined)
+  effect function send(event: CleanupEvent): (CleanupView | undefined)!! {
+    return (machine.send(event) catch () => undefined)
   }
 
   effect function device(method: string, receipt: NotesTrashRecordingCleanup) {
@@ -35,10 +35,10 @@ const make = effect {
   }
 
   effect function purge(receipt: NotesTrashRecordingCleanup, snapshot: NotesSnapshot | undefined): boolean!! {
-    const described = try (effect {
+    const described = (effect {
       return try decodeAudioDescription(try native.invoke(audioPlugin, "describe", { audioId: receipt.audioId }))
     } catch () => undefined)
-    const status = try (effect {
+    const status = (effect {
       return (try decodeAudioReceipt(try device("deletionStatus", receipt))).status
     } catch () => undefined)
     const plan: CleanupPlan = cleanupPlan({
@@ -51,7 +51,7 @@ const make = effect {
     })
     if (plan === "RetireReceipt") return status === "purged"
     if (plan !== "EraseAudio" && plan !== "MoveThenEraseAudio") return false
-    return try (effect {
+    return (effect {
       if (plan === "MoveThenEraseAudio") {
         const removed = try decodeAudioReceipt(try device("remove", receipt))
         if (removed.status !== "removed") return false
@@ -62,7 +62,7 @@ const make = effect {
   }
 
   effect function work(): number!! {
-    const listed = try (client.readCleanups() catch () => undefined)
+    const listed = (client.readCleanups() catch () => undefined)
     if (listed === undefined) return 0
     try send({ type: "listed", count: listed.length })
     if (try native.available(audioPlugin)) try send({ type: "hostRegistered" })
@@ -73,7 +73,7 @@ const make = effect {
       const proven = try purge(receipt, (try collection.current())?.snapshot)
       try send({ type: "devicePurged", proven })
       if (!proven) continue
-      const exact = try (client.completeCleanup(receipt) catch () => false)
+      const exact = (client.completeCleanup(receipt) catch () => false)
       try send({ type: "acknowledge", exact })
       if (exact) acknowledged += 1
     }
