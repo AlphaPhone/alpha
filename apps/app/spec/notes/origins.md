@@ -63,6 +63,12 @@ A link is added after its event or reminder is saved and confirmed by reading it
 never affected when the link is not stored. A link retires only with a durable terminal deletion receipt,
 never because a record is missing from a filtered range or a pending list.
 
+A record keeps the note it was made from: an existing link is never replaced, so a second save of the same
+record stores nothing new. The index holds at most 200 links, and the oldest make room past that. An
+index an earlier version stored, keyed by kind and record with each link's save time (an agent event under
+its event key, now named by that key's digest), is read in that shape. An index that cannot be read in any
+known shape is refused, never partly trusted, and never written over, so the links in it are not lost.
+
 ```quint
 pure def linkStored(recordSaved: bool, readBack: bool): bool = recordSaved and readBack
 pure def originRetires(terminalReceipt: bool, missingFromView: bool): bool = terminalReceipt

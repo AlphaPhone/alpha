@@ -2,6 +2,7 @@
 import {
   type ChangeWord, type Receipt, automationsCommitted, changeWord, changesCalendar, changesNotes, changesWorkflow, notesRevision, viewRefusal,
 } from "../../gen/workflows__vocabulary.effect.vibe"
+import { NotesCollection } from "../notes/collection.vibe"
 import { Automations } from "./automations.vibe"
 import { ActionResultRecord, type EffectReceiptRecord } from "./changes.schema.vibe"
 
@@ -31,16 +32,17 @@ function receiptOf(success: boolean, r: EffectReceiptRecord): Receipt {
   }
 }
 
-/** Reads what an agent reply changed, and refreshes the Workflows list once when a record it shows changed. */
+/** Reads what an agent reply changed, refreshes the Workflows list once when a record it shows changed, and has Notes follow a note change. */
 export service AgentChanges {
   /** What `results`, the reply's untrusted action results, prove changed. */
   read(results: ReadonlyArray<unknown>): ChangeSummary!!
-  /** Read `results` and refresh the Workflows list once when it shows a changed record. */
+  /** Read `results`, refresh the Workflows list once when it shows a changed record, and invalidate Notes when a note changed. */
   settle(results: ReadonlyArray<unknown>): ChangeSummary!!
 }
 
 export const agentChanges = Layer.effect(AgentChanges, effect {
   const list = try Automations
+  const notes = try NotesCollection
 
   effect function read(results: ReadonlyArray<unknown>) {
     const receipts: Array<{ receipt: Receipt; id: string }> = []
@@ -70,6 +72,8 @@ export const agentChanges = Layer.effect(AgentChanges, effect {
     effect settle(results: ReadonlyArray<unknown>) {
       const summary = try read(results)
       if (summary.automations) try list.refresh()
+      // spec/notes/collection.md: Notes follows each note change a chat reply reports.
+      if (summary.notesRevision !== undefined) try notes.invalidate(summary.notesRevision < 0 ? undefined : summary.notesRevision)
       return summary
     },
   }
