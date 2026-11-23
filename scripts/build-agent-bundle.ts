@@ -10,12 +10,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /** The upstream plugins Alpha's resident agent loads; the same workspace packages apps/app depends on. */
 export const RESIDENT_PLUGINS = Object.freeze([
-  '@elizaos/plugin-personal-assistant', '@elizaos/plugin-calendar', '@elizaos/plugin-inbox', '@elizaos/plugin-notes',
+  '@elizaos/plugin-personal-assistant', '@elizaos/plugin-calendar', '@elizaos/plugin-inbox',
   '@elizaos/plugin-files', '@elizaos/plugin-workflow', '@elizaos/plugin-maps', '@elizaos/plugin-browser',
 ]);
 
-/** The plugin the host provides as a module factory over the device's InferenceEngine (scripts/resident/entry.vibe). */
-export const HOSTED_PLUGINS = Object.freeze(['@elizaos/plugin-local-inference']);
+/** The plugins the host registers through module factories in scripts/resident/entry.vibe. */
+export const HOSTED_PLUGINS = Object.freeze(['@elizaos/plugin-notes', '@elizaos/plugin-local-inference']);
 
 /** Every package the bundle carries: the resident plugins and the hosted ones, each named once. */
 export const BUNDLED_PLUGINS = Object.freeze([...RESIDENT_PLUGINS, ...HOSTED_PLUGINS]);
