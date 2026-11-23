@@ -3,6 +3,7 @@
  "actions": {
   "allowed": [
    "REPLY", "IGNORE",
+   "PROPOSE_DEVICE_ACTION",
    "OWNER_REMINDERS", "OWNER_GOALS", "TODO",
    "CALENDAR",
    "INBOX_READ", "INBOX_COMPOSE_EMAIL",
@@ -14,6 +15,7 @@
  },
  "plugins": {
   "load": [
+   "@elizaos/agent/device-actions",
    "@elizaos/plugin-personal-assistant",
    "@elizaos/plugin-calendar",
    "@elizaos/plugin-inbox",

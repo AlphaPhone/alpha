@@ -3,24 +3,27 @@
   "globalDependencies": ["pnpm-workspace.yaml", "upstream.lock.json", "app.config.json", "cloud/deployment.json"],
   "globalPassThroughEnv": ["ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_CLOUD_CUTOVER", "ALPHA_CLOUD_DEPLOYMENT_FILE"],
   "tasks": {
+    "//#build:upstream": {
+      "cache": false
+    },
     "gen": {
       "outputs": ["gen/**", "generated/**"]
     },
     "build": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen", "//#build:upstream"],
       "env": ["ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_CLOUD_CUTOVER", "ALPHA_CLOUD_DEPLOYMENT_FILE", "VITE_*"],
       "outputs": ["dist/**", "generated/**", "storybook-static/**", "../../web-dist/**"]
     },
     "typecheck": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen", "//#build:upstream"],
       "outputs": [".vibe/declarations/**"]
     },
     "test": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen", "//#build:upstream"],
       "outputs": [".cache/test-result-*.json"]
     },
     "test:browser": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen", "//#build:upstream"],
       "outputs": []
     },
     "lint": {
@@ -32,7 +35,7 @@
       "cache": false
     },
     "dev": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["//#build:upstream"],
       "cache": false,
       "persistent": true
     }

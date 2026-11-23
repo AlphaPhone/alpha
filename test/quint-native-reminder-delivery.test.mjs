@@ -42,7 +42,7 @@ async function checkNativeReminderDelivery(extraSources = []) {
   const product = [app+'AlphaReminders.java',app+'ReminderReceiver.java'];
   const sourcePaths = [...product,...native.map(path=>'vendor/eliza/'+path)];
   const traceWriter = join(directory,'Trace.java');
-  const manifest='android/app/src/main/AndroidManifest.xml';
+  const manifest='android/app/manifests/main/AndroidManifest.xml';
   const sources = [...sourcePaths, manifest, harness, traceWriter, library, jsonJar, fileURLToPath(import.meta.url),
     join(directory,'reminder-delivery-platform.mjs'),'scripts/upstream-native-source.ts','upstream.lock.json',
     'android/upstream-native-sources.json','test/fixtures/jvm-tools.mjs',...extraSources];

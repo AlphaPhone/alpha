@@ -37,14 +37,12 @@
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }
 
-# Pinned local-agent runtime staged by scripts/stage-local-agent-sources.ts.
-# JNI symbol names (libelizavoicejni) depend on the exact class and method names,
-# and the service resolves hidden platform APIs by reflection.
--keep class ai.alphacompute.alphaphone.ElizaVoiceNative { *; }
--keep class ai.alphacompute.alphaphone.ElizaBionicInferenceServer { *; }
--keep class ai.alphacompute.alphaphone.BionicDecodeLoop { *; }
--keep class ai.alphacompute.alphaphone.BionicDecodeLoop$* { *; }
--keep class ai.alphacompute.alphaphone.BgeEmbeddingSession { *; }
+# The upstream os agent service and local inference host (packages/os/android agent-service and
+# local-inference). libparadeevoicejni registers its natives on ai/eliza/voice/VoiceNative by name,
+# and the agent service's socket hosts and inference engine are reached across the process boundary
+# by class name; agent-service ships no consumer rules of its own.
+-keep class ai.eliza.voice.** { *; }
+-keep class ai.eliza.os.agent.** { *; }
 -keepclasseswithmembernames,includedescriptorclasses class * {
     native <methods>;
 }

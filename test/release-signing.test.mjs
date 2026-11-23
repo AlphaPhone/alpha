@@ -10,7 +10,7 @@ import { appLinkFilters, assetLinksProblems, fingerprint, PLACEHOLDER, renderAss
 import { buildEnv, partialSigningProblem, readReleaseSigner, releaseAdmission, SIGNING_ENV, signingRequested, validateReleaseSigner } from "../scripts/build-android.ts";
 import { releaseBlockers } from "../scripts/release-blockers.ts";
 import { fontCheckFailedItem, fontLicenceLine } from "../scripts/font-license-blockers.ts";
-import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
+import { CLOUD_VOICE_CHECKS, cloudVoiceAdmission } from "../scripts/os-ported/os/apk-release-record.mjs";
 
 const ALL = { ELIZAOS_KEYSTORE_PATH: "/k", ELIZAOS_KEYSTORE_PASSWORD: "p", ELIZAOS_KEY_ALIAS: "a", ELIZAOS_KEY_PASSWORD: "q" };
 const SIGNER = "a".repeat(64);

@@ -200,7 +200,6 @@ function voiceStagingState(root: string) {
   };
   for (const relative of [
     'vendor/eliza/packages/os/android/local-inference/native',
-    'vendor/eliza/packages/os/android/local-inference/paradee-voice/native',
   ]) if (at(relative)) throw Error(`Unrecognized voice staging outside the admitted product output: ${relative}`);
   const checkRawVoiceJni = (rawJni: string) => {
     if (!at(rawJni)) return;

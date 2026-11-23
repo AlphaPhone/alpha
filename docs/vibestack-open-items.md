@@ -46,6 +46,9 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **OWNER:** Browser's `GoogleLink` (`src/browser/googleReturn.vibe`) and `CloudRequests` (`src/browser/cloudCustody.vibe`) have no consumer, and GoogleLink overlaps account's google.md readback. Absorb them or drop them?
 - **OWNER:** These developer-only test-mock pieces are not ported: Browser's simulated agent Clock handoff and its exact-byte bookmark backup/reset dialog.
 - **OWNER:** Accept the legacy Trash import limits in Notes: imported rows get new IDs and a fresh deletedAt, and their recordings stay in the device audio trash.
+- **OWNER:** The resident's stored state is not carried over an app update. Legacy kept the agent database in `files/.eliza`; upstream `AgentService` launches with `files/agent/<sha256(user, org)>`, and nothing adopts the old directory (`GoogleAgentAccessFile` and `AlphaLocalAgentPlugin.notificationInstallation` still read `files/.eliza`). Adopt the legacy state (if the new agent can read the old PGlite schema), or accept a reset on update?
+- **OWNER:** Upstream's `AgentStartReceiver` (agent-service module manifest) starts the resident at boot and after every update whenever `AgentService.signedIn()`, and `AlphaAgentCredentials.current()` always answers, so Alpha's `ResidentScheduleReceiver` gate (`shouldAutoStart`: on-device or hybrid only) no longer decides. Keep "the resident always runs" (P-43) and drop the gate, or remove the upstream receiver with `tools:node="remove"`?
+- **OWNER:** Native request gates that lost their only caller when `AlphaLocalAgent.request`/`AlphaConnection.request` went: `CalendarSyncConsent`, `PreparedViewNavigation.allowed`, `OwnerRoutes.requestAllowed` and the owner-mismatch 409, reply drafting only on the verified image, and `ConnectionRoutes.managedService`/`admittedHeader`/`billingRequestIdentity`. For each: a `host.json` body or query rule, a renderer rule with a model, or retire the class.
 
 - **OWNER:** A message typed on a private screen (Passwords, a locked screen) is sent with no observation (`spec/assistant/context.md`, "A private screen sends the message with no observation…"), but `spec/assistant/conversation.md`'s `canSend` refuses it, and legacy refused it with "Not sent. Agent observation is paused on this screen." and kept the text. Which rule wins?
 - **OWNER:** Voice choices the port made that legacy did not:
@@ -138,8 +141,15 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Android / native
 
-- Best-effort and unbuilt: the `ElizaAgentService` compatibility layer, the `android/agent/host.json` route lists (about 160) and the `policy.json` action allowlist and plugin load order. The `BROWSER_*` sub-action names are guessed.
-- `scripts/stage-agent-runtime` and `agent:stage-android` must produce the payload layout upstream PayloadCheck expects under `assets/agent`.
+- Not run on a device: the `ElizaAgentService` compatibility layer and the `android/agent/host.json` route lists (about 160). `policy.json` now loads `@elizaos/agent/device-actions` and allows `PROPOSE_DEVICE_ACTION`; every allowed name was checked against the pin's registered actions (`BROWSER_BACK/FORWARD/RELOAD` are the promoted `BROWSER` sub-actions), but no agent has booted with it.
+- `agent:stage-android` stages through upstream `stageRuntimePayload` with the workflow worker `agent:build-workflow-worker` builds; neither has been run.
+- `pnpm android:build:local` has not been run: the staged on-device voice outputs, the embedding host libraries and the pinned engine checkout (`.eliza/inference-engine/<engine.lock.json commit>`) are not built here. Only `:app:compileLauncherDebugJavaWithJavac` with `-PelizaParadeeApiOnly=true` and the voice and embedding input checks skipped was run (see the Tooling result below).
+- `androidTest` (182 files) does not compile against the new APIs: besides the `secureWrite`/`secureRemove` callers, `ScopedCalendarDeletionInstrumentedTest` (5-argument `DeferredDeletionJournal.stage`), `NativeVoiceLatencyInstrumentedTest` (`LiveCaptureController.Sink`, 4-argument `SpeechOutputWarmup`), `ResidentWorkflowCrashInstrumentedTest` (`DeviceRamTierPolicy`, `WorkflowSurvivorInventory`, gone) and every test that drives `AlphaLocalAgent` "start".
+- An owner stop goes through upstream `ElizaAgent.stop` and never advances `AlphaLocalAgentPlugin`'s lifecycle epoch or calls `AlphaCanonicalNotifications.forget`; `publishNotificationRoot` (the legacy root-publication hook) has no caller.
+- Not ported natively: `editProviderKeys`/`clearProviderIfCurrent` (settings), `AlphaFiles.storageReadAttachment` and `AlphaMailAttachments.cancelPhotoSelected` (files, inbox), `AlphaTelephony.contactForNumber`/`searchContacts` (telephony: confirm `AlphaContacts.resolveNames` keeps Android's own number matching).
+- The new `wifi` module's `CHANGE_NETWORK_STATE` is stripped because Alpha's manifest does not request it, so a reviewed join may fail; `product.gradle` lost the `verifyNativeGoogleHost` pre-build check.
+- The qualified host records (`voice-host/qualified-voice-host.json`, `embedding-host/qualified-host.json`) changed only `forkPin`; the staged binaries were not rebuilt at the pin. The upstream embedding producer inputs Alpha's recipe names (`local-inference/scripts/aosp/*`, `omnivoice-merged.ts`, `scripts/lib/repo-root.ts`) are gone at the pin, so `agent:build-embedding-host` cannot run until the producer is re-homed.
+- An AOSP image boot is needed for the new abstract socket `<package>.workflow.v1` under the privileged-app domain.
 - The native channel takes no headers, so `X-Eliza-Device-*` and `X-ElizaOS-Client-Id` are no longer forwarded on native requests (needs the upstream items below).
 - ElizaSecureStore must accept the exact `inbox-drafts:v1:*` names the renderer reads and the keys `device:alpha/device/inbox/drafts~held` and `device:alpha/device/inbox/operations~held` (keys over 200 characters are refused). AlphaConnection must keep answering `secureRead`/`secureCompareExchange` for the `inbox-drafts:v1:*` slots and `notes-folders:v1:device`, `note-origins:v1:device` and `notes-trash:v1:device`.
 - `WorkflowBridgeHost.perform` still reads `read_calendar_range` in-process with SelectedCalendarReader instead of forwarding to the renderer's Calendar operationPorts.
@@ -153,30 +163,29 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 - The eliza pin is now vibestack-dp `6451775c35a` (eliza#40258). It exports `workflowDeviceOffer` (`packages/agent/src/device-actions/workflow-offer.vibe`), so the earlier need to move past `c8f273cec1b` is met; `pnpm-lock.yaml` is committed and `pnpm install --frozen-lockfile` passes. `pnpm gen` exits 0.
 - `pnpm typecheck` fails with 493 syntax-phase errors in 93 files (mostly EK0301, `!` beside a union or function type without parentheses, and TS1005/TS1128 around `match (…) { when …: }` blocks). vibelang stops before semantic checking, so the count of type errors behind them is unknown. Browser has 234 of them, account 72, notes 47, inbox 36, every other area under 20.
-- `scripts/generate-licenses.ts --check` crashes: `node_modules/@tesseract.js-data/eng` is not installed (see the OCR item below). The elizaOS entry of the committed notices was edited by hand to name the new pin.
-- The Tesseract OCR assets are not set up:
-  - the files are not served under `apps/app/public/ocr/`;
-  - `vite.config.ts` must add `localOcrAssets()`;
-  - `apps/app/package.json` must list `tesseract.js-core` and `@tesseract.js-data/eng`.
-
-  The root `package.json` also lacks `@electric-sql/pglite`, which `eval-phone-actions.ts --database` needs.
+- The root `typecheck`, `test`, `build` and `dev` tasks build the pinned upstream through `pnpm build:upstream` (upstream's own turbo; `vendor/eliza/turbo.json` is a root configuration this repository's turbo cannot read as a package's). `pnpm verify` also runs `pnpm test:root`.
+- Third-party notices are not regenerated or gated yet. The generator now reads upstream's bundle `manifest.json`, the workflow worker's `dependencies.json` and the shipped packages under `apps/app/node_modules`; `licenses/android-runtime-classpath.json` must be refreshed (`ORG_GRADLE_PROJECT_elizaParadeeApiOnly=true node scripts/generate-licenses.ts --refresh-android`) after the Gradle dependency move into `product.gradle`, then the notices regenerated, committed and `--check` added to `pnpm verify`. The licence, SBOM and runtime-licence tests still read `bun.lock` (held in `test/root-tests.json`). The root `package.json` lacks `@electric-sql/pglite`, which `eval-phone-actions.ts --database` needs.
+- `pnpm lint` stops before ESLint runs: `apps/app/tokens.json` gives `scrim` a translucent `oklch(0 0 0 / 0.18)` (`/ 0.55` dark), and the vibestack token check and the design-system ESLint rules (`apps/app/eslint.config.js`, the fullstack example's rule set) both require opaque colors. The token owner (shell/design) must make `scrim` opaque and apply the opacity where it is used.
 - `scripts/resident` must:
   - register the `workflow-device` and `workflow-native-digests` runtime services;
   - call `registerMapsViews`/`registerMapsSavedPlaces` (`namesAlphaView` is a fixed word list).
-- `scripts/os-ported/**` and the harness scripts (`android-instrumentation.ts`, `android-workflow-native.ts`, `native-test-fixture.ts`) are still to be rewritten onto `@elizaos/os/image`.
+- `scripts/os-ported/**` and the harness scripts (`android-instrumentation.ts`, `android-workflow-native.ts`, `native-test-fixture.ts`) are still to be rewritten onto `@elizaos/os/image`. The upstream Pixel 10a product compositions (`packages/os/android/products/`) that `os-ported/os/pixel10a-release.mjs` reads are gone at the pin; `scripts/android-instrumentation.ts` names eight removed campaign scripts.
 - `scripts/ci/export-browser-proof.ts` must keep shipping `delegation-return.html` alongside `index.html`.
-- `scripts/legacy-retirement.json` (around line 498) still marks `test/batch-voice-progress-ack.test.mjs` "mapped"; it is deleted, so mark it "removed", pointing to `spec/voice/acknowledgement.md`.
-- These tests still target removed code:
-  - owner-route-parity (including its JVM half), `test/android-host.test.mjs` and verify-apks import the removed `product/owner-route-table.ts` or the legacy generator;
-  - `specs/quint/refinement/native/credential-coordinator*.mjs`;
-  - `scripts/test-cloud-delegation-return.ts`, `test/quint-conformance.test.mjs` and `specs/quint/refinement/application/portable.mjs` validate the old static delegation page, not the forwarder.
+- `test/root-tests.json` holds 108 tooling and Cloud tests with the reason for each group: the legacy Quint/Lemma harness tests (moved to the spec check), the Cloud tests of modules that moved into `cloud/src`, and tests still to port (the schema-1 host and patched-native tests, the os-ported harness, the licence and SBOM tests, `cloud-provision` against `cloud/deployment.json`, the embedding producer). Other still-stale tests named earlier: owner-route-parity (including its JVM half); `specs/quint/refinement/native/credential-coordinator*.mjs`; `scripts/test-cloud-delegation-return.ts`, `test/quint-conformance.test.mjs` and `specs/quint/refinement/application/portable.mjs` validate the old static delegation page, not the forwarder.
+- `scripts/ci/upstream-reachability.json` still records develop `ca435030bc`; re-record it for the vibestack-dp pin (`node --conditions=eliza-source --import vibelang/register scripts/verify-upstream.ts --record-reachability`, needs `gh`).
+- `calendar-bridge.py` now runs its driver on Node; its pinned SDK, host digest and fixture hashes have not been requalified in CI.
+- The browser lanes in `promotion.yml`: the storage (Firefox/WebKit) and production jobs still run the legacy Playwright specs in `test/browser`, which select the removed UI; `production-surface.spec.ts` must be rewritten for `src/web` before the flag-off production check means anything.
+- Model-checking depth: CI runs the seeded simulation only; no job runs `spec.ts check --nightly` or `quint verify` over the generated modules, and only one spec has a `leadsTo`.
+- Alpha's build and release tooling (licence policy, release blockers, APK admission, cloud deployment policy) has no spec under `apps/app/spec`.
 
 ## Upstream (eliza)
 
 - **os:**
   - the ElizaAgent bridge carries no headers at pin `c8f273cec1b`: add `AgentRoute.headers` (the four admitted device headers) and carry them through `AgentPlugin.ask`, `AgentChannel.ask` and `AgentSocketClient`'s socket payload. Until then native ignores the headers Alpha passes;
   - there is no `sharedBackupReadiness`/`approveSharedBackup` implementation;
-  - `CloudRequestPolicy.PROVIDER_HOSTS` (`ElizaCloud.openExternal`) does not admit `invoice.stripe.com`.
+  - `CloudRequestPolicy.PROVIDER_HOSTS` (`ElizaCloud.openExternal`) does not admit `invoice.stripe.com`;
+  - the notifications module's `NativeNotificationInbox/Wire/Route/Projector` are package-private in `ai.elizaos.app` with no upstream caller; Alpha reaches them through `android/app/src/main/java/ai/elizaos/app/AlphaNotificationProjection.java`. A public facade upstream would retire that class;
+  - the embedding host producer (`local-inference/scripts/aosp/*`, `omnivoice-merged.ts`) is gone; Alpha's `agent:build-embedding-host` needs an upstream producer or its own.
 - **agent/client:**
   - `TurnTransport`, `RuntimeJsonBridge.request`/`requestStream` and `client.request`/`client.stream` take no headers, so the development host off the phone drops device headers;
   - `encodeTurnContext` must accept the `selectedObject` kinds `map-place`, `map-route` and `map-search` and the metadata keys `viewClientId`, `viewDelivery` and `uiView` (assumed, not checked);

@@ -39,11 +39,11 @@ test("the committed Cuttlefish product names its target, lock, host packages and
   const brand = read(product.brandConfig);
   assert.equal(brand.packageName, read("app.config.json").appId);
   // Pixel 10a (stallion) has its own source lock and production descriptor; the Cuttlefish product never stages against them.
-  assert.equal(product.separateLocks.pixel10a, "vendor/eliza/packages/os/android/sources/pixel10a-stallion.json");
+  assert.equal(product.separateLocks.pixel10a, "vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json");
   assert.notEqual(product.sourceLock.file, product.separateLocks.pixel10a);
   assert.equal(fs.existsSync(path.join(root, "android/aosp/pixel10.lock.json")), false, "the unadmitted Pixel 10 placeholder lock is retired");
   // The source lock is the shared reviewed Cuttlefish profile; Alpha keeps no lock of its own.
-  assert.equal(product.sourceLock.file, "vendor/eliza/packages/os/android/aosp.lock.json");
+  assert.equal(product.sourceLock.file, "vendor/eliza/packages/os/aosp/aosp.lock.json");
   // The OS build tools resolve aospLockPath against packages/os, so a brand on the shared lock omits it.
   assert.equal(brand.aospLockPath, undefined);
   assert.equal(fs.existsSync(path.join(root, "android/aosp/aosp.lock.json")), false, "Alpha's unreviewed Cuttlefish lock is retired");
@@ -69,8 +69,8 @@ test("a fully populated fixture lock is complete; each unset, placeholder or for
   refuse(PRODUCT_DESCRIPTOR, { ...product, hostPackages: [{ ...product.hostPackages[0], sha256: "unset" }] }, /cuttlefish-base needs a version and a SHA-256/);
   refuse(PRODUCT_DESCRIPTOR, { ...product, hostPackages: [] }, /lists no Cuttlefish host package/);
   refuse(PRODUCT_DESCRIPTOR, { ...product, target: "pixel10a" }, /target must be one of/);
-  write("vendor/eliza/packages/os/android/sources/pixel10a-stallion.json", { schema: 1, target: "pixel10a" });
-  refuse(PRODUCT_DESCRIPTOR, { ...product, sourceLock: { file: "vendor/eliza/packages/os/android/sources/pixel10a-stallion.json", profile: "cuttlefish" } }, /separate product's lock; it is not admitted for the Cuttlefish product/);
+  write("vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json", { schema: 1, target: "pixel10a" });
+  refuse(PRODUCT_DESCRIPTOR, { ...product, sourceLock: { file: "vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json", profile: "cuttlefish" } }, /separate product's lock; it is not admitted for the Cuttlefish product/);
   refuse(PRODUCT_DESCRIPTOR, { ...product, signer: { ...product.signer, platformCertificateSha256: "UNSET" } }, /platformCertificateSha256/);
   refuse("android/release-signer.json", { ...read("android/release-signer.json"), signerSha256: "unset" }, /signerSha256 is "unset"/);
   refuse(product.brandConfig, { ...read(product.brandConfig), packageName: "ai.elizaos.app" }, /packageName ai\.elizaos\.app is not ai\.alphacompute\.alphaphone/);
@@ -86,7 +86,7 @@ test("production stage-aosp refuses an incomplete lock before reading any APK an
   const stage = (cwd, args) => spawnSync(process.execPath, [path.join(root, "scripts/stage-aosp.ts"), "--target", "cuttlefish", "--aosp-source", "absent-source", ...args], { cwd, encoding: "utf8" });
   const unset = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-aosp-unset-"));
   t.after(() => fs.rmSync(unset, { recursive: true, force: true }));
-  for (const rel of ["app.config.json", "android/release-signer.json", "vendor/eliza/packages/os/android/aosp.lock.json", ...fs.readdirSync(path.join(root, "android/aosp")).map(name => `android/aosp/${name}`)]) {
+  for (const rel of ["app.config.json", "android/release-signer.json", "vendor/eliza/packages/os/aosp/aosp.lock.json", ...fs.readdirSync(path.join(root, "android/aosp")).map(name => `android/aosp/${name}`)]) {
     fs.mkdirSync(path.dirname(path.join(unset, rel)), { recursive: true });
     // android/aosp also holds directories (the listener image configuration).
     fs.cpSync(path.join(root, rel), path.join(unset, rel), { recursive: true });

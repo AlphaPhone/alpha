@@ -2435,7 +2435,7 @@
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaReminders.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/ReminderReceiver.java",
-      "android/app/src/main/AndroidManifest.xml",
+      "android/app/manifests/main/AndroidManifest.xml",
       "vendor/eliza/plugins/plugin-native-reminders/android/src/main/java/ai/eliza/plugins/reminders/ReminderEngine.java",
       "vendor/eliza/plugins/plugin-native-reminders/android/src/main/java/ai/eliza/plugins/reminders/ReminderConfiguration.java",
       "vendor/eliza/plugins/plugin-native-reminders/android/src/main/java/ai/eliza/plugins/reminders/ReminderStore.java",
@@ -2559,7 +2559,7 @@
       "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
-      "android/app/src/launcher/AndroidManifest.xml",
+      "android/app/manifests/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
@@ -2637,7 +2637,7 @@
       "android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSmsSendReceiver.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapability.java",
-      "android/app/src/launcher/AndroidManifest.xml",
+      "android/app/manifests/launcher/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/upstream-native-sources.json",
       "vendor/eliza/plugins/plugin-native-messages/android/src/main/java/ai/eliza/plugins/messages/SmsTelephony.java",
@@ -2692,7 +2692,7 @@
     "sources": [
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaDevicePlugin.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/MainActivity.java",
-      "android/app/src/main/AndroidManifest.xml"
+      "android/app/manifests/main/AndroidManifest.xml"
     ],
     "stateMapping": {
       "viewA/viewB": "Two exact Activity identities, lifecycle, current platform font class, and actual WebView zoom and setter writes",
@@ -2928,7 +2928,7 @@
       "vendor/eliza/plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/SenseListenerClient.java",
       "vendor/eliza/plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/SenseInvocation.java",
       "vendor/eliza/plugins/plugin-native-system/android/src/main/java/ai/eliza/plugins/system/AssistantEntryTile.java",
-      "android/app/src/main/AndroidManifest.xml",
+      "android/app/manifests/main/AndroidManifest.xml",
       "android/consumer-host.json",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaSenseAdmission.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/AlphaImageCapabilities.java",

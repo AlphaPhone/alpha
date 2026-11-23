@@ -8,6 +8,7 @@ import {execFileSync,spawn,spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,verifyNativeSymbols} from './embedding-native-contract.ts';
 import {ANDROID_ABIS} from './android-abis.ts';
+import {pinnedEngine} from './paradee-runtime.ts';
 
 export const NATIVE_BUILD_RECEIPT = '.eliza/native-inputs/receipt.json';
 export const NATIVE_BUILD_REQUIREMENTS = 'android/embedding-host/native-requirements.txt';
@@ -35,11 +36,11 @@ export function nativeRecipe(root:string) {
   const git=(...args:string[])=>execFileSync('git',['-C',vendor,...args],{encoding:'utf8',maxBuffer:16*1024*1024}).trim();
   if(!/^[a-f0-9]{40}$/.test(pin)||git('rev-parse','HEAD')!==pin)throw Error('Native producer requires the locked SDK checkout');
   // Trees include the complete upstream producer module closure, model recipes and Java/JNI inputs.
-  const sources=[...new Set([...embeddingProducerInputPaths,...nativeInputPaths,nativeJavaPath,'packages/os/android/local-inference/scripts','bun.lock','packages/os/android/local-inference/scripts/paradee-voice/build-native.ts','packages/os/android/local-inference/scripts/voice/build-phonon2-gguf.ts','packages/os/android/local-inference','packages/os/android/local-inference/model-catalog','packages/os/android/local-inference/model-catalog/voice-model-versions.json'])].sort();
+  const sources=[...new Set([...embeddingProducerInputPaths,...nativeInputPaths,nativeJavaPath,'packages/os/android/local-inference/scripts','pnpm-lock.yaml','packages/os/android/local-inference/engine.lock.json','packages/os/android/local-inference/scripts/build-native.ts','packages/os/android/local-inference/scripts/build-phonon2-gguf.ts','packages/os/android/local-inference','packages/os/android/local-inference/voice-model-versions.json'])].sort();
   const ids=git('rev-parse',...sources.map(name=>`${pin}:${name}`)).split('\n');
   const sourceTrees=Object.fromEntries(sources.map((name,index)=>[name,ids[index]]));
-  git('diff','--quiet','HEAD','--',...sources,'packages/os/android/local-inference/llama.cpp');
-  const engineCommit=git('rev-parse',`${pin}:packages/os/android/local-inference/llama.cpp`);
+  git('diff','--quiet','HEAD','--',...sources);
+  const engineCommit=pinnedEngine(root).commit;
   const inputFiles=['app.config.json','android/consumer-host.json','android/embedding-host/build-toolchain.json',NATIVE_BUILD_REQUIREMENTS,'android/embedding-host/bootstrap-requirements.txt','android/paradee-voice/asr-inputs.json','scripts/build-embedding-host.ts','scripts/prepare-embedding-host.ts','scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts','scripts/native-build-inputs.ts','scripts/android-identity.ts','scripts/android-stage-voice-models.ts','scripts/voice-host.ts','scripts/paradee-runtime.ts','scripts/android-abis.ts','scripts/copy-file-clone.ts','scripts/stage-embedding-host.ts'];
   const productInputs=Object.fromEntries(inputFiles.map(name=>[name,fileDigest(path.join(root,name))]));
   const voice=json(root,'android/voice-host/qualified-voice-host.json');

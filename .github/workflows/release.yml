@@ -70,7 +70,7 @@ jobs:
           test "$WORKFLOW_COMMIT" = "$(git rev-parse HEAD)"
           [[ "$FIXTURE_GENERATOR_SHA256" =~ ^[0-9a-f]{64}$ ]]
           printf '%s  scripts/ci/build-app-signing-fixtures.py\n' "$FIXTURE_GENERATOR_SHA256" | sha256sum --check --strict
-          node --input-type=module -e 'if (!/^[0-9a-f]{64}$/.test(require("./android/release-signer.json").signerSha256)) process.exit(1)'
+          node --input-type=module -e 'import fs from "node:fs"; if (!/^[0-9a-f]{64}$/.test(JSON.parse(fs.readFileSync("./android/release-signer.json", "utf8")).signerSha256)) process.exit(1)'
           python3 scripts/ci/build-app-signing-fixtures.py "$ANDROID_HOME" artifacts
           sha256sum artifacts/launcher-release-unsigned.apk > artifacts/unsigned-fixtures.sha256
       - name: Sign the launcher fixture using the protected app keystore
@@ -468,9 +468,6 @@ jobs:
           else
             npm ci --ignore-scripts --no-audit --no-fund
           fi
-      - name: Project the exact product's reviewed client sources
-        working-directory: qualified-product
-        run: pnpm upstream:prepare-client
       - name: Reverify all signed bytes and exact reviewed Cloud voice evidence
         run: |
           set -euo pipefail

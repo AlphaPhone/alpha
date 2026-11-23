@@ -21,7 +21,7 @@ export async function checkNativeTextScaleLifecycle(extraSources=[]) {
     const compiled=[...mainActivitySources,...fixture.paths];
     const sources=[...compiled,navigationActionSource,deviceSource,bridgeCallSource,join(directory,harness),join(directory,'Trace.java'),
       join(directory,'java.mjs'),join(directory,'main-activity-platform.mjs'),join(directory,'text-scale-platform.mjs'),
-      fileURLToPath(import.meta.url),'test/fixtures/jvm-tools.mjs','android/app/src/main/AndroidManifest.xml',
+      fileURLToPath(import.meta.url),'test/fixtures/jvm-tools.mjs','android/app/manifests/main/AndroidManifest.xml',
       ...(jsonJar?[jsonJar]:[]),...extraSources];
     const driverHashes=captureInputs(sources);
     const traces=javaTraceCampaign(harness,compiled,scenarios.map(name=>[name]));

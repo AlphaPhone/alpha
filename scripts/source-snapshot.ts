@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {sha256, sha256File} from './sha256.ts';
 import {verifyAndroidIdentity} from './android-identity.ts';
-const roots=['apps/app/src','apps/app/spec','apps/app/public','apps/app/package.json','apps/app/vite.config.ts','cloud/src','cloud/deployment.json','cloud/generated','android/app/src/main/java','android/app/src/main/res','android/app/src/androidTest','android/app/src/main/AndroidManifest.xml','android/app/build.gradle','android/settings.gradle','capacitor.config.ts','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','app.config.json'];
+const roots=['apps/app/src','apps/app/spec','apps/app/public','apps/app/package.json','apps/app/vite.config.ts','cloud/src','cloud/deployment.json','cloud/generated','android/app/src/main/java','android/app/src/main/res','android/app/src/androidTest','android/app/manifests/main/AndroidManifest.xml','android/app/build.gradle','android/settings.gradle','capacitor.config.ts','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','app.config.json'];
 // Record flavor manifests and build policy as well as renderer/bridge sources.
 // Generated web assets and Gradle output remain outputs, not source inputs.
 roots.push('android/app/src/launcher','android/app/src/release',

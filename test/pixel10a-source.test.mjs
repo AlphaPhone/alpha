@@ -95,10 +95,10 @@ test('applied patches cannot carry changed bytes, wrong preimages, extra files, 
 
 
 test('the Alpha adapter uses the shared inventory and retains required-input rejection', async () => {
-  assert.equal(defaultLockPath, path.resolve('vendor/eliza/packages/os/android/sources/pixel10a-stallion.json'));
+  assert.equal(defaultLockPath, path.resolve('vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json'));
   assert.equal(fs.existsSync('android/aosp/pixel10a-source.json'), false);
   const product = JSON.parse(fs.readFileSync('android/aosp/pixel10a-product.json'));
-  assert.equal(product.sourceLock.file, 'vendor/eliza/packages/os/android/sources/pixel10a-stallion.json');
+  assert.equal(product.sourceLock.file, 'vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json');
   assert.equal(sha(fs.readFileSync(defaultLockPath)), product.sourceLock.sha256);
   await assert.rejects(verifyPixel10aSource({}), /requires --aosp-source and --factory-image/);
 });

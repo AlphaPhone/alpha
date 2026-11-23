@@ -45,7 +45,7 @@ function read(path: string){
 const lockBytes=read(join(root,'upstream.lock.json')),sdk=JSON.parse(lockBytes.toString('utf8')).commit;
 checked(join(root,'vendor/eliza'));
 if(!/^[a-f0-9]{40}$/.test(sdk)||git('rev-parse','HEAD:vendor/eliza')!==sdk||git('-C','vendor/eliza','rev-parse','HEAD')!==sdk)throw Error('SDK checkout differs from lock');
-const source=checked(mode==='renderer'?resolve('test-results/browser-proof-renderer'):resolve(`artifacts/mobile-workflow-worker-${sdk}`));
+const source=checked(mode==='renderer'?resolve('test-results/browser-proof-renderer'):resolve('.eliza/workflow-worker'));
 const output=checked(resolve(`test-results/browser-proof/${mode}`),true);
 directory(dirname(output));mkdirSync(output); // Exclusive: never overlay a previous export.
 const files: Record<string, string> = {};
@@ -90,12 +90,14 @@ if(mode==='renderer'){
  const flags=JSON.parse(read(join(source,'build-flags.json')).toString('utf8'));
  if(flags.testMocks!==false)throw Error('Expected flag-off renderer');
 }else{
- const {verifyWorkerArtifact}=await import('../workflow-worker-artifact.ts');
- const prepared=checked(resolve(`artifacts/local-agent-resident-${sdk}`));
- const stamp=read(join(prepared,'.alpha-runtime-source.json')),sdkLock=read(join(prepared,'bun.lock'));
- const worker=verifyWorkerArtifact(source,{sourceStampSha256:hash(stamp),lockSha256:hash(sdkLock)});
+ // The artifact scripts/build-workflow-worker.ts built, checked by upstream's verifier against this checkout's identity.
+ const {Effect}=await import('effect');
+ const {verifyWorkerArtifact}=await import('@elizaos/plugin-workflow/worker');
+ const {workerIdentity}=await import('../build-workflow-worker.ts');
+ const identity=workerIdentity();
+ const worker=await Effect.runPromise(verifyWorkerArtifact(source,identity));
  workerDigests=new Map(worker.files);
- exportBytes('provenance/runtime-source.json',stamp);
+ exportBytes('provenance/worker-identity.json',Buffer.from(JSON.stringify(identity,null,2)+'\n'));
 }
 const inventory: string[] = [];
 const rejected: {path: string; pathSha256: string; truncated: boolean; reason: string}[] = [];

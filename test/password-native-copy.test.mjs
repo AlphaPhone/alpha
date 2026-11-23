@@ -73,7 +73,7 @@ test('Alpha’s password screens read only Alpha’s resources and never the sha
 });
 
 test('Alpha declares its own fill and save screens in place of the shared ones',()=>{
- const manifest=read('android/app/src/main/AndroidManifest.xml');
+ const manifest=read('android/app/manifests/main/AndroidManifest.xml');
  for(const screen of ['PasswordFillActivity','PasswordSaveActivity']){
   assert.match(manifest,new RegExp(`<activity[^>]*android:name="ai\\.eliza\\.plugins\\.passwords\\.${screen}"[^>]*tools:node="remove"`),'shared '+screen+' removed');
   const own=new RegExp(`<activity[^>]*android:name="\\.${screen}"[^>]*>`).exec(manifest)?.[0];

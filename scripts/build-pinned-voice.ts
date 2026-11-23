@@ -11,7 +11,7 @@ import {verifyPinnedUpstream} from './pinned-upstream-source.ts';
 
 const identity = (root: string) => {
   const source = upstreamNativeSource(root);
-  for (const prefix of ['packages/os/android/local-inference/scripts/paradee-voice', 'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts', 'packages/os/android/local-inference/inputs.json']) source.read(prefix);
+  for (const prefix of ['packages/os/android/local-inference/scripts/build-native.ts', 'packages/os/android/local-inference/scripts/build-helpers', 'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts', 'packages/os/android/local-inference/inputs.json']) source.read(prefix);
   const pin = source.pin;
   const {forkPin} = verifyParadeeFfi(root);
   return {sourceCommit: pin, nativeCommit: forkPin};
@@ -33,7 +33,7 @@ export function buildPinnedVoice(root: string, args: string[], {
   }
   if (fs.existsSync(output)) throw Error('Voice output must be a fresh directory');
   const before = readIdentity(root);
-  run(process.execPath, [path.join(root, 'vendor/eliza/packages/os/android/local-inference/scripts/paradee-voice/build-native.ts'), ...args]);
+  run(process.execPath, [path.join(root, 'vendor/eliza/packages/os/android/local-inference/scripts/build-native.ts'), ...args]);
   const after = readIdentity(root);
   const recordPath = path.join(output, 'build-record.json');
   if (JSON.stringify(before) !== JSON.stringify(after)) throw Error('Voice source changed during the build');

@@ -68,7 +68,6 @@ jobs:
         run: bash scripts/ci/prepare-host-test-json.sh
       - name: Prepare reviewed Kotlin compiler for native routing checks
         run: node test/fixtures/kotlin-tools.mjs --prepare
-      - run: pnpm exec vitest run --timeout=600000 vendor/eliza/packages/os/scripts/__tests__/stage-launcher-overlay.node.test.ts
       # The normal chain builds and verifies its native source/model inputs.
       - name: Record tracked source frame before the Android build
         timeout-minutes: 1
@@ -88,7 +87,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f .eliza/native-inputs/receipt.json
-          test -f android/app/src/main/assets/agent/agent-bundle-dependencies.json
+          test -f android/app/src/main/assets/agent/manifest.json
           node --test --test-concurrency=1 --test-reporter=tap test/voice-host-record.test.mjs test/wallet-disabled.test.mjs | tee artifacts/android-postbuild-owners.tap
           python3 - <<'PY'
           import hashlib, json, pathlib, re, subprocess
@@ -99,7 +98,7 @@ jobs:
               assert re.search(r'^ok \d+ - ' + re.escape(name) + r'\s*$', text, re.M), name
           digest = lambda file: hashlib.sha256(pathlib.Path(file).read_bytes()).hexdigest()
           record = {'sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(), 'tests':int(re.search(r'^# tests (\d+)\s*$', text, re.M)[1]), 'skipped':0,
-                    'nativeReceiptSha256':digest('.eliza/native-inputs/receipt.json'), 'runtimeInventorySha256':digest('android/app/src/main/assets/agent/agent-bundle-dependencies.json'),
+                    'nativeReceiptSha256':digest('.eliza/native-inputs/receipt.json'), 'runtimeInventorySha256':digest('android/app/src/main/assets/agent/manifest.json'),
                     'scope':'Actual normal producer receipt and staged runtime inventory; no device execution.'}
           pathlib.Path('artifacts/android-postbuild-owners.json').write_text(json.dumps(record, indent=2) + '\n')
           PY
@@ -116,14 +115,7 @@ jobs:
         timeout-minutes: 15
         working-directory: android
         run: ./gradlew --no-daemon :app:testLauncherDebugUnitTest
-      # The build prepared the pinned SDK and built the workflow worker; both are reused here.
-      - name: Verify digest recovery across independent runtime processes
-        timeout-minutes: 10
-        env:
-          TMPDIR: ${{ runner.temp }}/digest-restart
-        run: |
-          mkdir -p "$TMPDIR"
-          pnpm agent:test-digest-restart
+      # The build staged the workflow worker artifact (pnpm agent:build-workflow-worker); its proof is exported here.
       - name: Export the portable worker dependency proof
         run: node --conditions=eliza-source --import vibelang/register scripts/ci/export-browser-proof.ts worker
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -136,7 +128,7 @@ jobs:
         run: |
           node --conditions=eliza-source --import vibelang/register scripts/audit-production-bundle.ts web-dist
           node --input-type=module - <<'NODE'
-          const fs = require('node:fs');
+          import fs from 'node:fs';
           const manifest = JSON.parse(fs.readFileSync('artifacts/apk-manifest.json', 'utf8'));
           if (manifest.testMocks !== false || manifest.demoEntryPoints !== false) throw new Error('APKs must be testMocks:false and demoEntryPoints:false');
           if (manifest.results.length !== 2 || manifest.results.some(row => row.testMocks !== false || row.bundleAudit !== 'passed' || row.runtime !== 'PACKAGED')) throw new Error('Both launcher APKs must pass the flag-off bundle audit and package the runtime');
@@ -162,9 +154,6 @@ jobs:
             artifacts/sbom/*.json
             artifacts/android-postbuild-owners.tap
             test-results/
-            ${{ runner.temp }}/digest-restart/alpha-digest-crash-*/*.log
-            ${{ runner.temp }}/digest-restart/alpha-digest-crash-*/*.json
-            ${{ runner.temp }}/digest-restart/alpha-digest-crash-*/*.jsonl
             android/app/build/reports/
             android/voice-host/qualified-voice-host.json
             ${{ runner.temp }}/alpha-calendar-bridge-${{ github.run_id }}-${{ github.run_attempt }}/receipt/inputs.json

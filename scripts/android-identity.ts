@@ -22,6 +22,9 @@ export function androidIdentity(root = ROOT, applicationId = process.env.ALPHA_A
  return {...config, appId: selected, updateManifestUrl: installed.updateManifestUrl};
 }
 
+/** Files the upstream host generator writes under android/app; the authored manifests live in android/app/manifests. */
+const GENERATED_APP_FILE = /^(?:src\/[^/]+\/AndroidManifest\.xml|eliza-host-manifest\.xml|build\.gradle)$/;
+
 /** Project only the complete qualified package token, not brand names or feature code. */
 export function projectAndroidPackage(source: string, from: string, to: string): string {
  if (from === to) return source;
@@ -58,6 +61,8 @@ export function stageAndroidIdentity(root = ROOT, identity = androidIdentity(roo
    const file = path.join(directory, entry.name);
    if (entry.isSymbolicLink()) throw new Error('Android identity source must not contain symlinks');
    if (entry.isDirectory()) { if (!['build', 'assets', 'jniLibs'].includes(entry.name)) visit(file); }
+   // The host generator's copies (android/consumer-host.json manifests, its overlay): projected from their sources.
+   else if (GENERATED_APP_FILE.test(path.relative(app, file).split(path.sep).join('/'))) continue;
    else if (entry.isFile() && (entry.name.endsWith('.java') || entry.name.endsWith('.pro') || entry.name === 'AndroidManifest.xml')) {
     const name = path.relative(root, file).split(path.sep).join('/'), bytes = fs.readFileSync(file);
     inputs[name] = createHash('sha256').update(bytes).digest('hex');

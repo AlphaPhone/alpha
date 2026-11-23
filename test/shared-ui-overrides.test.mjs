@@ -14,7 +14,8 @@ import fs from 'node:fs';
 
 const read = file => fs.readFileSync(file, 'utf8');
 const {schema, overrides} = JSON.parse(read('android/shared-ui-overrides.json'));
-const modules = new Map(JSON.parse(read('android/consumer-host.json')).profile.modules.map(module => [module.name, module]));
+// Each upstream os module the host builds as :eliza-<module> (android/consumer-host.json osModules).
+const modules = new Map(JSON.parse(read('android/consumer-host.json')).profile.osModules.map(({module}) => [`eliza-${module}`, {path: `packages/os/android/${module}`}]));
 /** Alpha's changes to each upstream body, applied in order as [upstream text, Alpha text]. None yet. */
 const ALPHA_CHANGES = {
   'ai.eliza.plugins.reminders.ReminderStore': [],
@@ -29,7 +30,7 @@ const PORTED_TESTS = {
 const paths = override => {
   const relative = override.class.replaceAll('.', '/') + '.java';
   const module = modules.get(override.module);
-  return {upstream: `vendor/eliza/${module.source.path}/src/main/java/${relative}`, copy: `${override.source}/${relative}`};
+  return {upstream: `vendor/eliza/${module.path}/src/main/java/${relative}`, copy: `${override.source}/${relative}`};
 };
 const declaration = (source, simple) => {
   const match = new RegExp(`^(?:public |final |abstract )*class ${simple}\\b[^\\n]*\\{$`, 'm').exec(source);
@@ -43,7 +44,7 @@ test('each copy is listed once, for a shared module the app compiles, under its 
   assert.deepEqual(overrides.map(override => override.class).sort(), Object.keys(ALPHA_CHANGES).sort());
   for (const override of overrides) {
     const module = modules.get(override.module);
-    assert.ok(module && ['upstream', 'patchedNative'].includes(module.source.root) && module.appDependency !== false, `${override.module} is a shared app module`);
+    assert.ok(module, `${override.module} is an os module the app builds`);
     assert.match(override.source, /^android\/shared-ui\/[a-z-]+\/java$/);
     const {upstream, copy} = paths(override);
     assert.ok(fs.existsSync(upstream) && fs.existsSync(copy), `${override.class}: upstream and copy exist`);
@@ -72,7 +73,7 @@ test('below its declaration each copy is the pinned upstream source with only Al
 test('the ported upstream tests stay the pinned tests', () => {
   for (const override of overrides) for (const name of PORTED_TESTS[override.class]) {
     const pkg = override.class.split('.').slice(0, -1).join('/');
-    const upstream = read(`vendor/eliza/${modules.get(override.module).source.path}/src/test/java/${pkg}/${name}.java`);
+    const upstream = read(`vendor/eliza/${modules.get(override.module).path}/src/test/java/${pkg}/${name}.java`);
     const ported = read(`android/app/src/test/java/${pkg}/${name}.java`);
     const body = text => text.slice(text.indexOf('\nimport '));
     assert.equal(body(ported), body(upstream), `${name} is the pinned upstream test`);

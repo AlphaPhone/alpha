@@ -104,7 +104,7 @@ test("production staging refuses an old or unprotected launcher manifest even wi
 
 test("the image grants the launcher its runtime permissions on first boot, revocably, alongside the one privileged permission", async () => {
   const { LAUNCHER_DEFAULT_PERMISSIONS, LAUNCHER_PRIVILEGED_PERMISSIONS } = await import("../scripts/stage-aosp.ts");
-  const { renderOverlay } = await import("../vendor/eliza/packages/os/scripts/android/stage-launcher-overlay.ts");
+  const { renderOverlay } = await import("../vendor/eliza/packages/os/aosp/stage-launcher-overlay.ts");
   // The shared stager refuses a grant the APK does not declare; the launcher build merges these two manifests.
   const declared = ["main", "launcher"].map(flavor => fs.readFileSync(`android/app/src/${flavor}/AndroidManifest.xml`, "utf8")).join("\n");
   for (const permission of LAUNCHER_DEFAULT_PERMISSIONS)

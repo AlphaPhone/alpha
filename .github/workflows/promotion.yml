@@ -1,6 +1,7 @@
 name: Promotion checks
-# Checks for promoting develop to main: the spec check (Quint models in apps/app/spec), the tests,
-# Chromium, Firefox/WebKit storage and the production surface. Nothing here runs on pull requests
+# Checks for promoting develop to main: the spec check (Quint models, Dafny proofs and Bombadil
+# exploration of apps/app/spec), the tests, the browser journeys, Firefox/WebKit storage and the
+# production surface. Nothing here runs on pull requests
 # into develop or on pushes; authors run `pnpm check`, `pnpm test:browser` and
 # `pnpm test:browser:production` locally.
 on:
@@ -27,26 +28,19 @@ jobs:
       - name: Install pnpm
         run: npm install --global pnpm@10.24.0
       - run: pnpm install --frozen-lockfile
+      # The proof stage runs Dafny; the explore stage drives Bombadil in Chromium.
+      - name: Install Dafny
+        run: bash scripts/ci/prepare-dafny.sh
+      - run: bash scripts/ci/install-playwright-browser.sh chromium
       - name: Spec check (stories, rules, Quint models and proofs of apps/app/spec)
         run: pnpm check
       - name: Unit, journey and generated conformance tests
         run: pnpm test
   browser:
-    name: Browser development surface (shard ${{ matrix.shard }}/6)
+    name: Browser journeys (Vitest browser project)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4, 5, 6]
     steps:
-      - name: Free disk on the disposable browser runner
-        if: runner.environment == 'github-hosted'
-        run: |
-          for unused in /usr/share/dotnet /usr/local/.ghcup /opt/ghc /usr/local/share/powershell; do
-            if [ -d "$unused" ]; then sudo rm -rf -- "$unused"; fi
-          done
-          df -h "$GITHUB_WORKSPACE"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
@@ -57,28 +51,11 @@ jobs:
         run: npm install --global pnpm@10.24.0
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/ci/install-playwright-browser.sh chromium
-      - name: Chromium suite on the flag-on development server
+      - name: Browser journeys and story mounts on the flag-on development build
         env:
-          # Development shards opt into test mocks, fixtures and device controls explicitly.
+          # Development journeys opt into test mocks, fixtures and device controls explicitly.
           ELIZA_DEV_ALLOW_TEST_MOCKS: '1'
-        run: pnpm test:browser --shard=${{ matrix.shard }}/6
-      # Every case in these files needs the local-agent bridge profile. The bridge answers the
-      # reminder spec's storage route itself, so the unreachable synthetic agent origin is enough.
-      - name: Exercise synthetic local-agent speech profile and host reminder recovery
-        if: matrix.shard == 1
-        run: |
-          node --input-type=module -e "import fs from 'node:fs'; fs.writeFileSync(process.env.RUNNER_TEMP + '/alpha-synthetic-owner-token', 'a'.repeat(64), {mode: 0o600});"
-          PLAYWRIGHT_HTML_OUTPUT_DIR=test-results/browser-agent-profile-report ELIZA_DEV_ALLOW_TEST_MOCKS=1 VITE_LOCAL_AGENT=1 ALPHA_LOCAL_AGENT_TOKEN_FILE="$RUNNER_TEMP/alpha-synthetic-owner-token" ALPHA_LOCAL_AGENT_ORIGIN=http://127.0.0.1:1 pnpm test:browser test/browser/browser-agent-tts.spec.ts test/browser/browser-host-disclosure.spec.ts test/browser/host-reminder-recovery.spec.ts --output=test-results/browser-agent-profile
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure()
-        with:
-          name: browser-development-shard-${{ matrix.shard }}-of-6
-          path: |
-            test-results/browser/
-            test-results/browser-report/
-            test-results/browser-agent-profile/
-            test-results/browser-agent-profile-report/
-          retention-days: 3
+        run: pnpm test:browser
   storage:
     name: Browser storage (${{ matrix.browser }})
     runs-on: ubuntu-24.04
@@ -117,7 +94,6 @@ jobs:
           pactl load-module module-null-sink sink_name=alpha_browser_audio
           pactl set-default-sink alpha_browser_audio
           pactl info
-      - run: pnpm upstream:prepare-client
       - name: Storage contracts on the flag-on development server
         env:
           ELIZA_DEV_ALLOW_TEST_MOCKS: '1'
@@ -148,10 +124,12 @@ jobs:
         run: npm install --global pnpm@10.24.0
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/ci/install-playwright-browser.sh chromium
-      - run: pnpm upstream:prepare-client
       - name: Test-mocks bundle records its flag
+        env:
+          ELIZA_DEV_ALLOW_TEST_MOCKS: '1'
         run: |
-          pnpm build:test-mocks --outDir ../../test-results/test-mocks-web
+          pnpm --filter @alphacompute/alphaphone-app exec vite build --outDir ../../../../test-results/test-mocks-web
+          node scripts/write-build-flags.ts test-results/test-mocks-web
           node --conditions=eliza-source --import vibelang/register scripts/audit-production-bundle.ts test-results/test-mocks-web --expect-test-mocks
       # Builds and previews a flag-off bundle; the flag is deliberately unset here.
       - run: pnpm test:browser:production

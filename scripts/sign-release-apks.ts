@@ -11,7 +11,7 @@
  * Gradle signs a release only from a keystore file (ELIZAOS_KEYSTORE_*). Alpha's application key
  * instead comes from the upstream offline ceremony (android/signing/alpha-key-manifest.json) as
  * <name>.pk8 + <name>.x509.pem, decrypted into tmpfs for one signing job by
- * scripts/os-ported/os/decrypt-release-keys.ts, or is held in an HSM or managed
+ * `eliza-os keys decrypt` (vendor/eliza/packages/os/src/cli.vibe), or is held in an HSM or managed
  * key service that exposes PKCS#11 (decision P-16). Build without the ELIZAOS_KEYSTORE_* variables
  * (ELIZAOS_VERSION_CODE and ELIZAOS_VERSION_NAME still set), then run this. By default it signs
  * artifacts/launcher-release-unsigned.apk into
@@ -25,7 +25,7 @@
  * path and never read here: the key directory must be absolute, outside every Git working tree,
  * owner-only (no group or other permission) and not a symbolic link, and both files regular files;
  * the private <name>.pk8 must have mode 0600 or stricter. The public <name>.x509.pem may keep the
- * default mode decrypt-release-keys.ts gives it: a substituted certificate cannot pass the signer
+ * default mode `eliza-os keys decrypt` gives it: a substituted certificate cannot pass the signer
  * check above. In PKCS#11 mode apksigner loads the key labelled --key-label
  * through SunPKCS11 with the --pkcs11-config file; a token PIN is read by apksigner from the
  * environment variable ELIZAOS_PKCS11_PIN when it is set and never appears on a command line.

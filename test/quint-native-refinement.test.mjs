@@ -30,7 +30,7 @@ const passed = receipts => {
 const producerSources = () => {
   const stubs = 'vendor/eliza/packages/app/test/android/sense-fixtures/systemui-chip-jvm';
   return readdirSync(join(root, stubs), {recursive: true}).filter(name => name.endsWith('.java')).map(name => join(stubs, name))
-    .concat(['SenseListeningPolicy.java', 'SenseListeningLease.java'].map(name => `vendor/eliza/packages/os/android/sense/systemui/chip/source/${name}`));
+    .concat(['SenseListeningPolicy.java', 'SenseListeningLease.java'].map(name => `vendor/eliza/packages/os/aosp/sense/systemui/chip/source/${name}`));
 };
 const actionJournal = 'vendor/eliza/plugins/plugin-native-action-journal/android/src/main/java/ai/eliza/plugins/actionjournal/deletion/';
 const javaGroups = [

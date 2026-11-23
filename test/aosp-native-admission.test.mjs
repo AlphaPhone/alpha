@@ -8,8 +8,8 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {alphaNativeOptions} from '../scripts/aosp-native-admission.ts';
-import {stageAndroidNative, finalizeAndroidNative} from '../vendor/eliza/packages/os/scripts/android/android-native-admission.mjs';
-import {renderOverlay} from '../vendor/eliza/packages/os/scripts/android/stage-launcher-overlay.ts';
+import {stageAndroidNative, finalizeAndroidNative} from '../scripts/os-ported/os/android-native-admission.mjs';
+import {renderOverlay} from '../vendor/eliza/packages/os/aosp/stage-launcher-overlay.ts';
 import {LAUNCHER_DEFAULT_PERMISSIONS, LAUNCHER_PRIVILEGED_PERMISSIONS} from '../scripts/stage-aosp.ts';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));

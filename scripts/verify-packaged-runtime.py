@@ -17,6 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 STAGED = ROOT / 'android/app/src/main/assets/agent'
 NODE_LOCK = ROOT / 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'
 REQUIRED = ('agent.mjs', 'manifest.json', 'inventory.json', 'alpha-source.json', 'alpha-runtime-profile.json')
+# The bundle carries the workflow plugin, so its manifest pins the worker; the worker program and its own manifest ship.
+WORKER = 'workflow-worker/'
+WORKER_REQUIRED = ('src/worker/main.js', 'manifest.json', 'workflow-worker.json', 'dependencies.json')
 ABIS = ('arm64-v8a', 'x86_64')
 NOT_DISTRIBUTABLE = 3
 
@@ -59,6 +62,14 @@ def verify(apk, release=False):
             raise ValueError('Packaged runtime was staged from a different pin or stager')
         if stamp != json.loads((STAGED / 'alpha-source.json').read_text()):
             raise ValueError('Packaged runtime differs from the staged payload')
+        bundle = json.loads(archive.read('assets/agent/manifest.json'))
+        worker_sha = bundle.get('workflowWorkerSha256') if isinstance(bundle, dict) else None
+        if not isinstance(worker_sha, str) or len(worker_sha) != 64:
+            raise ValueError('The agent bundle pins no workflow worker')
+        if not all('assets/agent/' + WORKER + name in names for name in WORKER_REQUIRED):
+            raise ValueError('The pinned workflow worker is not packaged')
+        if packaged('assets/agent/' + WORKER + WORKER_REQUIRED[0]) != worker_sha:
+            raise ValueError('The packaged workflow worker differs from the bundle pin')
         inventory = json.loads(archive.read('assets/agent/inventory.json'))
         rows = inventory.get('files') if isinstance(inventory, dict) and inventory.get('schema') == 1 else None
         if not isinstance(rows, list) or not rows:

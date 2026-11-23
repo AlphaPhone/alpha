@@ -45,7 +45,7 @@ export async function checkNativeAssistantEntry(extraSources=[]) {
   const fixture=assistantEntryPlatform();
   try {
     const sources=[...appSources,imageAdmissionSource,assistantAgent,assistantNavigation,...sharedSources,senseFixtures,
-      'android/app/src/main/AndroidManifest.xml',hostPath,patchManifest,'upstream.lock.json',
+      'android/app/manifests/main/AndroidManifest.xml',hostPath,patchManifest,'upstream.lock.json',
       capacitor+'BridgeActivity.java',capacitor+'Bridge.java','scripts/upstream-native-source.ts',
       'test/fixtures/jvm-tools.mjs',...(jsonJar?[jsonJar]:[]),
       ...[harness,'Trace.java','java.mjs','main-activity-platform.mjs','assistant-entry-platform.mjs']

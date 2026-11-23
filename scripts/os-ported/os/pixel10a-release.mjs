@@ -21,7 +21,7 @@ export const PIXEL10A_DEVICE = Object.freeze({
 });
 /** The shared stallion source inventory every Pixel 10a product pins. */
 export const SHARED_SOURCE_LOCK = fileURLToPath(
-  new URL("../../android/sources/pixel10a-stallion.json", import.meta.url),
+  new URL("../../../vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json", import.meta.url),
 );
 const productsDirectory = fileURLToPath(
   new URL("../../android/products/", import.meta.url),
