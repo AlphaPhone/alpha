@@ -27,6 +27,7 @@ import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
 import { turnTransport } from "./transport.vibe"
 import { bindingOf, textOf, unitsOf } from "./units.vibe"
 import { EmailShelf, type EmailRow } from "./email-shelf.vibe"
+import type { AcknowledgingHooks } from "./cue.vibe"
 import { AgentViews, type ViewDelivery } from "./views.vibe"
 
 /** What the composer is doing to a sent message: quoting it in a reply, or correcting it. */
@@ -368,29 +369,37 @@ export const composerLayer = Layer.effect(Composer, effect {
     })
     try latency.draftSent(timed ? composed : "")
     try quiet(sends.send({ type: "transportCall", id: attempt }))
+    const labelled = (label: string) => rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, label: label.slice(0, 160) } : row))
+    // The agent's acknowledgment frame is the turn's one acknowledgement; an agent that sends none acknowledges from
+    // the text shown before its first tool. The reply machine takes whichever comes first and refuses the other.
+    const hooks: AcknowledgingHooks = {
+      onPreview: (text, provisional) => {
+        if (!streamed) {
+          streamed = true
+          runFork(effect {
+            try quiet(sends.send({ type: "serverReceives", id: attempt }))
+            try quiet(sends.send({ type: "streamChunk", id: attempt }))
+            if (timed) try latency.draftReplied("FirstToken")
+          })
+        }
+        runFork(effect { try quiet(view.send({ type: "token", units: Math.max(1, text.length), provisional })) })
+        pushView(text)
+      },
+      onStatus: (activity) => runFork(labelled(activity)),
+      onAcknowledgment: (text: string) => runFork(effect {
+        if (!(try quiet(view.send({ type: "acknowledge", units: text.length })))) return
+        try labelled(text)
+        pushView("")
+      }),
+      onTool: (_name: string, label?: string) => runFork(effect {
+        try quiet(view.send({ type: "toolStarts" }))
+        if (label !== undefined) try labelled(label)
+        pushView("")
+      }),
+    }
     const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
       { text: composed, metadata: { ...context, ...(viewFields ?? {}), ...(browserPage === undefined ? {} : { clientDevice: { browserPage } }) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
-      { stream: {
-        onPreview: (text, provisional) => {
-          if (!streamed) {
-            streamed = true
-            runFork(effect {
-              try quiet(sends.send({ type: "serverReceives", id: attempt }))
-              try quiet(sends.send({ type: "streamChunk", id: attempt }))
-              if (timed) try latency.draftReplied("FirstToken")
-            })
-          }
-          runFork(effect { try quiet(view.send({ type: "token", units: Math.max(1, text.length), provisional })) })
-          pushView(text)
-        },
-        onStatus: (activity) => runFork(rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, label: activity.slice(0, 160) } : row))),
-        onTool: () => runFork(effect {
-          const before = try view.get()
-          if (before.shown > 0 && before.acks === 0) try quiet(view.send({ type: "acknowledge", units: Math.min(120, before.shown) }))
-          else try quiet(view.send({ type: "workStarts" }))
-          pushView("")
-        }),
-      } },
+      { stream: hooks },
     )))
     const outcome = try classify(result, attempt, streamed)
     try typing()

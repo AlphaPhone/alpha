@@ -13,7 +13,7 @@ import { copy } from "../../src/assistant/presentation.vibe"
 import { DeviceReview } from "../../src/assistant/review.vibe"
 import { AgentRestart } from "../../src/assistant/restart.vibe"
 import { ChatSearch } from "../../src/assistant/search.vibe"
-import { emptyTranscript } from "../../src/assistant/transcript.vibe"
+import { emptyTranscript, type Row } from "../../src/assistant/transcript.vibe"
 import { textOf } from "../../src/assistant/units.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
 import {
@@ -214,6 +214,57 @@ it.effect("Hear a brief acknowledgment and still get the whole answer (spec/assi
       { text: answer, status: "Settled", whole: true },
     ))
   }
+})
+
+/** Send one message to an agent whose stream sends `before` ahead of `answer`; every transcript it showed, and the reply it settled. */
+effect function acknowledgedTurn(before: readonly unknown[], answer: string) {
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: answer }, proposals: [], before }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const seen: Row[] = []
+    const watching = fork Stream.runForEach(composer.transcript, (t) => sync(() => {
+      const row = t.rows.find((r) => r.kind === "agent")
+      if (row !== undefined) seen.push(row)
+    }))
+    for (const _ of [1, 2, 3, 4]) try yieldNow
+    try composer.edit("What's on my calendar today?")
+    try composer.send()
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+    try Fiber.interrupt(watching)
+    const settled = (try transcriptNow()).rows.find((row) => row.kind === "agent")
+    const working = seen.filter((row) => row.kind === "agent" && row.reply.status === "Working" && row.text === "").map((row) => row.kind === "agent" ? row.label : undefined)
+    return { settled, working }
+  }
+}
+
+const calendarAnswer = "You have two meetings today: standup at nine and a review at three."
+const cueText = (text: string) => ({ type: "token", text })
+const restart = { type: "token", fullText: "" }
+
+it.effect("The agent's acknowledgment frame is the one acknowledgement, shown before its tool and never in the answer (spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\")", () => effect {
+  const cue = "Let me check your calendar."
+  const { settled, working } = try acknowledgedTurn([cueText(cue), { type: "acknowledgment", text: cue }, restart, { type: "tool", name: "CALENDAR", label: "Using Calendar" }], calendarAnswer)
+  try Effect.try(() => assert.deepStrictEqual(
+    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits, final: settled.reply.final, working: working.slice(0, 1), tool: working.at(-1) } : {},
+    { text: calendarAnswer, acks: 1, ackUnits: cue.length, final: calendarAnswer.length, working: [cue], tool: "Using Calendar" },
+  ))
+})
+
+it.effect("An agent with no acknowledgment frame is acknowledged once from the text before its first tool (spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\")", () => effect {
+  const { settled } = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR" }, restart, { type: "tool", name: "CALENDAR" }], calendarAnswer)
+  try Effect.try(() => assert.deepStrictEqual(
+    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits } : {},
+    { text: calendarAnswer, acks: 1, ackUnits: "On it.".length },
+  ))
+})
+
+it.effect("An acknowledgment frame after the tool fallback, or a tool after the frame, never acknowledges again (spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\")", () => effect {
+  const fallbackFirst = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR" }, { type: "acknowledgment", text: "Let me check your calendar." }, restart], calendarAnswer)
+  const frameFirst = try acknowledgedTurn([cueText("Sure."), { type: "acknowledgment", text: "Sure." }, cueText(" One more."), { type: "tool", name: "ALARM", label: "Using Clock" }], calendarAnswer)
+  const units = (turn: { readonly settled?: Row }) => turn.settled?.kind === "agent" ? [turn.settled.reply.acks, turn.settled.reply.ackUnits, turn.settled.text] : []
+  try Effect.try(() => assert.deepStrictEqual(
+    { fallbackFirst: units(fallbackFirst), frameFirst: units(frameFirst) },
+    { fallbackFirst: [1, "On it.".length, calendarAnswer], frameFirst: [1, "Sure.".length, calendarAnswer] },
+  ))
 })
 
 it.effect("Approve an action card once, from wherever it is shown (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {

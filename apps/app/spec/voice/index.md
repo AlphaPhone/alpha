@@ -21,8 +21,8 @@ them.
   retirement, a screen the agent opens, and the one Cloud speech relay session a streamed
   conversation listens and speaks on.
 - [Acknowledgement](./acknowledgement.md): the one short line a voice turn may say while its reply
-  is prepared, held 300 ms and bounded at 2.5 s by the assistant's spoken cue, and never spoken over
-  the reply.
+  is prepared, started at once and bounded at 2.5 s by the assistant's spoken cue, and never
+  spoken over the reply.
 - [Speech output](./speech.md): cleanup of each speaking channel, warm-up, what may be spoken, and
   what is spoken or transcribed only on the phone (page readings, voicemail).
 - [Microphone](./capture.md): one owner of the renderer's capture, permission and calls.
