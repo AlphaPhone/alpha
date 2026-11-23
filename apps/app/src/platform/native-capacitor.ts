@@ -114,3 +114,9 @@ export function jsonText(value: unknown): string | undefined {
 export function jsonBytes(value: unknown): Uint8Array {
   return new TextEncoder().encode(jsonText(value) ?? "null");
 }
+
+/** The value the JSON body in `parts` holds, or undefined where it is not JSON, for a refusal streamed back. @throws {never} */
+export function jsonOfBytes(parts: readonly Uint8Array[]): unknown {
+  const decoder = new TextDecoder();
+  return parsedJson(parts.map((part) => decoder.decode(part, { stream: true })).join("") + decoder.decode());
+}

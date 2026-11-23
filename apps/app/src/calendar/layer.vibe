@@ -1,5 +1,5 @@
 // spec/calendar/index.md
-// Every Calendar service, over the platform's Native, Resident, Build and KeyValueStore, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground.
+// Every Calendar service, over the platform's Native, Resident, Build, CloudServices and KeyValueStore, Account's AccountBindings, CloudSession and GoogleAccounts, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground.
 import { Machine as PresentationMachine, stored as presentationStored } from "../../gen/calendar__presentation.effect.vibe"
 import { machine as agentMachine } from "../../gen/calendar__agent.effect.vibe"
 import { machine as deviceMachine } from "../../gen/calendar__device.effect.vibe"
@@ -21,6 +21,7 @@ import { type AgentBinding, agentLayer } from "./agent.vibe"
 import { approvalsLayer } from "./approvals.vibe"
 import { bindCalendar, enterCalendar, hideCalendar, leaveCalendar } from "./binding.vibe"
 import { deletionsLayer } from "./deletions.vibe"
+import { deviceSyncLayer } from "./deviceSync.vibe"
 import { deviceLayer } from "./device.vibe"
 import { draftsLayer } from "./drafts.vibe"
 import { handoffLayer } from "./handoffs.vibe"
@@ -35,6 +36,7 @@ export { calendarCapabilities, operationPorts } from "./operations.vibe"
 export { CalendarMaps, type CalendarEventOrigin } from "./ports.vibe"
 export { calendarDayObservation, type CalendarDayObservation } from "./observation.vibe"
 export { nativeLinkedPort } from "./linkedLocal.vibe"
+export { DeviceCalendarSync, type DeviceSyncView } from "./deviceSync.vibe"
 
 const presentation = presentationStored(ownerKey("device", "calendar/presentation"))
 const preserved = Layer.provideMerge(preservationLayer, preservationMachine())
@@ -95,5 +97,5 @@ const followForeground = Layer.effectDiscard(effect {
   try fork.scoped Stream.runForEach(foreground.changes, (state) => follow(state))
 })
 
-/** Every Calendar service, bound to the account's agent binding and following the foreground, with the hand-over of note and scan drafts; it needs the platform, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground. */
-export const layer = Layer.provideMerge(Layer.mergeAll(followAccount, followForeground, handoffLayer), services)
+/** Every Calendar service, bound to the account's agent binding and following the foreground, with the hand-over of note and scan drafts and device Google Calendar sync; it needs the platform (with CloudServices), Account's AccountBindings, CloudSession and GoogleAccounts, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground. */
+export const layer = Layer.provideMerge(Layer.mergeAll(followAccount, followForeground, handoffLayer, deviceSyncLayer), services)

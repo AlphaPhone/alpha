@@ -1,6 +1,6 @@
 package ai.alphacompute.alphaphone;
 
 /** Installed host name and storage key; provider rules are shared upstream. */
-final class LocalAgentProviderAdmission extends ai.eliza.plugins.agent.runtime.NativeProviderAdmission {
+final class LocalAgentProviderAdmission extends ai.alphacompute.alphaphone.runtime.NativeProviderAdmission {
  static final String PROVIDER_SLOT="local-agent-provider:v1";
 }

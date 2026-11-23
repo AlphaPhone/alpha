@@ -1,13 +1,15 @@
 # Landing
 
-Cloud delegation returns the owner's browser to a static page, `delegation-return.html`, which hands
-the authorization back to Alpha through `alphaphone://cloud-delegation`. The page removes the query
-from its address before it decides anything, forwards only a code or the fact that access was
-denied, never the provider's error text, and offers no link for a return it cannot vouch for. Its
-query is summarised by the shell into counts and validity classes: how many `state`, `code`,
-`error` and `error_description` values it holds, whether the state has the 43-character URL-safe
-shape, whether the code fits 4096 characters and a description 2000, and whether any other key is
-present.
+Cloud delegation returns the owner's browser to `delegation-return.html`, a static page locked to
+its one script and sending no referrer, which removes the query from its own address and hands it,
+unread, to Alpha's landing in the address fragment, which never reaches a server. The landing
+removes the return from its address before it decides anything, leaving only its own mark so a
+reopened page says to go back to Alpha, and hands the authorization back to Alpha through
+`alphaphone://cloud-delegation`. It forwards only a code or the fact that access was denied, never
+the provider's error text, and offers no link for a return it cannot vouch for. Its query is
+summarised by the shell into counts and validity classes: how many `state`, `code`, `error` and
+`error_description` values it holds, whether the state has the 43-character URL-safe shape, whether
+the code fits 4096 characters and a description 2000, and whether any other key is present.
 
 ```quint
 type Query = {

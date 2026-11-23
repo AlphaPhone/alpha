@@ -1,0 +1,217 @@
+// spec/assistant/views.md, "Story: Have my agent open the screen it means"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/views.md, "Story: Let my agent press back or reload only on the page I am looking at"; spec/assistant/views.md, "A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once"
+import { observes } from "../../gen/assistant.effect.vibe"
+import { answerOf, assistantClaims, claimWaitMs, claims, delivered, interactionWaitMs, mapsDelivers, negativeSent, negativeWaitMs, reported, taken, type Delivered } from "../../gen/assistant__views.ts"
+import { newId } from "../platform/ids.ts"
+import { Resident } from "../platform/resident.vibe"
+import { ResidentFeeds } from "../platform/view-events.vibe"
+import { Preferences } from "../settings/preferences.vibe"
+import { appOfKey, BUILTIN_PREFIX } from "../shell/apps.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import type { AppId } from "../web/app-screen.ts"
+import { AssistantHost } from "./host.vibe"
+import { ViewClaim, ViewHandoff, ViewInteraction, ViewResultAnswer } from "./payloads.schema.vibe"
+import { AdvertisedCapabilities, BrowserViews, MapsViews, type ViewAnswer } from "./ports.vibe"
+import { ask } from "./transport.vibe"
+
+const CLAIM = "/api/views/interact-claim"
+const RESULT = "/api/views/interact-result"
+const REVIEW_REQUIRED = "review-required: the owner reviews phone actions first"
+const NO_VIEW_COMMAND = "UNSUPPORTED: This phone has no agent command for that view."
+const UNKNOWN_OUTCOME = "Native view command failed or its outcome is unknown; it was not repeated"
+
+/** What a turn tells the agent about this renderer, so a view it prepares can be delivered here. */
+export interface ViewTurnFields {
+  readonly viewClientId: string
+  readonly viewDelivery: "completed-action"
+  readonly uiView: string
+}
+
+/** What became of the view a reply prepared: none, opened, unknown, or a view this phone does not have (with the view it does have, for a page inside one). */
+export type ViewDelivery =
+  | { readonly status: "none" }
+  | { readonly status: "delivered"; readonly label: string }
+  | { readonly status: "unknown" }
+  | { readonly status: "unavailable"; readonly parentView?: string }
+
+/** The agent's id of the view an app shows. */
+export function viewIdOf(app: string): string {
+  return app === "home" ? "chat" : app === "workflows" ? "automations" : app
+}
+
+/** The app a view id of the agent names on this phone, Home included, or undefined for a view this phone does not have. */
+export function appOfView(viewId: string): AppId | "home" | undefined {
+  if (viewId === "chat" || viewId === "home") return "home"
+  if (viewId === "automations") return "workflows"
+  return appOfKey(`${BUILTIN_PREFIX}${viewId}`)
+}
+
+/** The prepared view of a reply's action results: the last result whose values hand over a prepared view, or undefined. */
+export function handoffOf(results: readonly { readonly action: string; readonly data: unknown }[]): typeof ViewHandoff.Type | undefined {
+  let found: typeof ViewHandoff.Type | undefined
+  for (const result of results) {
+    const data = result.data
+    const values = typeof data === "object" && data !== null && "values" in data ? (data as { readonly values?: unknown }).values : data
+    const decoded = Schema.decodeUnknownOption(ViewHandoff)(values)
+    if (Option.isSome(decoded)) found = decoded.value
+  }
+  return found
+}
+
+/** The agent's views on this phone: what a turn says about this renderer, the views a reply prepared, and the agent's commands inside a view. */
+export service AgentViews {
+  /** This renderer's id, as every turn and view route names it. */
+  readonly clientId: string
+  /** The fields a turn carries so its prepared view can be delivered here; none on a screen the assistant does not observe. */
+  turnFields(observed: boolean, view: string): ViewTurnFields | undefined!!
+  /** Deliver the view a reply's action results prepared, only while the screen is still `contextKey`, the one the turn was sent from. */
+  deliver(results: readonly { readonly action: string; readonly data: unknown }[], contextKey: string): ViewDelivery!!
+  /** Follow the agent's view commands for this renderer, starting the feed when it is not followed already; called on each use of the connection. */
+  connect(): void!!
+}
+
+/** The agent's views over the resident's view routes and feed, the shell's navigation, Maps' delivery and Browser's commands. */
+export const viewsLayer = Layer.effect(AgentViews, effect {
+  const host = try AssistantHost
+  const navigation = try Navigation
+  const feeds = try ResidentFeeds
+  const preferences = try Preferences
+  const maps = try MapsViews
+  const browser = try BrowserViews
+  const resident = try Resident
+  const advertised = try AdvertisedCapabilities
+  const post = (path: string, body: unknown) => Effect.provideService(Effect.provideService(ask("POST", path, body), Resident, resident), AdvertisedCapabilities, advertised)
+  const clientId = newId()
+  const running = new Set<string>()
+  const effects = new Map<string, number>()
+  let requests = 0
+  let following = false
+
+  effect function claimOf(binding: unknown, waitMs: number) {
+    const answer = timeout(post(CLAIM, binding), waitMs) catch () => undefined
+    const claim = Schema.decodeUnknownOption(ViewClaim)(answer)
+    return Option.isSome(claim) ? claim.value.claimId : undefined
+  }
+
+  effect function settle(binding: object, claimId: string, outcome: { readonly success: boolean; readonly result?: unknown; readonly error?: string }, waitMs?: number) {
+    const body = { ...binding, claimId, ...outcome }
+    const sent = waitMs === undefined ? post(RESULT, body) : timeout(post(RESULT, body), waitMs)
+    const answer = sent catch () => undefined
+    const accepted = Schema.decodeUnknownOption(ViewResultAnswer)(answer)
+    return Option.isSome(accepted) && accepted.value.accepted
+  }
+
+  effect function current(contextKey: string) {
+    const screen = try host.screen()
+    return observes(screen.exposure) && screen.contextKey === contextKey && (try host.identity()) !== undefined
+  }
+
+  effect function inFront(target: AppId | "home") {
+    const screen = try host.screen()
+    const view = screen.observation.view
+    return observes(screen.exposure) && (target === "home" ? view === "home" || view === "library" : view === target)
+  }
+
+  effect function effectKeyOf(requestId: string) {
+    const known = effects.get(requestId)
+    if (known !== undefined) return known
+    const next = effects.size + 1
+    effects.set(requestId, next)
+    if (effects.size > 64) effects.delete(effects.keys().next().value ?? "")
+    return next
+  }
+
+  effect function deliver(results: readonly { readonly action: string; readonly data: unknown }[], contextKey: string) {
+    const handoff = handoffOf(results)
+    if (handoff === undefined) return { status: "none" } satisfies ViewDelivery
+    const binding = handoff.navigationBinding
+    const ours = binding.clientId === clientId
+    const target = handoff.subview === true || (handoff.viewPath !== undefined && handoff.viewPath !== "" && handoff.viewPath !== "/") ? undefined : appOfView(handoff.viewId)
+    const said: Delivered = reported(true, ours, target !== undefined)
+    if (said === "UnavailableView") {
+      const parent = appOfView(handoff.viewId)
+      return { status: "unavailable", ...(parent === undefined ? {} : { parentView: parent }) } satisfies ViewDelivery
+    }
+    if (target === undefined || !claims(true, ours, true, try current(contextKey))) return { status: "none" } satisfies ViewDelivery
+    const label = target === "home" ? "Home" : handoff.label ?? target
+    if (mapsDelivers(target)) {
+      requests += 1
+      const apply = map(host.openView("maps"), () => undefined)
+      try maps.deliver(requests, try effectKeyOf(binding.requestId), binding, apply)
+      return (try inFront("maps")) ? { status: "delivered", label } satisfies ViewDelivery : { status: "unknown" } satisfies ViewDelivery
+    }
+    if (!assistantClaims(target, true)) return { status: "none" } satisfies ViewDelivery
+    const claimId = try claimOf(binding, claimWaitMs)
+    if (claimId === undefined) return { status: "unknown" } satisfies ViewDelivery
+    if (!(try current(contextKey))) {
+      if (negativeSent(true, false)) try settle(binding, claimId, { success: false, result: { switched: false } }, negativeWaitMs)
+      return { status: "unknown" } satisfies ViewDelivery
+    }
+    const opened = target === "home" ? try navigation.home() : try host.openView(target)
+    const switched = opened && (try inFront(target))
+    const accepted = try settle(binding, claimId, { success: switched, result: { switched } })
+    const outcome = delivered(true, switched, accepted, try inFront(target))
+    return outcome === "DeliveredView" ? { status: "delivered", label } satisfies ViewDelivery : { status: "unknown" } satisfies ViewDelivery
+  }
+
+  function paramsOf(raw: unknown): { readonly command?: unknown; readonly selection?: unknown } {
+    return typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw as { readonly command?: unknown; readonly selection?: unknown } : {}
+  }
+
+  function answered(said: ViewAnswer, envelope: boolean): { readonly success: boolean; readonly result?: unknown; readonly error?: string } {
+    if (envelope) return { success: true, result: said }
+    return said.ok ? { success: true, result: said.data } : { success: false, error: `${said.code}: ${said.message}` }
+  }
+
+  effect function command(frame: typeof ViewInteraction.Type, contextKey: string) {
+    const identity = { requestId: frame.requestId, clientId, viewId: frame.viewId, viewType: frame.viewType, installationId: frame.installationId }
+    const claimId = try claimOf(identity, interactionWaitMs)
+    if (claimId === undefined) return
+    const asks = preferences.asksBeforeActions() catch () => true
+    const browserView = frame.viewId === "browser"
+    const isCommand = frame.capability === "browser-command"
+    const params = paramsOf(frame.params)
+    const kind = answerOf(true, asks, browserView, isCommand)
+    const outcome = !(try current(contextKey)) ? { success: false, error: UNKNOWN_OUTCOME }
+      : kind === "ReviewRequired" ? { success: false, error: REVIEW_REQUIRED }
+      : kind === "BrowserAnswered" ? answered(try browser.command(params.command, params.selection), true)
+      : browserView ? answered(try browser.interact(frame.capability, params.command, params.selection), false)
+      : { success: false, error: NO_VIEW_COMMAND }
+    if ((try host.identity()) === undefined) return
+    try settle(identity, claimId, outcome)
+  }
+
+  effect function serve(raw: unknown) {
+    const decoded = Schema.decodeUnknownOption(ViewInteraction)(raw)
+    if (Option.isNone(decoded)) return
+    const frame = decoded.value
+    const screen = try host.screen()
+    if (!taken(true, !observes(screen.exposure), running.has(frame.requestId))) return
+    running.add(frame.requestId)
+    try ensuring(timeout(command(frame, screen.contextKey), interactionWaitMs) catch () => undefined, sync(() => { running.delete(frame.requestId) }))
+  }
+
+  effect function listen() {
+    for try (const raw of feeds.view(clientId)) {
+      fork.detached serve(raw)
+    }
+  }
+
+  effect function follow() {
+    try (listen() catch () => undefined)
+    following = false
+  }
+
+  return {
+    clientId,
+    effect turnFields(observed: boolean, view: string) {
+      if (!observed || (try host.identity()) === undefined) return undefined
+      return { viewClientId: clientId, viewDelivery: "completed-action", uiView: viewIdOf(view) } satisfies ViewTurnFields
+    },
+    deliver,
+    effect connect() {
+      if (following || (try host.identity()) === undefined) return
+      following = true
+      fork.detached follow()
+    },
+  }
+})

@@ -27,6 +27,11 @@ const WORDS: Readonly<Record<string, string>> = {
   unavailable: "Device Calendar sync is unavailable. Existing events are retained.",
 }
 
+/** The sentence the owner sees for a device sync refusal: the plugin's own words, or Alpha's for its status. */
+export function localSyncWords(status: string, message?: string): string {
+  return message ?? WORDS[status] ?? WORDS.unavailable!
+}
+
 function refused(answer: LocalRefusalRecord): LinkedLocalRefused {
   return new LinkedLocalRefused({ status: answer.status, message: answer.message ?? WORDS[answer.status] ?? WORDS.unavailable! })
 }

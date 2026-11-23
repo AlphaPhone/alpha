@@ -1,5 +1,5 @@
-// spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/viewfinder.md, "Another flow borrows the shutter only over the ready, idle preview: the assistant's photo, a scanned frame or a document page"
-import { Machine as CaptureMachine, type Capture, type Event as CaptureEvent, type Scene, type Wanted } from "../../gen/camera__agentCapture.effect.vibe"
+// spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentCapture.md, "The reveal ends only once the closing panel is gone; an abort, a changed context or a hidden Camera ends it with nothing taken"; spec/camera/viewfinder.md, "Another flow borrows the shutter only over the ready, idle preview: the assistant's photo, a scanned frame or a document page"
+import { Machine as CaptureMachine, type Capture, type Event as CaptureEvent, type Scene, type Wanted, panelLimitMs } from "../../gen/camera__agentCapture.effect.vibe"
 import { chatCovers, type Camera } from "../../gen/camera__viewfinder.effect.vibe"
 import { CameraBridge, CameraFailed } from "./bridge.vibe"
 import { photoReceiptId } from "./bridge.schema.vibe"
@@ -7,6 +7,7 @@ import { CameraHandoffs } from "./ports.vibe"
 import { PHOTO_NOT_TAKEN, cameraText } from "./messages.vibe"
 import { PhotoStore } from "./photos.vibe"
 import { Viewfinder } from "./viewfinder.vibe"
+import { Foreground } from "../shell/foreground.vibe"
 
 /** The receipt a requested photo answers with; the library id only for an assistant that offered `camera.capture-library-id.v1`. */
 export interface CameraReceipt {
@@ -58,7 +59,6 @@ export function sceneOf(c: Camera): Scene {
 }
 
 const wantedOf = (lens: "front" | "back" | undefined): Wanted => lens === "front" ? "WantFront" : lens === "back" ? "WantBack" : "AnyLens"
-const PANEL_CLEARS = "350 millis"
 
 /** The requested-photo service: the request Machine reads the viewfinder's own state at every step. */
 export const agentCamera = Layer.effect(AgentCamera, effect {
@@ -67,6 +67,14 @@ export const agentCamera = Layer.effect(AgentCamera, effect {
   const bridge = try CameraBridge
   const store = try PhotoStore
   const handoffs = try CameraHandoffs
+  const foreground = try Foreground
+
+  effect function panelGone() {
+    if ((try foreground.get()).chat === "closed") return true
+    const closed = timeout(Stream.runHead(Stream.filter(foreground.changes, (state) => state.chat === "closed")), Duration.millis(panelLimitMs)) catch () => undefined
+    if (closed !== undefined && Option.isSome(closed)) return true
+    return (try foreground.get()).chat === "closed"
+  }
 
   effect function scene() {
     return sceneOf(try viewfinder.get())
@@ -131,12 +139,13 @@ export const agentCamera = Layer.effect(AgentCamera, effect {
     if (asked.request === "Revealing") {
       try handoffs.hideConversation()
       try viewfinder.setChat("ChatHidden")
-      try sleep(PANEL_CLEARS)
+      const gone = try panelGone()
       try send({ type: "panelCleared" })
       const now = try scene()
-      if ((try send({ type: "revealed", scene: now })) === undefined) {
-        try send({ type: "revealFails", scene: now })
-        return try failed("Camera closed")
+      const seen = gone ? now : { ...now, covers: true }
+      if ((try send({ type: "revealed", scene: seen })) === undefined) {
+        try send({ type: "revealFails", scene: seen })
+        return try failed(gone ? "Camera closed" : "Camera viewfinder is covered")
       }
     }
     if ((try machine.get()).request === "Queued") {

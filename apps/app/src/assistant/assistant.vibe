@@ -39,8 +39,10 @@ export service Assistant {
   follow(): void!!
   /** Back while the assistant is in front: close search, then drop a reply or edit aim; false when Back is the shell's. */
   back(): boolean!!
-  /** Each question a Messages or Phone list bar asked through the `comms:<key>:ask:<text>` route, and whether a turn took it. */
+  /** Each question a Messages or Phone list bar asked through the `comms:<key>:ask:<text>` route or `askComms`, and whether a turn took it. */
   readonly commsAsks: Stream.Stream<CommsAsk>
+  /** Ask a Messages or Phone list-bar question on subject `key` as a turn, and publish whether it was taken; the same text asked again is a new question. */
+  askComms(key: string, text: string): boolean!!
 }
 
 /** A list-bar question the assistant was asked from Messages or Phone, and whether it was taken. */
@@ -107,6 +109,12 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     if ((detent === "Input" || detent === "Hidden") && (state.chat === "Sheet" || state.chat === "Full")) try quiet(dock.send({ type: "closeChat" }))
     if (detent === "Hidden" && (try dock.get()).chat === "Input") try quiet(dock.send({ type: "lowerBar" }))
   }
+  effect function askComms(key: string, text: string) {
+    if (key === "" || text.trim() === "") return false
+    const taken = try composer.send(text)
+    try PubSub.publish(asks, { key, taken })
+    return taken
+  }
   effect function followShell() {
     let context: string | undefined
     let owner: string | undefined
@@ -123,12 +131,7 @@ export const assistantLayer = Layer.effect(Assistant, effect {
       const route = nav.app === "assistant" ? nav.places.find((place) => place.app === "assistant")?.route : undefined
       const asked = route !== routed ? commsAskOf(route) : undefined
       routed = route
-      if (asked !== undefined) {
-        fork.detached effect {
-          const taken = try composer.send(asked.text)
-          try PubSub.publish(asks, { key: asked.key, taken })
-        }
-      }
+      if (asked !== undefined) fork.detached askComms(asked.key, asked.text)
       const view = surfaceOf(nav)
       const before = try dock.get()
       if (before.view !== view && !before.drag.active) try quiet(dock.send({ type: "navigate", view }))
@@ -223,6 +226,7 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     show,
     requestVoice: () => map(PubSub.publish(voice, undefined), () => undefined),
     commsAsks: Stream.fromPubSub(asks),
+    askComms,
     back: () => effect {
       if (try search.close()) return true
       return try composer.back()

@@ -57,8 +57,10 @@ export function receiptOfFailure(failure: TelephonyRefused): Receipt {
   return REFUSED_BEFORE_SENDING.includes(refusalTag(failure)) || failure.code !== undefined ? "ReceiptRefused" : "ReceiptLost"
 }
 
-/** The picture store key of one attached picture. */
-const pictureKey = (thread: string, name: string) => `pictures/${thread}/${name}`
+/** The slot under the owner namespace that keeps one attached picture's bytes. */
+export function pictureSlot(thread: string, name: string): string {
+  return `telephony/pictures/${thread}/${name}`
+}
 
 /** The draft sends over the drafts and messages machines, the messages bridge and the picture store. */
 export const draftSendsLayer = Layer.effect(DraftSends, effect {
@@ -67,7 +69,7 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
   const messages = try MessagesMachine
   const store = try KeyValueStore.KeyValueStore
   const session = try CloudSession
-  const keyOf = (thread: string, name: string) => session.ownerKey(`telephony/${pictureKey(thread, name)}`)
+  const keyOf = (thread: string, name: string) => session.ownerKey(pictureSlot(thread, name))
   const tell = (event: DraftsEvent, by: "Owner" | "Alpha" | "Device") => drafts.send(event, by) catch () => undefined
   const note = (event: Parameters<typeof messages.send>[0]) => messages.send(event) catch () => undefined
 

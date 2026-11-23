@@ -1,4 +1,4 @@
-// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import { assert, it } from "@effect/vitest"
 import { Composer } from "../../src/assistant/composer.vibe"
 import { spokenCue } from "../../src/assistant/cue.vibe"
@@ -9,6 +9,7 @@ import {
   assistantOver, browserScreen, countingExecutors, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
   wireProposal, type Seen,
 } from "./fakes.vibe"
+import type { PageObservation } from "../../src/assistant/ports.vibe"
 
 const page = {
   tabId: "t1", revision: "r1", url: "https://news.example.com/today#top", title: "Today\nin brief", capturedAt: 1,
@@ -122,29 +123,27 @@ it.effect("Decline a card with the agent's own decision body (spec/assistant/app
   }
 })
 
-it.effect("Let my agent read the page I have open in Browser (spec/assistant/context.md, \"A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s\")", () => effect {
-  const sent = effect function (on: boolean, declares: boolean, read: typeof page | undefined) {
+it.effect("Let my agent read the page I have open in Browser (spec/assistant/context.md, \"A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it\")", () => effect {
+  const sent = effect function (on: boolean, declares: boolean) {
     const seen: Seen = { calls: [] }
-    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Here is the summary." }, proposals: [] }), Layer.merge(fakeHost([], browserScreen, [], declares), fakeBrowserPages({ on }, { id: "t1", revision: "r1" }, read)), countingExecutors({ count: 0 })) {
+    const asked: PageObservation[] = []
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Here is the summary." }, proposals: [] }), Layer.merge(fakeHost([], browserScreen, [], declares), fakeBrowserPages({ on }, { id: "t1", revision: "r1" }, page, asked)), countingExecutors({ count: 0 })) {
       const composer = try Composer
       try composer.edit("Summarize this page")
       try composer.send()
       const body = turnBodies(seen)[0]
-      return { page: pageOf(body), observed: JSON.stringify(body ?? {}).includes("\"browser-tab\"") }
+      return { page: pageOf(body), observed: JSON.stringify(body ?? {}).includes("\"browser-tab\""), asked: asked.map((observation) => observation.selectedObject?.id) }
     }
   }
-  const shared = try sent(true, true, page)
-  const off = try sent(false, true, page)
-  const older = try sent(true, false, page)
-  const otherTab = try sent(true, true, { ...page, tabId: "t2" })
+  const shared = try sent(true, true)
+  const off = try sent(false, true)
+  const older = try sent(true, false)
   try Effect.try(() => assert.deepStrictEqual(
-    { shared, off: off.page, older: older.page, otherTab: otherTab.page },
+    { shared, off: off.page, older },
     {
-      shared: {
-        page: { tabId: "t1", revision: "r1", url: "https://news.example.com/today", title: "Today in brief", capturedAt: 1, text: "Top stories", links: [{ url: "https://news.example.com/story-2", text: "Second story" }] },
-        observed: true,
-      },
-      off: undefined, older: undefined, otherTab: undefined,
+      shared: { page, observed: true, asked: ["t1"] },
+      off: undefined,
+      older: { page: undefined, observed: true, asked: [] },
     },
   ))
 })
@@ -184,7 +183,7 @@ it.effect("Send what I dictated and have it timed like a voice turn (spec/assist
   }
   const sentAsDictated = try timed(false)
   const edited = try timed(true)
-  try Effect.try(() => assert.deepStrictEqual({ sentAsDictated, edited }, { sentAsDictated: ["begin", "Request", "FirstToken", "Answered"], edited: [] }))
+  try Effect.try(() => assert.deepStrictEqual({ sentAsDictated, edited }, { sentAsDictated: ["sent:Call mom", "FirstToken", "FinalReply"], edited: ["sent:"] }))
 })
 
 it.effect("Hear a brief acknowledgment and still get the whole answer (spec/assistant/reply.md, \"A spoken cue waits 300 ms and is dropped when the reply is ready first; an audible cue finishes before the reply, within 2.5 s\")", () => effect {

@@ -24,6 +24,8 @@ import { Notices } from "../../shell/notices.vibe";
 import { Permissions } from "../../shell/permissions.vibe";
 import { Recovery } from "../../shell/recovery.vibe";
 import { Shade } from "../../shell/shade.vibe";
+import { followSurfaceSheets } from "../../shell/surfaceSheets.vibe";
+import { Build } from "../../platform/build.vibe";
 import type { AppId, SurfaceSlot } from "../app-screen.ts";
 import { useAppearanceClass } from "../settings/index.tsx";
 import { runtime } from "../runtime.ts";
@@ -38,7 +40,7 @@ import { StandInShade } from "./StandInShade.tsx";
 import { StartupPermissions } from "./StartupPermissions.tsx";
 import { NoticesSlot, ToastRegion } from "./ToastRegion.tsx";
 import type { GestureControls } from "./TileGrid.tsx";
-import { admittedScreens, allScreens, homeMounts, onImage, screenOf, surfacesIn, walkthroughMounts } from "./registry.ts";
+import { admittedScreens, allScreens, allSurfaces, homeMounts, onImage, screenOf, surfacesIn, walkthroughMounts } from "./registry.ts";
 import { act } from "./services.ts";
 
 const launcher = (f: (l: Launcher.Shape) => Effect.Effect<void>) => act(Effect.flatMap(Effect.service(Launcher), f));
@@ -56,6 +58,15 @@ function faceOf(key: string, apps: readonly InstalledApp[], details: ReadonlyMap
 }
 
 setAppBack((app) => allScreens.find((screen) => screen.id === app)?.back);
+
+let sheetsFollowed = false;
+
+function followSheets(): void {
+  if (sheetsFollowed) return;
+  sheetsFollowed = true;
+  act(Effect.flatMap(Effect.service(Build), (build) => followSurfaceSheets(allSurfaces.flatMap((surface) =>
+    surface.back !== undefined && (surface.availability === "everywhere" || build.info.variant === "aosp") ? [{ id: surface.id, ...surface.back }] : []))));
+}
 
 const controls: GestureControls = {
   down: (pointer, key, onRemove) => launcher((l) => l.down(pointer, key, onRemove)),
@@ -89,7 +100,10 @@ export function ShellRoot() {
   const info = useAppInfo(runtime).state ?? appInfoStart;
   const { snapshot, details } = useSyncExternalStore(inventory.subscribe, inventory.getSnapshot, inventory.getSnapshot);
   const appearance = useAppearanceClass();
-  useState(() => act(Effect.flatMap(Effect.service(Recovery), (r) => r.mounted())));
+  useState(() => {
+    followSheets();
+    act(Effect.flatMap(Effect.service(Recovery), (r) => r.mounted()));
+  });
   const start = useRef<{ id: number; x: number; y: number } | null>(null);
 
   if (recovery.phase !== "Running") {
@@ -189,7 +203,11 @@ export function ShellRoot() {
       <AppFrame nav={nav} screens={screens} failures={recovery.recorded} onClose={() => navigate((n) => n.home())} />
       <AddToHomeSheet hidden={hidden} open={nav.adding} onAdd={(key) => launcher((l) => l.addView(key))} onClose={() => launcher((l) => l.closeAdd())} />
       <StandInShade open={nav.shade} onClose={() => navigate((n) => n.send({ type: "closeShade" }))} />
-      {dockShown(nav) && <Surfaces slot="dock" admitted={admitted} />}
+      {dockShown(nav) && (
+        <div data-alpha-dock data-alpha-dock-bar={nav.chat === "Sheet" || nav.chat === "Full" ? undefined : ""} className="contents">
+          <Surfaces slot="dock" admitted={admitted} />
+        </div>
+      )}
       <div className="absolute inset-x-0 z-40 flex flex-col gap-2" style={{ top: "calc(var(--alpha-header-clearance, 0px) + 4rem)" }}>
         <Surfaces slot="notices" admitted={admitted} />
         <NoticesSlot notices={toasts.notices} onDismiss={(message) => act(Effect.flatMap(Effect.service(Notices), (n) => n.dismiss(message)))} />

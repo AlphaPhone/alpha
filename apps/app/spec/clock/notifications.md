@@ -157,3 +157,19 @@ pure def alwaysADraftFollowsAReview(n: Shade): bool = n.composed <= n.asks
 pure def sometimesQuestionDrafted(n: Shade): bool = n.composed >= 1
 pure def sometimesGone(n: Shade): bool = n.report == ReportGone
 ```
+
+### The phone consumes a notice once, at the revision asked about; a phone without that call consumes it once for this session
+
+The assistant's question consumes the notice through `AlphaNotifications.consumeOwnNotice` with the
+id and revision the owner reviewed. Only `consumed` lets the question join the draft: a notice
+already consumed, changed or gone is reported as changed. A phone whose plugin does not offer the
+call keeps the notice consumed in Alpha's memory until Alpha restarts.
+
+```quint
+type ConsumeAnswer = ConsumedNow | AlreadyConsumed | NoticeChanged | NoticeGone | ConsumeUnavailable | ConsumeUnsupported
+pure def consumeAccepted(answer: ConsumeAnswer, seenThisSession: bool): bool =
+  answer == ConsumedNow or (answer == ConsumeUnsupported and not(seenThisSession))
+pure val seenThisSessionValues = Set(true, false)
+pure def lawAChangedNoticeIsNeverConsumed(seenThisSession: bool): bool = not(consumeAccepted(NoticeChanged, seenThisSession))
+pure def lawAnUnsupportedPhoneConsumesOncePerSession(seenThisSession: bool): bool = consumeAccepted(ConsumeUnsupported, seenThisSession) iff not(seenThisSession)
+```

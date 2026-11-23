@@ -3,6 +3,7 @@ import { api } from "./api.vibe"
 import { ReplyChanges } from "../assistant/ports.vibe"
 import { AgentChanges, agentChanges } from "./changes.vibe"
 import { automations } from "./automations.vibe"
+import { workflowCalendar } from "./calendarRanges.vibe"
 import { clockDraft } from "./clock-draft.vibe"
 import { stepDecisions } from "./decisions.vibe"
 import { definitions } from "./definitions.vibe"
@@ -22,6 +23,7 @@ const panel = Layer.provideMerge(digestSources, digests)
 
 const services = Layer.mergeAll(
   runs, automations, definitions, approvalNotices, phoneSteps, panel, hostedResults, clockDraft, requestRecovery, simulatedWorkflows, simulatedTriggers, stepDecisions,
+  workflowCalendar,
 )
 
 const background = Layer.effectDiscard(effect {
@@ -32,7 +34,7 @@ const background = Layer.effectDiscard(effect {
 
 /**
  * Workflows' services: WorkflowApi, WorkflowVersions, WorkflowRuns, Automations, WorkflowDefinitions, ApprovalNotices, PhoneSteps,
- * Digests, DigestSourcesService, HostedResults, WorkflowClockDraft, RequestRecovery, SimulatedWorkflows, SimulatedTriggers, AgentChanges,
+ * Digests, DigestSourcesService, HostedResults, WorkflowClockDraft, RequestRecovery, SimulatedWorkflows, SimulatedTriggers, WorkflowCalendar, AgentChanges,
  * WorkflowsPlace and the assistant's WorkflowStepDecisions port, with the renewal reminder, foreground and route followers running. It needs
  * Resident, Native, Build and KeyValueStore from the platform and Navigation and Foreground from the shell; WorkflowClockPort refuses until
  * Clock's provider reaches it.

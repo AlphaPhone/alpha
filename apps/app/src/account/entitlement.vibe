@@ -5,6 +5,7 @@ import {
 } from "../../gen/account__plan.effect.vibe"
 import { checkEntitlement, nextRefreshDelay, parseEntitlementKeys, snapshotFromResponse, subscriptionView, type SubscriptionView } from "@elizaos/cloud/client"
 import { Build } from "../platform/build.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { buildCloudEnvironment } from "../platform/build-live.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
@@ -12,7 +13,6 @@ import { ownerKey } from "../platform/storage.vibe"
 import { authorityOf, deployment } from "./deployment.ts"
 import { bindInference, unbindInference } from "./inference.vibe"
 import { CloudSession, ownerOf } from "./session.vibe"
-import { NetworkStatus } from "./signIn.schema.vibe"
 
 /** Cloud's answer could not be read, or did not arrive. */
 error PlanUnread { offline: boolean; signedOut: boolean; absent: boolean }
@@ -33,7 +33,7 @@ export service Entitlement {
   readonly summaries: Stream.Stream<PlanSummary>
   current(): Admission!!
   summary(): PlanSummary!!
-  /** Follow the session, the network and the minute clock; runs for the app's life. */
+  /** Follow the session, the app's network as AppLifecycle reports it, and the minute clock; runs for the app's life. */
   run(): void!!
   /** The app came to the foreground, or left it. */
   foreground(visible: boolean): void!!
@@ -78,6 +78,7 @@ export const entitlementService = Layer.effect(Entitlement, effect {
   const native = try Native
   const cloud = try Cloud
   const build = try Build
+  const lifecycle = try AppLifecycle
   const scope = try Scope.Scope
   const host = try Semaphore.make(1)
   const authority = authorityOf(deployment, buildCloudEnvironment(build.info))
@@ -231,11 +232,11 @@ export const entitlementService = Layer.effect(Entitlement, effect {
   }
 
   effect function followNetwork() {
-    for try (const raw of native.listen("ElizaSystem", "networkStatusChanged")) {
-      const status = Schema.decodeUnknownEffect(NetworkStatus)(raw) catch () => undefined
-      if (status?.connected === undefined) continue
-      try send({ type: "network", online: status.connected })
-      if (status.connected) try tryCheck()
+    for try (const network of Stream.changes(Stream.map(lifecycle.changes, (app) => app.network))) {
+      if (network === "NetUnknown") continue
+      const online = network === "NetOnline"
+      try send({ type: "network", online })
+      if (online) try tryCheck()
     }
   }
 

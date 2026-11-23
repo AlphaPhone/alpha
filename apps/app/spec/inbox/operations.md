@@ -4,7 +4,9 @@ Every change Alpha makes through Gmail, and every email it sends, is one operati
 account: proposed, reviewed by managed Gmail (`POST …/inbox-v1/operations`), confirmed by the owner,
 recorded as dispatching on this phone, dispatched once (`POST …/operations/{id}/dispatch`) and then
 known only by its receipt (`GET …/operations/{id}`). Each account has at most one operation at a
-time; it survives restarts, and nothing ever dispatches it a second time.
+time; it survives restarts, and nothing ever dispatches it a second time. A kept journal that does not
+read back is set apart for review in the same secure store, as spec/platform/storage.md holds such a
+value, and is never written over.
 
 ## Story: Change or send from my mailbox once, as I reviewed it
 

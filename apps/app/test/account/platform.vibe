@@ -1,16 +1,21 @@
-// spec/account/session.md, "Story: Sign in once for Cloud's managed services"
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"
 import { createCloudClient } from "@elizaos/cloud/client"
 import { Build } from "../../src/platform/build.vibe"
 import { elizaCloud } from "../../src/platform/build-flags.ts"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { CloudServices } from "../../src/platform/cloud-services.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
-import { Resident } from "../../src/platform/resident.vibe"
+import { initial as appStart, type Net } from "../../gen/platform__lifecycle.ts"
+import { initial as connectionStart } from "../../gen/platform__resident.ts"
+import { AppLifecycle } from "../../src/platform/lifecycle.vibe"
+import { Resident, ResidentRefused, type ResidentHeaders } from "../../src/platform/resident.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
+import { enrollmentLayer } from "../../src/account/enrollment.vibe"
 import { services } from "../../src/account/layer.vibe"
 
-/** What the fakes were asked, in order: `plugin.method` for native calls, `METHOD path` for Cloud and the resident. */
-export type Calls = Array<{ readonly name: string; readonly args: unknown }>
+/** What the fakes were asked, in order: `plugin.method` for native calls, `METHOD path` for Cloud and the resident, with the device headers a resident request carried. */
+export type Calls = Array<{ readonly name: string; readonly args: unknown; readonly headers?: ResidentHeaders }>
 
 /** A native refusal with the plugin's code, as `PluginCall.reject(message, code)` gives it. */
 export interface Refusal { readonly refuse: string }
@@ -80,13 +85,18 @@ function refused(value: Answer): value is Refusal {
   return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
 }
 
-/** The platform at its boundary: the native host, Cloud and the resident answer from tables, and a Cloud page opened is recorded as `CloudServices.openExternal`; nothing leaves the test. */
+/** The platform at its boundary: the native host, Cloud and the resident answer from tables (a resident answer that is a `ResidentRefused` refuses), the resident is connected to `connected`, the app's network is `network`, and a Cloud page opened is recorded as `CloudServices.openExternal`; nothing leaves the test. */
 export function platform(calls: Calls, native: Record<string, Answer>, cloud: Record<string, Answer>, options: {
   readonly events?: Record<string, ReadonlyArray<unknown>>
   readonly resident?: ResidentAnswers
   readonly variant?: "launcher" | "aosp" | "browser"
   readonly testMocks?: boolean
+  readonly network?: Net
+  readonly connected?: { readonly owner: string; readonly agent: string }
 } = {}) {
+  const network = options.network ?? "NetOnline"
+  const app = { ...appStart, network }
+  const verified = options.connected ?? { owner: "owner-1", agent: "agent-1" }
   return Layer.mergeAll(
     Layer.succeed(Native, {
       available: () => Effect.succeed(true),
@@ -115,12 +125,28 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
     Layer.succeed(Resident, {
       status: () => Effect.succeed("running" as const),
       ensureRunning: () => Effect.sync(() => { calls.push({ name: "Resident.ensureRunning", args: undefined }) }),
-      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => {
-        calls.push({ name: `${method} ${path}`, args: body })
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown, headers?: ResidentHeaders) => {
+        calls.push({ name: `${method} ${path}`, args: body, ...(headers === undefined ? {} : { headers }) })
         const found = answer(options.resident ?? {}, `${method} ${path}`, body)
+        if (found instanceof ResidentRefused) return Effect.fail(found)
         return Effect.succeed({ status: 200, data: found ?? { method, path } })
       },
       stream: () => Stream.empty
+    }),
+    Layer.succeed(ResidentControl, {
+      changes: Stream.make({ ...connectionStart, phase: "Connected" as const, generation: 1, owner: verified.owner, agent: verified.agent }),
+      session: () => Effect.succeed({ owner: verified.owner, agent: verified.agent, generation: 1, epoch: 1 }),
+      refreshAccount: () => Effect.void,
+      stop: () => Effect.void,
+      recovered: () => Effect.void
+    }),
+    Layer.succeed(AppLifecycle, {
+      changes: Stream.make(app),
+      get: () => Effect.succeed(app),
+      refreshNetwork: () => Effect.succeed(network),
+      metered: () => Effect.succeed(null),
+      turnSent: () => Effect.void,
+      turnSettled: () => Effect.void
     }),
     Layer.succeed(Build, { info: { version: "test", variant: options.variant ?? "launcher", testMocks: options.testMocks ?? false } }),
     memoryStore
@@ -130,6 +156,25 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
 /** The account services over the fake platform. */
 export function account(calls: Calls, native: Record<string, Answer> = signedInNative, cloud: Record<string, Answer> = cloudAnswers, options: Parameters<typeof platform>[3] = {}) {
   return Layer.provide(services, platform(calls, native, cloud, options))
+}
+
+/** The account services with the device enrollment over the fake platform. */
+export function enrolling(calls: Calls, native: Record<string, Answer> = signedInNative, cloud: Record<string, Answer> = cloudAnswers, options: Parameters<typeof platform>[3] = {}) {
+  return Layer.provide(Layer.provideMerge(enrollmentLayer, services), platform(calls, native, cloud, options))
+}
+
+/** A native secure store kept in `slots`, answering `ElizaSecureStore.get` and `compareAndExchange` as the phone does. */
+export function secureStore(slots: Map<string, string>): Record<string, Answer> {
+  return {
+    "ElizaSecureStore.get": (args: unknown) => ({ value: slots.get((args as { key: string }).key) ?? null }),
+    "ElizaSecureStore.compareAndExchange": (args: unknown) => {
+      const { key, expected, value } = args as { key: string; expected: string | null; value: string | null }
+      if ((slots.get(key) ?? null) !== expected) return { exchanged: false }
+      if (value === null) slots.delete(key)
+      else slots.set(key, value)
+      return { exchanged: true }
+    }
+  }
 }
 
 /** The names of the calls, in order. */

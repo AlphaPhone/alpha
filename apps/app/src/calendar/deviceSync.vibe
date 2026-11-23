@@ -1,0 +1,362 @@
+// spec/calendar/deviceSync.md, "Story: Sync my phone's calendar only with the Google calendar I chose, for the account I use"; spec/calendar/deviceSync.md, "A pass is prepared only for a signed-in production Cloud account with an agent and a chosen Google calendar"; spec/calendar/deviceSync.md, "The phone's prepared binding must name exactly the account, organization, agent, connection and calendar chosen"; spec/calendar/deviceSync.md, "A pass belongs to the identity it was prepared under; a changed account, key, Cloud session, choice or agent session retires it"; spec/calendar/deviceSync.md, "The owner may choose only a calendar it can write, of a Google account that granted Calendar changes"; spec/calendar/nativeSync.md, "Story: Turn device sync on only through Android's consent, and off for every review at once"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import {
+  type CalendarSyncClient, type CalendarSyncDeviceGate, type CalendarSyncPrepared, type CalendarSyncReview, type CalendarSyncTarget,
+  calendarSyncSettingsSlot, createCalendarSyncHost,
+} from "@elizaos/plugin-calendar/linked-sync"
+import { bindingAgrees, destinationOffered, deviceSyncReady, passCurrent } from "../../gen/calendar__deviceSync.ts"
+import type { Session } from "../../gen/account__session.ts"
+import { AccountBindings, type AgentBinding } from "../account/bindings.vibe"
+import { GoogleAccounts } from "../account/google.vibe"
+import { CloudSession, ownerNameOf, ownerOf } from "../account/session.vibe"
+import { Build } from "../platform/build.vibe"
+import { CloudServices } from "../platform/cloud-services.vibe"
+import { Native } from "../platform/native.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { decodeAccess, decodeSync } from "./device.schema.vibe"
+import { type SyncSelectionRecord, decodeLegacySelection, decodeOffered, decodeSelection } from "./deviceSync.schema.vibe"
+import { SYNC_SETTINGS_SLOT, calendarLinkStorage } from "./linkStorage.vibe"
+import { localSyncWords, nativeLinkedPort } from "./linkedLocal.vibe"
+import { type PreparedRecord, decodePrepared } from "./linkedLocal.schema.vibe"
+import { canonicalSyncRecurrence } from "./syncRecurrence.ts"
+
+const PLUGIN = "AlphaCalendar"
+const SELECTION_KEY = "calendar/device-sync-selection"
+
+/** The provider idempotency keys the earlier Alpha installed keep their prefix, so a reconnect never makes a second Google event. */
+export const SYNC_NAMESPACE = "alpha-calendar-sync"
+
+/** Device sync refused or could not be confirmed; nothing more was changed. */
+export error DeviceSyncRefused { message: string }
+
+/** Everything Settings shows of device Calendar sync. */
+export interface DeviceSyncView {
+  /** This phone has a device calendar to sync. */
+  readonly available: boolean
+  /** A pass may be prepared now: a production account, its agent and a chosen calendar. */
+  readonly ready: boolean
+  readonly status: string
+  readonly running: boolean
+  readonly enabled: boolean
+  /** The Google calendar the owner chose for the account signed in now. */
+  readonly selection: SyncSelectionRecord | undefined
+  /** The account and calendar names the last prepared review gave. */
+  readonly destination: { readonly account: string; readonly calendar: string }
+  /** How many local events the review waiting for the owner's confirmation links. */
+  readonly reviewed: number | undefined
+  /** The calendars the owner may choose, as last listed. */
+  readonly offered: readonly SyncSelectionRecord[] | undefined
+}
+
+/** Local-first sync of the phone's own calendar with the Google calendar the owner chose, through Cloud's sync protocol, only while Alpha is in front. */
+export service DeviceCalendarSync {
+  readonly changes: Stream.Stream<DeviceSyncView>
+  view(): DeviceSyncView!!
+  /** Settings opened: read the saved opt-in and the device switch again. */
+  refresh(): void!!
+  /** List the writable calendars of the connected Google accounts that granted Calendar changes. */
+  offer(): readonly SyncSelectionRecord[]!!
+  /** Keep the owner's choice for the account signed in now, or clear it; false when it was not one offered or could not be kept. */
+  choose(selection: SyncSelectionRecord | undefined): boolean!!
+  /** Prepare a review of the destination and every local event; nothing is enabled. */
+  review(): void!!
+  /** Enable exactly what was reviewed, through Android's consent, then run a pass. */
+  enable(): void!!
+  /** Run one pass now. */
+  sync(): void!!
+  /** Turn sync off, keeping saved events and links. */
+  pause(): void!!
+  /** Settings closed: the operation in flight is retired and the waiting review dropped. */
+  cancel(): void!!
+}
+
+interface Facts {
+  session: Session
+  agent: AgentBinding
+  selection: SyncSelectionRecord | undefined
+  front: boolean
+}
+
+const environmentOf = (s: Session): "production" | "staging" => s.environment === "Production" ? "production" : "staging"
+
+/** Why a pass cannot be prepared for these facts, in the owner's words, or undefined when it can. */
+export function unreadyReason(signedIn: boolean, production: boolean, agent: boolean, chosen: boolean, phone: boolean): string | undefined {
+  if (deviceSyncReady(signedIn, production, agent, chosen, phone)) return undefined
+  if (!phone) return "Device Calendar sync requires Android."
+  if (!signedIn || !agent) return "Connect your Cloud account and agent before enabling Calendar sync."
+  if (!production) return "Device Calendar sync requires the production Cloud account; no other environment was used."
+  return "Choose a Google calendar for sync first."
+}
+
+/** The identity a pass is bound to: environment, account, key, sign-in generation, chosen calendar, agent and its session; "" while any is missing. */
+export function syncIdentity(s: Session, agent: AgentBinding, selection: SyncSelectionRecord | undefined): string {
+  if (ownerOf(s) === 0 || !agent.usable || agent.agentId === "" || selection === undefined) return ""
+  return JSON.stringify([environmentOf(s), s.account.userId, s.account.organizationId, s.account.credentialId, s.generation, selection, agent.agentId, agent.session])
+}
+
+/** The legacy key the earlier Alpha kept an account's choice under. */
+export function legacySelectionKey(s: Session): string {
+  return `alpha.google-calendar-selection.v1:${JSON.stringify([environmentOf(s), s.account.userId, s.account.organizationId])}`
+}
+
+/** The device sync service over the AlphaCalendar plugin, the secure store, Cloud's sync client and upstream's foreground sync host. */
+export const deviceSyncLayer = Layer.effect(DeviceCalendarSync, effect {
+  const native = try Native
+  const build = try Build
+  const store = try KeyValueStore.KeyValueStore
+  const cloud = try CloudServices
+  const session = try CloudSession
+  const bindings = try AccountBindings
+  const google = try GoogleAccounts
+  const foreground = try Foreground
+  const storage = try calendarLinkStorage()
+  const phone = build.info.variant !== "browser" && (try native.available(PLUGIN))
+  const front0 = try foreground.get()
+  const facts: Facts = { session: try session.current(), agent: try bindings.agentNow(), selection: undefined, front: front0.visible && !front0.locked }
+  let lease: PreparedRecord | undefined = undefined
+  const waiting = try Ref.make<CalendarSyncReview | undefined>(undefined)
+  const offered = try Ref.make<readonly SyncSelectionRecord[] | undefined>(undefined)
+
+  const client: CalendarSyncClient = {
+    googleCalendarSync: (input, signal) => cloud.client.googleCalendarSync(input, { signal }),
+  }
+
+  const identity = () => syncIdentity(facts.session, facts.agent, facts.selection)
+  const reason = () => unreadyReason(ownerOf(facts.session) !== 0, environmentOf(facts.session) === "production",
+    facts.agent.usable && facts.agent.agentId !== "", facts.selection !== undefined, phone)
+
+  function target(): CalendarSyncTarget {
+    const s = facts.session
+    const signedIn = ownerOf(s) !== 0
+    return {
+      environment: environmentOf(s), userId: signedIn ? s.account.userId : "", organizationId: signedIn ? s.account.organizationId : "",
+      connectionId: facts.selection?.connectionId ?? "", calendarId: facts.selection?.providerCalendarId ?? "",
+      agentId: facts.agent.usable ? facts.agent.agentId : "",
+    }
+  }
+
+  effect function call(kind: string, args: Record<string, unknown>, current?: () => boolean): unknown!DeviceSyncRefused {
+    if (current !== undefined && !current()) throw new DeviceSyncRefused({ message: "Calendar sync context changed" })
+    const raw = try mapError(native.invoke(PLUGIN, "sync", { kind, ...args }), () => new DeviceSyncRefused({ message: localSyncWords("unavailable") }))
+    if (current !== undefined && !current()) throw new DeviceSyncRefused({ message: "Calendar sync context changed" })
+    return raw
+  }
+
+  effect function prepared(raw: unknown) {
+    return try mapError(decodePrepared(raw), () => new DeviceSyncRefused({ message: "Device Calendar destination changed" }))
+  }
+
+  effect function prepareSource(selection: { readonly environment: string; readonly connectionId: string; readonly calendarId: string },
+    current: () => boolean, interactive: boolean): PreparedRecord!DeviceSyncRefused {
+    if (selection.environment !== "production") throw new DeviceSyncRefused({ message: "Device Calendar sync does not use a different Cloud environment." })
+    let answer = try prepared(try call("prepare", { selection }, current))
+    if (answer.status === "permission-required" && interactive) {
+      const access = effect { return try decodeAccess(try native.invoke(PLUGIN, "requestAccess")) } catch () => undefined
+      if (!current()) throw new DeviceSyncRefused({ message: "Calendar review changed" })
+      if (access?.status !== "granted") throw new DeviceSyncRefused({ message: localSyncWords(answer.status, answer.message) })
+      answer = try prepared(try call("prepare", { selection }, current))
+    }
+    if (answer.status !== "ready") throw new DeviceSyncRefused({ message: localSyncWords(answer.status, answer.message) })
+    lease = answer
+    return answer
+  }
+
+  const gate: CalendarSyncDeviceGate = {
+    enabled: () => runPromise(effect {
+      const held = lease
+      if (held === undefined) return false
+      const answer = effect { return try prepared(try call("status", { lease: held.lease })) } catch () => undefined
+      return answer !== undefined && answer.status === "ready" && answer.enabled
+    }),
+    enable: (current) => runPromise(effect {
+      const held = lease
+      if (held === undefined) throw new DeviceSyncRefused({ message: "Review Calendar sync first" })
+      const answer = try prepared(try call("enable", { lease: held.lease }, current))
+      if (answer.status !== "ready") throw new DeviceSyncRefused({ message: localSyncWords(answer.status, answer.message) })
+      lease = answer
+    }),
+    pause: () => runPromise(effect {
+      const reply = effect { return try decodeSync(try native.invoke(PLUGIN, "sync", { kind: "pause" })) } catch () => undefined
+      lease = undefined
+      if (reply?.status !== "paused") throw new DeviceSyncRefused({ message: localSyncWords(reply?.status ?? "unavailable") })
+    }),
+    cancel: () => {
+      lease = undefined
+      runFork(native.invoke(PLUGIN, "sync", { kind: "cancel" }) catch () => undefined)
+    },
+  }
+
+  const host = try createCalendarSyncHost({
+    async prepare(signal, request): Promise<CalendarSyncPrepared> {
+      const why = reason()
+      if (why !== undefined) throw new DeviceSyncRefused({ message: why })
+      const key = identity()
+      const chosen = facts.selection!
+      const owner = facts.session.account
+      const agentId = facts.agent.agentId
+      const current = () => passCurrent(!signal.aborted, facts.front, identity() === key, key !== "")
+      const source = await runPromise(prepareSource({ environment: "production", connectionId: chosen.connectionId, calendarId: chosen.providerCalendarId }, current, request.interactive))
+      const binding = source.binding
+      if (!bindingAgrees(binding.environment === environmentOf(facts.session), binding.userId === owner.userId, binding.organizationId === owner.organizationId,
+        binding.agentId === agentId, binding.connectionId === chosen.connectionId, binding.calendarId === chosen.providerCalendarId)) {
+        throw new DeviceSyncRefused({ message: "Device and Google Calendar account bindings differ. Nothing was enabled." })
+      }
+      const local = nativeLinkedPort(native, { lease: source.lease, binding: { ...binding } }, current, signal)
+      return {
+        reviewIdentity: key, binding: { ...binding }, destination: { ...source.destination }, client, current, local,
+        localDeletionUndone: local.deletionUndone, storage, events: () => local.events(),
+      }
+    },
+    settings: calendarSyncSettingsSlot(storage, SYNC_SETTINGS_SLOT),
+    target,
+    identity,
+    foreground: () => facts.front,
+    async source(selected, current) {
+      const source = await runPromise(prepareSource({ environment: selected.environment, connectionId: selected.connectionId, calendarId: selected.calendarId }, current, false))
+      return { revision: source.binding.localSourceRevision, deviceEnabled: source.enabled }
+    },
+    storage,
+    device: () => (phone ? gate : undefined),
+    controller: { idempotencyNamespace: SYNC_NAMESPACE, canonicalRecurrence: canonicalSyncRecurrence },
+    reviewMessage: (count) => `Ready to link ${count} Alpha events.`,
+  })
+
+  const view0: DeviceSyncView = {
+    available: phone, ready: false, status: host.snapshot().status, running: false, enabled: false, selection: undefined,
+    destination: { account: "", calendar: "" }, reviewed: undefined, offered: undefined,
+  }
+  const shown = try SubscriptionRef.make<DeviceSyncView>(view0)
+
+  effect function publish() {
+    const snapshot = host.snapshot()
+    const review = try Ref.get(waiting)
+    try SubscriptionRef.set(shown, {
+      available: phone, ready: reason() === undefined, status: snapshot.status, running: snapshot.running, enabled: snapshot.enabled,
+      selection: facts.selection, destination: host.destination(), reviewed: review?.events.length, offered: try Ref.get(offered),
+    })
+  }
+
+  effect function loadSelection(s: Session): SyncSelectionRecord | undefined {
+    if (ownerOf(s) === 0) return undefined
+    const key = ownerKey(ownerNameOf(s), SELECTION_KEY)
+    const kept = store.get(key) catch () => undefined
+    if (kept !== undefined) return (decodeSelection(kept) catch () => undefined)?.selection
+    const earlier = store.get(legacySelectionKey(s)) catch () => undefined
+    if (earlier === undefined) return undefined
+    const legacy = decodeLegacySelection(earlier) catch () => undefined
+    const owner = JSON.stringify([environmentOf(s), s.account.userId, s.account.organizationId])
+    if (legacy === undefined || legacy.owner !== owner) return undefined
+    const row = legacy.selection
+    if (row.sourceId !== `google:${encodeURIComponent(row.connectionId)}:${encodeURIComponent(row.providerCalendarId)}`) return undefined
+    const carried: SyncSelectionRecord = { connectionId: row.connectionId, providerCalendarId: row.providerCalendarId, name: row.name, account: row.account }
+    store.set(key, JSON.stringify({ version: 1, selection: carried })) catch () => undefined
+    return carried
+  }
+
+  host.subscribe(() => { runFork(publish()) })
+  facts.selection = try loadSelection(facts.session)
+
+  const scheduler = try host.start()
+
+  effect function ownerChanged() {
+    try Ref.set(waiting, undefined)
+    scheduler.ownerChanged() catch () => undefined
+    try publish()
+  }
+
+  try Effect.addFinalizer(() => Effect.ignore(scheduler.stop()))
+  fork.scoped Stream.runForEach(session.changes, (next) => effect {
+    const before = identity()
+    facts.session = next
+    facts.selection = try loadSelection(next)
+    if (identity() !== before) try ownerChanged()
+  })
+  fork.scoped Stream.runForEach(bindings.agent, (next) => effect {
+    const before = identity()
+    facts.agent = next
+    if (identity() !== before) try ownerChanged()
+  })
+  fork.scoped Stream.runForEach(foreground.changes, (state: ForegroundState) => effect {
+    const front = state.visible && !state.locked
+    if (front === facts.front) return
+    facts.front = front
+    scheduler.visibilityChanged() catch () => undefined
+    try publish()
+  })
+  if (phone) fork.scoped (Stream.runForEach(native.listen(PLUGIN, "calendarSyncChanged"), () => Effect.ignore(scheduler.localChanged())) catch () => undefined)
+  try publish()
+
+  effect function attempt<A, E>(work: Effect.Effect<A, E>) {
+    const done = map(work, (value) => value as A | undefined) catch () => undefined
+    try publish()
+    return done
+  }
+
+  return {
+    changes: shown.changes,
+    effect view() { return try SubscriptionRef.get(shown) },
+    effect refresh() {
+      if (!phone) return
+      try attempt(host.settings())
+    },
+    effect offer() {
+      const rows: SyncSelectionRecord[] = []
+      for (const account of try google.list()) {
+        const writes = account.grantedCapabilities.includes("google.calendar.write")
+        if (!destinationOffered(true, writes, true)) continue
+        const calendars = effect {
+          return try tryPromise({ try: (signal) => cloud.client.calendarCalendars({ grantId: account.connectionId }, { signal }), catch: () => new DeviceSyncRefused({ message: "unavailable" }) })
+        } catch () => []
+        for (const calendar of calendars) {
+          if (!destinationOffered(true, writes, calendar.write)) continue
+          const row = decodeOffered({ connectionId: account.connectionId, providerCalendarId: calendar.calendarId, name: calendar.label,
+            account: calendar.accountEmail !== "" ? calendar.accountEmail : account.email ?? "Google account" })
+          if (Option.isSome(row) && !rows.some((seen) => seen.connectionId === row.value.connectionId && seen.providerCalendarId === row.value.providerCalendarId)) rows.push(row.value)
+        }
+      }
+      try Ref.set(offered, rows)
+      try publish()
+      return rows
+    },
+    effect choose(selection: SyncSelectionRecord | undefined) {
+      const s = facts.session
+      if (ownerOf(s) === 0) return false
+      const listed = try Ref.get(offered)
+      if (selection !== undefined && !(listed ?? []).some((row) => row.connectionId === selection.connectionId && row.providerCalendarId === selection.providerCalendarId)) return false
+      const key = ownerKey(ownerNameOf(s), SELECTION_KEY)
+      const kept = effect {
+        if (selection === undefined) try store.remove(key)
+        else try store.set(key, JSON.stringify({ version: 1, selection: { ...selection } }))
+        return true
+      } catch () => false
+      if (!kept) return false
+      facts.selection = selection === undefined ? undefined : { ...selection }
+      try ownerChanged()
+      return true
+    },
+    effect review() {
+      try Ref.set(waiting, undefined)
+      const review = try attempt(host.review())
+      try Ref.set(waiting, review)
+      try publish()
+    },
+    effect enable() {
+      const review = try Ref.getAndSet(waiting, undefined)
+      if (review === undefined) return
+      try attempt(host.enable(review))
+    },
+    effect sync() {
+      try attempt(host.sync())
+    },
+    effect pause() {
+      try Ref.set(waiting, undefined)
+      try attempt(host.pause())
+    },
+    effect cancel() {
+      try Ref.set(waiting, undefined)
+      host.cancel()
+      try publish()
+    },
+  }
+})

@@ -1,12 +1,12 @@
-// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Use Cloud only for managed services"; spec/account/provider.md, "Story: Use my own keys instead of Cloud"
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Use Cloud only for managed services"; spec/account/provider.md, "Story: Use my own keys instead of Cloud"; spec/account/enrollment.md, "Story: Let my agent act on my phone once it knows this phone"
 import { GoogleAgentAccess, agentAccessLayer } from "./agentAccess.vibe"
 import { Membership, billingLayer } from "./billing.vibe"
 import { bindingsService, followersLive, mapsAccountLive } from "./bindings.vibe"
 import { CloudDelegation, delegationLayer } from "./delegation.vibe"
 import { devLayer } from "./devBridge.vibe"
+import { DeviceEnrollment, enrollmentLayer } from "./enrollment.vibe"
 import { Entitlement, entitlementLayer } from "./entitlement.vibe"
 import { GoogleAccounts, googleLayer } from "./google.vibe"
-import { limitsLayer } from "./limits.vibe"
 import { presentationLive, presentationService } from "./presentation.vibe"
 import { AiProvider, providerLayer } from "./provider.vibe"
 import { CloudSession, sessionLayer } from "./session.vibe"
@@ -16,7 +16,8 @@ import { SignInScreen, signInLayer } from "./signIn.vibe"
 export { CloudSession, newsOf, noNews, ownerNameOf, ownerOf, type SignInNews } from "./session.vibe"
 export { Entitlement } from "./entitlement.vibe"
 export { GoogleAccounts, type GoogleAccount } from "./google.vibe"
-export { VoiceLimit, type LimitFacts } from "./limits.vibe"
+export { limitOf, limitOfError, limitOfRefusal, readLimit, type LimitFacts } from "./limits.vibe"
+export { DeviceEnrollment, type EnrolledDevice } from "./enrollment.vibe"
 export { AiProvider } from "./provider.vibe"
 export { AccountPresentation } from "./presentation.vibe"
 export {
@@ -25,12 +26,11 @@ export {
 } from "./bindings.vibe"
 
 /**
- * Every account service with its machine, needing only Native, Resident, Cloud, CloudServices, Build and a KeyValueStore;
+ * Every account service with its machine, needing only Native, Resident, Cloud, CloudServices, Build, AppLifecycle and a KeyValueStore;
  * nothing runs until `run()`.
  */
 export const services = Layer.mergeAll(
   agentAccessLayer,
-  limitsLayer,
   Layer.provideMerge(
     presentationService,
     Layer.provideMerge(
@@ -58,13 +58,16 @@ export effect function run() {
 }
 
 const running = Layer.effectDiscard(effect {
+  const enrollment = try DeviceEnrollment
   fork.scoped run()
+  fork.scoped enrollment.run()
 })
 
 /**
- * Every account service running for the app's life, with AccountBindings, Maps' MapsAccount port and the sheet following
- * the Account app in front, keeping the device storage owner, the resident's account, speech's key and plan limit and the
- * startup walkthrough current. Needs the platform's Native, Resident, ResidentControl, Cloud, CloudServices, Build,
- * DeviceStorage and KeyValueStore, the shell's Navigation and Permissions, and voice's VoiceRoute.
+ * Every account service running for the app's life, with the device enrollment, AccountBindings, Maps' MapsAccount port and
+ * the sheet following the Account app in front, keeping the device storage owner, the resident's account, speech's key and
+ * plan limit and the startup walkthrough current. Needs the platform's Native, Resident, ResidentControl, Cloud,
+ * CloudServices, Build, AppLifecycle, DeviceStorage and KeyValueStore, the DeviceCapabilities slot, the shell's Navigation
+ * and Permissions, and voice's VoiceRoute.
  */
-export const layer = Layer.provideMerge(Layer.mergeAll(bindingsService, mapsAccountLive, followersLive, presentationLive, running), services)
+export const layer = Layer.provideMerge(Layer.mergeAll(bindingsService, mapsAccountLive, followersLive, presentationLive, running), Layer.provideMerge(enrollmentLayer, services))

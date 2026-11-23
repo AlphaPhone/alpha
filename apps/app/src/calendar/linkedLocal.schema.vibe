@@ -5,7 +5,7 @@ const Id = Schema.String.check(Schema.isPattern(/^[1-9][0-9]{0,18}$/))
 const Revision = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 const Lease = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/))
 const Text = (max: number) => Schema.String.check(Schema.isMaxLength(max))
-const Refusal = Schema.Literals(["pending", "context-changed", "permission-required", "conflict", "unknown", "cancelled", "unavailable"])
+const Refusal = Schema.Literals(["pending", "context-changed", "permission-required", "conflict", "unknown", "cancelled", "unavailable", "busy", "sync-paused"])
 
 /** One guest as both sides of linked sync can say it. */
 export const LocalGuest = Schema.Struct({ email: Text(320), optional: Schema.Boolean })
@@ -56,14 +56,34 @@ export const EventsReply = Schema.Union([
   LocalRefusal,
 ])
 
-/** A prepared device sync review: its lease, whether the device switch is on, and the destination it names. */
+const Filled = (max: number) => Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(max))
+
+/** The binding a prepared device sync review was granted for: the production Cloud account, its agent, the Google connection and calendar, and the phone's own calendar at its revision. */
+export const PreparedBinding = Schema.Struct({
+  environment: Schema.Literal("production"),
+  userId: Filled(1024),
+  organizationId: Filled(1024),
+  connectionId: Filled(1024),
+  providerAccountId: Filled(1024),
+  calendarId: Filled(1024),
+  agentId: Filled(1024),
+  localSourceId: Schema.String.check(Schema.isPattern(/^native:[1-9][0-9]{0,18}$/)),
+  localSourceRevision: Filled(1024),
+})
+
+/** A prepared device sync review: its lease, the binding it names, the destination the owner sees, every local event at its revision, and whether the device switch is on. */
 export const PreparedReply = Schema.Union([
-  Schema.Struct({ status: Schema.Literal("ready"), lease: Lease, enabled: Schema.Boolean, destination: Schema.Struct({ account: Text(320), calendar: Text(1024) }) }),
+  Schema.Struct({
+    status: Schema.Literal("ready"), lease: Lease, enabled: Schema.Boolean, binding: PreparedBinding,
+    destination: Schema.Struct({ account: Text(320), calendar: Text(1024) }),
+    events: Schema.Array(Schema.Struct({ id: Id, revision: Revision })).check(Schema.isMaxLength(2000)),
+  }),
   LocalRefusal,
 ])
 
 export type LocalSnapshotRecord = typeof LocalSnapshot.Type
 export type LocalRefusalRecord = typeof LocalRefusal.Type
+export type PreparedRecord = Extract<typeof PreparedReply.Type, { readonly status: "ready" }>
 
 /** Decoders, failing with Schema's own issue on anything else. */
 export const decodeGet = Schema.decodeUnknownEffect(GetReply)

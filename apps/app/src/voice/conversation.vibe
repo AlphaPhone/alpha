@@ -1,5 +1,6 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
 import { readReplyStream } from "@elizaos/agent/client"
+import type { AssistantCapture, AssistantListenHandlers, CloudStreamingSpeech } from "@elizaos/os/bridges/voice"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
@@ -11,15 +12,17 @@ import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { readingMayStart } from "../../gen/voice__speech.effect.vibe"
 import { acknowledgement, type Acknowledgement } from "./acknowledgement.vibe"
 import { Microphone } from "./capture.vibe"
+import { voiceAbort } from "./cloud-stream.ts"
 import { Dictation } from "./dictation.vibe"
 import { callCaused, cancelledByPhone, pausedByPhone, refusalOf } from "./failure.vibe"
 import { newId } from "../platform/ids.ts"
 import { Latency } from "./latency.vibe"
 import { Listener, type InvocationScreen } from "./listener.vibe"
-import { CloudSpeechEvent, CloudSpeechStarted, ClefTurnAnswer, EndOfTurnScore, LiveCaptureEnded, LiveCaptureStarted, LiveCaptureStatus, RecordingClip, RecordingStarted, TranscriptReply, VoiceTurnReply } from "./native.schema.vibe"
+import { ClefTurnAnswer, EndOfTurnScore, LiveCaptureEnded, LiveCaptureStarted, LiveCaptureStatus, RecordingClip, RecordingStarted, TranscriptReply, VoiceTurnReply } from "./native.schema.vibe"
 import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
 import { Speech, SpeechNotStopped, type SpeechInterrupted, type SpeechRefused, type SpeechUnavailable } from "./speech.vibe"
 import { planReply, replyActionOf, spokenLineOf } from "./spoken-text.ts"
+import { cloudStreaming } from "./stream.vibe"
 import { transcription } from "./transcription.vibe"
 import { gateRecording } from "./vad.vibe"
 
@@ -84,6 +87,17 @@ const QUIET_RETRY_WAIT_MS = 2000
 const LONG_WAIT_SECONDS = 30
 const decode = <A>(schema: Schema.Decoder<A>, raw: unknown) => Option.getOrUndefined(Schema.decodeUnknownOption(schema)(raw))
 
+/** One Cloud stream conversation's relay session: the os package's shared streaming speech, the capture it is listening with, and the turn its words belong to. */
+interface StreamSession {
+  readonly sessionId: string
+  readonly relay: CloudStreamingSpeech
+  readonly owner: AbortController
+  capture: AssistantCapture | undefined
+  ended: Deferred.Deferred<unknown> | undefined
+  turn: string
+  seq: number
+}
+
 /** What a voice turn sends to the resident, streamed or not. */
 interface TurnBody {
   readonly text: string
@@ -126,6 +140,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   let pendingTyped: (() => void!!) | undefined
   let pendingChat: (() => boolean) | undefined
   let cue: Acknowledgement | undefined
+  let stream: StreamSession | undefined
   const listeners = new Set<(envelope: unknown) => void>()
 
   effect function send(event: Event) {
@@ -205,49 +220,85 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     events.failed(lastCause)
   }
 
-  effect function captureStream(sessionId: string, account: VoiceAccount, ticket: number, events: CaptureEvents) {
-    if (account.kind !== "cloud") return events.failed({ code: "sign-in" })
-    const raw = native.invoke("AlphaCloudSpeechStream", "startCloudSpeech", { sessionId, environment: account.environment, credentialId: account.credentialId }) catch effect (error) => {
-      lastCause = error
+  effect function openStream(sessionId: string) {
+    try endStream()
+    const account = try routes.account()
+    if (account.kind !== "cloud") return undefined
+    const relay = try cloudStreaming(account.environment, account.credentialId, () => stream?.sessionId === sessionId, (text: string) => {
+      const session = stream
+      if (session === undefined || session.sessionId !== sessionId) return
+      session.seq += 1
+      emit(envelope(sessionId, session.turn, "partial", text, session.seq))
+    })
+    const session: StreamSession = { sessionId, relay, owner: voiceAbort(), capture: undefined, ended: undefined, turn: newId(), seq: 0 }
+    stream = session
+    try speech.bindStream(relay)
+    return session
+  }
+
+  effect function endStream() {
+    const session = stream
+    if (session === undefined) return true
+    stream = undefined
+    try speech.bindStream(undefined)
+    const ended = session.ended
+    session.ended = undefined
+    session.capture = undefined
+    if (ended !== undefined) try Deferred.succeed(ended, undefined)
+    session.owner.abort()
+    const stopped = tryPromise(() => session.relay.stop()) catch () => false
+    return stopped !== false
+  }
+
+  effect function captureStream(session: StreamSession, ticket: number, events: CaptureEvents) {
+    const ended = try Deferred.make<unknown>()
+    session.ended = ended
+    const handlers: AssistantListenHandlers = {
+      signal: session.owner.signal,
+      onSpeechStart: () => {
+        session.turn = newId()
+        session.seq = 0
+        emit(envelope(session.sessionId, session.turn, "speech-start"))
+      },
+      onSpeechEnd: () => { emit(envelope(session.sessionId, session.turn, "speech-end")) },
+      onSegment: (text: string | null) => {
+        run(latency.mark("AsrFinal"))
+        emit(envelope(session.sessionId, session.turn, "final", text ?? ""))
+      },
+      onEnd: (error?: unknown) => { runFork(Deferred.succeed(ended, error ?? { code: "cloud-stream-ended" })) },
+    }
+    const capture = tryPromise({ try: () => session.relay.listen(handlers), catch: (cause: unknown) => cause }) catch (cause) => {
+      lastCause = cause
       return undefined
     }
-    const started = decode(CloudSpeechStarted, raw)
-    if (started === undefined) return events.failed(lastCause)
+    if (capture === undefined) return events.failed(lastCause)
+    if (session.ended !== ended) {
+      tryPromise(() => capture.cancel()) catch () => undefined
+      return
+    }
+    session.capture = capture
     capturing = true
     try microphone.opened(ticket)
-    events.opened({ echoCancelled: started.echoCancelled === true })
-    let turn = newId()
-    let seq = 0
-    for try (const value of native.listen("AlphaCloudSpeechStream", "cloudSpeechEvent")) {
-      if (!capturing) break
-      const event = decode(CloudSpeechEvent, value)
-      if (event === undefined || event.sessionId !== sessionId) continue
-      if (event.type === "error") {
-        lastCause = { code: event.code ?? "cloud-stream", ...(event.status === undefined ? {} : { status: event.status }), ...(event.data === undefined ? {} : { data: event.data }) }
-        capturing = false
-        emit(envelope(sessionId, turn, "error"))
-        events.failed(lastCause)
-        break
-      }
-      if (event.type === "speech-start") {
-        turn = newId()
-        seq = 0
-        emit(envelope(sessionId, turn, "speech-start"))
-      }
-      if (event.type === "transcript" && event.final !== true && event.text !== undefined) {
-        seq += 1
-        emit(envelope(sessionId, turn, "partial", event.text, seq))
-      }
-      const heardFinal = (event.type === "speech-end" && event.text !== undefined) || (event.type === "transcript" && event.final === true)
-      if (event.type === "speech-end") emit(envelope(sessionId, turn, "speech-end"))
-      if (heardFinal) {
-        try latency.mark("AsrFinal")
-        emit(envelope(sessionId, turn, "final", event.text ?? ""))
-      }
-    }
-    if (capturing) {
-      capturing = false
-      events.failed(lastCause ?? { code: "cloud-stream-ended" })
+    events.opened({ echoCancelled: capture.fullDuplex })
+    const failure = try Deferred.await(ended)
+    if (!capturing || session.capture !== capture) return
+    capturing = false
+    session.capture = undefined
+    lastCause = failure
+    emit(envelope(session.sessionId, session.turn, "error"))
+    events.failed(lastCause)
+  }
+
+  effect function closeStream(session: StreamSession) {
+    const capture = session.capture
+    const ended = session.ended
+    session.capture = undefined
+    session.ended = undefined
+    if (ended !== undefined) try Deferred.succeed(ended, undefined)
+    if (capture === undefined) return
+    tryPromise({ try: () => capture.close(), catch: (cause: unknown) => cause }) catch effect (cause) => {
+      lastCause = cause
+      try endStream()
     }
   }
 
@@ -328,7 +379,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     return resent
   }
 
-  function ports(start: VoiceStart, route: Route, sessionId: string, liveCapture: boolean): VoiceSessionPorts {
+  function ports(start: VoiceStart, route: Route, sessionId: string, liveCapture: boolean, streamed: StreamSession | undefined): VoiceSessionPorts {
     let captureId = newId()
     let opened: CaptureEvents | undefined
     const capture = {
@@ -339,7 +390,11 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         if (ticket === undefined) return events.failed({ code: "microphone-refused" })
         const opening = effect {
           if (route === "Device") try captureLive(captureId, start, ticket, events)
-          else if (route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))) try captureStream(sessionId, try routes.account(), ticket, events)
+          else if (route === "Cloud" && liveCapture) {
+            if (streamed === undefined) events.failed({ code: "sign-in" })
+            else if (stream !== streamed) events.failed(lastCause ?? { code: "cloud-stream-ended" })
+            else try captureStream(streamed, ticket, events)
+          }
           else try captureBatch(sessionId, ticket, events)
         }
         run(effect { try opening; follows() })
@@ -351,7 +406,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         capturing = false
         run(effect {
           if (route === "Device") native.invoke("AlphaVoiceCloud", "stopLiveCapture", { captureId }) catch () => undefined
-          else if (route === "Cloud") native.invoke("AlphaCloudSpeechStream", "stopCloudSpeech", { sessionId }) catch () => undefined
+          else if (streamed !== undefined) try closeStream(streamed)
           const mic = try microphone.get()
           try microphone.release(mic.ticket)
           events?.closed()
@@ -458,10 +513,10 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       for try (const event of feeds.voice()) emit({ type: "event", event })
     }
     const agentEvents = fork.detached effect { transcripts catch () => undefined }
-    const liveRoute = route === "Device" ? decode(LiveCaptureStatus, native.invoke("AlphaVoiceCloud", "liveCaptureStatus", {}) catch () => undefined)?.available === true
-      : route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))
+    const liveRoute = try liveRouteNow(route)
+    const streamed = route === "Cloud" && liveRoute ? (try openStream(sessionId)) : undefined
     const session = createLiveVoiceSession({
-      ...ports(start, route, sessionId, liveRoute),
+      ...ports(start, route, sessionId, liveRoute, streamed),
       sessionId,
       subscribe: (listen) => {
         listeners.add(listen)
@@ -500,8 +555,9 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     cue = undefined
     if (playing !== undefined) try playing.cancel()
     session?.stop()
+    const relayStopped = try endStream()
     if (!media) return
-    const confirmed = try mediaStopped()
+    const confirmed = (try mediaStopped()) && relayStopped
     const chatCurrent = pendingChat?.() ?? false
     try send({ type: "cleanupSettled", confirmed, sendCurrent: chatCurrent })
     const typed = pendingTyped

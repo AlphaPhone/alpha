@@ -148,34 +148,78 @@ pure def lawAnUncomparedPeerGetsNoDay(observed: bool, onCalendar: bool): bool =
 > never once I turned Browser page for Alpha off, so that "summarize this
 > page" or "open the second story" just works (#1444).
 
-### A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s
+### A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it
 
-When an ordinary turn's observation selects a `browser-tab`, the turn asks
-Browser for that tab's page (its HTTPS address without credentials or
-fragment, its title as one line, up to 6,000 characters of visible text,
-the selection and public links, or only the address and title when the
-page is withheld) and waits at most 1.2 s; without an answer the turn goes
-without the page, and the owner's own cancellation still stops the send.
-The page travels only when its tab id and revision are the observed ones,
-Settings › Privacy › Browser page for Alpha is on (on by default;
-unreadable preferences share nothing) both before the read and when the
-turn is sent, and the peer's fresh status declares `browserPage`. A private
-screen or a private tab sends no page, and nothing of it is ever stored on
-the phone.
+Browser owns the page read (`spec/browser/pageContext.md`): which page may
+be read, the 1.2 s wait, the bounds of what is read, the withheld forms and
+the links an open may name. The assistant asks it once per ordinary turn,
+only when the observation is sent and selects the `browser-tab` Browser
+shows in front, which is never a private tab; it sends what Browser handed
+it unchanged, as `clientDevice.browserPage`, only to a peer whose fresh
+status declares `browserPage`, and stores nothing of it. A turn whose page
+Browser did not hand over goes without it; the owner's own cancellation
+still stops the send. The links of the page the latest message carried are
+Browser's to remember ([Review](./review.md)).
 
 ```quint
-type PageRead = NoPage | PageFor({ sameTab: bool }) | PageLate
-pure val browserPageWaitMs = 1200
-pure def asksForPage(observed: bool, onBrowserTab: bool, allowed: bool): bool = observed and onBrowserTab and allowed
-pure def pageBound(read: PageRead): bool = match read { | PageFor(x) => x.sameTab | _ => false }
-pure def sendsBrowserPage(observed: bool, onBrowserTab: bool, allowedBefore: bool, allowedAtSend: bool, read: PageRead, peerDeclares: bool): bool =
-  asksForPage(observed, onBrowserTab, allowedBefore) and allowedAtSend and peerDeclares and pageBound(read)
-pure def lawAPrivateScreenSendsNoPage(read: PageRead, peer: bool): bool = not(sendsBrowserPage(false, true, true, true, read, peer))
-pure def lawAnotherTabsPageIsNeverSent(peer: bool): bool = not(sendsBrowserPage(true, true, true, true, PageFor({ sameTab: false }), peer))
-pure def lawTurningItOffBeforeTheSendSendsNothing(read: PageRead): bool = not(sendsBrowserPage(true, true, true, false, read, true))
-pure def lawALateReadSendsNothing(peer: bool): bool = not(sendsBrowserPage(true, true, true, true, PageLate, peer))
-pure def lawAnUndeclaredPeerGetsNoPage(read: PageRead): bool = not(sendsBrowserPage(true, true, true, true, read, false))
-pure val readValues = Set(NoPage).union(Set(PageLate)).union(Set(PageFor({ sameTab: true }))).union(Set(PageFor({ sameTab: false })))
+pure def asksForPage(observed: bool, onBrowserTab: bool): bool = observed and onBrowserTab
+pure def sendsBrowserPage(observed: bool, onBrowserTab: bool, handed: bool, peerDeclares: bool): bool =
+  asksForPage(observed, onBrowserTab) and handed and peerDeclares
+pure def lawAPrivateScreenSendsNoPage(handed: bool, peer: bool): bool = not(sendsBrowserPage(false, true, handed, peer))
+pure def lawOffBrowserSendsNoPage(handed: bool, peer: bool): bool = not(sendsBrowserPage(true, false, handed, peer))
+pure def lawAPageBrowserWithheldIsNeverSent(peer: bool): bool = not(sendsBrowserPage(true, true, false, peer))
+pure def lawAnUndeclaredPeerGetsNoPage(handed: bool): bool = not(sendsBrowserPage(true, true, handed, false))
+```
+
+## Story: Let my agent see what Maps shows when I ask about it
+
+> As the owner, when I ask about the place or route Maps shows, I want my
+> agent to know which one I mean without seeing it, so that it can ask to
+> read exactly that one, and only after I approve.
+
+### A turn names the place, route or search Maps shows as its selected object only while Maps is in front
+
+While Maps is the observed view and nothing else is selected, the turn's
+observation names what Maps shows (`map-place`, `map-route` or
+`map-search`) by its opaque identity and revision, which Maps keeps while
+the same selection stays shown. Nothing of the place itself travels with
+the turn; the agent reads it only through the reviewed Maps read
+([Review](./review.md)). Off Maps, on a locked or private screen, or with
+nothing shown, the turn names nothing of Maps.
+
+```quint
+type MapsShown = NothingShown | PlaceShown | RouteShown | SearchShown
+pure def namesMaps(observed: bool, onMaps: bool, otherSelected: bool, shown: MapsShown): bool =
+  observed and onMaps and not(otherSelected) and shown != NothingShown
+pure def lawOffMapsNamesNothing(shown: MapsShown): bool = not(namesMaps(true, false, false, shown))
+pure def lawAPrivateScreenNamesNothingOfMaps(shown: MapsShown): bool = not(namesMaps(false, true, false, shown))
+pure def lawAnotherSelectionWins(shown: MapsShown): bool = not(namesMaps(true, true, true, shown))
+pure val shownValues = Set(NothingShown, PlaceShown, RouteShown, SearchShown)
+```
+
+## Story: Be offered only what this phone can do
+
+> As the owner, I want my agent to propose only phone actions this phone
+> can carry out, so that a card never asks me for something that cannot
+> happen here.
+
+### Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none
+
+The capabilities the agent offered this enrollment come from its device
+registration; each area selects, of those, what it runs on this build
+(the shell's `DeviceCapabilities`). Every turn, proposal route and view
+route of the assistant carries the selection, distinct and in one line,
+as `x-eliza-device-capabilities`, read again for each request; a name the
+agent did not offer is never sent, since an unknown name refuses the whole
+header, and an empty selection sends no header at all.
+
+```quint
+pure def sentNames(offered: Set[str], runs: Set[str]): Set[str] = offered.intersect(runs)
+pure def sendsHeader(offered: Set[str], runs: Set[str]): bool = sentNames(offered, runs) != Set()
+pure def lawOnlyOfferedNamesAreSent(offered: Set[str], runs: Set[str]): bool = sentNames(offered, runs).subseteq(offered)
+pure def lawNothingOfferedSendsNoHeader(runs: Set[str]): bool = not(sendsHeader(Set(), runs))
+pure val offeredValues = Set(Set(), Set("maps.selected-read.v1"), Set("maps.selected-read.v1", "files.browser.v1"))
+pure val runsValues = Set(Set(), Set("maps.selected-read.v1"))
 ```
 
 ## Story: Know when my words leave the phone

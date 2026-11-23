@@ -1,4 +1,4 @@
-// spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/speech.md, "Story: Never have a secret read aloud"; spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"
+// spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/speech.md, "Story: Never have a secret read aloud"; spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"; spec/voice/conversation.md, "A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it"
 import type { MisroutedSpeech, SpeechAttemptFailed } from "@elizaos/plugin-local-inference/speech-route"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -7,6 +7,7 @@ import type { Route } from "../../gen/voice__route.ts"
 import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
 import { refusalOf } from "./failure.vibe"
 import { newId } from "../platform/ids.ts"
+import { voiceAbort } from "./cloud-stream.ts"
 import { PlaybackEvent, PreparedSpeech } from "./native.schema.vibe"
 import { planReading, planReply, refusalMessage, type SpokenRefusal } from "./spoken-text.ts"
 
@@ -33,6 +34,14 @@ export interface SpeakOptions {
   readonly onStarted?: () => void!!
 }
 
+/** A Cloud speech session that listens and speaks on one relay; while it is bound the reply channel speaks through it. */
+export interface StreamSpeaker {
+  /** Speak `text`, running `onStarted` at its first audible playback; settles once it has played, and rejects when `signal` aborts or the session ends. */
+  speak(text: string, signal: AbortSignal, onStarted: () => void): Promise<void>
+  /** Mute or unmute only the session's output. */
+  setOutputMuted(muted: boolean): Promise<void>
+}
+
 /** Everything Alpha says aloud, one passage at a time on each channel, with confirmed cleanup. */
 export service Speech {
   /** The channels now and after each change. */
@@ -57,16 +66,28 @@ export service Speech {
   warmCloud(connection: number): void!!
   /** Mute or unmute only the speech output; false when the phone cannot. */
   setMuted(muted: boolean): boolean!!
+  /** Speak the reply channel through `stream` while a Cloud stream conversation holds it, and on the route's own synthesis once it is unbound. */
+  bindStream(stream: StreamSpeaker | undefined): void!!
 }
 
 const PASSAGE_LIMIT = "20 minutes"
 const BUSY_WAIT = "100 millis"
 const PLAYBACK_EVENTS = ["playbackEnded", "playbackFailed", "playbackStopped"] as const
+const STREAM_CLEANUP = "2500 millis"
+const CLEANUP_UNCONFIRMED = "speech-cleanup-unconfirmed"
 const decodePrepared = Schema.decodeUnknownOption(PreparedSpeech)
 const decodePlayback = Schema.decodeUnknownOption(PlaybackEvent)
 
 type Ending = { readonly event: (typeof PLAYBACK_EVENTS)[number] | "stopped"; readonly reason?: string }
 type PhoneCall = { readonly method: string; readonly args: object; readonly deviceOnly: boolean }
+
+function streamFailure(cause: unknown): string {
+  if (typeof cause !== "object" || cause === null) return "cloud-stream"
+  const code = (cause as { readonly code?: unknown }).code
+  if (typeof code === "string" && code !== "") return code
+  const name = (cause as { readonly name?: unknown }).name
+  return typeof name === "string" && name !== "" ? name : "cloud-stream"
+}
 
 function synthesis(route: Route, account: VoiceAccount, text: string, requestId: string, queue: boolean, voiceTurnId: string | undefined) {
   const replace = queue ? { replace: false } : {}
@@ -86,6 +107,7 @@ export const speechService = Layer.effect(Speech, effect {
   const resident = try Resident
   const routes = try VoiceRoute
   const stops = new Map<Channel, Deferred.Deferred<string>>()
+  let stream: StreamSpeaker | undefined
 
   effect function send(event: Event) {
     held.send(event) catch () => undefined
@@ -143,7 +165,39 @@ export const speechService = Layer.effect(Speech, effect {
     }
   }
 
+  effect function playStreamed(through: StreamSpeaker, channel: Channel, text: string, started: () => void!!) {
+    const stopSignal = stops.get(channel)
+    const owned = voiceAbort()
+    let began = false
+    const settled = try Deferred.make<string | undefined>()
+    fork.detached effect {
+      const said = try promise(() => through.speak(text, owned.signal, () => { began = true; runFork(started()) }).then(() => undefined, (cause: unknown) => streamFailure(cause)))
+      try Deferred.succeed(settled, said)
+    }
+    const playing = effect {
+      const failure = try Deferred.await(settled)
+      const ending: Ending = failure === undefined ? { event: "playbackEnded" } : { event: "playbackFailed", reason: failure }
+      return ending
+    }
+    const stopped = effect {
+      const reason = try (stopSignal === undefined ? never : Deferred.await(stopSignal))
+      const ending: Ending = { event: "stopped", reason }
+      return ending
+    }
+    try ensuring(effect {
+      const outcome = try.race [playing, stopped]
+      if (outcome.event !== "playbackEnded") throw new SpeechInterrupted({ reason: outcome.reason ?? outcome.event, started: began, failed: outcome.event === "playbackFailed" })
+    }, effect {
+      if ((try chainOf(channel)).stage === "Playing") try send({ type: "finished", ch: channel })
+      owned.abort()
+      const after = timeout(Deferred.await(settled), STREAM_CLEANUP) catch () => CLEANUP_UNCONFIRMED
+      try send({ type: "cleanupSettled", ch: channel, confirmed: after !== CLEANUP_UNCONFIRMED })
+    })
+  }
+
   effect function playPiece(channel: Channel, text: string, queue: boolean, started: () => void!!, voiceTurnId: string | undefined) {
+    const through = channel === "Replies" ? stream : undefined
+    if (through !== undefined) return try playStreamed(through, channel, text, started)
     const stopSignal = stops.get(channel)
     const requestId = newId()
     let playbackId: string | undefined
@@ -279,8 +333,13 @@ export const speechService = Layer.effect(Speech, effect {
       if (sent !== undefined) resident.json("POST", "/api/cloud/warm", {}) catch () => undefined
     },
     effect setMuted(muted: boolean) {
+      const through = stream
+      if (through !== undefined) return try promise(() => through.setOutputMuted(muted).then(() => true, () => false))
       const done = native.invoke("AlphaVoiceCloud", "setSpeechOutputMuted", { muted }) catch () => false
       return done !== false
+    },
+    effect bindStream(next: StreamSpeaker | undefined) {
+      stream = next
     },
   }
 })

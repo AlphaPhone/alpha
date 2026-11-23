@@ -42,6 +42,8 @@ export service PhoneSteps {
   tap(approve: boolean): void!!
   /** The page went to the background or came back. */
   foreground(front: boolean): void!!
+  /** The step the open run shows now, as last reviewed; undefined when none waits. */
+  reviewed(): StepReview | undefined!!
 }
 
 function ownerOf(scope: OwnerScope): string {
@@ -206,6 +208,9 @@ export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
         held.send({ type: "reopen" }) catch () => undefined
         held.send({ type: "sync" }) catch () => undefined
       }
+    },
+    effect reviewed() {
+      return try Ref.get(current)
     },
   }
 }), stepsMachine())

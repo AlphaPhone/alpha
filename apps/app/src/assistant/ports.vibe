@@ -1,8 +1,8 @@
-// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
+// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
 import type { ChangeSummary } from "../workflows/changes.vibe"
-import type { BrowserPageObservation } from "./payloads.schema.vibe"
+import type { BrowserPageObservation } from "../browser/page-context.ts"
 
 /** An email the owner reviewed in the chat, under the request id its version sends once. */
 export interface ReviewedEmail {
@@ -127,21 +127,80 @@ export interface ObservedTab {
   readonly revision: string
 }
 
-/** The open page a turn carries beside its observation as `clientDevice.browserPage`, bound to the observed tab and revision. */
+/** The open page a turn carries beside its observation as `clientDevice.browserPage`, exactly as Browser handed it. */
 export type BrowserPage = BrowserPageObservation
 
-/** Browser's open page for a chat turn, and the owner's Browser page for Alpha setting, filled from Browser and Settings; unprovided, no page is shared. */
+/** The screen a turn is sent from, as Browser's page read checks it. */
+export interface PageObservation {
+  readonly view?: string
+  readonly sensitive?: boolean
+  readonly selectedObject?: { readonly kind: string; readonly id: string; readonly revision?: string }
+}
+
+/** Browser's page for a chat turn, the one model of it (Browser's `BrowserPageContext`), filled from Browser; unprovided, no tab is observed and no page is shared. */
 export service BrowserPages {
-  /** Settings › Privacy › Browser page for Alpha, read now; unreadable preferences share nothing. */
-  allowed(): boolean!!
   /** The tab Browser shows in front now, or undefined for a private tab, no tab, or Browser not in front. */
   selected(): ObservedTab | undefined!!
-  /** The page of `tab` read on this phone, or undefined when Browser no longer shows that tab, it is private, or it has no loaded public page. */
-  read(tab: ObservedTab): BrowserPage | undefined!!
+  /** The page of the observed tab for one turn to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds, and undefined whenever it may not go. */
+  forTurn(observation: PageObservation, peerTakesIt: boolean): BrowserPage | undefined!!
+  /** Whether `url` is exactly a link of the page the latest turn carried. */
+  carried(url: string): boolean!!
   static readonly defaultValue = () => ({
-    allowed: () => succeed(false),
     selected: () => succeed(undefined),
-    read: (_tab: ObservedTab) => succeed(undefined),
+    forTurn: (_observation: PageObservation, _peerTakesIt: boolean) => succeed(undefined),
+    carried: (_url: string) => succeed(false),
   })
 }
 
+/** What Maps shows the agent now, as the turn observation's selected object names it. */
+export interface MapsShown {
+  readonly kind: "map-place" | "map-route" | "map-search"
+  readonly id: string
+  readonly revision: string
+}
+
+/** Maps' part of the agent's views, owned by Maps (`MapsAgent`); unprovided, Maps names nothing and delivers no view. */
+export service MapsViews {
+  /** What Maps shows now with its identity and revision; undefined off Maps, on a locked screen, or with nothing shown. */
+  shown(): MapsShown | undefined!!
+  /** Claim and apply a Maps view the agent prepared, under Maps' own delivery: `request` numbers this delivery, `effectKey` what it does, the same across a redelivery; `apply` brings Maps forward. */
+  deliver(request: number, effectKey: number, binding: { readonly [field: string]: unknown }, apply: void!!): void!!
+  static readonly defaultValue = () => ({
+    shown: () => succeed(undefined),
+    deliver: (_request: number, _effectKey: number, _binding: { readonly [field: string]: unknown }, _apply: Effect.Effect<void>) => succeed(undefined),
+  })
+}
+
+/** What Browser answers a view command: its result envelope, a dispatch or a typed refusal before any effect. */
+export type ViewAnswer =
+  | { readonly ok: true; readonly data: unknown }
+  | { readonly ok: false; readonly code: string; readonly message: string }
+
+/** Browser's part of the agent's view commands, owned by Browser (`BrowserAgent`); unprovided, every command is unavailable. */
+export service BrowserViews {
+  /** A back, forward or reload on the page the owner is viewing, claimed once and never repeated. */
+  command(raw: unknown, selection: unknown): ViewAnswer!!
+  /** Any other view interaction in Browser, such as a page-text request, answered with where the page comes from. */
+  interact(capability: string, raw: unknown, selection: unknown): ViewAnswer!!
+  static readonly defaultValue = () => ({
+    command: (_raw: unknown, _selection: unknown) => succeed({ ok: false, code: "UNAVAILABLE", message: "Native view capability is unavailable" } satisfies ViewAnswer),
+    interact: (_capability: string, _raw: unknown, _selection: unknown) => succeed({ ok: false, code: "UNAVAILABLE", message: "Native view capability is unavailable" } satisfies ViewAnswer),
+  })
+}
+
+/** The capabilities this phone advertises in `x-eliza-device-capabilities`: the shell's `DeviceCapabilities` selection of those the agent offered this enrollment in its device registration, filled by the shell once the enrolment and every area are built; unprovided, nothing is advertised and no header is sent. */
+export service AdvertisedCapabilities {
+  /** The capability names to advertise on the next request, read again for each request. */
+  names(): readonly string[]!!
+  static readonly defaultValue = () => ({
+    names: () => succeed([] as readonly string[]),
+  })
+}
+
+/** The workflow step a device operation serves, as its executor learns it. */
+export interface WorkflowStepRef {
+  readonly workflowId: string
+  readonly versionId: string
+  readonly runId: string
+  readonly stepId: string
+}

@@ -239,11 +239,11 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
    this.request=request;epoch=AlphaLocalAgentPlugin.credentialAuthorityEpoch();revision=required(call.getString("providerRevision"),128);
    key=AlphaLocalAgentPlugin.withCredentialAuthority(epoch,()->{
     JSONObject provider=new JSONObject(new AlphaCredentialStore(getContext()).readCredentialSlot("local-agent-provider:v1"));
-    if(provider.optBoolean("unbound")||!"cerebras".equals(provider.optString("provider"))||!revision.equals(ai.eliza.plugins.agent.runtime.NativeProviderSlot.managementRevision(provider.toString(),epoch)))throw new SecurityException("Provider changed");
+    if(provider.optBoolean("unbound")||!"cerebras".equals(provider.optString("provider"))||!revision.equals(ai.alphacompute.alphaphone.runtime.NativeProviderSlot.managementRevision(provider.toString(),epoch)))throw new SecurityException("Provider changed");
     String value=provider.optString("cartesiaKey","");if(!LocalAgentProviderAdmission.validProviderToken(value,1024))throw new SecurityException("Voice is not configured");return value;
    });
   }
-  public void check()throws Exception{if(request.cancelled||destroyed())throw new IOException("Speech cancelled");AlphaLocalAgentPlugin.withCredentialAuthority(epoch,()->{JSONObject provider=new JSONObject(new AlphaCredentialStore(getContext()).readCredentialSlot("local-agent-provider:v1"));if(!revision.equals(ai.eliza.plugins.agent.runtime.NativeProviderSlot.managementRevision(provider.toString(),epoch)))throw new SecurityException("Provider changed");return null;});}
+  public void check()throws Exception{if(request.cancelled||destroyed())throw new IOException("Speech cancelled");AlphaLocalAgentPlugin.withCredentialAuthority(epoch,()->{JSONObject provider=new JSONObject(new AlphaCredentialStore(getContext()).readCredentialSlot("local-agent-provider:v1"));if(!revision.equals(ai.alphacompute.alphaphone.runtime.NativeProviderSlot.managementRevision(provider.toString(),epoch)))throw new SecurityException("Provider changed");return null;});}
   public void opened(HttpURLConnection connection)throws Exception{request.connection=connection;check();}
  }
  @PluginMethod public void transcribeOwnRecording(PluginCall call){submit(call,request->{

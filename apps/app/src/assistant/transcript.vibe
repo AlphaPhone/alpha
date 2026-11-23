@@ -49,7 +49,7 @@ export type Row =
   | { readonly kind: "receipt"; readonly id: string; readonly proposalId: string; readonly title: string; readonly summary: string }
   | { readonly kind: "notice"; readonly id: string; readonly text: string; readonly system: boolean }
   | { readonly kind: "card"; readonly id: string; readonly card: ProposalCard }
-  | { readonly kind: "email"; readonly id: string; readonly card: EmailCard; readonly to: string; readonly subject: string; readonly body: string }
+  | { readonly kind: "email"; readonly id: string; readonly card: EmailCard; readonly to: string; readonly subject: string; readonly body: string; readonly messageId?: string; readonly ownerTurn?: string }
   | { readonly kind: "change"; readonly id: string; readonly text: string; readonly app: "workflows" | "notes" | "calendar"; readonly route?: string }
 
 /** The transcript of the open conversation, as the assistant shows it. */

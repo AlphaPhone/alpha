@@ -39,22 +39,8 @@ export schema LiveCaptureStatus { readonly available?: boolean; readonly nativeT
 /** A live capture that ended, and the code it ended with: a call, a pause of Alpha, a cancellation or a capture failure. */
 export schema LiveCaptureEnded { readonly captureId: string; readonly error?: string }
 
-/** A Cloud speech stream that opened. */
-export schema CloudSpeechStarted { readonly sessionId: string; readonly echoCancelled?: boolean }
-
-/** One event of the Cloud speech stream. */
-export schema CloudSpeechEvent {
-  readonly sessionId: string
-  readonly type: "error" | "audio-start" | "audio-end" | "speech-start" | "speech-end" | "transcript" | "level"
-  readonly utteranceId?: string
-  readonly text?: string
-  readonly peak?: number
-  readonly final?: boolean
-  readonly code?: string
-  readonly status?: number
-  readonly beforeAudio?: boolean
-  readonly data?: unknown
-}
+/** A Cloud speech relay session that opened: its id, its audio rate and whether its capture cancels Alpha's own voice. */
+export schema CloudSpeechStarted { readonly sessionId: string; readonly sampleRate: number; readonly echoCancelled?: boolean }
 
 /** Whether the listener's settings opened. */
 export schema SettingsOpened { readonly opened: boolean }

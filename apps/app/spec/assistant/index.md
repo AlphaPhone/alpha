@@ -36,6 +36,7 @@ handing area.
 - [Withdrawal](./withdrawal.md): giving up on a bridge request so that it never reaches the agent later.
 - [Suggestion](./suggestion.md): inserting one exact reviewed suggestion into a text field.
 - [Notice question](./noticeQuestion.md): asking the assistant about one of Alpha's own notifications.
+- [Views](./views.md): the views the agent opens on this phone and the commands it gives inside them, Maps' and Browser's included.
 
 ## Story: Ask my assistant from anywhere
 

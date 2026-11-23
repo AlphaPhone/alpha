@@ -1,10 +1,11 @@
-// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "An abandoned request is withdrawn by its id, and its outcome is unknown unless native withdrew it first"; spec/platform/resident.md, "Stopping is confirmed only when the service reports its launch stopped and serving nothing"; spec/platform/resident.md, "The agent's status reads as running only while its launch serves"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"
+// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "An abandoned request is withdrawn by its id, and its outcome is unknown unless native withdrew it first"; spec/platform/resident.md, "Stopping is confirmed only when the service reports its launch stopped and serving nothing"; spec/platform/resident.md, "The agent's status reads as running only while its launch serves"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"; spec/platform/index.md, "A request carries only the device headers the resident reads, each one bounded line"
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client"
-import type { AgentStatus, AgentStreamData, AgentStreamEnd, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import type { AgentRequest, AgentStatus, AgentStreamData, AgentStreamEnd, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
 import { abortOutcome, runtimePhaseOf, stopConfirmed, type AbortOutcome, type Boot } from "../../gen/platform__resident.effect.vibe"
 import { Machine as Relay, machine as relayMachine, type Event as RelayEvent, type Failure, type Relay as RelayState } from "../../gen/platform__nativeStream.effect.vibe"
 import { bytesOfBase64, jsonBytes } from "./native-capacitor.ts"
 import { newId } from "./ids.ts"
+import type { ResidentHeaders } from "./resident.vibe"
 
 const IDLE_MS = 60000
 const TURN_MS = 600000
@@ -80,10 +81,21 @@ export effect function stopAgent(agent: ElizaAgentPlugin) {
   throw new AgentCallFailed({ method: "stop", message: "Not confirmed" })
 }
 
-/** One plain resident request through the agent service, sent under `id` so that it can be withdrawn. */
-export effect function agentRequest(agent: ElizaAgentPlugin, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, id: string = newId()) {
+/** The device headers a route asks the agent service to carry to the resident beside the session it adds. */
+export interface DeviceHeaderFields {
+  readonly headers?: ResidentHeaders
+}
+
+/** The route field that carries admitted device `headers`, none where there are none. */
+export function headerFieldsOf(headers: ResidentHeaders): DeviceHeaderFields {
+  return Object.keys(headers).length === 0 ? {} : { headers }
+}
+
+/** One plain resident request through the agent service, sent under `id` so that it can be withdrawn, carrying the admitted device `headers`. */
+export effect function agentRequest(agent: ElizaAgentPlugin, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, id: string = newId(), headers: ResidentHeaders = {}) {
   const fields = typeof body === "object" && body !== null && !Array.isArray(body) ? { body: body as Record<string, unknown> } : {}
-  return try call("request", () => agent.request({ method, path, id, ...fields }))
+  const route: AgentRequest & DeviceHeaderFields = { method, path, id, ...fields, ...headerFieldsOf(headers) }
+  return try call("request", () => agent.request(route))
 }
 
 /** Withdraws the plain request sent under `id`: not sent where native withdrew it before dispatch, otherwise its outcome is unknown. */
@@ -109,8 +121,8 @@ const contentTypeOf = (headers: Readonly<Record<string, string>>) =>
 
 type Heard = AgentStreamData | AgentStreamEnd | { readonly id: string; readonly kind: "rejected" | "changed" }
 
-/** One streamed reply through the agent service, as the frames `@elizaos/agent/client` reads: the listeners first, then the request, then what the service posts under its id. */
-export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body: unknown) {
+/** One streamed reply through the agent service, carrying the admitted device `headers`, as the frames `@elizaos/agent/client` reads: the listeners first, then the request, then what the service posts under its id. */
+export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body: unknown, headers: ResidentHeaders = {}) {
   const relay = try Effect.provide(effect { return try Relay }, relayMachine())
   effect function hear(event: RelayEvent) {
     const next = relay.send(event) catch () => undefined
@@ -138,7 +150,8 @@ export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body:
   try addFinalizer(() => Effect.ignore(tryPromise(() => agent.abort({ id }))))
   const fields = typeof body === "object" && body !== null && !Array.isArray(body) ? { body: body as Record<string, unknown> } : {}
   effect function dispatch() {
-    const admitted = call("requestStream", () => agent.requestStream({ id, method: "POST", path, ...fields })) catch () => undefined
+    const route: AgentStreamRequest & DeviceHeaderFields = { id, method: "POST", path, ...fields, ...headerFieldsOf(headers) }
+    const admitted = call("requestStream", () => agent.requestStream(route)) catch () => undefined
     if (admitted === undefined) try Queue.offer(inbox, { id, kind: "rejected" })
     else if (admitted.id !== id) try Queue.offer(inbox, { id, kind: "changed" })
   }

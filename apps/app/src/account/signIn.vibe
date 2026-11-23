@@ -3,9 +3,11 @@ import {
   type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
   Machine as SignInMachine, enabled, entryOf, machine as signInMachine
 } from "../../gen/account__signIn.effect.vibe"
+import type { Net as LifeNet } from "../../gen/platform__lifecycle.ts"
 import { Build } from "../platform/build.vibe"
 import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
 import { Cloud } from "../platform/cloud.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { freshKey } from "./deployment.ts"
@@ -22,7 +24,7 @@ export type ServiceInfo = ServiceAnswer["service"]
 export service SignInScreen {
   readonly changes: Stream.Stream<SignIn>
   current(): SignIn!!
-  /** Fix the host, follow the session, the network, the host's readiness and its retained second verifications; runs for the app's life. */
+  /** Fix the host, follow the session, the network as AppLifecycle reports it, the host's readiness and its retained second verifications; runs for the app's life. */
   run(): void!!
   /** The owner opens sign-in, or checks the methods again. */
   open(): void!!
@@ -46,7 +48,7 @@ export service SignInScreen {
 
 const methodNames = { EmailCode: { start: "startEmail", verify: "verifyEmail", field: "email" }, PhoneCode: { start: "startPhone", verify: "verifyPhone", field: "phone" } } as const
 
-/** What Android says of the network, as the screen's network state. */
+/** What Android says of the network, as AppLifecycle reports it and with its validation fact on the phone, as the screen's network state. */
 export function netOf(status: NetworkStatus, android: boolean): Net {
   if (status.connected === false) return "NetOffline"
   if (android && status.internetValidated === false) return "NetUnvalidated"
@@ -78,6 +80,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const cloud = try Cloud
   const resident = try Resident
   const build = try Build
+  const lifecycle = try AppLifecycle
   const session = try CloudSession
   const scope = try Scope.Scope
   const environment = environmentName(buildCloudEnvironment(build.info))
@@ -236,18 +239,30 @@ export const signInService = Layer.effect(SignInScreen, effect {
     }
   }
 
-  effect function followNetwork() {
-    const first = effect {
+  effect function validated() {
+    const read = effect {
       return try Schema.decodeUnknownEffect(NetworkStatus)(try native.invoke("ElizaSystem", "getNetworkStatus"))
     } catch () => undefined
-    if (first !== undefined) try send({ type: "networkSeen", net: netOf(first, android) })
-    for try (const raw of native.listen("ElizaSystem", "networkStatusChanged")) {
-      const read = Schema.decodeUnknownEffect(NetworkStatus)(raw) catch () => undefined
-      if (read === undefined) continue
-      const net = netOf(read, android)
-      try send({ type: "networkSeen", net })
-      const s = try machine.get()
-      if (net === "NetOnline" && enabled(s, { type: "ownerOpens" }) && s.screen === "Choose" && !s.methods.known) try send({ type: "ownerOpens" })
+    return read?.internetValidated
+  }
+
+  effect function seen(network: LifeNet) {
+    const validation = android && network === "NetOnline" ? (try validated()) : undefined
+    const status: NetworkStatus = {
+      ...(network === "NetOnline" ? { connected: true } : network === "NetOffline" ? { connected: false } : {}),
+      ...(validation === undefined ? {} : { internetValidated: validation }),
+    }
+    const net = netOf(status, android)
+    const before = try machine.get()
+    if (enabled(before, { type: "networkSeen", net })) try send({ type: "networkSeen", net })
+    const s = try machine.get()
+    if (net === "NetOnline" && enabled(s, { type: "ownerOpens" }) && s.screen === "Choose" && !s.methods.known) try send({ type: "ownerOpens" })
+  }
+
+  effect function followNetwork() {
+    try seen(try lifecycle.refreshNetwork())
+    for try (const app of Stream.changesWith(lifecycle.changes, (a, b) => a.network === b.network && a.returns === b.returns)) {
+      try seen(app.network)
     }
   }
 

@@ -134,6 +134,9 @@ export const NoticeListing = Schema.Struct({
   calendarStatus: Schema.optionalKey(Schema.Literals(["ready", "unavailable", "disabled"])),
 })
 
+/** The phone's answer to consuming one of Alpha's own notices for a question (`AlphaNotifications.consumeOwnNotice`): consumed now, already consumed, or no longer listed at that revision. */
+export const OwnNoticeConsumed = Schema.Struct({ status: Schema.Literals(["consumed", "already-consumed", "changed", "gone", "unavailable"]) })
+
 /** Each cleared row's outcome (`AlphaNotifications.clear`). */
 export const ClearOutcomes = Schema.Struct({ outcomes: Schema.Array(Schema.Struct({ id: Schema.optionalKey(Schema.String), status: Schema.String })) })
 

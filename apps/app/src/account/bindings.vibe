@@ -1,4 +1,4 @@
-// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "A protected power launch is claimed only for a settled, quiet production account with its agent connected"; spec/account/plan.md, "The Ready card names a missing plan, AI being checked and AI off, and only a missing plan or AI off asks for attention"; spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"; spec/platform/index.md, "Every stored key of an owner lies in that owner's namespace, and a reset removes exactly those keys"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "A protected power launch is claimed only for a settled, quiet production account with its agent connected"; spec/account/plan.md, "The Ready card names a missing plan, AI being checked and AI off, and only a missing plan or AI off asks for attention"; spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"; spec/platform/index.md, "Every stored key of an owner lies in that owner's namespace, and a reset removes exactly those keys"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"
 import { initial as connectionStart, type Resident as ResidentConnection } from "../../gen/platform__resident.ts"
 import { aiChip, chipAsksAttention, type Admission, type AiChip } from "../../gen/account__plan.ts"
 import type { Provider } from "../../gen/account__provider.ts"
@@ -9,9 +9,10 @@ import { Build } from "../platform/build.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { DeviceStorage } from "../platform/device-storage.vibe"
 import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
-import { ResidentControl } from "../platform/resident-control.vibe"
+import { ResidentControl, type ResidentSession } from "../platform/resident-control.vibe"
 import { Permissions, type ConnectionFacts } from "../shell/permissions.vibe"
 import { VoiceRoute, type VoiceAccount } from "../voice/route.vibe"
+import { DeviceEnrollment, type EnrolledDevice } from "./enrollment.vibe"
 import { Entitlement } from "./entitlement.vibe"
 import { AiProvider } from "./provider.vibe"
 import { CloudSession, ownerNameOf, ownerOf } from "./session.vibe"
@@ -26,7 +27,7 @@ export interface AgentBinding {
   readonly usable: boolean
 }
 
-/** The verified agent session the assistant talks to: one origin, owner, agent and session. */
+/** The verified agent session the assistant talks to: one origin, owner, agent and session, with the installation and enrollment the agent confirmed for it, both empty while the phone is chat only. */
 export interface AgentSession {
   readonly origin: string
   readonly owner: string
@@ -88,6 +89,15 @@ export service AccountBindings {
   /** The Settings Account and AI provider row values, then each change of them. */
   readonly rows: Stream.Stream<AccountRows>
   rowsNow(): AccountRows!!
+}
+
+/** The verified agent session of a resident connection, naming the installation and enrollment only when the agent confirmed them for that same connection. */
+export function agentSessionOf(verified: ResidentSession, device: EnrolledDevice | undefined): AgentSession {
+  const own = device !== undefined && device.owner === verified.owner && device.agent === verified.agent && device.generation === verified.generation
+  return {
+    origin: "resident", owner: verified.owner, agent: verified.agent, session: `${verified.generation}:${verified.epoch}`,
+    installationId: own ? device.installationId : "", enrollmentId: own ? device.enrollmentId : "",
+  }
 }
 
 /** Whether the session's key may be used for Cloud requests now. */
@@ -209,6 +219,7 @@ export const bindingsService = Layer.effect(AccountBindings, effect {
   const provider = try AiProvider
   const entitlement = try Entitlement
   const resident = try ResidentControl
+  const enrollment = try DeviceEnrollment
   const cloud = try Cloud
   const latest = try SubscriptionRef.make<AgentBinding>({ owner: "device", session: 0, agentId: "", usable: false })
   const facts = try SubscriptionRef.make<BindingFacts>({
@@ -257,14 +268,9 @@ export const bindingsService = Layer.effect(AccountBindings, effect {
     agent: SubscriptionRef.changes(latest),
     agentNow: () => SubscriptionRef.get(latest),
     effect identity() {
-      const s = try session.current()
       const verified = try resident.session()
       if (verified === undefined) return undefined
-      const signedIn = usableSession(s)
-      return {
-        origin: "resident", owner: verified.owner, agent: verified.agent, session: `${verified.generation}:${verified.epoch}`,
-        installationId: signedIn ? s.account.organizationId : "device", enrollmentId: signedIn ? s.account.credentialId : "device",
-      } satisfies AgentSession
+      return agentSessionOf(verified, try enrollment.enrolled())
     },
     effect idle() { return idleOf(try session.current(), try signIn.current(), try provider.current()) },
     ready: derived(chipsOf),

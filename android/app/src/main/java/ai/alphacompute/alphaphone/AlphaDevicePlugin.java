@@ -316,7 +316,7 @@ public final class AlphaDevicePlugin extends Plugin {
  private int updateBoot()throws Settings.SettingNotFoundException{return Settings.Global.getInt(getContext().getContentResolver(),Settings.Global.BOOT_COUNT);}
  /** Native-only durable ownership. Android's session is still the commit fence; this record fences runtime starts. */
  static final class UpdatePause {
-  static volatile ai.eliza.plugins.agent.updater.RuntimeUpdatePause journal;
+  static volatile ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause journal;
   static volatile Context context;
   static volatile String executingApk;
   static volatile String liveOwner;
@@ -325,14 +325,14 @@ public final class AlphaDevicePlugin extends Plugin {
    // Application.attachBaseContext runs before LoadedApk publishes its Application.
    Context application=base.getApplicationContext();context=application!=null?application:base;
    executingApk=base.getApplicationInfo().sourceDir;
-   ai.eliza.plugins.agent.updater.RuntimeUpdatePause.configureStartAdmission(()->{
+   ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.configureStartAdmission(()->{
     try{return activation==null&&store().read()==null;}catch(Exception unavailable){return false;}
    });
    // No record means no APK hashing on ordinary startup. A successor reconciles before providers start.
    try{reconcile();}catch(Exception unavailable){/* Durable uncertainty keeps starts fenced. */}
   }
-  static ai.eliza.plugins.agent.updater.RuntimeUpdatePause store()throws Exception {
-   if(journal==null)synchronized(UpdatePause.class){if(journal==null)journal=new ai.eliza.plugins.agent.updater.RuntimeUpdatePause(new java.io.File(context.getNoBackupFilesDir(),"app-update-pause").toPath());}
+  static ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause store()throws Exception {
+   if(journal==null)synchronized(UpdatePause.class){if(journal==null)journal=new ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause(new java.io.File(context.getNoBackupFilesDir(),"app-update-pause").toPath());}
    return journal;
   }
   static String digest(String path)throws Exception {
@@ -342,7 +342,7 @@ public final class AlphaDevicePlugin extends Plugin {
   }
   static void acquire(String id,int session,long version,String sha,int boot)throws Exception {
    liveOwner=id;
-   store().acquire(new ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Record(id,session,boot,BuildConfig.VERSION_CODE,digest(executingApk),version,sha,appSigner(context),false));
+   store().acquire(new ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Record(id,session,boot,BuildConfig.VERSION_CODE,digest(executingApk),version,sha,appSigner(context),false));
   }
   static void stop()throws Exception {
    shutdownRequest=AlphaLocalAgentPlugin.pauseForUpdate(context);
@@ -354,26 +354,26 @@ public final class AlphaDevicePlugin extends Plugin {
    }
   }
   static void committing(String id)throws Exception{store().committing(id);}
-  static boolean binds(ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Record record,PackageInstaller.SessionInfo session){
+  static boolean binds(ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Record record,PackageInstaller.SessionInfo session){
    String expected="alpha-update://"+context.getPackageName()+"/"+record.targetCode+"/"+record.targetDigest+"/"+record.signer+"/"+record.boot+"/intent";
    return session!=null&&(expected.equals(String.valueOf(session.getReferrerUri()))||(expected+"/automatic").equals(String.valueOf(session.getReferrerUri())));
   }
   /** Returns only a proven settled owner. It never starts the runtime or retains a provider credential. */
-  static synchronized ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Record reconcile()throws Exception {
+  static synchronized ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Record reconcile()throws Exception {
    var record=store().read();if(record==null||record.id.equals(liveOwner))return null;
    PackageInstaller installer=context.getPackageManager().getPackageInstaller();
    PackageInstaller.SessionInfo session=installer.getSessionInfo(record.session);
-   var observation=ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Session.PENDING;
-   if(session==null)observation=ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Session.ABSENT;
+   var observation=ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Session.PENDING;
+   if(session==null)observation=ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Session.ABSENT;
    else {
     int boot=Settings.Global.getInt(context.getContentResolver(),Settings.Global.BOOT_COUNT);
     // PAUSING was durably written before any commit intent. COMMITTING retains the existing Android ordering proof.
     boolean uncommitted=binds(record,session)&&!session.isSealed()&&(!record.committing||record.boot!=boot||"REL".equals(Build.VERSION.CODENAME)&&(Build.VERSION.SDK_INT<=30||Build.VERSION.SDK_INT>=33&&Build.VERSION.SDK_INT<=37)&&session.getProgress()==0f);
-    if(uncommitted)observation=ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Session.PROVEN_UNCOMMITTED;
+    if(uncommitted)observation=ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Session.PROVEN_UNCOMMITTED;
    }
    // An old process with a pending Android session cannot settle. Its WebViews
    // poll this state while waiting, so do not hash the installed APK each time.
-   if(observation==ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Session.PENDING&&BuildConfig.VERSION_CODE!=record.targetCode)return null;
+   if(observation==ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Session.PENDING&&BuildConfig.VERSION_CODE!=record.targetCode)return null;
    // A stop that timed out in this process does not become success just because its install was abandoned.
    if(shutdownRequest>=0&&!AlphaLocalAgentPlugin.updateShutdownConfirmed(context,shutdownRequest))return null;
    var installed=context.getPackageManager().getPackageInfo(context.getPackageName(),0);
@@ -558,7 +558,7 @@ public final class AlphaDevicePlugin extends Plugin {
   return session==null||session.getProgress()>0.8f||session.isActive()&&!"android.content.pm.action.CONFIRM_DEVELOPER_VERIFICATION".equals(confirm.getAction());
  }
  /** Only a received, unopened callback for the sealed session survives a process restart. */
- private Intent readUpdateConfirmation(ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Record record,PackageInstaller.SessionInfo session){
+ private Intent readUpdateConfirmation(ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Record record,PackageInstaller.SessionInfo session){
   if(record==null||!record.committing||session==null||session.getSessionId()!=record.session||!session.isSealed()||!UpdatePause.binds(record,session))return null;
   try{
    if(record.boot!=updateBoot()||!record.signer.equals(appSigner(getContext())))return null;
@@ -708,7 +708,7 @@ public final class AlphaDevicePlugin extends Plugin {
       return count;
      }
     }:in;
-    byte[] manifest=ai.eliza.plugins.agent.connection.ConnectionTransport.readBounded(bounded,UPDATE_MANIFEST_LIMIT);
+    byte[] manifest=ai.alphacompute.alphaphone.connection.ConnectionTransport.readBounded(bounded,UPDATE_MANIFEST_LIMIT);
     long length=connection.getContentLengthLong();
     String encoding=connection.getContentEncoding();
     if(length>=0&&(encoding==null||"identity".equalsIgnoreCase(encoding))&&manifest.length!=length)

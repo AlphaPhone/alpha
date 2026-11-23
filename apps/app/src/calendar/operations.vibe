@@ -280,11 +280,16 @@ export const operationPorts = effect {
       : { kind: "refused", code: "not_shared", result: { summary: read.sentence } }
   }
 
-  effect function rangeRead(op: RangeRead) {
+  effect function rangeShown() {
     const shown = try screen()
+    return !shown.hidden && !shown.sensitive
+  }
+
+  effect function rangeRead(op: RangeRead) {
+    const shown = try rangeShown()
     let permission = false
-    if (!shown.hidden) permission = try access("ReadNext")
-    if (!rangeReadAdmitted(!shown.hidden, permission)) return { kind: "refused", code: NOT_DISPATCHED }
+    if (shown) permission = try access("ReadNext")
+    if (!rangeReadAdmitted(shown, permission)) return { kind: "refused", code: NOT_DISPATCHED }
     const begin = Date.parse(op.start)
     const end = Date.parse(op.end)
     const raw = native.invoke(PLUGIN, "list", { begin: begin - DAY, end: end + DAY }) catch () => undefined
@@ -305,7 +310,7 @@ export const operationPorts = effect {
     const result = { kind: "calendar", events }
     const outcome = rangeOutcome(ready !== undefined, ready !== undefined && !ready.truncated, unique.length, op.maximumEvents,
       events.length === unique.length && readResult(op as unknown as Parameters<typeof readResult>[0], result) !== undefined)
-    if ((try screen()).hidden) return { kind: "refused", code: NOT_DISPATCHED }
+    if (!(try rangeShown())) return { kind: "refused", code: NOT_DISPATCHED }
     switch (outcome) {
       case "RangeShared": return { kind: "applied", result }
       case "RangeTooMany": return { kind: "refused", code: "calendar_overflow", result: { maximumEvents: op.maximumEvents } }

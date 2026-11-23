@@ -1,8 +1,8 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.auth.cloud.CloudCredentialSlots;
-import ai.eliza.auth.cloud.CloudSignInConfig;
-import ai.eliza.auth.cloud.CloudSignInEnvironment;
+import ai.alphacompute.alphaphone.cloud.CloudCredentialSlots;
+import ai.alphacompute.alphaphone.cloud.CloudSignInConfig;
+import ai.alphacompute.alphaphone.cloud.CloudSignInEnvironment;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
 /**

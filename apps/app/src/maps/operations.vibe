@@ -51,7 +51,7 @@ export const operationPorts = effect {
           : "Its name, position and provider credit, only while Maps still shows this place.",
       }
     },
-    classOf: () => "NotesRead",
+    classOf: () => "MapsRead",
     target: () => ({ tag: "NoTarget" }),
     handoff: () => false,
     summarize: (operation, result) => {

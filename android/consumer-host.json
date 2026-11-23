@@ -6,7 +6,7 @@
       "updateManifestUrl": "https://github.com/eliza-research/alphaphone/releases/download/app-stable/alpha-update-stable.json"
     }
   ],
-  "description": "Alpha's Android host profile (schema 2). The upstream generator (@elizaos/os/build generateAndroidHost, vendor/eliza/packages/os) owns the Gradle setup, toolchain, variants, signing and version policy and writes the build files into android/ (node scripts/android-host.ts). This file supplies only Alpha's identity inputs, os modules, consumer modules, dependencies, admission and installed-data compatibility names. References use the consumer and dependencies (node_modules) roots; upstream native sources are named by os module.",
+  "description": "Alpha's Android host profile (schema 2). The upstream generator (@elizaos/os/build generateAndroidHost, vendor/eliza/packages/os) owns the Gradle setup, toolchain, variants, signing and version policy and writes the build files into android/ (node scripts/android-host.ts). This file supplies only Alpha's identity inputs, os modules, consumer modules, dependencies, admission and installed-data compatibility names, and the agent data files (android/agent/host.json, character.json, policy.json) the upstream agent service launches the resident from; its service subclass is ai.alphacompute.alphaphone.ElizaAgentService. References use the consumer and dependencies (node_modules) roots; upstream native sources are named by os module.",
   "profile": {
     "schema": 2,
     "sdk": {
@@ -17,6 +17,20 @@
     "releaseMinify": true,
     "kotlin": false,
     "nativeLibraries": "extract-16k",
+    "agent": {
+      "host": {
+        "root": "consumer",
+        "path": "android/agent/host.json"
+      },
+      "character": {
+        "root": "consumer",
+        "path": "android/agent/character.json"
+      },
+      "policy": {
+        "root": "consumer",
+        "path": "android/agent/policy.json"
+      }
+    },
     "manifest": {
       "root": "consumer",
       "path": "android/app/src/main/AndroidManifest.xml"
@@ -300,13 +314,6 @@
         }
       }
     ],
-    "generatedSources": [
-      {
-        "sourceSet": "main",
-        "kind": "java",
-        "path": "generated/local-agent/java"
-      }
-    ],
     "assetFiles": [
       {
         "source": {
@@ -350,8 +357,8 @@
         "stopAction": false
       },
       "launchHook": {
-        "class": "AlphaLocalAgentPlugin",
-        "method": "configureEnvironment"
+        "class": "ai.alphacompute.alphaphone.ElizaAgentService",
+        "method": "configureLaunch"
       }
     }
   },

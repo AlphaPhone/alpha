@@ -10,6 +10,7 @@ import type { AppScreen, AppSurface } from "../app-screen.ts";
 import { FilePickerSheet } from "./FilePickerSheet.tsx";
 import { FilesScreen } from "./FilesScreen.tsx";
 import { ask, now, perform } from "../shell/services.ts";
+import { closes, sheetBack } from "../shell/surfaceBack.ts";
 import { runtime } from "./runtime.ts";
 
 /** The picker surface takes nothing from the shell: it follows the picker machine. */
@@ -42,5 +43,8 @@ export const screens: AppScreen[] = [
 
 /** The file picker over every screen. */
 export const surfaces: AppSurface[] = [
-  { id: "files-picker", slot: "overlay", availability: "everywhere", Surface: FilePickerSurface },
+  {
+    id: "files-picker", slot: "overlay", availability: "everywhere", Surface: FilePickerSurface,
+    back: sheetBack(Effect.map(Effect.service(FilePicker), (picker) => picker.changes), (picker) => picker.open, () => closes(FilePicker.use((picker) => picker.dismiss()))),
+  },
 ];

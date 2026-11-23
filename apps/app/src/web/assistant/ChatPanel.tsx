@@ -77,7 +77,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
     const id = row.id;
     const work = Effect.flatMap(Effect.service(AssistantFlows), (flows) =>
       choice === "edit" ? flows.editEmail(id, row.card, fields.to.trim() !== "", fields.body.trim() !== "")
-      : choice === "send" ? flows.sendEmail(id, row.card, fields) : flows.declineEmail(id, row.card));
+      : choice === "send" ? flows.sendEmail(id, row.card, fields, row.ownerTurn) : flows.declineEmail(id, row.card));
     act(Effect.flatMap(work, (card) => Effect.flatMap(Effect.service(Composer), (c) => c.replaceRow({ ...row, ...fields, card }))));
   };
   const composer = (use: (c: Composer.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Composer), use));

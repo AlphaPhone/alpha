@@ -1,30 +1,48 @@
-// spec/telephony/drafts.md, "Story: Write to someone, in my own words or Alpha's"; spec/telephony/drafts.md, "What I wrote signed out becomes the account's that signs in, only where that account kept nothing"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
+// spec/telephony/drafts.md, "Story: Write to someone, in my own words or Alpha's"; spec/telephony/drafts.md, "What I wrote signed out becomes the account's that signs in, only where that account kept nothing"; spec/telephony/comms.md, "Story: See what Alpha is acting on"; spec/platform/storage.md, "A stored value that is not a state is held for review and never written over"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { adoptsDeviceSlot, type Kept } from "../../gen/telephony__drafts.effect.vibe"
-import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { CloudSession } from "../account/layer.vibe"
+import { DeviceStorage } from "../platform/device-storage.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 
-/** A machine's state kept under the key of whoever is signed in when it is read or written, and the owner changes that republish it. */
+/** A machine's state kept under the key of whoever is signed in when it is read or written, and what is shown of it as that owner changes. */
 export interface OwnerKept<S> {
   load(): S!unknown
   keep(next: S): void!!
-  readonly owners: Stream.Stream<number>
+  /** The state as shown: read again by `reload` after each of `changes`, and by `rebind` each time the signed-in owner's namespace becomes another than the one last shown; it follows for the layer's life. */
+  follow(changes: Stream.Stream<unknown>, reload: () => S!unknown, rebind: () => S!unknown): Stream.Stream<S>!!
 }
 
 /**
  * One machine's stored state, bound to the owner signed in at each read and write rather than at layer build,
  * so a start signed out never lands the next owner's drafts under the wrong key. What was kept signed out moves to
- * the first account that reads it with nothing of its own, and leaves the phone's namespace. `decode` refuses what is not a state.
+ * the first account that reads it with nothing of its own, with the companion values `companions` names for it
+ * (slots under the owner namespace, such as a draft's pictures), and leaves the phone's namespace. `decode` refuses what is
+ * not a state: that value is held for review through DeviceStorage and the owner starts from `start`; where it cannot be held,
+ * that owner's state runs in memory and the stored value is never written over.
  */
-export effect function ownerKept<S>(name: string, start: S, decode: (input: unknown) => S!unknown) {
+export effect function ownerKept<S>(name: string, start: S, decode: (input: unknown) => S!unknown, companions: (state: S) => readonly string[] = () => []) {
   const session = try CloudSession
   const store = try KeyValueStore.KeyValueStore
+  const storage = try Effect.serviceOption(DeviceStorage)
   const slot = `telephony/${name}`
   const deviceKey = ownerKey("device", slot)
+  const inMemory = try Ref.make(new Map<string, S>())
 
   effect function parsed(raw: string | undefined) {
     if (raw === undefined) return undefined
     return try (decode(try Effect.try(() => JSON.parse(raw) as unknown)) catch () => undefined)
+  }
+
+  effect function moveCompanions(state: S) {
+    const moved: string[] = []
+    for (const companion of companions(state)) {
+      const bytes = try (store.getUint8Array(ownerKey("device", companion)) catch () => undefined)
+      if (bytes === undefined) continue
+      const placed = try (effect { try store.set(try session.ownerKey(companion), bytes); return true } catch () => false)
+      if (placed) moved.push(companion)
+    }
+    return moved
   }
 
   effect function adopt(key: string, mine: string | undefined) {
@@ -33,20 +51,58 @@ export effect function ownerKept<S>(name: string, start: S, decode: (input: unkn
     if (left === undefined) return mine
     const state = try parsed(left)
     const device: Kept = state === undefined ? "KeptDamaged" : "KeptState"
-    if (!adoptsDeviceSlot(device, mine === undefined ? "NothingKept" : "KeptState")) return mine
-    try (store.set(key, left) catch () => undefined)
+    if (state === undefined || !adoptsDeviceSlot(device, mine === undefined ? "NothingKept" : "KeptState")) return mine
+    const moved = try moveCompanions(state)
+    const placed = try (effect { try store.set(key, left); return true } catch () => false)
+    if (!placed) return mine
     try (store.remove(deviceKey) catch () => undefined)
+    for (const companion of moved) try (store.remove(ownerKey("device", companion)) catch () => undefined)
     return left
   }
 
-  effect function load() {
+  effect function damaged(key: string): S {
+    const held = Option.isSome(storage) && (try storage.value.hold(key))
+    const cleared = held && (try (effect { try store.remove(key); return true } catch () => false))
+    if (!cleared) try Ref.update(inMemory, (states) => new Map(states).set(key, start))
+    return start
+  }
+
+  effect function load(): S {
     const key = try session.ownerKey(slot)
+    const running = (try Ref.get(inMemory)).get(key)
+    if (running !== undefined) return running
     const found = try adopt(key, try store.get(key))
-    return found === undefined ? start : try decode(try Effect.try(() => JSON.parse(found) as unknown))
+    if (found === undefined) return start
+    const state = try parsed(found)
+    return state === undefined ? try damaged(key) : state
   }
+
   effect function keep(next: S) {
-    try orDie(store.set(try session.ownerKey(slot), JSON.stringify(next)))
+    const key = try session.ownerKey(slot)
+    if ((try Ref.get(inMemory)).has(key)) {
+      try Ref.update(inMemory, (states) => new Map(states).set(key, next))
+      return
+    }
+    try orDie(store.set(key, JSON.stringify(next)))
   }
-  const owners = Stream.drop(Stream.changesWith(Stream.map(session.changes, ownerOf), (a, b) => a === b), 1)
-  return { load, keep, owners } satisfies OwnerKept<S>
+
+  effect function follow(changes: Stream.Stream<unknown>, reload: () => S!unknown, rebind: () => S!unknown) {
+    const shownUnder = try Ref.make(try session.ownerKey(slot))
+    const shown = try SubscriptionRef.make(try (reload() catch () => start))
+    effect function show(read: () => S!unknown) {
+      const next = try (effect { return { state: try read() } } catch () => undefined)
+      if (next !== undefined) try SubscriptionRef.set(shown, next.state)
+    }
+    effect function owner() {
+      const key = try session.ownerKey(slot)
+      if (key === (try Ref.get(shownUnder))) return
+      try Ref.set(shownUnder, key)
+      try show(rebind)
+    }
+    try fork.scoped Stream.runForEach(changes, () => show(reload))
+    try fork.scoped Stream.runForEach(session.changes, () => owner())
+    return SubscriptionRef.changes(shown)
+  }
+
+  return { load, keep, follow } satisfies OwnerKept<S>
 }

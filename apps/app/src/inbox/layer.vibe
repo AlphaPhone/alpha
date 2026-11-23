@@ -1,13 +1,14 @@
-// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/platform/storage.md, "A stored value that is not a state is held for review and never written over"
 import { machine as accountsMachine } from "../../gen/inbox__accounts.effect.vibe"
 import { machine as mailboxMachine } from "../../gen/inbox__mailbox.effect.vibe"
 import { machine as readerMachine } from "../../gen/inbox__reader.effect.vibe"
 import { machine as selectionMachine } from "../../gen/inbox__selection.effect.vibe"
 import { machine as suggestionsMachine } from "../../gen/inbox__suggestions.effect.vibe"
 import { machine as noticesMachine } from "../../gen/inbox__notices.effect.vibe"
-import { stored as storedDrafts } from "../../gen/inbox__drafts.effect.vibe"
-import { stored as storedJournal } from "../../gen/inbox__operations.effect.vibe"
-import { keys, mailStore } from "./store.vibe"
+import { decodeState as decodeDrafts, machine as draftsMachine, stored as storedDrafts } from "../../gen/inbox__drafts.effect.vibe"
+import { decodeState as decodeJournal, machine as journalMachine, stored as storedJournal } from "../../gen/inbox__operations.effect.vibe"
+import { storedOrHeld } from "../platform/device-storage.vibe"
+import { keys, mailHeld, mailStore } from "./store.vibe"
 import { layer as gmail } from "./gmail.vibe"
 import { layer as saved } from "./saved.vibe"
 import { layer as accounts } from "./accounts.vibe"
@@ -38,10 +39,18 @@ export { inboxCapabilities } from "./handoffs.vibe"
 export { keepPreviousDrafts } from "./previous.vibe"
 export type { ComposerBack } from "./composer.vibe"
 
+/** The drafts and operation journal kept in the phone's mail store, each held for review and started fresh where what is kept is not a state. */
+export const mailMachines = Layer.provide(
+  Layer.mergeAll(
+    storedOrHeld(keys.drafts, decodeDrafts, storedDrafts(keys.drafts), draftsMachine()),
+    storedOrHeld(keys.operations, decodeJournal, storedJournal(keys.operations), journalMachine()),
+  ),
+  Layer.provideMerge(mailHeld, mailStore),
+)
+
 /** The Inbox's machines: memory for what is read, the phone's mail store for drafts and operations. */
 export const machines = Layer.mergeAll(
-  accountsMachine(), mailboxMachine(), readerMachine(), selectionMachine(), suggestionsMachine(), noticesMachine(),
-  Layer.provide(Layer.mergeAll(storedDrafts(keys.drafts), storedJournal(keys.operations)), mailStore)
+  accountsMachine(), mailboxMachine(), readerMachine(), selectionMachine(), suggestionsMachine(), noticesMachine(), mailMachines,
 )
 
 /**

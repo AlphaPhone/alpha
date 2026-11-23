@@ -490,7 +490,8 @@ it.live(`The switches are published in order, and an outdated change is refused 
 // spec/account/delegation.md, "Story: Let Cloud run my hosted results"
 it.live(`Authorizing keeps the pending record in the account's slot and opens Cloud's page (spec/account/delegation.md, "Story: Let Cloud run my hosted results")`, () => effect {
   const calls: Calls = []
-  const authUrl = `https://api.eliza.app/app-auth/authorize?state=${"s".repeat(43)}`
+  // spec/account/delegation.md, "The authorization page is the deployment's own"
+  const authUrl = `https://eliza.app/app-auth/authorize?state=${"s".repeat(43)}`
   const slots = new Map<string, string>()
   const native = {
     ...signedInNative,

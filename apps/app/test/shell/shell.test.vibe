@@ -12,6 +12,7 @@ import { land } from "../../src/shell/landing.vibe"
 import { Navigation, navigationLive } from "../../src/shell/navigation.vibe"
 import { Notices } from "../../src/shell/notices.vibe"
 import { routeCrosses, preparedViewNavigation } from "../../src/shell/ownerRoutes.vibe"
+import { followSurfaceSheets } from "../../src/shell/surfaceSheets.vibe"
 
 const journal = Layer.succeed(CrashJournal, {
   record: () => succeed(undefined),
@@ -52,6 +53,59 @@ it.effect("Open an app from Home and keep my place (spec/shell/index.md, \"Story
       walked: { pushed: ["notes", ["calendar"]], returned: ["calendar", "ClosedStack", { app: "calendar", route: "event-1", inner: true }] },
       restarted: { restored: ["calendar", true], inner: "ClosedInner", home: ["", "RendererBack", "Input"], phone: false },
     }))
+  }
+})
+
+effect function until(check: () => boolean) {
+  for (let step = 0; step < 64 && !check(); step++) try yieldNow
+}
+
+it.effect("A surface's sheet is listed while it shows, and Back and HOME close it through the surface (spec/shell/navigation.md, \"A layer is listed once, closes with its owner or with Back, and holds the phone while open\")", () => effect {
+  provide memoryStore, platform {
+    provide navigationOnly {
+      const navigation = try Navigation
+      const open = try SubscriptionRef.make(false)
+      let finishing = false
+      let closed = 0
+      let layers: readonly string[] = []
+      const sheet = {
+        id: "test-sheet",
+        shown: SubscriptionRef.changes(open),
+        close: effect {
+          closed = closed + 1
+          if (!finishing) try SubscriptionRef.set(open, false)
+          return true
+        },
+      }
+      const fiber = fork followSurfaceSheets([sheet])
+      const watcher = fork (effect { for try (const state of navigation.changes) layers = state.layers.map((layer) => layer.id) })
+      try navigation.open("calendar")
+      try SubscriptionRef.set(open, true)
+      try until(() => layers.includes("test-sheet"))
+      const listed = [...layers]
+      const backTaken = try navigation.back()
+      try until(() => !layers.includes("test-sheet"))
+      const afterBack = { closed, layers: [...layers], app: (try navigation.get()).app, backTaken }
+      finishing = true
+      try SubscriptionRef.set(open, true)
+      try until(() => layers.includes("test-sheet"))
+      try navigation.back()
+      try until(() => closed === 2)
+      const kept = { closed, layers: [...layers] }
+      finishing = false
+      try navigation.home()
+      try until(() => closed === 3 && !layers.includes("test-sheet"))
+      for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+      const homed = { closed, layers: [...layers], app: (try navigation.get()).app, open: try SubscriptionRef.get(open) }
+      try Fiber.interrupt(fiber)
+      try Fiber.interrupt(watcher)
+      try Effect.try(() => assert.deepStrictEqual({ listed, afterBack, kept, homed }, {
+        listed: ["test-sheet"],
+        afterBack: { closed: 1, layers: [], app: "calendar", backTaken: true },
+        kept: { closed: 2, layers: ["test-sheet"] },
+        homed: { closed: 3, layers: [], app: "", open: false },
+      }))
+    }
   }
 })
 

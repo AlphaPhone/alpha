@@ -1,4 +1,4 @@
-// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"
 import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type TurnResult } from "@elizaos/agent/client"
 import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
 import { Machine as SendsMachine, timedAsVoice, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
@@ -8,16 +8,16 @@ import { Machine as ClientMachine, canReplyWith } from "../../gen/assistant__con
 import { Machine as RecoveryMachine } from "../../gen/assistant__recovery.effect.vibe"
 import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
-import { sendsDay } from "../../gen/assistant__context.effect.vibe"
+import { namesMaps, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
 import { Preferences } from "../settings/preferences.vibe"
 import { Latency } from "../voice/latency.vibe"
 import type { DictationTarget } from "../voice/dictation.vibe"
-import { pageForTurn, pageToSend } from "./browser-page.vibe"
+import { browserTabObject, pageForTurn } from "./browser-page.vibe"
 import { ChatAttachments } from "./attachments.vibe"
 import { Conversations } from "./conversations.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
 import { PhoneLocation } from "./location.vibe"
-import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, ReplyChanges, TurnSources } from "./ports.vibe"
+import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type MapsShown } from "./ports.vibe"
 import { changeWords, copy, failureKindOf, failureText, liveWaitOf, planActionOf } from "./presentation.vibe"
 import { DeviceReview, type Approval } from "./review.vibe"
 import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
@@ -26,6 +26,8 @@ import { initial as emailStart } from "../../gen/assistant__emailCard.effect.vib
 import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
 import { turnTransport } from "./transport.vibe"
 import { bindingOf, textOf, unitsOf } from "./units.vibe"
+import { EmailShelf, type EmailRow } from "./email-shelf.vibe"
+import { AgentViews, type ViewDelivery } from "./views.vibe"
 
 /** What the composer is doing to a sent message: quoting it in a reply, or correcting it. */
 export type Target = { readonly kind: "reply"; readonly quote: Quote } | { readonly kind: "edit"; readonly messageId: string; readonly text: string; readonly requestId: string }
@@ -85,6 +87,9 @@ export const composerLayer = Layer.effect(Composer, effect {
   const preferences = try Preferences
   const latency = try Latency
   const pages = try BrowserPages
+  const maps = try MapsViews
+  const views = try AgentViews
+  const shelf = try EmailShelf
   const transport = try turnTransport()
   const transcript = try SubscriptionRef.make<Transcript>(emptyTranscript)
   const target = try SubscriptionRef.make<Target | undefined>(undefined)
@@ -142,7 +147,9 @@ export const composerLayer = Layer.effect(Composer, effect {
       const files = identity === undefined ? [] : try attachments.savedFor([identity.origin, identity.owner, identity.agent, conversation, row.clientMessageId ?? row.id])
       withFiles.push({ ...row, files })
     }
-    try SubscriptionRef.set(transcript, { conversation, rows: collapseSystemNotices(withFiles), hasMore: page?.hasMore ?? false, typing: false })
+    const owner = try host.identity()
+    const kept = owner === undefined ? [] : try shelf.shelved([owner.origin, owner.owner, owner.agent, conversation])
+    try SubscriptionRef.set(transcript, { conversation, rows: collapseSystemNotices(withShelf(withFiles, kept)), hasMore: page?.hasMore ?? false, typing: false })
     try quiet(recovery.send({ type: "rekey" }))
     if (!(try sends.get()).typing) try recoverCards()
     const last = messages.at(-1)
@@ -253,6 +260,12 @@ export const composerLayer = Layer.effect(Composer, effect {
     ownKey = (try host.screen()).contextKey
     return pass
   }
+  effect function viewed(results: readonly { readonly action: string; readonly data: unknown }[], contextKey: string) {
+    acting += 1
+    const done = try ensuring(views.deliver(results, contextKey), sync(() => { acting -= 1 }))
+    if (done.status === "delivered") ownKey = (try host.screen()).contextKey
+    return done
+  }
   effect function send(handed?: string) {
     const identity = try host.identity()
     if (identity === undefined) {
@@ -260,6 +273,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       return false
     }
     const current = try controllerFor(identity)
+    try views.connect()
     const draftState = try drafts.get()
     if (handed === undefined && slotOf(draftState, draftState.active).unsettled) {
       try host.toast(copy.maySent)
@@ -288,7 +302,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const spoken = dictated
     if (handed === undefined) dictated = undefined
     const timed = timedAsVoice(spoken !== undefined, spoken?.text === composed.trim(), spoken?.binding === JSON.stringify(heldBinding), handed !== undefined)
-    const timedEnd = (answered: boolean) => timed ? latency.finish(answered ? "Answered" : "Abandoned") : succeed(undefined)
+    const timedEnd = (answered: boolean) => timed ? latency.draftReplied(answered ? "FinalReply" : "Abandoned") : succeed(undefined)
     const durable = handed === undefined && (try quiet(drafts.send({ type: "hold" })))
     try quiet(stopped.send({ type: "sendStart" }))
     try stoppedNotice()
@@ -322,18 +336,21 @@ export const composerLayer = Layer.effect(Composer, effect {
     const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
     const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
-    const browserRead = try pageForTurn(pages, observed, browserTab)
+    const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
+    const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
     const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
     const observation = observed ? {
       ...screen.observation,
       ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
       ...(notesList === undefined ? {} : { selectedObject: notesList }),
-      ...(browserTab === undefined ? {} : { selectedObject: { kind: "browser-tab", id: browserTab.id, revision: browserTab.revision } }),
+      ...(browserTab === undefined ? {} : { selectedObject: browserTabObject(browserTab) }),
+      ...(mapsNamed === undefined ? {} : { selectedObject: { kind: mapsNamed.kind, id: mapsNamed.id, revision: mapsNamed.revision } }),
       ...(day === undefined ? {} : { calendarDay: day }),
       ...(place === undefined ? {} : { location: place }),
     } : undefined
     const context = encodeTurnContext(observation === undefined ? {} : { observation }, { optionalFields: peer.optionalFields })
-    const browserPage = try pageToSend(pages, observed, browserRead, peer.browserPage === true)
+    const browserPage = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.browserPage === true)
+    const viewFields = try views.turnFields(observed, screen.observation.view)
     const pageLinks = (browserPage?.links ?? []).map((link) => link.url)
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
@@ -349,13 +366,10 @@ export const composerLayer = Layer.effect(Composer, effect {
       shownText = text
       try settleView(replyId, try view.get(), text)
     })
-    if (timed) {
-      try latency.begin()
-      try latency.mark("Request")
-    }
+    try latency.draftSent(timed ? composed : "")
     try quiet(sends.send({ type: "transportCall", id: attempt }))
     const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
-      { text: composed, metadata: { ...context, ...(browserPage === undefined ? {} : { clientDevice: { browserPage } }) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
+      { text: composed, metadata: { ...context, ...(viewFields ?? {}), ...(browserPage === undefined ? {} : { clientDevice: { browserPage } }) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
       { stream: {
         onPreview: (text, provisional) => {
           if (!streamed) {
@@ -363,7 +377,7 @@ export const composerLayer = Layer.effect(Composer, effect {
             runFork(effect {
               try quiet(sends.send({ type: "serverReceives", id: attempt }))
               try quiet(sends.send({ type: "streamChunk", id: attempt }))
-              if (timed) try latency.mark("FirstToken")
+              if (timed) try latency.draftReplied("FirstToken")
             })
           }
           runFork(effect { try quiet(view.send({ type: "token", units: Math.max(1, text.length), provisional })) })
@@ -462,8 +476,13 @@ export const composerLayer = Layer.effect(Composer, effect {
     const cardsShown = delivered ? pass.cards : []
     const staged = emailDraftOf(reply.actionResults)
     const inConversation = live !== null && live.id === (try SubscriptionRef.get(transcript)).conversation
-    const emailRows: Row[] = staged === undefined || !inConversation ? []
-      : [{ kind: "email", id: `email:${reply.messageId}`, card: { ...emailStart, recipients: staged.to.trim() !== "", body: staged.body.trim() !== "" }, ...staged }]
+    const ownerTurn = result.kind === "Replied" || result.kind === "AgentFailed" ? String(result.clientMessageId) : reply.userMessageId
+    const drafted: EmailRow | undefined = staged === undefined || !inConversation || live === null ? undefined
+      : { kind: "email", id: `email:${reply.messageId}`, card: { ...emailStart, recipients: staged.to.trim() !== "", body: staged.body.trim() !== "" }, ...staged, messageId: reply.messageId, ownerTurn }
+    const emailRows: Row[] = drafted === undefined || live === null ? [] : [try shelf.stage([identity.origin, identity.owner, identity.agent, live.id], drafted)]
+    const opened: ViewDelivery = delivered && inConversation ? try viewed(reply.actionResults, screen.contextKey) : { status: "none" }
+    const viewRows: Row[] = opened.status !== "unavailable" ? []
+      : [{ kind: "notice", id: `view-notice:${reply.messageId}`, text: opened.parentView === undefined ? copy.viewUnavailable : copy.viewInside(opened.parentView), system: false }]
     const changed = delivered && inConversation ? try changes.settle(reply.actionResults) : undefined
     const changeRows: Row[] = changed === undefined ? [] : [
       ...changed.workflows.map((change): Row => ({ kind: "change", id: `change:${reply.messageId}:workflow:${change.workflowId}`, text: `${changeWords[change.word]} workflow`, app: "workflows", route: change.workflowId })),
@@ -482,10 +501,11 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...cardsShown.map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
       ...(bound && !delivered ? [{ kind: "notice", id: `stale:${reply.messageId}`, text: copy.stale, system: false } satisfies Row] : []),
       ...emailRows,
+      ...viewRows,
       ...changeRows,
     ])
     try watch(cardsShown)
-    try timedEnd(result.kind === "Replied")
+    try timedEnd(result.kind === "Replied" && reply.text.trim() !== "")
     return true
   }
   return {
@@ -538,7 +558,12 @@ export const composerLayer = Layer.effect(Composer, effect {
       try SubscriptionRef.set(target, next)
       if (next?.kind === "edit") try quiet(drafts.send({ type: "handOver", text: unitsOf(next.text) }))
     },
-    replaceRow: (row: Row) => rows((list) => list.map((each) => each.id === row.id ? row : each)),
+    replaceRow: (row: Row) => effect {
+      try rows((list) => list.map((each) => each.id === row.id ? row : each))
+      const identity = try host.identity()
+      const conversation = (try SubscriptionRef.get(transcript)).conversation
+      if (row.kind === "email" && identity !== undefined && conversation !== null) try shelf.keep([identity.origin, identity.owner, identity.agent, conversation], row)
+    },
     dictationTarget: () => effect {
       const identity = try host.identity()
       const binding = JSON.stringify((try drafts.get()).active)
@@ -585,4 +610,20 @@ export function draftText(state: Parameters<typeof shown>[0]): string {
 /** Whether the active draft may already have been sent and waits for review. */
 export function draftUnsettled(state: Parameters<typeof shown>[0]): boolean {
   return slotOf(state, state.active).unsettled
+}
+
+/** What Maps shows, as the turn-context rule names it. */
+export function shownKindOf(shown: MapsShown | undefined): ShownKind {
+  return shown === undefined ? "NothingShown" : shown.kind === "map-route" ? "RouteShown" : shown.kind === "map-place" ? "PlaceShown" : "SearchShown"
+}
+
+/** The restored rows with the conversation's kept email cards, each after the agent message that drafted it, or at the end when that message is not shown. */
+export function withShelf(restored: readonly Row[], kept: readonly EmailRow[]): readonly Row[] {
+  const placed: Row[] = []
+  const left = kept.filter((card) => !restored.some((row) => row.id === card.id))
+  for (const row of restored) {
+    placed.push(row)
+    for (const card of left) if (card.messageId !== undefined && card.messageId === row.id) placed.push(card)
+  }
+  return [...placed, ...left.filter((card) => card.messageId === undefined || !restored.some((row) => row.id === card.messageId))]
 }

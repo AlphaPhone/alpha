@@ -88,3 +88,30 @@ pure def lawAnotherAccountNeverSends(count: int): bool = not(sendRecipientsOk(co
 pure def alwaysAFinalCardIsNeverSendable(e: EmailCard): bool = finalState(e.state) implies not(sendable(e))
 pure val countValues = Set(1, 2, 21)
 ```
+
+### Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity
+
+Each card is kept by the agent message that drafted it on the shelf of its
+conversation's binding (origin, owner, agent and conversation), at most
+twenty per conversation, newest last; a reload of that conversation shows
+every card it kept, declined and sent ones included, in its last state,
+and never one of another conversation or account. A turn that drafted a
+card already on the shelf shows the kept card, never a second one. An edit
+applies only to the version the card shows and is kept at once, each edit
+a new version. Version one, the card as drafted, is sent under the request
+identity of the owner turn that asked for it; every later version under
+one derived from the card and that version.
+
+```quint
+type CardIdentity = OwnerTurnIdentity | VersionIdentity
+pure val shelfLimit = 20
+pure def identityOf(version: int): CardIdentity = if (version == 1) OwnerTurnIdentity else VersionIdentity
+pure def editAccepted(editable: bool, shownVersion: int, version: int): bool = editable and shownVersion == version
+pure def restored(sameConversation: bool, sameAccount: bool): bool = sameConversation and sameAccount
+pure def stagedAgain(onShelf: bool): bool = not(onShelf)
+pure def lawAStaleEditIsRefused(version: int): bool = not(editAccepted(true, version, version + 1))
+pure def lawAnEditedCardHasItsOwnIdentity(version: int): bool = version >= 2 implies identityOf(version) == VersionIdentity
+pure def lawAnotherConversationsCardIsNeverRestored(account: bool): bool = not(restored(false, account))
+pure def lawAShelvedCardIsNeverStagedTwice(x: bool): bool = not(stagedAgain(true))
+pure val versionValues = Set(1, 2, 3)
+```

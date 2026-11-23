@@ -1,8 +1,8 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.auth.cloud.CloudEmailCode;
-import ai.eliza.auth.cloud.CloudSignInEnvironment;
-import ai.eliza.plugins.agent.connection.ConnectionTransport;
+import ai.alphacompute.alphaphone.cloud.CloudEmailCode;
+import ai.alphacompute.alphaphone.cloud.CloudSignInEnvironment;
+import ai.alphacompute.alphaphone.connection.ConnectionTransport;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;

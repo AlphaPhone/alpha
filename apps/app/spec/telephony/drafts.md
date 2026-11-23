@@ -255,8 +255,14 @@ pure def sometimesBothDraftsKept(d: Drafts): bool = d.requests.length() > 0 and 
 Drafts, requests and the comms stage are kept under the account signed in at each read and write.
 What was kept while signed out (the phone's own `device` namespace) moves to the first account
 that signs in when that account has nothing kept, and is then removed from the phone's namespace,
-so a later account never receives it. An account's own kept state is never replaced; a damaged
-record is never moved. Nothing is sent or proposed by the move.
+so a later account never receives it. The pictures its drafts hold move with it, and leave the
+phone's namespace only once the drafts are the account's. An account's own kept state is never
+replaced; a damaged record is never moved. Nothing is sent or proposed by the move. What the apps
+show follows the account: each time the signed-in account's namespace becomes another than the one
+shown, its drafts and comms stage are read again from that namespace, and a proposal read that way is
+shown restored. A kept record that is not a state is held for review, as spec/platform/storage.md
+holds such a value, and that account starts with nothing kept; where it cannot be held, the account's
+state runs in memory and the record is never written over.
 
 ```quint
 type Kept = NothingKept | KeptState | KeptDamaged

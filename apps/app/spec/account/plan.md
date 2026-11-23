@@ -206,7 +206,9 @@ pure def sometimesRedeemedEndPassed(a: Admission): bool = a.redeemed and a.redee
 ### A check runs at most once a minute, once at once after a real network return, and once after a payment page
 
 A failed server read creates no network-return permit; one that started offline does. A permit
-belongs to the sign-in it was earned under. A check needs the app in the foreground.
+belongs to the sign-in it was earned under. A check needs the app in the foreground. The network is
+the app's as the platform's AppLifecycle reports it (spec/platform/lifecycle.md); an unknown network
+changes nothing.
 
 ```quint
 pure val minutesValues = Set(1)

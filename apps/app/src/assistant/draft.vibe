@@ -1,4 +1,4 @@
-// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/noticeQuestion.md, "A workflow approval notice is asked about through a reviewed excerpt, rechecked and consumed at Add to chat, and asking never decides the step"
+// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "A file's question is reviewed before it joins the draft: \"Use excerpt\" for its text, its name alone for a file too large, and its source line only while linked"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/noticeQuestion.md, "A workflow approval notice is asked about through a reviewed excerpt, rechecked and consumed at Add to chat, and asking never decides the step"
 import type { CameraHandoffs, FrameQuestion, PhotoAttachment } from "../camera/ports.vibe"
 import { sensitiveText } from "../platform/sensitive.ts"
 import { Assistant } from "./assistant.vibe"
@@ -7,6 +7,7 @@ import { Composer } from "./composer.vibe"
 import { AssistantHost } from "./host.vibe"
 import { blobOf } from "./image-encode.ts"
 import { workflowAskComposes } from "../../gen/assistant__noticeQuestion.effect.vibe"
+import { askLabel, composes, namesSource, type FileAsk } from "../../gen/assistant__attachments.effect.vibe"
 import { OwnNotices } from "./ports.vibe"
 
 /** What another area asks the assistant about: a page, a frame or a passage, and the question the review starts with. */
@@ -18,6 +19,8 @@ export interface AskSource {
   readonly image?: Blob
   /** One of Alpha's own notices the question is about, rechecked at the revision the owner saw and consumed once when it joins the draft. */
   readonly notice?: { readonly id: string; readonly revision: string }
+  /** A file from Files: its text as the excerpt, or only its name when it is too large to attach. */
+  readonly file?: FileAsk
 }
 
 /** A question the owner reviews before it joins the draft; nothing is sent from the review. */
@@ -30,6 +33,10 @@ export interface QuestionReview {
   readonly image?: Blob
   readonly notice: string
   readonly about?: { readonly id: string; readonly revision: string }
+  /** The review's title: "Use excerpt" for a file's text, else "Ask Alpha". */
+  readonly label: string
+  /** For a file, how its question is asked; the review then offers "Link source". */
+  readonly file?: FileAsk
 }
 
 /** The longest question a review takes. */
@@ -43,12 +50,23 @@ const notices = {
   secrets: "Remove secrets first",
   full: "Remove an attachment before adding another.",
   changed: "This notification changed or is gone. Nothing was added.",
+  sourceOnly: "Too large to attach. Only its name goes with your question.",
 } as const
 
-/** The draft a reviewed question composes: the question, its source and the excerpt. */
-export function questionDraft(question: string, name: string, url: string | undefined, excerpt: string): string {
+/** The question a workflow approval notice starts its review with. */
+export const workflowStepQuestion = "Help me decide on this workflow step."
+
+/** What a workflow approval notice asks about: the step Clock resolved under the current agent, bound to the notice at the revision the owner saw. */
+export function workflowStepSource(notice: { readonly id: string; readonly revision: string }, workflow: string, step: string, excerpt: string): AskSource {
+  const name = workflow.trim() === "" ? "Workflow step" : `${workflow.trim()} · ${step.trim() === "" ? "step" : step.trim()}`
+  return { name, text: excerpt, question: workflowStepQuestion, notice }
+}
+
+/** The draft a reviewed question composes: the question, its source while linked, and the excerpt. */
+export function questionDraft(question: string, name: string, url: string | undefined, excerpt: string, linked: boolean = true): string {
   const source = url !== undefined && url !== "" && url !== name ? `${name} (${url})` : name
-  return excerpt.trim() === "" ? `${question.trim()}\n\nSource: ${source}` : `${question.trim()}\n\nSource: ${source}\n\n${excerpt.trim()}`
+  const parts = [question.trim(), ...(namesSource(linked) ? [`Source: ${source}`] : []), ...(excerpt.trim() === "" ? [] : [excerpt.trim()])]
+  return parts.join("\n\n")
 }
 
 /** Questions other areas hand to the assistant, reviewed by the owner and then composed into the draft once. */
@@ -57,8 +75,8 @@ export service AssistantDraft {
   readonly review: Stream.Stream<QuestionReview | undefined>
   /** Open the review of a question about a page, passage or frame; a newer one replaces it. */
   askAbout(source: AskSource): void!!
-  /** The owner chose Add to chat: the question joins the draft once, and the sheet opens; false keeps the review with its notice. */
-  compose(id: number, question: string, excerpt: string): boolean!!
+  /** The owner chose Add to chat: the question joins the draft once, its source line only while `linked`, and the sheet opens; false keeps the review with its notice. */
+  compose(id: number, question: string, excerpt: string, linked?: boolean): boolean!!
   /** The owner left the review; nothing joins the draft. */
   dismiss(id: number): void!!
   /** Back while a review is open: leave it; false when none was open. */
@@ -83,19 +101,23 @@ export const draftLayer = Layer.effect(AssistantDraft, effect {
       next += 1
       const question = (source.question ?? (source.image === undefined ? "Summarize this excerpt." : "What does this mean?")).slice(0, questionLimit)
       try SubscriptionRef.set(review, {
-        id: next, name: source.name, text: source.text.slice(0, excerptLimit), question,
-        notice: source.text.length > excerptLimit ? notices.truncated : "",
+        id: next, name: source.name, text: source.file === "SourceAsk" ? "" : source.text.slice(0, excerptLimit), question,
+        notice: source.file === "SourceAsk" ? notices.sourceOnly : source.text.length > excerptLimit ? notices.truncated : "",
+        label: source.file === undefined ? "Ask Alpha" : askLabel(source.file),
         ...(source.url === undefined ? {} : { url: source.url }), ...(source.image === undefined ? {} : { image: source.image }),
         ...(source.notice === undefined ? {} : { about: source.notice }),
+        ...(source.file === undefined ? {} : { file: source.file }),
       })
     },
-    compose: (id: number, question: string, excerpt: string) => effect {
+    compose: (id: number, question: string, excerpt: string, linked: boolean = true) => effect {
       const open = try SubscriptionRef.get(review)
       if (open === undefined || open.id !== id) return false
       const asked = question.slice(0, questionLimit)
-      const passage = excerpt.slice(0, excerptLimit)
-      if (asked.trim() === "" || (passage.trim() === "" && open.image === undefined)) return try refuse(open, notices.empty)
-      if (sensitiveText(passage)) return try refuse(open, notices.secrets)
+      const passage = open.file === "SourceAsk" ? "" : excerpt.slice(0, excerptLimit)
+      const secret = sensitiveText(passage)
+      if (open.file !== undefined && !composes(open.file, asked.trim() !== "", passage.trim() !== "", secret)) return try refuse(open, secret ? notices.secrets : notices.empty)
+      if (asked.trim() === "" || (passage.trim() === "" && open.image === undefined && open.file !== "SourceAsk")) return try refuse(open, notices.empty)
+      if (secret) return try refuse(open, notices.secrets)
       if (open.about !== undefined) {
         const listed = try owned.current(open.about.id)
         const same = listed !== undefined && listed.id === open.about.id && listed.revision === open.about.revision
@@ -112,7 +134,7 @@ export const draftLayer = Layer.effect(AssistantDraft, effect {
         if (!added) return try refuse(open, notices.full)
       }
       try SubscriptionRef.set(review, undefined)
-      try assistant.openWith(questionDraft(asked, open.name, open.url, passage))
+      try assistant.openWith(questionDraft(asked, open.name, open.url, passage, open.file === undefined || linked))
       return true
     },
     dismiss: (id: number) => effect {

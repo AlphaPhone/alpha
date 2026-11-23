@@ -27,7 +27,7 @@ bound to the agent session that listed it.
 Opening a view (Settings included, which is navigation and never a settings
 write), creating a note, opening a typed address in Browser, taking a photo
 and opening a file may run directly; creating a reminder, reading notes,
-reading or changing Calendar, changing files (share, move, trash, a new
+reading reminders, reading the place or route Maps shows, reading or changing Calendar, changing files (share, move, trash, a new
 folder), changing Photos, and calls, texts and contact changes always need
 review. An operation that would change a setting never becomes
 a card. A Browser open needs the address the owner typed and runs at most
@@ -35,7 +35,7 @@ once per message.
 
 ```quint
 type Op = OpenView | OpenSettings | CreateNote | BrowserNavigate | CameraCapture | FilesOpen | CreateReminder | NotesRead
-  | CalendarRead | CalendarWrite | FilesChange | PhotosChange | CommsAct | SettingsWrite
+  | RemindersRead | MapsRead | CalendarRead | CalendarWrite | FilesChange | PhotosChange | CommsAct | SettingsWrite
 type Preference = PreferenceOff | PreferenceOn | PreferenceUnreadable
 type Journal = JournalEmpty | JournalReserved | JournalApplying | JournalTerminal
 type Authority = NoAuthority | ByReview | ByRequest
@@ -60,7 +60,8 @@ pure val initial: Custody = {
 }
 pure def directOp(op: Op): bool = op == OpenView or op == OpenSettings or op == CreateNote or op == BrowserNavigate or op == CameraCapture or op == FilesOpen
 pure def reviewedOp(op: Op): bool =
-  op == CreateReminder or op == NotesRead or op == CalendarRead or op == CalendarWrite or op == FilesChange or op == PhotosChange or op == CommsAct
+  op == CreateReminder or op == NotesRead or op == RemindersRead or op == MapsRead or op == CalendarRead or op == CalendarWrite
+    or op == FilesChange or op == PhotosChange or op == CommsAct
 pure def lawAReviewedClassIsNeverDirect(op: Op): bool = reviewedOp(op) implies not(directOp(op))
 pure def parses(op: Op): bool = directOp(op) or reviewedOp(op)
 pure def valid(c: Custody): bool = c.fresh and not(c.sensitive or c.expired or c.aborted)
@@ -240,7 +241,9 @@ current message gets the notice "I only open a site or search you ask for
 yourself" with an example, and no card; a grounded one that is not a
 direct command keeps its review card. A Browser open of a link of the
 page my message carried ([Turn context](./context.md)), exactly as the page
-gave it, also keeps its review card and never opens on its own (#1444). A
+gave it, also keeps its review card and never opens on its own (#1444): the
+page's words are not the owner's, so such an open counts as not typed even
+when its family grounds it for a card. A
 Browser tab switch that matches several tabs never runs directly.
 
 ```quint
@@ -254,6 +257,8 @@ pure def lawAnUntypedNumberNeverDials(typed: bool): bool = typed or not(keypadDi
 pure def lawOnePhotoPerMessage(own: bool, length: int): bool = not(photoDirect(own, length, true))
 pure def lawAnAmbiguousTabNeedsTheOwner(grounded: bool, command: bool): bool = not(browserDirect(grounded, command, true))
 pure def browserCarded(grounded: bool, pageLink: bool): bool = grounded or pageLink
+pure def ownerTyped(grounded: bool, pageLink: bool): bool = grounded and not(pageLink)
+pure def lawAPageLinkIsNeverOwnerTyped(grounded: bool): bool = not(ownerTyped(grounded, true))
 pure def lawAPageLinkKeepsItsCardAndNeverRunsDirectly(command: bool): bool = browserCarded(false, true) and not(browserDirect(false, command, false))
 pure def lawAnUngroundedOpenGetsTheNotice(pageLink: bool): bool = not(browserCarded(false, pageLink)) implies browserNoticeInstead(false)
 pure val lengthValues = Set(0, 1, 512, 513)
@@ -279,4 +284,77 @@ pure def lawAnUnlistedSetIsNeverACard(l: Listing): bool = (l == Unlisted or l ==
 pure def lawAnItemizedCardNeedsTheLatestListing(l: Listing): bool = l != NotItemized implies not(approvable(l, false))
 pure def lawEveryOfferIsACardOrANotice(l: Listing): bool = cardOffered(l) or noticeInstead(l)
 pure val lValues = Set(NotItemized, Unlisted, ListedEmpty, Listed)
+```
+
+## Story: Find what a card is about
+
+> As the owner, I want a card's link to open the view its action is about,
+> so that I can check a reminder, a note or a place before I approve.
+
+### A card opens the view its family names, or else the view of its operation's class
+
+A family that names a destination keeps it. Otherwise a reminder, read or
+created, opens Reminders; a note or a note read opens Notes; a Calendar
+read or change opens Calendar; a file opens Files; a photo change opens
+Photos and a capture Camera; a Browser open opens Browser; a Maps read
+opens Maps; a view or a Settings page opens nothing of its own, and a call,
+text or contact change opens the app its family names.
+
+```quint
+pure def destinationOf(op: Op): str = match op {
+  | CreateReminder => "reminders" | RemindersRead => "reminders" | CreateNote => "notes" | NotesRead => "notes"
+  | CalendarRead => "calendar" | CalendarWrite => "calendar" | FilesOpen => "files" | FilesChange => "files"
+  | PhotosChange => "photos" | CameraCapture => "camera" | BrowserNavigate => "browser" | MapsRead => "maps"
+  | OpenView => "" | OpenSettings => "settings" | CommsAct => "" | SettingsWrite => "" }
+pure def lawAReminderCardOpensReminders(op: Op): bool = (op == CreateReminder or op == RemindersRead) implies destinationOf(op) == "reminders"
+pure def lawAMapsReadOpensMaps(op: Op): bool = op == MapsRead implies destinationOf(op) == "maps"
+pure val opValues = Set(CreateReminder, RemindersRead, MapsRead, NotesRead, CommsAct, OpenView)
+```
+
+## Story: Approve a call or text where I am talking
+
+> As the owner, I want a call, text or contact card to wait on the Phone,
+> Messages and Contacts bar too, one at a time, and to act only once
+> whichever of the two I approve it from.
+
+### A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once
+
+Every listed call, dial, text, read or contact card is proposed to the
+comms stage (`spec/telephony/comms.md`) with the words its card shows; a
+newer one replaces the open one, and one that acts is dropped while an
+emergency call is live. Approving it in the chat first approves it on the
+stage, and a card the stage no longer holds open is not approved; approving
+it from the comms bar approves it on the stage and then runs it through
+this review, never twice. Declining it anywhere declines it on both.
+
+```quint
+pure def commsApproved(stageOpen: bool, live: bool, emergencyActs: bool): bool = stageOpen and live and not(emergencyActs)
+pure def runsOnce(fromChat: bool, fromBar: bool): bool = not(fromChat and fromBar)
+pure def lawAReplacedCommsCardNeverRuns(live: bool): bool = not(commsApproved(false, live, false))
+pure def lawNothingActsOverAnEmergencyCall(open: bool): bool = not(commsApproved(open, true, true))
+pure def lawBothRoutesNeverBothRun(fromChat: bool): bool = runsOnce(fromChat, false) and not(runsOnce(true, true))
+```
+
+## Story: Let a workflow use my phone only for the step I approved
+
+> As the owner, I want a phone step of a workflow to run only for the run
+> and step I approved in Workflows, exactly once, so that a workflow never
+> acts in the chat or on its own.
+
+### A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run
+
+A proposal whose binding names a workflow run is never listed in the chat
+and never runs directly. Once the owner approved the step in Workflows and
+the agent admitted it, the step's review asks the device review for the
+proposal bound to exactly that run and step; it runs once as reviewed, and
+its executor learns the run, version and step it serves, so a Notes save
+or a notification knows it is a workflow's. Another run's or step's
+proposal is left alone.
+
+```quint
+pure def workflowStepRuns(bound: bool, sameRun: bool, sameStep: bool, admitted: bool, consumed: bool): bool =
+  bound and sameRun and sameStep and admitted and not(consumed)
+pure def lawAnotherRunsProposalNeverRuns(step: bool): bool = not(workflowStepRuns(true, false, step, true, false))
+pure def lawAWorkflowStepRunsOnce(run: bool): bool = not(workflowStepRuns(true, run, true, true, true))
+pure def lawAnUnboundProposalIsNotAStep(run: bool): bool = not(workflowStepRuns(false, run, true, true, false))
 ```

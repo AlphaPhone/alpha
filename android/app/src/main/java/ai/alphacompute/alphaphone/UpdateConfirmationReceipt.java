@@ -1,6 +1,6 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.plugins.agent.updater.RuntimeUpdatePause.Record;
+import ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.Record;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageInstaller;

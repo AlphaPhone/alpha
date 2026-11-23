@@ -5,8 +5,11 @@ The renderer's connection to the agent that runs on the phone, through the agent
 its inference. A connection is one verified owner session with exactly one running agent, bound to
 the Cloud account the renderer knew when it was verified. Every start, account change, loss and stop
 begins a new generation, and an answer that belongs to an older generation changes nothing, so a
-reply meant for an earlier account or an earlier process is never shown. The request protocol
-itself (one shared startup, refusals, streams sent at most once) is `@elizaos/agent/client`'s.
+reply meant for an earlier account or an earlier process is never shown. Startup, verification and
+the development host off the phone use `@elizaos/agent/client`'s protocol (one shared startup,
+refusals). On the phone each request and each stream goes to the agent service under its own id,
+carrying the device headers the platform admits, so it can be withdrawn. A stream is sent once,
+and it ends as unavailable at its next frame once its generation is over.
 
 ## Domain
 

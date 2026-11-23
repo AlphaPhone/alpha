@@ -1,10 +1,12 @@
-// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Talk to my agent from the power button at cold start"; spec/account/plan.md, "Story: Use my plan's AI on the phone"; spec/account/plan.md, "Story: See what my account needs when setup ends"; spec/account/billing.md, "Story: Add funds"; spec/account/google.md, "Story: Connect my Google account with the access I choose"; spec/account/limits.md, "Story: Know when I can use a limited service again"
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Talk to my agent from the power button at cold start"; spec/account/plan.md, "Story: Use my plan's AI on the phone"; spec/account/plan.md, "Story: See what my account needs when setup ends"; spec/account/billing.md, "Story: Add funds"; spec/account/google.md, "Story: Connect my Google account with the access I choose"; spec/account/limits.md, "Story: Know when I can use a limited service again"; spec/account/billing.md, "Story: Choose or change my plan in Alpha"
 import { assert, it } from "@effect/vitest"
 import { CloudSession } from "../../src/account/session.vibe"
 import { Entitlement } from "../../src/account/entitlement.vibe"
 import { Membership } from "../../src/account/billing.vibe"
 import { GoogleAccounts } from "../../src/account/google.vibe"
-import { VoiceLimit } from "../../src/account/limits.vibe"
+import { authorityOf, stripePageAllowed } from "../../src/account/deployment.ts"
+import { clefAllows, limitDisplay, limitOfError, limitOfRefusal, readLimit } from "../../src/account/limits.vibe"
+import { CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { SignInScreen } from "../../src/account/signIn.vibe"
 import {
   accountRowsOf, agentBindingOf, attentionOf, connectionFactsOf, idleOf, mapsBindingOf, planLimitOf, powerLaunchOf, readyChipsOf, storageOwnerOf, voiceAccountOf
@@ -138,24 +140,45 @@ it.live(`Connect Google for one capability after a current read, keeping what it
 
 // spec/account/limits.md, "Story: Know when I can use a limited service again"
 it.effect(`Read a refusal's wait (spec/account/limits.md, "Story: Know when I can use a limited service again")`, () => effect {
-  provide account([]) {
-    const limits = try VoiceLimit
-    const fromBody = try limits.read(null, { error: { code: "rate_limited", retryAfterSeconds: 0.2 } })
-    const fromHeader = try limits.read("30", {})
-    const tooLong = try limits.read("90000", {})
-    const fromError = try limits.ofError({ code: "voice-http-429", data: { retryAfterSeconds: 12, limitCode: "clef_daily" } })
-    const other = try limits.ofError({ code: "voice-http-500" })
-    const shown = try limits.display({ limitCode: "subscription_required" })
-    // spec/account/limits.md, "Semantic end-of-turn has a daily quota, after which only a subscription continues"
-    const quota = [try limits.clef("ClefFree", 1999), try limits.clef("ClefFree", 2000), try limits.clef("ClefFunded", 3999), try limits.clef("ClefSubscribed", 9000)]
-    try Effect.try(() => assert.deepStrictEqual(
-      { fromBody, fromHeader, tooLong, fromError, other, card: shown.card, quota },
-      {
-        fromBody: { retryAfterSeconds: 1, limitCode: "rate_limited" }, fromHeader: { retryAfterSeconds: 30 }, tooLong: {},
-        fromError: { retryAfterSeconds: 12, limitCode: "clef_daily" }, other: undefined, card: "ChoosePlanCard", quota: [true, false, true, true]
-      }
-    ))
-  }
+  const at = 1_000_000
+  const fromBody = readLimit(null, { error: { code: "rate_limited", retryAfterSeconds: 0.2 } }, at)
+  const fromHeader = readLimit("30", {}, at)
+  const tooLong = readLimit("90000", {}, at)
+  const fromError = limitOfError({ code: "voice-http-429", data: { retryAfterSeconds: 12, limitCode: "clef_daily" } })
+  const other = limitOfError({ code: "voice-http-500" })
+  const shown = limitDisplay({ limitCode: "subscription_required" }, at)
+  // spec/account/limits.md, "A wait is between one second and one day, or there is none"
+  const refusal = limitOfRefusal(new CloudUnavailable({ status: 429, code: "allowance_exhausted", message: "spent", retryAfter: 120, resetAt: at + 86400000 }), at)
+  const stale = limitOfRefusal(new CloudUnavailable({ status: 429, code: "Not A Code", message: "spent", retryAfter: 90000, resetAt: at - 1 }), at)
+  // spec/account/limits.md, "A refusal names a plan, an allowance or a wait, and a limit is shown only until it passes"
+  const allowance = limitDisplay(refusal, at)
+  const passed = limitDisplay(refusal, at + 86400001)
+  // spec/account/limits.md, "Semantic end-of-turn has a daily quota, after which only a subscription continues"
+  const quota = [clefAllows("ClefFree", 1999), clefAllows("ClefFree", 2000), clefAllows("ClefFunded", 3999), clefAllows("ClefSubscribed", 9000)]
+  try Effect.try(() => assert.deepStrictEqual(
+    { fromBody, fromHeader, tooLong, fromError, other, card: shown.card, refusal, stale, allowance: [allowance.limit.tag, allowance.shown, allowance.card], passed: passed.shown, quota },
+    {
+      fromBody: { retryAfterSeconds: 1, limitCode: "rate_limited" }, fromHeader: { retryAfterSeconds: 30 }, tooLong: {},
+      fromError: { retryAfterSeconds: 12, limitCode: "clef_daily" }, other: undefined, card: "ChoosePlanCard",
+      refusal: { retryAfterSeconds: 120, limitCode: "allowance_exhausted", resetAt: at + 86400000 }, stale: {},
+      allowance: ["AllowanceExhausted", true, "ManagePlanCard"], passed: false, quota: [true, false, true, true]
+    }
+  ))
+})
+
+// spec/account/billing.md, "A payment page opens only on a Stripe host the phone's link policy opens"
+it.effect(`Open only the payment pages the phone's link policy opens (spec/account/billing.md, "Story: Choose or change my plan in Alpha")`, () => effect {
+  const pages = [
+    "https://checkout.stripe.com/c/pay/plus", "https://billing.stripe.com/p/session/1", "https://invoice.stripe.com/i/acct/inv",
+    "http://checkout.stripe.com/c/pay/plus", "https://checkout.stripe.com:8443/c", "https://user:pw@checkout.stripe.com/c", "https://checkout.stripe.com.example/c"
+  ]
+  // spec/account/session.md, "The build addresses one deployment, and staging only with test mocks or the Cloud resident's browser preview"
+  const eliza = authorityOf("ElizaCloud", "Production")
+  const alpha = authorityOf("AlphaCloud", "Staging")
+  try Effect.try(() => assert.deepStrictEqual(
+    { opens: pages.map(stripePageAllowed), agents: [eliza.agents, alpha.agents], alphaWeb: alpha.web },
+    { opens: [true, true, false, false, false, false, false], agents: [new URL(eliza.services).host, "cloud-staging.alphacompute.cc"], alphaWeb: "https://cloud-staging.alphacompute.cc" }
+  ))
 })
 
 // spec/account/session.md, "Story: Sign in once for Cloud's managed services"

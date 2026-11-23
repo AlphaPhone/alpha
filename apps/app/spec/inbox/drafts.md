@@ -4,7 +4,9 @@ Every email the owner writes is a local draft on this phone first, kept with the
 written from: the owner key is the Cloud environment, user, organization and Gmail grant. Each
 account has at most one open draft, the one in the composer, and a shelf of set-aside drafts shown
 in Drafts. The state is kept whole on the phone and survives restarts, an app update and account
-switches; it never mixes accounts. Edits reach it coalesced, a pause in typing at a time.
+switches; it never mixes accounts. Edits reach it coalesced, a pause in typing at a time. Where what
+is kept does not read back as drafts, it is set apart in the same secure store for review, as
+spec/platform/storage.md holds such a value, and Drafts starts empty rather than write over it.
 
 ## Story: Keep what I write, with the account I wrote it from
 
@@ -396,7 +398,9 @@ as an earlier version of a sent email. The recovery copy is newer than the saved
 id and replaces it. A draft already open or shelved is kept, so a second pass adds nothing. Only
 the account bound now receives drafts, a full shelf takes none, and the previous slots are cleared
 only once every meaningful draft is kept, so an interrupted pass resumes on the next binding; an
-unreadable slot is never cleared.
+unreadable slot is never cleared. On the phone, each previous slot is first moved out of the earlier
+connection plugin's encrypted slot of the same name into the secure store, as spec/platform/storage.md
+moves a legacy slot, before it is read.
 
 ```quint
 pure def canKeepPrevious(s: Drafts, owner: str, draft: Draft, shelfBytes: int): bool = {

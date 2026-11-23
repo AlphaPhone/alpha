@@ -198,7 +198,7 @@ describe("Reminder reads (spec/clock/reminderReads.md, \"Story: Let a workflow r
         },
         {
           kind: "applied", ids: [["overdue", "open"], ["done", "completed"], ["today", "open"]], notes: false,
-          overflow: ["refused", "reminders_overflow", 1], cls: "CalendarRead", handoff: false,
+          overflow: ["refused", "reminders_overflow", 1], cls: "RemindersRead", handoff: false,
         },
       ))
     }

@@ -1,4 +1,4 @@
-// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/canonicalTaps.md, "Story: Open the view a notification names"; spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/mirror.md, "Story: Choose which apps Alpha may mirror"; spec/clock/mirror.md, "Story: Know whether Alpha's own notices can reach me"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/clock/notices.md, "Story: Be told my data was kept"; spec/clock/notices.md, "Story: Recover unreadable data while developing"
+// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/canonicalTaps.md, "Story: Open the view a notification names"; spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/mirror.md, "Story: Choose which apps Alpha may mirror"; spec/clock/mirror.md, "Story: Know whether Alpha's own notices can reach me"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/clock/notices.md, "Story: Be told my data was kept"; spec/clock/notices.md, "Story: Recover unreadable data while developing"
 // @vitest-environment happy-dom
 import { assert, describe, it } from "@effect/vitest"
 import { Machine as ShadeMachine } from "../../gen/clock__notifications.effect.vibe"
@@ -46,6 +46,33 @@ describe("Notifications (spec/clock/notifications.md, \"Story: Act on exactly th
         { changed: "ReportChanged", ongoing: "ReportOngoing", cleared: { items: [{ id: "reminder-1", revision: "v1", source: "own" }] }, dismissed: 0, closed: 0 },
       ))
     }
+  })
+})
+
+describe("Asking about a notice (spec/clock/notifications.md, \"Story: Ask Alpha about one of its notifications\")", () => {
+  // spec/clock/notifications.md, "The phone consumes a notice once, at the revision asked about; a phone without that call consumes it once for this session"
+  it.effect("the phone consumes a notice once at the revision listed, and a phone without that call consumes it once per session (spec/clock/notifications.md, \"The phone consumes a notice once, at the revision asked about; a phone without that call consumes it once for this session\")", () => effect {
+    const answers = ["consumed", "already-consumed"]
+    const items = [row("reminder-1", "v2")]
+    const phone = fakePhone({
+      "AlphaNotifications.list": () => ({ items, scope: "device" }),
+      "AlphaNotifications.consumeOwnNotice": () => ({ status: answers.shift() ?? "gone" }),
+    })
+    const older = fakePhone({ "AlphaNotifications.list": () => ({ items, scope: "device" }) })
+    let consumed: boolean[] = []
+    let unsupported: boolean[] = []
+    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, fakeAssistant().layer {
+      const notifications = try Notifications
+      consumed = [try notifications.consume("reminder-1"), try notifications.consume("reminder-1"), try notifications.consume("missing")]
+    }
+    provide Layer.provideMerge(notificationsLayer, machines), older.layer, fakeAssistant().layer {
+      const notifications = try Notifications
+      unsupported = [try notifications.consume("reminder-1"), try notifications.consume("reminder-1")]
+    }
+    try Effect.try(() => assert.deepStrictEqual(
+      { consumed, unsupported, sent: phone.calls.filter((c) => c.method === "consumeOwnNotice").map((c) => c.args) },
+      { consumed: [true, false, false], unsupported: [true, false], sent: [{ id: "reminder-1", revision: "v2" }, { id: "reminder-1", revision: "v2" }] },
+    ))
   })
 })
 

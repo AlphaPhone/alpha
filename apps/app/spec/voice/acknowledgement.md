@@ -7,21 +7,29 @@ reply's own speaker on the conversation's route, and it never talks over the rep
 The planner status that carries the line is a frame of the turn's reply stream
 (`@elizaos/agent/client` `readReplyStream`); a stream that drops before its last frame is sent
 once more without streaming under the same message id, and that resend carries no status, so its
-turn says no line. Everything here is what Alpha decides about the line.
+turn says no line.
+
+How long a cue waits, when a ready reply drops it and how long an audible one may hold the reply
+are the assistant's spoken-cue rule ([reply](../assistant/reply.md), "A spoken cue waits 300 ms and
+is dropped when the reply is ready first; an audible cue finishes before the reply, within
+2.5 s"), and voice speaks its cue through the assistant's `spokenCue`. What voice decides is
+which line it gives that cue, when the microphone lets it speak, and what ends a turn's cue
+(#1450).
 
 ## Domain
 
-### A turn's cue holds its stage, whether the reply is ready, whether the turn retired it, whether the reply waits on its bound, and what was spoken, heard, dropped and cut
+### A turn's cue holds whether its line was taken, whether the reply is ready, whether the turn retired it, whether it is audible now and how often it was heard
 
 ```quint
-type CueStage = NoCue | Held | Preparing | Audible | Ended
+import reply as R from "../assistant/reply"
 type Activity = Thinking | RunningAction | RunningTool | OtherActivity
-type Cue = { stage: CueStage, final: bool, retired: bool, bounded: bool, spoken: int, heard: int, dropped: int, clipped: int }
-pure val initial: Cue = { stage: NoCue, final: false, retired: false, bounded: false, spoken: 0, heard: 0, dropped: 0, clipped: 0 }
-pure val cueHoldMs = 300
-pure val cueReplyBoundMs = 2500
-pure val cueLabelChars = 160
-pure val labelCharsValues = Set(0, 1, 24, 160, 161)
+type CueTurn = { used: bool, final: bool, retired: bool, speaking: bool, heard: int }
+pure val initial: CueTurn = { used: false, final: false, retired: false, speaking: false, heard: 0 }
+pure val cueHoldMs = R::cueHoldMs
+pure val cueReplyBoundMs = R::cueReplyBoundMs
+pure val cueLabelChars = R::ackLimit
+pure val labelCharsValues = Set(0, 1, 24, 120, 121, 160)
+pure val waitedMsValues = Set(0, 299, 300, 2499, 2500, 6000)
 ```
 
 ## Story: Hear that Alpha is working on it, never over its answer
@@ -30,44 +38,44 @@ pure val labelCharsValues = Set(0, 1, 24, 160, 161)
 > never have it cut off by the answer or the answer wait long behind it, so that I know Alpha heard
 > me and still get the answer at once.
 
-### Only the planner's own thinking line, of 1 to 160 characters, is spoken, and only once a turn
+### Only the planner's own thinking line, of 1 to 120 characters, is spoken, and only once a turn
 
 A named tool or action with no line of the model's own, a line on a tool or action status, and an
 empty or longer line stay visual only and do not use up the turn's cue. A second status in the
-same turn says nothing more.
+same turn says nothing more. The limit is the agent's acknowledgment grammar, which never writes a
+cue over 120 characters.
 
 ```quint
 pure def admittedLine(activity: Activity, labelChars: int): bool =
   activity == Thinking and labelChars >= 1 and labelChars <= cueLabelChars
+pure def canProgress(t: CueTurn, activity: Activity, labelChars: int, microphoneClear: bool): bool =
+  not(t.used) and not(t.final) and not(t.retired)
+pure def progress(t: CueTurn, activity: Activity, labelChars: int, microphoneClear: bool): CueTurn =
+  if (admittedLine(activity, labelChars) and microphoneClear) { ...t, used: true } else t
 pure def lawOnlyAModelLineIsSpoken(activity: Activity, labelChars: int): bool =
-  admittedLine(activity, labelChars) implies (activity == Thinking and labelChars >= 1 and labelChars <= 160)
-pure def alwaysOneCueATurn(c: Cue): bool =
-  c.spoken >= 0 and c.spoken <= 1 and c.heard >= 0 and c.heard <= c.spoken
-  and c.dropped >= 0 and c.dropped + c.heard <= c.spoken and c.clipped >= 0 and c.clipped <= c.heard
-  and ((c.stage == NoCue or c.stage == Held) implies c.spoken == 0)
-  and (c.stage == Preparing implies (c.spoken == 1 and c.heard == 0 and c.dropped == 0))
-  and (c.stage == Audible implies (c.heard == 1 and c.clipped == 0))
-pure def sometimesALineWithheld(c: Cue): bool = c.final and c.stage == NoCue
+  admittedLine(activity, labelChars) implies (activity == Thinking and labelChars >= 1 and labelChars <= 120)
+pure def lawTheLineFitsTheAssistantsCue(activity: Activity, labelChars: int): bool =
+  admittedLine(activity, labelChars) implies labelChars <= R::ackLimit
+pure def alwaysOneCueATurn(t: CueTurn): bool =
+  t.heard >= 0 and t.heard <= 1 and (t.heard == 1 implies t.used) and (t.speaking implies t.heard == 1)
+pure def sometimesALineWithheld(t: CueTurn): bool = t.final and not(t.used)
 ```
 
 ### The cue waits 300 ms before it speaks, and only with the microphone retired or held open for barge-in
 
-A recorded clip's capture must already be closed when the hold ends, or the cue is not spoken; a
-live, echo-cancelled capture stays open and hears the cue as Alpha's own speech.
+A recorded clip's capture must already be closed when the status arrives and again when the hold
+ends, or the cue is not spoken; a live, echo-cancelled capture stays open and hears the cue as
+Alpha's own speech.
 
 ```quint
-pure def canProgress(c: Cue, activity: Activity, labelChars: int, microphoneClear: bool): bool =
-  c.stage == NoCue and not(c.final) and not(c.retired)
-pure def progress(c: Cue, activity: Activity, labelChars: int, microphoneClear: bool): Cue =
-  if (admittedLine(activity, labelChars) and microphoneClear) { ...c, stage: Held } else c
-pure def canHoldElapsed(c: Cue, microphoneClear: bool): bool = c.stage == Held
-pure def holdElapsed(c: Cue, microphoneClear: bool): Cue =
-  if (microphoneClear) { ...c, stage: Preparing, spoken: c.spoken + 1 } else { ...c, stage: Ended }
-pure def canAudible(c: Cue): bool = c.stage == Preparing
-pure def audible(c: Cue): Cue = { ...c, stage: Audible, heard: c.heard + 1 }
-pure def stepANewCueNeverStartsAfterTheReply(before: Cue, after: Cue): bool =
-  after.spoken > before.spoken implies (not(before.final) and not(before.retired))
-pure def sometimesHeardBeforeTheReply(c: Cue): bool = c.final and c.stage == Ended and c.heard == 1 and c.clipped == 0 and not(c.retired)
+pure def holdOver(waitedMs: int): bool = waitedMs >= cueHoldMs
+pure def speaksAfterTheHold(waitedMs: int, microphoneClear: bool): bool = holdOver(waitedMs) and microphoneClear
+pure def lawTheHoldIsThreeHundredMilliseconds(waitedMs: int): bool =
+  cueHoldMs == 300 and (waitedMs < 300 implies not(holdOver(waitedMs)))
+pure def lawAnOpenRecordingSilencesTheCue(waitedMs: int): bool = not(speaksAfterTheHold(waitedMs, false))
+pure def lawAnOpenRecordingTakesNoLine(t: CueTurn, labelChars: int): bool = progress(t, Thinking, labelChars, false) == t
+pure def stepALineIsTakenOnlyBeforeTheReplyAndTheTurnsEnd(before: CueTurn, via: str, after: CueTurn): bool =
+  (after.used and not(before.used)) implies (via == "progress" and not(before.final or before.retired))
 ```
 
 ### A reply ready within the hold means the cue is never spoken, and a cue still being prepared is dropped at once
@@ -76,38 +84,42 @@ pure def sometimesHeardBeforeTheReply(c: Cue): bool = c.final and c.stage == End
 after the reply was ready cannot make the reply wait.
 
 ```quint
-pure def canReplyReady(c: Cue): bool = not(c.final)
-pure def replyReady(c: Cue): Cue =
-  if (c.stage == Held) { ...c, final: true, stage: Ended }
-  else if (c.stage == Preparing) { ...c, final: true, stage: Ended, dropped: c.dropped + 1 }
-  else if (c.stage == Audible) { ...c, final: true, bounded: true }
-  else { ...c, final: true }
-pure def alwaysAReadyReplyLeavesNoQuietCue(c: Cue): bool = c.final implies (c.stage != Held and c.stage != Preparing)
-pure def stepAReplyWithinTheHoldSilencesTheCue(before: Cue, via: str, after: Cue): bool =
-  (via == "replyReady" and before.stage == Held) implies (after.stage == Ended and after.spoken == 0)
-pure def sometimesSilencedByAQuickReply(c: Cue): bool = c.final and c.spoken == 0 and c.stage == Ended
-pure def sometimesDroppedWhilePrepared(c: Cue): bool = c.dropped == 1 and c.final
+pure def canAudible(t: CueTurn): bool = t.used and not(t.final) and not(t.retired) and not(t.speaking) and t.heard == 0
+pure def audible(t: CueTurn): CueTurn = { ...t, speaking: true, heard: t.heard + 1 }
+pure def canReplyReady(t: CueTurn): bool = not(t.final)
+pure def replyReady(t: CueTurn): CueTurn = { ...t, final: true }
+pure def lawACueNotYetAudibleIsDropped(cue: R::Cue): bool =
+  (cue == R::CueHeld or cue == R::CuePreparing) implies R::cueOnReply(cue) == R::CueDropped
+pure def stepNothingIsHeardAfterTheReplyIsReady(before: CueTurn, via: str, after: CueTurn): bool =
+  after.heard > before.heard implies (via == "audible" and not(before.final) and not(before.retired))
+pure def sometimesSilencedByAQuickReply(t: CueTurn): bool = t.final and t.used and t.heard == 0
 ```
 
 ### An audible cue finishes before the reply speaks, but never holds a ready reply more than 2.5 seconds
 
+At the bound the cue is cut, which ends it like its own end.
+
 ```quint
-pure def canCueEnded(c: Cue): bool = c.stage == Preparing or c.stage == Audible
-pure def cueEnded(c: Cue): Cue = { ...c, stage: Ended, bounded: false }
-pure def canBoundElapsed(c: Cue): bool = c.stage == Audible and c.bounded
-pure def boundElapsed(c: Cue): Cue = { ...c, stage: Ended, bounded: false, clipped: c.clipped + 1 }
-pure def replyMayStart(c: Cue): bool = c.retired or (c.final and c.stage != Audible)
-pure def alwaysOnlyAReadyReplyBoundsTheCue(c: Cue): bool = c.bounded implies (c.final and c.stage == Audible)
-pure def stepAnAudibleCueEndsOnlyByItselfItsBoundOrTheTurn(before: Cue, via: str, after: Cue): bool =
-  (before.stage == Audible and after.stage == Ended) implies (via == "cueEnded" or via == "boundElapsed" or via == "cancel")
-pure def sometimesCutAtTheBound(c: Cue): bool = c.clipped == 1 and replyMayStart(c)
+pure def canEnded(t: CueTurn): bool = t.speaking
+pure def ended(t: CueTurn): CueTurn = { ...t, speaking: false }
+pure def replyMayStart(t: CueTurn, waitedMs: int): bool =
+  t.retired or (t.final and (not(t.speaking) or waitedMs >= cueReplyBoundMs))
+pure def lawAnAudibleCueFinishes(cue: R::Cue): bool = cue == R::CueAudible implies R::cueOnReply(cue) == R::CueAudible
+pure def lawAReadyReplyWaitsAtMostTwoAndAHalfSeconds(cue: R::Cue, audibleLeftMs: int): bool =
+  cueReplyBoundMs == 2500 and R::replyWaitMs(cue, audibleLeftMs) <= cueReplyBoundMs
+pure def lawTheBoundReleasesAReadyReply(waitedMs: int): bool =
+  replyMayStart({ ...initial, used: true, final: true, speaking: true, heard: 1 }, waitedMs) iff waitedMs >= 2500
+pure def alwaysOnlyAReadyReplyWaitsOnTheCue(t: CueTurn): bool = (t.final and t.speaking) implies (t.heard == 1 and not(t.retired))
+pure def stepAnAudibleCueEndsOnlyByItselfItsBoundOrTheTurn(before: CueTurn, via: str, after: CueTurn): bool =
+  (before.speaking and not(after.speaking)) implies (via == "ended" or via == "cancel")
+pure def sometimesHeardBeforeTheReply(t: CueTurn): bool = t.final and t.heard == 1 and not(t.speaking) and not(t.retired)
 ```
 
 ### A turn abort, Stop, speaking over it or voice retiring stops the cue at once, and nothing restarts it
 
 ```quint
-pure def canCancel(c: Cue): bool = not(c.retired)
-pure def cancel(c: Cue): Cue = { ...c, retired: true, bounded: false, stage: if (c.stage == NoCue) NoCue else Ended }
-pure def alwaysARetiredCueIsSilent(c: Cue): bool = c.retired implies (c.stage == NoCue or c.stage == Ended)
-pure def sometimesStoppedMidCue(c: Cue): bool = c.retired and c.heard == 1 and c.clipped == 0
+pure def canCancel(t: CueTurn): bool = not(t.retired)
+pure def cancel(t: CueTurn): CueTurn = { ...t, retired: true, speaking: false }
+pure def alwaysARetiredCueIsSilent(t: CueTurn): bool = t.retired implies not(t.speaking)
+pure def sometimesStoppedMidCue(t: CueTurn): bool = t.retired and t.heard == 1
 ```

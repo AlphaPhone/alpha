@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
+// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"; spec/calendar/deviceSync.md, "Story: Sync my phone's calendar only with the Google calendar I chose, for the account I use"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
 import { Effect } from "effect";
 import { CalendarDays, Layers, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
 import { useState } from "react";
@@ -27,6 +27,7 @@ import { EventEditor } from "./EventEditor.tsx";
 import { PreservationReview } from "./Surfaces.tsx";
 import { MonthGrid } from "./MonthGrid.tsx";
 import { ScheduleList } from "./ScheduleList.tsx";
+import { DeviceSyncSettings } from "./DeviceSyncSettings.tsx";
 import { SyncSettings } from "./SyncSettings.tsx";
 import { Timeline } from "./Timeline.tsx";
 import { useAgentView, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
@@ -173,6 +174,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
       <CalendarSources open={p.sourcesSheet} agentShown={!agentHidden} deviceShown={p.deviceVisible} agentAccess={p.agentAccess && p.owner !== ""} deviceAccess={p.deviceAccess}
         onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => void perform(closeSources())}>
         {p.owner !== "" && sync.grant !== "NoGoogleGrant" && <SyncSettings grant={sync.grant} destinations={sync.destinations} />}
+        <DeviceSyncSettings />
       </CalendarSources>
       <DatePicker open={p.datePicker} rows={rows} day={p.day} month={p.month} zone={zone} now={now}
         onMonth={(month) => go({ type: "chooseMonth", month }, true)} onPickDay={(day) => { go({ type: "chooseDay", day }, true); }} onClose={() => go({ type: "closeDatePicker" })} />

@@ -1,18 +1,27 @@
-// spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
+// spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/review.md, "A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
 import type { ExecutorCall } from "@elizaos/agent/client"
 import { Machine as SendsMachine } from "../../gen/assistant__send.effect.vibe"
 import { BrowserCallFacts } from "../browser/ports.vibe"
 import { CameraCallFacts } from "../camera/ports.vibe"
 import type { TelephonyCalls } from "../telephony/ports.vibe"
+import { Composer } from "./composer.vibe"
+import { AdvertisedCapabilities } from "./ports.vibe"
+import { CAPABILITIES_HEADER, capabilityHeaders } from "./transport.vibe"
 import { DeviceReview } from "./review.vibe"
 
 /** Camera's per-call facts from the assistant's review: a photo runs without its card only for the owner's own words in the message it answers. */
 export const cameraCallFactsLive = Layer.effect(CameraCallFacts, effect {
   const review = try DeviceReview
+  const advertised = try AdvertisedCapabilities
   return {
-    of: (call: ExecutorCall) => map(review.callFacts(call), (facts) => ({
-      reviewed: facts.reviewed, messageId: facts.messageId, ownerText: facts.reviewed ? "" : facts.ownerText,
-    })),
+    of: (call: ExecutorCall) => effect {
+      const facts = try review.callFacts(call)
+      const header = capabilityHeaders(try (advertised.names() catch () => [] as readonly string[]))[CAPABILITIES_HEADER]
+      return {
+        reviewed: facts.reviewed, messageId: facts.messageId, ownerText: facts.reviewed ? "" : facts.ownerText,
+        ...(header === undefined ? {} : { capabilities: header }),
+      }
+    },
   }
 })
 
@@ -36,4 +45,28 @@ export effect function telephonyCallsFromAssistant() {
     },
   }
   return calls
+}
+
+/** The assistant's side of the comms bar's approvals, for Telephony to call after its own stage: the bar approved or declined the open proposal on the comms stage, and this settles it once through the device review and redraws its chat card. */
+export effect function commsReviewFromAssistant() {
+  const review = try DeviceReview
+  const composer = try Composer
+  return {
+    /** Run the open proposal the comms bar approved; false when no card of it was drawn or it did not run. */
+    approve: (proposalId: string) => effect {
+      const card = try review.cardOf(proposalId)
+      if (card === undefined) return false
+      const done = try review.approve(card, true)
+      try composer.replaceRow({ kind: "card", id: `card:${proposalId}`, card: done.card })
+      return done.card.state === "DoneCard" || done.card.state === "UnconfirmedCard"
+    },
+    /** Decline the proposal the comms bar dismissed; nothing runs. */
+    decline: (proposalId: string) => effect {
+      const card = try review.cardOf(proposalId)
+      if (card === undefined) return false
+      const done = try review.decline(card)
+      try composer.replaceRow({ kind: "card", id: `card:${proposalId}`, card: done })
+      return done.state === "DeclinedCard"
+    },
+  }
 }

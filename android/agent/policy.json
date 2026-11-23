@@ -1,0 +1,28 @@
+{
+ "schema": 1,
+ "actions": {
+  "allowed": [
+   "REPLY", "IGNORE",
+   "OWNER_REMINDERS", "OWNER_GOALS", "TODO",
+   "CALENDAR",
+   "INBOX_READ", "INBOX_COMPOSE_EMAIL",
+   "NOTES_LIST", "NOTES_GET", "NOTES_CREATE", "NOTES_UPDATE", "NOTES_DELETE", "NOTES_MOVE", "NOTES_RESTORE",
+   "WORKFLOW",
+   "MAPS_PLACE", "MAPS_ROUTE", "MAPS_NAVIGATION_START", "MAPS_NAVIGATION_REROUTE", "MAPS_NAVIGATION_STOP", "MAPS_SELECT", "MAPS_SAVE", "MAPS_SAVED",
+   "BROWSER", "BROWSER_BACK", "BROWSER_FORWARD", "BROWSER_RELOAD"
+  ]
+ },
+ "plugins": {
+  "load": [
+   "@elizaos/plugin-personal-assistant",
+   "@elizaos/plugin-calendar",
+   "@elizaos/plugin-inbox",
+   "@elizaos/plugin-notes",
+   "@elizaos/plugin-files",
+   "@elizaos/plugin-workflow",
+   "@elizaos/plugin-maps",
+   "@elizaos/plugin-browser",
+   "@elizaos/plugin-local-inference"
+  ]
+ }
+}

@@ -158,6 +158,9 @@ pure def lawWiderTextFewerColumns(canvas: int): bool = daysFor(canvas, 200) <= d
 ### The dock's footprint is published while a dock shows, and kept while none does
 
 Two lengths are published: everything the dock covers now, and the bar alone, which is never more.
+The shell marks the dock slot it mounts, so the footprint is read from the boxes the dock's surfaces
+draw, again whenever one of them resizes; with the conversation at rest the whole dock is the bar,
+and with it open as a sheet or full screen the bar is everything it covers.
 While the shade or the lock screen hides the dock the last footprint stays, so Home does not jump
 when it returns. The header clearance is the bottom of the visible header: an app's, the library's
 title row, an open sheet's, or the conversation's when it is full screen.

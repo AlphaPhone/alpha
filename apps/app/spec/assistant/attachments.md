@@ -143,3 +143,25 @@ pure def lawOneWayPerFile(s: Shared): bool =
 pure def lawATooLargeFileIsNeverAttached(s: Shared): bool = s == TooLargeShared implies not(attached(s))
 pure val sValues = Set(TextShared, AttachableShared, TooLargeShared)
 ```
+
+### A file's question is reviewed before it joins the draft: "Use excerpt" for its text, its name alone for a file too large, and its source line only while linked
+
+The review of a text file is titled "Use excerpt" and starts with the
+file's text; the review of a file too large to attach is titled "Ask
+Alpha", starts with no excerpt and says that only the file's name goes with
+the question. Either names the file as the question's source while
+"Link source" is on (on by default); turning it off leaves the source line
+out. Add to chat composes only a question that is not blank, with an
+excerpt unless only the name goes, and never while the excerpt holds a
+secret ("Remove secrets first"); nothing is sent from the review.
+
+```quint
+type FileAsk = ExcerptAsk | SourceAsk
+pure def askLabel(a: FileAsk): str = if (a == ExcerptAsk) "Use excerpt" else "Ask Alpha"
+pure def composes(a: FileAsk, question: bool, excerpt: bool, secret: bool): bool = question and not(secret) and (excerpt or a == SourceAsk)
+pure def namesSource(linked: bool): bool = linked
+pure def lawASecretNeverComposes(a: FileAsk, excerpt: bool): bool = not(composes(a, true, excerpt, true))
+pure def lawAnExcerptNeedsText(question: bool): bool = not(composes(ExcerptAsk, question, false, false))
+pure def lawABlankQuestionNeverComposes(a: FileAsk, excerpt: bool): bool = not(composes(a, false, excerpt, false))
+pure val aValues = Set(ExcerptAsk, SourceAsk)
+```

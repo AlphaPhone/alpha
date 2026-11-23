@@ -149,19 +149,25 @@ export const nextFrame: Effect.Effect<void> = Effect.callback<void>((resume) => 
 /** The dock's footprint in canvas pixels: everything it covers, and the resting bar alone. @throws {never} */
 export function dockFootprint(): { clearance: number; rest: number } | undefined {
   const screen = document.querySelector<HTMLElement>("[data-alpha-screen]");
-  const docks = Array.from(document.querySelectorAll<HTMLElement>("[data-alpha-dock]")).filter(takesFocusOrShown);
+  const docks = Array.from(document.querySelectorAll<HTMLElement>("[data-alpha-dock]")).flatMap(boxesOf);
   if (!screen || docks.length === 0) return undefined;
   const bottom = screen.getBoundingClientRect().bottom;
   const scale = screen.getBoundingClientRect().width / (screen.offsetWidth || 1) || 1;
   const top = Math.min(...docks.map((dock) => dock.getBoundingClientRect().top));
-  const bar = document.querySelector<HTMLElement>("[data-alpha-dock-bar]");
+  const bars = Array.from(document.querySelectorAll<HTMLElement>("[data-alpha-dock-bar]")).flatMap(boxesOf);
   const clearance = Math.ceil((bottom - top) / scale);
-  const rest = bar ? Math.ceil((bottom - bar.getBoundingClientRect().top) / scale) : clearance;
+  const rest = bars.length > 0 ? Math.ceil((bottom - Math.min(...bars.map((bar) => bar.getBoundingClientRect().top))) / scale) : clearance;
   return clearance > 0 && rest > 0 ? { clearance, rest: Math.min(rest, clearance) } : undefined;
 }
 
 function takesFocusOrShown(element: HTMLElement): boolean {
   return element.isConnected && !element.closest("[inert],[hidden]") && element.getClientRects().length > 0;
+}
+
+function boxesOf(element: HTMLElement): HTMLElement[] {
+  if (!element.isConnected || element.closest("[inert],[hidden]")) return [];
+  if (element.getClientRects().length > 0) return [element];
+  return Array.from(element.children).flatMap((child) => child instanceof HTMLElement ? boxesOf(child) : []);
 }
 
 /** The bottom of the visible header (an app's, the library's, an open sheet's), in canvas pixels. @throws {never} */
@@ -174,17 +180,20 @@ export function headerBottom(): number {
   return Math.max(0, ...headers.map((header) => Math.ceil((header.getBoundingClientRect().bottom - box.top) / scale)));
 }
 
-/** Layout changes that can move the dock or a header: element resizes and DOM changes under the screen. */
+/** Layout changes that can move the dock or a header: resizes of the screen and of the dock's boxes, and DOM changes under the screen. */
 export function layoutChanges(): Stream.Stream<unknown> {
   return Stream.callback<unknown>((queue) =>
     Effect.acquireRelease(
       Effect.sync(() => {
-        const notify = () => { Queue.offerUnsafe(queue, undefined); };
-        const sizes = new ResizeObserver(notify);
-        const changes = new MutationObserver(notify);
+        const sizes = new ResizeObserver(() => { Queue.offerUnsafe(queue, undefined); });
+        const watchDocks = () => {
+          for (const box of Array.from(document.querySelectorAll<HTMLElement>("[data-alpha-dock]")).flatMap(boxesOf)) sizes.observe(box);
+        };
+        const changes = new MutationObserver(() => { watchDocks(); Queue.offerUnsafe(queue, undefined); });
         const screen = document.querySelector("[data-alpha-screen]") ?? document.body;
         sizes.observe(screen);
-        changes.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["inert", "hidden", "data-alpha-dock", "data-alpha-header"] });
+        watchDocks();
+        changes.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["inert", "hidden", "data-alpha-dock", "data-alpha-dock-bar", "data-alpha-header"] });
         return () => { sizes.disconnect(); changes.disconnect(); };
       }),
       (stop) => Effect.sync(stop),
@@ -249,14 +258,18 @@ export function nextMidnight(at: number): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
 }
 
-/** The current page's query string. @throws {never} */
-export function pageQuery(): string {
-  return location.search;
+const LANDING = "#delegation-return";
+
+/** The raw query of a delegation return: the one `delegation-return.html` handed over in the fragment, or the page's own on the landing's path; undefined on any other page. @throws {never} */
+export function landingQuery(): string | undefined {
+  if (location.hash.startsWith(LANDING)) return location.hash.slice(LANDING.length);
+  if (location.pathname.endsWith("/delegation-return")) return location.search;
+  return undefined;
 }
 
-/** Replaces the address with its path alone, removing the query and fragment. @throws {never} */
-export function scrubAddress(): void {
-  history.replaceState(null, "", location.pathname);
+/** Replaces the address with the landing's own, without the return's query, so a reopened landing says to go back to Alpha. @throws {never} */
+export function scrubLanding(): void {
+  history.replaceState(null, "", `${location.pathname}${LANDING}`);
 }
 
 /** Every open native modal dialog closes, or is removed when it cannot, so recovery is on top. @throws {never} */

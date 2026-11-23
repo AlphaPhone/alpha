@@ -1,8 +1,9 @@
-// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
+// spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Draft, type DraftFields, type Mode, Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, meaningful, previousKept, previousSlotsClear } from "../../gen/inbox__drafts.effect.vibe"
 import type { OutgoingFile } from "../../gen/inbox__attachments.ts"
 import { GoogleAccounts } from "../account/layer.vibe"
+import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
 import { Native } from "../platform/native.vibe"
 import { mailAccountOf } from "./accounts.vibe"
 import { outgoing } from "./composer.vibe"
@@ -78,6 +79,7 @@ export effect function keepPreviousDrafts(owner: string): number!! {
 
   effect function read(slot: string): string | undefined {
     if (onDevice) {
+      try adoptLegacySlot(slot, slot)
       const answer = try native.invoke(SECURE_STORE, "get", { key: slot })
       const decoded = try decodePreviousSlot(answer)
       return decoded.value ?? undefined

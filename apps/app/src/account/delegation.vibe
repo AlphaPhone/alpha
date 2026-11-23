@@ -1,12 +1,14 @@
-// spec/account/delegation.md, "Story: Let Cloud run my hosted results"; spec/account/delegation.md, "Removing the grant is reviewed with what reads through it, and only a pending disconnect is retried as it is"
+// spec/account/delegation.md, "Story: Let Cloud run my hosted results"; spec/account/delegation.md, "The authorization page is the deployment's own"; spec/account/delegation.md, "Removing the grant is reviewed with what reads through it, and only a pending disconnect is retried as it is"
 import {
   type CloudSide, type Delegation, type DelegationEffect, type Retained,
-  Machine as DelegationMachine, machine as delegationMachine
+  Machine as DelegationMachine, authorizePageOpens, machine as delegationMachine
 } from "../../gen/account__delegation.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment } from "../platform/build-live.vibe"
 import { CloudServices } from "../platform/cloud-services.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
-import { delegationSlot, freshKey } from "./deployment.ts"
+import { authorityOf, delegationSlot, deployment, freshKey } from "./deployment.ts"
 import { CallbackSlot, PendingRecord, Revocations, SecureValue, Started, Status, SwapAnswer } from "./delegation.schema.vibe"
 import { CloudSession, ownerOf } from "./session.vibe"
 
@@ -42,6 +44,8 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
   const services = try CloudServices
   const resident = try Resident
   const session = try CloudSession
+  const build = try Build
+  const authority = authorityOf(deployment, buildCloudEnvironment(build.info))
   const details = try SubscriptionRef.make<DelegationDetails>({ grantId: undefined, pendingRevocations: [], email: true, calendar: true })
   const slot = try Ref.make("")
   const scope = try Scope.Scope
@@ -122,7 +126,8 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
           } catch () => undefined
           const state = started === undefined || !URL.canParse(started.authUrl) ? null : new URL(started.authUrl).searchParams.get("state")
           const page = started === undefined || !URL.canParse(started.authUrl) ? undefined : new URL(started.authUrl)
-          const valid = page !== undefined && page.protocol === "https:" && !page.username && !page.password && page.pathname === "/app-auth/authorize" && state !== null && /^[-\w]{43}$/.test(state)
+          const valid = page !== undefined && authorizePageOpens(page.origin === authority.web, page.pathname === "/app-auth/authorize",
+            state !== null && /^[-\w]{43}$/.test(state), !!page.username || !!page.password || !!page.hash)
           if (valid && started !== undefined && state !== null) {
             const record: PendingRecord = { state, authUrl: started.authUrl, expiresAt: started.expiresAt, phase: "waiting" }
             const saved = swapRecord(undefined, record) catch () => false

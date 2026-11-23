@@ -1,6 +1,6 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.plugins.agent.runtime.NativeProviderAdmission;
+import ai.alphacompute.alphaphone.runtime.NativeProviderAdmission;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Set;

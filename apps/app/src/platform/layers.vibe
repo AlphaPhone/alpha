@@ -12,9 +12,9 @@ import { deviceStorageLive } from "./device-storage.vibe"
 import { lifecycleLive } from "./lifecycle.vibe"
 import { Native, NativeFailed, NativeUnavailable } from "./native.vibe"
 import { nativeLive } from "./native-live.vibe"
-import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer } from "./resident.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer, type ResidentHeaders } from "./resident.vibe"
 import { ResidentControl, ResidentRecovery } from "./resident-control.vibe"
-import { pathShapeOf, residentLive, routeAllowed } from "./resident-live.vibe"
+import { deviceHeaders, headerRefusal, pathShapeOf, residentLive, routeAllowed } from "./resident-live.vibe"
 import { browserStore, memoryStore } from "./storage.vibe"
 import { feedsLive } from "./view-events.vibe"
 import { answerRoute, routeFetch } from "./cloud-fetch.ts"
@@ -56,19 +56,21 @@ export function fakeNative(table: FakeNativeTable, events: { readonly [pluginEve
   return Layer.succeed(Native, native)
 }
 
-/** One fake resident route: its data, a function of the body that gives it, or a `ResidentRefused` it refuses with. */
+/** One fake resident route: its data, a function of the body and the admitted device headers that gives it, or a `ResidentRefused` it refuses with. */
 export type FakeRoute = unknown
 
-/** A Resident, ResidentControl and ResidentRecovery layer for tests and stories: `routes` keyed `"METHOD /path"`, `streams` keyed by path with the text chunks each streams; nothing is ever held for review. */
-export function fakeResident(routes: { readonly [route: string]: FakeRoute }, streams: { readonly [path: string]: readonly string[] } = {}, owner = "owner-test") {
+/** A Resident, ResidentControl and ResidentRecovery layer for tests and stories: `routes` keyed `"METHOD /path"`, `streams` keyed by path with the text chunks each streams, and `heard` told the admitted device headers of each stream; headers are admitted as the live resident admits them, and nothing is ever held for review. */
+export function fakeResident(routes: { readonly [route: string]: FakeRoute }, streams: { readonly [path: string]: readonly string[] } = {}, owner = "owner-test", heard: (path: string, headers: ResidentHeaders) => void = () => undefined) {
   const connected: ResidentConnection = { ...connectionStart, phase: "Connected", generation: 1, owner, agent: "agent-test" }
-  effect function answer(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown): ResidentAnswer!ResidentRefused {
+  effect function answer(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, headers: ResidentHeaders | undefined): ResidentAnswer!ResidentRefused {
     if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
     if (!routeAllowed(method, path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
+    const sent = deviceHeaders(headers)
+    if (sent === undefined) throw headerRefusal()
     const key = `${method} ${path.split("?")[0]}`
     if (!Object.hasOwn(routes, key)) throw new ResidentRefused({ status: 404, code: "not_found", message: "Not found" })
     const route = routes[key]
-    const data = typeof route === "function" ? try Effect.orDie(Effect.try(() => (route as (body: unknown) => unknown)(body))) : route
+    const data = typeof route === "function" ? try Effect.orDie(Effect.try(() => (route as (body: unknown, headers: ResidentHeaders) => unknown)(body, sent))) : route
     if (data instanceof ResidentRefused) throw data
     return { status: 200, data }
   }
@@ -76,10 +78,16 @@ export function fakeResident(routes: { readonly [route: string]: FakeRoute }, st
   const resident: Resident.Shape = {
     status: () => succeed("running"),
     ensureRunning: () => Effect.void,
-    json: (method, path, body) => answer(method, path, body),
-    stream: (path: string) => Object.hasOwn(streams, path)
-      ? Stream.fromIterable(streams[path]!.map((chunk) => encoder.encode(chunk)))
-      : Stream.fail(new ResidentRefused({ status: 404, code: "not_found", message: "Not found" })),
+    json: (method, path, body, headers) => answer(method, path, body, headers),
+    stream: (path: string, _body: unknown, headers?: ResidentHeaders) => {
+      const sent = deviceHeaders(headers)
+      if (sent === undefined) return Stream.fail(headerRefusal())
+      if (!Object.hasOwn(streams, path)) return Stream.fail(new ResidentRefused({ status: 404, code: "not_found", message: "Not found" }))
+      return Stream.unwrap(sync(() => {
+        heard(path, sent)
+        return Stream.fromIterable(streams[path]!.map((chunk) => encoder.encode(chunk)))
+      }))
+    },
   }
   const control: ResidentControl.Shape = {
     changes: Stream.make(connected),

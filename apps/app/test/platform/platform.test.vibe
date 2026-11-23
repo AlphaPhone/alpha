@@ -59,6 +59,7 @@ module device {
   export interface Agent {
     readonly plugin: ElizaAgentPlugin
     readonly sent: AgentRequest[]
+    readonly streamed: AgentStreamRequest[]
     readonly aborted: string[]
     readonly unsubscribed: string[]
     readonly routes: Record<string, Reply | Reply[]>
@@ -72,6 +73,7 @@ module device {
     const table: Record<string, Reply | Reply[]> = Object.fromEntries(Object.entries(routes).map(([key, reply]) => [key, Array.isArray(reply) ? [...reply] : reply]))
     const state: Agent = {
       sent: [],
+      streamed: [],
       aborted: [],
       unsubscribed: [],
       routes: table,
@@ -90,6 +92,7 @@ module device {
           return Promise.resolve(reply ?? { status: 404, data: { error: "not_found" } })
         },
         async requestStream(options: AgentStreamRequest) {
+          state.streamed.push(options)
           queueMicrotask(() => {
             if (plan.refuseStream !== undefined) {
               emit("streamEnd", { id: options.id, kind: "failed", code: plan.refuseStream })
@@ -546,6 +549,41 @@ it.live("hear that a busy agent never got my message", () => effect {
     // spec/platform/nativeStream.md, "A message is reported not sent only when native refused it before any response"
     const refused = try Effect.flip(Stream.runCollect((try Resident).stream("/api/conversations/c1/messages/stream", { text: "hi" })))
     try Effect.try(() => assert.deepStrictEqual(refused instanceof ResidentRefused ? [refused.status, refused.code] : refused._tag, [429, "busy"]))
+  }
+})
+
+// spec/platform/index.md, "Story: Talk to the resident agent"
+it.live("name my phone and what it can do to my agent, and never send a header it does not read", () => effect {
+  const capability = { "X-Eliza-Device-Capabilities": "notes.local-record.v1,calendar.local-event.v1" }
+  const phone = agent({ ...owned, "POST /api/client-devices/register": { status: 200, data: { ok: true } } }, { chunks: ["hel", "lo"] })
+  provide residentOver(phone.plugin, true, undefined) {
+    const resident = try Resident
+    // spec/platform/index.md, "A request carries only the device headers the resident reads, each one bounded line"
+    try resident.json("POST", "/api/client-devices/register", { protocol: 5 }, capability)
+    const reply = try Stream.runCollect(resident.stream("/api/conversations/c1/messages/stream", { text: "hi" }, capability))
+    const before = phone.sent.length
+    const bearer = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { Authorization: "Bearer stolen" }))
+    const twice = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { "x-eliza-device-id": "a", "X-Eliza-Device-Id": "b" }))
+    const broken = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { "x-eliza-device-key": "a\r\nX-Other: 1" }))
+    const client = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { "X-ElizaOS-Client-Id": "not a token" }))
+    const long = try Effect.flip(Stream.runCollect(resident.stream("/api/conversations/c1/messages/stream", {}, { "x-eliza-device-capabilities": "x".repeat(2049) })))
+    const register = phone.sent.find((request) => request.path === "/api/client-devices/register") as { readonly headers?: unknown } | undefined
+    const codes = [bearer, twice, broken, client, long].map((refused) => refused instanceof ResidentRefused ? `${refused.status} ${refused.code}` : refused._tag)
+    try Effect.try(() => assert.deepStrictEqual({
+      register: register?.headers,
+      stream: (phone.streamed[0] as { readonly headers?: unknown } | undefined)?.headers,
+      reply: text([...reply]),
+      codes,
+      sentSince: phone.sent.length - before,
+      streams: phone.streamed.length,
+    }, {
+      register: { "x-eliza-device-capabilities": "notes.local-record.v1,calendar.local-event.v1" },
+      stream: { "x-eliza-device-capabilities": "notes.local-record.v1,calendar.local-event.v1" },
+      reply: "hello",
+      codes: ["400 InvalidHeader", "400 InvalidHeader", "400 InvalidHeader", "400 InvalidHeader", "400 InvalidHeader"],
+      sentSince: 0,
+      streams: 1,
+    }))
   }
 })
 

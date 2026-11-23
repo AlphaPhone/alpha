@@ -1,4 +1,4 @@
-// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "A shared text file is asked about as a reviewed excerpt, a file that cannot be attached goes as its name, and anything else is attached"
+// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "A file's question is reviewed before it joins the draft: \"Use excerpt\" for its text, its name alone for a file too large, and its source line only while linked"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "A shared text file is asked about as a reviewed excerpt, a file that cannot be attached goes as its name, and anything else is attached"
 import { FilePicker } from "../files/picker.vibe"
 import { FilesAgent } from "../files/agent.vibe"
 import type { FileShareTargets } from "../files/share.vibe"
@@ -7,7 +7,7 @@ import { AssistantHost } from "./host.vibe"
 import { copy } from "./presentation.vibe"
 import type { ChatFile } from "./transcript.vibe"
 import { imageIntakeBytes, maxAttachments, mediaBase64Cap, rawCap } from "../../gen/assistant__attachments.effect.vibe"
-import { AssistantDraft, excerptLimit, questionDraft } from "./draft.vibe"
+import { AssistantDraft, excerptLimit } from "./draft.vibe"
 
 const chatTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"])
 
@@ -38,20 +38,20 @@ export effect function askAlphaTarget() {
       const asked = question.trim() === "" ? copy.explainFile : question
       const cap = file.mimeType.startsWith("image/") ? imageIntakeBytes : rawCap(mediaBase64Cap)
       if (file.size > cap || !chatAccepts(file.mimeType)) {
-        try assistant.openWith(questionDraft(asked, file.name, undefined, ""))
+        try draft.askAbout({ name: file.name, text: "", question: asked, file: "SourceAsk" })
         return true
       }
       const bytes = file.read catch () => undefined
       if (bytes === undefined) return false
       const text = excerptTypes.has(bytes.mimeType) ? utf8Of(bytes.dataBase64) : undefined
       if (text !== undefined && text.trim() !== "") {
-        try draft.askAbout({ name: bytes.name, text: text.slice(0, excerptLimit + 1), question: asked })
+        try draft.askAbout({ name: bytes.name, text: text.slice(0, excerptLimit + 1), question: asked, file: "ExcerptAsk" })
         return true
       }
       const encoded: ChatFile = { id: `files-${bytes.sha256}`, name: bytes.name, mimeType: bytes.mimeType, data: bytes.dataBase64 }
       const attached = map(assistant.attach({ kind: "encoded", files: [encoded] }), () => true) catch () => false
       if (attached) try assistant.openWith(asked)
-      else try assistant.openWith(questionDraft(asked, bytes.name, undefined, ""))
+      else try draft.askAbout({ name: bytes.name, text: "", question: asked, file: "SourceAsk" })
       return true
     },
   }

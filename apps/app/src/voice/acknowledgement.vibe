@@ -1,5 +1,6 @@
-// spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"
-import { Machine, cueHoldMs, cueReplyBoundMs, machine, replyMayStart, type Activity, type Event } from "../../gen/voice__acknowledgement.effect.vibe"
+// spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/assistant/reply.md, "A spoken cue waits 300 ms and is dropped when the reply is ready first; an audible cue finishes before the reply, within 2.5 s"
+import { spokenCue } from "../assistant/cue.vibe"
+import { Machine, machine, type Activity, type Event } from "../../gen/voice__acknowledgement.effect.vibe"
 import { Speech } from "./speech.vibe"
 
 /** A planner status of the turn in flight: its activity and the model's own line for it, if any. */
@@ -14,7 +15,7 @@ export interface Acknowledgement {
   readonly progress: (status: TurnStatus, microphoneClear: () => boolean) => void!!
   /** Reply text is ready: a held or still-prepared cue is dropped, an audible one is given its bound. */
   readonly preempt: () => void!!
-  /** Preempt, then settle once the reply may speak: an audible cue ended or its bound passed. */
+  /** Preempt, then settle once the reply may speak: the cue never spoke, ended, or reached its bound. */
   readonly idle: () => void!!
   /** The turn aborted, Stop was pressed, the owner spoke over it or voice retired: the cue stops at once. */
   readonly cancel: () => void!!
@@ -30,62 +31,53 @@ export function activityOf(activity: string): Activity {
   return "OtherActivity"
 }
 
-/** One turn's acknowledgement over a cue Machine of its own, spoken on the reply channel. */
+/** One turn's acknowledgement: its line admitted over a cue Machine of its own, then held, dropped or bounded by the assistant's `spokenCue` and spoken on the reply channel. */
 export effect function acknowledgement() {
   const speech = try Speech
   const held = try Effect.provide(effect { return try Machine }, machine())
-  const over = try Deferred.make<void>()
+  let microphoneClear: () => boolean = () => false
+  let released: Fiber.Fiber<void> | undefined
 
   effect function send(event: Event) {
-    const after = held.send(event) catch () => undefined
-    if (after !== undefined && after.stage === "Ended") try Deferred.succeed(over, undefined)
-    return after
+    return held.send(event) catch () => undefined
   }
 
-  effect function speakCue(line: string, microphoneClear: () => boolean) {
-    try sleep(cueHoldMs)
-    const ready = try send({ type: "holdElapsed", microphoneClear: microphoneClear() })
-    if (ready === undefined || ready.stage !== "Preparing") return
-    const started = () => effect {
-      const heard = try send({ type: "audible" })
-      if (heard === undefined) try speech.stop("Replies")
+  effect function say(line: string, started: void!!) {
+    if (!microphoneClear()) return
+    const heard = () => effect {
+      if ((try send({ type: "audible" })) !== undefined) try started
     }
-    speech.speak(line, "Replies", { onStarted: started }) catch () => undefined
-    try send({ type: "cueEnded" })
+    try ensuring(effect { speech.speak(line, "Replies", { onStarted: heard }) catch () => undefined }, effect { try send({ type: "ended" }) })
   }
 
-  effect function bound() {
-    try sleep(cueReplyBoundMs)
-    const cut = try send({ type: "boundElapsed" })
-    if (cut !== undefined) try speech.stop("Replies")
-  }
+  const cue = try spokenCue(say)
 
   effect function preempt() {
-    const before = try held.get()
     const after = try send({ type: "replyReady" })
     if (after === undefined) return
-    if (before.stage === "Preparing") try speech.stop("Replies")
-    if (after.bounded) fork.detached bound()
+    released = fork.detached cue.replyReady()
   }
 
-  const cue: Acknowledgement = {
-    effect progress(status: TurnStatus, microphoneClear: () => boolean) {
+  const shape: Acknowledgement = {
+    effect progress(status: TurnStatus, clear: () => boolean) {
       const line = status.label?.trim() ?? ""
-      const after = try send({ type: "progress", activity: activityOf(status.activity), labelChars: line.length, microphoneClear: microphoneClear() })
-      if (after?.stage === "Held") fork.detached speakCue(line, microphoneClear)
+      const before = try held.get()
+      const after = try send({ type: "progress", activity: activityOf(status.activity), labelChars: line.length, microphoneClear: clear() })
+      if (after === undefined || before.used || !after.used) return
+      microphoneClear = clear
+      try cue.say(line)
     },
     preempt,
     effect idle() {
       try preempt()
-      if (replyMayStart(try held.get())) return
-      try Deferred.await(over)
+      const waiting = released
+      if (waiting !== undefined) try Fiber.await(waiting)
     },
     effect cancel() {
-      const before = try held.get()
-      const after = try send({ type: "cancel" })
-      if (after !== undefined && (before.stage === "Preparing" || before.stage === "Audible")) try speech.stop("Replies")
+      try send({ type: "cancel" })
+      try cue.cancel()
     },
-    effect audible() { return (try held.get()).stage === "Audible" },
+    effect audible() { return (try held.get()).speaking },
   }
-  return cue
+  return shape
 }

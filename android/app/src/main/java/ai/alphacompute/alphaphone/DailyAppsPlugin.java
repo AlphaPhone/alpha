@@ -35,6 +35,9 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
   *  the shared SelectedDocuments monitor, so they run here in call order, never on Capacitor's plugin thread. */
  private final ExecutorService worker=Executors.newSingleThreadExecutor();
  public DailyAppsPlugin() { super(AlphaReminders.CONFIGURATION, AlphaReminders.STORAGE); }
+ private final android.os.Handler changeMain=new android.os.Handler(android.os.Looper.getMainLooper());
+ private volatile boolean changesClosed;
+ private AutoCloseable changes;
 
  /** Cancellation uses AlphaDeletions' native review and durable ten-second window. */
  @Override @PluginMethod public void operateReminder(PluginCall call){JSObject operation=call.getObject("operation");if(operation!=null&&"reminder_cancel".equals(operation.optString("type"))){call.reject("Use the reviewed deletion window");return;}super.operateReminder(call);}
@@ -42,12 +45,13 @@ public class DailyAppsPlugin extends ai.eliza.plugins.reminders.ReminderPlugin {
  @Override public void load() {
   SelectedDocumentAccess.initialize(getContext());
   super.load();
+  changes=StoreChanges.observe(store->{if(store==StoreChanges.Store.REMINDERS)changeMain.post(()->{if(!changesClosed)notifyListeners("remindersChanged",new JSObject(),false);});});
   AlphaNotificationChannels.describe(getContext());
   openAssistant();
  }
  /** A channel the shared code created since the last look gets its description on the next return to the app. */
  @Override protected void handleOnResume(){super.handleOnResume();AlphaNotificationChannels.describe(getContext());}
- @Override protected void handleOnDestroy(){worker.shutdownNow();super.handleOnDestroy();}
+ @Override protected void handleOnDestroy(){changesClosed=true;try{if(changes!=null)changes.close();}catch(Exception ignored){/* Already detached. */}worker.shutdownNow();super.handleOnDestroy();}
  @Override protected void handleOnNewIntent(Intent intent) { super.handleOnNewIntent(intent); openAssistant(); }
  private void openAssistant() {
   if (!(getActivity() instanceof AlphaAssistActivity)) return;

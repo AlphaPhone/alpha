@@ -97,7 +97,11 @@ pure def alwaysPanelOnlyWhileRevealing(c: Capture): bool = c.panel implies c.req
 
 ### The reveal ends only once the closing panel is gone; an abort, a changed context or a hidden Camera ends it with nothing taken
 
+The panel is gone when the shell's foreground reads the conversation closed, never after a fixed
+pause. A conversation still open after two seconds covers the viewfinder, and nothing is taken.
+
 ```quint
+pure val panelLimitMs = 2000
 pure def canPanelCleared(c: Capture): bool = c.panel
 pure def panelCleared(c: Capture): Capture = { ...c, panel: false }
 pure def canRevealed(c: Capture, scene: Scene): bool = c.request == Revealing and not(c.panel) and admitted(c, scene) and not(scene.covers)

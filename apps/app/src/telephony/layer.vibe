@@ -1,4 +1,4 @@
-// spec/telephony/index.md; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"; spec/telephony/drafts.md, "Story: Keep what I was asking Alpha"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
+// spec/telephony/index.md; spec/telephony/drafts.md, "What I wrote signed out becomes the account's that signs in, only where that account kept nothing"; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"; spec/telephony/drafts.md, "Story: Keep what I was asking Alpha"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
 import { machine as actionsMachine } from "../../gen/telephony__actions.effect.vibe"
 import { machine as attentionMachine } from "../../gen/telephony__attention.effect.vibe"
 import { machine as callBarMachine } from "../../gen/telephony__callBar.effect.vibe"
@@ -16,7 +16,7 @@ import { bridgesLayer, type TelephonyBridges } from "./bridges.vibe"
 import { callWatchLayer } from "./call-bar.vibe"
 import { commsStageLayer } from "./comms.vibe"
 import { contactsViewLayer } from "./contacts.vibe"
-import { draftSendsLayer } from "./drafts.vibe"
+import { draftSendsLayer, pictureSlot } from "./drafts.vibe"
 import { messagesViewLayer } from "./messages.vibe"
 import { ownerKept } from "./owner.vibe"
 import { phoneViewLayer } from "./phone.vibe"
@@ -34,15 +34,21 @@ export { operationPorts, telephonyCapabilities } from "./operations.vibe"
 export { askAlpha, askFromContacts, askFromList, sendRequest } from "./list-ask.vibe"
 export { TelephonyCalls, VoicemailTranscriber } from "./ports.vibe"
 
-/** The owner's drafts and requests, read and written under whoever is signed in now, and republished when that changes. */
+/** The picture slots a kept drafts state refers to, which move with it from the phone's namespace to the account that adopts it. */
+export function draftPictures(state: typeof draftsInitial): string[] {
+  return state.slots.flatMap((slot) => slot.pictures.map((picture) => pictureSlot(slot.thread, picture.pictureName)))
+}
+
+/** The owner's drafts and requests, read and written under whoever is signed in now, and shown afresh when that owner changes. */
 export const draftsKept = Layer.effect(DraftsMachine, effect {
-  const kept = try ownerKept("drafts", draftsInitial, decodeDrafts)
+  const kept = try ownerKept("drafts", draftsInitial, decodeDrafts, draftPictures)
   const inner = try draftsOver(kept.load, kept.keep)
-  return { ...inner, changes: Stream.merge(inner.changes, Stream.mapEffect(kept.owners, () => inner.get())) }
+  const changes = try kept.follow(inner.changes, () => inner.get(), () => inner.get())
+  return { ...inner, changes }
 })
 
 /**
- * The comms stage and its open proposal, read and written under whoever is signed in now, and republished when that changes.
+ * The comms stage and its open proposal, read and written under whoever is signed in now, and shown afresh when that owner changes.
  * A proposal it holds when it is loaded, at start or for the account that signs in, came from the store: it is marked restored.
  */
 export const commsKept = Layer.effect(CommsMachine, effect {
@@ -53,7 +59,8 @@ export const commsKept = Layer.effect(CommsMachine, effect {
     return try inner.get()
   }
   try restore
-  return { ...inner, changes: Stream.merge(inner.changes, Stream.mapEffect(kept.owners, () => restore)) }
+  const changes = try kept.follow(inner.changes, () => inner.get(), () => restore)
+  return { ...inner, changes }
 })
 
 /** One untrusted event and sender through the owner's stored drafts, as the conformance driver reaches them: false where it is refused, the state unchanged. */

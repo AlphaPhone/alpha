@@ -17,6 +17,8 @@ public final class AlphaApplication extends android.app.Application {
   // Isolated helper processes have no app storage; only the main process keeps the problem log and schedules upkeep.
   if(android.os.Process.isIsolated()||!getPackageName().equals(getProcessName()))return;
   ai.eliza.plugins.system.crash.CrashLog.install(this);
+  // The upstream agent service reads Alpha's device credential and launch hook from here on.
+  ElizaAgentService.install(this);
   // A listener wake that reaches a cold process may start voice once the renderer binds a session
   // for the same native owner (shared SenseInvocation); before this registration it only opens.
   new ai.eliza.plugins.system.SenseListenerClient(this).admitOwner(()->AlphaLocalAgentPlugin.invocationOwner(this));

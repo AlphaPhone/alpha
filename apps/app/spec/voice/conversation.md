@@ -128,6 +128,27 @@ pure def lawAnOpenMicSendsAtTheFirstPause(duplex: Duplex): bool =
   duplex == Interruptible implies (profileOf(Device, duplex).shortGapMs == 0 and profileOf(Device, duplex).longGapMs == 0)
 ```
 
+### A Cloud stream listens, speaks the replies and the cue and mutes the speaker on one relay session, and only voice retiring ends it
+
+On the Cloud route, where the phone has the Cloud speech relay (`AlphaCloudSpeechStream`), a
+conversation opens one session of the os package's shared streaming speech
+(`createCloudStreamingSpeech` of `@elizaos/os/bridges/voice`): its capture hears the owner, the
+reply and the acknowledgement cue are spoken on it so that its echo cancelling knows Alpha's own
+voice, and Mute sets its output gain. The end of a turn mutes and drains the relay's microphone
+and keeps the session. Stop, a call, leaving or hiding the screen, review, a failed relay and a
+quiet retry end it, and the next start opens a fresh one under the key in force then. A relay that
+could not confirm its stop leaves voice closed until Alpha restarts.
+
+```quint
+type RelayUse = RelayListens | RelaySpeaks | RelayMutes | RelayTurnEnds | RelayRetires
+pure def onTheRelay(route: Route, live: bool): bool = route == Cloud and live
+pure def endsTheRelay(use: RelayUse): bool = use == RelayRetires
+pure def lawOnlyRetiringEndsTheRelay(use: RelayUse): bool = endsTheRelay(use) iff use == RelayRetires
+pure def lawATurnsEndKeepsTheRelay(route: Route, live: bool): bool = onTheRelay(route, live) implies not(endsTheRelay(RelayTurnEnds))
+pure def lawOnlyCloudSpeechUsesTheRelay(route: Route, live: bool): bool = onTheRelay(route, live) implies route == Cloud
+pure def lawTheRelayIsInterruptible(route: Route, live: bool): bool = onTheRelay(route, live) implies duplexOf(true, live) == Interruptible
+```
+
 ### What the conversation shows follows the session while it runs, and speaking clears the quiet retries
 
 ```quint

@@ -115,6 +115,37 @@ pure def lawAnUnclaimedPathOnlyReadsOrPosts(tableAllows: bool): bool = not(metho
 pure def lawAClaimedPathFollowsTheTable(readOrPost: bool): bool = not(methodAdmitted(true, false, readOrPost))
 ```
 
+### A request carries only the device headers the resident reads, each one bounded line
+
+A request or a streamed turn may name the phone to the resident: its device id
+(`x-eliza-device-id`), its device key (`x-eliza-device-key`), the capabilities it advertises
+(`x-eliza-device-capabilities`) and its client id (`x-elizaos-client-id`), each matched without
+regard to case and sent under its lower-case name. A value is one line of at most 2048 characters,
+and a client id is a token of 1 to 128 letters, digits, dots, underscores and hyphens. Any other
+header, among them `Authorization`, whose session only native holds, a name given twice, or a value
+that breaks these limits refuses the whole request as invalid before anything is sent. The agent
+service carries the admitted headers to the resident beside the session it adds itself.
+
+```quint
+type DeviceHeader = DeviceIdHeader | DeviceKeyHeader | CapabilitiesHeader | ClientIdHeader | OtherHeader
+
+pure val headerValueLimit = 2048
+
+pure def headerAdmitted(header: DeviceHeader, length: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
+  header != OtherHeader and length <= headerValueLimit and oneLine and not(repeated) and (header == ClientIdHeader implies clientToken)
+
+pure val lengthValues = Set(0, 128, 2048, 2049)
+
+pure def lawOnlyTheDeviceHeadersCross(length: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
+  not(headerAdmitted(OtherHeader, length, oneLine, clientToken, repeated))
+
+pure def lawACrossingHeaderIsOneBoundedLine(header: DeviceHeader, length: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
+  headerAdmitted(header, length, oneLine, clientToken, repeated) implies (oneLine and length <= headerValueLimit and not(repeated))
+
+pure def lawAClientIdIsAToken(length: int, oneLine: bool, repeated: bool): bool =
+  not(headerAdmitted(ClientIdHeader, length, oneLine, false, repeated))
+```
+
 ### A refusal carries a wait only when the resident answered 429 with a whole number of seconds
 
 Every other refusal keeps the resident's status, code and message and no advice.

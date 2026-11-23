@@ -160,8 +160,7 @@ pure def expire(x: Steps): Steps = { ...x, expired: true }
 
 ### Speech and notices run only on the visible, unlocked, non-private screen; speech cut off after its audio began is unknown
 
-The notification is posted as a notice in Alpha that the owner dismisses; the Android notification
-path waits for the phone's own workflow notification bridge.
+The next rule says where a notification step is posted.
 
 ```quint
 type Presented = PresentedApplied | PresentedRefused | PresentedUnknown
@@ -175,6 +174,26 @@ pure val finishedValues = Set(true, false)
 pure def lawALockedScreenNeverPresents(visible: bool, privateView: bool): bool = not(presentationAdmitted(visible, true, privateView))
 pure def lawSpeechCutAfterItsAudioBeganIsUnknown(started: bool): bool = started implies spokenOutcome(true, true, false) == PresentedUnknown
 pure def lawUnadmittedSpeechIsRefused(started: bool, finished: bool): bool = spokenOutcome(false, started, finished) == PresentedRefused
+```
+
+### A notification step is posted on Android, bound to its run, step and operation; elsewhere it is a notice in Alpha
+
+On a phone whose `AlphaNotifications` offers `postWorkflow`, the reviewed title and body are posted
+there with the run's route and a binding of the owner, agent, session, enrollment, proposal and
+operation, so a tap reopens that run. Android's `succeeded` is applied, `failed` posted nothing, and
+any other answer is unconfirmed. Without that call, or without a reviewed run to bind it to, the
+step posts a notice in Alpha that the owner dismisses.
+
+```quint
+type NoticePath = AndroidNotice | AlphaNotice
+type PostedAnswer = PostedSucceeded | PostedFailed | PostedOther
+pure def noticePath(offered: bool, bound: bool): NoticePath = if (offered and bound) AndroidNotice else AlphaNotice
+pure def postedOutcome(answer: PostedAnswer): Presented =
+  if (answer == PostedSucceeded) PresentedApplied else if (answer == PostedFailed) PresentedRefused else PresentedUnknown
+pure val offeredValues = Set(true, false)
+pure val boundValues = Set(true, false)
+pure def lawAnUnboundStepNeverPostsOnAndroid(offered: bool): bool = noticePath(offered, false) == AlphaNotice
+pure def lawOnlySucceededIsApplied(answer: PostedAnswer): bool = postedOutcome(answer) == PresentedApplied iff answer == PostedSucceeded
 ```
 
 ## Story: Read my calendar for the run's own day

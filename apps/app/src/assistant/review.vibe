@@ -1,14 +1,17 @@
-// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/receipts.md, "A result is shown only after its journal entry and receipt settled"
+// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/receipts.md, "A result is shown only after its journal entry and receipt settled"; spec/assistant/review.md, "A card opens the view its family names, or else the view of its operation's class"; spec/assistant/review.md, "A comms card is staged on the comms bar when it is listed, and only the stage's open, live proposal is approved, once"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"
 import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type DeviceReceipt, type ExecutorCall } from "@elizaos/agent/client"
 import { Machine as RoutesMachine, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
-import { Machine as CustodyMachine, approvable, browserCarded, canDirect, cardOffered, contradicts, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
+import { Machine as CustodyMachine, approvable, browserCarded, canDirect, cardOffered, commsApproved, contradicts, destinationOf, ownerTyped, workflowStepRuns, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
+import type { ProposalKind } from "../../gen/telephony__comms.ts"
 import { offered, titleOf, type Evidence, type Resolution, type Result } from "../../gen/assistant__receipts.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { deviceJournalOver } from "../platform/native-plugins.ts"
 import { Preferences } from "../settings/preferences.vibe"
 import { Resident } from "../platform/resident.vibe"
+import { CommsStage } from "../telephony/comms.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
-import { BrowserOpen, ClaimAnswer, PendingListing, type WireProposal } from "./payloads.schema.vibe"
+import { BrowserOpen, ClaimAnswer, PendingListing, WorkflowStepBinding, type WireProposal } from "./payloads.schema.vibe"
+import { AdvertisedCapabilities, type WorkflowStepRef } from "./ports.vibe"
 import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
 import type { CardDestination, ItemizedSet, ProposalCard } from "./transcript.vibe"
 import { ask } from "./transport.vibe"
@@ -44,6 +47,8 @@ export interface CallFacts {
   readonly reviewed: boolean
   readonly messageId: string
   readonly ownerText: string
+  /** The workflow run and step the call serves, for a workflow-bound proposal run from its step review. */
+  readonly workflow?: WorkflowStepRef
 }
 
 /** How the owner may settle a past action whose outcome the phone cannot prove. */
@@ -74,8 +79,12 @@ export service DeviceReview {
   contextChanged(sensitive: boolean): void!!
   /** The agent session changed: a card listed under the earlier one is never approved. */
   agentChanged(): void!!
-  /** Approve a card the owner tapped. */
-  approve(card: ProposalCard): Approval!!
+  /** Approve a card the owner tapped; `fromStage` when the comms bar already approved it on the comms stage. */
+  approve(card: ProposalCard, fromStage?: boolean): Approval!!
+  /** The card last drawn for `proposalId`, such as the comms bar's open proposal, or undefined. */
+  cardOf(proposalId: string): ProposalCard | undefined!!
+  /** Run the device proposal bound to exactly this workflow run and step, once, after the owner approved the step in Workflows and the agent admitted it; undefined when none is pending or it already ran. */
+  workflowStep(runId: string, stepId: string): Approval | undefined!!
   /** Decline a card; nothing runs. */
   decline(card: ProposalCard): ProposalCard!!
   /** Mark a card whose review time passed. */
@@ -105,6 +114,7 @@ export interface PendingProposal {
   readonly operation: unknown
   readonly requestMessageId?: string
   readonly workflow?: unknown
+  readonly step?: WorkflowStepRef
   readonly title?: string
   readonly description?: string
 }
@@ -112,11 +122,48 @@ export interface PendingProposal {
 /** The pending proposal a wire proposal of the agent's review routes describes. */
 export function pendingOf(wire: WireProposal): PendingProposal {
   const { operation, requestMessageId, workflow } = wire.payload
+  const step = stepOf(workflow)
   return {
     id: wire.id, digest: wire.digest, state: wire.state, expiresAt: wire.expiresAt, operation,
     ...(requestMessageId === undefined || requestMessageId === "" ? {} : { requestMessageId }),
     ...(workflow === undefined ? {} : { workflow }),
+    ...(step === undefined ? {} : { step }),
   }
+}
+
+/** The workflow run and step a proposal's binding names, or undefined for an unbound or malformed binding. */
+export function stepOf(workflow: unknown): WorkflowStepRef | undefined {
+  const bound = Schema.decodeUnknownOption(WorkflowStepBinding)(workflow)
+  if (Option.isNone(bound)) return undefined
+  const { workflowId, versionId, runId, stepId } = bound.value
+  return { workflowId, versionId, runId, stepId }
+}
+
+const COMMS_CALLS: ReadonlySet<string> = new Set(["phone_call", "phone_dial"])
+const COMMS_READS: ReadonlySet<string> = new Set(["messages_read_selected", "voicemail_read_selected", "contact_read_selected", "sms_latest_sender"])
+
+function typeOf(operation: unknown): string {
+  if (typeof operation !== "object" || operation === null) return ""
+  const type = (operation as { readonly type?: unknown }).type
+  return typeof type === "string" ? type : ""
+}
+
+/** How the comms stage holds a comms card: a call or dial is a call proposal, anything else another; only a read never acts. */
+export function commsProposalOf(operation: unknown): { readonly kind: ProposalKind; readonly acts: boolean } {
+  const type = typeOf(operation)
+  return { kind: COMMS_CALLS.has(type) ? "CallProposal" : "OtherProposal", acts: !COMMS_READS.has(type) }
+}
+
+/** The words a comms card shows, as the comms stage keeps them to redraw it. */
+export function commsWordsOf(title: string, detail: string): { readonly text: string; readonly title: string; readonly detail: string } {
+  return { text: (detail === "" ? title : `${title}: ${detail}`).slice(0, 4000), title: title.slice(0, 500), detail: detail.slice(0, 2000) }
+}
+
+/** The destination a card opens: its family's own, else the view of its operation's class, else none. */
+export function cardDestination(named: CardDestination | undefined, op: Op): CardDestination | undefined {
+  if (named !== undefined) return named
+  const by = destinationOf(op)
+  return by === "" ? undefined : by as CardDestination
 }
 
 /** The device receipt as the agent's receipt route takes it: `outcome` for what the client reports. */
@@ -196,8 +243,11 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   const { ports } = try DeviceExecutors
   const preferences = try Preferences
   const requests = try WithdrawableRequests
-  const run = <A, E>(work: Effect.Effect<A, E, Resident>) => Effect.provideService(work, Resident, resident)
+  const comms = try CommsStage
+  const advertised = try AdvertisedCapabilities
+  const run = <A, E>(work: Effect.Effect<A, E, Resident>) => Effect.provideService(Effect.provideService(work, Resident, resident), AdvertisedCapabilities, advertised)
   const cards = new Map<string, RoutesMachine.Shape>()
+  const drawn = new Map<string, ProposalCard>()
   const proposals = new Map<string, PendingProposal>()
   const consumed = new Set<string>()
   const itemized = new Set<string>()
@@ -250,15 +300,31 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const done = try exit(routes.send(event))
     return Exit.isSuccess(done)
   }
-  effect function cardOf(proposal: PendingProposal, recovered: boolean, session: string): ProposalCard {
+  effect function drawCard(proposal: PendingProposal, recovered: boolean, session: string): ProposalCard {
     const described = ports.describe(proposal.operation)
     proposals.set(proposal.id, proposal)
     const items = listedNow.get(proposal.id)
-    return {
+    const destination = cardDestination(described.destination, ports.classOf(proposal.operation))
+    const card: ProposalCard = {
       proposalId: proposal.id, digest: proposal.digest, title: proposal.title ?? described.title, detail: proposal.description ?? described.detail,
       expiresAt: expiryOf(proposal.expiresAt), state: recovered ? "RecoveredCard" : "LiveCard", recovered, session,
-      ...(described.destination === undefined ? {} : { destination: described.destination }),
+      ...(destination === undefined ? {} : { destination }),
       ...(items === undefined ? {} : { items }),
+    }
+    drawn.set(proposal.id, card)
+    while (drawn.size > 64) drawn.delete(drawn.keys().next().value ?? "")
+    return card
+  }
+  function isComms(proposalId: string): boolean {
+    const proposal = proposals.get(proposalId)
+    return proposal !== undefined && ports.classOf(proposal.operation) === "CommsAct"
+  }
+  effect function stage(shown: readonly ProposalCard[]) {
+    for (const card of shown) {
+      const proposal = proposals.get(card.proposalId)
+      if (proposal === undefined || !isComms(card.proposalId)) continue
+      const held = commsProposalOf(proposal.operation)
+      try comms.propose(card.proposalId, held.kind, held.acts, "", commsWordsOf(card.title, card.detail))
     }
   }
   effect function newReview() {
@@ -300,13 +366,13 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const identity = try host.identity()
     if (identity === undefined) return { kind: "invalid" } satisfies ApproveResult
     const messageId = proposal.requestMessageId ?? ""
-    facts.set(proposal.id, { reviewed, messageId, ownerText: texts.get(messageId) ?? "" })
+    facts.set(proposal.id, { reviewed, messageId, ownerText: texts.get(messageId) ?? "", ...(proposal.step === undefined ? {} : { workflow: proposal.step }) })
     const execution = try executionFor(identity)
     const check = try screenCheck(reviewed, requestEligible, forceReview)
     const device: DeviceProposal = { id: proposal.id, digest: proposal.digest, expiresAt: expiryOf(proposal.expiresAt), operation: proposal.operation }
     return try promise(() => execution.approve(device, check))
   }
-  effect function approve(card: ProposalCard) {
+  effect function approve(card: ProposalCard, fromStage: boolean = false) {
     const routes = try routesOf(card)
     if (try host.emergency()) return { card: { ...card, state: try stateOf(routes) } }
     const identity = try host.identity()
@@ -317,6 +383,15 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     if (!approvable(itemized.has(card.proposalId) ? "Listed" : "NotItemized", listedNow.has(card.proposalId))) {
       try host.toast(copy.reviewListAgain)
       return { card: { ...card, state: try stateOf(routes) } }
+    }
+    if (isComms(card.proposalId) && !fromStage) {
+      const open = try comms.openCard()
+      const live = open?.proposalId === card.proposalId && open.live
+      const approved = live ? try comms.approve(card.proposalId) : false
+      if (!commsApproved(approved, live, false)) {
+        try host.toast(copy.commsReplaced)
+        return { card: { ...card, state: try stateOf(routes) } }
+      }
     }
     if (!(try step(routes, { type: "tapApprove" }))) return { card: { ...card, state: try stateOf(routes) } }
     if ((try routes.get()).tap === "Fetching") {
@@ -346,6 +421,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       return card
     }
     if (!(try step(routes, { type: "tapDecline" }))) return { ...card, state: try stateOf(routes) }
+    if (isComms(card.proposalId)) try comms.decline(card.proposalId)
     const answered = reject({ id: card.proposalId, digest: card.digest }) catch () => undefined
     const accepted = answered !== undefined
     try step(routes, { type: "declineSettles", accepted })
@@ -358,20 +434,13 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const done = try exit(custody.send(event))
     return Exit.isSuccess(done)
   }
-  effect function directOne(proposal: PendingProposal, text: string, messageId: string) {
-    const op = ports.classOf(proposal.operation)
-    const bound = proposal.requestMessageId === messageId
-    const grounded = op !== "BrowserNavigate" || (ports.target(proposal.operation, text).tag !== "NoTarget" && browserCommand(text))
-    try custodyStep({ type: "prefer", value: try preference() })
-    try custodyStep({ type: "propose", op, workflow: proposal.workflow !== undefined, bound, grounded, listed: false })
-    try custodyStep({ type: "review", visible: true })
-    if (!canDirect(try custody.get())) return undefined
-    try custodyStep({ type: "begin", byRequest: true })
+  effect function custodied(proposal: PendingProposal, byRequest: boolean) {
+    try custodyStep({ type: "begin", byRequest })
     try custodyStep({ type: "reserve", exact: true })
     try custodyStep({ type: "decide" })
     try custodyStep({ type: "claim" })
     try custodyStep({ type: "markApplying" })
-    const result = try execute(proposal, false, true, false)
+    const result = try execute(proposal, !byRequest, byRequest, !byRequest)
     if (result.kind !== "settled") {
       try custodyStep({ type: "abandon" })
       return try receiptOf(proposal, result)
@@ -383,6 +452,16 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     try custodyStep({ type: "finish", synced: result.synced })
     try presented(proposal, result)
     return receipt
+  }
+  effect function directOne(proposal: PendingProposal, text: string, messageId: string, pageLink: boolean) {
+    const op = ports.classOf(proposal.operation)
+    const bound = proposal.requestMessageId === messageId
+    const grounded = op !== "BrowserNavigate" || (ownerTyped(ports.target(proposal.operation, text).tag !== "NoTarget", pageLink) && browserCommand(text))
+    try custodyStep({ type: "prefer", value: try preference() })
+    try custodyStep({ type: "propose", op, workflow: proposal.workflow !== undefined, bound, grounded, listed: false })
+    try custodyStep({ type: "review", visible: true })
+    if (!canDirect(try custody.get())) return undefined
+    return try custodied(proposal, true)
   }
   return {
     pending: () => effect {
@@ -400,8 +479,9 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       for (const proposal of open) {
         const notice = try itemizedNotice(proposal)
         if (notice !== undefined) notices.push(notice)
-        else made.push(try cardOf(proposal, true, identity.session))
+        else made.push(try drawCard(proposal, true, identity.session))
       }
+      try stage(made)
       return { ok: true, cards: made, notices }
     },
     contextChanged: (sensitive: boolean) => effect {
@@ -412,6 +492,21 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       try custodyStep({ type: "changeAgent" })
     },
     approve,
+    cardOf: (proposalId: string) => sync(() => drawn.get(proposalId)),
+    workflowStep: (runId: string, stepId: string) => effect {
+      const identity = try host.identity()
+      if (identity === undefined) return undefined
+      const now = try Clock.currentTimeMillis
+      const found = (try listing()).find((proposal) => proposal.state === "pending" && proposal.step?.runId === runId && expiryOf(proposal.expiresAt) > now)
+      if (found === undefined || ports.validate(found.operation) === undefined) return undefined
+      if (!workflowStepRuns(found.step !== undefined, found.step?.runId === runId, found.step?.stepId === stepId, true, consumed.has(found.id))) return undefined
+      try custodyStep({ type: "propose", op: ports.classOf(found.operation), workflow: true, bound: false, grounded: false, listed: false })
+      if (!(try custodyStep({ type: "reviewWorkflow" }))) return undefined
+      consumed.add(found.id)
+      const card = try drawCard(found, false, identity.session)
+      const done = try custodied(found, false)
+      return { card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary } } satisfies Approval
+    },
     decline,
     expire: (card: ProposalCard) => effect {
       const routes = try routesOf(card)
@@ -429,12 +524,17 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       const left: ProposalCard[] = []
       const notices: string[] = []
       for (const proposal of listed) {
-        if (proposal.workflow !== undefined || ports.validate(proposal.operation) === undefined) {
+        if (proposal.workflow !== undefined) {
+          notices.push(copy.workflowStepElsewhere)
+          continue
+        }
+        if (ports.validate(proposal.operation) === undefined) {
           notices.push(`${copy.notShownHere}: ${proposal.title ?? copy.notAvailableHere}`)
           continue
         }
         const target = ports.target(proposal.operation, text)
-        const ungrounded = ports.classOf(proposal.operation) === "BrowserNavigate" && !browserCarded(target.tag !== "NoTarget", opensPageLink(proposal.operation, pageLinks))
+        const pageLink = opensPageLink(proposal.operation, pageLinks)
+        const ungrounded = ports.classOf(proposal.operation) === "BrowserNavigate" && !browserCarded(target.tag !== "NoTarget", pageLink)
         if (contradicts(writtenNumbers(text).length, target) || ungrounded) {
           reject(proposal) catch () => undefined
           notices.push(ungrounded ? copy.browserUngrounded : target.tag === "ContactTarget" ? copy.wrongNumberContact : copy.wrongNumber)
@@ -445,15 +545,16 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
           notices.push(notice)
           continue
         }
-        const card = try cardOf(proposal, false, identity.session)
+        const card = try drawCard(proposal, false, identity.session)
         if (listedNow.has(proposal.id)) {
           left.push(card)
           continue
         }
-        const done = try directOne(proposal, text, messageId)
+        const done = try directOne(proposal, text, messageId, pageLink)
         if (done === undefined) left.push(card)
         else receipts.push({ card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary } })
       }
+      try stage(left)
       return { receipts, cards: left, notices }
     },
     sync: () => effect {

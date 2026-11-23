@@ -1,11 +1,12 @@
-// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"
+// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/notifications.md, "The phone consumes a notice once, at the revision asked about; a phone without that call consumes it once for this session"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"
 import type { AskKind } from "../../gen/assistant__noticeQuestion.ts"
 import { AssistantFlows } from "../assistant/flows.vibe"
 import { OwnNotices, type OwnNotice } from "../assistant/ports.vibe"
-import { Machine as ShadeMachine, type NoticeKind, type NoticeRow, type NoticeSource } from "../../gen/clock__notifications.effect.vibe"
+import { type ConsumeAnswer, Machine as ShadeMachine, type NoticeKind, type NoticeRow, type NoticeSource, consumeAccepted } from "../../gen/clock__notifications.effect.vibe"
 import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
-import { ClearOutcomes, NoticeListing, NoticeRecord } from "./native.schema.vibe"
-import { NOTIFICATIONS, call, command } from "./plugins.vibe"
+import { ClearOutcomes, NoticeListing, NoticeRecord, OwnNoticeConsumed } from "./native.schema.vibe"
+import { MalformedReply, NOTIFICATIONS, call, command } from "./plugins.vibe"
+import { NativeUnavailable } from "../platform/native.vibe"
 import { WorkflowNotices, asksAboutTap } from "./workflow-notices.vibe"
 import { opaqueId, pageVisible } from "./page.ts"
 
@@ -45,6 +46,10 @@ export function askKindOf(row: NoticeRow): AskKind {
   return askable ? "ValidNotice" : "OrdinaryNotice"
 }
 
+const CONSUMED: Readonly<Record<typeof OwnNoticeConsumed.Type["status"], ConsumeAnswer>> = {
+  consumed: "ConsumedNow", "already-consumed": "AlreadyConsumed", changed: "NoticeChanged", gone: "NoticeGone", unavailable: "ConsumeUnavailable",
+}
+
 const WIRE_SOURCE: Readonly<Record<NoticeSource, Listed["source"]>> = { OwnNotice: "own", ExternalNotice: "external", HostedNotice: "hosted" }
 const refOf = (row: NoticeRow) => ({ id: row.id, revision: row.revision, source: WIRE_SOURCE[row.source] })
 
@@ -70,7 +75,7 @@ export service Notifications {
   own(): ReadonlyArray<NoticeRow>!!
   /** The own notice `id` as the phone lists it now, read again; undefined when it is gone, hidden, not askable or its text changed under the same revision. */
   current(id: string): OwnNotice | undefined!!
-  /** Consumes the notice once for this session; false when it was already consumed or is no longer listed. */
+  /** Consumes the notice once through the phone at the revision listed now, or once for this session where the phone cannot; false when it was already consumed, changed or is no longer listed. */
   consume(id: string): boolean!!
 }
 
@@ -154,11 +159,15 @@ export const notificationsLayer = Layer.effect(Notifications, effect {
       return { id: fresh.id, revision: fresh.revision } satisfies OwnNotice
     },
     effect consume(id: string) {
-      if (consumed.has(id)) return false
       const fresh = (try read())?.items.find((r) => r.id === id && r.source === "own")
       if (fresh === undefined) return false
-      consumed.add(id)
-      return true
+      const reply = call(NOTIFICATIONS, "consumeOwnNotice", OwnNoticeConsumed, { id: fresh.id, revision: fresh.revision }) catch (error) => error
+      const answer: ConsumeAnswer = reply instanceof NativeUnavailable ? "ConsumeUnsupported"
+        : reply instanceof MalformedReply || reply instanceof Error ? "ConsumeUnavailable"
+        : CONSUMED[reply.status]
+      const accepted = consumeAccepted(answer, consumed.has(id))
+      if (accepted) consumed.add(id)
+      return accepted
     },
   }
 })

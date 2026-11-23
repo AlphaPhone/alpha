@@ -60,9 +60,9 @@ export function operationKindOf(op: Owned): ClockOperationKind {
   return op.type === "reminder_read_selected" ? "ReminderRead" : "ReminderChange"
 }
 
-const REVIEW_OP: Readonly<Record<ReturnType<typeof reviewClassOf>, Op>> = { ReminderWrite: "CreateReminder", ScheduleRead: "CalendarRead" }
+const REVIEW_OP: Readonly<Record<ReturnType<typeof reviewClassOf>, Op>> = { ReminderWrite: "CreateReminder", ScheduleRead: "RemindersRead" }
 
-/** The assistant's review class of a Clock operation: every Clock request and reminder change a reminder write, every read a schedule read. */
+/** The assistant's review class of a Clock operation: every Clock request and reminder change a reminder write, every read a reminders read. */
 export function reviewOpOf(op: Owned): Op {
   return REVIEW_OP[reviewClassOf(operationKindOf(op))]
 }

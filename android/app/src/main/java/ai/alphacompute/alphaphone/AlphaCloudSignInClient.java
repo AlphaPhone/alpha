@@ -1,16 +1,16 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.auth.cloud.CloudCredentialSlots;
-import ai.eliza.auth.cloud.CloudEmailCode;
-import ai.eliza.auth.cloud.CloudKeyRenewal;
-import ai.eliza.auth.cloud.CloudKeyRevocation;
-import ai.eliza.auth.cloud.CloudSignInConfig;
-import ai.eliza.auth.cloud.CloudSignInEnvironment;
-import ai.eliza.auth.cloud.CloudSignInFlow;
-import ai.eliza.auth.cloud.CloudSignInReadiness;
-import ai.eliza.auth.cloud.CloudSignInRoutes;
-import ai.eliza.auth.cloud.CloudSmsCode;
-import ai.eliza.auth.cloud.NativeGoogleCredential;
+import ai.alphacompute.alphaphone.cloud.CloudCredentialSlots;
+import ai.alphacompute.alphaphone.cloud.CloudEmailCode;
+import ai.alphacompute.alphaphone.cloud.CloudKeyRenewal;
+import ai.alphacompute.alphaphone.cloud.CloudKeyRevocation;
+import ai.alphacompute.alphaphone.cloud.CloudSignInConfig;
+import ai.alphacompute.alphaphone.cloud.CloudSignInEnvironment;
+import ai.alphacompute.alphaphone.cloud.CloudSignInFlow;
+import ai.alphacompute.alphaphone.cloud.CloudSignInReadiness;
+import ai.alphacompute.alphaphone.cloud.CloudSignInRoutes;
+import ai.alphacompute.alphaphone.cloud.CloudSmsCode;
+import ai.alphacompute.alphaphone.cloud.NativeGoogleCredential;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -52,7 +52,7 @@ import org.json.JSONTokener;
 
 /**
  * Alpha's native Cloud sign-in client: its own fork of the shared client (elizaOS/eliza
- * packages/auth/android ai.eliza.auth.cloud.CloudSignInPlugin at the reviewed pin in
+ * packages/auth/android ai.alphacompute.alphaphone.cloud.CloudSignInPlugin at the reviewed pin in
  * upstream.lock.json), so that every screen sign-in shows is Alpha's: the authorization dialog that
  * alone releases a Steward session into a mobile key ({@code requireAuthorization}: "Authorize" and
  * "Cancel", not cancelable by an outside touch, bounded by the attempt's expiry and refused after

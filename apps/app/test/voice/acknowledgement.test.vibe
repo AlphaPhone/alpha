@@ -3,7 +3,7 @@ import { assert, it } from "@effect/vitest"
 import { acknowledgement, activityOf } from "../../src/voice/acknowledgement.vibe"
 import { Speech, SpeechInterrupted, type SpeakOptions } from "../../src/voice/speech.vibe"
 import { initial as speechInitial } from "../../gen/voice__speech.ts"
-import { audible, boundElapsed, cancel, cueEnded, holdElapsed, initial, progress, replyMayStart, replyReady } from "../../gen/voice__acknowledgement.ts"
+import { audible, cancel, ended, initial, progress, replyMayStart, replyReady } from "../../gen/voice__acknowledgement.ts"
 
 /** One line the fake speaker was asked to say: whether it was stopped, and its start report. */
 interface Said {
@@ -24,7 +24,7 @@ function speaker(said: Said[], startsAtOnce: boolean) {
       const entry: Said = { line: text, stopped: false, finished: false, start: options?.onStarted ?? (() => sync(() => undefined)), end }
       said.push(entry)
       if (startsAtOnce) try entry.start()
-      try Deferred.await(end)
+      try onInterrupt(Deferred.await(end), () => sync(() => { entry.stopped = true; entry.finished = true }))
       if (entry.stopped) throw new SpeechInterrupted({ reason: "stopped", started: startsAtOnce })
     },
     speakPieces: () => Effect.void,
@@ -39,6 +39,7 @@ function speaker(said: Said[], startsAtOnce: boolean) {
       }
     },
     entry: () => Effect.succeed("EntryAllowed" as const),
+    bindStream: () => Effect.void,
     warmDevice: () => Effect.void,
     warmCloud: () => Effect.void,
     setMuted: () => Effect.succeed(true),
@@ -58,14 +59,14 @@ effect function settle() {
 
 const clear = () => true
 
-it.effect(`a cue speaks only the planner's own thinking line, once a turn (spec/voice/acknowledgement.md, "Only the planner's own thinking line, of 1 to 160 characters, is spoken, and only once a turn")`, () => effect {
+it.effect(`a cue speaks only the planner's own thinking line, once a turn (spec/voice/acknowledgement.md, "Only the planner's own thinking line, of 1 to 120 characters, is spoken, and only once a turn")`, () => effect {
   const said: Said[] = []
   provide speaker(said, true) {
     const cue = try acknowledgement()
     try cue.progress({ activity: "running_tool" }, clear)
     try cue.progress({ activity: "running_action", label: "Synthetic system status" }, clear)
     try cue.progress({ activity: "thinking", label: "   " }, clear)
-    try cue.progress({ activity: "thinking", label: "x".repeat(161) }, clear)
+    try cue.progress({ activity: "thinking", label: "x".repeat(121) }, clear)
     try cue.progress({ activity: "thinking", label: "Checking your calendar." }, clear)
     try cue.progress({ activity: "thinking", label: "A second line" }, clear)
     try TestClock.adjust("300 millis")
@@ -205,21 +206,54 @@ it.effect(`a recorded clip's microphone must be closed before the cue (spec/voic
 })
 
 it.effect(`the cue model never lets a reply start over an audible cue (spec/voice/acknowledgement.md, "An audible cue finishes before the reply speaks, but never holds a ready reply more than 2.5 seconds")`, () => effect {
-  const held = progress(initial, "Thinking", 22, true)
-  const playing = audible(holdElapsed(held, true))
+  const taken = progress(initial, "Thinking", 22, true)
+  const playing = audible(taken)
   const waiting = replyReady(playing)
-  const silenced = replyReady(held)
-  const dropped = replyReady(holdElapsed(held, true))
+  const silenced = replyReady(taken)
   try Effect.try(() => assert.deepStrictEqual({
-    waiting: [waiting.stage, replyMayStart(waiting)],
-    afterItsEnd: replyMayStart(cueEnded(waiting)),
-    afterItsBound: [boundElapsed(waiting).clipped, replyMayStart(boundElapsed(waiting))],
-    silenced: [silenced.stage, silenced.spoken],
-    dropped: [dropped.stage, dropped.dropped],
-    stopped: [cancel(playing).stage, replyMayStart(cancel(playing))],
-    unclear: progress(initial, "Thinking", 22, false).stage,
+    waiting: [waiting.speaking, replyMayStart(waiting, 0), replyMayStart(waiting, 2499)],
+    afterItsEnd: replyMayStart(ended(waiting), 0),
+    atItsBound: replyMayStart(waiting, 2500),
+    silenced: [silenced.used, silenced.heard, replyMayStart(silenced, 0)],
+    stopped: [cancel(playing).speaking, replyMayStart(cancel(playing), 0)],
+    unclear: progress(initial, "Thinking", 22, false).used,
+    tooLong: progress(initial, "Thinking", 121, true).used,
   }, {
-    waiting: ["Audible", false], afterItsEnd: true, afterItsBound: [1, true], silenced: ["Ended", 0], dropped: ["Ended", 1],
-    stopped: ["Ended", true], unclear: "NoCue",
+    waiting: [true, false, false], afterItsEnd: true, atItsBound: true, silenced: [true, 0, true],
+    stopped: [false, true], unclear: false, tooLong: false,
   }))
+})
+
+it.effect(`a turn aborted during the hold says nothing (spec/voice/acknowledgement.md, "A turn abort, Stop, speaking over it or voice retiring stops the cue at once, and nothing restarts it")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const cue = try acknowledgement()
+    try cue.progress({ activity: "thinking", label: "Checking your notes." }, clear)
+    try TestClock.adjust("100 millis")
+    try cue.cancel()
+    try TestClock.adjust("1 second")
+    try settle()
+    try cue.idle()
+    const audibleAfter = try cue.audible()
+    try Effect.try(() => assert.deepStrictEqual({ spoken: said.length, audible: audibleAfter }, { spoken: 0, audible: false }))
+  }
+})
+
+it.effect(`a cue that already ended lets the reply start at once, and the turn never repeats it (spec/voice/acknowledgement.md, "Only the planner's own thinking line, of 1 to 120 characters, is spoken, and only once a turn")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const cue = try acknowledgement()
+    const status = { activity: "thinking", label: "Checking your saved notes." }
+    try cue.progress(status, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    try finishLine(said[0])
+    try settle()
+    const endedBeforeTheReply = !(try cue.audible())
+    try cue.idle()
+    try cue.progress({ activity: "thinking", label: "Different words" }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    try Effect.try(() => assert.deepStrictEqual({ endedBeforeTheReply, lines: said.map((entry) => entry.line), cut: said[0]?.stopped }, { endedBeforeTheReply: true, lines: ["Checking your saved notes."], cut: false }))
+  }
 })

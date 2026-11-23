@@ -22,4 +22,5 @@ The build carries one deployment: the shipped Eliza Cloud, or Alpha Cloud when t
 - [Agent access](./agentAccess.md): the owner's switches for agent writes through Google.
 - [Delegation](./delegation.md): the Cloud delegation for hosted results and its return.
 - [Dedicated setup](./dedicated.md): the test-mocks review of a dedicated Cloud agent.
-- [Limits](./limits.md): Cloud's service limits and their waits, shared with voice.
+- [Device enrollment](./enrollment.md): the phone's enrollment with its resident agent, its device key, workflow protocol and enabled views.
+- [Limits](./limits.md): Cloud's service limits and their waits and resets, shared with voice and Maps.

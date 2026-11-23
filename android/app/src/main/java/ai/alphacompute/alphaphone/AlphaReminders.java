@@ -24,7 +24,7 @@ public final class AlphaReminders {
   return new SecureStringStore() {
    public String identity() { return "alpha-credential-slots-v1"; }
    public String read(String key) throws Exception { return storage.readCredentialSlot(key); }
-   public void write(String key, String value) throws Exception { storage.writeCredentialSlot(key, value); }
+   public void write(String key, String value) throws Exception { storage.writeCredentialSlot(key, value); StoreChanges.changed(StoreChanges.Store.REMINDERS); }
   };
  };
  public static ReminderEngine engine(Context context) {

@@ -162,9 +162,9 @@ describe("The keyguard and the assistant surface (spec/assistant/index.md, \"The
 })
 
 describe("A kept navigation that is not a state (spec/shell/navigation.md, \"Booting brings back the app and its history without the old page's layers\")", () => {
-  it.effect("is held for review, never written over, and the phone starts on Home (spec/platform/storage.md, \"A stored value that is not a state is held for review and never written over\")", () => effect {
+  it.effect("is held for review and, where its copy cannot be kept apart, never written over, and the phone starts on Home (spec/platform/storage.md, \"A stored value that is not a state is held for review and never written over\")", () => effect {
     let held: string[] = []
-    const storage = Layer.succeed(DeviceStorage, { hold: (key: string) => sync(() => { held = [...held, key] }) } as never)
+    const storage = Layer.succeed(DeviceStorage, { hold: (key: string) => sync(() => { held = [...held, key]; return false }) } as never)
     provide memoryStore, storage, Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), resident, journal) {
       const store = try KeyValueStore.KeyValueStore
       try store.set(NAVIGATION_KEY, "{not a state")
@@ -177,6 +177,24 @@ describe("A kept navigation that is not a state (spec/shell/navigation.md, \"Boo
       }
       const kept = try store.get(NAVIGATION_KEY)
       try Effect.try(() => assert.deepStrictEqual([held, app, Option.isOption(kept) ? Option.getOrUndefined(kept) : kept], [[NAVIGATION_KEY], "notes", "{not a state"]))
+    }
+  })
+  it.effect("is removed once its copy is kept apart, and the phone keeps its new navigation (spec/platform/storage.md, \"A stored value that is not a state is held for review and never written over\")", () => effect {
+    let held: string[] = []
+    const storage = Layer.succeed(DeviceStorage, { hold: (key: string) => sync(() => { held = [...held, key]; return true }) } as never)
+    provide memoryStore, storage, Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), resident, journal) {
+      const store = try KeyValueStore.KeyValueStore
+      try store.set(NAVIGATION_KEY, "{not a state")
+      const app = try effect {
+        provide shell {
+          const navigation = try Navigation
+          try navigation.open("notes")
+          return (try navigation.get()).app
+        }
+      }
+      const kept = try store.get(NAVIGATION_KEY)
+      const text = Option.isOption(kept) ? Option.getOrUndefined(kept) : kept
+      try Effect.try(() => assert.deepStrictEqual([held, app, typeof text === "string" && text !== "{not a state"], [[NAVIGATION_KEY], "notes", true]))
     }
   })
 })

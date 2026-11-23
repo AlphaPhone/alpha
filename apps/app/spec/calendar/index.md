@@ -14,5 +14,5 @@ specs state what Alpha's renderer adds on top of them.
 | Changing events | [Editor rules](./editor.md), [retained drafts](./drafts.md), [device calendar writes](./device.md), [the assistant's selection](./selection.md) |
 | The agent's Calendar | [Reads and reviewed writes](./agent.md), [deletion Undo](./deletions.md), [approval review](./approvals.md) |
 | Agent requests on the phone | [Device actions](./deviceActions.md), [named reads](./namedRead.md), [availability](./availability.md), [reviewed range reads](./rangeRead.md) |
-| Google Calendar | [Linking](./googleLink.md), [sync control and consent](./sync.md), [device sync consent](./nativeSync.md), [the local port](./linkedLocal.md), [disconnect](./disconnect.md) |
+| Google Calendar | [Linking](./googleLink.md), [sync control and consent](./sync.md), [device sync consent](./nativeSync.md), [syncing the phone's calendar](./deviceSync.md), [the local port](./linkedLocal.md), [disconnect](./disconnect.md) |
 | Keeping what exists | [Legacy calendar preservation, backups and recovery](./preservation.md) |

@@ -50,6 +50,22 @@ pure def alwaysAQueuedReturnHasTheGate(d: Delegation): bool = d.queued implies (
 pure def sometimesReturnDeferredBehindStart(d: Delegation): bool = d.queued and d.running == StartStep
 ```
 
+### The authorization page is the deployment's own
+
+Start opens only the page the resident answered when it is the deployment's own `/app-auth/authorize`
+page on its web origin, the App Link host the phone's external-link policy (upstream
+`ElizaCloud.openExternal`) opens, with a 43-character `state` and no user info or fragment. Any other
+page is not opened and no pending authorization is kept for it.
+
+```quint
+pure def authorizePageOpens(ownOrigin: bool, authorizePath: bool, stateWellFormed: bool, extra: bool): bool =
+  ownOrigin and authorizePath and stateWellFormed and not(extra)
+pure def lawAnotherOriginIsNeverOpened(authorizePath: bool, stateWellFormed: bool, extra: bool): bool =
+  not(authorizePageOpens(false, authorizePath, stateWellFormed, extra))
+pure def lawAPageWithoutItsStateIsNeverOpened(ownOrigin: bool, authorizePath: bool, extra: bool): bool =
+  not(authorizePageOpens(ownOrigin, authorizePath, false, extra))
+```
+
 ### The native shell keeps each return until its authorization is finished
 
 A return for another account is kept. A denial cancels and clears. One with no usable code, or past

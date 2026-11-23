@@ -161,8 +161,9 @@ pure def sometimesCodeSent(b: Billing): bool = b.authority == CodeSent and b.pen
 
 ### Cloud's answer to a change is what the owner is told
 
-An applied upgrade is done; one that needs payment continues on Stripe's invoice page; a downgrade
-changes at renewal; anything not confirmed is not reported as done.
+An applied upgrade is done; one that needs payment continues on Stripe's payment page when the
+phone's link policy opens it, and is otherwise pending until Cloud confirms it; a downgrade changes
+at renewal; anything not confirmed is not reported as done.
 
 ```quint
 type ChangeResult = ChangeApplied | ChangeNeedsPayment | ChangeNotYet | ChangeFailed
@@ -189,6 +190,27 @@ pure def canReviewFailed(b: Billing): bool = b.busy and isChange(b.pending) and 
 pure def reviewFailed(b: Billing): Billing = { ...b, busy: false, pending: NoPending, outcome: ChangeRefused }
 pure def sometimesUpgraded(b: Billing): bool = b.outcome == PlanUpgraded
 pure def sometimesCancelledAtPeriodEnd(b: Billing): bool = b.outcome == EndsAtPeriodEnd and endsAtEnd(b.current)
+```
+
+### A payment page opens only on a Stripe host the phone's link policy opens
+
+Every page Cloud answers for payment, checkout, funds or a plan change, opens only through the
+phone's external-link policy (upstream `ElizaCloud.openExternal`, `CloudRequestPolicy.PROVIDER_HOSTS`):
+a plain HTTPS page with no port and no user info on Stripe's checkout or billing host. Stripe's
+invoice host is not on that list today, so an upgrade whose payment Cloud answers as an invoice page
+reads as pending rather than as a page that opened.
+
+```quint
+pure val paymentHosts: Set[str] = Set("checkout.stripe.com", "billing.stripe.com")
+pure def paymentPageOpens(host: str, https: bool, defaultPort: bool, userInfo: bool): bool =
+  https and defaultPort and not(userInfo) and paymentHosts.contains(host)
+pure val hostValues = Set("checkout.stripe.com", "billing.stripe.com", "invoice.stripe.com", "checkout.stripe.com.example")
+pure def lawAnInvoicePageIsNotOpened(https: bool, defaultPort: bool, userInfo: bool): bool =
+  not(paymentPageOpens("invoice.stripe.com", https, defaultPort, userInfo))
+pure def lawOnlyAPlainHttpsPageOpens(host: str): bool =
+  not(paymentPageOpens(host, false, true, false)) and not(paymentPageOpens(host, true, false, false)) and not(paymentPageOpens(host, true, true, true))
+pure def lawALookalikeHostIsNotOpened(https: bool, defaultPort: bool, userInfo: bool): bool =
+  not(paymentPageOpens("checkout.stripe.com.example", https, defaultPort, userInfo))
 ```
 
 ## Story: Add funds

@@ -26,12 +26,20 @@ import { withdrawableLayer } from "./withdrawable.vibe"
 import { networkLocationLayer } from "./network-location.vibe"
 import { browserCallFactsLive, cameraCallFactsLive } from "./call-facts.vibe"
 import { restartLayer } from "./restart.vibe"
+import { emailShelfLayer } from "./email-shelf.vibe"
+import { viewsLayer } from "./views.vibe"
 
 export { Assistant } from "./assistant.vibe"
 export { AssistantDraft, cameraHandoffsFromAssistant } from "./draft.vibe"
 export { askAlphaTarget, filesCapabilities } from "./files-bridge.vibe"
 export { AssistantHost } from "./host.vibe"
-export { AssistantEmail, BrowserPages, CameraComposer, MapsChatCards, MapsRelay, OwnNotices, ReplyChanges, TurnSources, WorkflowStepDecisions, type BrowserPage, type ObservedTab } from "./ports.vibe"
+export { AdvertisedCapabilities, AssistantEmail, BrowserPages, BrowserViews, CameraComposer, MapsChatCards, MapsRelay, MapsViews, OwnNotices, ReplyChanges, TurnSources, WorkflowStepDecisions, type BrowserPage, type MapsShown, type ObservedTab, type PageObservation, type ViewAnswer, type WorkflowStepRef } from "./ports.vibe"
+export { browserPagesFromBrowser, browserViewsFromBrowser, mapsViewsFromMaps } from "./fills.vibe"
+export { AgentViews, type ViewDelivery, type ViewTurnFields } from "./views.vibe"
+export { EmailShelf } from "./email-shelf.vibe"
+export { commsReviewFromAssistant } from "./call-facts.vibe"
+export { workflowStepSource } from "./draft.vibe"
+export { CAPABILITIES_HEADER, capabilityHeaders } from "./transport.vibe"
 export { spokenCue, type SpokenCue } from "./cue.vibe"
 export { NetworkLocation, type NetworkPosition } from "./network-location.vibe"
 export { PhoneLocation } from "./location.vibe"
@@ -42,7 +50,7 @@ export { Composer } from "./composer.vibe"
 export { Suggestions } from "./suggestion.vibe"
 export { AssistantFlows } from "./flows.vibe"
 export { ChatSearch } from "./search.vibe"
-export { DeviceExecutors } from "./review.vibe"
+export { DeviceExecutors, DeviceReview, type CallFacts } from "./review.vibe"
 
 /** The key the composer's drafts are kept under; each binding inside names its origin, owner, agent and conversation. */
 export const draftsKey = "alpha/assistant/drafts"
@@ -54,13 +62,13 @@ export const machines = Layer.mergeAll(
 )
 
 const services = Layer.provideMerge(
-  Layer.mergeAll(conversationsLayer, locationLayer, attachmentsLayer, reviewLayer, suggestionsLayer, restartLayer),
-  Layer.provideMerge(Layer.mergeAll(withdrawableLayer, networkLocationLayer), machines),
+  Layer.mergeAll(conversationsLayer, locationLayer, attachmentsLayer, reviewLayer, suggestionsLayer, restartLayer, viewsLayer),
+  Layer.provideMerge(Layer.mergeAll(withdrawableLayer, networkLocationLayer, emailShelfLayer), machines),
 )
 
 const conversation = Layer.provideMerge(searchLayer, Layer.provideMerge(composerLayer, services))
 
-/** The assistant's services and machines, and Camera's and Browser's per-call facts, needing Native, Resident, ResidentControl, ResidentRecovery, KeyValueStore, Preferences (settings), Latency (voice), Navigation (shell core), AssistantHost and DeviceExecutors (shell); the ports in ports.vibe answer with their defaults until Inbox, Clock, Workflows, Maps, Camera, Notes, Calendar, Browser and Settings fill them. */
+/** The assistant's services and machines, and Camera's and Browser's per-call facts, needing Native, Resident, ResidentControl, ResidentRecovery, ResidentFeeds, KeyValueStore, Preferences (settings), Latency (voice), CommsStage (telephony), Navigation (shell core), AssistantHost and DeviceExecutors (shell); the ports in ports.vibe answer with their defaults until Inbox, Clock, Workflows, Maps, Camera, Notes, Calendar, Browser, Settings and the shell fill them. */
 export const layer = Layer.provideMerge(
   Layer.mergeAll(flowsLayer, draftLayer, cameraCallFactsLive, browserCallFactsLive),
   Layer.provideMerge(assistantLayer, conversation),

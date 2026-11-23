@@ -1,4 +1,5 @@
 // spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/withdrawal.md, "Story: Give up on a request without it happening later"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"
+import { ProposalWords, StoredProposal } from "../telephony/comms.schema.vibe"
 
 /** A conversation as the resident lists it. */
 export schema ConversationRow {
@@ -75,22 +76,6 @@ export schema ClaimAnswer { readonly digest: string; readonly proposal: ClaimedP
 /** A Browser open, read only for its address. */
 export schema BrowserOpen { readonly type: "browser_navigate"; readonly url: string }
 
-/** One public link of an open Browser page. */
-export schema PageLink { readonly url: string; readonly text: string }
-
-/** The page of a Browser tab as Browser read it for a turn: address, one-line title, visible text, selection and links, or only the address and title when withheld. */
-export schema BrowserPageObservation {
-  readonly tabId: Schema.NonEmptyString
-  readonly revision: Schema.NonEmptyString
-  readonly url: string
-  readonly title: string
-  readonly capturedAt: Schema.Int
-  readonly text?: string
-  readonly selection?: string
-  readonly links?: readonly PageLink[]
-  readonly withheld?: string
-}
-
 /** What Android says about an assist invocation it handed to the renderer. */
 export schema AssistInvocation {
   readonly origin: "assist" | "listener" | "system" | "power" | "none"
@@ -119,11 +104,11 @@ export schema SavedFile { readonly id: string; readonly name: string; readonly m
 /** The chat attachments saved beside one sent message. */
 export schema SavedAttachments { readonly requestText: string; readonly displayText?: string; readonly files: readonly SavedFile[] }
 
-/** The open comms card kept on the phone. */
-export schema OpenSuggestion { readonly text: string; readonly title: string; readonly detail: string }
+/** The open comms card kept on the phone: Telephony's card words, the one decoder of that record. */
+export const OpenSuggestion = ProposalWords
 
-/** The comms suggestion kept on the phone across a restart. */
-export schema StoredSuggestion { readonly v: 1; readonly briefed: string | null; readonly open: OpenSuggestion | null }
+/** The comms suggestion kept on the phone across a restart: Telephony's `alpha-proposal:v1` record, the one decoder of that record. */
+export const StoredSuggestion = StoredProposal
 
 /** A workflow run a reply announced in its `[WORKFLOW]` block. */
 export schema WorkflowBlock { readonly workflowId: Schema.NonEmptyString; readonly runId: Schema.NonEmptyString; readonly title?: string }
@@ -136,3 +121,78 @@ export schema StagedEmail { readonly to?: string | readonly string[]; readonly s
 
 /** The native agent bridge's answer to a plain request. */
 export schema BridgeAnswer { readonly status: Schema.Int; readonly data?: Schema.Unknown }
+
+/** The workflow step a device proposal is bound to, as the agent's proposal payload names it. */
+export schema WorkflowStepBinding {
+  readonly workflowId: Schema.NonEmptyString
+  readonly versionId: Schema.NonEmptyString
+  readonly runId: Schema.NonEmptyString
+  readonly stepId: Schema.NonEmptyString
+  readonly specDigest: string
+}
+
+/** The renderer binding of a view the agent prepared or a command it sent, as the view routes take it back. */
+export schema ViewBinding {
+  readonly clientId: Schema.NonEmptyString
+  readonly requestId: Schema.NonEmptyString
+  readonly viewId: Schema.NonEmptyString
+  readonly viewType: "gui"
+  readonly installationId: Schema.NonEmptyString
+}
+
+/** A view an agent action prepared for this renderer: the completed-action handoff of its result values. */
+export schema ViewHandoff {
+  readonly mode?: string
+  readonly viewId: Schema.NonEmptyString
+  readonly viewPath?: string
+  readonly viewType?: string
+  readonly label?: string
+  readonly subview?: boolean
+  readonly completedActionDelivered?: boolean
+  readonly completedActionHandoffId?: string
+  readonly navigationPrepared: true
+  readonly navigationBinding: ViewBinding
+}
+
+/** The claim route's answer: the claim id that settles it. */
+export schema ViewClaim { readonly claimId: Schema.NonEmptyString }
+
+/** The result route's answer: whether the host took the result. */
+export schema ViewResultAnswer { readonly accepted: boolean }
+
+/** One agent command in a view, as the resident's `view-interact` feed gives it for this renderer. */
+export schema ViewInteraction {
+  readonly type: "view:interact"
+  readonly viewType: "gui"
+  readonly viewId: Schema.NonEmptyString
+  readonly requestId: Schema.NonEmptyString
+  readonly installationId: Schema.NonEmptyString
+  readonly capability: string
+  readonly params?: Schema.Unknown
+}
+
+/** The state of one email card as its shelf keeps it. */
+export schema ShelvedCard {
+  readonly state: "DraftEmail" | "SendingEmail" | "SentEmail" | "RejectedEmail" | "UncertainEmail" | "DeclinedEmail"
+  readonly version: Schema.Int
+  readonly dispatchedVersion: Schema.Int
+  readonly dispatches: Schema.Int
+  readonly account: boolean
+  readonly recipients: boolean
+  readonly body: boolean
+  readonly typing: boolean
+}
+
+/** One email card kept on its conversation's shelf: its row id, the owner turn it answers, its fields as last shown and its card. */
+export schema ShelvedEmail {
+  readonly id: Schema.NonEmptyString
+  readonly messageId: string
+  readonly ownerTurn?: string
+  readonly to: string
+  readonly subject: string
+  readonly text: string
+  readonly card: ShelvedCard
+}
+
+/** A conversation's email shelf (`inbox-drafts:v1:chat:`). */
+export schema EmailShelfRecord { readonly v: 1; readonly cards: readonly ShelvedEmail[] }

@@ -6,10 +6,10 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import ai.eliza.plugins.agent.runtime.CredentialIntentFence;
-import ai.eliza.plugins.agent.runtime.CredentialRequestFence;
-import ai.eliza.plugins.agent.runtime.NativeProviderSlot;
-import ai.eliza.plugins.agent.runtime.ResidentAttachment;
+import ai.eliza.plugins.securestore.nativeonly.CredentialIntentFence;
+import ai.alphacompute.alphaphone.runtime.CredentialRequestFence;
+import ai.alphacompute.alphaphone.runtime.NativeProviderSlot;
+import ai.alphacompute.alphaphone.runtime.ResidentAttachment;
 import java.io.File;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -127,7 +127,7 @@ private static final class ResidentAttachDiagnostic {
  private final java.util.Set<String> cancelledStarts=new java.util.HashSet<>();
  private static boolean accepting=true,stopping;
  private volatile boolean disposed;
- // Provider admission generation the running agent process was launched with (configureEnvironment).
+ // Provider admission generation the running agent process was launched with (configureLaunch).
  private static String launchedGeneration;
  // This surface's start requests that attached. Cancelling one never retires the shared launch.
  private final ResidentAttachment.Requests attachedStarts=new ResidentAttachment.Requests();
@@ -379,9 +379,9 @@ private static final class ResidentAttachDiagnostic {
   boolean assistant=activity instanceof AlphaAssistActivity&&activity.getIntent()!=null&&activity.getIntent().getBooleanExtra(AlphaAssistActivity.EXTRA_ASSISTANT,false);
   call.resolve(new JSObject().put("assistant",assistant));
  }
- /** How this assistant surface was opened, consumed on read: "listener" (the image's always-on
-  * listener, see ai.eliza.plugins.system.SenseInvocation) is reported once per launch, then
-  * "assist". `locked` reports whether the keyguard is showing now. */
+ /** How this assistant surface was opened: "listener" (the image's always-on listener, see
+  * ai.eliza.plugins.system.SenseInvocation) for the first read of a listener launch, then "assist".
+  * `locked` reports whether the keyguard is showing now; {@link #keyguard} reads that alone. */
  @PluginMethod public void takeInvocation(PluginCall call) {
   android.app.Activity activity=getActivity();
   boolean assistant=activity instanceof AlphaAssistActivity&&activity.getIntent()!=null&&activity.getIntent().getBooleanExtra(AlphaAssistActivity.EXTRA_ASSISTANT,false);
@@ -641,7 +641,8 @@ private static final class ResidentAttachDiagnostic {
    env.put("ELIZA_NATIVE_BROWSER_COMMANDS","back,forward,reload");
   }
  }
- static void configureEnvironment(Context context,java.util.Map<String,String> env) throws java.io.IOException {
+ /** The upstream agent service's launch hook (ElizaAgentService.configureLaunch): the variables Alpha adds to each launch. */
+ static void configureLaunch(Context context,java.util.Map<String,String> env) throws java.io.IOException {
   env.put("ELIZA_RUNTIME_PROFILE",BuildConfig.ELIZA_RUNTIME_PROFILE);
   if(AlphaImageCapability.verified(context))env.put("ELIZA_MOBILE_SMS_REPLY_DRAFT","1");
   else env.remove("ELIZA_MOBILE_SMS_REPLY_DRAFT");
@@ -814,7 +815,7 @@ private static final class ResidentAttachDiagnostic {
   String requestId=call.getString("requestId");
   if(requestId!=null&&!requestId.matches("[a-f0-9-]{36}")){call.reject("Invalid startup request");return;}
   try {
-   ai.eliza.plugins.agent.updater.RuntimeUpdatePause.beforeStart();
+   ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.beforeStart();
    if(!runtimePackaged()){call.reject("On-device agent is unavailable in this version.");return;}
    // No provider is required: without an admitted Eliza Cloud plan the agent runs unbound.
    final AlphaCredentialStore providerStore=new AlphaCredentialStore(getContext());
@@ -839,7 +840,7 @@ private static final class ResidentAttachDiagnostic {
      if(requestId!=null&&cancelledStarts.remove(requestId)){call.reject("Local startup cancelled");return;}
      if(observedEpoch!=lifecycleEpoch||continuationEpoch>=0&&!credentialIntents.isCurrent(continuationIntent)){if(continuationEpoch>=0){call.reject("Local agent connection changed; retry from the app.");return;}continue;}
      if(continuationEpoch>=0&&(getActivity()==null||!getActivity().hasWindowFocus())){call.reject("Return to the app before starting.");return;}
-     ai.eliza.plugins.agent.updater.RuntimeUpdatePause.beforeStart();
+     ai.alphacompute.alphaphone.runtime.RuntimeUpdatePause.beforeStart();
      if(disposed){call.reject("Local agent bridge is closed.");return;}
      if(credentialMutationEpoch>=0){call.reject("Local provider is changing; wait before starting.");return;}
      if(credentialShutdownRequest!=-1&&(credentialShutdownRequest<0||!ElizaAgentService.isCredentialShutdownConfirmed(credentialShutdownRequest))){call.reject("Provider shutdown is unconfirmed; check the local agent before starting.");return;}

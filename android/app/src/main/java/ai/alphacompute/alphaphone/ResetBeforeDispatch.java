@@ -5,14 +5,14 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.provider.CalendarContract;
-import ai.eliza.auth.cloud.CloudKeyRevocation;
+import ai.alphacompute.alphaphone.cloud.CloudKeyRevocation;
 import ai.eliza.plugins.calendar.CalendarConfiguration;
 import ai.eliza.plugins.system.reset.DataReset;
 
 /**
  * Alpha's work before the reset's package-scoped clear (AlphaDataReset): deleting its own "On this
  * phone" calendar, which lives in the system Calendar provider and so survives the clear, then the
- * shared ai.eliza.auth.cloud.CloudKeyRevocation reset step over this build's registration and slots.
+ * shared ai.alphacompute.alphaphone.cloud.CloudKeyRevocation reset step over this build's registration and slots.
  */
 final class ResetBeforeDispatch {
  static final DataReset.BeforeDispatch STEP=create(CloudKeyRevocation::revoke);

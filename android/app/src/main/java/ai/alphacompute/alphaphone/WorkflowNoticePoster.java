@@ -89,7 +89,7 @@ final class WorkflowNoticePoster implements WorkflowNoticeDelivery.Poster {
  }
  @Override public void post(String id,String title,String body)throws Exception{
   if(!allowed())throw new SecurityException("Notification delivery is disabled");
-  manager().notify(tag(id),0,step(title,body,tap(id,false)).addAction(question(tap(id,true))).build());awaitListed(id);
+  manager().notify(tag(id),0,step(title,body,tap(id,false)).addAction(question(tap(id,true))).build());StoreChanges.changed(StoreChanges.Store.NOTIFICATIONS);awaitListed(id);
  }
  /** notify() hands the notice to the system asynchronously, so an immediate read of the active list
   * can miss it and the receipt would record "unknown" for a notice Android is about to show. Wait
@@ -135,7 +135,7 @@ final class WorkflowNoticePoster implements WorkflowNoticeDelivery.Poster {
   manager().cancel(QUIET_GROUP,QUIET_SUMMARY_ID);
  }
  @Override public void cancel(String id){
-  manager().cancel(tag(id),0);settleQuietSummary(tag(id));
+  manager().cancel(tag(id),0);settleQuietSummary(tag(id));StoreChanges.changed(StoreChanges.Store.NOTIFICATIONS);
   try{String token=routes.token(id);if(token!=null&&context.getPackageManager().getLaunchIntentForPackage(context.getPackageName())!=null)for(String action:new String[]{WorkflowNoticeTaps.ACTION,WorkflowNoticeTaps.ASK_ACTION}){
    // Intent.filterEquals distinguishes actions, so the notice's Ask PendingIntent is revoked separately.
    PendingIntent pending=PendingIntent.getActivity(context,0,launch(action,token),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_NO_CREATE);if(pending!=null)pending.cancel();

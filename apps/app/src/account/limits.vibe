@@ -1,5 +1,6 @@
-// spec/account/limits.md, "Story: Know when I can use a limited service again"
-import { type ServiceLimit, boundedReset, boundedWait, clefContinues, limitShown, planCardFor } from "../../gen/account__limits.effect.vibe"
+// spec/account/limits.md, "Story: Know when I can use a limited service again"; spec/account/limits.md, "A wait is between one second and one day, or there is none"; spec/account/limits.md, "A refusal names a plan, an allowance or a wait, and a limit is shown only until it passes"; spec/account/limits.md, "Semantic end-of-turn has a daily quota, after which only a subscription continues"
+import { type ClefStanding, type PlanCard, type ServiceLimit, boundedReset, boundedWait, clefContinues, limitShown, planCardFor } from "../../gen/account__limits.effect.vibe"
+import type { CloudUnavailable } from "../platform/cloud.vibe"
 
 /** The retry facts of a Cloud refusal: a short limit code, a bounded wait and a bounded reset, never its text. */
 export interface LimitFacts {
@@ -74,25 +75,24 @@ export function limitOf(facts: LimitFacts, now: number): ServiceLimit {
   return { tag: "NoLimit" }
 }
 
-/** Cloud's service limits, as voice and chat read and show them. */
-export service VoiceLimit {
-  /** The facts of a speech refusal's header and body. */
-  read(retryAfter: string | null, body: unknown): LimitFacts!!
-  /** The facts a native voice rejection carries, or undefined for another rejection. */
-  ofError(error: unknown): LimitFacts | undefined!!
-  /** The limit those facts name, whether it is still shown, and the plan card it offers. */
-  display(facts: LimitFacts): { readonly limit: ServiceLimit; readonly shown: boolean; readonly card: ReturnType<typeof planCardFor> }!!
-  /** Whether Clef end-of-turn continues for this standing and today's count. */
-  clef(standing: "ClefFree" | "ClefFunded" | "ClefSubscribed", usedToday: number): boolean!!
+/** The limit facts of a Cloud refusal as the platform carries it: its code where it is a limit code, its wait bounded to a day and its reset bounded to 400 days ahead. */
+export function limitOfRefusal(error: CloudUnavailable, now: number): LimitFacts {
+  const wait = typeof error.retryAfter === "number" ? waitOf(error.retryAfter) : undefined
+  const reset = typeof error.resetAt === "number" && Number.isSafeInteger(error.resetAt) ? boundedReset(error.resetAt, now) : 0
+  return {
+    ...(wait === undefined ? {} : { retryAfterSeconds: wait }),
+    ...(typeof error.code === "string" && limitCode.test(error.code) ? { limitCode: error.code } : {}),
+    ...(reset === 0 ? {} : { resetAt: reset })
+  }
 }
 
-/** The limits service: pure reads over the clock. */
-export const limitsLayer = Layer.succeed(VoiceLimit, {
-  read: (retryAfter: string | null, body: unknown) => Effect.map(Clock.currentTimeMillis, (now) => readLimit(retryAfter, body, now)),
-  ofError: (error: unknown) => Effect.succeed(limitOfError(error)),
-  display: (facts: LimitFacts) => Effect.map(Clock.currentTimeMillis, (now) => {
-    const limit = limitOf(facts, now)
-    return { limit, shown: limitShown(limit, now), card: planCardFor(limit) }
-  }),
-  clef: (standing: "ClefFree" | "ClefFunded" | "ClefSubscribed", usedToday: number) => Effect.succeed(clefContinues(standing, usedToday))
-})
+/** What a refusal's facts show now: the limit they name, whether it is still shown, and the plan card it offers. */
+export function limitDisplay(facts: LimitFacts, now: number): { readonly limit: ServiceLimit; readonly shown: boolean; readonly card: PlanCard } {
+  const limit = limitOf(facts, now)
+  return { limit, shown: limitShown(limit, now), card: planCardFor(limit) }
+}
+
+/** Whether Clef end-of-turn continues for this standing and today's count. */
+export function clefAllows(standing: ClefStanding, usedToday: number): boolean {
+  return clefContinues(standing, usedToday)
+}

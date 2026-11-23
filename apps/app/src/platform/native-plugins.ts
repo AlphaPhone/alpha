@@ -74,7 +74,14 @@ export const nativePlugins = {
     ],
     events: ["signInCompleted", "signInIncomplete", "signInMfaRequired", "signInReadinessChanged", "signInRenewed"],
   },
-  AlphaCloudSpeechStream: { reach: "AnyNative", methods: ["startCloudSpeech", "stopCloudSpeech"], events: ["cloudSpeechEvent"] },
+  AlphaCloudSpeechStream: {
+    reach: "AnyNative",
+    methods: [
+      "requestPermissions", "cloudStreamTiming", "startCloudSpeech", "stopCloudSpeech", "setCloudSpeechOutputMuted",
+      "setCloudSpeechMuted", "speakCloudSpeech", "cancelCloudSpeech",
+    ],
+    events: ["cloudSpeechEvent"],
+  },
   AlphaConnection: {
     reach: "AnyNative",
     methods: [
@@ -149,9 +156,10 @@ export const nativePlugins = {
     methods: [
       "status", "list", "open", "dismiss", "clear", "canonicalPending", "acknowledgeCanonical", "crossAppStatus",
       "notificationApps", "setNotificationPolicy", "resumeCrossApp", "openNotificationAccess", "notificationHistory",
-      "clearNotificationHistory", "consumeOwnNotice", "postWorkflow",
+      "clearNotificationHistory", "consumeOwnNotice", "workflowPresentationCapabilities", "postWorkflow", "workflowReceipt",
+      "openChannelSettings",
     ],
-    events: ["canonicalNotificationTap"],
+    events: ["canonicalNotificationTap", "notificationsChanged", "mirrorChanged"],
   },
   AlphaOngoingCall: { reach: "AospImage", methods: ["ongoingCall", "showCall", "endCall"], events: ["ongoingCall"] },
   AlphaPhotoLibrary: {
@@ -190,7 +198,7 @@ export const nativePlugins = {
       "liveCaptureStatus", "startLiveCapture", "stopLiveCapture", "transcribeRecording", "transcribeOwnRecording",
       "synthesize", "synthesizeOwn", "synthesizeLocalBrowserReading", "startNoteRecording", "consumeNoteRecordingOpen",
       "clearNoteRecordingOpen", "noteRecordingStatus", "pauseNoteRecording", "resumeNoteRecording", "stopNoteRecording",
-      "discardNoteRecording", "setNoteSegmentText", "claimCanonicalNoteSave", "saveNoteRecording",
+      "discardNoteRecording", "setNoteSegmentText", "claimCanonicalNoteSave", "saveNoteRecording", "workflowPresentationCapabilities",
     ],
     events: ["noteRecordingChanged", "recordingStopped", "playbackEnded", "playbackFailed", "playbackStopped", "liveCaptureEnded"],
   },
@@ -202,7 +210,7 @@ export const nativePlugins = {
       "consumeReminderTap", "dismissReminderTap", "releaseReminderQuestion", "restoreSelected", "renameSelected",
       "pdfSelected", "describeSelected", "readSelected", "openSelected", "shareSelected", "forgetSelected", "closeAssistant",
     ],
-    events: ["assistantInvoked", "pendingReminderTap", "appResumed", "reminderOpened"],
+    events: ["assistantInvoked", "pendingReminderTap", "appResumed", "reminderOpened", "remindersChanged"],
   },
   DeviceApps: { reach: "AnyNative", methods: ["platformCapabilities", "openHomeChooser"], events: [] },
   ElizaCamera: {

@@ -1,4 +1,4 @@
-// spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"; spec/assistant/approvals.md, "A card whose review time passed reads \"Review expired\" and can only be asked for again"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/send.md, "The typing indicator belongs to the newest send, and an older send settling never clears it"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"
+// spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"; spec/assistant/approvals.md, "A card whose review time passed reads \"Review expired\" and can only be asked for again"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/send.md, "The typing indicator belongs to the newest send, and an older send settling never clears it"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/attachments.md, "A file's question is reviewed before it joins the draft: \"Use excerpt\" for its text, its name alone for a file too large, and its source line only while linked"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -103,3 +103,20 @@ export const assistantRestartOfferedOnce = always(() => restarts.current.every((
 
 /** A rate-limited reply always says the message was not retried. */
 export const assistantRateLimitNeverRetries = always(() => rateLimits.current.every((text) => text.includes("did not retry your message")));
+
+const questionReview = extract(({ document }) => {
+  const dialog = document.querySelector('[aria-label="Ask about selected content"]');
+  if (dialog === null) return { open: false, sourceOnly: false, excerpt: false, add: false, question: "" };
+  const add = dialog.querySelector<HTMLButtonElement>('button[aria-label="Use in conversation"]');
+  return {
+    open: true,
+    sourceOnly: dialog.querySelector('[role="status"]')?.textContent?.startsWith("Too large to attach") === true,
+    excerpt: dialog.querySelector('textarea[aria-label="Content excerpt"]') !== null,
+    add: add !== null && !add.disabled,
+    question: dialog.querySelector<HTMLTextAreaElement>('textarea[aria-label="Question about content"]')?.value ?? "",
+  };
+});
+
+/** A question review that only names a file shows no excerpt to send, and Add to chat is offered only for a question that is not blank. */
+export const assistantQuestionReviewNeedsAQuestion = always(() =>
+  !questionReview.current.open || ((!questionReview.current.sourceOnly || !questionReview.current.excerpt) && (!questionReview.current.add || questionReview.current.question.trim() !== "")));

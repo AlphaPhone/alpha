@@ -1,16 +1,16 @@
-// spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"
-import { createRuntimeJsonClient, RuntimeRequestError } from "@elizaos/agent/client"
+// spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"; spec/platform/index.md, "A request carries only the device headers the resident reads, each one bounded line"; spec/platform/resident.md, "A turn holds the session busy until it settles"
+import { createRuntimeJsonClient, RuntimeRequestError, type RuntimeStreamFrame } from "@elizaos/agent/client"
 import { agentClient, agentPlugin } from "@elizaos/os/bridges/agent"
 import type { ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
-import { adviceOf, answerOf, methodAdmitted, pathAdmitted, type PathShape } from "../../gen/platform.effect.vibe"
+import { adviceOf, answerOf, headerAdmitted, methodAdmitted, pathAdmitted, type DeviceHeader, type PathShape } from "../../gen/platform.effect.vibe"
 import { Machine as Connection, admissionOf, machine as connectionMachine, recoveryAfterArchive, recoveryAfterReview, retriesDeferred, retryDelayMs } from "../../gen/platform__resident.effect.vibe"
 import { routeCrosses } from "../shell/ownerRoutes.vibe"
-import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer } from "./resident.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer, type ResidentHeaders } from "./resident.vibe"
 import { ResidentControl, ResidentRecovery, type HeldRecovery, type ResidentSession } from "./resident-control.vibe"
-import { agentBridge, agentReport, agentRequest, stopAgent, withdraw } from "./resident-bridge.vibe"
+import { agentBridge, agentReport, agentRequest, relayFrames, stopAgent, withdraw } from "./resident-bridge.vibe"
 import { FeatureStarting, RecoveryArchive, RecoveryReview, ResidentAgents, ResidentRefusal, ResidentWhoAmI } from "./native.schema.vibe"
 import { developmentAgentBase } from "./build-flags.ts"
-import { capacitor } from "./native-capacitor.ts"
+import { capacitor, jsonOfBytes } from "./native-capacitor.ts"
 import { newId } from "./ids.ts"
 import ownerRoutes from "./owner-routes.json" with { type: "json" }
 
@@ -23,14 +23,45 @@ const CLAIMED_PREFIXES: readonly string[] = Object.values(ownerRoutes.groups).fl
 const IDENTIFIER_LIMIT = 512
 const REVIEW_TOKEN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 const RETAINED_LIMIT = 64
+const DEVICE_HEADERS: Readonly<Record<string, DeviceHeader>> = {
+  "x-eliza-device-id": "DeviceIdHeader",
+  "x-eliza-device-key": "DeviceKeyHeader",
+  "x-eliza-device-capabilities": "CapabilitiesHeader",
+  "x-elizaos-client-id": "ClientIdHeader",
+}
+const CLIENT_TOKEN = /^[A-Za-z0-9._-]{1,128}$/
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
 
 type Verb = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+type Reading =
+  | { readonly phase: "head" }
+  | { readonly phase: "open" }
+  | { readonly phase: "refused"; readonly status: number; readonly parts: readonly Uint8Array[] }
+  | { readonly phase: "ended" }
 type Attempt = { readonly kind: "answer"; readonly answer: ResidentAnswer } | { readonly kind: "deferred"; readonly refusal: ResidentRefused; readonly hintMs: number }
 
 /** The shape of a request path: rooted, protocol-relative, or anything else. */
 export function pathShapeOf(path: string): PathShape {
   if (path.startsWith("//")) return "ProtocolRelative"
   return path.startsWith("/") && !/[\\\u0000- ]/.test(path) ? "Rooted" : "Unrooted"
+}
+
+/** The device headers `headers` names, under their lower-case names; undefined when any header it names may not cross to the resident. */
+export function deviceHeaders(headers: ResidentHeaders | undefined): ResidentHeaders | undefined {
+  const sent: Record<string, string> = {}
+  for (const [given, value] of Object.entries(headers ?? {})) {
+    if (typeof value !== "string") return undefined
+    const name = given.toLowerCase()
+    const header: DeviceHeader = Object.hasOwn(DEVICE_HEADERS, name) ? DEVICE_HEADERS[name]! : "OtherHeader"
+    if (!headerAdmitted(header, value.length, !CONTROL_CHARACTER.test(value), CLIENT_TOKEN.test(value), Object.hasOwn(sent, name))) return undefined
+    sent[name] = value
+  }
+  return sent
+}
+
+/** The refusal of a request that names a header the resident may not be sent. */
+export function headerRefusal(): ResidentRefused {
+  return new ResidentRefused({ status: 400, code: "InvalidHeader", message: "Invalid local app request" })
 }
 
 /** Whether `path` reads the owner's records, the one kind of read a starting feature may defer. */
@@ -149,10 +180,10 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       if ((try conn.get()).generation !== gen) throw new ResidentUnavailable({ state: "starting", reason: "AccountChanged" })
     }
 
-    effect function viaAgent(method: Verb, path: string, body: unknown, remainingMs: number): Attempt!(ResidentUnavailable | ResidentRefused) {
+    effect function viaAgent(method: Verb, path: string, body: unknown, headers: ResidentHeaders, remainingMs: number): Attempt!(ResidentUnavailable | ResidentRefused) {
       const id = newId()
       const answer = try onInterrupt(
-        timeout(agentRequest(agent, method, path, body, id), remainingMs) catch effect (error) => {
+        timeout(agentRequest(agent, method, path, body, id, headers), remainingMs) catch effect (error) => {
           if (error._tag === "AgentCallFailed") throw new ResidentUnavailable({ state: "stopped", reason: error.code ?? error.message })
           const outcome = try withdraw(agent, id)
           throw new ResidentUnavailable({ state: "stopped", reason: outcome })
@@ -177,17 +208,19 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       return { kind: "answer", answer: { status: 200, data } }
     }
 
-    effect function json(method: Verb, path: string, body?: unknown): ResidentAnswer!(ResidentUnavailable | ResidentRefused) {
+    effect function json(method: Verb, path: string, body?: unknown, headers?: ResidentHeaders): ResidentAnswer!(ResidentUnavailable | ResidentRefused) {
       if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
       if (!routeAllowed(method, path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
       if ((method === "GET" || method === "DELETE") && body !== undefined) throw new ResidentRefused({ status: 400, code: "InvalidBody", message: "Invalid local request body" })
+      const sent = deviceHeaders(headers)
+      if (sent === undefined) throw headerRefusal()
       try ensureRunning()
       const gen = (try conn.get()).generation
       const deadline = (try Clock.currentTimeMillis) + REQUEST_TIMEOUT_MS
       while (true) {
         const remaining = deadline - (try Clock.currentTimeMillis)
         if (remaining <= 0) throw new ResidentUnavailable({ state: "stopped", reason: "NotSent" })
-        const result = try (present ? viaAgent(method, path, body, remaining) : viaClient(method, path, body))
+        const result = try (present ? viaAgent(method, path, body, sent, remaining) : viaClient(method, path, body))
         try current(gen)
         if (result.kind === "answer") return result.answer
         const left = deadline - (try Clock.currentTimeMillis)
@@ -197,17 +230,62 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       }
     }
 
-    function stream(path: string, body: unknown): Stream.Stream<Uint8Array, ResidentUnavailable | ResidentRefused> {
+    effect function relayed(reading: Ref.Ref<Reading>, gen: number, frame: RuntimeStreamFrame): Uint8Array | undefined!(ResidentUnavailable | ResidentRefused) {
+      try current(gen)
+      const now = try Ref.get(reading)
+      if (frame.kind === "head" && now.phase === "head") {
+        try Ref.set(reading, answerOf(frame.status) === "Replied" ? { phase: "open" } : { phase: "refused", status: frame.status, parts: [] })
+        return undefined
+      }
+      if (frame.kind === "chunk" && now.phase === "open") return frame.data
+      if (frame.kind === "chunk" && now.phase === "refused") {
+        try Ref.set(reading, { ...now, parts: [...now.parts, frame.data] })
+        return undefined
+      }
+      if (frame.kind === "end" && now.phase === "open") {
+        try Ref.set(reading, { phase: "ended" })
+        return undefined
+      }
+      if (frame.kind === "end" && now.phase === "refused") {
+        const said = Schema.decodeUnknownEffect(ResidentRefusal)(jsonOfBytes(now.parts)) catch () => undefined
+        throw refusalOf(now.status, said)
+      }
+      throw new ResidentUnavailable({ state: "stopped", reason: frame.kind === "aborted" ? "Aborted" : "TransportFailed" })
+    }
+
+    function viaAgentStream(path: string, body: unknown, headers: ResidentHeaders, gen: number): Stream.Stream<Uint8Array, ResidentUnavailable | ResidentRefused> {
+      return Stream.unwrap(effect {
+        const reading = try Ref.make<Reading>({ phase: "head" })
+        const bytes = Stream.filter(
+          Stream.mapEffect(relayFrames(agent, path, body, headers), (frame) => relayed(reading, gen, frame)),
+          (part): part is Uint8Array => part !== undefined,
+        )
+        const settled = Stream.unwrap(effect {
+          if ((try Ref.get(reading)).phase !== "ended") throw new ResidentUnavailable({ state: "stopped", reason: "TransportFailed" })
+          return Stream.empty
+        })
+        return Stream.concat(bytes, settled)
+      })
+    }
+
+    function viaClientStream(path: string, body: unknown): Stream.Stream<Uint8Array, ResidentUnavailable | ResidentRefused> {
+      return Stream.unwrap(effect {
+        const opened = try tryPromise({ try: (signal) => client.stream(path, body, signal), catch: failureOf })
+        return Stream.fromAsyncIterable(opened.body, failureOf)
+      })
+    }
+
+    function stream(path: string, body: unknown, headers?: ResidentHeaders): Stream.Stream<Uint8Array, ResidentUnavailable | ResidentRefused> {
       return Stream.unwrap(effect {
         if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
         if (!routeAllowed("POST", path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
+        const sent = deviceHeaders(headers)
+        if (sent === undefined) throw headerRefusal()
         try ensureRunning()
+        const gen = (try conn.get()).generation
         conn.send({ type: "turnBegan" }) catch () => undefined
-        const opened = tryPromise({ try: (signal) => client.stream(path, body, signal), catch: failureOf }) catch effect (error) => {
-          conn.send({ type: "turnEnded" }) catch () => undefined
-          throw error
-        }
-        return Stream.ensuring(Stream.fromAsyncIterable(opened.body, failureOf), Effect.ignore(conn.send({ type: "turnEnded" })))
+        const reply = present ? viaAgentStream(path, body, sent, gen) : viaClientStream(path, body)
+        return Stream.ensuring(reply, Effect.ignore(conn.send({ type: "turnEnded" })))
       })
     }
 

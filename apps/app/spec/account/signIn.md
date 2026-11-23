@@ -132,8 +132,11 @@ pure def chooseMethod(s: SignIn, method: CodeMethod): SignIn = { ...s, method: m
 
 ### Nothing starts while the phone is offline
 
-The network state is Android's own: offline, connected without validated internet, or online. A
-captive Wi-Fi portal leaves the drafts on screen.
+The network state is Android's own: offline, connected without validated internet, or online. It
+follows the app's network as the platform's AppLifecycle reports it (spec/platform/lifecycle.md),
+read again on each return to the app; on the phone, a network AppLifecycle calls online is
+connected without validated internet while Android says its internet is not validated. A captive
+Wi-Fi portal leaves the drafts on screen.
 
 ```quint
 pure def reachable(n: Net): bool = n != NetOffline

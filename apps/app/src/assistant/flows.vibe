@@ -1,8 +1,8 @@
-// spec/assistant/firstSend.md, "Story: Start a new chat without losing or duplicating my draft"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/suggestion.md, "Story: Use a suggested wording exactly as I reviewed it"
+// spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/assistant/firstSend.md, "Story: Start a new chat without losing or duplicating my draft"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/suggestion.md, "Story: Use a suggested wording exactly as I reviewed it"
 import { Machine as DraftsMachine } from "../../gen/assistant__draft.effect.vibe"
 import { moveFirstDraft } from "./first-send.vibe"
 import { Machine as DecisionMachine, machine as decisionMachine, initial as decisionStart, type Decision } from "../../gen/assistant__decision.effect.vibe"
-import { Machine as EmailMachine, machine as emailMachine, sendable, type EmailCard, type SendAnswer } from "../../gen/assistant__emailCard.effect.vibe"
+import { Machine as EmailMachine, machine as emailMachine, editAccepted, identityOf, sendable, type EmailCard, type SendAnswer } from "../../gen/assistant__emailCard.effect.vibe"
 import { Machine as AskMachine, machine as askMachine, type AskKind, type AskReply } from "../../gen/assistant__noticeQuestion.effect.vibe"
 import { Assistant } from "./assistant.vibe"
 import { AssistantHost } from "./host.vibe"
@@ -20,8 +20,8 @@ export service AssistantFlows {
   decideStep(runId: string, approved: boolean): Decision!!
   /** Record an edit of an email card: a new version with its own request id. */
   editEmail(cardId: string, card: EmailCard, recipients: boolean, body: boolean): EmailCard!!
-  /** Send an email card's current version once through Inbox; the card's state after. */
-  sendEmail(cardId: string, card: EmailCard, draft: { readonly to: string; readonly subject: string; readonly body: string }): EmailCard!!
+  /** Send an email card's current version once through Inbox, the version as drafted under `ownerTurn`, the owner turn that asked for it; the card's state after. */
+  sendEmail(cardId: string, card: EmailCard, draft: { readonly to: string; readonly subject: string; readonly body: string }, ownerTurn?: string): EmailCard!!
   /** Decline an email card; nothing is sent. */
   declineEmail(cardId: string, card: EmailCard): EmailCard!!
   /** Ask the assistant about one of Alpha's notifications at the revision the owner saw; true when the question was composed into the composer. */
@@ -69,14 +69,17 @@ export const flowsLayer = Layer.effect(AssistantFlows, effect {
     },
     editEmail: (cardId: string, card: EmailCard, recipients: boolean, body: boolean) => effect {
       const machine = try emailFor(cardId, card)
+      const now = try machine.get()
+      if (!editAccepted(now.state === "DraftEmail", card.version, now.version)) return now
       try quiet(machine.send({ type: "editDraft", recipients, body }))
       return try machine.get()
     },
-    sendEmail: (cardId: string, card: EmailCard, draft: { readonly to: string; readonly subject: string; readonly body: string }) => effect {
+    sendEmail: (cardId: string, card: EmailCard, draft: { readonly to: string; readonly subject: string; readonly body: string }, ownerTurn?: string) => effect {
       const machine = try emailFor(cardId, card)
       if (!sendable(try machine.get()) || !(try quiet(machine.send({ type: "sendEmail" })))) return try machine.get()
       const state = try machine.get()
-      const said: SendAnswer = try mail.send({ ...draft, requestId: `${cardId}:${state.version}` })
+      const requestId = identityOf(state.version) === "OwnerTurnIdentity" && ownerTurn !== undefined && ownerTurn !== "" ? ownerTurn : `${cardId}:${state.version}`
+      const said: SendAnswer = try mail.send({ ...draft, requestId })
       try quiet(machine.send({ type: "answer", said }))
       return try machine.get()
     },

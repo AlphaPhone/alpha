@@ -126,6 +126,7 @@ final class AlphaCredentialStore {
     if("cloud:production".equals(name)&&authorityChanged)slots.remove(CloudDeployment.storageSlot(GoogleWorkspaceReturn.SLOT));
     if(committed==null)slots.remove(CloudDeployment.storageSlot(name));
     else slots.write(CloudDeployment.storageSlot(name),committed);
+    if(authorityChanged)new Thread(ElizaAgentService::credentialChanged,"AlphaCredentialChanged").start();
     return true;
    }
   });

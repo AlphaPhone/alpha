@@ -3,7 +3,10 @@
 What a Cloud refusal of a metered service tells the owner: a plan to choose or manage, an
 allowance that resets, or a wait. Only a short limit code, a bounded wait and a bounded reset time
 are kept from a refusal, never its text. Voice reads speech refusals (`voice-http-429`) through
-these rules; chat reads plan and billing refusals.
+these rules; chat reads plan and billing refusals, and any area reads a Cloud refusal through the
+platform's `CloudUnavailable`, whose `retryAfter` is the wait in seconds and `resetAt` the epoch
+milliseconds Cloud named for an allowance reset (spec/platform/index.md). These are pure readings
+the areas import; the account area runs no service of its own for them.
 
 ## Story: Know when I can use a limited service again
 
@@ -13,7 +16,8 @@ these rules; chat reads plan and billing refusals.
 ### A wait is between one second and one day, or there is none
 
 `retryAfterSeconds` from the refusal body comes first, then a `Retry-After` header in seconds or as
-an HTTP date, then `retryAt`. A reset more than 400 days ahead is dropped.
+an HTTP date, then `retryAt`. A `CloudUnavailable` already carries its wait and reset, which are
+bounded the same way. A reset in the past, or more than 400 days ahead, is dropped.
 
 ```quint
 pure val maxRetryAfterSeconds = 86400

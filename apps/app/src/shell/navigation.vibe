@@ -77,9 +77,20 @@ export function setHoldBack(id: string, back: () => boolean!!): void {
   holdBacks.set(id, back)
 }
 
-/** One Back: a holding surface's own while nothing is listed above it, then the front app's own while nothing lies above it, then the shell's order. */
+const layerBacks = new Map<string, () => boolean!!>()
+
+/** Names the Back of a layer its owner draws (a surface's sheet listed under `id`), asked instead of the shell's while that layer is on top; true when it took Back. `undefined` forgets it. */
+export function setLayerBack(id: string, back: (() => boolean!!) | undefined): void {
+  if (back === undefined) layerBacks.delete(id)
+  else layerBacks.set(id, back)
+}
+
+/** One Back: the top layer's owner's own, then a holding surface's own while nothing is listed above it, then the front app's own while nothing lies above it, then the shell's order. */
 export effect function backOnce(machine: NavigationMachine.Shape) {
   const state = try machine.get()
+  const top = state.layers.at(-1)
+  const owned = top === undefined ? undefined : layerBacks.get(top.id)
+  if (owned !== undefined && (try owned())) return true
   if (state.layers.length === 0) {
     for (const id of state.holds) {
       const own = holdBacks.get(id)

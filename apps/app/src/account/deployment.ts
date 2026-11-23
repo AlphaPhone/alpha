@@ -1,4 +1,5 @@
-// spec/account/session.md, "The build addresses one deployment, and staging only with test mocks or the Cloud resident's browser preview"; spec/account/google.md, "Google's consent page is the only page consent opens"
+// spec/account/session.md, "The build addresses one deployment, and staging only with test mocks or the Cloud resident's browser preview"; spec/account/google.md, "Google's consent page is the only page consent opens"; spec/account/billing.md, "A payment page opens only on a Stripe host the phone's link policy opens"
+import { paymentPageOpens } from "../../gen/account__billing.ts";
 import type { ConsentPage } from "../../gen/account__google.ts";
 import type { Deployment, Environment } from "../../gen/account__session.ts";
 import deploymentText from "../../../../cloud/deployment.json?raw";
@@ -11,30 +12,7 @@ export interface CloudAuthority extends PlatformAuthority {
 
 const clouds = { ElizaCloud: elizaCloud, AlphaCloud: alphaCloud } as const;
 
-/** The public hosts of one Cloud environment as cloud/deployment.json publishes them. */
-export interface CloudHosts {
-  readonly api: string;
-  readonly web: string;
-  readonly agents: string;
-}
-
 const published: unknown = JSON.parse(deploymentText);
-
-function origin(value: unknown, where: string): string {
-  if (typeof value !== "string" || !URL.canParse(value)) throw new Error(`cloud/deployment.json has no origin at ${where}`);
-  const url = new URL(value);
-  if (url.protocol !== "https:" || url.origin !== value) throw new Error(`cloud/deployment.json names a non-origin at ${where}`);
-  return url.origin;
-}
-
-function hostsAt(group: "shipped" | "alphaCloudHosts", environment: "production" | "staging"): CloudHosts {
-  const groups = typeof published === "object" && published !== null ? (published as Record<string, unknown>)[group] : undefined;
-  const entry = typeof groups === "object" && groups !== null ? (groups as Record<string, unknown>)[environment] : undefined;
-  const fields = typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
-  const where = `${group}.${environment}`;
-  const web = origin(fields.web, `${where}.web`);
-  return { api: origin(fields.api, `${where}.api`), web, agents: new URL(fields.services === undefined ? web : origin(fields.services, `${where}.services`)).host };
-}
 
 function returnPath(name: "billingReturnPath" | "connectReturnPath"): string {
   const signIn = typeof published === "object" && published !== null ? (published as Record<string, unknown>).signIn : undefined;
@@ -46,19 +24,13 @@ function returnPath(name: "billingReturnPath" | "connectReturnPath"): string {
 const billingReturnPath = returnPath("billingReturnPath");
 const connectReturnPath = returnPath("connectReturnPath");
 
-/** Each deployment's public hosts, read once from cloud/deployment.json: Eliza Cloud's shipped hosts and Alpha Cloud's own. */
-export const cloudHosts: Record<Deployment, Record<Environment, CloudHosts>> = {
-  ElizaCloud: { Production: hostsAt("shipped", "production"), Staging: hostsAt("shipped", "staging") },
-  AlphaCloud: { Production: hostsAt("alphaCloudHosts", "production"), Staging: hostsAt("alphaCloudHosts", "staging") },
-};
-
 /** The deployment this build addresses: Alpha Cloud only once the platform's cutover flag is set, Eliza Cloud otherwise. */
 export const deployment: Deployment = alphaCloudCutover ? "AlphaCloud" : "ElizaCloud";
 
-/** The public authority of a deployment's environment: its name and audience from the platform, its hosts from cloud/deployment.json. */
+/** The public authority of a deployment's environment as the platform reads it from cloud/deployment.json, with its agents host: the host of its hosted services origin. @throws {never} */
 export function authorityOf(of: Deployment, environment: Environment): CloudAuthority {
-  const cloud = clouds[of];
-  return { ...(environment === "Staging" ? cloud.staging : cloud.production), ...cloudHosts[of][environment] };
+  const cloud = environment === "Staging" ? clouds[of].staging : clouds[of].production;
+  return { ...cloud, agents: new URL(cloud.services).host };
 }
 
 /** The registered App Link a Stripe page returns to. */
@@ -66,11 +38,11 @@ export function billingReturnUrl(authority: CloudAuthority): string {
   return `${authority.web}${billingReturnPath}`;
 }
 
-/** Whether a payment page Cloud answered is Stripe's own checkout or invoice page, and nothing else. */
+/** Whether a payment page Cloud answered is one the phone's external-link policy opens: a plain HTTPS page on a Stripe host spec/account/billing.md lists, and nothing else. @throws {never} */
 export function stripePageAllowed(value: string): boolean {
   if (!URL.canParse(value)) return false;
   const page = new URL(value);
-  return page.protocol === "https:" && !page.username && !page.password && !page.port && (page.hostname === "checkout.stripe.com" || page.hostname === "invoice.stripe.com");
+  return paymentPageOpens(page.hostname, page.protocol === "https:", !page.port, !!page.username || !!page.password);
 }
 
 const googleScopes = new Set([

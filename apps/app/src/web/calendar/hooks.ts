@@ -16,6 +16,7 @@ import { ApprovalReviews, type ApprovalSheet } from "../../calendar/approvals.vi
 import { whileVisible } from "../../calendar/binding.vibe";
 import { HeldDeletions } from "../../calendar/deletions.vibe";
 import { DeviceCalendar, type DeviceRead } from "../../calendar/device.vibe";
+import { DeviceCalendarSync, type DeviceSyncView } from "../../calendar/deviceSync.vibe";
 import { CalendarDrafts } from "../../calendar/drafts.vibe";
 import { HomeAgenda, type HomeAgendaCard } from "../../calendar/home.vibe";
 import { AgentRequests, type RequestSheet } from "../../calendar/requests.vibe";
@@ -24,7 +25,7 @@ import { openRoute } from "../../calendar/screen.vibe";
 import { useServiceStream } from "../shell/services.ts";
 
 const keys = {
-  writes: {}, agent: {}, device: {}, drafts: {}, held: {}, approval: {}, requests: {}, actions: {}, sync: {}, home: {},
+  writes: {}, agent: {}, device: {}, drafts: {}, held: {}, approval: {}, requests: {}, actions: {}, sync: {}, home: {}, deviceSync: {},
 };
 
 const agentView: AgentView = { state: agentInitial, feed: undefined, calendars: [], upcoming: undefined, savedAt: undefined, window: undefined };
@@ -69,6 +70,17 @@ export function useDeviceAction() {
 export function useSyncView(): SyncView {
   return useServiceStream(keys.sync, CalendarSync.use((service) => Effect.succeed(service.changes)),
     { control: controlInitial, link: linkInitial, device: nativeInitial, disconnect: disconnectInitial, review: undefined, links: undefined });
+}
+
+const deviceSyncShown = DeviceCalendarSync.use((service) =>
+  Effect.ensuring(Effect.andThen(service.refresh(), Effect.never), Effect.ignore(service.cancel())));
+
+/** Device Google Calendar sync while Settings shows it: showing it reads the saved opt-in again, and closing it retires the operation in flight. */
+export function useDeviceSyncView(): DeviceSyncView {
+  return useServiceStream(keys.deviceSync, DeviceCalendarSync.use((service) => Effect.succeed(service.changes)), {
+    available: false, ready: false, status: "Sync is off.", running: false, enabled: false, selection: undefined,
+    destination: { account: "", calendar: "" }, reviewed: undefined, offered: undefined,
+  }, { alongside: deviceSyncShown.pipe(Effect.orDie, Effect.asVoid) });
 }
 
 /** Home's agenda card. */
