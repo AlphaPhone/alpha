@@ -1,8 +1,10 @@
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
-import {openBrowserCalendar} from './helpers/browser-calendar';
+import {openBrowserCalendar,seedBrowserCalendar} from './helpers/browser-calendar';
 import {presentDeviceRecordOperation} from '../../apps/app/src/runtime/device-record-presentation.ts';
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
+
+test.use({timezoneId:'UTC'});
 
 // Real renderer, pairing, connection controller, proposal parser and journal
 // orchestration and real browser Calendar storage/review. Connection and journal
@@ -11,7 +13,6 @@ for (const mode of ['confirm', 'cancel', 'read', 'update', 'delete'] as const) {
   test(`browser assistant Calendar action: ${mode}`, async ({ page }) => {
     await page.addInitScript((mode) => {
       const w = window as any, store = new Map();
-      if(mode!=='confirm'&&mode!=='cancel'&&!localStorage.getItem('alpha.browser.calendar.v1')){const start=new Date();start.setHours(12,0,0,0);(localStorage.getItem('alpha.browser.calendar.v1')===null&&localStorage.setItem('alpha.browser.calendar.v1',JSON.stringify({sourceRevision:'b'.repeat(64),events:[{id:'selected-event',calendarId:'local',title:'Selected private event',body:'Private description',location:'Private location',begin:start.getTime(),end:start.getTime()+3600000,revision:'c'.repeat(64)}]})));}
       const agentId = '12345678-1234-4234-8234-123456789abc';
       const fixture = w.recoveryFixture = { posts: 0, lists: 0, decisions: 0, claims: 0, receipts: 0, effects: 0, journal: [] as string[], proposal: null as any };
       const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
@@ -87,6 +88,13 @@ for (const mode of ['confirm', 'cancel', 'read', 'update', 'delete'] as const) {
     await returnToApps(page);
     const creating=mode==='confirm'||mode==='cancel';
 
+    if(!creating){
+      const begin=await page.evaluate(()=>new Date().setHours(12,0,0,0));
+      await seedBrowserCalendar(page,{sourceRevision:'b'.repeat(64),events:[{
+        id:'selected-event',calendarId:'local',title:'Selected private event',body:'Private description',location:'Private location',
+        begin,end:begin+3600000,revision:'c'.repeat(64),
+      }]});
+    }
     await openBrowserCalendar(page);
     if(creating)await page.getByRole('button',{name:'New event',exact:true}).click();else await page.getByRole('button',{name:/^Selected private event,/}).click();
     await expect.poll(()=>page.evaluate(()=>document.documentElement.dataset.activeView)).toBe('calendar');
