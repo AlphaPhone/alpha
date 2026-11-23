@@ -500,6 +500,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const settledRow = (try SubscriptionRef.get(transcript)).rows.find((row) => row.id === replyId)
     try mapsChat.agentReply(settledRow?.kind === "agent" && settledRow.segments.some((segment) => segment.payload.kind === "choice"))
     const plan = result.kind === "AgentFailed" ? undefined : planActionOf(reply.planAction)
+    const effectBeforeFailure = result.kind === "AgentFailed" && "cutOffEffect" in reply && reply.cutOffEffect === "applied"
     const notices = replyNotices((reply as { readonly notices?: unknown }).notices)
     const replyLive = bound && canReplyWith(try client.get(), false)
     const skipped: { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] } = { receipts: [], cards: [], notices: [] }
@@ -529,7 +530,7 @@ export const composerLayer = Layer.effect(Composer, effect {
         row.id === userId && row.kind === "user" ? { ...row, id: reply.userMessageId, status: "recorded" as const }
         : row.id === replyId && row.kind === "agent" ? { ...row, id: reply.messageId, recorded: true, notices, ordinal: replyOrdinal, ...(plan === undefined || plan === "Funding" ? {} : { plan }),
             cutOff: cutOffLabel(result.kind === "AgentFailed", pass.receipts.filter((r) => r.card.state === "DoneCard").length + effects.applied, effects.approvals,
-              result.kind === "AgentFailed" && result.code === interruptedAfterEffect) }
+              effectBeforeFailure || (result.kind === "AgentFailed" && result.code === interruptedAfterEffect)) }
         : row),
       ...pass.notices.map((text, at): Row => ({ kind: "notice", id: `device-notice:${reply.userMessageId}:${at}`, text, system: false })),
       ...pass.receipts.flatMap((done): Row[] => done.receipt === undefined ? [] : [{ kind: "receipt", id: `device-receipt:${done.card.proposalId}`, proposalId: done.card.proposalId, title: done.receipt.title, summary: done.receipt.summary }]),

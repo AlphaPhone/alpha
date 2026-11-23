@@ -26,7 +26,7 @@ export interface Seen { readonly calls: { readonly method: string; readonly path
 export type TurnScript =
   | { readonly kind: "reply"; readonly text: string }
   | { readonly kind: "refuse"; readonly status: number }
-  | { readonly kind: "fail"; readonly failureKind: string; readonly planAction?: "sign-in" | "funding" | "retry"; readonly retryAfterMs?: number }
+  | { readonly kind: "fail"; readonly failureKind: string; readonly planAction?: "sign-in" | "funding" | "retry"; readonly retryAfterMs?: number; readonly cutOffEffect?: "applied" }
 
 /** A pending proposal as the agent's `/api/client-devices/proposals` listing gives it. */
 export function wireProposal(id: string, digest: string, operation: unknown, requestMessageId?: string, expiresAt = "2099-01-01T00:00:00.000Z") {
@@ -39,7 +39,7 @@ export function wireProposal(id: string, digest: string, operation: unknown, req
 function replyOf(turn: TurnScript, actionResults: readonly unknown[] = []) {
   const base = { agentName: "Alpha", messageId: "m1", userMessageId: "u1", actionResults }
   if (turn.kind === "fail") {
-    return { ...base, text: "", failureKind: turn.failureKind, ...(turn.planAction === undefined ? {} : { planAction: turn.planAction }), ...(turn.retryAfterMs === undefined ? {} : { retryAfterMs: turn.retryAfterMs }) }
+    return { ...base, text: "", failureKind: turn.failureKind, ...(turn.planAction === undefined ? {} : { planAction: turn.planAction }), ...(turn.retryAfterMs === undefined ? {} : { retryAfterMs: turn.retryAfterMs }), ...(turn.cutOffEffect === undefined ? {} : { cutOffEffect: turn.cutOffEffect }) }
   }
   return { ...base, text: turn.kind === "reply" ? turn.text : "" }
 }

@@ -121,29 +121,35 @@ A request or a streamed turn may name the phone to the resident: its device id
 (`x-eliza-device-id`), its device key (`x-eliza-device-key`), the capabilities it advertises
 (`x-eliza-device-capabilities`) and its client id (`x-elizaos-client-id`), each matched without
 regard to case and sent under its lower-case name. A value is one line of at most 2048 characters,
-and a client id is a token of 1 to 128 letters, digits, dots, underscores and hyphens. Any other
+and a client id is a token of 1 to 128 letters, digits, dots, underscores and hyphens. A POST of a
+conversation message, buffered or streamed, can ask for the applied-effect marker with
+`x-eliza-device-cut-off-effect: applied`. Any other value or route for that header is invalid. Any other
 header, among them `Authorization`, whose session only native holds, a name given twice, or a value
 that breaks these limits refuses the whole request as invalid before anything is sent. The agent
 service carries the admitted headers to the resident beside the session it adds itself.
 
 ```quint
-type DeviceHeader = DeviceIdHeader | DeviceKeyHeader | CapabilitiesHeader | ClientIdHeader | OtherHeader
+type DeviceHeader = DeviceIdHeader | DeviceKeyHeader | CapabilitiesHeader | ClientIdHeader | CutOffEffectHeader | OtherHeader
 
 pure val headerValueLimit = 2048
 
-pure def headerAdmitted(deviceHeader: DeviceHeader, len: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
-  deviceHeader != OtherHeader and len <= headerValueLimit and oneLine and not(repeated) and (deviceHeader == ClientIdHeader implies clientToken)
+pure def headerAdmitted(deviceHeader: DeviceHeader, len: int, oneLine: bool, clientToken: bool, cutOffTurn: bool, repeated: bool): bool =
+  deviceHeader != OtherHeader and len <= headerValueLimit and oneLine and not(repeated)
+    and (deviceHeader == ClientIdHeader implies clientToken) and (deviceHeader == CutOffEffectHeader implies cutOffTurn)
 
 pure val lenValues = Set(0, 128, 2048, 2049)
 
-pure def lawOnlyTheDeviceHeadersCross(len: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
-  not(headerAdmitted(OtherHeader, len, oneLine, clientToken, repeated))
+pure def lawOnlyTheDeviceHeadersCross(len: int, oneLine: bool, clientToken: bool, cutOffTurn: bool, repeated: bool): bool =
+  not(headerAdmitted(OtherHeader, len, oneLine, clientToken, cutOffTurn, repeated))
 
-pure def lawACrossingHeaderIsOneBoundedLine(deviceHeader: DeviceHeader, len: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
-  headerAdmitted(deviceHeader, len, oneLine, clientToken, repeated) implies (oneLine and len <= headerValueLimit and not(repeated))
+pure def lawACrossingHeaderIsOneBoundedLine(deviceHeader: DeviceHeader, len: int, oneLine: bool, clientToken: bool, cutOffTurn: bool, repeated: bool): bool =
+  headerAdmitted(deviceHeader, len, oneLine, clientToken, cutOffTurn, repeated) implies (oneLine and len <= headerValueLimit and not(repeated))
 
 pure def lawAClientIdIsAToken(len: int, oneLine: bool, repeated: bool): bool =
-  not(headerAdmitted(ClientIdHeader, len, oneLine, false, repeated))
+  not(headerAdmitted(ClientIdHeader, len, oneLine, false, false, repeated))
+
+pure def lawOnlyAnOptedInTurnCanAskForItsAppliedEffect(len: int, oneLine: bool, repeated: bool): bool =
+  not(headerAdmitted(CutOffEffectHeader, len, oneLine, false, false, repeated))
 ```
 
 ### A refusal carries a wait only when the resident answered 429 with a whole number of seconds
