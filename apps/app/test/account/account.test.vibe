@@ -177,7 +177,7 @@ it.effect(`Open only the payment pages the phone's link policy opens (spec/accou
   const alpha = authorityOf("AlphaCloud", "Staging")
   try Effect.try(() => assert.deepStrictEqual(
     { opens: pages.map(stripePageAllowed), agents: [eliza.agents, alpha.agents], alphaWeb: alpha.web },
-    { opens: [true, true, false, false, false, false, false], agents: [new URL(eliza.services).host, "staging.alphaphone.dev"], alphaWeb: "https://staging.alphaphone.dev" }
+    { opens: [true, true, false, false, false, false, false], agents: [new URL(eliza.services).host, "cloud-staging.alphaphone.dev"], alphaWeb: "https://cloud-staging.alphaphone.dev" }
   ))
 })
 

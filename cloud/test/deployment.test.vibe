@@ -43,7 +43,7 @@ describe("Alpha Phone's client deployment and the cutover flag", () => {
     try check(() => assert.ok(shipped[java].includes("static final boolean ALPHA_CLOUD_CUTOVER = false;")))
     try check(() => assert.ok(alpha[java].includes("static final boolean ALPHA_CLOUD_CUTOVER = true;")))
     try check(() => assert.ok(alpha[clientDeploymentFile].includes("export const alphaCloudCutover: boolean = true;")))
-    try check(() => assert.ok(alpha["android/app/cloud-deployment.generated.gradle"].includes("production: \"alphaphone.dev\",")))
+    try check(() => assert.ok(alpha["android/app/cloud-deployment.generated.gradle"].includes("production: \"cloud.alphaphone.dev\",")))
     try check(() => assert.ok(shipped[java].includes(`cloud-deployment:${storageNamespaces.at(-1)}:`)))
     try check(() => assert.deepStrictEqual(sdkBases(alphaDeployment), { production: "https://api.alphaphone.dev/api/v1", staging: "https://api-staging.alphaphone.dev/api/v1" }))
   })

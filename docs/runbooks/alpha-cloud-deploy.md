@@ -1,4 +1,4 @@
-# Deploying Alpha Cloud at alphaphone.dev
+# Deploying Alpha Cloud at cloud.alphaphone.dev
 
 This runbook is for the person deploying Alpha Cloud. It covers every account, value and command,
 in order. Background and design are in [docs/alpha-cloud.md](../alpha-cloud.md). You do not need
@@ -16,12 +16,12 @@ the current Cloud until a separate cutover release, which the owner approves (se
 
 ## 1. Hostnames
 
-The web, API and blob hostnames are on the apex or one level below it in the
-`alphaphone.dev` Cloudflare zone. Cloudflare's Universal SSL covers them.
+The landing page uses the `alphaphone.dev` apex on Cloudflare Pages. Alpha Cloud uses
+subdomains in the same zone, covered by Cloudflare's Universal SSL.
 
 | Role | Production | Staging | Created by |
 |---|---|---|---|
-| Web / App Link host (`cloud/src/edge.vibe` Worker) | `alphaphone.dev` | `staging.alphaphone.dev` | Worker custom domain, on `deploy` |
+| Web / App Link host (`cloud/src/edge.vibe` Worker) | `cloud.alphaphone.dev` | `cloud-staging.alphaphone.dev` | Worker custom domain, on `deploy` |
 | API (`cloud/src/worker.vibe`, upstream's Cloud Worker) | `api.alphaphone.dev` | `api-staging.alphaphone.dev` | Worker custom domain, on `deploy`; hostname checked by `provision` |
 | Blob storage (R2, same account) | `blob.alphaphone.dev` | `blob-staging.alphaphone.dev` | Proxied DNS, on `provision` |
 | Sign-in email sender | `noreply@alphacompute.cc` | same | Resend domain verification |
@@ -202,7 +202,7 @@ Then check by hand:
 ```bash
 curl -s https://api-staging.alphaphone.dev/api/health
 curl -s https://api-staging.alphaphone.dev/api/v1/subscriptions/plans    # Plus $30 and Pro $100
-curl -s https://staging.alphaphone.dev/.well-known/assetlinks.json # contains ai.alphacompute.alphaphone
+curl -s https://cloud-staging.alphaphone.dev/.well-known/assetlinks.json # contains ai.alphacompute.alphaphone
 curl -s https://api-staging.alphaphone.dev/api/v1/auth/methods           # email and google offered
 ```
 

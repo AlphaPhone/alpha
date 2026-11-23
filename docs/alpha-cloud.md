@@ -9,7 +9,7 @@ the app that is specific to Alpha Cloud is behind the cutover flag (section 8), 
 default.
 
 **To deploy it, follow [the deployment runbook](runbooks/alpha-cloud-deploy.md)** (hosts at
-`alphaphone.dev`, accounts, secrets, operator inputs, commands, verification, rollback).
+`cloud.alphaphone.dev`, accounts, secrets, operator inputs, commands, verification, rollback).
 
 ## 1. What the Cloud does, and what it does not
 
@@ -34,12 +34,12 @@ service as unavailable, and nothing else breaks.
 phone ──https──> api.alphaphone.dev    API Worker (cloud/src/worker.vibe: upstream's Cloud Worker)  ──Hyperdrive──> Postgres
                                          profile: its static asset alpha-cloud/profile.json, pinned by CLOUD_PROFILE_SHA256
                  blob.alphaphone.dev   R2 bucket (proxied DNS, provisioned)
-                 alphaphone.dev  web Worker (cloud/src/edge.vibe)  ──service binding API──> API Worker
+                 cloud.alphaphone.dev  web Worker (cloud/src/edge.vibe)  ──service binding API──> API Worker
 Stripe ──webhook──> api.alphaphone.dev/api/stripe/webhook
 ```
 
-`alphaphone.dev` is the app-link host. Its Worker answers only its own `/health`; every
-other `https://alphaphone.dev` address goes to the API Worker through the `API` service
+`cloud.alphaphone.dev` is the app-link host. Its Worker answers only its own `/health`; every
+other `https://cloud.alphaphone.dev` address goes to the API Worker through the `API` service
 binding (never a public fetch), with `X-Forwarded-Host` naming the web host. The API Worker answers
 `/.well-known/assetlinks.json`, the sign-in, checkout and connector returns
 (`/alphaphone/auth/callback`, `/alphaphone/billing/return`, `/alphaphone/gmail/callback`) and the
@@ -265,7 +265,7 @@ The cutover release itself, once staging and production pass `smoke` and a flag-
 checks above:
 
 1. Change `SHIPPED_CLOUD_DEPLOYMENT` to `cloud/deployment.json`'s rows (with `"alphaCloud": true`), which
-   turns the flag on for every build. The App Link host becomes `alphaphone.dev`.
+   turns the flag on for every build. The App Link host becomes `cloud.alphaphone.dev`.
 2. Append the new storage namespace to `STORAGE_NAMESPACES` and add the namespace migration. Users
    sign in again; Eliza Cloud accounts, subscriptions and Google grants do not move by themselves.
 3. Build, sign and publish through OTA (section 6).
