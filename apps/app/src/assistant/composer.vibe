@@ -495,7 +495,11 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (conversation === null && live !== null) {
       const destination = try binding(identity, live.id)
       try quiet(drafts.send({ type: "selectDraft", binding: destination }))
-      fork.detached Effect.provideService(moveFirstDraft(heldBinding, destination), DraftsMachine, drafts)
+        fork.detached effect {
+          provide DraftsMachine = drafts {
+            try moveFirstDraft(heldBinding, destination)
+          }
+        }
     }
     ordinal += 1
     const replyOrdinal = ordinal
