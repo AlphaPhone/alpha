@@ -1,6 +1,8 @@
 // spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import { assert, it } from "@effect/vitest"
+import { decodeObservation } from "@elizaos/agent/client"
 import { Composer } from "../../src/assistant/composer.vibe"
+import type { ScreenFacts } from "../../src/assistant/host.vibe"
 import { spokenCue } from "../../src/assistant/cue.vibe"
 import { copy, failureKindOf, failureText, planCardTitle, retryDuration } from "../../src/assistant/presentation.vibe"
 import { DeviceExecutors, DeviceReview, type OperationPorts } from "../../src/assistant/review.vibe"
@@ -9,7 +11,8 @@ import {
   assistantOver, browserScreen, countingExecutors, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
   wireProposal, type Seen,
 } from "./fakes.vibe"
-import type { PageObservation } from "../../src/assistant/ports.vibe"
+import { TurnSources, type PageObservation } from "../../src/assistant/ports.vibe"
+import type { SelectedObject as CalendarSelection } from "../../src/calendar/device.vibe"
 
 const page = {
   tabId: "t1", revision: "r1", url: "https://news.example.com/today#top", title: "Today\nin brief", capturedAt: 1,
@@ -86,6 +89,39 @@ it.effect("A failed reply shows the agent's fix and its live wait, and nothing i
     { limited, signIn: signIn.plan, retry: retry.plan, credits: credits.plan },
     { limited: { text: failureText("LimitReached", 2400), plan: undefined, posted: 1 }, signIn: "SignIn", retry: "RetryCloud", credits: "Funding" },
   ))
+})
+
+it.effect("Send the open inspected Calendar record (spec/assistant/context.md, \"A turn can name an inspected Calendar event or source that is open on the observed screen\")", () => effect {
+  const shown: ScreenFacts = {
+    exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+    observation: { view: "calendar", revision: 2, sensitive: false },
+    onCalendar: true,
+    contextKey: "calendar:",
+  }
+  const event: CalendarSelection = { kind: "calendar-event", id: "e-1", revision: "r-3", accountId: "c-1", sourceRevision: "r-2" }
+  const source: CalendarSelection = { kind: "calendar-source", id: "c-1", revision: "r-2", accountId: "c-1", sourceRevision: "r-2" }
+  const reads = { count: 0 }
+  effect function sent(screen: ScreenFacts, selected: CalendarSelection) {
+    const seen: Seen = { calls: [] }
+    const sources = Layer.succeed(TurnSources, {
+      calendarDay: () => succeed(undefined),
+      calendarSelection: () => sync(() => { reads.count += 1; return selected }),
+      notesList: () => succeed(undefined),
+      preferReview: () => succeed(undefined),
+    })
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Okay." }, proposals: [] }), Layer.merge(fakeHost([], screen), sources), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("Use the Calendar I have open")
+      try composer.send()
+      const observation = (turnBodies(seen)[0] as { metadata?: { observation?: unknown } } | undefined)?.metadata?.observation
+      return observation === undefined ? undefined : (try decodeObservation(observation)).selectedObject
+    }
+  }
+  const onEvent = try sent(shown, event)
+  const onSource = try sent(shown, source)
+  const hidden = try sent({ ...shown, exposure: { ...shown.exposure, hidden: true } }, event)
+  const elsewhere = try sent({ ...shown, observation: { ...shown.observation, view: "home" }, onCalendar: false }, source)
+  try Effect.try(() => assert.deepStrictEqual({ onEvent, onSource, hidden, elsewhere, reads: reads.count }, { onEvent: event, onSource: source, hidden: undefined, elsewhere: undefined, reads: 2 }))
 })
 
 it.effect("Approve an action card once, over the agent's own review routes (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {
