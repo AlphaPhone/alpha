@@ -64,13 +64,12 @@ function selectionPadding(container: HTMLElement): { top: number; bottom: number
   return { top: Math.round(above * scale), bottom: Math.round(below * scale), left: 30, right: 30 };
 }
 
-function styleFor(basemap: Basemap, protocol: string, tileSize: number, minZoom: number, maxZoom: number, land: string): string | StyleSpecification {
+function styleFor(basemap: Basemap, protocol: string, tileSize: number, minZoom: number, maxZoom: number): string | StyleSpecification {
   if (basemap === "WorldMap") return WORLD_STYLE;
   return {
     version: 8,
     sources: { cloud: { type: "raster", tiles: [`${protocol}://tiles/{z}/{x}/{y}.png`], tileSize, minzoom: minZoom, maxzoom: Math.min(maxZoom, 20) } },
-    // Land shows beneath a tile still on its way, not the page behind the map.
-    layers: [{ id: "land", type: "background", paint: { "background-color": land } }, { id: "cloud-raster", type: "raster", source: "cloud" }],
+    layers: [{ id: "cloud-raster", type: "raster", source: "cloud" }],
   };
 }
 
@@ -159,9 +158,8 @@ export function MapPlane(props: MapPlaneProps) {
       return { data: tile.bytes.buffer.slice(tile.bytes.byteOffset, tile.bytes.byteOffset + tile.bytes.byteLength) };
     });
     const raster = basemap !== "WorldMap";
-    const land = getComputedStyle(node).getPropertyValue("--muted").trim() || "#e5e5e5";
     const instance = new maplibregl.Map({
-      container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom, land), center: OPENING.center,
+      container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom), center: OPENING.center,
       zoom: raster ? Math.max(OPENING.zoom, minZoom) : OPENING.zoom,
       ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
       attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
