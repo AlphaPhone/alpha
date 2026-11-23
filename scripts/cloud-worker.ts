@@ -50,11 +50,14 @@ export const OPERATOR_SECRETS = Object.freeze({
 });
 /** Secrets this tool generates once and keeps in the env file; rerunning never rotates them. */
 export const GENERATED_SECRETS = Object.freeze(['CLOUD_DIGEST_KEY', 'CLOUD_SEALING_KEY', 'CLOUD_ENTITLEMENT_KEY', 'EMAIL_CODE_SECRET', 'GOOGLE_CONNECT_TOKEN_KEY']);
-/** The API Worker's secret names, mapped from the env file (the profile and the Worker name the inference key differently). */
+/** The canonical profile's secrets and the legacy Worker routes' bindings, sourced from the env file. */
 export const WORKER_SECRET_SOURCE: Readonly<Record<string, string>> = Object.freeze({
+  CLOUD_DIGEST_KEY: 'CLOUD_DIGEST_KEY', CLOUD_SEALING_KEY: 'CLOUD_SEALING_KEY', CLOUD_ENTITLEMENT_KEY: 'CLOUD_ENTITLEMENT_KEY',
   EMAIL_CODE_SECRET: 'EMAIL_CODE_SECRET', RESEND_API_KEY: 'RESEND_API_KEY', GOOGLE_CLIENT_SECRET: 'GOOGLE_CLIENT_SECRET',
   GOOGLE_CONNECT_CLIENT_SECRET: 'GOOGLE_CONNECT_CLIENT_SECRET', GOOGLE_CONNECT_TOKEN_KEY: 'GOOGLE_CONNECT_TOKEN_KEY',
-  STRIPE_SECRET_KEY: 'STRIPE_SECRET_KEY', STRIPE_WEBHOOK_SECRET: 'STRIPE_WEBHOOK_SECRET', INFERENCE_API_KEY: 'CEREBRAS_API_KEY', CARTESIA_API_KEY: 'CARTESIA_API_KEY',
+  STRIPE_SECRET_KEY: 'STRIPE_SECRET_KEY', STRIPE_WEBHOOK_SECRET: 'STRIPE_WEBHOOK_SECRET',
+  CEREBRAS_API_KEY: 'CEREBRAS_API_KEY', INFERENCE_API_KEY: 'CEREBRAS_API_KEY', CARTESIA_API_KEY: 'CARTESIA_API_KEY',
+  GOOGLE_MAPS_API_KEY: 'GOOGLE_MAPS_API_KEY',
 });
 
 const say = (message: string) => console.log(`[cloud] ${message}`);
@@ -122,7 +125,7 @@ export function completeSecrets(values: Record<string, string>, {frozen = false}
 }
 
 export function secretProblems(values: Record<string, string>, environment: CloudEnvironment): string[] {
-  const problems = OPERATOR_SECRETS.required.filter(name => !values[name]).map(name => `${name} is missing`);
+  const problems = [...OPERATOR_SECRETS.required, ...GENERATED_SECRETS].filter(name => !values[name]).map(name => `${name} is missing`);
   const stripe = values.STRIPE_SECRET_KEY;
   if (stripe && environment === 'production' && !/^(sk|rk)_live_/.test(stripe)) problems.push('STRIPE_SECRET_KEY must be a live key in production');
   if (stripe && environment === 'staging' && !/^(sk|rk)_test_/.test(stripe)) problems.push('STRIPE_SECRET_KEY must be a test key in staging');

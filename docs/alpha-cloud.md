@@ -84,7 +84,7 @@ live keys for production.
 |---|---|---|
 | **Cloudflare** (not in the env file) | An AlphaCompute Cloudflare account that owns the `alphaphone.dev` zone, on Workers Paid | Set `CLOUDFLARE_ACCOUNT_ID` and use a token for that account. Grant Workers Scripts, Routes, KV, R2 and Hyperdrive edit, plus Zone read and DNS edit on `alphaphone.dev`. |
 | `DATABASE_URL` | Postgres (Neon, Supabase or Railway) | One database per environment, empty before its first migration. Hyperdrive is created from it. |
-| `CEREBRAS_API_KEY` | cloud.cerebras.ai → API keys | Serves `qwen-3.8-27b`. The API Worker reads it as `INFERENCE_API_KEY`. |
+| `CEREBRAS_API_KEY` | cloud.cerebras.ai → API keys | Serves `qwen-3.8-27b`. The API Worker binds this key to the profile and the legacy `INFERENCE_API_KEY` binding. |
 | `CARTESIA_API_KEY` | play.cartesia.ai → API keys | Speech to text and text to speech. |
 | `RESEND_API_KEY` | resend.com, with `alphacompute.cc` verified as a sending domain | Sends sign-in codes from `noreply@alphacompute.cc`. |
 | `GOOGLE_CLIENT_SECRET`, `GOOGLE_CONNECT_CLIENT_SECRET` | Google Cloud Console → APIs & Services → Credentials → OAuth clients (Web application) in an AlphaCompute project | Authorized redirect URIs: `https://api.alphaphone.dev/api/v1/auth/google/callback` (sign-in) and `https://api.alphaphone.dev/api/v1/oauth/google/callback` (Gmail/Calendar connector); staging: the `api-staging.` host. The client ids go in the operator inputs. |
