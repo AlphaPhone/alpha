@@ -58,13 +58,16 @@ public final class AlphaNetworkLocationPlugin extends Plugin {
   NetworkLocationQuery query=new NetworkLocationQuery();
   try{addWifi(context,query);}catch(RuntimeException unavailable){/* Wi-Fi off or refused: cells may still answer. */}
   try{addCells(context,query);}catch(RuntimeException unavailable){/* No telephony or refused. */}
-  if(!query.usable()){call.reject("No Wi-Fi or cell signals to locate from","no-signals");return;}
-  String fingerprint=Integer.toHexString(query.fingerprint().hashCode());
+  // Too few signals (scan results not ready after a boot, Wi-Fi off, only 5G cells): nothing about
+  // the networks is sent, and the service answers from the request's address alone (city level).
+  if(!query.usable())query=new NetworkLocationQuery();
+  // Only a set of networks can be confirmed unchanged later; an address-only answer cannot.
+  String fingerprint=query.usable()?Integer.toHexString(query.fingerprint().hashCode()):"";
   if(Thread.currentThread().isInterrupted()){call.reject("Network location was stopped","unavailable");return;}
   if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){call.reject("Location permission is not granted","permission-denied");return;}
   if(!location.isLocationEnabled()){call.reject("Device location is off","location-off");return;}
   // The same visible networks as the caller's last answer: nothing is sent.
-  if(fingerprint.equals(call.getString("unchangedFrom",""))){JSObject same=new JSObject();same.put("unchanged",true);same.put("fingerprint",fingerprint);call.resolve(same);return;}
+  if(!fingerprint.isEmpty()&&fingerprint.equals(call.getString("unchangedFrom",""))){JSObject same=new JSObject();same.put("unchanged",true);same.put("fingerprint",fingerprint);call.resolve(same);return;}
   HttpsURLConnection connection=null;
   try{
    connection=(HttpsURLConnection)new URL(NetworkLocationQuery.ENDPOINT).openConnection();
