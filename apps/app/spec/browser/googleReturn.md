@@ -15,7 +15,10 @@ credential that started it.
 ### One attempt is live at a time, and a return is claimed once, by a worker that settles it
 
 A result for another app (`foreign`) claims nothing. A cancel or a closed browser fences results
-still queued. A hint that the code arrived waits a grace period for its result.
+still queued. A hint that the code arrived waits a grace period for its result. Leaving the host
+counts as the browser covering the attempt only when the page opened in the host's own task
+(`hostTask`); Alpha is the Home app, so its page opens in the browser's task and coming back to
+Home arms no grace and never ends the attempt.
 
 ```quint
 type Capture = CaptureSuccess | CaptureForeign | CaptureHint | CaptureError | CaptureMfaError | CaptureLinkError | CaptureInvalid
@@ -23,18 +26,20 @@ type PendingRecord = RecordMatching | RecordExpired | RecordReplaced | RecordUnr
 type ReturnOutcome = Waiting | NoAttempt | Authenticated | BrowserClosed | AppLinkUnverified | ReturnCancelled | ProviderRefused | MfaInBrowser | ReturnExpired | StorageUnconfirmed
 type Job = { capture: Capture, claim: bool }
 type GoogleReturn = {
-  live: bool, paused: bool, hint: bool, hintElapsed: bool, claimed: bool, received: bool, pending: PendingRecord,
+  live: bool, hostTask: bool, paused: bool, hint: bool, hintElapsed: bool, claimed: bool, received: bool, pending: PendingRecord,
   credentialCurrent: bool, fence: bool, outcome: ReturnOutcome, exchanged: bool, work: List[Job], grace: List[Capture],
 }
 pure val initial: GoogleReturn = {
-  live: true, paused: false, hint: false, hintElapsed: false, claimed: false, received: false, pending: RecordMatching,
+  live: true, hostTask: false, paused: false, hint: false, hintElapsed: false, claimed: false, received: false, pending: RecordMatching,
   credentialCurrent: true, fence: false, outcome: Waiting, exchanged: false, work: List(), grace: List(),
 }
 pure def matches(pending: PendingRecord): bool = pending == RecordMatching or pending == RecordExpired
 pure def ended(result: ReturnOutcome, g: GoogleReturn): GoogleReturn = { ...g, live: false, outcome: result }
 pure def closedBrowser(fence: bool, g: GoogleReturn): GoogleReturn = { ...ended(BrowserClosed, g), fence: true }
+pure def canOpenInHostTask(g: GoogleReturn): bool = g == initial
+pure def openInHostTask(g: GoogleReturn): GoogleReturn = { ...g, hostTask: true }
 pure def canPause(g: GoogleReturn): bool = g.live and not(g.paused)
-pure def pause(g: GoogleReturn): GoogleReturn = { ...g, paused: true }
+pure def pause(g: GoogleReturn): GoogleReturn = { ...g, paused: g.hostTask }
 pure def canResume(g: GoogleReturn): bool = g.live and g.paused and g.grace.length() < 3
 pure def resume(g: GoogleReturn): GoogleReturn = { ...g, grace: g.grace.append(CaptureError) }
 pure def canReceive(g: GoogleReturn, capture: Capture): bool = g.work.length() < 3
@@ -51,6 +56,9 @@ pure def canCancelAttempt(g: GoogleReturn): bool = g.live
 pure def cancelAttempt(g: GoogleReturn): GoogleReturn = { ...ended(ReturnCancelled, g), fence: true }
 pure def alwaysAClaimHasItsWorker(g: GoogleReturn): bool = g.work.select(j => j.claim).length() == (if (g.claimed) 1 else 0)
 pure def alwaysOnlyAWaitingAttemptIsLive(g: GoogleReturn): bool = (g.live iff g.outcome == Waiting) and (g.fence implies not(g.live))
+pure def alwaysOnlyAPageInTheHostTaskPauses(g: GoogleReturn): bool = g.paused implies g.hostTask
+pure def stepLeavingHomeKeepsTheAttempt(before: GoogleReturn, via: str, after: GoogleReturn): bool =
+  (via == "pause" and not(before.hostTask)) implies after == before
 ```
 
 ### A claimed result is exchanged only from a matching, unexpired record under the newest credential, and every other result ends the attempt with its reason
@@ -98,6 +106,7 @@ pure def alwaysAClaimedResultOutlivesTheGrace(g: GoogleReturn): bool =
   g.claimed implies (g.outcome != BrowserClosed and (g.outcome != AppLinkUnverified or g.received))
 pure def sometimesAuthenticated(g: GoogleReturn): bool = g.exchanged
 pure def sometimesTheBrowserWasClosed(g: GoogleReturn): bool = g.outcome == BrowserClosed
+pure def sometimesAHomeHostAttemptIsAuthenticated(g: GoogleReturn): bool = g.exchanged and not(g.hostTask)
 ```
 
 ## Story: Link Google only when the account really changed

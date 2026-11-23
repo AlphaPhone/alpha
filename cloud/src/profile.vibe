@@ -5,6 +5,9 @@ import deployment from "../deployment.json" with { type: "json" }
 /** The model Alpha Phone requests for chat on Alpha Cloud. */
 export const alphaModel = "qwen-3.8-27b"
 
+/** The longest reply the provider generates for `alphaModel`. A chat request that names no cap is quoted and sent at this length. */
+export const alphaModelMaxOutputTokens = 40960
+
 /** Alpha Cloud's display name in both environments. */
 export const alphaCloudName = "Alpha Cloud"
 
@@ -106,7 +109,7 @@ function environmentProfile(environment: CloudEnvironment, inputs: EnvironmentIn
     },
     inference: {
       providers: [{ id: "cerebras", baseUrl: "https://api.cerebras.ai/v1", apiKeyEnv: secretNames.inference }],
-      models: [{ id: alphaModel, provider: "cerebras", upstreamModel: alphaModel, vision: false }],
+      models: [{ id: alphaModel, provider: "cerebras", upstreamModel: alphaModel, vision: false, defaultMaxTokens: alphaModelMaxOutputTokens }],
     },
     speech: {
       provider: "cartesia",
