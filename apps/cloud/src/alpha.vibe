@@ -42,7 +42,7 @@ export function entryOf(registration: Registration) {
   return {
     clientId: registration.clientId, displayName: registration.displayName, androidPackage: registration.androidPackage,
     certFingerprints: registration.certFingerprints,
-    signInReturn: line(registration.signInReturn), billingReturn: line(registration.billingReturn), connectReturn: line(registration.connectReturn),
+    signInReturn: line(registration.signInReturn), billingReturn: line(registration.billingReturn),
   }
 }
 

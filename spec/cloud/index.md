@@ -63,7 +63,7 @@ type Environment = Production | Staging
 type ReturnUrl = { origin: str, path: str }
 type Registration = {
   clientId: str, environment: Environment, displayName: str, androidPackage: str,
-  certFingerprints: List[str], signInReturn: ReturnUrl, billingReturn: ReturnUrl, connectReturn: ReturnUrl
+  certFingerprints: List[str], signInReturn: ReturnUrl, billingReturn: ReturnUrl
 }
 
 pure val alphaPackage = "ai.alphacompute.alphaphone"
@@ -86,15 +86,31 @@ pure def signersOf(environment: Environment): List[str] =
   if (environment == Staging) List(releaseSigner).concat(debugSigners) else List(releaseSigner)
 ```
 
-### Each return is on the environment's web origin, under Alpha's own path
+### The release signer is never a debug signer
+
+A debug keystore is in the repository; a release signed by it could be
+installed over a phone by anyone who holds the repository.
+
+```quint
+pure def lawTheReleaseSignerIsNoDebugSigner(environment: Environment): bool =
+  not(debugSigners.includes(releaseSigner)) and signersOf(environment).nthOr(0, "") == releaseSigner
+```
+
+### Each return is on the environment's web origin, at the paths Alpha's App Links have always opened, and Alpha keeps no connect return
+
+The sign-in and billing returns are the paths phones installed before this
+rebuild already open (`/alphaphone/auth/callback`,
+`/alphaphone/billing/return`). A Google connection finished for Alpha shows
+eliza's own page as connected (`spec/cloud/returnPages.md`, "A Google
+connection finished for an enabled registration without a connect return
+shows ReturnToApp as connected, with no action").
 
 ```quint
 pure def registrationOf(environment: Environment, web: str): Registration = {
   clientId: alphaPackage, environment: environment, displayName: alphaName, androidPackage: alphaPackage,
   certFingerprints: signersOf(environment),
-  signInReturn: { origin: web, path: "/apps/alpha/sign-in" },
-  billingReturn: { origin: web, path: "/apps/alpha/billing" },
-  connectReturn: { origin: web, path: "/apps/alpha/connect" }
+  signInReturn: { origin: web, path: "/alphaphone/auth/callback" },
+  billingReturn: { origin: web, path: "/alphaphone/billing/return" }
 }
 ```
 
