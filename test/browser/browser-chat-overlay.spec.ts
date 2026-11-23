@@ -157,18 +157,30 @@ test('tapping browser input bar opens half-sheet with focused preserved textarea
   w.__browserComposerRef=document.querySelector('[data-alpha-layer="composer"] textarea[data-alpha-composer="true"]');
   const textarea=w.__browserComposerRef;
   textarea?.addEventListener('blur',()=>{w.__browserComposerBlurs=(w.__browserComposerBlurs??0)+1;});
-  for(const type of ['touchstart','pointerdown','touchend','pointerup','focusin'] as const){
-   document.addEventListener(type,event=>{
-    const target=event.target as Element|null;
-    if(!target?.closest('[data-alpha-layer="composer"]'))return;
+  const record=(event:Event)=>{
+   const target=event.target as Element|null;
+   if(!target?.closest('[data-alpha-layer="composer"]'))return;
+   const type=event.type;
+   const pointerType='pointerType' in event?String((event as PointerEvent).pointerType):null;
+   const targetTag=target.tagName??null;
+   // Read defaultPrevented in a microtask after the full synchronous dispatch
+   // completes so any cancellation in target, owner, or delegated root handlers
+   // is guaranteed to be observed.
+   queueMicrotask(()=>{
     w.__browserInputEvents?.push({
-     type:event.type,
-     pointerType:'pointerType' in event?String((event as PointerEvent).pointerType):null,
+     type,
+     pointerType,
      defaultPrevented:event.defaultPrevented,
-     targetTag:target.tagName??null,
+     targetTag,
      activeTag:document.activeElement?.tagName??null,
     });
-   },{capture:true});
+   });
+  };
+  for(const type of ['touchstart','touchend','focusin'] as const){
+   document.addEventListener(type,record,{capture:false});
+  }
+  for(const type of ['pointerdown','pointerup'] as const){
+   textarea?.addEventListener(type,record,{capture:false});
   }
  });
 
