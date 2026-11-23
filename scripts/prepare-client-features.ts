@@ -249,6 +249,7 @@ export const CLIENT_FEATURE_PATHS = [
   'plugins/plugin-maps/src/client/route-distance.ts',
   'plugins/plugin-maps/src/client/runtime.ts',
   'plugins/plugin-maps/src/client/saved-places.ts',
+  'plugins/plugin-maps/src/client/selection-handle.ts',
   'plugins/plugin-maps/src/client/state.ts',
   'plugins/plugin-maps/test/navigation-client.test.mjs',
   // Notes client stores, trash, recording and query logic. The Notes controller, editor and
