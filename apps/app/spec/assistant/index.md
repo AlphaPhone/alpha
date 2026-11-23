@@ -53,9 +53,12 @@ phone, and no proposal admitted on another screen may act on it.
 
 ```quint
 type Exposure = { privateView: bool, locked: bool, hidden: bool, connectionDialog: bool }
-pure def observes(e: Exposure): bool = not(e.privateView) and not(e.locked) and not(e.hidden) and not(e.connectionDialog)
-pure def lawAPrivateScreenIsNeverObserved(e: Exposure): bool = e.privateView implies not(observes(e))
-pure def lawALockedScreenIsNeverObserved(e: Exposure): bool = e.locked implies not(observes(e))
+pure def observes(exposure: Exposure): bool = not(exposure.privateView) and not(exposure.locked) and not(exposure.hidden) and not(exposure.connectionDialog)
+pure def lawAPrivateScreenIsNeverObserved(exposure: Exposure): bool = exposure.privateView implies not(observes(exposure))
+pure def lawALockedScreenIsNeverObserved(exposure: Exposure): bool = exposure.locked implies not(observes(exposure))
+pure val exposureValues = Set({ privateView: false, locked: false, hidden: false, connectionDialog: false }, { privateView: true, locked: false, hidden: false, connectionDialog: false },
+  { privateView: false, locked: true, hidden: false, connectionDialog: false }, { privateView: false, locked: false, hidden: true, connectionDialog: false },
+  { privateView: false, locked: false, hidden: false, connectionDialog: true })
 ```
 
 ### Something handed to the assistant is only ever a draft the owner sends
@@ -66,9 +69,10 @@ never replaces text the owner already typed.
 
 ```quint
 type Handoff = { typed: bool, handed: bool }
-pure def keepsTyped(h: Handoff): bool = h.typed
-pure def placesHanded(h: Handoff): bool = h.handed and not(h.typed)
-pure def lawAHandoffNeverOverwritesTyping(h: Handoff): bool = h.typed implies not(placesHanded(h))
+pure def keepsTyped(handoff: Handoff): bool = handoff.typed
+pure def placesHanded(handoff: Handoff): bool = handoff.handed and not(handoff.typed)
+pure def lawAHandoffNeverOverwritesTyping(handoff: Handoff): bool = handoff.typed implies not(placesHanded(handoff))
+pure val handoffValues = Set({ typed: true, handed: true }, { typed: false, handed: true }, { typed: true, handed: false }, { typed: false, handed: false })
 ```
 
 ### Back closes what the assistant opened before it leaves the assistant

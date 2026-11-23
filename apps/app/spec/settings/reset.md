@@ -52,6 +52,6 @@ Reset is the one way to recover from data that cannot be read; passwords never l
 
 ```quint
 type DataAction = EraseAll | Backup | Import | Export
-pure def offered(action: DataAction): bool = action == EraseAll
-pure def lawOnlyEraseIsOffered(action: DataAction): bool = offered(action) iff action == EraseAll
+pure def offered(dataAction: DataAction): bool = dataAction == EraseAll
+pure def lawOnlyEraseIsOffered(dataAction: DataAction): bool = offered(dataAction) iff dataAction == EraseAll
 ```

@@ -29,20 +29,20 @@ pure val initial: Intents = {
   refusedAdmits: 0, refusedAcks: 0, restarts: 0, clearedRevision: 0, heldRevisionAtClear: 0
 }
 pure def heldBy(s: Intents, caller: int): Intent = s.held.getOr(caller, noIntent)
-pure val callerValues = Set(1, 2)
+pure val callers = Set(1, 2)
+pure val callerValues = callers
 pure val tokenValues = Set("op-a", "op-b")
 ```
 
 ### A request is admitted only into an empty slot; an occupied slot refuses and keeps its request
 
 ```quint
-pure def canAdmit(s: Intents, caller: int, token: str): bool = callerValues.contains(caller) and heldBy(s, caller) == noIntent and token != ""
-pure def admit(s: Intents, caller: int, token: str): Intents =
+pure def canAdmit(s: Intents, caller: int, token: str): bool = callers.contains(caller) and heldBy(s, caller) == noIntent and token != ""
+pure def admit(s: Intents, caller: int, token: str): Intents = {
+  val stored = { token: token, revision: s.serial + 1 }
   if (s.slot != noIntent) { ...s, refusedAdmits: s.refusedAdmits + 1 }
-  else {
-    val stored = { token: token, revision: s.serial + 1 }
-    { ...s, slot: stored, serial: s.serial + 1, held: s.held.put(caller, stored), admitted: s.admitted + 1 }
-  }
+  else { ...s, slot: stored, serial: s.serial + 1, held: s.held.put(caller, stored), admitted: s.admitted + 1 }
+}
 pure def alwaysSinglePendingRequest(s: Intents): bool = s.admitted - s.acknowledged == (if (s.slot == noIntent) 0 else 1)
 pure def alwaysRevisionIdentifiesAdmission(s: Intents): bool = s.slot != noIntent implies (s.slot.revision >= 1 and s.slot.revision <= s.serial)
 pure def sometimesSecondRequestRefused(s: Intents): bool = s.refusedAdmits > 0 and s.slot != noIntent
@@ -51,7 +51,7 @@ pure def sometimesSecondRequestRefused(s: Intents): bool = s.refusedAdmits > 0 a
 ### An acknowledgement clears only the admission its caller holds
 
 ```quint
-pure def canAcknowledge(s: Intents, caller: int): bool = callerValues.contains(caller) and heldBy(s, caller) != noIntent
+pure def canAcknowledge(s: Intents, caller: int): bool = callers.contains(caller) and heldBy(s, caller) != noIntent
 pure def acknowledge(s: Intents, caller: int): Intents =
   if (s.slot != noIntent and s.slot == heldBy(s, caller))
     { ...s, slot: noIntent, held: s.held.put(caller, noIntent), acknowledged: s.acknowledged + 1,
@@ -65,7 +65,7 @@ pure def sometimesStaleAcknowledgeRefused(s: Intents): bool = s.refusedAcks > 0 
 
 ```quint
 pure def restart(s: Intents): Intents = { ...s, restarts: s.restarts + 1, held: Map().put(1, noIntent).put(2, noIntent) }
-pure def canRecover(s: Intents, caller: int): bool = callerValues.contains(caller) and s.slot != noIntent and heldBy(s, caller) == noIntent
+pure def canRecover(s: Intents, caller: int): bool = callers.contains(caller) and s.slot != noIntent and heldBy(s, caller) == noIntent
 pure def recover(s: Intents, caller: int): Intents = { ...s, held: s.held.put(caller, s.slot) }
 pure def sometimesRecoveredAfterRestart(s: Intents): bool = s.restarts > 0 and s.slot != noIntent and heldBy(s, 1) == s.slot
 ```

@@ -141,8 +141,8 @@ type SessionEffect = CreateNative(NativeCreate) | LoadNative(NativeLoad) | Close
   | Settle(AgentSettled) | Say(Said) | ShowBrowser | BackUnhandled
 type SessionChange = { state: Session, out: List[SessionEffect] }
 pure def say(notice: BrowserNotice): SessionEffect = Say({ notice: notice })
-pure def settle(request: str, tab: str, outcome: AgentOutcome): List[SessionEffect] =
-  if (request == "") List() else List(Settle({ request: request, tab: tab, outcome: outcome }))
+pure def settleEffects(request: str, tab: str, result: AgentOutcome): List[SessionEffect] =
+  if (request == "") List() else List(Settle({ request: request, tab: tab, outcome: result }))
 pure def canOpenTab(s: Session, id: str, profile: Profile): bool = s.host != UnknownHost and id != "" and not(known(s, id))
 pure def openTab(s: Session, id: str, profile: Profile): SessionChange =
   if (full(s)) { state: s, out: List(say(TabLimit)) }
@@ -213,37 +213,38 @@ pure def failedLoad(id: str, created: bool, unsupported: bool, s: Session): Sess
   else
     { state: { ...withTab({ ...t, stage: if (created) t.stage else Unborn, nav: noNav, attempts: 0 }, s),
         profileUnsupported: if (unsupported and id == s.cur) id else s.profileUnsupported },
-      out: if (t.nav.request != "") settle(t.nav.request, id, FailedOpen) else List(say(if (unsupported) ProfileUnsupported else TabFailed)) }
+      out: if (t.nav.request != "") settleEffects(t.nav.request, id, FailedOpen) else List(say(if (unsupported) ProfileUnsupported else TabFailed)) }
 }
 pure def canCreateSettled(s: Session, id: str, ok: bool, unsupported: bool): bool =
   isOpening(s, id) or (isTab(s, id) and tabOf(s, id).stage == Creating)
+pure def createdOpening(id: str, s: Session, ok: bool): SessionChange = {
+  val o = openingOf(s, id)
+  val rest = { ...s, openings: s.openings.select(x => x.id != id) }
+  val withdrawn = o.cancelled or ((not(o.nav.background) or o.nav.request != "") and s.cur != o.nav.selected)
+  val tab = { ...freshTab(id, o.profile), stage: Live, nav: o.nav, revision: 1,
+    page: { ...blankPage, url: o.nav.url, loading: true } }
+  if (not(ok)) { state: rest, out: if (o.nav.request != "") settleEffects(o.nav.request, id, FailedOpen) else List(say(TabFailed)) }
+  else if (withdrawn) { state: rest, out: List(CloseNative({ id: id })).concat(settleEffects(o.nav.request, id, RefusedChanged)) }
+  else if (rest.tabs.length() >= maxTabs)
+    { state: rest, out: List(CloseNative({ id: id })).concat(if (o.nav.request != "") settleEffects(o.nav.request, id, RefusedFull) else List(say(TabLimit))) }
+  else
+    { state: { ...rest, tabs: rest.tabs.append(tab), cur: if (o.nav.background) s.cur else id,
+        layers: if (o.nav.background) s.layers else noLayers },
+      out: List(LoadNative({ id: id, url: o.nav.url })) }
+}
+pure def createdTab(id: str, s: Session, ok: bool, unsupported: bool): SessionChange = {
+  val t = tabOf(s, id)
+  val live = { ...t, stage: Live }
+  if (not(ok)) failedLoad(id, false, unsupported, s)
+  else if ((not(t.nav.background) or t.nav.request != "") and s.cur != t.nav.selected)
+    { state: withTab({ ...live, nav: noNav }, s), out: settleEffects(t.nav.request, id, RefusedChanged) }
+  else
+    { state: { ...withTab({ ...live, revision: t.revision + 1, page: { ...t.page, url: t.nav.url, loading: true, committed: false, failed: false } }, s),
+        cur: if (t.nav.background) s.cur else id, layers: if (t.nav.background) s.layers else noLayers },
+      out: List(LoadNative({ id: id, url: t.nav.url })) }
+}
 pure def createSettled(s: Session, id: str, ok: bool, unsupported: bool): SessionChange =
-  if (isOpening(s, id)) {
-    val o = openingOf(s, id)
-    val rest = { ...s, openings: s.openings.select(x => x.id != id) }
-    val withdrawn = o.cancelled or ((not(o.nav.background) or o.nav.request != "") and s.cur != o.nav.selected)
-    if (not(ok)) { state: rest, out: if (o.nav.request != "") settle(o.nav.request, id, FailedOpen) else List(say(TabFailed)) }
-    else if (withdrawn) { state: rest, out: List(CloseNative({ id: id })).concat(settle(o.nav.request, id, RefusedChanged)) }
-    else if (rest.tabs.length() >= maxTabs)
-      { state: rest, out: List(CloseNative({ id: id })).concat(if (o.nav.request != "") settle(o.nav.request, id, RefusedFull) else List(say(TabLimit))) }
-    else {
-      val tab = { ...freshTab(id, o.profile), stage: Live, nav: o.nav, revision: 1,
-        page: { ...blankPage, url: o.nav.url, loading: true } }
-      { state: { ...rest, tabs: rest.tabs.append(tab), cur: if (o.nav.background) s.cur else id,
-          layers: if (o.nav.background) s.layers else noLayers },
-        out: List(LoadNative({ id: id, url: o.nav.url })) }
-    }
-  } else {
-    val t = tabOf(s, id)
-    val live = { ...t, stage: Live }
-    if (not(ok)) failedLoad(id, false, unsupported, s)
-    else if ((not(t.nav.background) or t.nav.request != "") and s.cur != t.nav.selected)
-      { state: withTab({ ...live, nav: noNav }, s), out: settle(t.nav.request, id, RefusedChanged) }
-    else
-      { state: { ...withTab({ ...live, revision: t.revision + 1, page: { ...t.page, url: t.nav.url, loading: true, committed: false, failed: false } }, s),
-          cur: if (t.nav.background) s.cur else id, layers: if (t.nav.background) s.layers else noLayers },
-        out: List(LoadNative({ id: id, url: t.nav.url })) }
-  }
+  if (isOpening(s, id)) createdOpening(id, s, ok) else createdTab(id, s, ok, unsupported)
 pure def alwaysRestoreAttemptsAreBounded(s: Session): bool = s.tabs.every(t => t.attempts >= 0 and t.attempts < maxRestoreAttempts)
 ```
 
@@ -255,7 +256,7 @@ pure def loadSettled(s: Session, id: str, ok: bool): SessionChange = {
   val t = tabOf(s, id)
   if (ok)
     { state: { ...withTab({ ...t, nav: noNav, attempts: 0 }, s), agentTab: if (t.nav.request != "") id else s.agentTab },
-      out: settle(t.nav.request, id, Dispatched) }
+      out: settleEffects(t.nav.request, id, Dispatched) }
   else failedLoad(id, true, false, s)
 }
 ```
@@ -299,10 +300,10 @@ pure def canNativeReport(s: Session, report: NativeReport): bool =
 pure def nativeReport(s: Session, report: NativeReport): SessionChange = {
   val t = tabOf(s, report.id)
   val p = report.page
-  val moved = (p.url != "" and p.url != t.page.url) or (p.loading and not(t.page.loading))
-  val visit = settled(p) and p.web
+  val shifted = (p.url != "" and p.url != t.page.url) or (p.loading and not(t.page.loading))
+  val visit = isSettled(p) and p.web
   val tab = { ...t, page: if (p.externalOnly) { ...p, committed: false } else p,
-    revision: if (moved) t.revision + 1 else t.revision, savedUrl: if (visit) p.url else t.savedUrl }
+    revision: if (shifted) t.revision + 1 else t.revision, savedUrl: if (visit) p.url else t.savedUrl }
   val warn = p.failed and not(t.page.failed) and report.insecureHttp and report.id == s.cur
   { state: { ...withTab(tab, s), visits: if (visit and t.profile == Normal) addVisit(p.url, p.title, report.at, s.visits) else s.visits },
     out: if (warn) List(say(NoSecureConnection)) else List() }
@@ -318,7 +319,7 @@ pure val reportValues: Set[NativeReport] = List(
   { id: "t2", page: { ...loadedPage, url: "https://other.test/", sequence: 2 }, insecureHttp: false, at: 2 },
   { id: "t3", page: { ...loadedPage, url: "https://other.test/", sequence: 2 }, insecureHttp: false, at: 2 },
 ).foldl(Set(), (acc, r) => acc.union(Set(r)))
-pure def sometimesAPrivatePageLoaded(s: Session): bool = s.tabs.some(t => t.profile == Private and settled(t.page))
+pure def sometimesAPrivatePageLoaded(s: Session): bool = s.tabs.some(t => t.profile == Private and isSettled(t.page))
 ```
 
 ### A pop-up the native host opened becomes the selected tab in its opener's profile, unless eight are open
@@ -328,13 +329,12 @@ told; a pop-up of a private tab is private.
 
 ```quint
 pure def canNativeOpened(s: Session, id: str, opener: str, priv: bool): bool = s.host != UnknownHost and id != "" and not(known(s, id))
-pure def nativeOpened(s: Session, id: str, opener: str, priv: bool): SessionChange =
+pure def nativeOpened(s: Session, id: str, opener: str, priv: bool): SessionChange = {
+  val profile = if (priv or isPrivateTab(s, opener)) Private else Normal
+  val tab = { ...freshTab(id, profile), stage: Live, opener: if (isTab(s, opener)) opener else "" }
   if (s.tabs.length() >= maxTabs) { state: s, out: List(CloseNative({ id: id }), say(TabLimit)) }
-  else {
-    val profile = if (priv or isPrivateTab(s, opener)) Private else Normal
-    val tab = { ...freshTab(id, profile), stage: Live, opener: if (isTab(s, opener)) opener else "" }
-    { state: { ...s, tabs: s.tabs.append(tab), cur: id, layers: noLayers }, out: List() }
-  }
+  else { state: { ...s, tabs: s.tabs.append(tab), cur: id, layers: noLayers }, out: List() }
+}
 pure def stepAPopUpOfAPrivateTabIsPrivate(before: Session, via: str, after: Session): bool =
   via == "nativeOpened" implies after.tabs.every(t => before.tabs.some(b => b.id == t.id) or not(isPrivateTab(before, t.opener)) or t.profile == Private)
 ```
@@ -456,12 +456,11 @@ The native host clears a tab's search when it navigates or stops being shown.
 
 ```quint
 pure def canFindResult(s: Session, id: str, cleared: bool, count: int, index: int, done: bool): bool = s.find.tab != "" and s.find.tab == id
-pure def findResult(s: Session, id: str, cleared: bool, count: int, index: int, done: bool): Session =
+pure def findResult(s: Session, id: str, cleared: bool, count: int, index: int, done: bool): Session = {
+  val total = if (count < 0) 0 else count
   if (cleared) { ...s, find: noFind }
-  else {
-    val total = if (count < 0) 0 else count
-    { ...s, find: { ...s.find, count: total, index: if (index < 0) 0 else if (index > total) total else index, done: done } }
-  }
+  else { ...s, find: { ...s.find, count: total, index: if (index < 0) 0 else if (index > total) total else index, done: done } }
+}
 pure def alwaysAMatchIndexIsWithinTheCount(s: Session): bool = s.find.count >= 0 and s.find.index >= 0 and s.find.index <= s.find.count
 pure def sometimesMatchesFound(s: Session): bool = s.find.count > 0 and s.find.tab == s.cur
 ```
@@ -477,7 +476,7 @@ pure def sometimesMatchesFound(s: Session): bool = s.find.count > 0 and s.find.t
 pure def headUrl(visits: List[Visit]): str = visits.foldl("", (first, v) => if (first == "") v.url else first)
 pure def stepANewVisitIsANormalTabsCommittedPage(before: Session, via: str, after: Session): bool =
   (via == "nativeReport" and after.visits != before.visits) implies
-    after.tabs.some(t => t.profile == Normal and t.savedUrl == headUrl(after.visits) and settled(t.page))
+    after.tabs.some(t => t.profile == Normal and t.savedUrl == headUrl(after.visits) and isSettled(t.page))
 pure def alwaysHistoryStaysWithinItsLimit(s: Session): bool = s.visits.length() <= maxHistory
 pure def canRemoveVisit(s: Session, url: str): bool = s.visits.some(v => v.url == url)
 pure def removeVisit(s: Session, url: str): Session = { ...s, visits: s.visits.select(v => v.url != url) }
@@ -604,7 +603,7 @@ pure def agentOpen(s: Session, request: str, id: str, url: str, newTab: bool, in
   val reuse = reuseTab(s, priv, newTab)
   val nav = { url: url, background: true, selected: s.cur, request: request, restore: false }
   if (reuse != "") beginLoad(reuse, nav, s)
-  else if (full(s)) { state: s, out: settle(request, "", RefusedFull) }
+  else if (full(s)) { state: s, out: settleEffects(request, "", RefusedFull) }
   else { state: { ...s, openings: s.openings.append({ id: id, profile: if (priv) Private else Normal, nav: nav, cancelled: false }) },
     out: List(CreateNative({ id: id, profile: if (priv) Private else Normal })) }
 }
@@ -632,8 +631,8 @@ pure def agentPresent(s: Session, tab: str, selected: str, edit: bool): SessionC
 ```quint
 pure def canAgentTabNew(s: Session, request: str, id: str, priv: bool): bool = request != "" and id != "" and s.host != UnknownHost and not(known(s, id))
 pure def agentTabNew(s: Session, request: str, id: str, priv: bool): SessionChange =
-  if (full(s)) { state: s, out: settle(request, "", RefusedFull) }
-  else { state: { ...s, tabs: s.tabs.append(freshTab(id, if (priv) Private else Normal)) }, out: settle(request, id, Done) }
+  if (full(s)) { state: s, out: settleEffects(request, "", RefusedFull) }
+  else { state: { ...s, tabs: s.tabs.append(freshTab(id, if (priv) Private else Normal)) }, out: settleEffects(request, id, Done) }
 ```
 
 ### The agent switches to or closes a private tab only for a request made from a private tab, never switches to the tab already showing, and closes the showing tab only when it is shown
@@ -641,20 +640,20 @@ pure def agentTabNew(s: Session, request: str, id: str, priv: bool): SessionChan
 ```quint
 pure def canAgentSwitch(s: Session, request: str, target: str, inBrowser: bool): bool = request != ""
 pure def agentSwitch(s: Session, request: str, target: str, inBrowser: bool): SessionChange =
-  if (not(isTab(s, target))) { state: s, out: settle(request, "", RefusedChanged) }
-  else if (isPrivateTab(s, target) and not(fromPrivate(s, inBrowser))) { state: s, out: settle(request, "", RefusedPrivate) }
-  else if (inBrowser and target == s.cur) { state: s, out: settle(request, target, RefusedShowing) }
-  else { state: s, out: settle(request, target, Done) }
+  if (not(isTab(s, target))) { state: s, out: settleEffects(request, "", RefusedChanged) }
+  else if (isPrivateTab(s, target) and not(fromPrivate(s, inBrowser))) { state: s, out: settleEffects(request, "", RefusedPrivate) }
+  else if (inBrowser and target == s.cur) { state: s, out: settleEffects(request, target, RefusedShowing) }
+  else { state: s, out: settleEffects(request, target, Done) }
 pure def canAgentClose(s: Session, request: str, target: str, inBrowser: bool, fallback: str): bool =
   request != "" and fallback != "" and not(known(s, fallback))
 pure def agentClose(s: Session, request: str, target: str, inBrowser: bool, fallback: str): SessionChange = {
   val id = if (target == "") s.cur else target
-  if (not(isTab(s, id))) { state: s, out: settle(request, "", RefusedChanged) }
-  else if (isPrivateTab(s, id) and not(fromPrivate(s, inBrowser))) { state: s, out: settle(request, "", RefusedPrivate) }
+  if (not(isTab(s, id))) { state: s, out: settleEffects(request, "", RefusedChanged) }
+  else if (isPrivateTab(s, id) and not(fromPrivate(s, inBrowser))) { state: s, out: settleEffects(request, "", RefusedPrivate) }
   else if (id != s.cur)
     { state: forgetTab(id, fallback, false, s),
-      out: (if (tabOf(s, id).stage != Unborn) List(CloseNative({ id: id })) else List()).concat(settle(request, id, Done)) }
-  else { state: s, out: settle(request, id, Done) }
+      out: (if (tabOf(s, id).stage != Unborn) List(CloseNative({ id: id })) else List()).concat(settleEffects(request, id, Done)) }
+  else { state: s, out: settleEffects(request, id, Done) }
 }
 pure def canAgentCloseShown(s: Session, tab: str, selected: str, fallback: str): bool =
   isTab(s, tab) and s.cur == selected and selected == tab and fallback != "" and not(known(s, fallback))
@@ -677,11 +676,11 @@ pure def observedCurrent(s: Session, observedTab: str, observedRevision: int): b
 pure def canAgentFind(s: Session, request: str, query: str): bool = request != "" and isTab(s, s.cur)
 pure def agentFind(s: Session, request: str, query: str): SessionChange = {
   val t = curTab(s)
-  if (s.host != NativeHost) { state: s, out: settle(request, "", RefusedNoFind) }
-  else if (t.stage == Unborn and t.restoreUrl != "") { state: s, out: settle(request, s.cur, RefusedUnloaded) }
-  else if (not(findable(s))) { state: s, out: settle(request, s.cur, RefusedNoPage) }
+  if (s.host != NativeHost) { state: s, out: settleEffects(request, "", RefusedNoFind) }
+  else if (t.stage == Unborn and t.restoreUrl != "") { state: s, out: settleEffects(request, s.cur, RefusedUnloaded) }
+  else if (not(findable(s))) { state: s, out: settleEffects(request, s.cur, RefusedNoPage) }
   else { state: { ...s, find: { ...noFind, tab: s.cur, query: query, done: query == "" }, layers: { ...s.layers, menu: false } },
-    out: settle(request, s.cur, Done) }
+    out: settleEffects(request, s.cur, Done) }
 }
 pure def historyOutcome(s: Session, command: PageCommand, observedTab: str, observedRevision: int): AgentOutcome = {
   val t = curTab(s)
@@ -695,7 +694,7 @@ pure def historyOutcome(s: Session, command: PageCommand, observedTab: str, obse
 }
 pure def canAgentHistory(s: Session, request: str, command: PageCommand, observedTab: str, observedRevision: int): bool = request != "" and isTab(s, s.cur)
 pure def agentHistory(s: Session, request: str, command: PageCommand, observedTab: str, observedRevision: int): SessionChange =
-  { state: s, out: settle(request, s.cur, historyOutcome(s, command, observedTab, observedRevision)) }
+  { state: s, out: settleEffects(request, s.cur, historyOutcome(s, command, observedTab, observedRevision)) }
 pure def canAgentCommandShown(s: Session, tab: str, command: PageCommand, navigation: str): bool =
   s.cur == tab and isTab(s, tab) and (curTab(s).stage == Unborn or curTab(s).page.navigation == navigation)
 pure def agentCommandShown(s: Session, tab: str, command: PageCommand, navigation: str): SessionChange =
@@ -726,10 +725,10 @@ pure def viewOutcome(s: Session, command: PageCommand, tab: str, navigation: str
 }
 pure def canViewCommand(s: Session, request: str, command: PageCommand, tab: str, navigation: str, shown: bool): bool = request != "" and command != StopLoading
 pure def viewCommand(s: Session, request: str, command: PageCommand, tab: str, navigation: str, shown: bool): SessionChange = {
-  val outcome = viewOutcome(s, command, tab, navigation, shown)
-  if (outcome == Dispatched)
-    { state: s, out: List(CommandNative({ id: tab, command: command, navigation: navigation })).concat(settle(request, tab, Dispatched)) }
-  else { state: s, out: settle(request, tab, outcome) }
+  val result = viewOutcome(s, command, tab, navigation, shown)
+  if (result == Dispatched)
+    { state: s, out: List(CommandNative({ id: tab, command: command, navigation: navigation })).concat(settleEffects(request, tab, Dispatched)) }
+  else { state: s, out: settleEffects(request, tab, result) }
 }
 pure def stepANativeCommandIsReportedOnlyAsDispatched(before: Session, via: str, after: Session, out: List[SessionEffect]): bool =
   via == "viewCommand" implies out.every(e => match e { | Settle(r) => r.outcome != Done | _ => true })
@@ -818,9 +817,9 @@ pure def agentCloseAll(s: Session, request: str, proposal: str, inBrowser: bool,
   val closing = listed.listMap(t => t.id)
   val showing = inBrowser and closing.includes(s.cur)
   val now = if (showing) closing.select(id => id != s.cur) else closing
-  if (not(listingCurrent(s, proposal, inBrowser)) or listed.length() == 0) { state: spent, out: settle(request, "", RefusedListChanged) }
+  if (not(listingCurrent(s, proposal, inBrowser)) or listed.length() == 0) { state: spent, out: settleEffects(request, "", RefusedListChanged) }
   else { state: dropTabs(now, fallback, not(fromPrivate(s, inBrowser)), spent),
-    out: closeNatives(s, now).concat(settle(request, if (showing) s.cur else "", Done)) }
+    out: closeNatives(s, now).concat(settleEffects(request, if (showing) s.cur else "", Done)) }
 }
 pure def canAgentCloseAllShown(s: Session, tab: str, selected: str, fallback: str, hidePrivate: bool): bool =
   isTab(s, tab) and s.cur == selected and selected == tab and fallback != "" and not(known(s, fallback))

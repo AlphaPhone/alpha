@@ -53,9 +53,9 @@ pure def lawNoHolderNamedIsNeverNoHolder(available: bool): bool =
 
 ```quint
 type Interruption = InterruptAll | InterruptPriority | InterruptAlarms | InterruptNone | InterruptUnread
-pure def dndOf(filter: Interruption): Switch =
-  if (filter == InterruptAll) Off else if (filter == InterruptUnread) Unknown else On
-pure def lawAnUnreadFilterIsUnknown(filter: Interruption): bool = filter == InterruptUnread iff dndOf(filter) == Unknown
+pure def dndOf(interruption: Interruption): Switch =
+  if (interruption == InterruptAll) Off else if (interruption == InterruptUnread) Unknown else On
+pure def lawAnUnreadFilterIsUnknown(interruption: Interruption): bool = interruption == InterruptUnread iff dndOf(interruption) == Unknown
 ```
 
 ### Wi-Fi is on when Android reports the switch, or an active Wi-Fi transport without it
@@ -63,7 +63,7 @@ pure def lawAnUnreadFilterIsUnknown(filter: Interruption): bool = filter == Inte
 No active transport does not prove Wi-Fi is off: it may be on and disconnected.
 
 ```quint
-pure def wifiOf(reported: bool, enabled: bool, active: bool): Switch =
-  if (reported) switchOf(true, enabled) else if (active) On else Unknown
+pure def wifiOf(reported: bool, isOn: bool, active: bool): Switch =
+  if (reported) switchOf(true, isOn) else if (active) On else Unknown
 pure def lawAnInactiveTransportNeverTurnsWifiOff(active: bool): bool = wifiOf(false, false, active) != Off
 ```

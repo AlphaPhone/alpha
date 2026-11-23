@@ -18,7 +18,7 @@ export interface ReviewRowsProps {
  */
 export function ReviewRows({ details }: ReviewRowsProps) {
   const { state = initial, send } = useMachine(runtime);
-  const runId = runIdOf(state.run);
+  const runId = runIdOf(state.ongoing);
   return (
     <ReviewRowsView
       actions={state}

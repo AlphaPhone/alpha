@@ -12,6 +12,18 @@ Times are milliseconds since the epoch and days are local day numbers, both give
 The calendar feed is the resident agent's (`GET /api/lifeops/calendar/feed`); overdue reminders,
 the mail summary and the brief are reported by the areas that own them.
 
+## Story: See my day on Home
+
+> As the owner, I want Home to show what is next, what needs me and what my agent prepared, each
+> from its real source and with how current it is, and nothing invented when a source is empty.
+
+### The agenda card shows an overdue reminder first, else the soonest item that has not ended
+
+A timed item stays through its last minute; an all-day item until its day ends. Overdue reminders
+lead even an event already in progress, and the next item that is not overdue is named beside
+them, so an overdue reminder never hides it. Ties keep the order they were read in. The shell
+wakes Home again only when the clock reaches the next item's end.
+
 ```quint
 type FeedState = FeedLoading | FeedComplete | FeedPartial | FeedUnavailable | FeedFailed | FeedNotConnected
 type Item = { id: str, title: str, begin: int, end: int, allDay: bool, overdue: bool, video: bool }
@@ -43,21 +55,6 @@ pure val atValues = Set(1, 3)
 pure val unreadValues = Set(0, 2)
 pure val countValues = Set(0, 3)
 pure val titleValues = Set("", "Morning brief")
-```
-
-## Story: See my day on Home
-
-> As the owner, I want Home to show what is next, what needs me and what my agent prepared, each
-> from its real source and with how current it is, and nothing invented when a source is empty.
-
-### The agenda card shows an overdue reminder first, else the soonest item that has not ended
-
-A timed item stays through its last minute; an all-day item until its day ends. Overdue reminders
-lead even an event already in progress, and the next item that is not overdue is named beside
-them, so an overdue reminder never hides it. Ties keep the order they were read in. The shell
-wakes Home again only when the clock reaches the next item's end.
-
-```quint
 pure def stillOn(i: Item, now: int): bool = i.overdue or (if (i.allDay) i.end > now else i.end >= now)
 pure def earlier(a: Item, b: Item): bool = (a.overdue and not(b.overdue)) or (a.overdue == b.overdue and a.begin < b.begin)
 pure def soonest(pool: List[Item]): Item =
@@ -128,13 +125,13 @@ A retained result is never a fresh run. The agent also records occurrences it sk
 time, an overlapping run, an expired source): those say the brief did not run.
 
 ```quint
-pure def canBriefReported(o: Overview, outcome: BriefOutcome, at: int, title: str): bool =
-  (outcome == NoBrief) iff (title == "")
-pure def briefReported(o: Overview, outcome: BriefOutcome, at: int, title: str): Overview =
-  { ...o, brief: outcome, briefAt: if (outcome == NoBrief) 0 else at, briefTitle: title }
+pure def canBriefReported(o: Overview, result: BriefOutcome, at: int, title: str): bool =
+  (result == NoBrief) iff (title == "")
+pure def briefReported(o: Overview, result: BriefOutcome, at: int, title: str): Overview =
+  { ...o, brief: result, briefAt: if (result == NoBrief) 0 else at, briefTitle: title }
 pure def canWorkflowsRead(o: Overview, count: int, at: int): bool = count >= 0
 pure def workflowsRead(o: Overview, count: int, at: int): Overview = { ...o, workflows: count, workflowsAt: at }
-pure val outcomeValues = Set(NoBrief, BriefRan, BriefFailed)
+pure val resultValues = Set(NoBrief, BriefRan, BriefFailed)
 ```
 
 ### A card shows only when it has something, and the date stands in when none does

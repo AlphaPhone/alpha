@@ -257,7 +257,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     const failure = Exit.isSuccess(answer) ? undefined : Cause.squash(answer.cause)
     const code = failure instanceof CameraFailed ? failure.code : ""
     const outcome: RecordStart = Exit.isSuccess(answer) ? "RecordingStarted" : code === "MICROPHONE_DENIED" ? "MicrophoneRefused" : "RecordingNotStarted"
-    const after = try send(fromNotice ? { type: "answerMicNotice", sound, outcome } : { type: "record", outcome })
+    const after = try send(fromNotice ? { type: "answerMicNotice", sound, result: outcome } : { type: "record", result: outcome })
     if (after === undefined && outcome === "RecordingStarted") bridge.stopRecording() catch () => undefined
     if (outcome === "RecordingNotStarted") {
       if (code === "PREVIEW_STOPPED") try send({ type: "bindStopsPreview" })

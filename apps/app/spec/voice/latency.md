@@ -53,9 +53,9 @@ A turn that ends without an audible reply is recorded as abandoned.
 pure def canBegin(t: Trial, turn: int): bool = not(t.open) and turn >= 1 and turn != t.turn
 pure def begin(t: Trial, turn: int): Trial =
   { ...initial, turn: turn, open: true, opened: t.opened + 1, recorded: t.recorded, lastOutcome: t.lastOutcome }
-pure def canFinish(t: Trial, outcome: Outcome): bool =
-  t.open and (outcome == Answered implies (if (t.kind == DictatedDraft) t.replied else t.audible))
-pure def finish(t: Trial, outcome: Outcome): Trial = { ...t, open: false, recorded: t.recorded + 1, lastOutcome: outcome }
+pure def canFinish(t: Trial, result: Outcome): bool =
+  t.open and (result == Answered implies (if (t.kind == DictatedDraft) t.replied else t.audible))
+pure def finish(t: Trial, result: Outcome): Trial = { ...t, open: false, recorded: t.recorded + 1, lastOutcome: result }
 pure def alwaysEveryStartedTurnIsRecordedOnce(t: Trial): bool = t.opened == t.recorded + (if (t.open) 1 else 0)
 pure def sometimesAbandoned(t: Trial): bool = t.lastOutcome == Abandoned and t.recorded >= 1
 ```

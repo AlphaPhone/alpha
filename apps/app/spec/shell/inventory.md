@@ -8,14 +8,6 @@ ask for one quiet re-read 120 ms later, shared by every signal in between. While
 are followed, only they re-read icons; a resume re-reads the list without them. Without the change
 listener every resume is a full read, so a paused or unlocked profile still shows up.
 
-```quint
-type Signal = PackagesChanged | Resumed | Visible | Hidden
-type Refresh = NoRefresh | LightRefresh | FullRefresh
-type Observer = { active: bool, following: bool, scheduled: bool, changedSinceRead: bool, last: Refresh }
-pure val initial: Observer = { active: false, following: false, scheduled: false, changedSinceRead: false, last: NoRefresh }
-pure val DebounceMs = 120
-```
-
 ## Story: See the apps installed now
 
 > As the owner, I want the library to follow installs, removals and profile changes made outside
@@ -24,6 +16,11 @@ pure val DebounceMs = 120
 ### Signals while Home is active share one timer, and stopping disarms it
 
 ```quint
+type Signal = PackagesChanged | Resumed | Visible | Hidden
+type Refresh = NoRefresh | LightRefresh | FullRefresh
+type Observer = { active: bool, following: bool, scheduled: bool, changedSinceRead: bool, last: Refresh }
+pure val initial: Observer = { active: false, following: false, scheduled: false, changedSinceRead: false, last: NoRefresh }
+pure val DebounceMs = 120
 pure def canStart(o: Observer): bool = not(o.active)
 pure def start(o: Observer): Observer = { ...o, active: true, scheduled: false, changedSinceRead: false }
 pure def listen(o: Observer, listening: bool): Observer = { ...o, following: listening and o.active }

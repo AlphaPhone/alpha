@@ -307,7 +307,7 @@ export const permissionsLive = Layer.effect(Permissions, effect {
         try bridge.settings()
       }
       const reading = try bridge.status()
-      try sendTo({ type: "settle", access: reading.access })
+      try sendTo({ type: "settleAccess", access: reading.access })
       if (reading.access === "AccessReady") try sendTo({ type: "platformStatus", key, access: reading.access, grant: reading.grant })
     },
     effect next(skip: boolean) {

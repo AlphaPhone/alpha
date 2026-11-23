@@ -74,7 +74,7 @@ pure def canAndroidResult(s: Site, allowed: bool): bool = s.prompt == RuntimePro
 pure def androidResult(s: Site, allowed: bool): Site =
   { ...s, prompt: NoPrompt, androidAllowed: allowed,
     granted: allowed and s.phase == SiteCommitted and s.requestedOrigin == s.origin and s.requestedNavigation == s.navigation }
-pure def hide(s: Site): Site = { ...s, foreground: false, prompt: if (s.prompt == RuntimePrompt) RuntimePrompt else NoPrompt, passwordPresent: false }
+pure def hideSite(s: Site): Site = { ...s, foreground: false, prompt: if (s.prompt == RuntimePrompt) RuntimePrompt else NoPrompt, passwordPresent: false }
 pure def resume(s: Site): Site = { ...s, foreground: true }
 pure def deselect(s: Site): Site = { ...s, selected: false, prompt: if (s.prompt == RuntimePrompt) RuntimePrompt else NoPrompt, passwordPresent: false }
 pure def selectTab(s: Site): Site = { ...s, selected: true }

@@ -59,13 +59,13 @@ pure def alwaysNothingWithoutAnAccount(b: Billing): bool = b.owner == 0 implies 
 ### The plans and the current plan are read when the manager opens
 
 ```quint
-pure val currentValues = Set(NoPaidPlan, OnPlan({ plan: Plus, endsAtPeriodEnd: false, paymentDue: false }),
+pure val presentValues = Set(NoPaidPlan, OnPlan({ plan: Plus, endsAtPeriodEnd: false, paymentDue: false }),
   OnPlan({ plan: Pro, endsAtPeriodEnd: true, paymentDue: false }), OnPlan({ plan: Plus, endsAtPeriodEnd: false, paymentDue: true }))
 pure def canOpenManager(b: Billing): bool = b.owner != 0 and (b.manager == ManagerClosed or b.manager == ManagerFailed)
 pure def openManager(b: Billing): BillingStep = { state: { ...b, manager: ManagerLoading, outcome: NoOutcome }, out: List(LoadPlans) }
-pure def canManagerLoaded(b: Billing, current: Current, ok: bool): bool = b.manager == ManagerLoading
-pure def managerLoaded(b: Billing, current: Current, ok: bool): Billing =
-  if (ok) { ...b, manager: ManagerShown, current: current } else { ...b, manager: ManagerFailed }
+pure def canManagerLoaded(b: Billing, present: Current, ok: bool): bool = b.manager == ManagerLoading
+pure def managerLoaded(b: Billing, present: Current, ok: bool): Billing =
+  if (ok) { ...b, manager: ManagerShown, current: present } else { ...b, manager: ManagerFailed }
 pure def canCloseManager(b: Billing): bool = b.manager != ManagerClosed and not(b.busy)
 pure def closeManager(b: Billing): Billing = { ...b, manager: ManagerClosed, pending: NoPending, quote: NoQuote }
 pure def sometimesManagerShown(b: Billing): bool = b.manager == ManagerShown

@@ -40,18 +40,18 @@ pure def canReadRecordingOpen(s: RecordingOpen): bool = readable(s)
 pure def readRecordingOpen(s: RecordingOpen): RecordingOpen = startRead(true, s)
 pure def canReadSettled(s: RecordingOpen): bool = s.reading
 pure def readSettled(s: RecordingOpen, ok: bool, found: bool): RecordingOpen = {
-  val current = s.epoch == s.readEpoch
+  val present = s.epoch == s.readEpoch
   val sameTap = s.revision == s.readRevision
-  val hit = ok and found and current and s.unanswered > 0
-  val next: RecordingOpen = {
+  val hit = ok and found and present and s.unanswered > 0
+  val following: RecordingOpen = {
     ...s, reading: false,
     unanswered: if (hit) (if (sameTap) 0 else s.unanswered - 1) else if (ok and sameTap) 0 else s.unanswered,
     opened: s.opened + (if (hit and s.showable) 1 else 0),
     dropped: s.dropped + (if (hit and not(s.showable)) 1 else 0),
     failures: s.failures + (if (ok) 0 else 1),
-    owed: s.owed or (not(ok) and current),
+    owed: s.owed or (not(ok) and present),
   }
-  startRead(next.owed and not(sameTap), next)
+  startRead(following.owed and not(sameTap), following)
 }
 pure def alwaysOpensNeedTaps(s: RecordingOpen): bool = s.unanswered >= 0 and s.opened + s.dropped + s.unanswered <= s.taps
 pure def alwaysReadsAreOwed(s: RecordingOpen): bool = s.reads + (if (s.owed) 1 else 0) <= 1 + s.revision + s.failures

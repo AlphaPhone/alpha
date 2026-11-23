@@ -63,7 +63,7 @@ export function AssistantDock({ open }: AssistantDockProps) {
     const held = last === undefined ? 0 : Math.round(event.timeStamp - last.t);
     const released = Math.min(full, Math.max(0, t.startHeight + t.startY - event.clientY));
     setHeight(released);
-    void send({ type: "settle", direction: t.startY - event.clientY >= 0 ? "Up" : "Down", zone: zoneOf(released, floorOffset, full), flick: isFlick(travel, elapsed, held), over });
+    void send({ type: "settleDrag", direction: t.startY - event.clientY >= 0 ? "Up" : "Down", zone: zoneOf(released, floorOffset, full), flick: isFlick(travel, elapsed, held), over });
   };
   const cancel = () => { track.current = undefined; if (can({ type: "cancelDrag" })) void send({ type: "cancelDrag" }); };
   const openSheet = state.chat === "Sheet" || state.chat === "Full";

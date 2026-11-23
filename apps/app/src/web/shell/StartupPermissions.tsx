@@ -2,7 +2,7 @@
 import { Bell, CalendarDays, Camera, Check, Folder, Images, MapPin, Mic, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Access, CheckNotice, Grant, Perm, Permissions } from "../../../gen/shell__permissions.ts";
-import { accessOf, grantOf, keyAt, offersSettings, panelShown, selected, skippable, stepCount } from "../../../gen/shell__permissions.ts";
+import { accessOf, grantOf, keyAt, offersSettings, panelShown, selected, skippable, shownCount } from "../../../gen/shell__permissions.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Spinner } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -72,7 +72,7 @@ export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onC
   const current = selected(walkthrough);
   const state = accessOf(walkthrough, current);
   const review = walkthrough.target >= 0;
-  const count = stepCount(walkthrough);
+  const count = shownCount(walkthrough);
   const settings = offersSettings(walkthrough);
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && review) onClose(); }}>

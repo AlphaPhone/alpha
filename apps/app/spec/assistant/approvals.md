@@ -179,6 +179,9 @@ the same conversation and session, on a visible screen that is not private.
 
 ```quint
 type Lease = { sameConversation: bool, sameSession: bool, digestMatches: bool, visible: bool, privateScreen: bool, used: bool }
-pure def completes(l: Lease): bool = l.sameConversation and l.sameSession and l.digestMatches and l.visible and not(l.privateScreen) and not(l.used)
-pure def lawAUsedLeaseNeverCompletesAgain(l: Lease): bool = l.used implies not(completes(l))
+pure def completes(lease: Lease): bool = lease.sameConversation and lease.sameSession and lease.digestMatches and lease.visible and not(lease.privateScreen) and not(lease.used)
+pure def lawAUsedLeaseNeverCompletesAgain(lease: Lease): bool = lease.used implies not(completes(lease))
+pure val leaseValues = Set({ sameConversation: true, sameSession: true, digestMatches: true, visible: true, privateScreen: false, used: false },
+  { sameConversation: true, sameSession: true, digestMatches: true, visible: true, privateScreen: false, used: true },
+  { sameConversation: false, sameSession: true, digestMatches: true, visible: true, privateScreen: true, used: false })
 ```

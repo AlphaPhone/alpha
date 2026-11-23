@@ -39,6 +39,7 @@ pure def sometimesStoppedWithTime(w: Stopwatch): bool = not(w.running) and w.ban
 ```quint
 pure def canLap(w: Stopwatch, now: int): bool = w.running and now >= w.seen and w.laps.length() < maxLaps
 pure def lap(w: Stopwatch, now: int): Stopwatch = { ...w, laps: w.laps.append(elapsed(w, now)), seen: now }
+type LapFold = { ok: bool, last: int }
 pure def ascending(laps: List[int]): bool = laps.foldl({ ok: true, last: 0 }, (acc, l) => { ok: acc.ok and l >= acc.last, last: l }).ok
 pure def alwaysLapsAscendWithinTheElapsedTime(w: Stopwatch): bool =
   w.laps.length() <= maxLaps and ascending(w.laps) and w.laps.every(l => l >= 0 and l <= elapsed(w, w.seen))

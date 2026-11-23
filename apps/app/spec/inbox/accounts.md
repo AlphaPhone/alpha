@@ -57,14 +57,14 @@ read-only: no change, send or Gmail draft is offered until a fresh account list 
 session has been read.
 
 ```quint
-pure def canChangeMail(s: MailAccounts): bool = s.phase == Checked and not(s.fromDisk) and s.selected != ""
+pure def mayChangeMail(s: MailAccounts): bool = s.phase == Checked and not(s.fromDisk) and s.selected != ""
 pure def showsConnect(s: MailAccounts): bool = s.phase == Checked and firstReadable(s.rows) == ""
 pure def canRestoreSaved(s: MailAccounts): bool = s.phase == CloudRestoring and s.rows == List()
 pure def restoreSaved(s: MailAccounts, saved: List[MailAccount], choice: str): MailAccounts = {
-  val next = if (readableIn(saved, choice)) choice else ""
-  { ...s, rows: saved, fromDisk: true, selected: next, hint: choice, readEpoch: if (next != "") s.readEpoch + 1 else s.readEpoch }
+  val following = if (readableIn(saved, choice)) choice else ""
+  { ...s, rows: saved, fromDisk: true, selected: following, hint: choice, readEpoch: if (following != "") s.readEpoch + 1 else s.readEpoch }
 }
-pure def alwaysSavedAccountsCannotChangeMail(s: MailAccounts): bool = s.fromDisk implies not(canChangeMail(s))
+pure def alwaysSavedAccountsCannotChangeMail(s: MailAccounts): bool = s.fromDisk implies not(mayChangeMail(s))
 pure def alwaysNoConnectPromptBeforeTheCheck(s: MailAccounts): bool = s.phase != Checked implies not(showsConnect(s))
 pure def sometimesSavedSelectionShown(s: MailAccounts): bool = s.fromDisk and s.selected != ""
 pure val savedValues = Set(List()).union(Set(List(acctA, acctB)))
@@ -85,11 +85,11 @@ pure def changeHeld(rows: List[MailAccount], id: str): List[GmailCapability] =
 pure def canAccountsRead(s: MailAccounts, session: str): bool = s.phase == Checking and session == s.session
 pure def accountsRead(s: MailAccounts, session: str, fresh: List[MailAccount]): MailAccounts = {
   val previous = s.selected
-  val next = chosen(fresh, previous, s.hint)
-  val keyChanged = next != previous or (previous != "" and s.keySession != session)
+  val following = chosen(fresh, previous, s.hint)
+  val keyChanged = following != previous or (previous != "" and s.keySession != session)
   val held = changeHeld(s.rows, previous)
   val lost = held.some(c => not(changeHeld(fresh, previous).includes(c)))
-  { ...s, phase: Checked, rows: fresh, fromDisk: false, selected: next, hint: if (next != "") next else s.hint,
+  { ...s, phase: Checked, rows: fresh, fromDisk: false, selected: following, hint: if (following != "") following else s.hint,
     keySession: session, readEpoch: if (keyChanged) s.readEpoch + 1 else s.readEpoch,
     withdrawals: if (previous != "" and held != List() and (lost or keyChanged)) s.withdrawals + 1 else s.withdrawals }
 }

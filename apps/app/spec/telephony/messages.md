@@ -269,12 +269,12 @@ pure def canDeleteStarted(m: Messages): bool =
   menuConfirming(m.menu) and not(m.deleting) and not(m.uncertain.includes(menuRow(m.menu))) and m.rows.some(r => r.id == menuRow(m.menu))
 pure def deleteStarted(m: Messages): Messages = { ...m, deleting: true }
 pure def canDeleteAnswered(m: Messages): bool = m.deleting
-pure def deleteAnswered(m: Messages, outcome: DeleteOutcome): Messages = {
+pure def deleteAnswered(m: Messages, result: DeleteOutcome): Messages = {
   val target = menuRow(m.menu)
   { ...m, deleting: false, menu: NoMenu,
-    rows: if (outcome == Removed) m.rows.select(r => r.id != target) else m.rows,
-    uncertain: if (outcome == RemovalUnknown) m.uncertain.append(target) else m.uncertain,
-    deleteNotice: if (outcome == Removed) NoDeleteNotice else if (outcome == RemovalUnknown) DeleteUncertain else DeleteRefused({ reason: outcome }) }
+    rows: if (result == Removed) m.rows.select(r => r.id != target) else m.rows,
+    uncertain: if (result == RemovalUnknown) m.uncertain.append(target) else m.uncertain,
+    deleteNotice: if (result == Removed) NoDeleteNotice else if (result == RemovalUnknown) DeleteUncertain else DeleteRefused({ reason: result }) }
 }
 pure def alwaysDeletingNeedsAConfirmedMenu(m: Messages): bool = m.deleting implies (menuConfirming(m.menu) and menuRow(m.menu) != "")
 pure def alwaysAnUncertainDeleteIsNeverConfirmedAgain(m: Messages): bool = menuConfirming(m.menu) implies not(m.uncertain.includes(menuRow(m.menu)))

@@ -80,14 +80,14 @@ pure def writeSettled(w: Writer, ok: bool, now: int): WriterChange = {
   val written = w.inflight
   val rejected = not(ok) and not(w.clearing) and w.lastSaved == written
   val failures = if (w.clearing) w.failures else if (ok) 0 else if (rejected) (if (w.failures < 6) w.failures + 1 else 6) else w.failures
-  val next = if (w.queued.held and w.enabled and not(w.clearing)) w.queued else emptySlot
-  val settled = { ...w, clock: now, inflight: next, queued: emptySlot, failures: failures,
+  val following = if (w.queued.held and w.enabled and not(w.clearing)) w.queued else emptySlot
+  val resolved = { ...w, clock: now, inflight: following, queued: emptySlot, failures: failures,
     lastSaved: if (rejected) emptySlot else w.lastSaved,
     failed: if (w.clearing) w.failed else if (ok) emptySlot else if (rejected) written else w.failed,
     retryAt: if (rejected) now + retryDelay(failures) else if (ok and not(w.clearing)) 0 else w.retryAt,
     warned: if (ok and not(w.clearing)) false else w.warned or rejected }
-  { state: settled,
-    out: (if (rejected and not(w.warned)) List(WarnSaveFailed) else List()).concat(if (next.held) List(Write({ snapshot: next.snapshot })) else List()) }
+  { state: resolved,
+    out: (if (rejected and not(w.warned)) List(WarnSaveFailed) else List()).concat(if (following.held) List(Write({ snapshot: following.snapshot })) else List()) }
 }
 pure def alwaysARejectionIsCounted(w: Writer): bool = w.failed.held implies (w.failures > 0 and w.failures <= 6)
 pure def stepARejectedSnapshotWaitsForItsRetry(before: Writer, via: str, after: Writer, out: List[WriterEffect]): bool =

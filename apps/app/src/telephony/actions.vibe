@@ -151,17 +151,17 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
   /** Waits for the owner's choice among `candidates`: the chosen candidate, or undefined for none. */
   effect function choose(runId: string, candidates: Candidate[]) {
     const shown = try tell({ type: "candidatesFound", runId, candidates }, "Device")
-    if (shown === undefined || !isChoosing(shown.run)) return undefined
-    const decided = try Stream.runHead(Stream.filter(actions.changes, (a) => runIdOf(a.run) !== runId || !isChoosing(a.run)))
+    if (shown === undefined || !isChoosing(shown.ongoing)) return undefined
+    const decided = try Stream.runHead(Stream.filter(actions.changes, (a) => runIdOf(a.ongoing) !== runId || !isChoosing(a.ongoing)))
     const after = Option.getOrUndefined(decided) ?? (try actions.get())
-    return after.run.tag === "Guarding" && after.run.runId === runId ? after.run.guardedNumber : undefined
+    return after.ongoing.tag === "Guarding" && after.ongoing.runId === runId ? after.ongoing.guardedNumber : undefined
   }
 
   /** Reads Telecom right before an effect; true lets it dispatch. */
   effect function guard(runId: string) {
     const fresh = try watch.allowed()
     const after = try tell({ type: "guardAnswered", runId, fresh, reading: (try callBar.get()).reading }, "Device")
-    return after?.run.tag === "Dispatching"
+    return after?.ongoing.tag === "Dispatching"
   }
 
   effect function finish(runId: string, result: unknown, status: string) {
@@ -177,7 +177,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
 
   effect function cancelled(runId: string, result: unknown) {
     const now = try actions.get()
-    const settled = now.run.tag === "Finished" && now.run.runId === runId ? now.run.result : "OwnerCancelled"
+    const settled = now.ongoing.tag === "Finished" && now.ongoing.runId === runId ? now.ongoing.result : "OwnerCancelled"
     return { result, settled } satisfies ActionExecution
   }
 
@@ -306,7 +306,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       try Ref.set(review, { changes: Object.fromEntries(options.map((o) => [o.candidate.candidateId, { before: o.before, after: o.after }])) })
       const chosenNumber = try choose(runId, options.map((o) => o.candidate))
       const now = try actions.get()
-      if (chosenNumber === undefined || now.run.tag !== "Guarding") return try cancelled(runId, result("cancelled"))
+      if (chosenNumber === undefined || now.ongoing.tag !== "Guarding") return try cancelled(runId, result("cancelled"))
       const chosen = options.find((o) => o.candidate.candidateId === chosenNumber)
       if (chosen === undefined) return try cancelled(runId, result("cancelled"))
       const reviewed = { id: chosen.before.id as ContactId, version: chosen.before.version as ContactVersion }
@@ -340,7 +340,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       try Ref.set(review, {})
       const started = try tell({ type: "actionStarted", runId: operationId, kind, form, grounded: isGrounded }, "Device")
       if (started === undefined) throw new AlreadyRan({ operationId })
-      if (started.run.tag === "Finished") return { result: { kind: op.type, status: "unavailable" }, settled: "Refused" } satisfies ActionExecution
+      if (started.ongoing.tag === "Finished") return { result: { kind: op.type, status: "unavailable" }, settled: "Refused" } satisfies ActionExecution
       if (!bridges.offered) return try settle(operationId, { kind: op.type, status: "unavailable" }, "unavailable")
       switch (op.type) {
         case "phone_dial": return try callOrDial(operationId, op, true)

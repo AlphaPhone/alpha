@@ -2,7 +2,7 @@
 import { BookOpen, Bookmark, Download, ExternalLink, Eraser, KeyRound, Library, MessageSquare, Plus, Search, Share2, Trash2, Volume2 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Reading } from "../../../gen/browser__reading.ts";
-import { settled } from "../../../gen/browser__page.ts";
+import { isSettled } from "../../../gen/browser__page.ts";
 import { mayClearSite } from "../../../gen/browser__site.ts";
 import { type Session, canOpenFind, curTab, full } from "../../../gen/browser__session.ts";
 import { Sheet, SheetContent } from "../components/ui/index.ts";
@@ -40,7 +40,7 @@ function Item({ icon, label, onSelect, disabled = false, destructive = false }: 
 export function BrowserMenu({ session, reading, marked, onAction, onDismiss }: BrowserMenuProps) {
   const tab = curTab(session);
   const onDevice = session.host === "NativeHost";
-  const loaded = tab.stage === "Live" && settled(tab.page);
+  const loaded = tab.stage === "Live" && isSettled(tab.page);
   const reads = reading.support !== "Unsupported";
   const act = (action: MenuAction) => () => onAction(action);
   return (

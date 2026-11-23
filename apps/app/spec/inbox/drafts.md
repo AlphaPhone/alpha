@@ -121,14 +121,14 @@ pure def keepsIntent(before: DraftFields, after: DraftFields): bool =
   and after.forward.messageId == before.forward.messageId and after.forward.historyId == before.forward.historyId
   and after.forward.parts.every(p => before.forward.parts.includes(p))
   and after.files.every(f => before.files.includes(f))
-pure def canEdit(s: Drafts, id: str, revision: int, fields: DraftFields, bytes: int): bool = {
+pure def canEdit(s: Drafts, id: str, revision: int, edits: DraftFields, bytes: int): bool = {
   val a = accountOf(s.owner, s)
-  s.owner != "" and hasDraft(a.open) and a.open.id == id and a.open.revision == revision and keepsIntent(a.open.fields, fields)
-  and fieldsBounded(fields) and bytes >= 0 and bytes <= draftBytesLimit
+  s.owner != "" and hasDraft(a.open) and a.open.id == id and a.open.revision == revision and keepsIntent(a.open.fields, edits)
+  and fieldsBounded(edits) and bytes >= 0 and bytes <= draftBytesLimit
 }
-pure def edit(s: Drafts, id: str, revision: int, fields: DraftFields, pendingTo: str, bytes: int): Drafts = {
+pure def edit(s: Drafts, id: str, revision: int, edits: DraftFields, pendingTo: str, bytes: int): Drafts = {
   val a = accountOf(s.owner, s)
-  withAccount({ ...a, open: { ...a.open, revision: a.open.revision + 1, fields: fields, pendingTo: pendingTo } }, s)
+  withAccount({ ...a, open: { ...a.open, revision: a.open.revision + 1, fields: edits, pendingTo: pendingTo } }, s)
 }
 pure def canAttach(s: Drafts, id: str, revision: int, file: OutgoingFile, policy: AttachmentPolicy, bytes: int): bool = {
   val a = accountOf(s.owner, s)
@@ -144,7 +144,7 @@ pure def stepAnEditAdvancesTheRevision(before: Drafts, via: str, after: Drafts):
 pure def alwaysTheOpenDraftFitsItsLimits(s: Drafts): bool = s.accounts.every(a => fieldsBounded(a.open.fields))
 pure val idValues = Set("d1", "d2", "d3")
 pure val revisionValues = Set(1, 2)
-pure val fieldsValues = Set(pickedFields).union(Set({ ...pickedFields, body: "Hi, noon works" })).union(Set(emptyFields))
+pure val editsValues = Set(pickedFields).union(Set({ ...pickedFields, body: "Hi, noon works" })).union(Set(emptyFields))
 pure val pendingToValues = Set("", "bo")
 pure def sometimesEditedTwice(s: Drafts): bool = s.accounts.some(a => a.open.revision >= 3)
 pure def sometimesAttached(s: Drafts): bool = s.accounts.some(a => a.open.fields.files != List())
@@ -160,8 +160,8 @@ composer, after the open one is set aside; an earlier version of an email that w
 opens only after the owner confirms that sending it creates another message.
 
 ```quint
-pure def canHide(s: Drafts): bool = accountOf(s.owner, s).composing
-pure def hide(s: Drafts): Drafts = { val a = accountOf(s.owner, s) withAccount({ ...a, composing: false }, s) }
+pure def canHideComposer(s: Drafts): bool = accountOf(s.owner, s).composing
+pure def hideComposer(s: Drafts): Drafts = { val a = accountOf(s.owner, s) withAccount({ ...a, composing: false }, s) }
 pure def canResume(s: Drafts): bool = s.owner != "" and hasDraft(accountOf(s.owner, s).open) and not(accountOf(s.owner, s).composing)
 pure def resume(s: Drafts): Drafts = { val a = accountOf(s.owner, s) withAccount({ ...a, composing: true }, s) }
 pure def canSetAside(s: Drafts, shelfBytes: int): bool = {
@@ -373,7 +373,7 @@ pure def sent(s: Drafts, owner: str, id: str, copy: DraftFields): Drafts = {
   else withAccount({ ...a, open: if (a.open.id == id) noDraft else a.open, composing: if (a.open.id == id) false else a.composing,
     shelf: a.shelf.foldl(List(), (acc, d) => if (d.id != id) acc.append(d) else if (d.fields == copy) acc else acc.append({ ...d, earlier: true })) }, s)
 }
-pure def lawADifferentDraftSurvivesASend(d: Draft, id: str, copy: DraftFields): bool = d.id != id implies not(editedAfterSend(d, id, copy))
+pure def lawADifferentDraftSurvivesASend(draft: Draft, id: str, copy: DraftFields): bool = draft.id != id implies not(editedAfterSend(draft, id, copy))
 pure def stepCleanupOnlyRemovesOrMarks(before: Drafts, via: str, after: Drafts): bool =
   via == "sent" implies accountOf(before.owner, after).shelf.every(d =>
     accountOf(before.owner, before).shelf.some(o => o.id == d.id and o.fields == d.fields and o.revision == d.revision))

@@ -60,7 +60,7 @@ export const layer = Layer.effect(FilePicker, effect {
     const outcome: ListingOutcome = listed === undefined ? "Failed" : listed.status !== "ready" ? "Failed" : listed.truncated ? "Partial" : "Complete"
     const take = try Ref.get(accepted)
     const rows = (listed?.entries ?? []).map((entry) => toRow("", entry)).filter((row) => row.kind === "KindFolder" || take(row.mimeType))
-    try ignore(picker.send({ type: "folderReply", ticket, rows, outcome, granted }))
+    try ignore(picker.send({ type: "folderReply", ticket, rows, result: outcome, granted }))
   }
 
   effect function identity(path: string) {

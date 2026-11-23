@@ -206,11 +206,11 @@ retired or blank ticket leaves the current one alone.
 type MicPermission = PermissionGranted | PermissionPrompt | PermissionDenied
 pure def startAdmitted(foreground: bool, closed: bool, inCall: bool, permission: MicPermission, available: bool): bool =
   foreground and not(closed) and not(inCall) and permission == PermissionGranted and available
-pure def serviceStopAdmitted(ticket: int, current: int, recordingOpen: bool): bool =
-  not(recordingOpen) and (ticket == 0 or ticket == current) and not(ticket == 0 and current != 0)
+pure def serviceStopAdmitted(ticket: int, present: int, recordingOpen: bool): bool =
+  not(recordingOpen) and (ticket == 0 or ticket == present) and not(ticket == 0 and present != 0)
 pure def lawCallRefusesStart(foreground: bool, permission: MicPermission, available: bool): bool =
   not(startAdmitted(foreground, false, true, permission, available))
-pure def lawStaleTicketKeepsService(current: int): bool = current > 1 implies not(serviceStopAdmitted(1, current, false))
+pure def lawStaleTicketKeepsService(present: int): bool = present > 1 implies not(serviceStopAdmitted(1, present, false))
 pure val ticketValues = Set(0, 1, 2)
-pure val currentValues = Set(0, 1, 2)
+pure val presentValues = Set(0, 1, 2)
 ```

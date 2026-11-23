@@ -106,12 +106,12 @@ refused before any journal work ("The agent changed. Review this action
 again.").
 
 ```quint
-pure def canList(c: Custody): bool = not(c.busy) and parses(c.op) and not(c.workflow)
-pure def canReview(c: Custody, visible: bool): bool = not(c.busy) and (visible implies canList(c))
+pure def listable(c: Custody): bool = not(c.busy) and parses(c.op) and not(c.workflow)
+pure def canReview(c: Custody, visible: bool): bool = not(c.busy) and (visible implies listable(c))
 pure def review(c: Custody, visible: bool): Custody = { ...c, card: visible, fresh: true, route: LiveRoute, cardSession: c.session }
 pure def canReviewWorkflow(c: Custody): bool = not(c.busy) and c.workflow and parses(c.op)
 pure def reviewWorkflow(c: Custody): Custody = { ...c, card: true, fresh: true, route: LiveRoute, cardSession: c.session }
-pure def canRecover(c: Custody): bool = canList(c) and not(c.sensitive) and not(c.expired)
+pure def canRecover(c: Custody): bool = listable(c) and not(c.sensitive) and not(c.expired)
 pure def recover(c: Custody): Custody = { ...c, card: true, fresh: true, route: RecoveredRoute, cardSession: c.session }
 pure def canChangeAgent(c: Custody): bool = not(c.busy)
 pure def changeAgent(c: Custody): Custody = { ...c, session: c.session + 1 }
@@ -124,8 +124,8 @@ pure def becomeSensitive(c: Custody): Custody = { ...c, sensitive: true, fresh: 
 pure def expire(c: Custody): Custody = { ...c, expired: true }
 pure def abort(c: Custody): Custody = { ...c, aborted: true }
 pure def sameSession(c: Custody): bool = c.cardSession == c.session
-pure def canApproveCard(c: Custody): bool = c.card and not(c.busy) and valid(c) and (c.route == RecoveredRoute implies sameSession(c))
-pure def canDirect(c: Custody): bool = canApproveCard(c) and not(asks(c)) and c.bound and eligible(c) and c.passOpen and c.pass < directPerMessage
+pure def mayApproveCard(c: Custody): bool = c.card and not(c.busy) and valid(c) and (c.route == RecoveredRoute implies sameSession(c))
+pure def mayDirect(c: Custody): bool = mayApproveCard(c) and not(asks(c)) and c.bound and eligible(c) and c.passOpen and c.pass < directPerMessage
 pure def alwaysARecoveredEffectRanUnderItsListingSession(c: Custody): bool =
   (dispatchedOnce(c) and c.at.route == RecoveredRoute and c.at.authority == ByReview) implies c.at.sameSession
 pure def alwaysARecoveredEffectWasUnexpired(c: Custody): bool = (dispatchedOnce(c) and c.at.route == RecoveredRoute) implies not(c.at.expired)
@@ -135,7 +135,7 @@ pure def sometimesARecoveredEffect(c: Custody): bool = dispatchedOnce(c) and c.a
 ### An approval consumes its card before it waits, and the executor runs only after an exact reservation, a decision and a claim
 
 ```quint
-pure def canBegin(c: Custody, byRequest: bool): bool = if (byRequest) canDirect(c) else canApproveCard(c)
+pure def canBegin(c: Custody, byRequest: bool): bool = if (byRequest) mayDirect(c) else mayApproveCard(c)
 pure def begin(c: Custody, byRequest: bool): Custody =
   { ...c, card: false, busy: true, returned: NotSettled, synced: false,
     browserUsed: c.browserUsed or (byRequest and c.op == BrowserNavigate), authority: if (byRequest) ByRequest else ByReview }
@@ -173,9 +173,9 @@ journal that already holds an applying or finished attempt for the proposal
 is not repeated, and the call cannot say what that attempt did.
 
 ```quint
-pure def canSettle(c: Custody, outcome: Settled): bool =
-  c.busy and c.journal == JournalApplying and outcome != NotSettled and (c.dispatches == 0 implies outcome == FailedResult)
-pure def settle(c: Custody, outcome: Settled): Custody = { ...c, journal: JournalTerminal, status: outcome }
+pure def canSettleCustody(c: Custody, result: Settled): bool =
+  c.busy and c.journal == JournalApplying and result != NotSettled and (c.dispatches == 0 implies result == FailedResult)
+pure def settleCustody(c: Custody, result: Settled): Custody = { ...c, journal: JournalTerminal, status: result }
 pure def canUpload(c: Custody): bool = c.busy and c.journal == JournalTerminal
 pure def upload(c: Custody): Custody = { ...c, receipts: c.receipts + 1 }
 pure def leave(result: Settled, c: Custody): Custody =
@@ -250,18 +250,18 @@ Browser tab switch that matches several tabs never runs directly.
 pure val photoRequestLimit = 512
 pure val photoPrefixLimit = 80
 pure def keypadDirect(number: bool, typed: bool): bool = not(number) or typed
-pure def photoDirect(ownRequest: bool, length: int, alreadyTaken: bool): bool = ownRequest and length >= 1 and length <= photoRequestLimit and not(alreadyTaken)
+pure def photoDirect(ownRequest: bool, len: int, alreadyTaken: bool): bool = ownRequest and len >= 1 and len <= photoRequestLimit and not(alreadyTaken)
 pure def browserDirect(grounded: bool, command: bool, ambiguousTab: bool): bool = grounded and command and not(ambiguousTab)
 pure def browserNoticeInstead(grounded: bool): bool = not(grounded)
 pure def lawAnUntypedNumberNeverDials(typed: bool): bool = typed or not(keypadDirect(true, typed))
-pure def lawOnePhotoPerMessage(own: bool, length: int): bool = not(photoDirect(own, length, true))
+pure def lawOnePhotoPerMessage(own: bool, len: int): bool = not(photoDirect(own, len, true))
 pure def lawAnAmbiguousTabNeedsTheOwner(grounded: bool, command: bool): bool = not(browserDirect(grounded, command, true))
 pure def browserCarded(grounded: bool, pageLink: bool): bool = grounded or pageLink
 pure def ownerTyped(grounded: bool, pageLink: bool): bool = grounded and not(pageLink)
 pure def lawAPageLinkIsNeverOwnerTyped(grounded: bool): bool = not(ownerTyped(grounded, true))
 pure def lawAPageLinkKeepsItsCardAndNeverRunsDirectly(command: bool): bool = browserCarded(false, true) and not(browserDirect(false, command, false))
 pure def lawAnUngroundedOpenGetsTheNotice(pageLink: bool): bool = not(browserCarded(false, pageLink)) implies browserNoticeInstead(false)
-pure val lengthValues = Set(0, 1, 512, 513)
+pure val lenValues = Set(0, 1, 512, 513)
 ```
 
 ### A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it
@@ -354,7 +354,7 @@ proposal is left alone.
 ```quint
 pure def workflowStepRuns(bound: bool, sameRun: bool, sameStep: bool, admitted: bool, consumed: bool): bool =
   bound and sameRun and sameStep and admitted and not(consumed)
-pure def lawAnotherRunsProposalNeverRuns(step: bool): bool = not(workflowStepRuns(true, false, step, true, false))
-pure def lawAWorkflowStepRunsOnce(run: bool): bool = not(workflowStepRuns(true, run, true, true, true))
-pure def lawAnUnboundProposalIsNotAStep(run: bool): bool = not(workflowStepRuns(false, run, true, true, false))
+pure def lawAnotherRunsProposalNeverRuns(atStep: bool): bool = not(workflowStepRuns(true, false, atStep, true, false))
+pure def lawAWorkflowStepRunsOnce(sameRun: bool): bool = not(workflowStepRuns(true, sameRun, true, true, true))
+pure def lawAnUnboundProposalIsNotAStep(sameRun: bool): bool = not(workflowStepRuns(false, sameRun, true, true, false))
 ```

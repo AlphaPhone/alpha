@@ -39,11 +39,11 @@ every build.
 ```quint
 type Availability = Everywhere | AospOnly
 type Variant = LauncherBuild | AospImage | BrowserBuild
-pure def admits(availability: Availability, variant: Variant): bool =
-  availability == Everywhere or variant == AospImage
-pure def lawAospAppsOnlyOnTheImage(variant: Variant): bool =
-  admits(AospOnly, variant) iff variant == AospImage
-pure def lawEverywhereAppsInEveryBuild(variant: Variant): bool = admits(Everywhere, variant)
+pure def admits(availability: Availability, build: Variant): bool =
+  availability == Everywhere or build == AospImage
+pure def lawAospAppsOnlyOnTheImage(build: Variant): bool =
+  admits(AospOnly, build) iff build == AospImage
+pure def lawEverywhereAppsInEveryBuild(build: Variant): bool = admits(Everywhere, build)
 ```
 
 ### Home lists Alpha's apps in Alpha's order until the owner arranges them

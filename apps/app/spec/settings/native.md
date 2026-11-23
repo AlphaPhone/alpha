@@ -15,8 +15,11 @@ renderer relies on these and states nothing beyond them.
 
 ```quint
 type Staged = { urlMatches: bool, digestMatches: bool, sizeMatches: bool, versionMatches: bool, fullyHashed: bool }
-pure def stageAdmitted(s: Staged): bool = s.urlMatches and s.digestMatches and s.sizeMatches and s.versionMatches and s.fullyHashed
-pure def lawAPartialHashNeverStages(s: Staged): bool = not(stageAdmitted({ ...s, fullyHashed: false }))
+pure def stageAdmitted(staged: Staged): bool = staged.urlMatches and staged.digestMatches and staged.sizeMatches and staged.versionMatches and staged.fullyHashed
+pure def lawAPartialHashNeverStages(staged: Staged): bool = not(stageAdmitted({ ...staged, fullyHashed: false }))
+pure val stagedValues = Set({ urlMatches: true, digestMatches: true, sizeMatches: true, versionMatches: true, fullyHashed: true },
+  { urlMatches: true, digestMatches: true, sizeMatches: true, versionMatches: true, fullyHashed: false },
+  { urlMatches: false, digestMatches: true, sizeMatches: false, versionMatches: true, fullyHashed: true })
 ```
 
 ### An automatic install commits only after a fresh read of the feed still offers the same bytes
@@ -26,18 +29,22 @@ seconds after boot and while a call is active or unreadable.
 
 ```quint
 type Commit = { uptimeMs: int, callIdle: bool, feedStillOffers: bool, draftsKept: bool, agentHeld: bool, automatic: bool }
-pure def mayCommit(c: Commit): bool =
-  c.draftsKept and c.agentHeld and (not(c.automatic) or (c.uptimeMs >= 30000 and c.callIdle and c.feedStillOffers))
-pure def lawNoAutomaticCommitDuringBoot(c: Commit): bool = mayCommit({ ...c, automatic: true, uptimeMs: 29999 }) == false
-pure def lawNoCommitWithoutKeptDrafts(c: Commit): bool = not(mayCommit({ ...c, draftsKept: false }))
+pure def mayCommit(commit: Commit): bool =
+  commit.draftsKept and commit.agentHeld and (not(commit.automatic) or (commit.uptimeMs >= 30000 and commit.callIdle and commit.feedStillOffers))
+pure def lawNoAutomaticCommitDuringBoot(commit: Commit): bool = mayCommit({ ...commit, automatic: true, uptimeMs: 29999 }) == false
+pure def lawNoCommitWithoutKeptDrafts(commit: Commit): bool = not(mayCommit({ ...commit, draftsKept: false }))
+pure val commitValues = Set({ uptimeMs: 29999, callIdle: true, feedStillOffers: true, draftsKept: true, agentHeld: true, automatic: true },
+  { uptimeMs: 30000, callIdle: true, feedStillOffers: true, draftsKept: true, agentHeld: true, automatic: true },
+  { uptimeMs: 30000, callIdle: false, feedStillOffers: true, draftsKept: false, agentHeld: true, automatic: false })
 ```
 
 ### The agent's update pause is held by one owner and released only after a confirmed outcome
 
 ```quint
 type Pause = { held: bool, owner: int, outcomeKnown: bool }
-pure def mayRelease(p: Pause, claimant: int): bool = p.held and p.owner == claimant and p.outcomeKnown
-pure def lawAForeignOwnerNeverReleases(p: Pause, claimant: int): bool = claimant != p.owner implies not(mayRelease(p, claimant))
+pure def mayRelease(pause: Pause, claimant: int): bool = pause.held and pause.owner == claimant and pause.outcomeKnown
+pure def lawAForeignOwnerNeverReleases(pause: Pause, claimant: int): bool = claimant != pause.owner implies not(mayRelease(pause, claimant))
+pure val pauseValues = Set({ held: true, owner: 1, outcomeKnown: true }, { held: true, owner: 2, outcomeKnown: true }, { held: false, owner: 1, outcomeKnown: false })
 ```
 
 ### A release is published only from an admitted candidate above every version floor
@@ -47,19 +54,22 @@ release authority, and floors only rise.
 
 ```quint
 type Candidate = { admitted: bool, signed: bool, versionCode: int, floor: int, legacyFloor: int, mirrored: bool }
-pure def mayPublish(c: Candidate): bool =
-  c.admitted and c.signed and c.mirrored and c.versionCode > c.floor and c.versionCode > c.legacyFloor
+pure def mayPublish(candidate: Candidate): bool =
+  candidate.admitted and candidate.signed and candidate.mirrored and candidate.versionCode > candidate.floor and candidate.versionCode > candidate.legacyFloor
 pure def raiseFloor(floor: int, published: int): int = if (published > floor) published else floor
 pure def lawFloorsOnlyRise(floor: int, published: int): bool = raiseFloor(floor, published) >= floor
-pure def lawAnUnsignedReceiptNeverPublishes(c: Candidate): bool = not(mayPublish({ ...c, signed: false }))
+pure def lawAnUnsignedReceiptNeverPublishes(candidate: Candidate): bool = not(mayPublish({ ...candidate, signed: false }))
+pure val candidateValues = Set({ admitted: true, signed: true, versionCode: 3, floor: 2, legacyFloor: 1, mirrored: true },
+  { admitted: true, signed: false, versionCode: 3, floor: 2, legacyFloor: 1, mirrored: true }, { admitted: true, signed: true, versionCode: 2, floor: 2, legacyFloor: 1, mirrored: false })
 ```
 
 ### A pilot update is claimed, dispatched and verified on one device under its lock
 
 ```quint
 type Pilot = { claimed: bool, homeObserved: bool, readBefore: bool, readbackMatches: bool }
-pure def pilotVerified(p: Pilot): bool = p.claimed and p.homeObserved and p.readBefore and p.readbackMatches
-pure def lawNoPilotWithoutReadback(p: Pilot): bool = not(pilotVerified({ ...p, readbackMatches: false }))
+pure def pilotVerified(pilot: Pilot): bool = pilot.claimed and pilot.homeObserved and pilot.readBefore and pilot.readbackMatches
+pure def lawNoPilotWithoutReadback(pilot: Pilot): bool = not(pilotVerified({ ...pilot, readbackMatches: false }))
+pure val pilotValues = Set({ claimed: true, homeObserved: true, readBefore: true, readbackMatches: true }, { claimed: true, homeObserved: true, readBefore: true, readbackMatches: false }, { claimed: false, homeObserved: false, readBefore: true, readbackMatches: true })
 ```
 
 ## Story: Reset, store and journal honestly
@@ -74,19 +84,25 @@ page instead of restarting in a loop.
 
 ```quint
 type ResetAttempt = { confirmed: bool, markerRecorded: bool, listenerRevoked: bool, listenerAbsent: bool, reserved: bool }
-pure def mayDispatchReset(r: ResetAttempt): bool =
-  r.confirmed and r.markerRecorded and r.reserved and (r.listenerRevoked or r.listenerAbsent)
-pure def lawNoResetWithoutConfirmation(r: ResetAttempt): bool = not(mayDispatchReset({ ...r, confirmed: false }))
+pure def mayDispatchReset(attempt: ResetAttempt): bool =
+  attempt.confirmed and attempt.markerRecorded and attempt.reserved and (attempt.listenerRevoked or attempt.listenerAbsent)
+pure def lawNoResetWithoutConfirmation(attempt: ResetAttempt): bool = not(mayDispatchReset({ ...attempt, confirmed: false }))
+pure val attemptValues = Set({ confirmed: true, markerRecorded: true, listenerRevoked: true, listenerAbsent: false, reserved: true },
+  { confirmed: false, markerRecorded: true, listenerRevoked: false, listenerAbsent: true, reserved: true },
+  { confirmed: true, markerRecorded: false, listenerRevoked: false, listenerAbsent: false, reserved: false })
 ```
 
 ### A credential slot changes only on an exact compare, and a replaced Cloud key notifies first
 
 ```quint
 type SlotWrite = { expectedMatches: bool, withinCap: bool, shrinksLegacy: bool, observerRan: bool, productionKeyReplaced: bool, readsBack: bool }
-pure def mayWriteSlot(w: SlotWrite): bool =
-  w.expectedMatches and (w.withinCap or w.shrinksLegacy) and (not(w.productionKeyReplaced) or w.observerRan)
-pure def acknowledged(w: SlotWrite): bool = mayWriteSlot(w) and w.readsBack
-pure def lawAReplacedKeyNotifiesBeforeTheWrite(w: SlotWrite): bool = mayWriteSlot({ ...w, productionKeyReplaced: true, observerRan: false }) == false
+pure def mayWriteSlot(slotWrite: SlotWrite): bool =
+  slotWrite.expectedMatches and (slotWrite.withinCap or slotWrite.shrinksLegacy) and (not(slotWrite.productionKeyReplaced) or slotWrite.observerRan)
+pure def acknowledged(slotWrite: SlotWrite): bool = mayWriteSlot(slotWrite) and slotWrite.readsBack
+pure def lawAReplacedKeyNotifiesBeforeTheWrite(slotWrite: SlotWrite): bool = mayWriteSlot({ ...slotWrite, productionKeyReplaced: true, observerRan: false }) == false
+pure val slotWriteValues = Set({ expectedMatches: true, withinCap: true, shrinksLegacy: false, observerRan: true, productionKeyReplaced: true, readsBack: true },
+  { expectedMatches: true, withinCap: false, shrinksLegacy: true, observerRan: false, productionKeyReplaced: false, readsBack: false },
+  { expectedMatches: false, withinCap: true, shrinksLegacy: false, observerRan: false, productionKeyReplaced: true, readsBack: true })
 ```
 
 ### The text size Android applies is the last request it took, per window
@@ -108,8 +124,9 @@ pure def lawTheJournalIsBounded(count: int): bool = kept(count) <= journalCap
 
 ```quint
 type Migration = { intentRecorded: bool, eligible: bool, ownerChoseOther: bool }
-pure def mayGrantRole(m: Migration): bool = m.intentRecorded and m.eligible and not(m.ownerChoseOther)
-pure def lawAnOwnerChoiceStopsMigration(m: Migration): bool = not(mayGrantRole({ ...m, ownerChoseOther: true }))
+pure def mayGrantRole(migration: Migration): bool = migration.intentRecorded and migration.eligible and not(migration.ownerChoseOther)
+pure def lawAnOwnerChoiceStopsMigration(migration: Migration): bool = not(mayGrantRole({ ...migration, ownerChoseOther: true }))
+pure val migrationValues = Set({ intentRecorded: true, eligible: true, ownerChoseOther: false }, { intentRecorded: true, eligible: true, ownerChoseOther: true }, { intentRecorded: false, eligible: true, ownerChoseOther: false })
 ```
 
 ### A Settings handoff opens only an allowlisted page, or the password provider's own settings

@@ -274,7 +274,7 @@ export const messagesViewLayer = Layer.effect(MessagesView, effect {
       if (row === undefined || (try tell({ type: "deleteStarted" })) === undefined) return
       const reference = parseMessageDeleteReference({ id: row.id, kind: row.kind === "MmsKind" ? "mms" : "sms", threadId: row.threadId, date: row.date })
       const deferred = reference === undefined ? { queued: false, refused: true } as const : try undo.defer({ kind: "message", reference })
-      const after = try tell({ type: "deleteAnswered", outcome: deferred.queued ? "Removed" : deferred.refused ? "RowChanged" : "RemovalUnknown" })
+      const after = try tell({ type: "deleteAnswered", result: deferred.queued ? "Removed" : deferred.refused ? "RowChanged" : "RemovalUnknown" })
       if (after !== undefined && !deferred.queued && deferred.refused) try read(false)
     },
     effect readSelected() {

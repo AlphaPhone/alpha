@@ -127,7 +127,7 @@ export const layer = Layer.effect(MailComposer, effect {
       const open = (try mine()).open
       if (!hasDraft(open)) return undefined
       const next = { ...open, fields: w.fields, pendingTo: w.pendingTo }
-      const done = try send({ type: "edit", id: open.id, revision: open.revision, fields: w.fields, pendingTo: w.pendingTo, bytes: jsonBytes(next) })
+      const done = try send({ type: "edit", id: open.id, revision: open.revision, edits: w.fields, pendingTo: w.pendingTo, bytes: jsonBytes(next) })
       if (done === undefined) {
         try Ref.set(conflict, true)
         return "changed"
@@ -176,7 +176,7 @@ export const layer = Layer.effect(MailComposer, effect {
   effect function hide() {
     if (!(try mine()).composing) return false
     try flush()
-    return (try send({ type: "hide" })) !== undefined
+    return (try send({ type: "hideComposer" })) !== undefined
   }
 
   fork.scoped (effect {

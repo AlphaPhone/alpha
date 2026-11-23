@@ -120,7 +120,7 @@ export const phoneViewLayer = Layer.effect(PhoneView, effect {
       const { session } = try phone.get()
       if ((try tell({ type: "dialStarted", valid: target !== null })) === undefined || target === null) return
       const outcome: CallOutcome = try Effect.provideService(placeOwnerCall(target), TelephonyBridges, bridges)
-      try tell({ type: "dialAnswered", session, outcome })
+      try tell({ type: "dialAnswered", session, result: outcome })
     },
   }
 })

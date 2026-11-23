@@ -63,7 +63,7 @@ export const alphaDraft: Slot = {
 
 /** A call to a name with two matching numbers, waiting for the owner's choice. */
 export const choosing: Actions = {
-  run: { tag: "Choosing", runId: "op1", kind: "PlaceCall", candidates: [
+  ongoing: { tag: "Choosing", runId: "op1", kind: "PlaceCall", candidates: [
     { candidateId: "7:4155550100", title: "Maya Chen", number: "4155550100" },
     { candidateId: "8:4155550111", title: "Maya Ortiz", number: "4155550111" },
   ] },

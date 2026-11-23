@@ -470,7 +470,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     try SubscriptionRef.update(transcript, (t) => ({ ...t, conversation: live?.id ?? t.conversation }))
     if (conversation === null && live !== null) {
       const destination = try binding(identity, live.id)
-      try quiet(drafts.send({ type: "select", binding: destination }))
+      try quiet(drafts.send({ type: "selectDraft", binding: destination }))
       fork.detached Effect.provideService(moveFirstDraft(heldBinding, destination), DraftsMachine, drafts)
     }
     ordinal += 1
@@ -543,7 +543,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       }
       if (!(try quiet(client.send({ type: "restoreHistory", automatic })))) try quiet(client.send({ type: "attach", session: (try client.get()).session }))
       try quiet(stopped.send({ type: "explicitReload" }))
-      try quiet(drafts.send({ type: "select", binding: try binding(identity, conversation) }))
+      try quiet(drafts.send({ type: "selectDraft", binding: try binding(identity, conversation) }))
       try SubscriptionRef.set(target, undefined)
       if (!automatic) try attachments.retire("conversation")
       if (conversation !== null) try bind(identity, conversation)

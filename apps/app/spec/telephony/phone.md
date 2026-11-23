@@ -111,10 +111,10 @@ pure def numberTyped(p: Phone, number: str): Phone = { ...p, number: number, not
 pure def canDialStarted(p: Phone, valid: bool): bool = p.shown and not(p.reading) and not(p.dialing)
 pure def dialStarted(p: Phone, valid: bool): Phone = if (valid) { ...p, dialing: true, notice: Quiet } else { ...p, notice: InvalidNumber }
 pure def canDialAnswered(p: Phone, session: int): bool = p.dialing and session == p.session
-pure def dialAnswered(p: Phone, session: int, outcome: CallOutcome): Phone =
+pure def dialAnswered(p: Phone, session: int, result: CallOutcome): Phone =
   landPrefill(p.prefill, { ...p, dialing: false,
-    number: if (outcome == CallStarted) "" else p.number,
-    notice: if (outcome == CallStarted) Quiet else Placement({ outcome: outcome }) })
+    number: if (result == CallStarted) "" else p.number,
+    notice: if (result == CallStarted) Quiet else Placement({ outcome: result }) })
 pure def stepOnlyTheOwnersDialStartsACall(before: Phone, via: str, after: Phone): bool =
   (after.dialing and not(before.dialing)) implies via == "dialStarted"
 pure def sometimesTheDialScreenOpened(p: Phone): bool = p.notice == Placement({ outcome: DialerOpened })

@@ -20,7 +20,7 @@ type KeyboardDictation = { phase: ImePhase, ticket: int, route: ImeRoute, field:
 pure val initial: KeyboardDictation = { phase: ImeClosed, ticket: 0, route: ImeCloud, field: 0, account: 0, provider: 0,
   inserted: 0, requests: 0, captures: 0, last: NoEnd }
 pure val ticketValues = Set(1, 2, 3)
-pure val fieldValues = Set(1, 2)
+pure val fieldIdValues = Set(1, 2)
 pure val accountValues = Set(1, 2)
 pure val providerValues = Set(1, 2)
 ```
@@ -38,10 +38,10 @@ The panel says "Uses your selected Alpha voice provider… Stop inserts text; it
 ```quint
 pure def canOpenPanel(k: KeyboardDictation, route: ImeRoute): bool = k.phase == ImeClosed
 pure def openPanel(k: KeyboardDictation, route: ImeRoute): KeyboardDictation = { ...k, phase: ImeReady, ticket: k.ticket + 1, route: route, last: NoEnd }
-pure def canStartCapture(k: KeyboardDictation, field: int, account: int, provider: int, secretField: bool): bool =
-  k.phase == ImeReady and not(secretField) and field >= 1 and account >= 1 and provider >= 1
-pure def startCapture(k: KeyboardDictation, field: int, account: int, provider: int, secretField: bool): KeyboardDictation =
-  { ...k, phase: ImeRecording, ticket: k.ticket + 1, field: field, account: account, provider: provider, captures: k.captures + 1 }
+pure def canStartCapture(k: KeyboardDictation, fieldId: int, account: int, provider: int, secretField: bool): bool =
+  k.phase == ImeReady and not(secretField) and fieldId >= 1 and account >= 1 and provider >= 1
+pure def startCapture(k: KeyboardDictation, fieldId: int, account: int, provider: int, secretField: bool): KeyboardDictation =
+  { ...k, phase: ImeRecording, ticket: k.ticket + 1, field: fieldId, account: account, provider: provider, captures: k.captures + 1 }
 pure def canStopCapture(k: KeyboardDictation, ticket: int): bool = k.phase == ImeRecording and ticket == k.ticket
 pure def stopCapture(k: KeyboardDictation, ticket: int): KeyboardDictation = { ...k, phase: ImeTranscribing, requests: k.requests + 1 }
 pure def alwaysOneRequestPerCapture(k: KeyboardDictation): bool =
@@ -56,10 +56,10 @@ does a reply that is not a success, not valid text, or, over Cloud, not marked a
 and the connection closed.
 
 ```quint
-pure def canFinish(k: KeyboardDictation, ticket: int, field: int, account: int, provider: int, httpOk: bool, validText: bool, providerHeader: bool): bool =
+pure def canFinish(k: KeyboardDictation, ticket: int, fieldId: int, account: int, provider: int, httpOk: bool, validText: bool, providerHeader: bool): bool =
   k.phase == ImeTranscribing and ticket == k.ticket
-pure def finish(k: KeyboardDictation, ticket: int, field: int, account: int, provider: int, httpOk: bool, validText: bool, providerHeader: bool): KeyboardDictation = {
-  val accepted = httpOk and validText and (k.route == ImeDirect or providerHeader) and field == k.field and account == k.account and provider == k.provider
+pure def finish(k: KeyboardDictation, ticket: int, fieldId: int, account: int, provider: int, httpOk: bool, validText: bool, providerHeader: bool): KeyboardDictation = {
+  val accepted = httpOk and validText and (k.route == ImeDirect or providerHeader) and fieldId == k.field and account == k.account and provider == k.provider
   { ...k, phase: ImeClosed, ticket: k.ticket + 1, inserted: k.inserted + (if (accepted) 1 else 0), last: if (accepted) ImeInserted else ImeRefused }
 }
 pure def alwaysAtMostOneInsertPerCapture(k: KeyboardDictation): bool = k.inserted >= 0 and k.inserted <= k.requests

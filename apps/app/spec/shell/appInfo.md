@@ -6,15 +6,6 @@ bridge, "App info opens Android's details page for exactly the entry the owner c
 keeps one request at a time, under the ticket it captured, and shows Android's refusal for the
 entry it asked about even if the library has closed since.
 
-```quint
-type InfoPhase = InfoIdle | InfoQueued
-type InfoReply = InfoOpened | InfoInvalid | InfoProfileGone | InfoNotInstalled | InfoFailed
-type AppInfo = { phase: InfoPhase, target: str, ticket: int, notice: str, reason: InfoReply }
-pure val initial: AppInfo = { phase: InfoIdle, target: "", ticket: 0, notice: "", reason: InfoOpened }
-pure val keyValues = Set("org.fixture.clock", "org.fixture.mail/org.fixture.mail.Main#10")
-pure val ticketValues = Set(0, 1, 2)
-```
-
 ## Story: Check an app's details in Android
 
 > As the owner, I want App info on a library entry to open Android's page for that exact app and
@@ -26,6 +17,12 @@ The menu closes when the request is sent; focus goes back to the entry's tile. A
 waits until the first is answered.
 
 ```quint
+type InfoPhase = InfoIdle | InfoQueued
+type InfoReply = InfoOpened | InfoInvalid | InfoProfileGone | InfoNotInstalled | InfoFailed
+type AppInfo = { phase: InfoPhase, target: str, ticket: int, notice: str, reason: InfoReply }
+pure val initial: AppInfo = { phase: InfoIdle, target: "", ticket: 0, notice: "", reason: InfoOpened }
+pure val keyValues = Set("org.fixture.clock", "org.fixture.mail/org.fixture.mail.Main#10")
+pure val ticketValues = Set(0, 1, 2)
 pure def canRequest(a: AppInfo, key: str): bool = a.phase == InfoIdle and key != ""
 pure def request(a: AppInfo, key: str): AppInfo = { ...a, phase: InfoQueued, target: key, ticket: a.ticket + 1 }
 pure def canAnswer(a: AppInfo, ticket: int, reply: InfoReply): bool = a.phase == InfoQueued and ticket == a.ticket

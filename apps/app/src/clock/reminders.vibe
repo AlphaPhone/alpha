@@ -326,7 +326,7 @@ export const remindersLayer = Layer.effect(Reminders, effect {
       const looked = step({ type: "lookedUp", found: other ? "OtherJournaled" : "NothingJournaled" })
       if (looked?.stage !== "WReview") return
       const answer = call(DELETIONS, "reviewReminder", DeletionReviewAnswer, { target: row.target }) catch () => undefined
-      step({ type: "deletionReviewed", answer: answer === undefined ? "DeletionUnknown" : DELETION[answer.status] ?? "DeletionUnknown" })
+      step({ type: "deletionReviewed", deletion: answer === undefined ? "DeletionUnknown" : DELETION[answer.status] ?? "DeletionUnknown" })
       try refresh()
     },
     effect saveTodo(title: string, body: string) {

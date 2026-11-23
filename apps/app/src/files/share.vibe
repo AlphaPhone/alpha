@@ -118,7 +118,7 @@ export const layer = Layer.effect(FilesShare, effect {
       if (destination === "CancelShare") return after !== undefined
       if (after === undefined || !after.effects.some((e) => e.panel === id)) return false
       const outcome: DeliveryOutcome = try deliver
-      panels.send({ type: "reportDelivery", id, outcome }) catch () => undefined
+      panels.send({ type: "reportDelivery", id, result: outcome }) catch () => undefined
       return outcome === "Delivered"
     },
     effect retire() {

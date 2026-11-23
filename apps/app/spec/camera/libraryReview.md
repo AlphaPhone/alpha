@@ -17,7 +17,7 @@ handed to Android keeps its owner and settles while hidden.
 
 ```quint
 type AskPhase = Idle | Validating
-type Pending = { phase: AskPhase, token: int, revision: int, action: str, count: int }
+type Pending = { phase: AskPhase, token: int, revision: int, askAction: str, count: int }
 type Press = { review: int, pending: bool }
 type Reviews = {
   inPhotos: bool, hidden: bool, hostReview: bool, epoch: int, disposed: bool, revision: int,
@@ -25,7 +25,7 @@ type Reviews = {
   presses: int -> Press, acting: int, actingRevision: int, dispatched: List[int], applied: List[int],
   refusedBusy: int, refusedLeft: int, staleClosed: int, androidStale: int, latePresses: int
 }
-pure val idlePending: Pending = { phase: Idle, token: 0, revision: 0, action: "", count: 0 }
+pure val idlePending: Pending = { phase: Idle, token: 0, revision: 0, askAction: "", count: 0 }
 pure val unpressed: Press = { review: 0, pending: false }
 pure val initial: Reviews = {
   inPhotos: true, hidden: false, hostReview: false, epoch: 0, disposed: false, revision: 0,
@@ -37,7 +37,8 @@ pure def visible(r: Reviews): bool = r.inPhotos and not(r.hidden) and not(r.disp
 pure def reviewBusy(r: Reviews): bool = r.acting != 0 or r.review != 0 or r.hostReview
 pure def pendingAt(r: Reviews, slot: int): Pending = r.requests.getOr(slot, idlePending)
 pure def pressAt(r: Reviews, slot: int): Press = r.presses.getOr(slot, unpressed)
-pure val slotValues = Set(1, 2)
+pure val slots = Set(1, 2)
+pure val slotValues = slots
 pure val readValues = Set(0, 1, 2)
 ```
 
@@ -50,26 +51,26 @@ pure val readValues = Set(0, 1, 2)
 ### A proposal names the revision the assistant read and is admitted only over the visible grid with no review open
 
 ```quint
-pure def canRequest(r: Reviews, slot: int, read: int, action: str, count: int): bool =
-  slotValues.contains(slot) and pendingAt(r, slot).phase == Idle and visible(r) and not(reviewBusy(r)) and read >= 0 and read <= r.revision and
+pure def canRequest(r: Reviews, slot: int, read: int, askAction: str, count: int): bool =
+  slots.contains(slot) and pendingAt(r, slot).phase == Idle and visible(r) and not(reviewBusy(r)) and read >= 0 and read <= r.revision and
   count >= 1 and count <= 20
-pure def request(r: Reviews, slot: int, read: int, action: str, count: int): Reviews =
-  { ...r, requests: r.requests.put(slot, { phase: Validating, token: r.epoch, revision: read, action: action, count: count }) }
-pure val actionValues = Set("trash", "share")
+pure def request(r: Reviews, slot: int, read: int, askAction: str, count: int): Reviews =
+  { ...r, requests: r.requests.put(slot, { phase: Validating, token: r.epoch, revision: read, askAction: askAction, count: count }) }
+pure val askActionValues = Set("trash", "share")
 pure val countValues = Set(1, 20)
 ```
 
 ### The library confirms the revisions before the review opens; a stale read, a departure or a busy grid opens nothing
 
 ```quint
-pure def canValidated(r: Reviews, slot: int): bool = slotValues.contains(slot) and pendingAt(r, slot).phase == Validating
+pure def canValidated(r: Reviews, slot: int): bool = slots.contains(slot) and pendingAt(r, slot).phase == Validating
 pure def validated(r: Reviews, slot: int): Reviews = {
   val asked = pendingAt(r, slot)
-  val settled = { ...r, requests: r.requests.put(slot, idlePending) }
-  if (asked.revision != r.revision) settled
-  else if (asked.token != r.epoch or r.disposed) { ...settled, refusedLeft: settled.refusedLeft + 1 }
-  else if (reviewBusy(r) or not(visible(r))) { ...settled, refusedBusy: settled.refusedBusy + 1 }
-  else { ...settled, review: r.serial + 1, serial: r.serial + 1, reviewRevision: asked.revision, reviewEpoch: r.epoch, reviewAction: asked.action, reviewCount: asked.count }
+  val resolved = { ...r, requests: r.requests.put(slot, idlePending) }
+  if (asked.revision != r.revision) resolved
+  else if (asked.token != r.epoch or r.disposed) { ...resolved, refusedLeft: resolved.refusedLeft + 1 }
+  else if (reviewBusy(r) or not(visible(r))) { ...resolved, refusedBusy: resolved.refusedBusy + 1 }
+  else { ...resolved, review: r.serial + 1, serial: r.serial + 1, reviewRevision: asked.revision, reviewEpoch: r.epoch, reviewAction: asked.askAction, reviewCount: asked.count }
 }
 pure def alwaysOpenReviewBelongsToCurrentVisit(r: Reviews): bool = (r.review != 0 and not(r.disposed)) implies (r.reviewEpoch == r.epoch and visible(r))
 pure def alwaysSinglePendingReview(r: Reviews): bool = not(r.review != 0 and r.acting != 0) and not(r.review != 0 and r.hostReview)
@@ -80,15 +81,15 @@ pure def sometimesSecondRequestRefused(r: Reviews): bool = r.refusedBusy > 0 and
 
 ```quint
 pure def canConfirmPress(r: Reviews, slot: int): bool =
-  slotValues.contains(slot) and not(pressAt(r, slot).pending) and r.review != 0 and r.acting == 0
+  slots.contains(slot) and not(pressAt(r, slot).pending) and r.review != 0 and r.acting == 0
 pure def confirmPress(r: Reviews, slot: int): Reviews = { ...r, presses: r.presses.put(slot, { review: r.review, pending: true }) }
-pure def canConfirmValidated(r: Reviews, slot: int): bool = slotValues.contains(slot) and pressAt(r, slot).pending
+pure def canConfirmValidated(r: Reviews, slot: int): bool = slots.contains(slot) and pressAt(r, slot).pending
 pure def confirmValidated(r: Reviews, slot: int): Reviews = {
   val pressed = pressAt(r, slot)
-  val settled = { ...r, presses: r.presses.put(slot, unpressed) }
-  if (r.review != pressed.review) { ...settled, latePresses: settled.latePresses + 1 }
-  else if (r.reviewRevision != r.revision) { ...settled, review: 0, staleClosed: settled.staleClosed + 1 }
-  else { ...settled, review: 0, acting: pressed.review, actingRevision: r.reviewRevision, dispatched: r.dispatched.append(pressed.review) }
+  val resolved = { ...r, presses: r.presses.put(slot, unpressed) }
+  if (r.review != pressed.review) { ...resolved, latePresses: resolved.latePresses + 1 }
+  else if (r.reviewRevision != r.revision) { ...resolved, review: 0, staleClosed: resolved.staleClosed + 1 }
+  else { ...resolved, review: 0, acting: pressed.review, actingRevision: r.reviewRevision, dispatched: r.dispatched.append(pressed.review) }
 }
 pure def distinctReviews(ids: List[int]): bool = ids.every(a => ids.select(b => b == a).length() == 1)
 pure def alwaysEachReviewDispatchedOnce(r: Reviews): bool = distinctReviews(r.dispatched)
@@ -155,8 +156,9 @@ pure def lawLockedPhoneSharesNothing(available: bool, granted: bool): bool =
 
 ```quint
 type ChangeCount = { verified: int, requested: int, skipped: int }
-pure def complete(count: ChangeCount): bool = count.verified == count.requested and count.skipped == 0
-pure def lawUnverifiedNeverCountsAsChanged(count: ChangeCount): bool = complete(count) implies count.verified == count.requested
+pure def complete(changes: ChangeCount): bool = changes.verified == changes.requested and changes.skipped == 0
+pure def lawUnverifiedNeverCountsAsChanged(changes: ChangeCount): bool = complete(changes) implies changes.verified == changes.requested
+pure val changesValues = Set({ verified: 2, requested: 2, skipped: 0 }, { verified: 1, requested: 2, skipped: 0 }, { verified: 2, requested: 2, skipped: 1 })
 ```
 
 ### Photos operations reach a phone only when the assistant and the phone both offer their capability

@@ -34,8 +34,8 @@ pure def alwaysARecordHasAnIdentity(h: HandoffHistory): bool = (h.record == NoRe
 ```quint
 pure def canFinishRecord(h: HandoffHistory, id: str, status: HandoffStatus): bool = opening(h) and recordId(h) == id
 pure def finishRecord(h: HandoffHistory, id: str, status: HandoffStatus): HandoffHistory = {
-  val last = h.record
-  match last {
+  val final = h.record
+  match final {
     | LastHandoff(r) => { record: LastHandoff({ id: r.id, handoffAction: r.handoffAction, answered: true, status: status, at: r.at }), writes: h.writes + 1 }
     | NoRecord => h
   }

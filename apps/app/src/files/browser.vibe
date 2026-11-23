@@ -146,8 +146,8 @@ export const layer = Layer.effect(FilesBrowser, effect {
   effect function readTrash(generation: number, volumes: readonly Volume[]) {
     const { ticket } = try trash.get()
     const { items, outcome } = try trashAcross(volumes)
-    try dispatchTrash({ type: "trashReply", ticket, items, outcome })
-    try dispatch({ type: "listReply", ticket: generation, rows: [], groups: [], outcome, count: -1 })
+    try dispatchTrash({ type: "trashReply", ticket, items, result: outcome })
+    try dispatch({ type: "listReply", ticket: generation, rows: [], groups: [], result: outcome, count: -1 })
   }
 
   effect function readCounts(ticket: number, volumes: readonly Volume[]) {
@@ -177,14 +177,14 @@ export const layer = Layer.effect(FilesBrowser, effect {
       const missingDownloads = answer?.status === "missing"
       const rows = uniqueRows((answer?.entries ?? []).map((entry) => toRow(volume, entry)))
       const outcome: ListingOutcome = answer === undefined ? "Failed" : missingDownloads ? "Complete" : outcomeOf(answer.status, answer.truncated)
-      return try dispatch({ type: "listReply", ticket, rows: missingDownloads ? [] : rows, groups: [], outcome, count: answer?.count ?? -1 })
+      return try dispatch({ type: "listReply", ticket, rows: missingDownloads ? [] : rows, groups: [], result: outcome, count: answer?.count ?? -1 })
     }
     const answer = storage.category(CATEGORY_IDS[place.category], false) catch () => undefined
     if (answer?.status === "denied") return try deny()
     const rows = uniqueRows((answer?.entries ?? []).map((entry) => toRow("", entry)))
     const grouped = place.category === "Images" || place.category === "Videos"
     try dispatch({ type: "listReply", ticket, rows, groups: grouped ? folderGroups(rows, answer?.entries, answer?.folders) : [],
-      outcome: answer === undefined ? "Failed" : outcomeOf(answer.status, answer.truncated), count: answer?.count ?? -1 })
+      result: answer === undefined ? "Failed" : outcomeOf(answer.status, answer.truncated), count: answer?.count ?? -1 })
   }
 
   effect function deny() {

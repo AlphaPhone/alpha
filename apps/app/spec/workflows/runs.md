@@ -13,11 +13,11 @@ and never by starting a second run (PRD AP-04, AP-11; legacy `WorkflowExecution`
 ### Runs hold the open workflow, the request kept for it, the run shown and the history read
 
 ```quint
-import vocabulary.* from "./vocabulary"
+import vocabulary as V from "./vocabulary"
 type Custody = NoCustody | Saved | Sent | Unknown | NotAdmitted | ConfirmingResend
 type Intent = { owner: str, workflowId: str, version: int, submission: str }
 type Shown = { runId: str, owner: str, workflowId: str, finished: bool, cancelRequested: bool, status: str, reconciliation: str }
-type Entry = { runId: str, occurred: Occurred, finished: bool, status: str, at: str }
+type Entry = { runId: str, occurred: V::Occurred, finished: bool, status: str, at: str }
 type Runs = {
   owner: str, workflowId: str, version: int, typed: bool, confirming: bool, reviewed: int,
   intent: Intent, custody: Custody, executions: int, abandoned: bool, recovered: bool, resends: int,
@@ -31,7 +31,7 @@ pure val initial: Runs = {
   shown: noRun, previous: noRun, claimed: false, switchCancels: 0, history: List(), selected: ""
 }
 pure def hasEntry(r: Runs, runId: str): bool = r.history.some(e => e.runId == runId)
-pure def entryOf(r: Runs, runId: str): Entry = r.history.select(e => e.runId == runId).nthOr(0, { runId: "", occurred: Ran, finished: false, status: "", at: "" })
+pure def entryOf(r: Runs, runId: str): Entry = r.history.select(e => e.runId == runId).nthOr(0, { runId: "", occurred: V::Ran, finished: false, status: "", at: "" })
 ```
 
 ### What the simulator tries
@@ -44,7 +44,7 @@ pure val submissionValues = Set("s1", "s2")
 pure val runIdValues = Set("r1", "r2")
 pure val statusValues = Set("running", "finished")
 pure val reconciliationValues = Set("", "outcome-unknown")
-pure val entriesValues = Set(List(), List({ runId: "r1", occurred: Missed, finished: true, status: "finished", at: "t1" }), List({ runId: "r2", occurred: Ran, finished: false, status: "running", at: "t2" }))
+pure val entriesValues = Set(List(), List({ runId: "r1", occurred: V::Missed, finished: true, status: "finished", at: "t1" }), List({ runId: "r2", occurred: V::Ran, finished: false, status: "running", at: "t2" }))
 ```
 
 ## Story: Open a workflow and see its runs
@@ -229,8 +229,8 @@ pure def sometimesPreviousCancelled(r: Runs): bool = r.claimed and r.switchCance
 
 ```quint
 pure def canRunMissedNow(r: Runs, runId: str): bool =
-  r.typed and r.custody == NoCustody and entryOf(r, runId).runId == runId and runId != "" and entryOf(r, runId).occurred == Missed
+  r.typed and r.custody == NoCustody and entryOf(r, runId).runId == runId and runId != "" and entryOf(r, runId).occurred == V::Missed
 pure def runMissedNow(r: Runs, runId: str): Runs = { ...r, confirming: true, reviewed: r.version, selected: runId }
 pure def stepRunNowKeepsTheMissedRecord(before: Runs, via: str, after: Runs): bool = via == "runMissedNow" implies after.history == before.history
-pure def sometimesMissedRunReviewed(r: Runs): bool = r.confirming and entryOf(r, r.selected).occurred == Missed
+pure def sometimesMissedRunReviewed(r: Runs): bool = r.confirming and entryOf(r, r.selected).occurred == V::Missed
 ```

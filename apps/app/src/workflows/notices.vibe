@@ -106,7 +106,7 @@ export const approvalNotices = Layer.provideMerge(Layer.effect(ApprovalNotices, 
             if (verdict === "resume") native.invoke(plugin, "resumeWorkflowApprovalNotice", { ...identity, expiresAt: posted.expiresAt, route }) catch () => undefined
             else native.invoke(plugin, "withdrawWorkflowApprovalNotice", { id: identity.id }) catch () => undefined
           } else if (!steps.some((s) => s.run.id === posted.route.runId && workflowApprovalProposalId(s.approval) === posted.route.step)) {
-            held.send({ type: "stepSettled", runId: posted.route.runId, stepId: posted.route.step }) catch () => undefined
+            held.send({ type: "settledStep", runId: posted.route.runId, stepId: posted.route.step }) catch () => undefined
             native.invoke(plugin, "withdrawWorkflowApprovalNotice", { id: identity.id }) catch () => undefined
           }
         }
@@ -115,11 +115,11 @@ export const approvalNotices = Layer.provideMerge(Layer.effect(ApprovalNotices, 
           const step = workflowApprovalProposalId(approval)
           const full: NoticeRoute = { owner: bound.owner, workflowId: run.workflowId, runId: run.id, versionId: run.versionId, step }
           const expiresAt = approval.expiresAt ?? now + STEP_NOTICE_MS
-          const added = try (held.send({ type: "stepWaiting", route: full, expiresAt }) catch () => undefined)
+          const added = try (held.send({ type: "awaitingStep", route: full, expiresAt }) catch () => undefined)
           if (added === undefined) continue
           const identity = try workflowApprovalNoticeIdentity(route, step)
           const reply = try (effect { return try Schema.decodeUnknownEffect(NoticePosted)(try native.invoke(plugin, "postWorkflowApprovalNotice", { ...identity, expiresAt, route })) } catch () => undefined)
-          if (reply !== undefined && reply.status === "failed") held.send({ type: "stepSettled", runId: run.id, stepId: step }) catch () => undefined
+          if (reply !== undefined && reply.status === "failed") held.send({ type: "settledStep", runId: run.id, stepId: step }) catch () => undefined
         }
       }
     },

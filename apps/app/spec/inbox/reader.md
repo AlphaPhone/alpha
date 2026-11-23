@@ -211,8 +211,8 @@ pure val bytesValues = Set(0, 5242880, 5242881)
 ```quint
 pure def canBeginSave(s: Reader): bool = s.attachment.phase == AttachmentShown and (s.attachment.save == SaveIdle or s.attachment.save == SaveCancelled)
 pure def beginSave(s: Reader): Reader = { ...s, attachment: { ...s.attachment, save: Saving } }
-pure def canSaveFinished(s: Reader, outcome: SavePhase): bool = s.attachment.save == Saving and (outcome == SavedCopy or outcome == SaveCancelled or outcome == SaveUnconfirmed)
-pure def saveFinished(s: Reader, outcome: SavePhase): Reader = { ...s, attachment: { ...s.attachment, save: outcome } }
+pure def canSaveFinished(s: Reader, result: SavePhase): bool = s.attachment.save == Saving and (result == SavedCopy or result == SaveCancelled or result == SaveUnconfirmed)
+pure def saveFinished(s: Reader, result: SavePhase): Reader = { ...s, attachment: { ...s.attachment, save: result } }
 pure def stepAnUnconfirmedSaveIsFinal(before: Reader, after: Reader): bool =
   (before.attachment.save == SaveUnconfirmed and after.attachment.phase == AttachmentShown and after.attachment.sha256 == before.attachment.sha256) implies after.attachment.save == SaveUnconfirmed
 pure def sometimesSaved(s: Reader): bool = s.attachment.save == SavedCopy
@@ -273,10 +273,10 @@ brands shows its icon, never a shared mail provider's or a local or test domain,
 owner allows images.
 
 ```quint
-pure def senderImageShown(enabled: bool, sharedProvider: bool, validDomain: bool, bundledBrand: bool): bool =
-  enabled and not(sharedProvider) and validDomain and bundledBrand
-pure def lawSharedProvidersShowNoSenderImage(enabled: bool, validDomain: bool, bundledBrand: bool): bool =
-  not(senderImageShown(enabled, true, validDomain, bundledBrand))
+pure def senderImageShown(isOn: bool, sharedProvider: bool, validDomain: bool, bundledBrand: bool): bool =
+  isOn and not(sharedProvider) and validDomain and bundledBrand
+pure def lawSharedProvidersShowNoSenderImage(isOn: bool, validDomain: bool, bundledBrand: bool): bool =
+  not(senderImageShown(isOn, true, validDomain, bundledBrand))
 ```
 
 ## Story: Ask my agent about the email I am reading

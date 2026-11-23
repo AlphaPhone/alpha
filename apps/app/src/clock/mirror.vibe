@@ -41,7 +41,7 @@ export const mirrorLayer = Layer.effect(Mirror, effect {
       return
     }
     step({
-      type: "statusRead", revision: status.revision, enabled: status.enabled, history: status.history, paused: status.paused, granted: status.accessGranted,
+      type: "statusRead", revision: status.revision, isOn: status.enabled, history: status.history, paused: status.paused, granted: status.accessGranted,
       apps: status.apps.slice(0, 20).map((a) => ({ packageName: a.packageName, preview: a.preview, available: a.available !== false })),
     })
   }

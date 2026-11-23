@@ -49,7 +49,7 @@ pure def scene(s: DeviceAction, view: ScreenView, sensitive: bool, selected: str
 pure def canPropose(s: DeviceAction, op: CalendarOperation): bool = idle(s) and not(s.queued)
 pure def propose(s: DeviceAction, op: CalendarOperation): DeviceAction = { ...s, op: op, nativeStep: NativeNone, outcome: OutcomeNone }
 pure def eventChanges(s: DeviceAction): DeviceAction = { ...s, targetCurrent: false }
-pure def hide(s: DeviceAction): DeviceAction = { ...s, hidden: true }
+pure def hideAction(s: DeviceAction): DeviceAction = { ...s, hidden: true }
 ```
 
 ### There is no direct path: the only way in is the owner's card on the bound screen
@@ -103,8 +103,8 @@ pure def canUndo(s: DeviceAction): bool = s.queued
 pure def undo(s: DeviceAction): DeviceAction = { ...s, queued: false, undone: s.undone + 1 }
 pure def canWindowEnds(s: DeviceAction): bool = s.queued
 pure def windowEnds(s: DeviceAction): DeviceAction = { ...s, queued: false, deleted: s.deleted + 1 }
-pure def canSettle(s: DeviceAction): bool = not(idle(s)) and s.outcome != OutcomeNone
-pure def settle(s: DeviceAction): DeviceAction = { ...s, authority: NoAuthority, outcome: OutcomeNone, nativeStep: NativeNone }
+pure def canSettleAction(s: DeviceAction): bool = not(idle(s)) and s.outcome != OutcomeNone
+pure def settleAction(s: DeviceAction): DeviceAction = { ...s, authority: NoAuthority, outcome: OutcomeNone, nativeStep: NativeNone }
 pure def alwaysQueuedDeleteIsUnknown(s: DeviceAction): bool = (s.op == DeleteSelected and not(idle(s))) implies s.outcome != OutcomeSucceeded
 pure def alwaysEveryQueuedDeleteEndsOnce(s: DeviceAction): bool = s.deleted + s.undone + (if (s.queued) 1 else 0) == s.queues
 pure def alwaysUnknownOnlyAfterNativeCall(s: DeviceAction): bool = s.outcome == OutcomeUnknown implies s.nativeStep != NativeNone

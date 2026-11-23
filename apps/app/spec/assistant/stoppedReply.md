@@ -38,16 +38,16 @@ pure def scheduled(withCancel: bool, r: Reconcile): Reconcile =
   { ...r, check: Scheduled, cancelAttempt: if (withCancel) CancelPending else NoCancel, cancelled: false, notice: CheckPending,
     message: if (r.message == ConfirmedStopped) NoMessage else r.message, reads: 0, schedules: r.schedules + 1 }
 pure def retired(r: Reconcile): Reconcile = { ...r, check: NoCheck, cancelAttempt: NoCancel, notice: NoNotice }
-pure def settled(dispatched: bool, r: Reconcile): Reconcile =
+pure def settledReconcile(dispatched: bool, r: Reconcile): Reconcile =
   { ...r, sending: false, retiredPending: false, notice: if (not(dispatched) and r.retiredPending) LookLater else r.notice }
 pure def pendingNotice(n: StoppedNotice): bool = n == CheckPending or n == CancelledPending
 pure def canSendStart(r: Reconcile): bool = not(r.sending) and not(r.operation)
 pure def sendStart(r: Reconcile): Reconcile = { ...retired(r), sending: true, retiredPending: pendingNotice(r.notice) }
 pure def canSendSettled(r: Reconcile, dispatched: bool): bool = r.sending
-pure def sendSettled(r: Reconcile, dispatched: bool): Reconcile = settled(dispatched, r)
+pure def sendSettled(r: Reconcile, dispatched: bool): Reconcile = settledReconcile(dispatched, r)
 pure def canSendStopped(r: Reconcile, dispatched: bool, withCancel: bool): bool = r.sending
 pure def sendStopped(r: Reconcile, dispatched: bool, withCancel: bool): Reconcile =
-  if (dispatched) scheduled(withCancel, settled(true, r)) else settled(false, r)
+  if (dispatched) scheduled(withCancel, settledReconcile(true, r)) else settledReconcile(false, r)
 pure def canRestoredUnanswered(r: Reconcile): bool = not(r.sending) and r.check == NoCheck
 pure def restoredUnanswered(r: Reconcile): Reconcile = scheduled(false, r)
 pure def canCancelOutcome(r: Reconcile, aborted: bool): bool = r.check == Scheduled and r.cancelAttempt == CancelPending

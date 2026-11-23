@@ -25,7 +25,7 @@ pure val initial: Storage = { owner: "", resetPending: false, startupAdmitted: f
 pure val ownerValues = Set("", "ann", "ben")
 pure val keyValues = Set("notes", "maps")
 pure val readValues = Set(0, 1, 2)
-pure val currentValues = Set(0, 1, 2)
+pure val presentValues = Set(0, 1, 2)
 ```
 
 ## Story: Keep my phone's state as I left it
@@ -36,9 +36,9 @@ pure val currentValues = Set(0, 1, 2)
 ### A save commits only over the version it read
 
 ```quint
-pure def commits(read: int, current: int): bool = read == current
+pure def commits(read: int, present: int): bool = read == present
 
-pure def lawAStaleSaveNeverCommits(read: int, current: int): bool = commits(read, current) iff read == current
+pure def lawAStaleSaveNeverCommits(read: int, present: int): bool = commits(read, present) iff read == present
 ```
 
 ### Startup is admitted once, and only with no reset pending

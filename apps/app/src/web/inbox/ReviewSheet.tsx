@@ -1,6 +1,6 @@
 // spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "A confirmed result offers only its follow-ups: undo, continue the Gmail draft, delete it"
 import type { OperationRecord } from "../../../gen/inbox__operations.ts";
-import { canContinueDraft, canDeleteGmailDraft, canUndo, clearable, notStarted } from "../../../gen/inbox__operations.ts";
+import { mayContinueDraft, mayDeleteGmailDraft, undoable, clearable, notStarted } from "../../../gen/inbox__operations.ts";
 import { Button, Sheet, SheetContent } from "../components/ui/index.ts";
 import { reviewTitle } from "./messages.ts";
 
@@ -74,9 +74,9 @@ export function ReviewSheet({ record, open, confirmable, busy, onConfirm, onRefr
               <Button variant="outline" disabled={busy} onClick={onRefresh}>Check receipt</Button>
             )}
             {notStarted(record) && <Button variant="destructive" disabled={busy} onClick={onAbandon}>Discard this operation</Button>}
-            {canUndo(record) && <Button variant="outline" disabled={busy} onClick={onUndo}>Undo</Button>}
-            {canContinueDraft(record) && <Button variant="outline" disabled={busy} onClick={onContinueDraft}>Edit draft</Button>}
-            {canDeleteGmailDraft(record) && <Button variant="outline" disabled={busy} onClick={onDeleteDraft}>Permanently delete draft</Button>}
+            {undoable(record) && <Button variant="outline" disabled={busy} onClick={onUndo}>Undo</Button>}
+            {mayContinueDraft(record) && <Button variant="outline" disabled={busy} onClick={onContinueDraft}>Edit draft</Button>}
+            {mayDeleteGmailDraft(record) && <Button variant="outline" disabled={busy} onClick={onDeleteDraft}>Permanently delete draft</Button>}
             {clearable(record) && (
               <Button variant="ghost" disabled={busy} onClick={onClear}>{record.phase === "Reviewing" || record.phase === "Preparing" ? "Cancel unsent review" : "Close receipt"}</Button>
             )}

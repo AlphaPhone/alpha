@@ -31,14 +31,14 @@ type BookmarksChange = { state: Bookmarks, out: List[BookmarkEffect] }
 pure def isRefresh(op: BookmarkOp): bool = match op { | Refresh => true | _ => false }
 pure def changeOf(op: BookmarkOp): MarkChange = match op { | Save(c) => { url: c.url, title: c.title, saved: c.saved } | _ => { url: "", title: "", saved: false } }
 pure def firstOp(queue: List[BookmarkOp]): BookmarkOp = queue.nthOr(0, Refresh)
-pure def run(dropFirst: bool, b: Bookmarks): BookmarksChange = {
-  val head = firstOp(b.queue)
-  val rest = if (dropFirst) { ...b, stage: Idle, queue: b.queue.removeAt(0), refreshQueued: if (isRefresh(head)) false else b.refreshQueued } else b
-  val next = firstOp(rest.queue)
+pure def runQueue(dropFirst: bool, b: Bookmarks): BookmarksChange = {
+  val front = firstOp(b.queue)
+  val rest = if (dropFirst) { ...b, stage: Idle, queue: b.queue.removeAt(0), refreshQueued: if (isRefresh(front)) false else b.refreshQueued } else b
+  val following = firstOp(rest.queue)
   if (rest.disposed and rest.stage == Idle) { state: { ...rest, queue: List(), refreshQueued: false }, out: List() }
   else if (rest.stage != Idle or rest.queue.length() == 0) { state: rest, out: List() }
-  else if (isRefresh(next) or not(rest.hydrated)) { state: { ...rest, stage: ReadingMarks }, out: List(ReadMarks) }
-  else { state: { ...rest, stage: WritingMarks }, out: List(WriteMark(changeOf(next))) }
+  else if (isRefresh(following) or not(rest.hydrated)) { state: { ...rest, stage: ReadingMarks }, out: List(ReadMarks) }
+  else { state: { ...rest, stage: WritingMarks }, out: List(WriteMark({ url: changeOf(following).url, title: changeOf(following).title, saved: changeOf(following).saved })) }
 }
 pure def alwaysTheStageMatchesTheQueue(b: Bookmarks): bool =
   (b.stage == Idle iff b.queue.length() == 0) and (b.stage == WritingMarks implies not(isRefresh(firstOp(b.queue))))
@@ -56,7 +56,7 @@ speak up.
 pure def canRequestRefresh(b: Bookmarks, quiet: bool): bool = not(b.disposed)
 pure def requestRefresh(b: Bookmarks, quiet: bool): BookmarksChange =
   if (b.refreshQueued) { state: { ...b, quiet: b.quiet and quiet }, out: List() }
-  else run(false, { ...b, refreshQueued: true, quiet: quiet, queue: b.queue.append(Refresh) })
+  else runQueue(false, { ...b, refreshQueued: true, quiet: quiet, queue: b.queue.append(Refresh) })
 pure def alwaysOneRefreshWaits(b: Bookmarks): bool =
   b.queue.select(op => isRefresh(op)).length() <= 1 and (b.refreshQueued iff b.queue.select(op => isRefresh(op)).length() == 1)
 ```
@@ -66,7 +66,7 @@ pure def alwaysOneRefreshWaits(b: Bookmarks): bool =
 ```quint
 pure def canRequestSave(b: Bookmarks, url: str, title: str, saved: bool): bool = not(b.disposed) and url != ""
 pure def requestSave(b: Bookmarks, url: str, title: str, saved: bool): BookmarksChange =
-  run(false, { ...b, queue: b.queue.append(Save({ url: url, title: title, saved: saved })) })
+  runQueue(false, { ...b, queue: b.queue.append(Save({ url: url, title: title, saved: saved })) })
 pure def stepAWriteFollowsARead(before: Bookmarks, via: str, after: Bookmarks, out: List[BookmarkEffect]): bool =
   out.every(e => match e { | WriteMark(c) => after.hydrated | _ => true })
 pure def sometimesASaveWaitsForItsRead(b: Bookmarks): bool = b.stage == ReadingMarks and not(isRefresh(firstOp(b.queue)))
@@ -85,20 +85,14 @@ pure val noChange: MarkChange = { url: "", title: "", saved: false }
 pure def canReadSettled(b: Bookmarks, ok: bool, urls: List[str], damaged: bool, missing: bool): bool = b.stage == ReadingMarks
 pure def readSettled(b: Bookmarks, ok: bool, urls: List[str], damaged: bool, missing: bool): BookmarksChange = {
   val refresh = isRefresh(firstOp(b.queue))
-  if (b.disposed) run(true, b)
-  else if (ok) {
-    val read = { ...b, marks: titled(urls, b.marks, noChange), hydrated: true, recovery: false }
-    if (refresh) run(true, read)
-    else { state: { ...read, stage: WritingMarks }, out: List(WriteMark(changeOf(firstOp(b.queue)))) }
-  }
-  else if (damaged) {
-    val next = run(true, { ...b, hydrated: false, recovery: true })
-    { state: next.state, out: (if (b.recovery) List() else List(OfferRecovery)).concat(next.out) }
-  }
-  else {
-    val next = run(true, { ...b, hydrated: false })
-    { state: next.state, out: (if (missing and b.quiet and refresh) List() else List(ReportMarksFailed)).concat(next.out) }
-  }
+  val read = { ...b, marks: titled(urls, b.marks, noChange), hydrated: true, recovery: false }
+  val recovering = runQueue(true, { ...b, hydrated: false, recovery: true })
+  val unread = runQueue(true, { ...b, hydrated: false })
+  if (b.disposed) runQueue(true, b)
+  else if (ok and refresh) runQueue(true, read)
+  else if (ok) { state: { ...read, stage: WritingMarks }, out: List(WriteMark({ url: changeOf(firstOp(b.queue)).url, title: changeOf(firstOp(b.queue)).title, saved: changeOf(firstOp(b.queue)).saved })) }
+  else if (damaged) { state: recovering.state, out: (if (b.recovery) List() else List(OfferRecovery)).concat(recovering.out) }
+  else { state: unread.state, out: (if (missing and b.quiet and refresh) List() else List(ReportMarksFailed)).concat(unread.out) }
 }
 pure def alwaysRecoveryMeansTheListWasNotRead(b: Bookmarks): bool = b.recovery implies not(b.hydrated)
 pure def sometimesRecoveryOffered(b: Bookmarks): bool = b.recovery and b.stage == Idle
@@ -108,13 +102,12 @@ pure def sometimesRecoveryOffered(b: Bookmarks): bool = b.recovery and b.stage =
 
 ```quint
 pure def canWriteSettled(b: Bookmarks, ok: bool, urls: List[str]): bool = b.stage == WritingMarks
-pure def writeSettled(b: Bookmarks, ok: bool, urls: List[str]): BookmarksChange =
-  if (b.disposed) run(true, b)
-  else if (ok) run(true, { ...b, marks: titled(urls, b.marks, changeOf(firstOp(b.queue))) })
-  else {
-    val next = run(true, b)
-    { state: next.state, out: List(ReportMarksFailed).concat(next.out) }
-  }
+pure def writeSettled(b: Bookmarks, ok: bool, urls: List[str]): BookmarksChange = {
+  val following = runQueue(true, b)
+  if (b.disposed) following
+  else if (ok) runQueue(true, { ...b, marks: titled(urls, b.marks, changeOf(firstOp(b.queue))) })
+  else { state: following.state, out: List(ReportMarksFailed).concat(following.out) }
+}
 pure def stepDisposedBookmarksNeverChange(before: Bookmarks, after: Bookmarks): bool =
   before.disposed implies after.marks == before.marks
 pure def canDispose(b: Bookmarks): bool = not(b.disposed)

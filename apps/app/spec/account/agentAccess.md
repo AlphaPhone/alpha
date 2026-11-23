@@ -25,7 +25,7 @@ type AgentAccess = {
   saved: Access, host: Access, previous: Access, revision: int, queue: List[Choice], inFlight: Choice,
   phase: AccessPhase, applied: int, failed: int, refused: int, hostUnconfirmed: bool
 }
-type AccessEffect = PublishAccess
+type AccessEffect = | PublishAccess
 type AccessStep = { state: AgentAccess, out: List[AccessEffect] }
 pure val noChoice: Choice = { field: GmailChanges, value: false, expected: -1 }
 pure val initial: AgentAccess = {

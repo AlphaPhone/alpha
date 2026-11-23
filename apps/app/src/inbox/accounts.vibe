@@ -1,5 +1,5 @@
 // spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/accounts.md, "Story: Grant Gmail access a step at a time"
-import { type Event as AccountsEvent, type MailAccount, type MailAccounts, type GmailCapability, type GmailPermission, Machine as AccountsMachine, canChangeMail, consentCapabilities } from "../../gen/inbox__accounts.effect.vibe"
+import { type Event as AccountsEvent, type MailAccount, type MailAccounts, type GmailCapability, type GmailPermission, Machine as AccountsMachine, mayChangeMail, consentCapabilities } from "../../gen/inbox__accounts.effect.vibe"
 import { CloudSession, GoogleAccounts, ownerOf, type GoogleAccount } from "../account/layer.vibe"
 import type { Capability as GoogleCapability } from "../../gen/account__google.ts"
 import { SavedMail, type SavedMailScope } from "./saved.vibe"
@@ -169,7 +169,7 @@ export const layer = Layer.effect(InboxAccounts, effect {
       try refresh()
     },
     effect canChange() {
-      return canChangeMail(try machine.get())
+      return mayChangeMail(try machine.get())
     }
   }
 })

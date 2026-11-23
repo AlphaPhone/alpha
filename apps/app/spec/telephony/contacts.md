@@ -170,13 +170,13 @@ pure def saveStarted(c: Contacts, valid: bool): Contacts =
 pure def canSaveAnswered(c: Contacts): bool = c.writeKind == SavingWrite
 pure def saveAnswered(c: Contacts, written: WriteAnswer, savedId: str): Contacts = {
   val editor = c.editor
-  val settled = { ...c, writeKind: NoWrite, lastWrite: Wrote({ outcome: written }), gate: if (written == WriteUnknown) WriteUnsettled else WriteIdle }
-  if (written == WriteSaved) { ...settled, editor: EditorClosed, openId: savedId, detail: NoDetail, detailTicket: c.detailTicket + 1 }
-  else if (written == WriteStale) { ...settled, notice: ChangedSinceShown, detailTicket: c.detailTicket + 1,
+  val resolved = { ...c, writeKind: NoWrite, lastWrite: Wrote({ outcome: written }), gate: if (written == WriteUnknown) WriteUnsettled else WriteIdle }
+  if (written == WriteSaved) { ...resolved, editor: EditorClosed, openId: savedId, detail: NoDetail, detailTicket: c.detailTicket + 1 }
+  else if (written == WriteStale) { ...resolved, notice: ChangedSinceShown, detailTicket: c.detailTicket + 1,
     editor: match editor { | EditorOpen(e) => EditorOpen({ ...e, stale: true }) | EditorClosed => EditorClosed } }
-  else if (written == WriteMissing) { ...settled, editor: EditorClosed, openId: "", detail: NoDetail, notice: ContactGone }
-  else if (written == WriteUnknown) { ...settled, editor: EditorClosed, openId: "", detail: NoDetail, confirming: false, notice: OutcomeUnknown }
-  else { ...settled, notice: NotWritten }
+  else if (written == WriteMissing) { ...resolved, editor: EditorClosed, openId: "", detail: NoDetail, notice: ContactGone }
+  else if (written == WriteUnknown) { ...resolved, editor: EditorClosed, openId: "", detail: NoDetail, confirming: false, notice: OutcomeUnknown }
+  else { ...resolved, notice: NotWritten }
 }
 pure val savedIdValues = Set("", "7")
 pure def sometimesAStaleEditorIsKept(c: Contacts): bool = {
@@ -198,11 +198,11 @@ pure def canDeleteStarted(c: Contacts): bool = c.shown and c.confirming and c.ga
 pure def deleteStarted(c: Contacts): Contacts = { ...c, gate: WriteInFlight, writeKind: DeletingWrite, explicitRead: false }
 pure def canDeleteAnswered(c: Contacts): bool = c.writeKind == DeletingWrite
 pure def deleteAnswered(c: Contacts, written: WriteAnswer): Contacts = {
-  val settled = { ...c, writeKind: NoWrite, confirming: false, lastWrite: Wrote({ outcome: written }), gate: if (written == WriteUnknown) WriteUnsettled else WriteIdle }
+  val resolved = { ...c, writeKind: NoWrite, confirming: false, lastWrite: Wrote({ outcome: written }), gate: if (written == WriteUnknown) WriteUnsettled else WriteIdle }
   if (written == WriteDeleted or written == WriteMissing or written == WriteUnknown)
-    { ...settled, openId: "", detail: NoDetail, detailTicket: c.detailTicket + 1, notice: if (written == WriteUnknown) OutcomeUnknown else NoContactsNotice }
-  else if (written == WriteStale) { ...settled, detailTicket: c.detailTicket + 1, notice: ChangedSinceShown }
-  else { ...settled, notice: NotWritten }
+    { ...resolved, openId: "", detail: NoDetail, detailTicket: c.detailTicket + 1, notice: if (written == WriteUnknown) OutcomeUnknown else NoContactsNotice }
+  else if (written == WriteStale) { ...resolved, detailTicket: c.detailTicket + 1, notice: ChangedSinceShown }
+  else { ...resolved, notice: NotWritten }
 }
 pure def alwaysConfirmingNeedsTheContactReadWhole(c: Contacts): bool = c.confirming implies (c.openId != "" and detailFor(c.detail, c.openId))
 pure def sometimesDeleted(c: Contacts): bool = c.lastWrite == Wrote({ outcome: WriteDeleted }) and c.openId == ""

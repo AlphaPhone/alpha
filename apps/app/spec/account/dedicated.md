@@ -43,11 +43,11 @@ pure def isPending(v: DedicatedView): bool = match v { | PendingSetup(p) => true
 pure def atCutover(v: DedicatedView): bool = match v { | PendingSetup(p) => p.cutover | _ => false }
 pure def canPoll(d: Dedicated): bool = (isPending(d.view) or d.blocked) and not(d.busy)
 pure def poll(d: Dedicated): DedicatedStep = { state: { ...d, busy: true }, out: List(PollStatus) }
-pure def canPolled(d: Dedicated, outcome: PollOutcome): bool = d.busy and (d.blocked or not(reviewAvailable(d.view)))
-pure def polled(d: Dedicated, outcome: PollOutcome): Dedicated =
-  if (outcome == SetupFinished) { ...d, busy: false, blocked: false, view: DedicatedReady }
-  else if (outcome == ReadyForCutover) { ...d, busy: false, blocked: false, view: PendingSetup({ cutover: true }) }
-  else if (outcome == StillProvisioning) { ...d, busy: false, blocked: false, view: PendingSetup({ cutover: false }) }
+pure def canPolled(d: Dedicated, result: PollOutcome): bool = d.busy and (d.blocked or not(reviewAvailable(d.view)))
+pure def polled(d: Dedicated, result: PollOutcome): Dedicated =
+  if (result == SetupFinished) { ...d, busy: false, blocked: false, view: DedicatedReady }
+  else if (result == ReadyForCutover) { ...d, busy: false, blocked: false, view: PendingSetup({ cutover: true }) }
+  else if (result == StillProvisioning) { ...d, busy: false, blocked: false, view: PendingSetup({ cutover: false }) }
   else { ...d, busy: false, blocked: true }
 pure def canFinalize(d: Dedicated): bool = atCutover(d.view) and not(d.blocked) and not(d.busy)
 pure def finalize(d: Dedicated): DedicatedStep = { state: { ...d, busy: true }, out: List(FinalizeCutover) }

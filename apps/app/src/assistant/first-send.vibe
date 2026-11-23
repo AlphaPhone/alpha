@@ -34,8 +34,8 @@ export effect function moveFirstDraft(source: string, destination: string) {
       const before = slotOf(try drafts.get(), source)
       const active = (try drafts.get()).active
       const exchanged = before.revision === (try migration.get()).source.revision
-        && (try quiet(drafts.send({ type: "select", binding: source }))) && (try quiet(drafts.send({ type: "edit", text: [] })))
-      if ((try drafts.get()).active !== active) try quiet(drafts.send({ type: "select", binding: active }))
+        && (try quiet(drafts.send({ type: "selectDraft", binding: source }))) && (try quiet(drafts.send({ type: "edit", text: [] })))
+      if ((try drafts.get()).active !== active) try quiet(drafts.send({ type: "selectDraft", binding: active }))
       try quiet(migration.send({ type: "finishClear", exchanged, revision: slotOf(try drafts.get(), source).revision }))
     }
     if ((try migration.get()).phase === "Done") return (try migration.get()).result === "Moved"

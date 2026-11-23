@@ -156,7 +156,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
       return { tag: "GoogleFactor", googleFactor: factorOf(answer.method) } as const
     })
-    if (try stillCurrent(turn)) try send({ type: "googleEnds", outcome })
+    if (try stillCurrent(turn)) try send({ type: "googleEnds", result: outcome })
   }
 
   effect function runSend() {

@@ -286,7 +286,7 @@ export const launcherLive = Layer.effect(Launcher, effect {
 
   const raw = storedValue(LEGACY_FAVORITES_KEY)
   const record = raw === null ? undefined : (effect { return try Schema.decodeUnknownEffect(LegacyFavorites)(try Effect.try(() => JSON.parse(raw))) } catch () => undefined)
-  try saveFavorites({ type: "importLegacy", record: legacyOf(record), keys: record === undefined ? [] : [...record.keys] })
+  try saveFavorites({ type: "importLegacy", record: legacyOf(record), keyList: record === undefined ? [] : [...record.keys] })
   try saveFavorites({ type: "syncViews", views: homeDefaults((try navigation.get()).admitted) })
   if (installed !== undefined) {
     observer.send({ type: "start" }) catch () => undefined

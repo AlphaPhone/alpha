@@ -99,7 +99,7 @@ export const dedicatedService = Layer.effect(DedicatedSetup, effect {
       }
       const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(DedicatedStatus)(raw) catch () => undefined)
       const outcome: PollOutcome = read === undefined || read.phase === "unconfirmed" ? "SetupUnconfirmed" : read.phase === "ready" ? "SetupFinished" : read.phase === "cutover" ? "ReadyForCutover" : "StillProvisioning"
-      machine.send({ type: "polled", outcome }) catch () => undefined
+      machine.send({ type: "polled", result: outcome }) catch () => undefined
     }
   }
 

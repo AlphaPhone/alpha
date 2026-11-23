@@ -25,8 +25,8 @@ pure val pageSize = 50
 pure val debounceMs = 250
 pure val markMs = 1800
 pure def openSearch(s: Search): Search = { ...s, open: true, pending: false, results: false, page: 0, more: false }
-pure def canQuery(s: Search, length: int): bool = s.open and not(s.pending) and length >= minimumQuery
-pure def query(s: Search, length: int): Search = { ...s, pending: true, held: s.owner, page: 0 }
+pure def canQuery(s: Search, len: int): bool = s.open and not(s.pending) and len >= minimumQuery
+pure def query(s: Search, len: int): Search = { ...s, pending: true, held: s.owner, page: 0 }
 pure def canLoadMore(s: Search): bool = s.open and not(s.pending) and s.results and s.more
 pure def loadMore(s: Search): Search = { ...s, pending: true, held: s.owner, page: s.page + 1 }
 pure def answer(s: Search, count: int): Search = {
@@ -39,7 +39,7 @@ pure def alwaysResultsBelongToTheOpenOwner(s: Search): bool = s.results implies 
 pure def alwaysMoreNeedsResults(s: Search): bool = s.more implies s.results
 pure def sometimesResultsShown(s: Search): bool = s.results and s.more
 pure def sometimesARetiredAnswerShowedNothing(s: Search): bool = s.owner >= 1 and not(s.results) and s.held < s.owner
-pure val lengthValues = Set(0, 1, 2, 5)
+pure val lenValues = Set(0, 1, 2, 5)
 pure val countValues = Set(0, 3, 50)
 ```
 

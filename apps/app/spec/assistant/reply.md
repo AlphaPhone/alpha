@@ -57,7 +57,7 @@ pure val linesValues = Set(List()).union(Set(List(Prose))).union(Set(List(FenceM
 pure val noticeLimit = 5
 pure val noticeLength = 500
 pure def keptNotices(count: int): int = if (count < 0) 0 else if (count > noticeLimit) noticeLimit else count
-pure def noticeFits(length: int): bool = length >= 1 and length <= noticeLength
+pure def noticeFits(len: int): bool = len >= 1 and len <= noticeLength
 pure def systemNoticeShown(isLatestNotice: bool, replyAfter: bool): bool = isLatestNotice and not(replyAfter)
 pure def lawNoMoreThanFiveNotices(count: int): bool = keptNotices(count) <= noticeLimit
 pure val countValues = Set(-1, 0, 5, 6)
@@ -217,6 +217,6 @@ pure val waitMsValues = Set(-1, 0, 999, 2400, 120000)
 
 ```quint
 type PlanAction = ChoosePlan | RetryCloud | SignIn | RecheckProvider | Funding
-pure def cardOnSettledReply(action: PlanAction): bool = action != Funding
-pure def lawFundingIsNeverOnASettledReply(action: PlanAction): bool = action == Funding implies not(cardOnSettledReply(action))
+pure def cardOnSettledReply(planAction: PlanAction): bool = planAction != Funding
+pure def lawFundingIsNeverOnASettledReply(planAction: PlanAction): bool = planAction == Funding implies not(cardOnSettledReply(planAction))
 ```

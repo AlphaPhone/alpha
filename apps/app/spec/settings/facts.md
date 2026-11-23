@@ -63,7 +63,7 @@ pure def sometimesARead(f: Facts): bool = f.shown >= 1 and f.read.launcher
 ```quint
 pure def resume(f: Facts): Facts = if (f.visible) beginRead(f) else { ...f, resumedUnread: true }
 pure def show(f: Facts): Facts = beginRead({ ...f, visible: true })
-pure def hide(f: Facts): Facts = { ...f, visible: false }
+pure def hideFacts(f: Facts): Facts = { ...f, visible: false }
 pure def alwaysAShownSettingsHasNothingUnread(f: Facts): bool = f.visible implies not(f.resumedUnread)
 pure def sometimesUnreadBehindAnotherView(f: Facts): bool = f.resumedUnread
 ```

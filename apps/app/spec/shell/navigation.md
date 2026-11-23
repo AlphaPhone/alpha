@@ -14,6 +14,19 @@ The page publishes `backTaken` to Android as `data-alpha-can-go-back`; Android h
 page only while it holds. Otherwise the HOME app stays on Home, the launcher flavour moves its task
 back and any other activity finishes.
 
+## Story: Open an app and find it where I left it
+
+> As the owner, I want an app I open to show the place I left it in, and Android restarting Alpha
+> to bring back the app I was in and the way back from it.
+
+### An app opens only while it is admitted and nothing holds the phone
+
+Opening from Home, the library, a notification or the agent closes the library, the shade and
+Home's edit mode and puts the assistant on the app's resting detent: the comms apps rest on their
+bar, every other app on the pill, Home on the bar. Push keeps the app being left as the way back,
+at most six deep; any other open starts a new history. Opening a different app changes the
+revision, which retires an agent's claim made on the screen before.
+
 ```quint
 import detents.* from "../assistant/detents"
 type Host = Standalone | LauncherApp | HomeApp | AssistantSurface
@@ -51,22 +64,6 @@ pure val entryValues = Set("org.fixture.clock", "alpha:notes")
 pure val entriesValues = Set(Set(), Set("org.fixture.clock"), Set("org.fixture.clock", "alpha:notes"))
 pure val queryValues = Set("", "cl")
 pure val weight_nativeBack = 6
-```
-
-## Story: Open an app and find it where I left it
-
-> As the owner, I want an app I open to show the place I left it in, and Android restarting Alpha
-> to bring back the app I was in and the way back from it.
-
-### An app opens only while it is admitted and nothing holds the phone
-
-Opening from Home, the library, a notification or the agent closes the library, the shade and
-Home's edit mode and puts the assistant on the app's resting detent: the comms apps rest on their
-bar, every other app on the pill, Home on the bar. Push keeps the app being left as the way back,
-at most six deep; any other open starts a new history. Opening a different app changes the
-revision, which retires an agent's claim made on the screen before.
-
-```quint
 pure def restOf(app: str): Detent = restFor(not(app == "" or BarApps.contains(app)))
 pure def placeOf(s: Nav, app: str): Place =
   s.places.select(p => p.app == app).nthOr(0, { app: app, route: "", inner: false })
@@ -393,8 +390,8 @@ change of it; a keyguard that cannot be read counts as locked. Only Alpha's own 
 is the assistant surface, never a page a caller opened with an assist action.
 
 ```quint
-pure def canHide(s: Nav): bool = not(s.hidden)
-pure def hide(s: Nav): Nav = { ...s, hidden: true, claim: NoClaim, destination: "" }
+pure def canHidePage(s: Nav): bool = not(s.hidden)
+pure def hidePage(s: Nav): Nav = { ...s, hidden: true, claim: NoClaim, destination: "" }
 pure def canShow(s: Nav): bool = s.hidden
 pure def show(s: Nav): Nav = { ...s, hidden: false }
 pure def canAppFailed(s: Nav, app: str): bool = s.app == app and s.app != ""
@@ -425,8 +422,8 @@ pure def canCommitClaim(s: Nav, route: str): bool =
   s.claim == ClaimHeld and s.captured == s.revision and not(s.hidden) and s.holds.size() == 0 and
   s.layers.length() == 0 and s.admitted.contains(s.destination)
 pure def commitClaim(s: Nav, route: str): Nav = {
-  val next = opened(s.destination, route, true, s)
-  { ...next, chat: if (talking(s)) s.chat else next.chat, claim: ClaimCommitted, destination: s.destination }
+  val following = opened(s.destination, route, true, s)
+  { ...following, chat: if (talking(s)) s.chat else following.chat, claim: ClaimCommitted, destination: s.destination }
 }
 pure def canAcknowledge(s: Nav): bool = s.claim == ClaimCommitted and s.destination == s.app and not(s.hidden)
 pure def acknowledge(s: Nav): Nav = { ...s, claim: ClaimDelivered }

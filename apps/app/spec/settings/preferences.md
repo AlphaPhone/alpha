@@ -32,7 +32,7 @@ pure val initial: Preferences = {
 ```quint
 type Preference = AskBeforeActions | AgentLocation | BrowserPage | GmailChanges | CalendarEdits | MailImages
   | BrowserMicrophone | BrowserLocation
-pure def valueOf(p: Preferences, preference: Preference): bool =
+pure def preferenceValue(p: Preferences, preference: Preference): bool =
   if (preference == AskBeforeActions) p.askBeforeActions else if (preference == AgentLocation) p.agentLocation
   else if (preference == BrowserPage) p.browserPage
   else if (preference == GmailChanges) p.gmailChanges else if (preference == CalendarEdits) p.calendarEdits
@@ -46,7 +46,7 @@ pure def setPreference(p: Preferences, preference: Preference, on: bool): Prefer
   else if (preference == MailImages) { ...q, mailImages: on } else if (preference == BrowserMicrophone) { ...q, browserMicrophone: on }
   else { ...q, browserLocation: on }
 }
-pure def lawASwitchSetsItsOwnValue(p: Preferences, preference: Preference, on: bool): bool = valueOf(setPreference(p, preference, on), preference) == on
+pure def lawASwitchSetsItsOwnValue(p: Preferences, preference: Preference, on: bool): bool = preferenceValue(setPreference(p, preference, on), preference) == on
 pure def sometimesLocationOff(p: Preferences): bool = not(p.agentLocation) and p.edits >= 1
 ```
 
@@ -84,7 +84,7 @@ A saved record that lacks a preference reads that one from `initial` and keeps e
 a record of the wrong shape is unreadable.
 
 ```quint
-pure def defaultOf(preference: Preference): bool = valueOf(initial, preference)
+pure def defaultOf(preference: Preference): bool = preferenceValue(initial, preference)
 pure def lawTheBrowserPageStartsOn(preference: Preference): bool = preference == BrowserPage implies defaultOf(preference)
 ```
 

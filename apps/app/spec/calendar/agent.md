@@ -233,19 +233,19 @@ approval queue with exactly its reviewed fields, and its card opens the [approva
 
 ```quint
 type ProviderReply = ProviderApplied | ProviderUnknown | ProviderForeign | ProviderRefused | ProviderTransport | ProviderQueued
-pure def settled(outcome: WriteOutcome, s: AgentCalendar): AgentCalendar =
-  val done = { ...s, write: noWrite, outcome: outcome, outcomeId: s.write.id, deferred: "" }
+pure def settledWrite(result: WriteOutcome, s: AgentCalendar): AgentCalendar =
+  val done = { ...s, write: noWrite, outcome: result, outcomeId: s.write.id, deferred: "" }
   if (s.deferred != "") startRead(s.deferred, done) else done
 pure def ownerLoss(s: AgentCalendar): WriteOutcome = WriteOwnerChanged
 pure def canProviderReply(s: AgentCalendar, id: int, reply: ProviderReply): bool = s.write.id == id and s.write.phase == Dispatched
 pure def providerReply(s: AgentCalendar, id: int, reply: ProviderReply): AgentCalendar =
   match reply {
-    | ProviderTransport => settled(WriteTransport, s)
-    | ProviderForeign => settled(WriteForeign, s)
-    | ProviderRefused => settled(WriteRefused, s)
-    | ProviderQueued => settled(if (writeCurrent(s)) WriteQueuedForApproval else ownerLoss(s), s)
-    | ProviderUnknown => settled(if (writeCurrent(s)) WriteUnknown else ownerLoss(s), s)
-    | ProviderApplied => if (writeCurrent(s)) { ...s, write: { ...s.write, phase: ReadingBack } } else settled(ownerLoss(s), s)
+    | ProviderTransport => settledWrite(WriteTransport, s)
+    | ProviderForeign => settledWrite(WriteForeign, s)
+    | ProviderRefused => settledWrite(WriteRefused, s)
+    | ProviderQueued => settledWrite(if (writeCurrent(s)) WriteQueuedForApproval else ownerLoss(s), s)
+    | ProviderUnknown => settledWrite(if (writeCurrent(s)) WriteUnknown else ownerLoss(s), s)
+    | ProviderApplied => if (writeCurrent(s)) { ...s, write: { ...s.write, phase: ReadingBack } } else settledWrite(ownerLoss(s), s)
   }
 ```
 
@@ -267,7 +267,7 @@ pure def readbackOutcome(kind: WriteKind, readback: Readback): WriteOutcome =
   }
 pure def canReadbackReply(s: AgentCalendar, id: int, readback: Readback): bool = s.write.id == id and s.write.phase == ReadingBack
 pure def readbackReply(s: AgentCalendar, id: int, readback: Readback): AgentCalendar =
-  if (not(writeCurrent(s))) settled(ownerLoss(s), s) else settled(readbackOutcome(s.write.kind, readback), s)
+  if (not(writeCurrent(s))) settledWrite(ownerLoss(s), s) else settledWrite(readbackOutcome(s.write.kind, readback), s)
 pure def lawSavedNeedsReadback(kind: WriteKind): bool = readbackOutcome(kind, ReadbackMissing) != Saved and readbackOutcome(kind, ReadbackFailed) != Saved
 pure def sometimesSavedAfterReadback(s: AgentCalendar): bool = s.outcome == Saved
 pure def sometimesDeferredReadRuns(s: AgentCalendar): bool = s.read.id != 0 and s.outcome != NoOutcome and s.outcomeId >= 1

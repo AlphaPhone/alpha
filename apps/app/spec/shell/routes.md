@@ -13,10 +13,6 @@ Notes' records are exactly these routes, each with no query: `GET /api/notes/sta
 `POST /api/notes/trash/recordings/complete` and `POST /api/views/notes/interact`. Any other method,
 path or query under those prefixes stays on the phone.
 
-```quint
-type RouteCheck = { owner: bool, unsafe: bool, claimed: bool, method: bool, path: bool, query: bool, id: bool }
-```
-
 ## Story: Let only my own app reach my agent's records
 
 > As the owner, I want the requests that reach my agent's records from the phone's renderer to be
@@ -29,6 +25,7 @@ whitespace or a Unicode space) is refused before anything else; every request ne
 owner.
 
 ```quint
+type RouteCheck = { owner: bool, unsafe: bool, claimed: bool, method: bool, path: bool, query: bool, id: bool }
 pure def crosses(c: RouteCheck): bool =
   c.owner and not(c.unsafe) and (not(c.claimed) or (c.method and c.path and c.query and c.id))
 pure val cValues = Set(

@@ -44,13 +44,12 @@ pure val shownValues: Set[ShownPage] = List(publicPage, { ...publicPage, priv: t
 
 ```quint
 pure def canStartHandoff(h: Handoff, shown: ShownPage): bool = h.phase == HandoffIdle
-pure def startHandoff(h: Handoff, shown: ShownPage): HandoffChange =
+pure def startHandoff(h: Handoff, shown: ShownPage): HandoffChange = {
+  val bound = { ...h, bound: shown, boundVisit: h.visit, approved: false }
   if (not(shown.visible and shown.settled and shown.secure)) { state: h, out: List(Notice({ problem: NeedsHttpsPage })) }
-  else {
-    val bound = { ...h, bound: shown, boundVisit: h.visit, approved: false }
-    if (shown.priv) { state: { ...bound, phase: PreparingReview }, out: List() }
-    else { state: { ...bound, phase: Presenting }, out: List() }
-  }
+  else if (shown.priv) { state: { ...bound, phase: PreparingReview }, out: List() }
+  else { state: { ...bound, phase: Presenting }, out: List() }
+}
 ```
 
 ### A private page is confirmed first, and the review opens only if the page did not change while the page was withdrawn
@@ -58,7 +57,7 @@ pure def startHandoff(h: Handoff, shown: ShownPage): HandoffChange =
 ```quint
 pure def canPrepared(h: Handoff, shown: ShownPage): bool = h.phase == PreparingReview
 pure def prepared(h: Handoff, shown: ShownPage): HandoffChange =
-  if (stillCurrent(h, shown)) { state: { ...h, phase: Reviewing }, out: List(AskLeavePrivate(h.bound)) } else changedPage(PageChanged, h)
+  if (stillCurrent(h, shown)) { state: { ...h, phase: Reviewing }, out: List(AskLeavePrivate({ visible: h.bound.visible, tab: h.bound.tab, url: h.bound.url, navigation: h.bound.navigation, revision: h.bound.revision, settled: h.bound.settled, secure: h.bound.secure, priv: h.bound.priv })) } else changedPage(PageChanged, h)
 pure def canReviewed(h: Handoff, approved: bool): bool = h.phase == Reviewing
 pure def reviewed(h: Handoff, approved: bool): HandoffChange =
   if (approved) { state: { ...h, phase: Presenting, approved: true }, out: List() }
@@ -69,12 +68,14 @@ pure def reviewed(h: Handoff, approved: bool): HandoffChange =
 
 ```quint
 pure def canPresented(h: Handoff, shown: ShownPage): bool = h.phase == Presenting
-pure def presented(h: Handoff, shown: ShownPage): HandoffChange =
-  if (stillCurrent(h, shown)) {
-    val launch = { tab: shown.tab, url: shown.url, navigation: shown.navigation, priv: h.bound.priv, approved: h.approved,
-      exact: shown.tab == h.bound.tab and shown.url == h.bound.url and shown.revision == h.bound.revision and h.visit == h.boundVisit }
-    { state: { ...h, phase: Dispatching, launched: h.launched.append(launch) }, out: List(Dispatch(launch)) }
-  } else changedPage(PageChanged, h)
+pure def presented(h: Handoff, shown: ShownPage): HandoffChange = {
+  val launch = { tab: shown.tab, url: shown.url, navigation: shown.navigation, priv: h.bound.priv, approved: h.approved,
+    exact: shown.tab == h.bound.tab and shown.url == h.bound.url and shown.revision == h.bound.revision and h.visit == h.boundVisit }
+  if (stillCurrent(h, shown))
+    { state: { ...h, phase: Dispatching, launched: h.launched.append(launch) },
+      out: List(Dispatch({ tab: launch.tab, url: launch.url, navigation: launch.navigation, priv: launch.priv, approved: launch.approved, exact: launch.exact })) }
+  else changedPage(PageChanged, h)
+}
 pure def canDispatched(h: Handoff, ok: bool): bool = h.phase == Dispatching
 pure def dispatched(h: Handoff, ok: bool): HandoffChange =
   { state: { ...h, phase: CleaningUp }, out: if (ok) List() else List(Notice({ problem: NotOpened })) }

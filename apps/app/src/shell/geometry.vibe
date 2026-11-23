@@ -53,8 +53,8 @@ export const geometryLive = Layer.effectDiscard(effect {
   fork.scoped (effect { for try (const _ of resizes()) { try measureWindow(machine); try measureLayout(machine) } })
   fork.scoped (effect { for try (const _ of layoutChanges()) try measureLayout(machine) })
   fork.scoped (effect { for try (const scale of textScales()) try sendTo(machine, { type: "measureText", scale }) })
-  fork.scoped (effect { for try (const _ of pageEvents("focusin", "document")) try sendTo(machine, { type: "focusField", field: focusedField() }) })
-  fork.scoped (effect { for try (const _ of pageEvents("focusout", "document")) try sendTo(machine, { type: "focusField", field: focusedField() }) })
+  fork.scoped (effect { for try (const _ of pageEvents("focusin", "document")) try sendTo(machine, { type: "focusField", fieldId: focusedField() }) })
+  fork.scoped (effect { for try (const _ of pageEvents("focusout", "document")) try sendTo(machine, { type: "focusField", fieldId: focusedField() }) })
   fork.scoped (effect {
     for try (const detail of pageEvents("alpha-keyboard-visibility")) {
       const shown = Schema.decodeUnknownEffect(KeyboardVisibility)(detail) catch () => undefined

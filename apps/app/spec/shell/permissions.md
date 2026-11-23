@@ -8,6 +8,16 @@ restart, and leads to Android's settings instead. Progress through the steps is 
 state, kept best-effort on the device; it never grants anything. Settings → "Set up Alpha access"
 opens the walkthrough again at a chosen step.
 
+## Story: Grant Alpha what it needs, when I choose
+
+> As the owner, I want to see each kind of access Alpha uses, be asked by Android only when I tap
+> Allow, and pick up where I left off after a restart, without Alpha ever assuming a grant.
+
+### The walkthrough resumes from what was saved and asks again for nothing already asked
+
+An installation that completed under an earlier, shorter list (four, five or six steps) stays
+completed. A saved step outside the list starts again at the first step.
+
 ```quint
 type Perm = PermNotifications | PermMicrophone | PermCamera | PermLocation | PermCalendar | PermPhotos | PermFiles
 type Access = AccessChecking | AccessAsk | AccessSettings | AccessReady | AccessUnavailable
@@ -39,19 +49,6 @@ pure val initial: Permissions = {
 pure val attemptedValues = Set(Set(), Set(PermCamera))
 pure val savedValues = Set(0, 2, 7)
 pure val indexValues = Set(0, 3, 6)
-```
-
-## Story: Grant Alpha what it needs, when I choose
-
-> As the owner, I want to see each kind of access Alpha uses, be asked by Android only when I tap
-> Allow, and pick up where I left off after a restart, without Alpha ever assuming a grant.
-
-### The walkthrough resumes from what was saved and asks again for nothing already asked
-
-An installation that completed under an earlier, shorter list (four, five or six steps) stays
-completed. A saved step outside the list starts again at the first step.
-
-```quint
 pure def keyAt(p: Permissions, index: int): Perm = p.keys.nthOr(index, PermNotifications)
 pure def accessOf(p: Permissions, index: int): Access = p.states.getOr(keyAt(p, index), AccessChecking)
 pure def inRange(p: Permissions, index: int): bool = index >= 0 and index < p.keys.length()
@@ -59,10 +56,10 @@ pure def selected(p: Permissions): int = if (p.target >= 0) p.target else p.prog
 pure def canRestore(p: Permissions, native: bool, attempted: Set[Perm], saved: int, done: bool, touched: bool): bool =
   not(p.restored) and p.pending == -1
 pure def restore(p: Permissions, native: bool, attempted: Set[Perm], saved: int, done: bool, touched: bool): Permissions = {
-  val keys = if (native) NativeKeys else BrowserKeys
-  { ...p, restored: true, native: native, keys: keys, attempted: attempted,
-    completed: done or saved >= keys.length(),
-    progress: if (done or saved >= keys.length()) -1 else if (saved < 0) 0 else saved,
+  val keyList = if (native) NativeKeys else BrowserKeys
+  { ...p, restored: true, native: native, keys: keyList, attempted: attempted,
+    completed: done or saved >= keyList.length(),
+    progress: if (done or saved >= keyList.length()) -1 else if (saved < 0) 0 else saved,
     imageKnown: p.imageKnown or not(native), untouched: not(touched), quietEnd: false, notice: NoCheckNotice }
 }
 pure val touchedValues = Set(true, false)
@@ -115,13 +112,13 @@ pure def begin(p: Permissions): Permissions =
 pure def canAsk(p: Permissions): bool =
   p.pending >= 0 and inRange(p, p.pending) and accessOf(p, p.pending) == AccessAsk and not(p.attempted.contains(keyAt(p, p.pending)))
 pure def ask(p: Permissions): Permissions = { ...p, attempted: p.attempted.union(Set(keyAt(p, p.pending))) }
-pure def canSettle(p: Permissions, access: Access): bool =
+pure def canSettleAccess(p: Permissions, access: Access): bool =
   p.pending >= 0 and inRange(p, p.pending) and p.ticket == p.generation and p.operations.getOr(keyAt(p, p.pending), -1) == p.ticket
 pure def noticeAfter(native: bool, access: Access): CheckNotice =
   if (native or access == AccessReady or access == AccessChecking) NoCheckNotice
   else if (access == AccessSettings) NoticeStillOff
   else NoticeUnconfirmed
-pure def settle(p: Permissions, access: Access): Permissions = {
+pure def settleAccess(p: Permissions, access: Access): Permissions = {
   val key = keyAt(p, p.pending)
   { ...p, pending: -1, states: p.states.put(key, access), operations: p.operations.put(key, -1),
     grants: p.grants.put(key, if (access == AccessReady) p.grants.getOr(key, GrantNone) else GrantNone),
@@ -154,11 +151,11 @@ pure def canAdvance(p: Permissions, skip: bool): bool =
   ((p.pending == -1 and (accessOf(p, p.progress) == AccessReady or (skip and accessOf(p, p.progress) != AccessChecking))) or
     (skip and p.stalled))
 pure def advance(p: Permissions, skip: bool): Permissions = {
-  val last = p.progress == p.keys.length() - 1
+  val final = p.progress == p.keys.length() - 1
   val untouched = p.untouched and not(skip) and not(p.attempted.contains(keyAt(p, p.progress)))
-  val quiet = last and automaticNow(p) and untouched and not(p.attention) and not(p.progressError)
-  { ...p, phase: if (quiet) PhaseHome else if (last) PhaseReady else PhaseWalkthrough, progress: if (last) -1 else p.progress + 1,
-    completed: p.completed or last, untouched: untouched, stalled: false, quietEnd: quiet, notice: NoCheckNotice,
+  val quiet = final and automaticNow(p) and untouched and not(p.attention) and not(p.progressError)
+  { ...p, phase: if (quiet) PhaseHome else if (final) PhaseReady else PhaseWalkthrough, progress: if (final) -1 else p.progress + 1,
+    completed: p.completed or final, untouched: untouched, stalled: false, quietEnd: quiet, notice: NoCheckNotice,
     pending: -1, generation: if (p.pending >= 0) p.generation + 1 else p.generation }
 }
 pure def canFinish(p: Permissions): bool = p.signedIn and p.phase == PhaseReady and p.pending == -1
@@ -238,10 +235,10 @@ Setup reads "Step 2 of 7" on Android and "Step 2 of 4" in a browser, from the sa
 it holds across a restart. The Ready card and a review from Settings show no count.
 
 ```quint
-pure def stepCount(p: Permissions): int =
+pure def shownCount(p: Permissions): int =
   if (p.phase == PhaseWalkthrough and p.target == -1 and not(p.review) and inRange(p, p.progress)) p.progress + 1 else 0
-pure def alwaysTheCountFitsTheList(p: Permissions): bool = stepCount(p) >= 0 and stepCount(p) <= p.keys.length()
-pure def sometimesCountShown(p: Permissions): bool = stepCount(p) == 2
+pure def alwaysTheCountFitsTheList(p: Permissions): bool = shownCount(p) >= 0 and shownCount(p) <= p.keys.length()
+pure def sometimesCountShown(p: Permissions): bool = shownCount(p) == 2
 ```
 
 ### On the Alpha image, steps Android already granted pass by themselves, and an untouched walkthrough ends on Home
@@ -284,12 +281,12 @@ the first step, a recorded skip as a touched walkthrough, and every prompt alrea
 ```quint
 pure def legacyCount(version: int, native: bool): int =
   if (not(native) or version == 1) 4 else if (version == 2) 5 else if (version == 3) 6 else 7
-pure def legacySaved(version: int, completed: bool, step: int, native: bool): int =
-  if (completed) 7 else if (step >= 0 and step < legacyCount(version, native)) step else 0
-pure def lawALegacyCompletionStaysCompleted(version: int, step: int, native: bool): bool =
-  legacySaved(version, true, step, native) >= legacyCount(4, native)
-pure def lawALegacyStepIsInTheList(version: int, step: int, native: bool): bool =
-  legacySaved(version, false, step, native) >= 0 and legacySaved(version, false, step, native) < legacyCount(4, native)
+pure def legacySaved(version: int, completed: bool, atStep: int, native: bool): int =
+  if (completed) 7 else if (atStep >= 0 and atStep < legacyCount(version, native)) atStep else 0
+pure def lawALegacyCompletionStaysCompleted(version: int, atStep: int, native: bool): bool =
+  legacySaved(version, true, atStep, native) >= legacyCount(4, native)
+pure def lawALegacyStepIsInTheList(version: int, atStep: int, native: bool): bool =
+  legacySaved(version, false, atStep, native) >= 0 and legacySaved(version, false, atStep, native) < legacyCount(4, native)
 ```
 
 ### The walkthrough opens only for a signed-in account, and not while a foreground connection works

@@ -21,6 +21,7 @@ its saved note's time while it is edited; a new note has none until it is saved.
 type RowTime = { pinned: bool, at: int }
 type Ranked = { pinned: bool, at: int, index: int }
 pure val noRow: RowTime = { pinned: false, at: -1 }
+type NewestFold = { k: int, newest: int }
 pure def effectiveAt(rows: List[RowTime], i: int): int = {
   val own = rows.nthOr(i, noRow).at
   if (own >= 0) own
@@ -28,16 +29,19 @@ pure def effectiveAt(rows: List[RowTime], i: int): int = {
 }
 pure def ahead(a: Ranked, b: Ranked): bool =
   (a.pinned and not(b.pinned)) or (a.pinned == b.pinned and (a.at > b.at or (a.at == b.at and a.index < b.index)))
+type PlaceFold = { placed: bool, out: List[Ranked] }
 pure def insertRanked(sorted: List[Ranked], e: Ranked): List[Ranked] = {
   val placed = sorted.foldl({ placed: false, out: List() }, (acc, x) =>
     if (not(acc.placed) and ahead(e, x)) { placed: true, out: acc.out.append(e).append(x) }
     else { placed: acc.placed, out: acc.out.append(x) })
   if (placed.placed) placed.out else placed.out.append(e)
 }
+type RankFold = { i: int, ranks: List[Ranked] }
 pure def ranked(rows: List[RowTime]): List[Ranked] =
   rows.foldl({ i: 0, ranks: List() }, (acc, r) => { i: acc.i + 1, ranks: acc.ranks.append({ pinned: r.pinned, at: effectiveAt(rows, acc.i), index: acc.i }) }).ranks
 pure def shownOrder(rows: List[RowTime]): List[int] =
   ranked(rows).foldl(List(), (sorted, e) => insertRanked(sorted, e)).listMap(e => e.index)
+type PinFold = { unpinned: bool, ok: bool }
 pure def pinnedBeforeUnpinned(order: List[int], rows: List[RowTime]): bool =
   order.foldl({ unpinned: false, ok: true }, (acc, i) =>
     { unpinned: acc.unpinned or not(rows.nthOr(i, noRow).pinned), ok: acc.ok and not(acc.unpinned and rows.nthOr(i, noRow).pinned) }).ok

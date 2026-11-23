@@ -81,7 +81,7 @@ export const layer = Layer.effect(FilesAgent, effect {
   }
 
   effect function prepare(op: FilesAgentOperation, context: AgentContext) {
-    try send({ type: "settle" })
+    try send({ type: "settleProposal" })
     try scene(context)
     const admitted = filesOperationAdmitted(op, try Ref.get(negotiated))
     const proposed = proposal.send({ type: "propose", op: OPS[op.type], target: targetOf(op) }) catch () => undefined
@@ -214,7 +214,7 @@ export const layer = Layer.effect(FilesAgent, effect {
     effect advertise(peer: readonly string[]) {
       const browserOffered = peer.includes(FILES_CAPABILITY)
       const shownOffered = browserOffered && peer.includes(FILES_SHOWN_TARGET_CAPABILITY)
-      try send({ type: "settle" })
+      try send({ type: "settleProposal" })
       try send({ type: "negotiateWith", peerBrowser: browserOffered, peerShown: shownOffered })
       const advertised = browserOffered ? (shownOffered ? [FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY] : [FILES_CAPABILITY]) : []
       try Ref.set(negotiated, advertised)
@@ -228,7 +228,7 @@ export const layer = Layer.effect(FilesAgent, effect {
       const s = try proposal.get()
       const direct = op.type === "files_filter" || op.type === "files_open"
       if (direct) {
-        try send({ type: "settle" })
+        try send({ type: "settleProposal" })
         try scene(context)
         const proposed = proposal.send({ type: "propose", op: OPS[op.type], target: targetOf(op) }) catch () => undefined
         if (proposed === undefined || proposed.outcome === "NotAvailable") return { status: "failed", summary: "This action isn't available on this phone." } satisfies AgentResult
@@ -241,7 +241,7 @@ export const layer = Layer.effect(FilesAgent, effect {
       }
       const refused = proposal.send({ type: "refuse" }) catch () => undefined
       if (refused !== undefined) {
-        try send({ type: "settle" })
+        try send({ type: "settleProposal" })
         return { status: "failed", summary: refused.sensitive || !refused.foreground ? "Files is unavailable." : !refused.granted ? "Nothing was changed because Files needs storage access." : "Nothing changed because these files changed after review." } satisfies AgentResult
       }
       if (direct && (try proposal.get()).view !== "OnFiles") {
@@ -249,7 +249,7 @@ export const layer = Layer.effect(FilesAgent, effect {
         const shown = forward ? (timeout(Stream.runHead(Stream.filter(filter.changes, (f) => f.active)), FILES_FORWARD) catch () => undefined) : undefined
         if (shown === undefined || Option.isNone(shown)) {
           try send({ type: "giveUp" })
-          try send({ type: "settle" })
+          try send({ type: "settleProposal" })
           return { status: "failed", summary: "Files is unavailable." } satisfies AgentResult
         }
         try ignore(proposal.send({ type: "openFiles" }))
@@ -257,7 +257,7 @@ export const layer = Layer.effect(FilesAgent, effect {
       const result = op.type === "files_filter" ? try filterNow(op) : op.type === "files_open" ? try openNow(op) : try changeNow(op)
       if (op.type === "files_filter" && result.status === "succeeded") try ignore(proposal.send({ type: "showFilter" }))
       try send({ type: "giveUp" })
-      try send({ type: "settle" })
+      try send({ type: "settleProposal" })
       return result
   }
 })

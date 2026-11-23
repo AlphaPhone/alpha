@@ -14,6 +14,17 @@ probe and publishes its ratio. The dock (bar, pill or composer) floats over the 
 footprint is the scroll clearance of Home, the library and every app scroller, and the header
 clearance keeps top notices off an app's header.
 
+## Story: Type without the page turning sideways
+
+> As the owner, I want typing in a portrait window to keep the portrait layout, a rotation while I
+> type to turn the layout, and closing the keyboard with Back to put the composer away.
+
+### The estimator keeps the keyboard-free height, and a swap of the sides while editing is a rotation
+
+At the same width, a shorter window while a field has focus is the keyboard. A new width while a
+field has focus, within a fifth of the remembered height, is a rotation: the remembered width
+stands in for the new keyboard-free height. Any other width change takes the measured height.
+
 ```quint
 type Field = NoField | ComposerField | OtherField
 type Base = { w: int, h: int }
@@ -45,20 +56,6 @@ pure val scaleValues = Set(100, 130, 150, 200)
 pure val clearanceValues = Set(80, 110)
 pure val restValues = Set(40, 60)
 pure val pxValues = Set(0, 60, 140)
-```
-
-## Story: Type without the page turning sideways
-
-> As the owner, I want typing in a portrait window to keep the portrait layout, a rotation while I
-> type to turn the layout, and closing the keyboard with Back to put the composer away.
-
-### The estimator keeps the keyboard-free height, and a swap of the sides while editing is a rotation
-
-At the same width, a shorter window while a field has focus is the keyboard. A new width while a
-field has focus, within a fifth of the remembered height, is a rotation: the remembered width
-stands in for the new keyboard-free height. Any other width change takes the measured height.
-
-```quint
 pure def magnitude(n: int): int = if (n < 0) -n else n
 pure def estimated(base: Base, w: int, h: int, editing: bool): Base =
   if (w == base.w) (if (not(editing) or h > base.h) { w: w, h: h } else base)
@@ -111,8 +108,8 @@ that ends releases it. A short suggestion bar never counts. The page going to th
 releases it too.
 
 ```quint
-pure def canFocusField(g: Geometry, field: Field): bool = g.mounted
-pure def focusField(g: Geometry, field: Field): Geometry = { ...g, field: field }
+pure def canFocusField(g: Geometry, fieldId: Field): bool = g.mounted
+pure def focusField(g: Geometry, fieldId: Field): Geometry = { ...g, field: fieldId }
 pure def keyboardShown(g: Geometry, visible: bool, handoff: bool): Geometry = {
   val release = g.ime == 1 and not(visible or handoff) and g.field == ComposerField
   { ...g, ime: if (visible or handoff) 1 else 0, handoff: handoff,

@@ -19,7 +19,7 @@ them, and a stored state cannot turn them on.
 
 ```quint
 type BuildVariant = LauncherVariant | AospVariant | BrowserVariant
-pure def telephonyOffered(variant: BuildVariant, registered: bool): bool = variant == AospVariant and registered
+pure def telephonyOffered(build: BuildVariant, registered: bool): bool = build == AospVariant and registered
 pure def lawOnlyTheRegisteredImageOffersTelephony(registered: bool): bool =
   not(telephonyOffered(LauncherVariant, registered)) and not(telephonyOffered(BrowserVariant, registered))
     and (telephonyOffered(AospVariant, registered) iff registered)

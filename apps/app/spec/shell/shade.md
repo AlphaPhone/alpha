@@ -8,6 +8,16 @@ empty launcher Home"). A browser build has no Android; its development build sta
 explains where notifications are. Android's answer is awaited for five seconds; a fallback never
 claims that the shade opened.
 
+## Story: Pull down for my notifications
+
+> As the owner, I want a pull on Home to show Android's notifications, and when Android does not,
+> to be told how to reach them instead of seeing nothing.
+
+### Only Android is asked, one request at a time, and only from Home
+
+A pull while a request is still waiting is ignored. A locked Home shows no notifications. A build
+without Android explains the top-edge swipe.
+
 ```quint
 type ShadeSurface = AndroidShade | StandInShade | NoShade
 type ShadeReply = ShadeOpened | ShadeNotInFront | ShadeStandalone | ShadePermissionMissing | ShadeUnsupported
@@ -22,19 +32,6 @@ pure val initial: Shade = {
 }
 pure val WaitMs = 5000
 pure val ticketValues = Set(1, 2, 3)
-```
-
-## Story: Pull down for my notifications
-
-> As the owner, I want a pull on Home to show Android's notifications, and when Android does not,
-> to be told how to reach them instead of seeing nothing.
-
-### Only Android is asked, one request at a time, and only from Home
-
-A pull while a request is still waiting is ignored. A locked Home shows no notifications. A build
-without Android explains the top-edge swipe.
-
-```quint
 pure def canConfigure(s: Shade, surface: ShadeSurface): bool = not(s.configured)
 pure def configure(s: Shade, surface: ShadeSurface): Shade = { ...s, surface: surface, configured: true }
 pure def onHome(s: Shade, home: bool): Shade = { ...s, home: home }

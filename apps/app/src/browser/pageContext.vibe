@@ -96,7 +96,7 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     const withheld: Withheld = page?.withheld === undefined ? "NotWithheld" : withheldOf[page.withheld]
     const settledRead = try step({ type: "answered", turn, tab: after.cur, revision: curTab(after).revision, valid: page !== undefined, withheld })
     if (settledRead?.stage !== "Answered" || page === undefined) return undefined
-    const checked = try step({ type: "rechecked", turn, enabled: try preferences.sharesBrowserPage(), current: try still(state.cur, tab.revision, tab.page.navigation) })
+    const checked = try step({ type: "rechecked", turn, isOn: try preferences.sharesBrowserPage(), present: try still(state.cur, tab.revision, tab.page.navigation) })
     if (checked?.stage !== "Answered") return undefined
     const handed = try step({ type: "delivered", turn })
     if (handed?.stage !== "Delivered") return undefined

@@ -85,11 +85,9 @@ pure def canAsk(c: Capture, scene: Scene, wanted: Wanted, reviewed: bool, ownerW
 pure def ask(c: Capture, scene: Scene, wanted: Wanted, reviewed: bool, ownerWords: bool, offersLibraryId: bool, sensitive: bool): Capture = {
   val fresh = { ...c, outcome: NoOutcome, shutters: 0, rows: 0, current: true, aborted: false, sensitive: sensitive, panel: false,
     wanted: wanted, flipped: false, libraryIdOffered: offersLibraryId, libraryIdShared: false, refusedByRecording: false, cancelledBeforeCapture: false }
+  val held = { ...fresh, holds: c.holds + 1, directTaken: c.directTaken or not(reviewed) }
   if (needsCard(reviewed, ownerWords, c.directTaken) or not(scene.shown) or scene.recording or scene.busy or sensitive) { ...fresh, outcome: Failed }
-  else {
-    val held = { ...fresh, holds: c.holds + 1, directTaken: c.directTaken or not(reviewed) }
-    if (scene.covers) { ...held, panel: true, request: Revealing } else { ...held, request: stageAfterWait(scene) }
-  }
+  else if (scene.covers) { ...held, panel: true, request: Revealing } else { ...held, request: stageAfterWait(scene) }
 }
 pure def alwaysHoldReleased(c: Capture): bool = c.holds == (if (c.request == NoRequest) 0 else 1)
 pure def alwaysPanelOnlyWhileRevealing(c: Capture): bool = c.panel implies c.request == Revealing

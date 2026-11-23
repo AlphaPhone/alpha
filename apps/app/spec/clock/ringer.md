@@ -106,15 +106,15 @@ own volume, which the browser and the computer control. A ringing alarm or timer
 its tone is silent.
 
 ```quint
-pure def toneLevel(dnd: SV::Switch, filter: AlarmFilter, reported: bool, volume: int, max: int): int =
-  if (filter == FilterNone and dnd != SV::Off) 0
+pure def toneLevel(dnd: SV::Switch, alarmFilter: AlarmFilter, reported: bool, volume: int, max: int): int =
+  if (alarmFilter == FilterNone and dnd != SV::Off) 0
   else if (not(reported)) 100
   else if (max <= 0 or volume <= 0) 0
   else if (volume >= max) 100
   else volume * 100 / max
-pure def canSoundFacts(s: Ringer, dnd: SV::Switch, filter: AlarmFilter, reported: bool, volume: int, max: int): bool = true
-pure def soundFacts(s: Ringer, dnd: SV::Switch, filter: AlarmFilter, reported: bool, volume: int, max: int): Ringer =
-  { ...s, level: toneLevel(dnd, filter, reported, volume, max) }
+pure def canSoundFacts(s: Ringer, dnd: SV::Switch, alarmFilter: AlarmFilter, reported: bool, volume: int, max: int): bool = true
+pure def soundFacts(s: Ringer, dnd: SV::Switch, alarmFilter: AlarmFilter, reported: bool, volume: int, max: int): Ringer =
+  { ...s, level: toneLevel(dnd, alarmFilter, reported, volume, max) }
 pure val volumeValues = Set(0, 3, 7)
 pure val maxValues = Set(0, 7)
 pure def alwaysTheToneIsAPercentage(s: Ringer): bool = s.level >= 0 and s.level <= 100
@@ -122,6 +122,6 @@ pure def lawTotalSilenceSilencesTheTone(reported: bool, volume: int, max: int): 
 pure def lawAlarmsRingThroughPriorityAndAlarmsOnly(dnd: SV::Switch, reported: bool, volume: int, max: int): bool =
   toneLevel(dnd, FilterPriority, reported, volume, max) == toneLevel(SV::Off, FilterAll, reported, volume, max) and
   toneLevel(dnd, FilterAlarms, reported, volume, max) == toneLevel(SV::Off, FilterAll, reported, volume, max)
-pure def lawAMutedAlarmStreamIsSilent(dnd: SV::Switch, filter: AlarmFilter, max: int): bool = toneLevel(dnd, filter, true, 0, max) == 0
+pure def lawAMutedAlarmStreamIsSilent(dnd: SV::Switch, alarmFilter: AlarmFilter, max: int): bool = toneLevel(dnd, alarmFilter, true, 0, max) == 0
 pure def sometimesSilencedByDnd(s: Ringer): bool = s.sounding and s.level == 0
 ```

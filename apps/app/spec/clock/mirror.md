@@ -27,10 +27,10 @@ pure val initial: Mirror = { loaded: false, revision: "", enabled: false, histor
   saving: false, report: NoMirrorReport, appEnabled: true, remindersBlocked: false, saves: 0 }
 pure val appsValues = Set(List(), List({ packageName: "com.mail", preview: true, available: true }))
 pure val revisionValues = Set("r1", "r2")
-pure def canStatusRead(m: Mirror, revision: str, enabled: bool, history: bool, paused: bool, granted: bool, apps: List[MirrorApp]): bool =
+pure def canStatusRead(m: Mirror, revision: str, isOn: bool, history: bool, paused: bool, granted: bool, apps: List[MirrorApp]): bool =
   not(m.saving) and apps.length() <= maxApps
-pure def statusRead(m: Mirror, revision: str, enabled: bool, history: bool, paused: bool, granted: bool, apps: List[MirrorApp]): Mirror =
-  { ...m, loaded: true, revision: revision, enabled: enabled, history: history, paused: paused, granted: granted, apps: apps }
+pure def statusRead(m: Mirror, revision: str, isOn: bool, history: bool, paused: bool, granted: bool, apps: List[MirrorApp]): Mirror =
+  { ...m, loaded: true, revision: revision, enabled: isOn, history: history, paused: paused, granted: granted, apps: apps }
 pure def canStatusFailed(m: Mirror): bool = not(m.saving)
 pure def statusFailed(m: Mirror): Mirror = { ...m, loaded: false, report: MirrorUnavailable }
 pure def collecting(m: Mirror): bool = m.granted and m.enabled and not(m.paused)

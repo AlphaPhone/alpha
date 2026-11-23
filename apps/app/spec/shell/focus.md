@@ -6,6 +6,20 @@ re-rendered its rows. Focus the owner placed is never taken; the shell only fill
 for a bounded time. The shell reports every focus change (`focusin`, `focusout`) and each animation
 frame it waits; the element ids are the controls' `data-alpha-focus` keys.
 
+## Story: Keep my place when the screen changes under me
+
+> As the owner using TalkBack or a keyboard, I want focus to land on the new screen's title, the
+> library's search or Home, to come back to the control that opened a sheet once it closes, and
+> never to be pulled away from where I put it.
+
+### A new screen is given focus within twelve frames, unless the owner already moved it
+
+After a screen change (an app, Home, the library opening) the shell waits two frames for the
+screen to render, then looks each frame for the screen's target: a screen that focuses itself, the
+library's search, Home's first control, the app's title, else the app's region. A control that
+already holds focus on the new screen keeps it. A resize that removed the focused control asks for
+the same, but only while that control is still gone, and never over a screen change in progress.
+
 ```quint
 type Target = TargetNone | TargetSelf | TargetSearch | TargetHome | TargetTitle | TargetRegion
 type Cause = Idle | ScreenChange | ResizeLoss
@@ -26,23 +40,6 @@ pure val modalValues = Set("sheet-a", "sheet-b")
 pure val openerValues = Set("opener", "tile-notes")
 pure val listIdValues = Set("inbox")
 pure val rowValues = Set("row-1", "row-2")
-```
-
-## Story: Keep my place when the screen changes under me
-
-> As the owner using TalkBack or a keyboard, I want focus to land on the new screen's title, the
-> library's search or Home, to come back to the control that opened a sheet once it closes, and
-> never to be pulled away from where I put it.
-
-### A new screen is given focus within twelve frames, unless the owner already moved it
-
-After a screen change (an app, Home, the library opening) the shell waits two frames for the
-screen to render, then looks each frame for the screen's target: a screen that focuses itself, the
-library's search, Home's first control, the app's title, else the app's region. A control that
-already holds focus on the new screen keeps it. A resize that removed the focused control asks for
-the same, but only while that control is still gone, and never over a screen change in progress.
-
-```quint
 pure def canScreenChanged(f: Focus, target: Target): bool = target != TargetNone
 pure def screenChanged(f: Focus, target: Target): Focus = { ...f, cause: ScreenChange, frames: WaitFrames, target: target }
 pure def canResizeLost(f: Focus, target: Target): bool =

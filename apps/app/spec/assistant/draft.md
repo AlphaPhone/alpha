@@ -35,8 +35,8 @@ pure val draftUnitLimit = 64000
 pure val newline = 10
 pure def slotOf(d: Drafts, binding: str): Slot = if (d.slots.keys().contains(binding)) d.slots.get(binding) else emptySlot
 pure def shown(d: Drafts): List[int] = slotOf(d, d.active).text
-pure def canSelect(d: Drafts, binding: str): bool = binding != d.active
-pure def select(d: Drafts, binding: str): Drafts =
+pure def canSelectDraft(d: Drafts, binding: str): bool = binding != d.active
+pure def selectDraft(d: Drafts, binding: str): Drafts =
   { ...d, active: binding, slots: d.slots.put(binding, slotOf(d, binding)),
     bindings: if (d.bindings.includes(binding)) d.bindings else d.bindings.append(binding),
     notice: if (slotOf(d, binding).unsettled) MaySent else Quiet }
@@ -48,7 +48,7 @@ pure def edit(d: Drafts, text: List[int]): Drafts = {
 }
 pure def alwaysEveryDraftHasItsBinding(d: Drafts): bool = d.bindings.includes(d.active) and d.bindings.every(b => d.bindings.select(c => c == b).length() == 1)
 pure def stepSelectingKeepsEveryText(before: Drafts, via: str, after: Drafts): bool =
-  via == "select" implies (slotOf(after, before.active) == slotOf(before, before.active) and shown(after) == slotOf(before, after.active).text)
+  via == "selectDraft" implies (slotOf(after, before.active) == slotOf(before, before.active) and shown(after) == slotOf(before, after.active).text)
 pure def sometimesTwoConversationsKeepTheirOwnText(d: Drafts): bool =
   d.bindings.some(b => b != d.active and slotOf(d, b).text.length() > 0) and shown(d).length() > 0
 ```

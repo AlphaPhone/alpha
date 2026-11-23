@@ -193,16 +193,16 @@ says what the store did without reopening the review.
 pure def allowsKeep(review: Keep): bool =
   review.source == UnsavedFrame and review.hasPort and not(review.closed) and review.operation > 0 and
   (review.status == KeepIdle or review.status == KeepFailed or (review.status == KeepUnknown and review.native))
-pure def keepIdentityAfter(review: Keep, outcome: KeepStatus, fresh: int): int = if (outcome == KeepFailed) fresh else review.operation
+pure def keepIdentityAfter(review: Keep, keepResult: KeepStatus, fresh: int): int = if (keepResult == KeepFailed) fresh else review.operation
 pure def canOpenKeepReview(s: Scan, source: Source, hasPort: bool, native: bool): bool = s.keep.closed and s.keep.status != KeepRunning
 pure def openKeepReview(s: Scan, source: Source, hasPort: bool, native: bool): Scan =
   { ...s, keep: { source: source, status: KeepIdle, closed: false, hasPort: hasPort, native: native, operation: s.keep.operation + 1 } }
 pure def canRequestKeep(s: Scan): bool = allowsKeep(s.keep)
 pure def requestKeep(s: Scan): Scan = { ...s, keep: { ...s.keep, status: KeepRunning } }
-pure def canResolveKeep(s: Scan, outcome: KeepStatus): bool =
-  s.keep.status == KeepRunning and (outcome == KeepSaved or outcome == KeepFailed or outcome == KeepUnknown)
-pure def resolveKeep(s: Scan, outcome: KeepStatus): Scan =
-  { ...s, keep: { ...s.keep, status: outcome, operation: keepIdentityAfter(s.keep, outcome, s.keep.operation + 1) } }
+pure def canResolveKeep(s: Scan, keepResult: KeepStatus): bool =
+  s.keep.status == KeepRunning and (keepResult == KeepSaved or keepResult == KeepFailed or keepResult == KeepUnknown)
+pure def resolveKeep(s: Scan, keepResult: KeepStatus): Scan =
+  { ...s, keep: { ...s.keep, status: keepResult, operation: keepIdentityAfter(s.keep, keepResult, s.keep.operation + 1) } }
 pure def canCloseKeepReview(s: Scan): bool = not(s.keep.closed)
 pure def closeKeepReview(s: Scan): Scan = { ...s, keep: { ...s.keep, closed: true } }
 pure def stepLateKeepCannotReopenReview(before: Scan, via: str, after: Scan): bool =

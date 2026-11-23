@@ -133,7 +133,7 @@ export const providerService = Layer.effect(AiProvider, effect {
       const read = readOf(status)
       return read.route === before.target && read.textKey === before.textKey && read.voiceKey === before.voiceKey
     })
-    try send({ type: "routeSettled", outcome })
+    try send({ type: "routeSettled", result: outcome })
     try follow()
   }
 
@@ -144,7 +144,7 @@ export const providerService = Layer.effect(AiProvider, effect {
       const read = readOf(status)
       return before.removing === "TextKey" ? !read.textKey && read.voiceKey === before.voiceKey : !read.voiceKey && read.textKey === before.textKey
     })
-    try send({ type: "removeSettled", outcome })
+    try send({ type: "removeSettled", result: outcome })
     try follow()
   }
 

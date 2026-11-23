@@ -1,7 +1,7 @@
 // spec/browser/egress.md, "Story: Share or keep the page I am looking at"
 import { type EgressEffect, type Event, type Viewed, Machine, machine } from "../../gen/browser__egress.effect.vibe"
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
-import { settled } from "../../gen/browser__page.effect.vibe"
+import { isSettled } from "../../gen/browser__page.effect.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 import { Toasts } from "../shell/toasts.vibe"
 import { copyText } from "./clipboard.ts"
@@ -26,7 +26,7 @@ export function viewedOf(s: Session, visible: boolean): Viewed {
   const tab = curTab(s)
   return {
     visible, tab: s.cur, url: tab.page.url, title: tab.page.title || tab.page.url, navigation: tab.page.navigation,
-    revision: tab.revision, settled: tab.stage === "Live" && settled(tab.page), secure: tab.page.secure,
+    revision: tab.revision, settled: tab.stage === "Live" && isSettled(tab.page), secure: tab.page.secure,
   }
 }
 

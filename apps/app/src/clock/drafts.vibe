@@ -73,7 +73,7 @@ export const draftsLayer = Layer.effect(ReminderDrafts, effect {
       const fields = JSON.stringify(keptFormOf(draft, try Clock.currentTimeMillis))
       const held = (try drafts.get()).creation
       const under = form === "new" && id === "" ? (held.tag === "Held" ? held.id : freshId()) : id
-      step({ type: "keep", slot: SLOT[form], id: under, revision, fields })
+      step({ type: "keep", slot: SLOT[form], id: under, revision, edits: fields })
     },
     effect settle(form: DraftForm, id: string, version: number) {
       if (CONFIRMED.has(outcomeTag((try screen.get()).outcome))) step({ type: "saved", slot: SLOT[form], id, version })

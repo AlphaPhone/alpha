@@ -44,9 +44,9 @@ registers on both native variants. The browser page registers no plugin.
 ```quint
 type Reach = AnyNative | AospImage
 
-pure def reachable(reach: Reach, variant: Variant): bool = match reach {
-  | AnyNative => variant != Browser
-  | AospImage => variant == Aosp
+pure def reachable(reach: Reach, build: Variant): bool = match reach {
+  | AnyNative => build != Browser
+  | AospImage => build == Aosp
 }
 
 pure def lawAospCapabilitiesNeverReachTheLauncher(reach: Reach): bool =
@@ -131,19 +131,19 @@ type DeviceHeader = DeviceIdHeader | DeviceKeyHeader | CapabilitiesHeader | Clie
 
 pure val headerValueLimit = 2048
 
-pure def headerAdmitted(header: DeviceHeader, length: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
-  header != OtherHeader and length <= headerValueLimit and oneLine and not(repeated) and (header == ClientIdHeader implies clientToken)
+pure def headerAdmitted(deviceHeader: DeviceHeader, len: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
+  deviceHeader != OtherHeader and len <= headerValueLimit and oneLine and not(repeated) and (deviceHeader == ClientIdHeader implies clientToken)
 
-pure val lengthValues = Set(0, 128, 2048, 2049)
+pure val lenValues = Set(0, 128, 2048, 2049)
 
-pure def lawOnlyTheDeviceHeadersCross(length: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
-  not(headerAdmitted(OtherHeader, length, oneLine, clientToken, repeated))
+pure def lawOnlyTheDeviceHeadersCross(len: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
+  not(headerAdmitted(OtherHeader, len, oneLine, clientToken, repeated))
 
-pure def lawACrossingHeaderIsOneBoundedLine(header: DeviceHeader, length: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
-  headerAdmitted(header, length, oneLine, clientToken, repeated) implies (oneLine and length <= headerValueLimit and not(repeated))
+pure def lawACrossingHeaderIsOneBoundedLine(deviceHeader: DeviceHeader, len: int, oneLine: bool, clientToken: bool, repeated: bool): bool =
+  headerAdmitted(deviceHeader, len, oneLine, clientToken, repeated) implies (oneLine and len <= headerValueLimit and not(repeated))
 
-pure def lawAClientIdIsAToken(length: int, oneLine: bool, repeated: bool): bool =
-  not(headerAdmitted(ClientIdHeader, length, oneLine, false, repeated))
+pure def lawAClientIdIsAToken(len: int, oneLine: bool, repeated: bool): bool =
+  not(headerAdmitted(ClientIdHeader, len, oneLine, false, repeated))
 ```
 
 ### A refusal carries a wait only when the resident answered 429 with a whole number of seconds
@@ -164,9 +164,12 @@ pure val secondsValues = Set(-1, 0, 30, 86401)
 pure def lawAdviceOnlyOn429(httpStatus: int, given: bool, seconds: int): bool =
   adviceOf(httpStatus, given, seconds) != NoAdvice implies httpStatus == 429
 
-pure def lawAdviceIsNeverNegative(httpStatus: int, given: bool, seconds: int): bool = match adviceOf(httpStatus, given, seconds) {
-  | WaitSeconds(w) => w.seconds >= 0 and w.seconds <= maxWaitSeconds
-  | NoAdvice => true
+pure def lawAdviceIsNeverNegative(httpStatus: int, given: bool, seconds: int): bool = {
+  val advice = adviceOf(httpStatus, given, seconds)
+  match advice {
+    | WaitSeconds(w) => w.seconds >= 0 and w.seconds <= maxWaitSeconds
+    | NoAdvice => true
+  }
 }
 ```
 

@@ -105,7 +105,7 @@ export const planeLayer = Layer.effect(MapsPlane, effect {
     effect mount(element: number, basemap: Basemap) {
       return (try send({ type: "mountPlane", element, basemap }))?.generation ?? (try plane.get()).generation
     },
-    effect report(owner: number, outcome: PlaneState) { try send({ type: "planeReports", owner, outcome }) },
+    effect report(owner: number, outcome: PlaneState) { try send({ type: "planeReports", owner, result: outcome }) },
     effect retry() { return (try send({ type: "retryMap" }))?.generation ?? (try plane.get()).generation },
     effect release() {
       const old = try Ref.getAndSet(asking, undefined)

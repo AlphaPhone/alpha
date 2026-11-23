@@ -155,9 +155,12 @@ changed is dropped.
 
 ```quint
 type Row = { recorded: bool, sameSession: bool, settledRow: bool, mine: bool }
-pure def quotable(r: Row, typing: bool): bool = r.recorded and r.sameSession and r.settledRow and not(typing)
-pure def editable(r: Row, typing: bool, draftEmpty: bool, canFork: bool): bool = quotable(r, typing) and r.mine and draftEmpty and canFork
-pure def lawOnlyMyMessageIsEdited(r: Row, typing: bool, canFork: bool): bool = editable(r, typing, true, canFork) implies r.mine
-pure def lawAnEditNeedsAnEmptyComposer(r: Row, typing: bool, canFork: bool): bool = not(editable(r, typing, false, canFork))
-pure def lawAnUnrecordedRowIsNoTarget(r: Row, typing: bool): bool = not(r.recorded) implies not(quotable(r, typing))
+pure def quotable(row: Row, typing: bool): bool = row.recorded and row.sameSession and row.settledRow and not(typing)
+pure def editable(row: Row, typing: bool, draftEmpty: bool, canFork: bool): bool = quotable(row, typing) and row.mine and draftEmpty and canFork
+pure def lawOnlyMyMessageIsEdited(row: Row, typing: bool, canFork: bool): bool = editable(row, typing, true, canFork) implies row.mine
+pure def lawAnEditNeedsAnEmptyComposer(row: Row, typing: bool, canFork: bool): bool = not(editable(row, typing, false, canFork))
+pure def lawAnUnrecordedRowIsNoTarget(row: Row, typing: bool): bool = not(row.recorded) implies not(quotable(row, typing))
+pure val rowValues = Set({ recorded: true, sameSession: true, settledRow: true, mine: true }, { recorded: true, sameSession: true, settledRow: true, mine: false },
+  { recorded: false, sameSession: true, settledRow: true, mine: true }, { recorded: true, sameSession: false, settledRow: true, mine: true },
+  { recorded: true, sameSession: true, settledRow: false, mine: true })
 ```

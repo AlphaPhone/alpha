@@ -47,6 +47,7 @@ pure val operationValues = Set("complete-r1")
 pure def canRetainCreation(j: ReminderJournal, id: str, request: str): bool =
   id != "" and not(hasCreation(j, id)) and (j.creations.length() < maxCreations or j.creations.some(c => c.state == CreationFound))
 pure val noCreations: List[Creation] = List()
+type OldestFold = { done: bool, kept: List[Creation] }
 pure def withoutOldestFound(cs: List[Creation]): List[Creation] =
   cs.foldl({ done: false, kept: noCreations }, (acc, c) =>
     if (not(acc.done) and c.state == CreationFound) { done: true, kept: acc.kept } else { done: acc.done, kept: acc.kept.append(c) }).kept

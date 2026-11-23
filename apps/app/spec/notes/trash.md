@@ -192,12 +192,12 @@ pure def eraseOutcome(commit: EraseCommit, hasAudio: bool): EraseOutcome =
   else { erased: false, cleanupPending: false, storeReady: false, reportedSuccess: false }
 pure def canFinishErase(s: TrashView, commit: EraseCommit, recordings: int): bool = s.busy == Erasing and recordings >= 0
 pure def finishErase(s: TrashView, commit: EraseCommit, recordings: int): TrashView = {
-  val outcome = eraseOutcome(commit, recordings > 0)
+  val result = eraseOutcome(commit, recordings > 0)
   val left = if (s.scope == ConfirmAll) 0 else if (s.rows > 0) s.rows - 1 else 0
-  val settled = { ...s, busy: TrashIdle, scope: NoConfirm, storeReady: outcome.storeReady, reportedSuccess: outcome.reportedSuccess }
+  val resolved = { ...s, busy: TrashIdle, scope: NoConfirm, storeReady: result.storeReady, reportedSuccess: result.reportedSuccess }
   if (commit == CommitSaved)
-    closedIfEmpty(left, { ...settled, erasedTotal: s.erasedTotal + 1, cleanupPending: s.cleanupPending + recordings })
-  else closedIfEmpty(s.rows, settled)
+    closedIfEmpty(left, { ...resolved, erasedTotal: s.erasedTotal + 1, cleanupPending: s.cleanupPending + recordings })
+  else closedIfEmpty(s.rows, resolved)
 }
 pure def canReopen(s: TrashView): bool = not(s.storeReady) and s.busy == TrashIdle
 pure def reopen(s: TrashView): TrashView = { ...s, storeReady: true }
@@ -232,15 +232,15 @@ type LegacyTrashRow = { deletedAt: int, now: int, inCanonicalTrash: bool }
 pure val legacyRetention = 2592000000
 pure def legacyRowKept(row: LegacyTrashRow): bool = row.now - row.deletedAt < legacyRetention
 pure def legacyRowSettled(row: LegacyTrashRow): bool = not(legacyRowKept(row)) or row.inCanonicalTrash
-pure def legacySlotClears(settled: int, total: int): bool = total >= 0 and settled == total
+pure def legacySlotClears(resolved: int, total: int): bool = total >= 0 and resolved == total
 pure val rowValues = Set(
   { deletedAt: 0, now: 2591999999, inCanonicalTrash: false },
   { deletedAt: 0, now: 2591999999, inCanonicalTrash: true },
   { deletedAt: 0, now: 2592000000, inCanonicalTrash: false })
-pure val settledValues = Set(0, 1, 2)
+pure val resolvedValues = Set(0, 1, 2)
 pure val totalValues = Set(0, 1, 2)
 pure def lawPassedRowNeedsNoNote(row: LegacyTrashRow): bool = not(legacyRowKept(row)) implies legacyRowSettled(row)
 pure def lawKeptRowSettlesOnlyInTrash(row: LegacyTrashRow): bool =
   (legacyRowKept(row) and not(row.inCanonicalTrash)) implies not(legacyRowSettled(row))
-pure def lawSlotWaitsForEveryRow(settled: int, total: int): bool = settled < total implies not(legacySlotClears(settled, total))
+pure def lawSlotWaitsForEveryRow(resolved: int, total: int): bool = resolved < total implies not(legacySlotClears(resolved, total))
 ```

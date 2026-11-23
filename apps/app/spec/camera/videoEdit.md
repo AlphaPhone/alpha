@@ -33,19 +33,19 @@ pure val initial: VideoEditor = {
 pure val maxDuration = 3000
 pure def clamp(low: int, value: int, high: int): int = if (value < low) low else if (value > high) high else value
 pure def editable(v: VideoEditor): bool = v.loaded and not(v.busy) and not(v.closed)
-pure val lengthValues = Set(4, 3000, 3001)
+pure val lenValues = Set(4, 3000, 3001)
 pure val sourceValues = Set("", "v:1")
 pure val positionValues = Set(-1, 0, 1, 3, 5)
-pure val handleValues = Set(true, false)
+pure val startHandleValues = Set(true, false)
 pure val resultValues = Set(VideoSaved, VideoNotSaved, VideoUnconfirmed)
 ```
 
 ### An editor opens over a video of up to five minutes with the whole length kept
 
 ```quint
-pure def canOpenEditor(v: VideoEditor, source: str, length: int): bool = v.closed and source != "" and length >= 1 and length <= maxDuration
-pure def openEditor(v: VideoEditor, source: str, length: int): VideoEditor =
-  { ...initial, source: source, duration: length, closed: false, aborted: false, trim: { ...untouched, end: length }, submitted: { ...untouched, end: length } }
+pure def canOpenEditor(v: VideoEditor, source: str, len: int): bool = v.closed and source != "" and len >= 1 and len <= maxDuration
+pure def openEditor(v: VideoEditor, source: str, len: int): VideoEditor =
+  { ...initial, source: source, duration: len, closed: false, aborted: false, trim: { ...untouched, end: len }, submitted: { ...untouched, end: len } }
 pure def canSourceLoaded(v: VideoEditor): bool = not(v.closed) and not(v.loaded)
 pure def sourceLoaded(v: VideoEditor): VideoEditor = { ...v, loaded: true }
 pure def canSourceError(v: VideoEditor): bool = not(v.closed)
@@ -100,8 +100,8 @@ pure def sometimesSavedCopy(v: VideoEditor): bool = v.outcome == VideoSaved and 
 ```quint
 pure def canCloseEditor(v: VideoEditor): bool = not(v.closed)
 pure def closeEditor(v: VideoEditor): VideoEditor = { ...v, closed: true, aborted: true, playing: false }
-pure def canHide(v: VideoEditor): bool = not(v.hidden)
-pure def hide(v: VideoEditor): VideoEditor = { ...v, hidden: true, closed: true, aborted: true, playing: false }
+pure def canHideEditor(v: VideoEditor): bool = not(v.hidden)
+pure def hideEditor(v: VideoEditor): VideoEditor = { ...v, hidden: true, closed: true, aborted: true, playing: false }
 pure def canShow(v: VideoEditor): bool = v.hidden
 pure def show(v: VideoEditor): VideoEditor = { ...v, hidden: false }
 pure def alwaysClosedAbortsSave(v: VideoEditor): bool = v.closed implies (v.aborted and not(v.playing))

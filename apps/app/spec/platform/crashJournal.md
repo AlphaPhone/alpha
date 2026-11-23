@@ -31,6 +31,7 @@ pure val errorClassValues = Set("TypeError", "RangeError")
 
 pure def bounded(entries: List[Entry]): List[Entry] = if (entries.length() > capacity) entries.removeAt(0) else entries
 
+type OrderFold = { prev: int, ok: bool }
 pure def ordered(entries: List[Entry]): bool =
   entries.foldl({ prev: -1, ok: true }, (acc, e) => { prev: e.at, ok: acc.ok and e.at >= acc.prev }).ok
 ```

@@ -106,7 +106,7 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
         if (found === undefined) try hostSend({ type: "remove", media: id })
         else if (!asked.library.includes(id)) try hostSend({ type: "restore", media: id })
       }
-      try hostSend({ type: "settle" })
+      try hostSend({ type: "settleAsk" })
     }
     const after = try host.get()
     if (after.refusedLeft > before.refusedLeft) throw new PhotosRefused({ message: "Open Photos, then ask again." })
@@ -180,7 +180,7 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
       }
       const items = operation.items.map((entry) => ({ id: entry.id, revision: issued.get(entry.revision)?.id === entry.id ? issued.get(entry.revision)!.revision : "" }))
       if (items.some((entry) => entry.revision === "")) throw new PhotosRefused({ message: "Nothing changed because an item changed since the assistant read it." })
-      const asked = try reviewSend({ type: "request", slot: 1, read: (try reviews.get()).revision, action: operation.action, count: items.length })
+      const asked = try reviewSend({ type: "request", slot: 1, read: (try reviews.get()).revision, askAction: operation.action, count: items.length })
       if (asked === undefined) throw new PhotosRefused({ message: "Finish the open review first." })
       const validated = store.deviceValidate(items) catch () => undefined
       const current = validated !== undefined && validated.items.length === items.length && validated.items.every((row) => row.status === "current")

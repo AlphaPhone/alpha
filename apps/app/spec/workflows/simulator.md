@@ -38,19 +38,19 @@ The decision is one object with exactly `urgent` and a reason of 1 to 500 charac
 1 to 16000 characters.
 
 ```quint
-pure def urgencyInputValid(length: int): bool = length >= 1 and length <= 16000
+pure def urgencyInputValid(len: int): bool = len >= 1 and len <= 16000
 pure def urgencyDecisionValid(exactFields: bool, reasonLength: int): bool = exactFields and reasonLength >= 1 and reasonLength <= 500
-pure val lengthValues = Set(0, 1, 16000, 16001)
-pure def lawAnOversizedInputIsNeverAssessed(length: int): bool = length > 16000 implies not(urgencyInputValid(length))
+pure val lenValues = Set(0, 1, 16000, 16001)
+pure def lawAnOversizedInputIsNeverAssessed(len: int): bool = len > 16000 implies not(urgencyInputValid(len))
 ```
 
 ### A developer's step result is test data of 1 to 16000 characters, never shown as the model's output
 
 ```quint
 type ResultSource = ModelResult | DeveloperResult
-pure def resultAccepted(length: int): bool = length >= 1 and length <= 16000
+pure def resultAccepted(len: int): bool = len >= 1 and len <= 16000
 pure def presentedAsModel(source: ResultSource): bool = source == ModelResult
-pure def lawADeveloperResultIsNeverTheModels(length: int): bool = not(presentedAsModel(DeveloperResult))
+pure def lawADeveloperResultIsNeverTheModels(len: int): bool = not(presentedAsModel(DeveloperResult))
 ```
 
 ### A focus block summarizes at most 100 arrivals over 10000 seen items in 15000 characters, or releases focus

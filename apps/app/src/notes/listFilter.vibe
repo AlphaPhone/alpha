@@ -46,7 +46,7 @@ const make = effect {
   }
 
   effect function settle(): void!! {
-    try send({ type: "settle" })
+    try send({ type: "settleFilter" })
   }
 
   return {

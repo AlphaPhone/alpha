@@ -103,7 +103,7 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
     }
     intents.send({ type: "acknowledge", caller: RECOVERY }) catch () => undefined
     const now = try edit.get()
-    if (now.status === "EditUncertain") try send({ type: "recover", found: result.status === "saved" ? "FoundSaved" : "FoundNothing" })
+    if (now.status === "EditUncertain") try send({ type: "recover", read: result.status === "saved" ? "FoundSaved" : "FoundNothing" })
     if (result.status === "saved") try say("Copy saved")
     return true
   }
@@ -173,7 +173,7 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
       if (opened instanceof PhotosFailed) return try say(photosText(opened.message, "Couldn’t open"))
       videoSession = { sessionId: opened.sessionId, operationId: opened.operationId, id: row.id, revision: row.revision }
       const length = Math.min(3000, Math.max(1, Math.round(opened.duration * 10)))
-      video.send({ type: "openEditor", source: row.id, length }) catch () => undefined
+      video.send({ type: "openEditor", source: row.id, len: length }) catch () => undefined
       video.send({ type: "sourceLoaded" }) catch () => undefined
     },
     videoEvent: videoEventNow,

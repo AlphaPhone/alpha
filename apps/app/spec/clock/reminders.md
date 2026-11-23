@@ -61,7 +61,7 @@ pure val idValues = Set("r1", "t1")
 pure val revisionValues = Set("v1", "v2")
 pure val occurrenceValues = Set("", "o1")
 pure val generationValues = Set(1, 2, 3)
-pure def alwaysARepeatingRowNamesItsRule(r: Reminders): bool = r.rows.forall(x => x.repeats == (x.rule != RepeatNever))
+pure def alwaysARepeatingRowNamesItsRule(r: Reminders): bool = r.rows.every(x => x.repeats == (x.rule != RepeatNever))
 pure val visitValues = Set(0, 1)
 pure val nowValues = Set(0, 1000, 40000)
 pure val atValues = Set(0, 1000)
@@ -281,13 +281,13 @@ pure def sometimesTodoSaved(r: Reminders): bool = r.outcome == TodoSaved
 ### A deletion goes to the phone's review, which queues it for ten seconds of Undo or proves nothing was staged
 
 ```quint
-pure def canDeletionReviewed(r: Reminders, answer: DeletionAnswer): bool = r.stage == WReview and r.kind == DeleteWrite
-pure def deletionReviewed(r: Reminders, answer: DeletionAnswer): Reminders = {
+pure def canDeletionReviewed(r: Reminders, deletion: DeletionAnswer): bool = r.stage == WReview and r.kind == DeleteWrite
+pure def deletionReviewed(r: Reminders, deletion: DeletionAnswer): Reminders = {
   val done = { ...r, stage: WIdle, kind: NoWrite }
-  if (answer == DeletionQueued) { ...done, outcome: DeletionPaused, stale: true }
-  else if (answer == DeletionCancelled) done
-  else if (answer == DeletionUnknown) { ...done, outcome: Unconfirmed, stale: true }
-  else { ...done, outcome: DeletionRefused({ answer: answer }), stale: answer == DeletionStale }
+  if (deletion == DeletionQueued) { ...done, outcome: DeletionPaused, stale: true }
+  else if (deletion == DeletionCancelled) done
+  else if (deletion == DeletionUnknown) { ...done, outcome: Unconfirmed, stale: true }
+  else { ...done, outcome: DeletionRefused({ answer: deletion }), stale: deletion == DeletionStale }
 }
 pure def sometimesDeletionQueued(r: Reminders): bool = r.outcome == DeletionPaused
 ```

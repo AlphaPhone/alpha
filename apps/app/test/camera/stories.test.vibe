@@ -167,7 +167,7 @@ it.effect("a hidden page drops the windows, a late answer publishes nothing, and
   provide catalogMachine() {
     const catalog = try Catalog
     try catalog.send({ type: "refresh", paging: false })
-    try catalog.send({ type: "hide" })
+    try catalog.send({ type: "hideCatalog" })
     try catalog.send({ type: "accessReply", scope: "ScopeFull", ok: true })
     const late = try catalog.get()
     try catalog.send({ type: "show" })
@@ -315,9 +315,9 @@ it.effect("a confirmed export freezes the pages, and Keep runs only for an unsav
     try scan.send({ type: "closeKeepReview" })
     try scan.send({ type: "openKeepReview", source: "UnsavedFrame", hasPort: true, native: true })
     try scan.send({ type: "requestKeep" })
-    try scan.send({ type: "resolveKeep", outcome: "KeepFailed" })
+    try scan.send({ type: "resolveKeep", keepResult: "KeepFailed" })
     try scan.send({ type: "requestKeep" })
-    try scan.send({ type: "resolveKeep", outcome: "KeepSaved" })
+    try scan.send({ type: "resolveKeep", keepResult: "KeepSaved" })
     const kept = scan.send({ type: "requestKeep" }) catch () => "refused"
     try Effect.try(() => assert.deepStrictEqual({ edit, picked, kept, status: (try scan.get()).keep.status }, { edit: "refused", picked: "refused", kept: "refused", status: "KeepSaved" }))
   }
@@ -412,7 +412,7 @@ it.effect("a system picker keeps the review open while it hides the page, and a 
 it.effect("a trim keeps a tenth of a second inside the source, and Save submits one frozen copy (spec/camera/videoEdit.md, \"Story: Trim a video into a copy\")", () => effect {
   provide videoMachine() {
     const video = try Video
-    try video.send({ type: "openEditor", source: "v:1", length: 50 })
+    try video.send({ type: "openEditor", source: "v:1", len: 50 })
     try video.send({ type: "sourceLoaded" })
     try video.send({ type: "trimTo", startHandle: true, position: 80 })
     const clamped = (try video.get()).trim
@@ -432,7 +432,7 @@ it.effect("a trim keeps a tenth of a second inside the source, and Save submits 
 it.effect("an unconfirmed copy is settled only by the owner's review, and a late answer to a closed editor is dropped (spec/camera/videoEdit.md, \"Story: Recover a video copy that may exist\")", () => effect {
   provide videoMachine() {
     const video = try Video
-    try video.send({ type: "openEditor", source: "v:1", length: 50 })
+    try video.send({ type: "openEditor", source: "v:1", len: 50 })
     try video.send({ type: "sourceLoaded" })
     try video.send({ type: "commit" })
     try video.send({ type: "closeEditor" })

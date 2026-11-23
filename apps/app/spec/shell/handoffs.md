@@ -5,11 +5,6 @@ draft of a note, or the web page a note came from. The shell opens the one app t
 what was handed over, as a draft the owner still reviews; nothing is sent or saved by the handoff.
 Calendar drafts from Notes are Calendar's own and do not pass through the shell.
 
-```quint
-type Request = OpenNotes | EmailDraft | OpenWebSource | CalendarDraft
-type Destination = ToNotes | ToInbox | ToBrowser | ToCalendar
-```
-
 ## Story: Carry what I asked for in Notes into the app that does it
 
 > As the owner, I want "email this note", "open where this came from" and a link back to a note to
@@ -21,6 +16,8 @@ Opening Notes at a note cannot be refused. Inbox refusing the draft, or Browser 
 leaves the screen as it was and shows a failure toast.
 
 ```quint
+type Request = OpenNotes | EmailDraft | OpenWebSource | CalendarDraft
+type Destination = ToNotes | ToInbox | ToBrowser | ToCalendar
 pure def destinationOf(request: Request): Destination = match request {
   | OpenNotes => ToNotes
   | EmailDraft => ToInbox

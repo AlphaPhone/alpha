@@ -73,8 +73,8 @@ pure def lawAStepDownIsOneAndNeverBelowTwo(protocol: int): bool =
 pure def canProtocolRefused(e: Enrollment, ofConnection: int): bool =
   e.phase == Registering and ofConnection == e.connection and olderProtocol(e.protocol) != 0
 pure def protocolRefused(e: Enrollment, ofConnection: int): EnrollStep = {
-  val older = olderProtocol(e.protocol)
-  { state: { ...e, protocol: older, stepDowns: e.stepDowns + 1 }, out: List(Register({ protocol: older })) }
+  val fallback = olderProtocol(e.protocol)
+  { state: { ...e, protocol: fallback, stepDowns: e.stepDowns + 1 }, out: List(Register({ protocol: fallback })) }
 }
 pure def alwaysARegisteringProtocolIsKnown(e: Enrollment): bool = inFlight(e.phase) implies (e.protocol >= 1 and e.protocol <= calendarAnchorProtocol)
 pure def stepTheProtocolOnlyFalls(before: Enrollment, via: str, after: Enrollment): bool =

@@ -129,10 +129,10 @@ pure def sometimesChangedSourceFailed(e: Edit): bool = e.status == EditStale and
 ### An unconfirmed save is resolved only by reading its outcome, and a read that finds nothing retires it
 
 ```quint
-pure def canRecover(e: Edit, found: ReadBack): bool = e.status == EditUncertain
-pure def recover(e: Edit, found: ReadBack): Edit =
-  if (found == FoundSaved) { ...e, status: EditSaved, writes: 1, replaced: e.mode == ReplaceMode and e.canReplace }
-  else if (found == FoundNothing) { ...e, status: EditFailed, retired: true }
+pure def canRecover(e: Edit, read: ReadBack): bool = e.status == EditUncertain
+pure def recover(e: Edit, read: ReadBack): Edit =
+  if (read == FoundSaved) { ...e, status: EditSaved, writes: 1, replaced: e.mode == ReplaceMode and e.canReplace }
+  else if (read == FoundNothing) { ...e, status: EditFailed, retired: true }
   else e
 pure def alwaysRetiredSaveWroteNothing(e: Edit): bool = e.retired implies (e.writes == 0 and e.status != SavingEdit)
 pure def sometimesRetiredSuspendedSave(e: Edit): bool = e.retired

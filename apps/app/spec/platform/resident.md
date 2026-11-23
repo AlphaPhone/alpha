@@ -97,8 +97,8 @@ type RecoveryStep = Reviewable | Archived | Blocked
 
 pure def recoveryAfterReview(offered: bool): RecoveryStep = if (offered) Reviewable else Blocked
 
-pure def recoveryAfterArchive(step: RecoveryStep, kept: bool): RecoveryStep =
-  if (step == Reviewable) (if (kept) Archived else Blocked) else step
+pure def recoveryAfterArchive(atStep: RecoveryStep, kept: bool): RecoveryStep =
+  if (atStep == Reviewable) (if (kept) Archived else Blocked) else atStep
 
 pure def lawOnlyAReviewedArchiveRestarts(offered: bool, kept: bool): bool =
   (recoveryAfterArchive(recoveryAfterReview(offered), kept) == Archived) iff (offered and kept)

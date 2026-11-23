@@ -87,10 +87,10 @@ pure def chooseRoute(p: Provider, route: Route, expected: int): ProviderStep =
   if (route == OwnRoute and not(p.textKey)) { state: { ...p, fault: NeedsTextKey }, out: List() }
   else if (route == CloudRoute and not(p.signedIn)) { state: p, out: List(OpenSignIn) }
   else { state: { ...p, work: Choosing, target: route, fault: NoProviderFault, review: NoReview }, out: List(SelectRoute) }
-pure def canRouteSettled(p: Provider, outcome: ChangeOutcome): bool = p.work == Choosing
-pure def routeSettled(p: Provider, outcome: ChangeOutcome): ProviderStep =
-  if (outcome == ChangeConfirmed) { state: { ...p, work: ProviderIdle, route: p.target, revision: p.revision + 1, switches: p.switches + 1 }, out: List() }
-  else if (outcome == ChangeLost) { state: { ...p, work: Reading, reads: p.reads + 1, lost: p.lost + 1 }, out: List(ReadProvider) }
+pure def canRouteSettled(p: Provider, result: ChangeOutcome): bool = p.work == Choosing
+pure def routeSettled(p: Provider, result: ChangeOutcome): ProviderStep =
+  if (result == ChangeConfirmed) { state: { ...p, work: ProviderIdle, route: p.target, revision: p.revision + 1, switches: p.switches + 1 }, out: List() }
+  else if (result == ChangeLost) { state: { ...p, work: Reading, reads: p.reads + 1, lost: p.lost + 1 }, out: List(ReadProvider) }
   else { state: { ...p, work: ProviderIdle, fault: ChangeNotConfirmed }, out: List() }
 pure def canSessionSeen(p: Provider, signedIn: bool): bool = signedIn != p.signedIn
 pure def sessionSeen(p: Provider, signedIn: bool): Provider = { ...p, signedIn: signedIn }
@@ -125,12 +125,12 @@ pure def cancelRemove(p: Provider): Provider = { ...p, review: NoReview }
 pure def canConfirmRemove(p: Provider, expected: int): bool = idle(p) and p.review != NoReview and expected == p.revision
 pure def confirmRemove(p: Provider, expected: int): ProviderStep =
   { state: { ...p, work: Removing, removing: reviewedKey(p.review), review: NoReview, fault: NoProviderFault }, out: List(RemoveKey) }
-pure def canRemoveSettled(p: Provider, outcome: ChangeOutcome): bool = p.work == Removing
-pure def removeSettled(p: Provider, outcome: ChangeOutcome): ProviderStep =
-  if (outcome == ChangeConfirmed)
+pure def canRemoveSettled(p: Provider, result: ChangeOutcome): bool = p.work == Removing
+pure def removeSettled(p: Provider, result: ChangeOutcome): ProviderStep =
+  if (result == ChangeConfirmed)
     { state: { ...p, work: ProviderIdle, textKey: p.textKey and p.removing != TextKey, voiceKey: p.voiceKey and p.removing != VoiceKey,
         revision: p.revision + 1, removals: p.removals + 1 }, out: List() }
-  else if (outcome == ChangeLost) { state: { ...p, work: Reading, reads: p.reads + 1, lost: p.lost + 1 }, out: List(ReadProvider) }
+  else if (result == ChangeLost) { state: { ...p, work: Reading, reads: p.reads + 1, lost: p.lost + 1 }, out: List(ReadProvider) }
   else { state: { ...p, work: ProviderIdle, fault: ChangeNotConfirmed }, out: List() }
 pure def canReveal(p: Provider, key: KeyName): bool = idle(p) and p.known and saved(p, key)
 pure def reveal(p: Provider, key: KeyName): ProviderStep = { state: { ...p, work: Revealing }, out: List(RevealKey) }

@@ -116,6 +116,6 @@ pure def lawGoogleIsNeverKept(kind: ProviderKind): bool = kind == GoogleProvider
 pure val maxSearchLength = 300
 pure val maxLabelLength = 300
 pure val maxSaved = 200
-pure def searchable(length: int): bool = length >= 1 and length <= maxSearchLength
-pure def labelFits(length: int): bool = length >= 1 and length <= maxLabelLength
+pure def searchable(len: int): bool = len >= 1 and len <= maxSearchLength
+pure def labelFits(len: int): bool = len >= 1 and len <= maxLabelLength
 ```

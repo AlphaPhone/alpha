@@ -51,14 +51,14 @@ pure def startShare(e: Egress, viewed: Viewed): EgressChange =
 pure def canShareDelayEnded(e: Egress, viewed: Viewed): bool = e.share == ShareWaiting
 pure def shareDelayEnded(e: Egress, viewed: Viewed): EgressChange =
   if (mayLeave(viewed) and viewed.tab == e.captured.tab and viewed.navigation == e.captured.navigation and viewed.revision == e.captured.revision and viewed.url == e.captured.url)
-    { state: { ...e, share: ShareShowing, shares: e.shares + 1 }, out: List(ShareSheet(shared(e.captured))) }
+    { state: { ...e, share: ShareShowing, shares: e.shares + 1 }, out: List(ShareSheet({ tab: e.captured.tab, url: e.captured.url, navigation: e.captured.navigation, title: e.captured.title })) }
   else { state: { ...e, share: ShareIdle }, out: List(said(PageChangedBeforeShare)) }
 pure def canShareSettled(e: Egress, ok: bool): bool = e.share == ShareShowing
 pure def shareSettled(e: Egress, ok: bool): EgressChange =
   { state: { ...e, share: ShareIdle }, out: if (ok) List() else List(said(ShareFailed)) }
 pure def alwaysAShareInProgressHoldsASettledPage(e: Egress): bool = e.share != ShareIdle implies mayLeave(e.captured)
 pure def stepTheSheetGetsTheCapturedPage(before: Egress, via: str, after: Egress, out: List[EgressEffect]): bool =
-  out.every(x => match x { | ShareSheet(p) => p == shared(before.captured) | _ => true })
+  out.every(x => match x { | ShareSheet(p) => p.tab == before.captured.tab and p.url == before.captured.url and p.navigation == before.captured.navigation and p.title == before.captured.title | _ => true })
 pure def sometimesShared(e: Egress): bool = e.shares > 0 and e.share == ShareIdle
 ```
 
@@ -66,10 +66,10 @@ pure def sometimesShared(e: Egress): bool = e.shares > 0 and e.share == ShareIdl
 
 ```quint
 pure def shareByEmail(e: Egress, viewed: Viewed): EgressChange =
-  if (mayLeave(viewed)) { state: { ...seen(viewed, e), emails: e.emails + 1 }, out: List(ComposeEmail(shared(viewed))) }
+  if (mayLeave(viewed)) { state: { ...seen(viewed, e), emails: e.emails + 1 }, out: List(ComposeEmail({ tab: viewed.tab, url: viewed.url, navigation: viewed.navigation, title: viewed.title })) }
   else { state: seen(viewed, e), out: List(said(LoadPageToShare)) }
 pure def copyLink(e: Egress, viewed: Viewed): EgressChange =
-  if (mayLeave(viewed)) { state: { ...seen(viewed, e), copies: e.copies + 1 }, out: List(CopyLink(shared(viewed))) }
+  if (mayLeave(viewed)) { state: { ...seen(viewed, e), copies: e.copies + 1 }, out: List(CopyLink({ tab: viewed.tab, url: viewed.url, navigation: viewed.navigation, title: viewed.title })) }
   else { state: seen(viewed, e), out: List(said(LoadPageToCopy)) }
 pure def copied(e: Egress, ok: bool): EgressChange = { state: e, out: List(said(if (ok) Copied else ClipboardUnavailable)) }
 pure def alwaysEgressFollowsASettledPage(e: Egress): bool = (e.shares > 0 or e.emails > 0 or e.copies > 0) implies e.sawSettled

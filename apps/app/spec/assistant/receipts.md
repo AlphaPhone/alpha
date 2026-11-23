@@ -21,18 +21,18 @@ journal cannot prove is unknown, never a failure.
 
 ```quint
 type Result = NoResult | Applied | Failed | NotStarted | Unknown
-type ActionEvent = { turn: int, action: int, result: Result }
-pure def attributed(events: List[ActionEvent], turn: int, action: int): Result =
-  events.foldl(NoResult, (found, e) => if (e.turn != turn or e.action != action) found else if (found == Applied) Applied else e.result)
+type ActionEvent = { turn: int, actionId: int, result: Result }
+pure def attributed(events: List[ActionEvent], turn: int, actionId: int): Result =
+  events.foldl(NoResult, (found, e) => if (e.turn != turn or e.actionId != actionId) found else if (found == Applied) Applied else e.result)
 pure def provesFailure(r: Result): bool = r == Failed or r == NotStarted
-pure def lawALaterSuccessSupersedesAFailure(turn: int, action: int): bool =
-  attributed(List({ turn: turn, action: action, result: Failed }, { turn: turn, action: action, result: Applied }), turn, action) == Applied
-pure def lawASuccessIsNeverUndoneByALaterReceipt(turn: int, action: int, later: Result): bool =
-  attributed(List({ turn: turn, action: action, result: Applied }, { turn: turn, action: action, result: later }), turn, action) == Applied
-pure def lawAnotherTurnsReceiptIsNotThisTurns(turn: int, action: int, result: Result): bool =
-  attributed(List({ turn: turn + 1, action: action, result: result }), turn, action) == NoResult
-pure def lawUnknownIsNeverReportedAsFailure(turn: int, action: int): bool =
-  not(provesFailure(attributed(List({ turn: turn, action: action, result: Unknown }), turn, action)))
+pure def lawALaterSuccessSupersedesAFailure(turn: int, actionId: int): bool =
+  attributed(List({ turn: turn, actionId: actionId, result: Failed }, { turn: turn, actionId: actionId, result: Applied }), turn, actionId) == Applied
+pure def lawASuccessIsNeverUndoneByALaterReceipt(turn: int, actionId: int, later: Result): bool =
+  attributed(List({ turn: turn, actionId: actionId, result: Applied }, { turn: turn, actionId: actionId, result: later }), turn, actionId) == Applied
+pure def lawAnotherTurnsReceiptIsNotThisTurns(turn: int, actionId: int, result: Result): bool =
+  attributed(List({ turn: turn + 1, actionId: actionId, result: result }), turn, actionId) == NoResult
+pure def lawUnknownIsNeverReportedAsFailure(turn: int, actionId: int): bool =
+  not(provesFailure(attributed(List({ turn: turn, actionId: actionId, result: Unknown }), turn, actionId)))
 ```
 
 ### A receipt's title says what the journal proves
@@ -105,8 +105,10 @@ attempt, operation and operation hash as succeeded.
 
 ```quint
 type Rebuilt = { done: bool, providerApplied: bool, journalSucceeded: bool, sameAttempt: bool, eligibleKind: bool }
-pure def rebuildsReceipt(r: Rebuilt): bool = r.done and r.providerApplied and r.journalSucceeded and r.sameAttempt and r.eligibleKind
-pure def lawAnUnjournaledResultIsNeverRebuilt(r: Rebuilt): bool = not(r.journalSucceeded) implies not(rebuildsReceipt(r))
+pure def rebuildsReceipt(rebuilt: Rebuilt): bool = rebuilt.done and rebuilt.providerApplied and rebuilt.journalSucceeded and rebuilt.sameAttempt and rebuilt.eligibleKind
+pure def lawAnUnjournaledResultIsNeverRebuilt(rebuilt: Rebuilt): bool = not(rebuilt.journalSucceeded) implies not(rebuildsReceipt(rebuilt))
+pure val rebuiltValues = Set({ done: true, providerApplied: true, journalSucceeded: true, sameAttempt: true, eligibleKind: true },
+  { done: true, providerApplied: true, journalSucceeded: false, sameAttempt: true, eligibleKind: true }, { done: false, providerApplied: false, journalSucceeded: true, sameAttempt: false, eligibleKind: true })
 ```
 
 ### Reading action history reads only; native recovery settles only what it has a receipt reader for

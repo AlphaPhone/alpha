@@ -5,15 +5,6 @@ removal in a dialog, and a long press that starts editing. Android plays it thro
 `AlphaDevice.haptic` and follows the owner's own touch-feedback setting; elsewhere nothing plays.
 The feedback a click earns is read before the control's own handler changes it.
 
-```quint
-type Haptic = NoHaptic | ToggleOn | ToggleOff | Confirm | LongPress
-type ControlRole = NotAControl | PlainButton | CheckboxSwitch | ButtonSwitch
-type Haptics = { available: bool, last: Haptic, at: int, played: int }
-pure val initial: Haptics = { available: false, last: NoHaptic, at: 0, played: 0 }
-pure val RepeatMs = 300
-pure val nowValues = Set(0, 100, 400)
-```
-
 ## Story: Feel the changes I make
 
 > As the owner, I want a light tap of feedback when I flip a switch, confirm a removal or start
@@ -27,6 +18,12 @@ something (Delete, Discard, Erase, Remove, Replace, Clear, Reset, Sign out) or t
 destructive; a Delete in a list still opens its own review.
 
 ```quint
+type Haptic = NoHaptic | ToggleOn | ToggleOff | Confirm | LongPress
+type ControlRole = NotAControl | PlainButton | CheckboxSwitch | ButtonSwitch
+type Haptics = { available: bool, last: Haptic, at: int, played: int }
+pure val initial: Haptics = { available: false, last: NoHaptic, at: 0, played: 0 }
+pure val RepeatMs = 300
+pure val nowValues = Set(0, 100, 400)
 pure def hapticForClick(role: ControlRole, disabled: bool, inert: bool, checked: bool, inDialog: bool, destructive: bool): Haptic =
   if (role == NotAControl or disabled or inert) NoHaptic
   else if (role == CheckboxSwitch) (if (checked) ToggleOn else ToggleOff)

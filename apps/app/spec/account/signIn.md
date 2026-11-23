@@ -121,10 +121,10 @@ pure def sometimesLateAnswerDropped(s: SignIn): bool = s.lateDropped >= 1
 ### Email works while readiness is unknown; Google and text messages need their own readiness
 
 ```quint
-pure def methodReady(m: Methods, method: CodeMethod): bool =
-  if (method == EmailCode) not(m.known) or m.email else m.known and m.phone
-pure def lawEmailWorksWhileReadinessIsUnknown(m: Methods): bool = not(m.known) implies methodReady(m, EmailCode)
-pure def lawPhoneNeedsItsReadiness(m: Methods): bool = methodReady(m, PhoneCode) implies (m.known and m.phone)
+pure def methodReady(methods: Methods, method: CodeMethod): bool =
+  if (method == EmailCode) not(methods.known) or methods.email else methods.known and methods.phone
+pure def lawEmailWorksWhileReadinessIsUnknown(methods: Methods): bool = not(methods.known) implies methodReady(methods, EmailCode)
+pure def lawPhoneNeedsItsReadiness(methods: Methods): bool = methodReady(methods, PhoneCode) implies (methods.known and methods.phone)
 pure def canChooseMethod(s: SignIn, method: CodeMethod): bool =
   s.screen == Choose and s.work == NoWork and method != s.method and methodReady(s.methods, method)
 pure def chooseMethod(s: SignIn, method: CodeMethod): SignIn = { ...s, method: method, fault: NoFault }
@@ -169,10 +169,10 @@ pure def canHostCommitsKey(s: SignIn): bool = s.work == GoogleWork and not(s.hos
 pure def hostCommitsKey(s: SignIn): SignIn = { ...s, storedKey: s.storedKey + 1, hostCommitted: true }
 pure def signedInFrom(key: int, s: SignIn): SignIn =
   { ...s, work: NoWork, screen: ScreenClosed, fault: NoFault, signedIn: true, opened: false, attempt: 0, stale: false, address: false, prefill: false, storedKey: key, adoptedKey: key, hostCommitted: false }
-pure val outcomeValues = Set(GoogleSignedIn, GoogleFactor({ googleFactor: TotpFactor }), GoogleFactor({ googleFactor: PasskeyFactor }), GoogleFailed)
-pure def canGoogleEnds(s: SignIn, outcome: GoogleOutcome): bool =
-  s.work == GoogleWork and ((outcome == GoogleSignedIn) iff s.hostCommitted)
-pure def googleEnds(s: SignIn, outcome: GoogleOutcome): SignInStep = match outcome {
+pure val resultValues = Set(GoogleSignedIn, GoogleFactor({ googleFactor: TotpFactor }), GoogleFactor({ googleFactor: PasskeyFactor }), GoogleFailed)
+pure def canGoogleEnds(s: SignIn, result: GoogleOutcome): bool =
+  s.work == GoogleWork and ((result == GoogleSignedIn) iff s.hostCommitted)
+pure def googleEnds(s: SignIn, result: GoogleOutcome): SignInStep = match result {
   | GoogleSignedIn => { state: signedInFrom(s.storedKey, s), out: List(Adopted) }
   | GoogleFactor(f) => { state: { ...s, work: NoWork, screen: FactorStep, factor: f.googleFactor, fault: NoFault,
       attempts: s.attempts + 1, attempt: s.attempts + 1, stale: false, address: false }, out: List() }

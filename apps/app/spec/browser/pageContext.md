@@ -36,7 +36,7 @@ type TurnFacts = {
   browserView: bool, sensitive: bool, shown: bool, sameTab: bool, sameRevision: bool,
   priv: bool, settled: bool, publicHttps: bool, enabled: bool, peerTakesIt: bool,
 }
-pure def pageShareable(shown: bool, priv: bool, settled: bool, publicHttps: bool): bool = shown and not(priv) and settled and publicHttps
+pure def pageShareable(shown: bool, priv: bool, resolved: bool, publicHttps: bool): bool = shown and not(priv) and resolved and publicHttps
 pure def mayRead(f: TurnFacts): bool =
   f.browserView and not(f.sensitive) and f.sameTab and f.sameRevision and pageShareable(f.shown, f.priv, f.settled, f.publicHttps) and f.enabled and f.peerTakesIt
 pure def lawAPrivateTabIsNeverRead(f: TurnFacts): bool = f.priv implies not(mayRead(f))
@@ -80,9 +80,9 @@ pure def canTimedOut(r: PageRead, turn: int): bool = r.stage == Reading and turn
 pure def timedOut(r: PageRead, turn: int): PageRead = { ...r, stage: Withdrawn, page: false }
 pure def canCancelled(r: PageRead, turn: int): bool = (r.stage == Reading or r.stage == Answered) and turn == r.turn
 pure def cancelled(r: PageRead, turn: int): PageRead = { ...r, stage: Withdrawn, page: false }
-pure def canRechecked(r: PageRead, turn: int, enabled: bool, current: bool): bool = r.stage == Answered and turn == r.turn and not(r.rechecked)
-pure def rechecked(r: PageRead, turn: int, enabled: bool, current: bool): PageRead =
-  if (enabled and current) { ...r, rechecked: true } else { ...r, stage: Withdrawn, page: false }
+pure def canRechecked(r: PageRead, turn: int, isOn: bool, present: bool): bool = r.stage == Answered and turn == r.turn and not(r.rechecked)
+pure def rechecked(r: PageRead, turn: int, isOn: bool, present: bool): PageRead =
+  if (isOn and present) { ...r, rechecked: true } else { ...r, stage: Withdrawn, page: false }
 pure def canDelivered(r: PageRead, turn: int): bool = r.stage == Answered and turn == r.turn and r.rechecked
 pure def delivered(r: PageRead, turn: int): PageRead = { ...r, stage: Delivered }
 pure def alwaysOnlyAnAnsweredReadHoldsAPage(r: PageRead): bool = r.page iff (r.stage == Answered or r.stage == Delivered)

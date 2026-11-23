@@ -292,7 +292,7 @@ export const scanner = Layer.effect(Scanner, effect {
       const answer = store.keepCapture(operationId, data) catch () => undefined
       const outcome: KeepStatus = answer === undefined || answer.status === "unknown" ? "KeepUnknown" : answer.status === "saved" && answer.id !== undefined ? "KeepSaved" : "KeepFailed"
       const kept: PhotoKeep = outcome === "KeepSaved" ? "PhotoKept" : outcome === "KeepFailed" || (outcome === "KeepUnknown" && !bridge.browser) ? "PhotoKeepIdle" : "PhotoKeepUnconfirmed"
-      try doc({ type: "resolveKeep", outcome })
+      try doc({ type: "resolveKeep", keepResult: outcome })
       try dialog({ type: "keepSettled", kept })
       try say(outcome === "KeepSaved" ? "Kept in Photos." : outcome === "KeepFailed" ? photosText(answer?.message, "Not saved") : "Unconfirmed")
     },
@@ -460,7 +460,7 @@ export const scanner = Layer.effect(Scanner, effect {
           const page = pages.get(id)
           if (page !== undefined) pages.set(id, { blob: page.blob, layer: layers[at] ?? null })
         })
-        try dialog({ type: "providerSettled", outcome: result === "ExportConfirmed" ? "PdfExported" : "PdfFailed" })
+        try dialog({ type: "providerSettled", searchOutcome: result === "ExportConfirmed" ? "PdfExported" : "PdfFailed" })
         searchLines = []
       }
       try settleAutosave()

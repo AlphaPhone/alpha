@@ -46,16 +46,16 @@ pure def canFlush(s: NotificationOpen): bool = readable(s)
 pure def flush(s: NotificationOpen): NotificationOpen = flushed(true, s)
 pure def canReadSettles(s: NotificationOpen, ok: bool, found: bool): bool = s.checking
 pure def readSettles(s: NotificationOpen, ok: bool, found: bool): NotificationOpen = {
-  val current = not(s.disposed) and s.epoch == s.captured
+  val present = not(s.disposed) and s.epoch == s.captured
   val hit = ok and found and s.pending
-  val next: NotificationOpen = {
+  val following: NotificationOpen = {
     ...s, checking: false, pending: if (ok) false else s.pending,
-    opened: s.opened + (if (hit and current and s.ready) 1 else 0),
-    dropped: s.dropped + (if (hit and current and not(s.ready)) 1 else 0),
+    opened: s.opened + (if (hit and present and s.ready) 1 else 0),
+    dropped: s.dropped + (if (hit and present and not(s.ready)) 1 else 0),
     failures: s.failures + (if (ok) 0 else 1),
-    requested: s.requested or (not(ok) and current),
+    requested: s.requested or (not(ok) and present),
   }
-  flushed(next.requested and next.revision != s.attempt, next)
+  flushed(following.requested and following.revision != s.attempt, following)
 }
 pure def canCancelOpen(s: NotificationOpen): bool = not(s.disposed)
 pure def cancelOpen(s: NotificationOpen): NotificationOpen = { ...s, requested: false, epoch: s.epoch + 1, pending: false }

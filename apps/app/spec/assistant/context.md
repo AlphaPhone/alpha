@@ -133,10 +133,11 @@ nothing, and the composed text is sent exactly as written.
 ```quint
 type PeerFields = { compared: bool, declaresLocation: bool }
 pure def sendsObservation(observed: bool): bool = observed
-pure def sendsDay(observed: bool, onCalendar: bool, peer: PeerFields): bool = observed and onCalendar and peer.compared
-pure def sendsLocationField(observed: bool, peer: PeerFields): bool = observed and peer.declaresLocation
-pure def lawAnUnobservedScreenSendsNoOptionalField(onCalendar: bool, peer: PeerFields): bool =
-  not(sendsDay(false, onCalendar, peer)) and not(sendsLocationField(false, peer))
+pure def sendsDay(observed: bool, onCalendar: bool, peerFields: PeerFields): bool = observed and onCalendar and peerFields.compared
+pure def sendsLocationField(observed: bool, peerFields: PeerFields): bool = observed and peerFields.declaresLocation
+pure def lawAnUnobservedScreenSendsNoOptionalField(onCalendar: bool, peerFields: PeerFields): bool =
+  not(sendsDay(false, onCalendar, peerFields)) and not(sendsLocationField(false, peerFields))
+pure val peerFieldsValues = Set({ compared: true, declaresLocation: true }, { compared: false, declaresLocation: true }, { compared: true, declaresLocation: false })
 pure def lawAnUncomparedPeerGetsNoDay(observed: bool, onCalendar: bool): bool =
   not(sendsDay(observed, onCalendar, { compared: false, declaresLocation: true }))
 ```
@@ -215,7 +216,7 @@ header, and an empty selection sends no header at all.
 
 ```quint
 pure def sentNames(offered: Set[str], runs: Set[str]): Set[str] = offered.intersect(runs)
-pure def sendsHeader(offered: Set[str], runs: Set[str]): bool = sentNames(offered, runs) != Set()
+pure def sendsHeader(offered: Set[str], runs: Set[str]): bool = sentNames(offered, runs).size() > 0
 pure def lawOnlyOfferedNamesAreSent(offered: Set[str], runs: Set[str]): bool = sentNames(offered, runs).subseteq(offered)
 pure def lawNothingOfferedSendsNoHeader(runs: Set[str]): bool = not(sendsHeader(Set(), runs))
 pure val offeredValues = Set(Set(), Set("maps.selected-read.v1"), Set("maps.selected-read.v1", "files.browser.v1"))

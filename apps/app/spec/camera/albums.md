@@ -75,15 +75,15 @@ pure def openDialog(d: Dialogs, target: str, media: str, mediaRevision: str): Di
 ### A control acts only for the generation and stage it was rendered for, over the active, visible Photos
 
 ```quint
-pure def current(d: Dialogs, gen: int): bool = d.active and d.visible and not(d.disposed) and d.generation != 0 and d.generation == gen and d.stage != DialogClosed
+pure def isCurrent(d: Dialogs, gen: int): bool = d.active and d.visible and not(d.disposed) and d.generation != 0 and d.generation == gen and d.stage != DialogClosed
 pure def naming(d: Dialogs): bool = d.stage == ManageAlbum or d.stage == CreateAlbum
-pure def canRename(d: Dialogs, gen: int, name: str, nameOk: bool): bool = current(d, gen) and naming(d)
+pure def canRename(d: Dialogs, gen: int, name: str, nameOk: bool): bool = isCurrent(d, gen) and naming(d)
 pure def rename(d: Dialogs, gen: int, name: str, nameOk: bool): Dialogs = { ...d, name: name, nameOk: nameOk }
-pure def canAskDelete(d: Dialogs, gen: int): bool = current(d, gen) and d.stage == ManageAlbum and not(d.busy)
+pure def canAskDelete(d: Dialogs, gen: int): bool = isCurrent(d, gen) and d.stage == ManageAlbum and not(d.busy)
 pure def askDelete(d: Dialogs, gen: int): Dialogs = { ...d, stage: ConfirmDelete }
-pure def canChooseCreate(d: Dialogs, gen: int): bool = current(d, gen) and d.stage == ChooseAlbum and not(d.busy)
+pure def canChooseCreate(d: Dialogs, gen: int): bool = isCurrent(d, gen) and d.stage == ChooseAlbum and not(d.busy)
 pure def chooseCreate(d: Dialogs, gen: int): Dialogs = { ...d, stage: CreateAlbum, name: "", nameOk: false }
-pure def canCloseDialog(d: Dialogs, gen: int): bool = current(d, gen)
+pure def canCloseDialog(d: Dialogs, gen: int): bool = isCurrent(d, gen)
 pure def closeDialog(d: Dialogs, gen: int): Dialogs = { ...d, stage: DialogClosed }
 pure def sometimesReplacedDialog(d: Dialogs): bool = d.generation >= 2 and d.stage == ManageAlbum
 ```
@@ -96,12 +96,12 @@ pure def dispatched(operation: AlbumOp, album: str, revision: str, d: Dialogs): 
     writes: d.writes.append({ operation: operation, album: album, revision: revision, name: d.name,
       media: d.media, mediaRevision: d.mediaRevision }) }
 pure def canSave(d: Dialogs, gen: int): bool =
-  current(d, gen) and naming(d) and not(d.busy) and d.nameOk and (d.stage == ManageAlbum or d.albums.length() < albumLimit)
+  isCurrent(d, gen) and naming(d) and not(d.busy) and d.nameOk and (d.stage == ManageAlbum or d.albums.length() < albumLimit)
 pure def save(d: Dialogs, gen: int): Dialogs =
   if (d.stage == CreateAlbum) dispatched(CreateOp, "", "", d) else dispatched(RenameOp, d.album, d.revision, d)
-pure def canChooseAlbum(d: Dialogs, gen: int, target: str): bool = current(d, gen) and d.stage == ChooseAlbum and not(d.busy) and listed(d.albums, target)
+pure def canChooseAlbum(d: Dialogs, gen: int, target: str): bool = isCurrent(d, gen) and d.stage == ChooseAlbum and not(d.busy) and listed(d.albums, target)
 pure def chooseAlbum(d: Dialogs, gen: int, target: str): Dialogs = dispatched(AddOp, target, listedRevision(d.albums, target), d)
-pure def canConfirmDelete(d: Dialogs, gen: int): bool = current(d, gen) and d.stage == ConfirmDelete and not(d.busy)
+pure def canConfirmDelete(d: Dialogs, gen: int): bool = isCurrent(d, gen) and d.stage == ConfirmDelete and not(d.busy)
 pure def confirmDelete(d: Dialogs, gen: int): Dialogs = dispatched(DeleteOp, d.album, d.revision, d)
 pure def alwaysExactAlbumRevision(d: Dialogs): bool = d.writes.every(w =>
   (if (w.operation == CreateOp) (w.album == "" and w.revision == "") else (w.album != "" and w.revision != "")) and
@@ -117,9 +117,9 @@ pure def sometimesAddedSelection(d: Dialogs): bool = d.writes.some(w => w.operat
 pure def canFinish(d: Dialogs, ok: bool): bool = d.busy
 pure def finish(d: Dialogs, ok: bool): Dialogs = {
   val owner = not(d.disposed) and d.active and d.generation == d.pendingOwner and d.stage != DialogClosed
-  val last = d.writes.foldl({ operation: CreateOp, album: "", revision: "", name: "", media: "", mediaRevision: "" }, (acc, w) => w)
+  val final = d.writes.foldl({ operation: CreateOp, album: "", revision: "", name: "", media: "", mediaRevision: "" }, (acc, w) => w)
   { ...d, busy: false, pendingOwner: 0, stage: if (owner and ok) DialogClosed else d.stage,
-    toasts: if (owner and (not(ok) or last.operation == DeleteOp or last.media != "")) d.toasts + 1 else d.toasts }
+    toasts: if (owner and (not(ok) or final.operation == DeleteOp or final.media != "")) d.toasts + 1 else d.toasts }
 }
 pure def sometimesDeleteConfirmed(d: Dialogs): bool = d.toasts > 0 and d.stage == DialogClosed
 ```
@@ -151,8 +151,8 @@ revision until it commits, and a trash queued meanwhile waits for it.
 ```quint
 type StoredMedia = { mediaId: str, mediaRev: str, inTrash: bool }
 type AlbumAnswer = AlbumUpdated | MediaChanged | AlbumChanged
-pure def mediaCurrent(media: List[StoredMedia], id: str, revision: str): bool =
-  media.some(m => m.mediaId == id and m.mediaRev == revision and not(m.inTrash))
+pure def mediaCurrent(stored: List[StoredMedia], id: str, revision: str): bool =
+  stored.some(m => m.mediaId == id and m.mediaRev == revision and not(m.inTrash))
 pure def albumAnswer(operation: AlbumOp, storedRevision: str, expected: str, itemCurrent: bool): AlbumAnswer =
   if (operation == AddOp and not(itemCurrent)) MediaChanged
   else if (operation == CreateOp) AlbumUpdated

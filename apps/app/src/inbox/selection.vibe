@@ -65,15 +65,15 @@ export const layer = Layer.effect(MailSelection, effect {
       const s = try scope()
       if (s !== "") try send({ type: "start", scope: s })
     },
-    toggle: (item: Picked) => effect { try send({ type: "toggle", item }) },
+    toggle: (item: Picked) => effect { try send({ type: "toggle", entry: item }) },
     pickAll: (items: Picked[]) => effect { try send({ type: "pickAll", items }) },
-    review: (action: SelectAction) => effect { try send({ type: "review", action }) },
+    review: (action: SelectAction) => effect { try send({ type: "review", selAction: action }) },
     backToPicking: () => effect { return (try send({ type: "backToPicking" })) !== undefined },
     effect apply() {
       const approved = try send({ type: "approve" })
       if (approved === undefined) return 0
       const s = try machine.get()
-      if (s.action === "SelDeleteDrafts") {
+      if (s.selAction === "SelDeleteDrafts") {
         const picks = s.picked.map((p) => ({ id: p.id, revision: Number(p.version) }))
         const deleted = try composer.deleteShelved(picks)
         for (const p of s.picked) {
@@ -83,7 +83,7 @@ export const layer = Layer.effect(MailSelection, effect {
         }
         return deleted ? s.picked.length : 0
       }
-      const kind = kinds[s.action]
+      const kind = kinds[s.selAction]
       let applied = 0
       while (true) {
         const current = try machine.get()

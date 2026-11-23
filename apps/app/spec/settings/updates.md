@@ -23,11 +23,14 @@ type OfferFacts = {
   sizeBytes: int, urlChars: int,
 }
 pure val maxBytes: int = 2147483648
-pure def admitOffer(o: OfferFacts): bool =
-  o.launcher and o.signerMatches and o.versionCode > o.installed and o.https and o.digest
-    and o.sizeBytes > 0 and o.sizeBytes <= maxBytes and o.urlChars <= 2048
-pure def lawNoOfferForAnotherSigner(o: OfferFacts): bool = not(admitOffer({ ...o, signerMatches: false }))
-pure def lawNoOfferOfTheInstalledVersion(o: OfferFacts): bool = not(admitOffer({ ...o, versionCode: o.installed }))
+pure def admitOffer(facts: OfferFacts): bool =
+  facts.launcher and facts.signerMatches and facts.versionCode > facts.installed and facts.https and facts.digest
+    and facts.sizeBytes > 0 and facts.sizeBytes <= maxBytes and facts.urlChars <= 2048
+pure def lawNoOfferForAnotherSigner(facts: OfferFacts): bool = not(admitOffer({ ...facts, signerMatches: false }))
+pure def lawNoOfferOfTheInstalledVersion(facts: OfferFacts): bool = not(admitOffer({ ...facts, versionCode: facts.installed }))
+pure val factsValues = Set({ launcher: true, signerMatches: true, versionCode: 3, installed: 2, https: true, digest: true, sizeBytes: 1000, urlChars: 100 },
+  { launcher: true, signerMatches: false, versionCode: 3, installed: 3, https: true, digest: true, sizeBytes: 1000, urlChars: 100 },
+  { launcher: false, signerMatches: true, versionCode: 2, installed: 3, https: false, digest: false, sizeBytes: 0, urlChars: 2049 })
 ```
 
 ### A check is due fifteen minutes after the last answer, or at once for an unknown or future clock
@@ -67,8 +70,8 @@ pure def canBeginCheck(u: Updates, manual: bool): bool = u.busy == Idle
 pure def beginCheck(u: Updates, manual: bool): Updates = { ...u, busy: Checking, manual: manual, outcome: if (manual) NoOutcome else u.outcome }
 pure def canCheckAnswered(u: Updates, now: int, offer: int, versionName: str, bound: bool): bool = u.busy == Checking and offer >= 0
 pure def checkAnswered(u: Updates, now: int, offer: int, versionName: str, bound: bool): Updates = {
-  val next = { ...u, busy: Idle, offer: offer, offerName: if (offer > u.installed) versionName else "", bound: bound and offer > u.installed, checkedAt: now }
-  if (u.manual) { ...next, outcome: if (offer > u.installed) UpdateReady else NoneOffered } else next
+  val following = { ...u, busy: Idle, offer: offer, offerName: if (offer > u.installed) versionName else "", bound: bound and offer > u.installed, checkedAt: now }
+  if (u.manual) { ...following, outcome: if (offer > u.installed) UpdateReady else NoneOffered } else following
 }
 pure def canCheckFailed(u: Updates): bool = u.busy == Checking
 pure def checkFailed(u: Updates): Updates = { ...u, busy: Idle, bound: false, outcome: if (u.manual) CheckFailed else u.outcome }
@@ -107,7 +110,7 @@ the self-update grant, which a phone handed over has without being asked.
 
 ```quint
 pure def permissionRead(u: Updates, permission: Permission): Updates = { ...u, permission: permission }
-pure def canAllowAutomatic(u: Updates): bool = u.permission == PermissionRequired
+pure def mayAllowAutomatic(u: Updates): bool = u.permission == PermissionRequired
 ```
 
 ### The phone is idle only on resting Home with nothing typed, open, recording or in flight
@@ -121,13 +124,17 @@ type IdleFacts = {
   editor: bool, drawer: bool, shade: bool, homeEdit: bool, review: bool, connectionBusy: bool,
   signInOpen: bool, signInUntouched: bool, call: bool,
 }
-pure def updateIdle(i: IdleFacts): bool =
-  i.home and not(i.viewOpen) and i.voiceOff and i.voiceInactive and not(i.typing) and i.chatResting
-    and not(i.editor) and not(i.drawer) and not(i.shade) and not(i.homeEdit) and not(i.review)
-    and not(i.connectionBusy) and (not(i.signInOpen) or i.signInUntouched) and not(i.call)
-pure def lawAnUntouchedSignInCardIsIdle(i: IdleFacts): bool =
-  updateIdle({ ...i, signInOpen: false }) implies updateIdle({ ...i, signInOpen: true, signInUntouched: true })
-pure def lawACallIsNeverIdle(i: IdleFacts): bool = not(updateIdle({ ...i, call: true }))
+pure def updateIdle(idleFacts: IdleFacts): bool =
+  idleFacts.home and not(idleFacts.viewOpen) and idleFacts.voiceOff and idleFacts.voiceInactive and not(idleFacts.typing) and idleFacts.chatResting
+    and not(idleFacts.editor) and not(idleFacts.drawer) and not(idleFacts.shade) and not(idleFacts.homeEdit) and not(idleFacts.review)
+    and not(idleFacts.connectionBusy) and (not(idleFacts.signInOpen) or idleFacts.signInUntouched) and not(idleFacts.call)
+pure def lawAnUntouchedSignInCardIsIdle(idleFacts: IdleFacts): bool =
+  updateIdle({ ...idleFacts, signInOpen: false }) implies updateIdle({ ...idleFacts, signInOpen: true, signInUntouched: true })
+pure def lawACallIsNeverIdle(idleFacts: IdleFacts): bool = not(updateIdle({ ...idleFacts, call: true }))
+pure val idleFactsValues = Set(
+  { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: false, signInUntouched: false, call: false },
+  { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: true, signInUntouched: true, call: true },
+  { home: false, viewOpen: true, voiceOff: false, voiceInactive: true, typing: true, chatResting: false, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: true, signInOpen: true, signInUntouched: false, call: false })
 ```
 
 ### A hands-off install needs idle, no pending install, Android's permission and a bound offer

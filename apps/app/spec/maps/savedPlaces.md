@@ -17,9 +17,9 @@ type SaveRequest = { label: str, lat: int, lng: int, provider: str, providerPlac
 type SavedPlaces = { items: List[SavedItem], nextId: int }
 pure val initial: SavedPlaces = { items: List(), nextId: 0 }
 pure def coordinateValid(lat: int, lng: int): bool = lat >= -90000000 and lat <= 90000000 and lng >= -180000000 and lng <= 180000000
-pure def samePlace(item: SavedItem, place: SaveRequest): bool =
-  if (place.provider != "") item.provider == place.provider and item.providerPlaceId == place.providerPlaceId
-  else item.provider == "" and item.lat == place.lat and item.lng == place.lng
+pure def samePlace(saved: SavedItem, place: SaveRequest): bool =
+  if (place.provider != "") saved.provider == place.provider and saved.providerPlaceId == place.providerPlaceId
+  else saved.provider == "" and saved.lat == place.lat and saved.lng == place.lng
 pure def has(s: SavedPlaces, id: int): bool = s.items.some(i => i.id == id)
 pure val placeValues = Set(
   { label: "Home", lat: 43730000, lng: 7420000, provider: "", providerPlaceId: "", kind: NoProvider },

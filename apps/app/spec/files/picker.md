@@ -46,11 +46,11 @@ pure def openPicker(s: Picker, maximum: int): Picker =
   { ...initial, open: true, epoch: s.epoch + 1, ticket: s.ticket + 1, loading: true, maximum: maximum, outcome: Choosing, delivered: 0 }
 pure def canBrowseFolder(s: Picker, path: str): bool = s.open and not(busy(s))
 pure def browseFolder(s: Picker, path: str): Picker = { ...s, path: path, ticket: s.ticket + 1, loading: true, rows: List(), listing: Unread, error: NoError }
-pure def canFolderReply(s: Picker, ticket: int, outcome: ListingOutcome): bool = ticket >= 1 and ticket <= s.ticket and outcome != Unread
-pure def folderReply(s: Picker, ticket: int, rows: List[Row], outcome: ListingOutcome, granted: bool): Picker =
+pure def canFolderReply(s: Picker, ticket: int, result: ListingOutcome): bool = ticket >= 1 and ticket <= s.ticket and result != Unread
+pure def folderReply(s: Picker, ticket: int, rows: List[Row], result: ListingOutcome, granted: bool): Picker =
   if (not(s.open) or ticket != s.ticket) s
   else if (not(granted)) { ...s, loading: false, rows: List(), listing: Unread, error: AccessNeeded }
-  else { ...s, loading: false, rows: keptRows(outcome, rows), listing: outcome }
+  else { ...s, loading: false, rows: keptRows(result, rows), listing: result }
 pure def lawALateFolderReplyChangesNothing(s: Picker, ticket: int, rows: List[Row]): bool =
   ticket != s.ticket implies folderReply(s, ticket, rows, Complete, true) == s
 pure val sValues = Set(initial, { ...initial, open: true, epoch: 1, ticket: 2, loading: true, maximum: 2, outcome: Choosing })

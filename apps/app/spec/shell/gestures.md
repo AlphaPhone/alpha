@@ -11,6 +11,19 @@ scroll or, in edit mode, a drag.
 The swipe zones of the phone canvas and the pull on empty Home that asks for Android's shade are
 libraries at the end.
 
+## Story: Arrange Home with my fingers
+
+> As the owner, I want a long press to start arranging Home, a drag to move a tile where I drop it,
+> the minus or a keyboard activation to remove one, and the tap that ended a press never to open
+> the app as well.
+
+### One pointer owns a press or a drag, and only on the surface that is showing
+
+A second pointer neither moves, ends nor cancels the first one's gesture. Outside edit mode a press
+on a shown tile starts a hold; in edit mode it starts a drag, except on the minus. A covered Home,
+the library opening, an app opening or the entry leaving the list ends the press, and an old hold
+timer cannot retarget the entry that replaced it.
+
 ```quint
 type Surface = OnHome | OnLibrary | Elsewhere
 type Press = { pointer: int, key: str }
@@ -35,62 +48,46 @@ pure val visibleValues = Set(Set(), Set("alpha:notes", "alpha:inbox"), Set("alph
 pure val directionValues = Set(-1, 1)
 pure val HoldMs = 450
 pure val PressSlop = 10
-```
-
-## Story: Arrange Home with my fingers
-
-> As the owner, I want a long press to start arranging Home, a drag to move a tile where I drop it,
-> the minus or a keyboard activation to remove one, and the tap that ended a press never to open
-> the app as well.
-
-### One pointer owns a press or a drag, and only on the surface that is showing
-
-A second pointer neither moves, ends nor cancels the first one's gesture. Outside edit mode a press
-on a shown tile starts a hold; in edit mode it starts a drag, except on the minus. A covered Home,
-the library opening, an app opening or the entry leaving the list ends the press, and an old hold
-timer cannot retarget the entry that replaced it.
-
-```quint
 pure def active(g: Gestures): bool = g.mounted and not(g.covered) and g.surface != Elsewhere
-pure def stepped(out: List[Outcome], g: Gestures): GestureStep = { state: g, out: out }
+pure def withOutcomes(out: List[Outcome], g: Gestures): GestureStep = { state: g, out: out }
 pure def acted(act: Act, key: str, over: str, g: Gestures): GestureStep =
   { state: g, out: List({ act: act, key: key, over: over }) }
 pure def showing(g: Gestures, surface: Surface, editing: bool, covered: bool, visible: Set[str]): GestureStep = {
   val shown = { ...g, surface: surface, editing: editing, covered: covered, visible: visible }
   val keepPress = active(shown) and surface == g.surface and not(editing) and visible.contains(g.press.key)
   val keepDrag = active(shown) and surface == OnHome and editing and visible.contains(g.drag.key)
-  stepped(List(), { ...shown, press: if (keepPress) g.press else NoPress, drag: if (keepDrag) g.drag else NoDrag,
+  withOutcomes(List(), { ...shown, press: if (keepPress) g.press else NoPress, drag: if (keepDrag) g.drag else NoDrag,
     swallow: if (visible.contains(g.swallow) and surface == g.surface) g.swallow else "" })
 }
 pure def canDown(g: Gestures, pointer: int, key: str, onRemove: bool): bool = g.mounted and pointer > 0
 pure def down(g: Gestures, pointer: int, key: str, onRemove: bool): GestureStep = {
   val busy = (g.press.pointer != 0 and g.press.pointer != pointer) or (g.drag.pointer != 0 and g.drag.pointer != pointer)
   val base = { ...g, press: NoPress, swallow: "" }
-  if (busy) stepped(List(), g)
-  else if (not(active(g)) or not(g.visible.contains(key))) stepped(List(), base)
-  else if (not(g.editing) or g.surface == OnLibrary) stepped(List(), { ...base, press: { pointer: pointer, key: key } })
-  else if (onRemove) stepped(List(), base)
-  else stepped(List(), { ...base, drag: { pointer: pointer, key: key, moved: false } })
+  if (busy) withOutcomes(List(), g)
+  else if (not(active(g)) or not(g.visible.contains(key))) withOutcomes(List(), base)
+  else if (not(g.editing) or g.surface == OnLibrary) withOutcomes(List(), { ...base, press: { pointer: pointer, key: key } })
+  else if (onRemove) withOutcomes(List(), base)
+  else withOutcomes(List(), { ...base, drag: { pointer: pointer, key: key, moved: false } })
 }
 pure def canMovePointer(g: Gestures, pointer: int, far: bool): bool = g.mounted and pointer > 0
 pure def movePointer(g: Gestures, pointer: int, far: bool): GestureStep = {
   val base = if (g.press.pointer == pointer and far) { ...g, press: NoPress } else g
-  if (g.drag.pointer != pointer) stepped(List(), base)
-  else if (not(active(g)) or not(g.visible.contains(g.drag.key))) stepped(List(), { ...base, drag: NoDrag })
-  else if (far and not(g.drag.moved)) stepped(List(), { ...base, drag: { ...g.drag, moved: true } })
-  else stepped(List(), base)
+  if (g.drag.pointer != pointer) withOutcomes(List(), base)
+  else if (not(active(g)) or not(g.visible.contains(g.drag.key))) withOutcomes(List(), { ...base, drag: NoDrag })
+  else if (far and not(g.drag.moved)) withOutcomes(List(), { ...base, drag: { ...g.drag, moved: true } })
+  else withOutcomes(List(), base)
 }
 pure def canUp(g: Gestures, pointer: int, over: str): bool = g.mounted and pointer > 0
 pure def up(g: Gestures, pointer: int, over: str): GestureStep = {
   val base = if (g.press.pointer == pointer) { ...g, press: NoPress } else g
-  if (g.drag.pointer != pointer) stepped(List(), base)
-  else if (not(active(g)) or not(g.drag.moved) or not(g.visible.contains(g.drag.key))) stepped(List(), { ...base, drag: NoDrag })
-  else if (over == "" or over == g.drag.key or not(g.visible.contains(over))) stepped(List(), { ...base, drag: NoDrag, swallow: g.drag.key })
+  if (g.drag.pointer != pointer) withOutcomes(List(), base)
+  else if (not(active(g)) or not(g.drag.moved) or not(g.visible.contains(g.drag.key))) withOutcomes(List(), { ...base, drag: NoDrag })
+  else if (over == "" or over == g.drag.key or not(g.visible.contains(over))) withOutcomes(List(), { ...base, drag: NoDrag, swallow: g.drag.key })
   else acted(PlaceTile, g.drag.key, over, { ...base, drag: NoDrag, swallow: g.drag.key })
 }
 pure def canCancel(g: Gestures, pointer: int): bool = g.mounted and pointer > 0
 pure def cancel(g: Gestures, pointer: int): GestureStep =
-  stepped(List(), { ...g, press: if (g.press.pointer == pointer) NoPress else g.press, drag: if (g.drag.pointer == pointer) NoDrag else g.drag })
+  withOutcomes(List(), { ...g, press: if (g.press.pointer == pointer) NoPress else g.press, drag: if (g.drag.pointer == pointer) NoDrag else g.drag })
 pure def alwaysOneGestureAtATime(g: Gestures): bool = g.press.pointer == 0 or g.drag.pointer == 0
 pure def alwaysRetiredOwnsNothing(g: Gestures): bool = g.mounted or (g.press == NoPress and g.drag == NoDrag and g.swallow == "")
 pure def alwaysDragOnlyInEditMode(g: Gestures): bool = g.drag.pointer != 0 implies (g.editing and g.surface == OnHome)
@@ -106,13 +103,13 @@ is swallowed. Android's long-press menu gesture (a context menu event) does the 
 ```quint
 pure def canHold(g: Gestures, pointer: int, key: str): bool = g.press.pointer == pointer and g.press.key == key and pointer > 0
 pure def hold(g: Gestures, pointer: int, key: str): GestureStep =
-  if (not(active(g)) or not(g.visible.contains(key))) stepped(List(), { ...g, press: NoPress })
+  if (not(active(g)) or not(g.visible.contains(key))) withOutcomes(List(), { ...g, press: NoPress })
   else if (g.surface == OnLibrary) acted(OpenEntryMenu, key, "", { ...g, press: NoPress, swallow: key })
   else acted(StartEditing, key, "", { ...g, press: NoPress, swallow: key })
 pure def canContext(g: Gestures, key: str): bool = active(g) and g.visible.contains(key)
 pure def context(g: Gestures, key: str): GestureStep =
   if (g.surface == OnLibrary) acted(OpenEntryMenu, key, "", { ...g, press: NoPress, swallow: key })
-  else if (g.editing) stepped(List(), { ...g, press: NoPress })
+  else if (g.editing) withOutcomes(List(), { ...g, press: NoPress })
   else acted(StartEditing, key, "", { ...g, press: NoPress, swallow: key })
 pure def alwaysSwallowIsShown(g: Gestures): bool = g.swallow == "" or g.visible.contains(g.swallow)
 pure def sometimesEditingStartedByHold(g: Gestures): bool = g.editing and g.swallow != ""
@@ -129,8 +126,8 @@ pure def canTap(g: Gestures, key: str, onRemove: bool, keyboard: bool): bool = a
 pure def tap(g: Gestures, key: str, onRemove: bool, keyboard: bool): GestureStep = {
   val held = g.swallow == key
   val after = { ...g, swallow: "" }
-  if (held) stepped(List(), after)
-  else if (g.editing and g.surface == OnHome) (if (onRemove or keyboard) acted(RemoveTile, key, "", after) else stepped(List(), after))
+  if (held) withOutcomes(List(), after)
+  else if (g.editing and g.surface == OnHome) (if (onRemove or keyboard) acted(RemoveTile, key, "", after) else withOutcomes(List(), after))
   else acted(Activate, key, "", after)
 }
 pure def canArrow(g: Gestures, key: str, direction: int): bool =
@@ -151,9 +148,9 @@ pure def sometimesDropped(g: Gestures): bool = g.swallow != "" and g.editing and
 
 ```quint
 pure def canUnmount(g: Gestures): bool = g.mounted
-pure def unmount(g: Gestures): GestureStep = stepped(List(), { ...g, mounted: false, press: NoPress, drag: NoDrag, swallow: "" })
+pure def unmount(g: Gestures): GestureStep = withOutcomes(List(), { ...g, mounted: false, press: NoPress, drag: NoDrag, swallow: "" })
 pure def canMount(g: Gestures): bool = not(g.mounted)
-pure def mount(g: Gestures): GestureStep = stepped(List(), { ...g, mounted: true, editing: false, covered: false })
+pure def mount(g: Gestures): GestureStep = withOutcomes(List(), { ...g, mounted: true, editing: false, covered: false })
 ```
 
 ## Story: Swipe the way the phone expects

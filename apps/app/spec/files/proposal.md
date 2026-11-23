@@ -189,8 +189,8 @@ pure def alwaysAMoveOrTrashWasReviewedByIdentity(s: Proposal): bool =
   (needsIdentity(s.op) and s.outcome == Succeeded) implies (s.authority != DirectRequest and s.bound)
 pure def canGiveUp(s: Proposal): bool = running(s)
 pure def giveUp(s: Proposal): Proposal = { ...s, outcome: Failed }
-pure def canSettle(s: Proposal): bool = s.authority != NoAuthority and s.outcome != Unsettled
-pure def settle(s: Proposal): Proposal = { ...s, authority: NoAuthority }
+pure def canSettleProposal(s: Proposal): bool = s.authority != NoAuthority and s.outcome != Unsettled
+pure def settleProposal(s: Proposal): Proposal = { ...s, authority: NoAuthority }
 pure def sometimesMovedByPosition(s: Proposal): bool = s.op == OpMove and s.target == ResolvedShown and s.outcome == Succeeded and s.changes >= 1
 pure def sometimesAChangedFileIsLeftAlone(s: Proposal): bool = s.op == OpTrash and s.outcome == Failed and s.bound and not(s.identityCurrent)
 pure def stepGivingUpChangesNothing(before: Proposal, via: str, after: Proposal): bool =

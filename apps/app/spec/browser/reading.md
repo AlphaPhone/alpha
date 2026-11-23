@@ -73,7 +73,7 @@ pure def readAloud(r: Reading, page: ReadPage, voice: bool): ReadingChange =
   else { state: { ...r, phase: Preparing, kind: ReadAloud, bound: page }, out: List() }
 pure def canReadingPrepared(r: Reading, page: ReadPage): bool = r.phase == Preparing and r.kind == ReadAloud
 pure def readingPrepared(r: Reading, page: ReadPage): ReadingChange =
-  if (samePage(r.bound, page)) { state: { ...r, phase: Extracting }, out: List(RequestReading(r.bound)) }
+  if (samePage(r.bound, page)) { state: { ...r, phase: Extracting }, out: List(RequestReading({ tab: r.bound.tab, url: r.bound.url, navigation: r.bound.navigation, revision: r.bound.revision, shown: r.bound.shown, settled: r.bound.settled, secure: r.bound.secure })) }
   else { state: ended(1, r), out: List(CancelReading) }
 pure def canReadingReturned(r: Reading, ok: bool, sensitive: bool): bool = r.phase == Extracting and r.kind == ReadAloud
 pure def readingReturned(r: Reading, ok: bool, sensitive: bool): ReadingChange =
@@ -131,7 +131,7 @@ pure def askAboutPage(r: Reading, page: ReadPage): ReadingChange = {
   val stopped = if (r.phase != NotReading) List(CancelReading) else List()
   if (r.support == Unsupported) { state: ended(1, r), out: stopped.concat(List(note(ReadingUnsupported))) }
   else if (not(page.shown and page.settled and page.secure)) { state: ended(1, r), out: stopped.concat(List(note(LoadHttpsToAsk))) }
-  else { state: { ...ended(1, r), phase: Extracting, kind: AskAboutPage, bound: page }, out: stopped.concat(List(RequestExcerpt(page))) }
+  else { state: { ...ended(1, r), phase: Extracting, kind: AskAboutPage, bound: page }, out: stopped.concat(List(RequestExcerpt({ tab: page.tab, url: page.url, navigation: page.navigation, revision: page.revision, shown: page.shown, settled: page.settled, secure: page.secure }))) }
 }
 pure def canExcerptReturned(r: Reading, readable: bool, empty: bool, sensitive: bool, page: ReadPage, body: str): bool = r.phase == Extracting and r.kind == AskAboutPage
 pure def excerptReturned(r: Reading, readable: bool, empty: bool, sensitive: bool, page: ReadPage, body: str): ReadingChange =
@@ -149,7 +149,7 @@ pure def questionEdited(r: Reading, empty: bool, sensitive: bool, body: str): Re
 pure def canQuestionApproved(r: Reading, page: ReadPage): bool =
   r.phase == Reviewing and r.kind == AskAboutPage and (r.excerpt == PageText or r.excerpt == UserText)
 pure def questionApproved(r: Reading, page: ReadPage): ReadingChange =
-  if (samePage(r.bound, page)) { state: ended(1, r), out: List(ComposeQuestion(r.bound)) }
+  if (samePage(r.bound, page)) { state: ended(1, r), out: List(ComposeQuestion({ tab: r.bound.tab, url: r.bound.url, navigation: r.bound.navigation, revision: r.bound.revision, shown: r.bound.shown, settled: r.bound.settled, secure: r.bound.secure })) }
   else { state: ended(1, r), out: List(note(ReadingStopped)) }
 pure def canQuestionClosed(r: Reading): bool = r.phase == Reviewing and r.kind == AskAboutPage
 pure def questionClosed(r: Reading): Reading = ended(1, r)
@@ -174,11 +174,11 @@ pure def canReadLocally(r: Reading, page: ReadPage, sensitiveAddress: bool): boo
 pure def readLocally(r: Reading, page: ReadPage, sensitiveAddress: bool): ReadingChange =
   if (not(page.shown and page.settled)) { state: r, out: List(note(LoadHttpsToRead)) }
   else { state: { ...r, phase: Reviewing, kind: ReadLocally, bound: page, blocked: sensitiveAddress, sourcePending: true, excerpt: NoExcerpt },
-    out: List(FetchSource(page)) }
-pure def canSourceSettled(r: Reading, found: bool, blockedText: bool, current: bool, body: str): bool = r.kind == ReadLocally and r.phase != NotReading and r.sourcePending
-pure def sourceSettled(r: Reading, found: bool, blockedText: bool, current: bool, body: str): Reading = {
+    out: List(FetchSource({ tab: page.tab, url: page.url, navigation: page.navigation, revision: page.revision, shown: page.shown, settled: page.settled, secure: page.secure })) }
+pure def canSourceSettled(r: Reading, found: bool, blockedText: bool, present: bool, body: str): bool = r.kind == ReadLocally and r.phase != NotReading and r.sourcePending
+pure def sourceSettled(r: Reading, found: bool, blockedText: bool, present: bool, body: str): Reading = {
   val filled = found and not(r.edited) and not(r.blocked)
-  if (not(current) or blockedText) { ...r, sourcePending: false, blocked: true, excerpt: NoExcerpt, text: "" }
+  if (not(present) or blockedText) { ...r, sourcePending: false, blocked: true, excerpt: NoExcerpt, text: "" }
   else { ...r, sourcePending: false, excerpt: if (filled) PageText else r.excerpt, text: if (filled) body else r.text }
 }
 pure def canLocalTyped(r: Reading, sensitive: bool, empty: bool, body: str): bool = r.kind == ReadLocally and r.phase == Reviewing and not(r.blocked)
@@ -190,10 +190,10 @@ pure def alwaysABlockedReviewHoldsNoText(r: Reading): bool = r.blocked implies (
 ### Read is offered only after the page text settled, speaks a non-empty clean excerpt of the still-current page, and only the latest speech ends the reading
 
 ```quint
-pure def canLocalRead(r: Reading, current: bool): bool =
+pure def canLocalRead(r: Reading, present: bool): bool =
   r.kind == ReadLocally and r.phase == Reviewing and not(r.blocked) and not(r.sourcePending)
-pure def localRead(r: Reading, current: bool): ReadingChange =
-  if (not(current)) { state: ended(1, r), out: List() }
+pure def localRead(r: Reading, present: bool): ReadingChange =
+  if (not(present)) { state: ended(1, r), out: List() }
   else if (r.excerpt == SensitiveText) { state: { ...r, blocked: true, excerpt: NoExcerpt, text: "", edited: true }, out: List(note(SensitivePage)) }
   else if (r.excerpt == NoExcerpt) { state: { ...r, edited: true }, out: List() }
   else { state: { ...r, phase: Speaking, edited: true, generation: r.generation + 1, speech: r.generation + 1 },

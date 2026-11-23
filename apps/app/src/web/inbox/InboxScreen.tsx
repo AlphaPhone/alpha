@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { ChevronLeft, PenSquare, Search } from "lucide-react";
 import { useState } from "react";
 import { useMachine as useAccounts } from "../../../gen/inbox__accounts.react.ts";
-import { initial as accountsInitial, readable, showsConnect, canChangeMail } from "../../../gen/inbox__accounts.ts";
+import { initial as accountsInitial, readable, showsConnect, mayChangeMail } from "../../../gen/inbox__accounts.ts";
 import { useMachine as useMailbox } from "../../../gen/inbox__mailbox.react.ts";
 import { initial as mailboxInitial, visibleFolders, draftsView, type Folder } from "../../../gen/inbox__mailbox.ts";
 import { useMachine as useReader } from "../../../gen/inbox__reader.react.ts";
@@ -62,7 +62,7 @@ export function InboxScreen({ onClose }: ScreenProps) {
   const record = journal.records.some((r) => r.owner === journal.owner) ? recordOf(journal.owner, journal) : undefined;
   const account = accounts.rows.find((a) => a.id === accounts.selected);
   const readableRows = accounts.rows.filter(readable);
-  const writable = canChangeMail(accounts);
+  const writable = mayChangeMail(accounts);
   const say = (text: string | undefined) => setNotice(text ?? "");
   const answered = (outcome: OperationOutcome | ComposerRefusal | undefined) => {
     if (outcome === undefined) { say(""); return; }

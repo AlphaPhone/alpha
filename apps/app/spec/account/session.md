@@ -276,13 +276,13 @@ startup settles with nothing interactive open, the first restore is still pendin
 waits for it rather than being discarded.
 
 ```quint
-pure def restorePending(settled: bool, interactive: bool): bool = not(interactive) and not(settled)
-pure def powerLaunchClaimable(settled: bool, interactive: bool, busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
-  settled and not(interactive) and not(busy) and usable and production and connected and wellFormedIds
-pure def lawAnInteractivePhoneNeverClaims(settled: bool, busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
-  not(powerLaunchClaimable(settled, true, busy, usable, production, connected, wellFormedIds))
-pure def lawStagingNeverClaims(settled: bool, interactive: bool, busy: bool, usable: bool, connected: bool, wellFormedIds: bool): bool =
-  not(powerLaunchClaimable(settled, interactive, busy, usable, false, connected, wellFormedIds))
+pure def restorePending(resolved: bool, interactive: bool): bool = not(interactive) and not(resolved)
+pure def powerLaunchClaimable(resolved: bool, interactive: bool, busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
+  resolved and not(interactive) and not(busy) and usable and production and connected and wellFormedIds
+pure def lawAnInteractivePhoneNeverClaims(resolved: bool, busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
+  not(powerLaunchClaimable(resolved, true, busy, usable, production, connected, wellFormedIds))
+pure def lawStagingNeverClaims(resolved: bool, interactive: bool, busy: bool, usable: bool, connected: bool, wellFormedIds: bool): bool =
+  not(powerLaunchClaimable(resolved, interactive, busy, usable, false, connected, wellFormedIds))
 pure def lawAPendingRestoreIsNeverClaimed(busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
   restorePending(false, false) and not(powerLaunchClaimable(false, false, busy, usable, production, connected, wellFormedIds))
 ```

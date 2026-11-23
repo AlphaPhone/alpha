@@ -80,7 +80,7 @@ pure def canSelectAll(b: Browse): bool = b.selecting and b.work == NoWork
 pure def selectAll(b: Browse): Browse = { ...b, selection: b.pool }
 pure def canCancelSelection(b: Browse): bool = b.selecting and b.work == NoWork
 pure def cancelSelection(b: Browse): Browse = { ...b, selecting: false, selection: Set() }
-pure def sometimesWholeListSelected(b: Browse): bool = b.selecting and b.pool.size() >= 2 and b.selection == b.pool
+pure def sometimesWholeListSelected(b: Browse): bool = b.selecting and b.pool.size() >= 2 and b.selection.subseteq(b.pool) and b.pool.subseteq(b.selection)
 ```
 
 ### Switching tabs ends the selection, and nothing switches while the viewer is open or a change runs
@@ -178,10 +178,10 @@ pure def beginChange(b: Browse, change: Change, count: int): Browse =
   { ...b, work: Changing, change: change, batches: count, sent: 0, declined: false, undo: Set() }
 pure def canBatchSettled(b: Browse, declined: bool, changed: Set[str]): bool = b.work == Changing and b.sent < b.batches
 pure def batchSettled(b: Browse, declined: bool, changed: Set[str]): Browse = {
-  val moved = if (b.change == TrashChange) b.undo.union(changed.intersect(b.selection)) else b.undo
+  val shifted = if (b.change == TrashChange) b.undo.union(changed.intersect(b.selection)) else b.undo
   val finished = declined or b.sent + 1 >= b.batches
-  if (finished) { ...b, work: NoWork, sent: b.sent + 1, declined: declined, undo: moved, selecting: false, selection: Set() }
-  else { ...b, sent: b.sent + 1, undo: moved }
+  if (finished) { ...b, work: NoWork, sent: b.sent + 1, declined: declined, undo: shifted, selecting: false, selection: Set() }
+  else { ...b, sent: b.sent + 1, undo: shifted }
 }
 pure def alwaysBatchesNeverOutrunTheRun(b: Browse): bool = b.sent <= b.batches and (b.declined implies b.work != Changing)
 pure def alwaysUndoOnlyForMovedItems(b: Browse): bool = b.undo.size() > 0 implies b.change == TrashChange
@@ -245,5 +245,5 @@ pure def clearFilter(b: Browse): Browse = { ...b, filtered: false, filterLabel: 
 pure def alwaysLabelOnlyWhileFiltered(b: Browse): bool = b.filtered == (b.filterLabel != "")
 pure val labelValues = Set("", "Videos", "Favorites · “beach”")
 pure def stepFilterChangesNoMedia(before: Browse, via: str, after: Browse): bool =
-  (via == "setFilter" or via == "clearFilter") implies (after.purged == before.purged and after.work == before.work)
+  (via == "setFilter" or via == "clearFilter") implies (after.purged.subseteq(before.purged) and before.purged.subseteq(after.purged) and after.work == before.work)
 ```

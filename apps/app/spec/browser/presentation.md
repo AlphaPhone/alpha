@@ -38,7 +38,7 @@ pure def hostRectsFor(tab: str, x: int, y: int, width: int, height: int, underAs
   if (underAssistant) wholePage(tab, x, y, width, height) else measured
 pure def wantedPresentation(facts: CoverFacts, placement: Placement): PresentRequest =
   if (pageHidden(facts)) Withdrawn
-  else Placed({ ...placement, below: facts.underlay,
+  else Placed({ tab: placement.tab, x: placement.x, y: placement.y, width: placement.width, height: placement.height, below: facts.underlay,
     rects: if (facts.underlay) hostRectsFor(placement.tab, placement.x, placement.y, placement.width, placement.height, facts.underAssistant, placement.rects) else List() })
 pure val shownFacts: CoverFacts = { inBrowser: true, home: true, layered: false, reviewing: false, modal: false, shade: false,
   viewport: true, tabLive: true, underlay: true, underAssistant: false }
@@ -52,7 +52,7 @@ pure def lawACoveredPageIsWithdrawn(facts: CoverFacts, placement: Placement): bo
   pageHidden(facts) implies wantedPresentation(facts, placement) == Withdrawn
 pure def lawUnderTheAssistantTheWholePageIsHost(facts: CoverFacts, placement: Placement): bool =
   (not(pageHidden(facts)) and facts.underAssistant) implies
-    wantedPresentation(facts, placement) == Placed({ ...placement, below: true,
+    wantedPresentation(facts, placement) == Placed({ tab: placement.tab, x: placement.x, y: placement.y, width: placement.width, height: placement.height, below: true,
       rects: wholePage(placement.tab, placement.x, placement.y, placement.width, placement.height) })
 ```
 
@@ -105,16 +105,15 @@ A failed withdrawal is retried quietly: there is nothing on screen to report.
 ```quint
 pure def canAnswered(p: Presenter, ok: bool): bool = p.unanswered.length() > 0
 pure def answered(p: Presenter, ok: bool): PresenterChange = {
-  val head = p.unanswered.nthOr(0, Withdrawn)
+  val front = p.unanswered.nthOr(0, Withdrawn)
   val rest = { ...p, unanswered: p.unanswered.removeAt(0) }
-  if (p.disposed or not(p.fresh and p.last == head)) { state: rest, out: List() }
-  else if (ok) { state: { ...rest, failed: false, recoveries: if (p.failed) p.recoveries + 1 else p.recoveries, acknowledged: head }, out: List() }
-  else {
-    val visible = head != Withdrawn
+  val visible = front != Withdrawn
+  if (p.disposed or not(p.fresh and p.last == front)) { state: rest, out: List() }
+  else if (ok) { state: { ...rest, failed: false, recoveries: if (p.failed) p.recoveries + 1 else p.recoveries, acknowledged: front }, out: List() }
+  else
     { state: { ...rest, fresh: false, acknowledged: Withdrawn, failed: p.failed or visible,
         reports: if (p.failed or not(visible)) p.reports else p.reports + 1 },
       out: if (p.failed or not(visible)) List() else List(ReportPresentFailed) }
-  }
 }
 pure def alwaysAFailureLeavesNoAcknowledgedPage(p: Presenter): bool = p.failed implies p.acknowledged == Withdrawn
 pure def alwaysAFailureIsReportedOncePerEpisode(p: Presenter): bool = p.reports == p.recoveries + (if (p.failed) 1 else 0)

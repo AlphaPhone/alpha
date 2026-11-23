@@ -239,7 +239,7 @@ export const billingService = Layer.effect(Membership, effect {
       match (effectOf) {
         when "LoadPlans": {
           const loaded = loadPlans() catch () => ({ ok: false, current: { tag: "NoPaidPlan" } as const })
-          try send({ type: "managerLoaded", current: loaded.current, ok: loaded.ok })
+          try send({ type: "managerLoaded", present: loaded.current, ok: loaded.ok })
         };
         when "StartCheckout": startCheckout() catch () => undefined;
         when "ConfirmCheckout": confirmCheckout() catch () => undefined;

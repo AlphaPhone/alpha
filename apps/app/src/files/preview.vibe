@@ -117,7 +117,7 @@ export const layer = Layer.effect(FilesPreview, effect {
     const answer = timeout(documents.pdf(doc.selection, page), PAGE_TIMEOUT) catch () => undefined
     if (answer === undefined) return try send(pdf, { type: "timeOutPage" })
     const image = answer.imageUri && (answer.imageUri.startsWith("file://") || answer.imageUri.startsWith("blob:") || answer.imageUri.startsWith("content://")) ? answer.imageUri : ""
-    try send(pdf, { type: "pageReply", ticket, outcome: pageOutcome(answer), page: answer.page ?? -1, count: answer.pageCount ?? 0, image })
+    try send(pdf, { type: "pageReply", ticket, result: pageOutcome(answer), page: answer.page ?? -1, count: answer.pageCount ?? 0, image })
   }
 
   effect function show(doc: Doc, key: string, listed: boolean) {

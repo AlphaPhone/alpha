@@ -33,12 +33,12 @@ pure def isHeld(k: Kept): bool = k != Empty
 pure def withKept(slot: Slot, d: ReminderDrafts, k: Kept): ReminderDrafts = if (slot == CreationSlot) { ...d, creation: k } else { ...d, edit: k }
 pure val idValues = Set("c1", "r1", "")
 pure val revisionValues = Set("", "v1", "v2")
-pure val fieldsValues = Set("call", "call the dentist")
+pure val editsValues = Set("call", "call the dentist")
 pure val versionValues = Set(1, 2, 3)
-pure def canKeep(d: ReminderDrafts, slot: Slot, id: str, revision: str, fields: str): bool =
+pure def canKeep(d: ReminderDrafts, slot: Slot, id: str, revision: str, edits: str): bool =
   id != "" and (slot == CreationSlot or revision != "") and (not(isHeld(keptIn(d, slot))) or idOf(keptIn(d, slot)) == id)
-pure def keep(d: ReminderDrafts, slot: Slot, id: str, revision: str, fields: str): ReminderDrafts =
-  { ...withKept(slot, d, Held({ id: id, revision: if (slot == CreationSlot) "" else revision, fields: fields, version: d.versions + 1 })), versions: d.versions + 1 }
+pure def keep(d: ReminderDrafts, slot: Slot, id: str, revision: str, edits: str): ReminderDrafts =
+  { ...withKept(slot, d, Held({ id: id, revision: if (slot == CreationSlot) "" else revision, fields: edits, version: d.versions + 1 })), versions: d.versions + 1 }
 pure def alwaysKeptVersionsAreIssued(d: ReminderDrafts): bool =
   versionOf(d.creation) <= d.versions and versionOf(d.edit) <= d.versions and
   (isHeld(d.creation) implies (idOf(d.creation) != "" and versionOf(d.creation) >= 1)) and

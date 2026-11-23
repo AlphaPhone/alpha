@@ -123,16 +123,15 @@ owes a read for a signed-in account, started once the resident is ready.
 ```quint
 pure def canBindAccount(s: MapsConnection, account: int, client: int): bool =
   account >= 0 and client > 0 and (account != s.account or client != s.client)
-pure def bindAccount(s: MapsConnection, account: int, client: int): ConnectionStep =
-  if (account == s.account) { state: { ...s, client: client }, out: List() }
-  else {
-    val retired: MapsConnection = {
-      ...s, account: account, client: client, generation: s.generation + 1, phase: NeverRead, owner: 0,
-      coverage: noCoverage, failure: if (account == 0) SignedOutFailure else NoFailure, wanted: account > 0, pausedUntil: 0,
-    }
-    val next: ConnectionStep = if (retired.wanted and retired.residentReady) reading(s.opened, retired) else { state: retired, out: List() }
-    { state: next.state, out: if (s.phase == Installed) List(ProviderRetired).concat(next.out) else next.out }
+pure def bindAccount(s: MapsConnection, account: int, client: int): ConnectionStep = {
+  val retired: MapsConnection = {
+    ...s, account: account, client: client, generation: s.generation + 1, phase: NeverRead, owner: 0,
+    coverage: noCoverage, failure: if (account == 0) SignedOutFailure else NoFailure, wanted: account > 0, pausedUntil: 0,
   }
+  val following: ConnectionStep = if (retired.wanted and retired.residentReady) reading(s.opened, retired) else { state: retired, out: List() }
+  if (account == s.account) { state: { ...s, client: client }, out: List() }
+  else { state: following.state, out: if (s.phase == Installed) List(ProviderRetired).concat(following.out) else following.out }
+}
 pure def stepAccountChangeRetiresProvider(before: MapsConnection, after: MapsConnection): bool =
   before.account != after.account implies after.phase != Installed and after.generation > before.generation
 pure def stepRebuiltClientKeepsProvider(before: MapsConnection, after: MapsConnection): bool =

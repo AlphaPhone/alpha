@@ -54,7 +54,7 @@ pure def canAskClear(d: Diagnostics): bool = d.log == LogShown and d.problems.le
 pure def askClear(d: Diagnostics): Diagnostics = { ...d, confirmClear: true }
 pure def canCancelClear(d: Diagnostics): bool = d.confirmClear
 pure def cancelClear(d: Diagnostics): Diagnostics = { ...d, confirmClear: false }
-pure def canConfirmClear(d: Diagnostics): bool = d.confirmClear and not(d.clearing)
+pure def canConfirmClearLog(d: Diagnostics): bool = d.confirmClear and not(d.clearing)
 pure def confirmClearLog(d: Diagnostics): Diagnostics = { ...d, confirmClear: false, clearing: true, clearFailed: false }
 pure def canCleared(d: Diagnostics, ok: bool): bool = d.clearing
 pure def cleared(d: Diagnostics, ok: bool): Diagnostics =
@@ -105,10 +105,10 @@ dropped rather than scrubbed.
 type Field = AppVersion | VersionCode | Variant | BuildType | TestMocks | AndroidRelease | SecurityPatch | SdkLevel
   | UpstreamPin | AssetHash | PermissionGrant | AlphaRole | ConnectionKind | PlanView | ProblemEntry
   | RoleHolder | AccountId | SessionId | FreeText | Url | PackageName
-pure def exported(field: Field): bool =
-  not(field == RoleHolder or field == AccountId or field == SessionId or field == FreeText or field == Url or field == PackageName)
-pure def lawNoIdentifierIsExported(field: Field): bool =
-  (field == AccountId or field == SessionId or field == PackageName or field == RoleHolder) implies not(exported(field))
+pure def exported(fieldId: Field): bool =
+  not(fieldId == RoleHolder or fieldId == AccountId or fieldId == SessionId or fieldId == FreeText or fieldId == Url or fieldId == PackageName)
+pure def lawNoIdentifierIsExported(fieldId: Field): bool =
+  (fieldId == AccountId or fieldId == SessionId or fieldId == PackageName or fieldId == RoleHolder) implies not(exported(fieldId))
 ```
 
 ## Story: Read the licences Alpha ships
@@ -118,7 +118,7 @@ pure def lawNoIdentifierIsExported(field: Field): bool =
 ### The notices load once from the app itself, never from a remote source
 
 ```quint
-pure val noticesValues = Set(List()).union(Set(List({ name: "react", version: "19.0.0", licence: "MIT", source: "", text: "", flags: List(), obligations: List() })))
+pure val noticesValues: Set[List[Notice]] = Set(List()).union(Set(List({ name: "react", version: "19.0.0", licence: "MIT", source: "", text: "", flags: List(), obligations: List() })))
 pure def canLoadLicences(d: Diagnostics): bool = d.licences == NotLoaded or d.licences == NoticesUnavailable
 pure def loadLicences(d: Diagnostics): Diagnostics = { ...d, licences: LoadingNotices }
 pure def canLicencesAnswered(d: Diagnostics, notices: List[Notice]): bool = d.licences == LoadingNotices

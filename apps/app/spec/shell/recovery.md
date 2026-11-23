@@ -9,14 +9,6 @@ stays usable and says which app closed. Diagnostics keep only the failure's kind
 the version, the platform and the time; never a message, stack, address or stored value, any of
 which can carry the owner's data. The failure class is recorded in the device's problem log.
 
-```quint
-type RecoveryPhase = Running | StartupFailed | RenderFailed
-type Recovery = { mounted: bool, phase: RecoveryPhase, errorClass: str, homeEscape: bool, failedApp: str, recorded: int }
-pure val initial: Recovery = { mounted: false, phase: Running, errorClass: "", homeEscape: false, failedApp: "", recorded: 0 }
-pure val errorClassValues = Set("TypeError", "Error")
-pure val appValues = Set("notes", "calendar")
-```
-
 ## Story: Get my phone back when something breaks
 
 > As the owner, I want a broken app to close and leave Home working, and a broken Alpha to offer a
@@ -25,6 +17,11 @@ pure val appValues = Set("notes", "calendar")
 ### Before Alpha has rendered, an uncaught failure shows recovery; after, only a failed shell does
 
 ```quint
+type RecoveryPhase = Running | StartupFailed | RenderFailed
+type Recovery = { mounted: bool, phase: RecoveryPhase, errorClass: str, homeEscape: bool, failedApp: str, recorded: int }
+pure val initial: Recovery = { mounted: false, phase: Running, errorClass: "", homeEscape: false, failedApp: "", recorded: 0 }
+pure val errorClassValues = Set("TypeError", "Error")
+pure val appValues = Set("notes", "calendar")
 pure def canAppMounted(r: Recovery): bool = not(r.mounted) and r.phase == Running
 pure def appMounted(r: Recovery): Recovery = { ...r, mounted: true }
 pure def canUncaught(r: Recovery, errorClass: str): bool = r.phase == Running

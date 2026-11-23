@@ -249,7 +249,7 @@ export const layer = Layer.effect(Reader, effect {
       const answer = native.invoke("AlphaMailAttachments", "saveReviewed", { name: reviewed.name, mimeType: reviewed.mimeType, dataBase64: reviewed.dataBase64, sha256: reviewed.sha256, size: reviewed.bytes, reviewed: true, opaque: reviewed.opaque }) catch () => undefined
       const result = Schema.decodeUnknownEffect(WireHandoffResult)(answer) catch () => undefined
       const outcome: SavePhase = result?.status === "saved" ? "SavedCopy" : result?.status === "cancelled" ? "SaveCancelled" : "SaveUnconfirmed"
-      try send({ type: "saveFinished", outcome })
+      try send({ type: "saveFinished", result: outcome })
     },
     effect closeAttachment() {
       if ((try machine.get()).attachment.phase === "NoAttachment") return false

@@ -53,9 +53,9 @@ pure def mode(s: Screen): ScreenMode =
   else BaseMode
 pure def owned(actor: Actor, s: Screen): Screen = if (actor == Owner) { ...s, intent: s.intent + 1 } else s
 pure def discarded(h: Handoff): Handoff = if (h == Queued) NoHandoff else h
-pure def settled(p: Phase): bool = p == Ready or p == Empty or p == Failed
+pure def isSettled(p: Phase): bool = p == Ready or p == Empty or p == Failed
 pure def answered(p: Phase): bool = p == Loading or p == Ready or p == Empty
-pure def planned(run: int, s: Screen): Screen = { ...s, routeRun: run, route: Loading, routes: 0, chosen: 0 }
+pure def planned(runNo: int, s: Screen): Screen = { ...s, routeRun: runNo, route: Loading, routes: 0, chosen: 0 }
 pure def noRoute(keep: bool, s: Screen): Screen = { ...s, route: NotAsked, routes: 0, chosen: 0, origin: keep and s.origin }
 ```
 
@@ -64,12 +64,12 @@ pure def noRoute(keep: bool, s: Screen): Screen = { ...s, route: NotAsked, route
 ```quint
 pure val textValues = Set("", "coffee", "43.73, 7.42")
 pure val labelValues = Set("Home", "Ferry Building")
-pure val runValues = Set(1, 2, 3)
+pure val runNoValues = Set(1, 2, 3)
 pure val idValues = Set(1, 2)
-pure val outcomeValues = Set(Ready, Empty, Failed)
+pure val resultValues = Set(Ready, Empty, Failed)
 pure val countValues = Set(1, 2, 3)
 pure val indexValues = Set(0, 1, 2)
-pure val lengthValues = Set(0, 6, 301)
+pure val lenValues = Set(0, 6, 301)
 pure val kindValues = Set(ChosenOrigin, SavedOrigin)
 pure val choiceValues = Set(ResultChoice, SavedChoice, PinChoice)
 pure val weight_routeSettles = 5
@@ -101,16 +101,16 @@ pure def typeQuery(s: Screen, text: str): Screen = owned(Owner, {
   ...s, query: text, pending: if (text == "") NoPending else QueryPending, searching: true,
   choice: NoChoice, choiceId: 0, details: NotAsked, locating: false, handoff: discarded(s.handoff),
 })
-pure def canSubmitSearch(s: Screen, by: Actor, length: int): bool = not(s.directions) and not(s.hidden) and searchable(length) and s.query != ""
-pure def submitSearch(s: Screen, by: Actor, length: int): Screen =
+pure def canSubmitSearch(s: Screen, by: Actor, len: int): bool = not(s.directions) and not(s.hidden) and searchable(len) and s.query != ""
+pure def submitSearch(s: Screen, by: Actor, len: int): Screen =
   if (reusable(s)) s else owned(by, searchFor(s.query, s))
 pure def canClearQuery(s: Screen): bool = not(s.directions)
 pure def clearQuery(s: Screen): Screen = owned(Owner, {
   ...s, query: "", searched: "", search: NotAsked, pending: NoPending, searching: true,
   choice: NoChoice, choiceId: 0, details: NotAsked, handoff: discarded(s.handoff),
 })
-pure def canSearchSettles(s: Screen, run: int, outcome: Phase): bool = run == s.queryRun and s.search == Loading and settled(outcome)
-pure def searchSettles(s: Screen, run: int, outcome: Phase): Screen = { ...s, search: outcome }
+pure def canSearchSettles(s: Screen, runNo: int, result: Phase): bool = runNo == s.queryRun and s.search == Loading and isSettled(result)
+pure def searchSettles(s: Screen, runNo: int, result: Phase): Screen = { ...s, search: result }
 pure def stepRepeatedEnterReuses(before: Screen, via: str, after: Screen): bool =
   (via == "submitSearch" and reusable(before)) implies after.queryRun == before.queryRun
 pure def alwaysSearchHasText(s: Screen): bool = s.search != NotAsked implies s.searched != ""
@@ -126,9 +126,9 @@ pure def originSubmitted(reuse: bool, s: Screen): Screen =
   else { ...s, choosingOrigin: true, originRun: s.originRun + 1, originSearch: Loading, originSearched: s.originText, pending: NoPending }
 pure def originReusable(s: Screen): bool =
   s.pending == NoPending and s.originSearched == s.originText and answered(s.originSearch)
-pure def canDebounce(s: Screen, length: int): bool = s.pending != NoPending and not(s.hidden)
-pure def debounce(s: Screen, length: int): Screen =
-  if (s.pending == QueryPending) (if (searchable(length)) searchFor(s.query, s) else { ...s, pending: NoPending })
+pure def canDebounce(s: Screen, len: int): bool = s.pending != NoPending and not(s.hidden)
+pure def debounce(s: Screen, len: int): Screen =
+  if (s.pending == QueryPending) (if (searchable(len)) searchFor(s.query, s) else { ...s, pending: NoPending })
   else originSubmitted(false, s)
 pure def alwaysHiddenHoldsNoInput(s: Screen): bool = s.hidden implies s.pending == NoPending and not(s.locating)
 ```
@@ -149,8 +149,8 @@ pure def pick(s: Screen, choice: Choice, id: int): Screen = owned(Owner, noRoute
   ...s, choice: choice, choiceId: id, details: if (choice == ResultChoice) Loading else Ready,
   searching: false, pending: NoPending, locating: false, handoff: discarded(s.handoff),
 }))
-pure def canDetailsSettle(s: Screen, id: int, outcome: Phase): bool = id == s.choiceId and s.details == Loading and settled(outcome)
-pure def detailsSettle(s: Screen, id: int, outcome: Phase): Screen = { ...s, details: outcome }
+pure def canDetailsSettle(s: Screen, id: int, result: Phase): bool = id == s.choiceId and s.details == Loading and isSettled(result)
+pure def detailsSettle(s: Screen, id: int, result: Phase): Screen = { ...s, details: result }
 pure def canClosePlace(s: Screen): bool = s.choice != NoChoice and not(s.directions)
 pure def closePlace(s: Screen): Screen = owned(Owner, noRoute(true, {
   ...s, choice: NoChoice, choiceId: 0, details: NotAsked, pending: NoPending, searching: s.searched != "", handoff: discarded(s.handoff),
@@ -259,8 +259,8 @@ pure def editOrigin(s: Screen, by: Actor, text: str, coordinates: bool): Screen 
 pure def canSubmitOrigin(s: Screen, by: Actor): bool =
   s.directions and not(s.hidden) and s.originText != "" and s.originKind != NoOrigin and s.originKind != LocatedOrigin
 pure def submitOrigin(s: Screen, by: Actor): Screen = owned(by, originSubmitted(originReusable(s), s))
-pure def canOriginSettles(s: Screen, run: int, outcome: Phase): bool = run == s.originRun and s.originSearch == Loading and settled(outcome)
-pure def originSettles(s: Screen, run: int, outcome: Phase): Screen = { ...s, originSearch: outcome }
+pure def canOriginSettles(s: Screen, runNo: int, result: Phase): bool = runNo == s.originRun and s.originSearch == Loading and isSettled(result)
+pure def originSettles(s: Screen, runNo: int, result: Phase): Screen = { ...s, originSearch: result }
 pure def canChooseOrigin(s: Screen, kind: OriginKind, label: str): bool =
   s.directions and not(s.hidden) and label != "" and
   (kind == SavedOrigin or (kind == ChosenOrigin and s.choosingOrigin and s.originSearch == Ready))
@@ -279,10 +279,10 @@ returns one to three routes: Recommended, Alternative 1, Alternative 2. Start
 guides along the chosen one.
 
 ```quint
-pure def canRouteSettles(s: Screen, run: int, outcome: Phase, count: int): bool =
-  run == s.routeRun and s.route == Loading and settled(outcome) and (outcome != Ready or (count >= 1 and count <= 3))
-pure def routeSettles(s: Screen, run: int, outcome: Phase, count: int): Screen =
-  { ...s, route: outcome, routes: if (outcome == Ready) count else 0, chosen: 0 }
+pure def canRouteSettles(s: Screen, runNo: int, result: Phase, count: int): bool =
+  runNo == s.routeRun and s.route == Loading and isSettled(result) and (result != Ready or (count >= 1 and count <= 3))
+pure def routeSettles(s: Screen, runNo: int, result: Phase, count: int): Screen =
+  { ...s, route: result, routes: if (result == Ready) count else 0, chosen: 0 }
 pure def canChooseRoute(s: Screen, index: int): bool = s.route == Ready and s.routes > 1 and index >= 0 and index < s.routes
 pure def chooseRoute(s: Screen, index: int): Screen = owned(Owner, { ...s, chosen: index })
 pure def alwaysARouteNeedsAnOrigin(s: Screen): bool = (s.route == Loading or s.route == Ready) implies s.origin and s.directions
@@ -320,13 +320,14 @@ returns to that event.
 
 ```quint
 pure def canBack(s: Screen): bool = s.choosingOrigin or s.directions or s.choice != NoChoice or s.searching or s.query != ""
-pure def back(s: Screen): Screen = owned(Owner, {
+pure def back(s: Screen): Screen = {
   val base: Screen = { ...s, pending: NoPending, handoff: discarded(s.handoff) }
-  if (s.choosingOrigin) { ...base, choosingOrigin: false }
-  else if (s.directions) noRoute(true, { ...base, directions: false, locating: false })
-  else if (s.choice != NoChoice) { ...base, choice: NoChoice, choiceId: 0, details: NotAsked }
-  else { ...base, searching: false, query: "", searched: "", search: NotAsked, handoffFromEvent: false }
-})
+  owned(Owner,
+    if (s.choosingOrigin) { ...base, choosingOrigin: false }
+    else if (s.directions) noRoute(true, { ...base, directions: false, locating: false })
+    else if (s.choice != NoChoice) { ...base, choice: NoChoice, choiceId: 0, details: NotAsked }
+    else { ...base, searching: false, query: "", searched: "", search: NotAsked, handoffFromEvent: false })
+}
 pure def returnsToEvent(s: Screen): bool =
   s.handoffFromEvent and not(s.directions) and s.choice == NoChoice and not(s.choosingOrigin)
 ```
@@ -373,8 +374,8 @@ pure def resumable(s: Screen): bool = s.searching and s.search == NotAsked and s
 pure def canHandoffArrives(s: Screen, text: str, fromEvent: bool): bool = s.handoff != Queued and text != ""
 pure def handoffArrives(s: Screen, text: str, fromEvent: bool): Screen =
   { ...s, handoff: Queued, handoffText: text, handoffFromEvent: fromEvent, requests: s.requests + 1 }
-pure def canApplyHandoff(s: Screen, length: int): bool = s.handoff == Queued and not(s.hidden) and searchable(length)
-pure def applyHandoff(s: Screen, length: int): Screen = {
+pure def canApplyHandoff(s: Screen, len: int): bool = s.handoff == Queued and not(s.hidden) and searchable(len)
+pure def applyHandoff(s: Screen, len: int): Screen = {
   val released: Screen = providerChanged({ ...s, searching: true })
   { ...searchFor(s.handoffText, released), handoff: Applied, handoffs: s.handoffs + 1 }
 }

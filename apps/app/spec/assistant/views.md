@@ -39,13 +39,13 @@ not retire the turn's cards.
 type Delivered = NothingPrepared | DeliveredView | UnknownView | UnavailableView
 pure val claimWaitMs = 5000
 pure val negativeWaitMs = 1500
-pure def claims(prepared: bool, ours: bool, known: bool, current: bool): bool = prepared and ours and known and current
+pure def claims(prepared: bool, ours: bool, known: bool, present: bool): bool = prepared and ours and known and present
 pure def delivered(claimed: bool, switched: bool, accepted: bool, stillCurrent: bool): Delivered =
   if (not(claimed)) UnknownView else if (switched and accepted and stillCurrent) DeliveredView else UnknownView
 pure def reported(prepared: bool, ours: bool, known: bool): Delivered =
   if (not(prepared)) NothingPrepared else if (ours and not(known)) UnavailableView else NothingPrepared
 pure def negativeSent(claimed: bool, switchedOrAcknowledged: bool): bool = claimed and not(switchedOrAcknowledged)
-pure def lawAnUnknownViewIsNeverClaimed(current: bool): bool = not(claims(true, true, false, current))
+pure def lawAnUnknownViewIsNeverClaimed(present: bool): bool = not(claims(true, true, false, present))
 pure def lawAnotherRenderersBindingIsNeverClaimed(known: bool): bool = not(claims(true, false, known, true))
 pure def lawNoClaimNoView(switched: bool, accepted: bool): bool = delivered(false, switched, accepted, true) != DeliveredView
 pure def lawAnAcknowledgedClaimSendsNoNegative(claimed: bool): bool = not(negativeSent(claimed, true))

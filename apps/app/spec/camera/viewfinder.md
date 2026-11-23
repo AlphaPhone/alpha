@@ -54,7 +54,7 @@ pure def recordingBusy(c: Camera): bool = c.recording != RecordingIdle
 pure val panelValues = Set(ChatSheet, ChatFull)
 pure val wantedValues = Set(PhotoMode, VideoMode)
 pure val kindValues = Set(CameraNotice, UnavailableNotice, MicrophoneNotice)
-pure val outcomeValues = Set(RecordingStarted, MicrophoneRefused, RecordingNotStarted)
+pure val resultValues = Set(RecordingStarted, MicrophoneRefused, RecordingNotStarted)
 pure val grantValues = Set(AccessGranted, AccessNotGranted, AccessUnreadable)
 pure val ticketValues = Set(1, 2, 3)
 pure val widestValues = Set(5, 10)
@@ -341,18 +341,18 @@ pure def sometimesPreviewStoppedRetry(c: Camera): bool = c.released and c.notice
 A refused microphone shows the microphone notice; the camera stays usable.
 
 ```quint
-pure def startedWith(sound: bool, outcome: RecordStart, c: Camera): Camera =
-  if (outcome == RecordingStarted) { ...c, recording: RecordingActive, elapsed: 0, recordedBytes: 0, withSound: sound, noSoundChosen: not(sound), notice: NoNotice,
+pure def startedWith(sound: bool, result: RecordStart, c: Camera): Camera =
+  if (result == RecordingStarted) { ...c, recording: RecordingActive, elapsed: 0, recordedBytes: 0, withSound: sound, noSoundChosen: not(sound), notice: NoNotice,
     micDenied: false, saidMaxLength: false, stopCause: NoStop }
-  else if (outcome == MicrophoneRefused) { ...c, notice: MicrophoneNotice, micDenied: true }
+  else if (result == MicrophoneRefused) { ...c, notice: MicrophoneNotice, micDenied: true }
   else c
-pure def canRecord(c: Camera, outcome: RecordStart): bool =
+pure def canRecord(c: Camera, result: RecordStart): bool =
   active(c) and ready(c) and c.mode == VideoMode and c.recording == RecordingIdle and not(c.binding) and c.notice == NoNotice and not(c.capturing)
-pure def record(c: Camera, outcome: RecordStart): Camera = startedWith(true, outcome, c)
-pure def canAnswerMicNotice(c: Camera, sound: bool, outcome: RecordStart): bool =
+pure def record(c: Camera, result: RecordStart): Camera = startedWith(true, result, c)
+pure def canAnswerMicNotice(c: Camera, sound: bool, result: RecordStart): bool =
   active(c) and c.notice == MicrophoneNotice and ready(c) and c.recording == RecordingIdle and not(c.binding) and not(c.capturing) and
-  (sound or outcome != MicrophoneRefused)
-pure def answerMicNotice(c: Camera, sound: bool, outcome: RecordStart): Camera = startedWith(sound, outcome, { ...c, notice: NoNotice })
+  (sound or result != MicrophoneRefused)
+pure def answerMicNotice(c: Camera, sound: bool, result: RecordStart): Camera = startedWith(sound, result, { ...c, notice: NoNotice })
 pure def alwaysNoOrphanRecording(c: Camera): bool = c.recording == RecordingActive implies ready(c)
 pure def alwaysSoundlessOnlyWhenChosen(c: Camera): bool = (c.recording == RecordingActive and not(c.withSound)) implies c.noSoundChosen
 pure def alwaysMicNoticeOnlyAfterDenial(c: Camera): bool = c.notice == MicrophoneNotice implies (c.micDenied and c.mode == VideoMode)

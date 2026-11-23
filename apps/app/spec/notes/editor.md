@@ -38,12 +38,12 @@ pure def retireOwner(s: Editor): Editor = { ...initial, nextToken: s.nextToken }
 pure def canPublish(s: Editor, revision: int, notes: Set[str], trashed: Set[str]): bool =
   s.current and revision >= 0 and revision >= s.revision and not(s.saving) and s.mutation == NoMutation and notes.intersect(trashed).size() == 0
 pure def publish(s: Editor, revision: int, notes: Set[str], trashed: Set[str]): Editor = {
-  val next = { ...s, revision: revision, known: notes, trash: trashed }
-  if (not(s.present)) next
-  else if (s.draftId == "") { ...next, base: revision }
-  else if (s.version > 0) { ...next, review: s.review or s.base != revision }
-  else if (not(notes.contains(s.draftId))) closedDraft(s.review, next)
-  else { ...next, base: revision }
+  val following = { ...s, revision: revision, known: notes, trash: trashed }
+  if (not(s.present)) following
+  else if (s.draftId == "") { ...following, base: revision }
+  else if (s.version > 0) { ...following, review: s.review or s.base != revision }
+  else if (not(notes.contains(s.draftId))) closedDraft(s.review, following)
+  else { ...following, base: revision }
 }
 pure def canOpenNote(s: Editor, id: str): bool =
   s.current and s.revision >= 0 and s.known.contains(id) and not(s.saving) and s.mutation == NoMutation and not(s.present and s.draftId == id)
@@ -175,14 +175,14 @@ back. The editor closes a draft of the deleted note. Anything else is under revi
 ```quint
 pure def canFinishMutation(s: Editor): bool = s.current and (s.mutation == Deleting or s.mutation == Restoring)
 pure def finishMutation(s: Editor, revision: int, notes: Set[str], trashed: Set[str], success: bool): Editor = {
-  val moved = if (s.mutation == Deleting) trashed.contains(s.mutationId) and not(notes.contains(s.mutationId))
+  val shifted = if (s.mutation == Deleting) trashed.contains(s.mutationId) and not(notes.contains(s.mutationId))
     else notes.contains(s.mutationId) and not(trashed.contains(s.mutationId))
-  val accepted = success and revision >= s.revision and moved and notes.intersect(trashed).size() == 0
-  val next = { ...s, mutation: NoMutation, mutationId: "" }
-  if (not(accepted)) { ...next, review: true }
+  val accepted = success and revision >= s.revision and shifted and notes.intersect(trashed).size() == 0
+  val following = { ...s, mutation: NoMutation, mutationId: "" }
+  if (not(accepted)) { ...following, review: true }
   else if (s.mutation == Deleting and s.present and s.draftId == s.mutationId)
-    closedDraft(s.review, { ...next, revision: revision, known: notes, trash: trashed })
-  else { ...next, revision: revision, known: notes, trash: trashed }
+    closedDraft(s.review, { ...following, revision: revision, known: notes, trash: trashed })
+  else { ...following, revision: revision, known: notes, trash: trashed }
 }
 pure def sometimesDeletesAfterSave(s: Editor): bool = s.mutation == Deleting and s.committedId != "" and s.committedId == s.mutationId
 pure def sometimesRestores(s: Editor): bool = s.mutation == Restoring

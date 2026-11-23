@@ -15,8 +15,8 @@ the account and list the selection was made in. A refused or uncertain result st
 type SelectAction = SelArchive | SelUnarchive | SelTrash | SelUntrash | SelMarkRead | SelMarkUnread | SelStar | SelUnstar | SelDeleteDrafts
 type Picked = { id: str, version: str }
 type SelPhase = NotSelecting | Selecting | ReviewingSelection | Applying | SelectionStopped | SelectionDone
-type Selection = { scope: str, phase: SelPhase, picked: List[Picked], action: SelectAction, dispatched: List[str], applied: List[str] }
-pure val initial: Selection = { scope: "", phase: NotSelecting, picked: List(), action: SelArchive, dispatched: List(), applied: List() }
+type Selection = { scope: str, phase: SelPhase, picked: List[Picked], selAction: SelectAction, dispatched: List[str], applied: List[str] }
+pure val initial: Selection = { scope: "", phase: NotSelecting, picked: List(), selAction: SelArchive, dispatched: List(), applied: List() }
 pure def canStart(s: Selection, scope: str): bool = scope != "" and s.phase == NotSelecting
 pure def start(s: Selection, scope: str): Selection = { ...initial, scope: scope, phase: Selecting }
 pure def canFinish(s: Selection): bool = s.phase != NotSelecting and s.phase != Applying
@@ -30,17 +30,17 @@ pure val scopeValues = Set("a|inbox", "a|sent")
 ### Picking toggles one message, Select all takes the shown ones, and a review names them all
 
 ```quint
-pure def canToggle(s: Selection, item: Picked): bool = s.phase == Selecting and item.id != ""
-pure def toggle(s: Selection, item: Picked): Selection =
-  { ...s, picked: if (s.picked.some(p => p.id == item.id)) s.picked.select(p => p.id != item.id) else s.picked.append(item) }
+pure def canToggle(s: Selection, entry: Picked): bool = s.phase == Selecting and entry.id != ""
+pure def toggle(s: Selection, entry: Picked): Selection =
+  { ...s, picked: if (s.picked.some(p => p.id == entry.id)) s.picked.select(p => p.id != entry.id) else s.picked.append(entry) }
 pure def canPickAll(s: Selection, items: List[Picked]): bool = s.phase == Selecting and items.every(i => i.id != "" and items.select(o => o.id == i.id).length() == 1)
 pure def pickAll(s: Selection, items: List[Picked]): Selection = { ...s, picked: items }
-pure def canReview(s: Selection, action: SelectAction): bool = s.phase == Selecting and s.picked != List()
-pure def review(s: Selection, action: SelectAction): Selection = { ...s, phase: ReviewingSelection, action: action }
+pure def canReview(s: Selection, selAction: SelectAction): bool = s.phase == Selecting and s.picked != List()
+pure def review(s: Selection, selAction: SelectAction): Selection = { ...s, phase: ReviewingSelection, selAction: selAction }
 pure def canBackToPicking(s: Selection): bool = s.phase == ReviewingSelection
 pure def backToPicking(s: Selection): Selection = { ...s, phase: Selecting }
 pure def alwaysPickedOnce(s: Selection): bool = s.picked.every(p => s.picked.select(o => o.id == p.id).length() == 1)
-pure val itemValues = Set({ id: "m1", version: "h1" }, { id: "m2", version: "h2" })
+pure val entryValues = Set({ id: "m1", version: "h1" }, { id: "m2", version: "h2" })
 pure val itemsValues = Set(List({ id: "m1", version: "h1" }, { id: "m2", version: "h2" }))
 ```
 

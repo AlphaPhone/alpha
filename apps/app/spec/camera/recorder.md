@@ -58,13 +58,12 @@ pure def startResolved(r: Recorder, ok: bool): Recorder =
       bytes: 0, chunks: 0, full: false, truncated: false, prefix: PrefixUnread, settles: 0, cause: NoCause }
   else { ...r, adapter: AdapterIdle }
 pure def canChunk(r: Recorder, piece: int): bool = (r.session == Capturing or r.session == Stopping) and piece >= 0
-pure def chunk(r: Recorder, piece: int): Recorder =
+pure def chunk(r: Recorder, piece: int): Recorder = {
+  val admitted = admitChunk(r.bytes, piece, r.limit)
   if (r.full) { ...r, truncated: true }
-  else {
-    val admitted = admitChunk(r.bytes, piece, r.limit)
-    { ...r, bytes: admitted.total, chunks: if (admitted.keep) r.chunks + 1 else r.chunks, truncated: not(admitted.keep),
-      full: admitted.stop, session: if (admitted.stop) Stopping else r.session }
-  }
+  else { ...r, bytes: admitted.total, chunks: if (admitted.keep) r.chunks + 1 else r.chunks, truncated: not(admitted.keep),
+    full: admitted.stop, session: if (admitted.stop) Stopping else r.session }
+}
 pure def alwaysWithinSizeLimit(r: Recorder): bool = r.bytes <= r.limit and (r.full implies r.session != Capturing)
 pure def sometimesLimitReachedWithVideo(r: Recorder): bool = r.full and r.bytes > 0 and r.session == SavedPending
 ```

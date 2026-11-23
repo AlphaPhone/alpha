@@ -33,7 +33,7 @@ pure def runWord(status: str): RunWord =
   else if (status == "waiting-timer") WaitingTimer
   else if (status == "skipped") RunSkipped
   else RunUnknown
-pure val statusValues = Set("succeeded", "success", "finished", "error", "waiting-approval", "engine-internal")
+pure val statusValues = Set("succeeded", "success", "finished", "error", "waiting-approval", "engine-internal", "", "snoozed", "fired")
 pure def lawEverySuccessReadsFinished(status: str): bool =
   (status == "success" or status == "succeeded" or status == "finished") iff runWord(status) == RunFinished
 pure def lawAnUnlistedStatusIsUnknown(status: str): bool =
@@ -87,7 +87,6 @@ pure def statusWord(schedule: bool, status: str, switchedOn: bool): StatusWord =
   else if (status == "") (if (switchedOn) ActiveWord else InactiveWord)
   else if (wordedStatuses.contains(status)) Worded
   else Unknown
-pure val rowStatusValues = Set("", "snoozed", "fired", "engine-internal")
 pure def lawAStatusIsWordedOnlyFromTheList(schedule: bool, status: str, switchedOn: bool): bool =
   statusWord(schedule, status, switchedOn) == Worded implies wordedStatuses.contains(status)
 ```

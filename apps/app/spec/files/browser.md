@@ -156,18 +156,17 @@ A failed read shows nothing and says so; a partial read keeps the rows it read a
 are in all when it knows. In Trash, whose rows Trash keeps, the reply only ends the read.
 
 ```quint
-pure def canListReply(s: Browser, ticket: int, rows: List[Row], outcome: ListingOutcome): bool =
-  ticket >= 1 and ticket <= s.generation and outcome != Unread and noRepeats(rows.listMap(r => r.key))
-pure def listReply(s: Browser, ticket: int, rows: List[Row], groups: List[FolderGroup], outcome: ListingOutcome, count: int): Browser =
+pure def canListReply(s: Browser, ticket: int, rows: List[Row], result: ListingOutcome): bool =
+  ticket >= 1 and ticket <= s.generation and result != Unread and noRepeats(rows.listMap(r => r.key))
+pure def listReply(s: Browser, ticket: int, rows: List[Row], groups: List[FolderGroup], result: ListingOutcome, count: int): Browser = {
+  val shown = keptRows(result, rows)
+  val kept = pruned(s.selected, shown)
   if (not(s.active) or ticket != s.generation or s.access != AccessGranted or s.place == Browse) s
   else if (s.place == InTrash) { ...s, loading: false }
-  else {
-    val shown = keptRows(outcome, rows)
-    val kept = pruned(s.selected, shown)
-    { ...s, rows: shown, groups: if (outcome == Failed) List() else groups, listing: outcome,
-      listedCount: if (outcome == Partial and count > shown.length()) count else -1, loading: false,
-      selected: kept, selecting: s.selecting and shown.length() > 0 }
-  }
+  else { ...s, rows: shown, groups: if (result == Failed) List() else groups, listing: result,
+    listedCount: if (result == Partial and count > shown.length()) count else -1, loading: false,
+    selected: kept, selecting: s.selecting and shown.length() > 0 }
+}
 pure def alwaysTheSelectionIsListed(s: Browser): bool = s.selected.every(k => listed(s.rows, k)) and noRepeats(s.selected)
 pure def alwaysOnlySelectingHoldsASelection(s: Browser): bool = s.selected.length() > 0 implies s.selecting
 pure def alwaysRowKeysAreUnique(s: Browser): bool = noRepeats(s.rows.listMap(r => r.key))
@@ -207,8 +206,8 @@ open, share or change is in flight.
 ```quint
 pure def canToggle(s: Browser, key: str): bool = s.active and selectable(s.place) and listed(s.rows, key) and s.mutations == 0
 pure def toggle(s: Browser, key: str): Browser = {
-  val next = if (s.selected.includes(key)) s.selected.select(k => k != key) else s.selected.append(key)
-  { ...s, selected: next, selecting: next.length() > 0 }
+  val following = if (s.selected.includes(key)) s.selected.select(k => k != key) else s.selected.append(key)
+  { ...s, selected: following, selecting: following.length() > 0 }
 }
 pure def canBeginSelecting(s: Browser): bool = s.active and selectable(s.place) and s.rows.length() > 0 and not(s.selecting) and s.mutations == 0
 pure def beginSelecting(s: Browser): Browser = { ...s, selecting: true }
@@ -271,18 +270,18 @@ A preview being renamed holds Back without closing. A folder walk goes back the 
 ```quint
 type BackLayer = BackShare | BackTrashReview | BackTrashItem | BackViewer | BackPreview | BackSelection
   | BackTrashSelection | BackPlace | BackFilter | BackLeaves
-pure def backLayer(share: bool, review: bool, item: bool, viewer: bool, preview: bool, selecting: bool,
+pure def backLayer(share: bool, review: bool, entry: bool, viewer: bool, preview: bool, selecting: bool,
   trashSelecting: bool, away: bool, filtered: bool): BackLayer =
-  if (share) BackShare else if (review) BackTrashReview else if (item) BackTrashItem
+  if (share) BackShare else if (review) BackTrashReview else if (entry) BackTrashItem
   else if (viewer) BackViewer else if (preview) BackPreview else if (selecting) BackSelection
   else if (trashSelecting) BackTrashSelection else if (away) BackPlace else if (filtered) BackFilter else BackLeaves
-pure def lawBackLeavesOnlyWithNothingOpen(share: bool, review: bool, item: bool, viewer: bool, preview: bool, selecting: bool,
+pure def lawBackLeavesOnlyWithNothingOpen(share: bool, review: bool, entry: bool, viewer: bool, preview: bool, selecting: bool,
   trashSelecting: bool, away: bool, filtered: bool): bool =
-  (backLayer(share, review, item, viewer, preview, selecting, trashSelecting, away, filtered) == BackLeaves) iff
-    not(share or review or item or viewer or preview or selecting or trashSelecting or away or filtered)
-pure def lawTheSharePanelClosesFirst(review: bool, item: bool, viewer: bool, preview: bool, selecting: bool,
+  (backLayer(share, review, entry, viewer, preview, selecting, trashSelecting, away, filtered) == BackLeaves) iff
+    not(share or review or entry or viewer or preview or selecting or trashSelecting or away or filtered)
+pure def lawTheSharePanelClosesFirst(review: bool, entry: bool, viewer: bool, preview: bool, selecting: bool,
   trashSelecting: bool, away: bool, filtered: bool): bool =
-  backLayer(true, review, item, viewer, preview, selecting, trashSelecting, away, filtered) == BackShare
+  backLayer(true, review, entry, viewer, preview, selecting, trashSelecting, away, filtered) == BackShare
 pure def lawTheViewerClosesBeforeThePreview(selecting: bool, trashSelecting: bool, away: bool, filtered: bool): bool =
   backLayer(false, false, false, true, true, selecting, trashSelecting, away, filtered) == BackViewer
 ```

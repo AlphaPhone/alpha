@@ -72,10 +72,10 @@ pure def chooseTransfer(s: Transfer, kind: TransferKind, testMocks: bool): Trans
   if (s.busy) { ...s, refusedBusy: s.refusedBusy + 1 } else { ...s, busy: true, kind: kind, token: s.visit }
 pure def canTransferSettled(s: Transfer, result: TransferResult, stored: bool): bool = s.kind != NoTransfer
 pure def transferSettled(s: Transfer, result: TransferResult, stored: bool): Transfer = {
-  val current = s.token == s.visit
+  val present = s.token == s.visit
   val finished = { ...s, busy: false, kind: NoTransfer, settled: s.settled + 1 }
-  issued(0, if (result == TransferThrew) (if (current) { ...finished, waiting: s.waiting.append(s.visit) } else finished)
-    else if (not(current) or not(s.active)) finished
+  issued(0, if (result == TransferThrew) (if (present) { ...finished, waiting: s.waiting.append(s.visit) } else finished)
+    else if (not(present) or not(s.active)) finished
     else if (s.kind == ImportText and result == TransferDone)
       { ...finished, reads: s.reads + 1, imported: if (stored) s.imported + 1 else s.imported,
         waiting: if (stored) s.waiting.append(s.visit) else s.waiting }

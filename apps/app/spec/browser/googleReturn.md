@@ -31,19 +31,18 @@ pure val initial: GoogleReturn = {
   credentialCurrent: true, fence: false, outcome: Waiting, exchanged: false, work: List(), grace: List(),
 }
 pure def matches(pending: PendingRecord): bool = pending == RecordMatching or pending == RecordExpired
-pure def ended(outcome: ReturnOutcome, g: GoogleReturn): GoogleReturn = { ...g, live: false, outcome: outcome }
+pure def ended(result: ReturnOutcome, g: GoogleReturn): GoogleReturn = { ...g, live: false, outcome: result }
 pure def closedBrowser(fence: bool, g: GoogleReturn): GoogleReturn = { ...ended(BrowserClosed, g), fence: true }
 pure def canPause(g: GoogleReturn): bool = g.live and not(g.paused)
 pure def pause(g: GoogleReturn): GoogleReturn = { ...g, paused: true }
 pure def canResume(g: GoogleReturn): bool = g.live and g.paused and g.grace.length() < 3
 pure def resume(g: GoogleReturn): GoogleReturn = { ...g, grace: g.grace.append(CaptureError) }
 pure def canReceive(g: GoogleReturn, capture: Capture): bool = g.work.length() < 3
-pure def receive(g: GoogleReturn, capture: Capture): GoogleReturn =
+pure def receive(g: GoogleReturn, capture: Capture): GoogleReturn = {
+  val claim = g.live and not(g.received or g.fence or g.claimed) and capture != CaptureForeign
   if (capture == CaptureInvalid) g
-  else {
-    val claim = g.live and not(g.received or g.fence or g.claimed) and capture != CaptureForeign
-    { ...g, claimed: g.claimed or claim, work: g.work.append({ capture: capture, claim: claim }) }
-  }
+  else { ...g, claimed: g.claimed or claim, work: g.work.append({ capture: capture, claim: claim }) }
+}
 pure def canRecordChanged(g: GoogleReturn, pending: PendingRecord): bool = g.live and not(matches(pending))
 pure def recordChanged(g: GoogleReturn, pending: PendingRecord): GoogleReturn = { ...g, pending: pending }
 pure def canCredentialSuperseded(g: GoogleReturn): bool = g.live

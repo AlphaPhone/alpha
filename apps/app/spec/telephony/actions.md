@@ -27,8 +27,8 @@ type Run = Idle
   | Guarding({ runId: str, kind: ActionKind, guardedNumber: str })
   | Dispatching({ runId: str, kind: ActionKind, number: str })
   | Finished({ runId: str, kind: ActionKind, result: Settled })
-type Actions = { run: Run, ran: List[str], dispatches: int, refusals: int }
-pure val initial: Actions = { run: Idle, ran: List(), dispatches: 0, refusals: 0 }
+type Actions = { ongoing: Run, ran: List[str], dispatches: int, refusals: int }
+pure val initial: Actions = { ongoing: Idle, ran: List(), dispatches: 0, refusals: 0 }
 pure def runIdOf(r: Run): str = match r {
   | Resolving(x) => x.runId | Choosing(x) => x.runId | Guarding(x) => x.runId | Dispatching(x) => x.runId | Finished(x) => x.runId | Idle => ""
 }
@@ -72,13 +72,13 @@ never runs again.
 pure def startedRun(runId: str, kind: ActionKind, form: TargetForm, grounded: bool): Run =
   if (form == WrittenNumber and not(grounded)) Finished({ runId: runId, kind: kind, result: Refused })
   else Resolving({ runId: runId, kind: kind, form: form })
-pure def canActionStarted(a: Actions, runId: str, by: Actor): bool = by == Device and runId != "" and not(inProgress(a.run)) and not(a.ran.includes(runId))
+pure def canActionStarted(a: Actions, runId: str, by: Actor): bool = by == Device and runId != "" and not(inProgress(a.ongoing)) and not(a.ran.includes(runId))
 pure def actionStarted(a: Actions, runId: str, kind: ActionKind, form: TargetForm, grounded: bool, by: Actor): Actions =
-  { ...a, run: startedRun(runId, kind, form, grounded), ran: a.ran.append(runId), refusals: a.refusals + (if (form == WrittenNumber and not(grounded)) 1 else 0) }
+  { ...a, ongoing: startedRun(runId, kind, form, grounded), ran: a.ran.append(runId), refusals: a.refusals + (if (form == WrittenNumber and not(grounded)) 1 else 0) }
 pure def lawANumberTheOwnerDidNotWriteIsRefused(runId: str, kind: ActionKind, grounded: bool): bool =
   not(grounded) implies startedRun(runId, kind, WrittenNumber, grounded) == Finished({ runId: runId, kind: kind, result: Refused })
-pure def alwaysTheRunIsRemembered(a: Actions): bool = a.run == Idle or a.ran.includes(runIdOf(a.run))
-pure def sometimesAnUngroundedNumberRefused(a: Actions): bool = resultOf(a.run) == Refused and a.dispatches == 0 and a.refusals > 0
+pure def alwaysTheRunIsRemembered(a: Actions): bool = a.ongoing == Idle or a.ran.includes(runIdOf(a.ongoing))
+pure def sometimesAnUngroundedNumberRefused(a: Actions): bool = resultOf(a.ongoing) == Refused and a.dispatches == 0 and a.refusals > 0
 ```
 
 ### A name is looked up on the phone and the owner picks the exact number, even for one match
@@ -89,28 +89,28 @@ A new contact whose name or number is already in Contacts shows that contact as 
 contact exactly as it is is never offered.
 
 ```quint
-pure def canCandidatesFound(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.run) == runId and isResolving(a.run) and formOf(a.run) == ContactLookup
+pure def canCandidatesFound(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isResolving(a.ongoing) and formOf(a.ongoing) == ContactLookup
 pure def candidatesFound(a: Actions, runId: str, candidates: List[Candidate], by: Actor): Actions = {
-  val kind = kindOf(a.run)
-  if (candidates.length() > 0) { ...a, run: Choosing({ runId: runId, kind: kind, candidates: candidates }) }
-  else if (kind == ContactAdd) { ...a, run: Guarding({ runId: runId, kind: kind, guardedNumber: "" }) }
-  else { ...a, run: Finished({ runId: runId, kind: kind, result: NothingFound }) }
+  val kind = kindOf(a.ongoing)
+  if (candidates.length() > 0) { ...a, ongoing: Choosing({ runId: runId, kind: kind, candidates: candidates }) }
+  else if (kind == ContactAdd) { ...a, ongoing: Guarding({ runId: runId, kind: kind, guardedNumber: "" }) }
+  else { ...a, ongoing: Finished({ runId: runId, kind: kind, result: NothingFound }) }
 }
 pure def canCandidateChosen(a: Actions, runId: str, candidateId: str, by: Actor): bool =
-  ownerOnly(by) and runIdOf(a.run) == runId and candidatesOf(a.run).some(x => x.candidateId == candidateId)
+  ownerOnly(by) and runIdOf(a.ongoing) == runId and candidatesOf(a.ongoing).some(x => x.candidateId == candidateId)
 pure def candidateChosen(a: Actions, runId: str, candidateId: str, by: Actor): Actions = {
-  val chosen = candidatesOf(a.run).select(x => x.candidateId == candidateId).nthOr(0, { candidateId: candidateId, title: "", number: "" })
-  { ...a, run: Guarding({ runId: runId, kind: kindOf(a.run), guardedNumber: chosen.number }) }
+  val chosen = candidatesOf(a.ongoing).select(x => x.candidateId == candidateId).nthOr(0, { candidateId: candidateId, title: "", number: "" })
+  { ...a, ongoing: Guarding({ runId: runId, kind: kindOf(a.ongoing), guardedNumber: chosen.number }) }
 }
 pure def canNumberReady(a: Actions, runId: str, number: str, by: Actor): bool =
-  by == Device and runIdOf(a.run) == runId and isResolving(a.run) and formOf(a.run) != ContactLookup and effectKind(kindOf(a.run))
-pure def numberReady(a: Actions, runId: str, number: str, by: Actor): Actions = { ...a, run: Guarding({ runId: runId, kind: kindOf(a.run), guardedNumber: number }) }
+  by == Device and runIdOf(a.ongoing) == runId and isResolving(a.ongoing) and formOf(a.ongoing) != ContactLookup and effectKind(kindOf(a.ongoing))
+pure def numberReady(a: Actions, runId: str, number: str, by: Actor): Actions = { ...a, ongoing: Guarding({ runId: runId, kind: kindOf(a.ongoing), guardedNumber: number }) }
 pure def stepALookupReachesTheGuardOnlyByTheOwnersChoice(before: Actions, via: str, after: Actions): bool =
-  (isResolving(before.run) and formOf(before.run) == ContactLookup and isGuarding(after.run))
-    implies (via == "candidatesFound" and kindOf(before.run) == ContactAdd and candidatesOf(after.run).length() == 0)
+  (isResolving(before.ongoing) and formOf(before.ongoing) == ContactLookup and isGuarding(after.ongoing))
+    implies (via == "candidatesFound" and kindOf(before.ongoing) == ContactAdd and candidatesOf(after.ongoing).length() == 0)
 pure def stepTheChosenNumberIsTheOneShown(before: Actions, via: str, after: Actions): bool =
-  via == "candidateChosen" implies candidatesOf(before.run).some(x => x.number == guardedNumberOf(after.run))
-pure def sometimesTheOwnerPicksAmongNames(a: Actions): bool = candidatesOf(a.run).length() > 1
+  via == "candidateChosen" implies candidatesOf(before.ongoing).some(x => x.number == guardedNumberOf(after.ongoing))
+pure def sometimesTheOwnerPicksAmongNames(a: Actions): bool = candidatesOf(a.ongoing).length() > 1
 ```
 
 ### The owner's Not now, leaving the app or a changed context ends a run that has not dispatched
@@ -120,11 +120,11 @@ nothing; nothing is called, sent or changed.
 
 ```quint
 pure def canReviewDismissed(a: Actions, runId: str, by: Actor): bool =
-  by != Alpha and runIdOf(a.run) == runId and (isResolving(a.run) or isChoosing(a.run) or isGuarding(a.run))
-pure def reviewDismissed(a: Actions, runId: str, by: Actor): Actions = { ...a, run: Finished({ runId: runId, kind: kindOf(a.run), result: OwnerCancelled }) }
+  by != Alpha and runIdOf(a.ongoing) == runId and (isResolving(a.ongoing) or isChoosing(a.ongoing) or isGuarding(a.ongoing))
+pure def reviewDismissed(a: Actions, runId: str, by: Actor): Actions = { ...a, ongoing: Finished({ runId: runId, kind: kindOf(a.ongoing), result: OwnerCancelled }) }
 pure def stepADispatchedRunIsNeverCancelled(before: Actions, via: str, after: Actions): bool =
-  isDispatching(before.run) implies resultOf(after.run) != OwnerCancelled
-pure def sometimesDismissed(a: Actions): bool = resultOf(a.run) == OwnerCancelled
+  isDispatching(before.ongoing) implies resultOf(after.ongoing) != OwnerCancelled
+pure def sometimesDismissed(a: Actions): bool = resultOf(a.ongoing) == OwnerCancelled
 ```
 
 ## Story: Nothing acts over an emergency call
@@ -138,15 +138,15 @@ A refusal is reported in the guard's own words: nothing was done during a call t
 emergency call.
 
 ```quint
-pure def canGuardAnswered(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.run) == runId and isGuarding(a.run)
+pure def canGuardAnswered(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isGuarding(a.ongoing)
 pure def guardAnswered(a: Actions, runId: str, fresh: bool, reading: CallReading, by: Actor): Actions =
-  if (effectAllowed(fresh, reading)) { ...a, run: Dispatching({ runId: runId, kind: kindOf(a.run), number: guardedNumberOf(a.run) }), dispatches: a.dispatches + 1 }
-  else { ...a, run: Finished({ runId: runId, kind: kindOf(a.run), result: Refused }), refusals: a.refusals + 1 }
+  if (effectAllowed(fresh, reading)) { ...a, ongoing: Dispatching({ runId: runId, kind: kindOf(a.ongoing), number: guardedNumberOf(a.ongoing) }), dispatches: a.dispatches + 1 }
+  else { ...a, ongoing: Finished({ runId: runId, kind: kindOf(a.ongoing), result: Refused }), refusals: a.refusals + 1 }
 pure def stepAnEffectDispatchesOnlyAfterTheGuard(before: Actions, via: str, after: Actions): bool =
-  (isDispatching(after.run) and not(isDispatching(before.run))) implies (via == "guardAnswered" and isGuarding(before.run))
+  (isDispatching(after.ongoing) and not(isDispatching(before.ongoing))) implies (via == "guardAnswered" and isGuarding(before.ongoing))
 pure def stepNothingDispatchesOverAnEmergencyCall(before: Actions, via: str, after: Actions): bool =
-  after.dispatches > before.dispatches implies (via == "guardAnswered" and isDispatching(after.run))
-pure def sometimesTheGuardRefused(a: Actions): bool = resultOf(a.run) == Refused and a.refusals > 0 and a.ran.length() > 0
+  after.dispatches > before.dispatches implies (via == "guardAnswered" and isDispatching(after.ongoing))
+pure def sometimesTheGuardRefused(a: Actions): bool = resultOf(a.ongoing) == Refused and a.refusals > 0 and a.ran.length() > 0
 ```
 
 ## Story: Be told exactly what happened
@@ -161,13 +161,13 @@ phone refusing before it acted: unavailable. A lost reply may follow an accepted
 took the text, or a committed contact write, so it is unconfirmed, and the run is never retried.
 
 ```quint
-pure def canEffectAnswered(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.run) == runId and isDispatching(a.run)
-pure def effectAnswered(a: Actions, runId: str, result: Settled, by: Actor): Actions = { ...a, run: Finished({ runId: runId, kind: kindOf(a.run), result: result }) }
-pure def canEffectLost(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.run) == runId and isDispatching(a.run)
-pure def effectLost(a: Actions, runId: str, by: Actor): Actions = { ...a, run: Finished({ runId: runId, kind: kindOf(a.run), result: Unconfirmed }) }
-pure def stepALostAnswerIsUnconfirmed(before: Actions, via: str, after: Actions): bool = via == "effectLost" implies resultOf(after.run) == Unconfirmed
-pure def sometimesUnconfirmed(a: Actions): bool = resultOf(a.run) == Unconfirmed and a.dispatches > 0
-pure def sometimesApplied(a: Actions): bool = resultOf(a.run) == Applied and a.dispatches > 0
+pure def canEffectAnswered(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isDispatching(a.ongoing)
+pure def effectAnswered(a: Actions, runId: str, result: Settled, by: Actor): Actions = { ...a, ongoing: Finished({ runId: runId, kind: kindOf(a.ongoing), result: result }) }
+pure def canEffectLost(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isDispatching(a.ongoing)
+pure def effectLost(a: Actions, runId: str, by: Actor): Actions = { ...a, ongoing: Finished({ runId: runId, kind: kindOf(a.ongoing), result: Unconfirmed }) }
+pure def stepALostAnswerIsUnconfirmed(before: Actions, via: str, after: Actions): bool = via == "effectLost" implies resultOf(after.ongoing) == Unconfirmed
+pure def sometimesUnconfirmed(a: Actions): bool = resultOf(a.ongoing) == Unconfirmed and a.dispatches > 0
+pure def sometimesApplied(a: Actions): bool = resultOf(a.ongoing) == Applied and a.dispatches > 0
 ```
 
 ### An unconfirmed text is settled only by the phone's own send record for its operation ID
@@ -206,11 +206,11 @@ reply draft goes to that sender in that conversation (upstream `spec/os/android/
 
 ```quint
 pure def canSettledWithoutEffect(a: Actions, runId: str, by: Actor): bool =
-  by == Device and runIdOf(a.run) == runId and (isResolving(a.run) or (isGuarding(a.run) and (kindOf(a.run) == ComposeText or kindOf(a.run) == SendText)))
-pure def settledWithoutEffect(a: Actions, runId: str, result: Settled, by: Actor): Actions = { ...a, run: Finished({ runId: runId, kind: kindOf(a.run), result: result }) }
+  by == Device and runIdOf(a.ongoing) == runId and (isResolving(a.ongoing) or (isGuarding(a.ongoing) and (kindOf(a.ongoing) == ComposeText or kindOf(a.ongoing) == SendText)))
+pure def settledWithoutEffect(a: Actions, runId: str, result: Settled, by: Actor): Actions = { ...a, ongoing: Finished({ runId: runId, kind: kindOf(a.ongoing), result: result }) }
 pure def stepASettlementWithoutEffectNeverDispatches(before: Actions, via: str, after: Actions): bool =
   via == "settledWithoutEffect" implies after.dispatches == before.dispatches
-pure def sometimesDraftedInsteadOfSent(a: Actions): bool = kindOf(a.run) == ComposeText and resultOf(a.run) == Applied and a.dispatches == 0
+pure def sometimesDraftedInsteadOfSent(a: Actions): bool = kindOf(a.ongoing) == ComposeText and resultOf(a.ongoing) == Applied and a.dispatches == 0
 ```
 
 ### A view change that shows the outcome waits for the reply that carries it

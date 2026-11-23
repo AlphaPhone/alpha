@@ -12,6 +12,16 @@ failure and also stays listed in the notices slot, without a timer, until it is 
 While a modal dialog is open the toast is copied into that dialog's own live region, the
 topmost one only, so it is seen and announced above the dialog; its Undo runs the page's Undo.
 
+## Story: Read what just happened, at my own pace
+
+> As the owner, I want a toast to stay until I can read it, an Undo to stay its full ten seconds, a
+> failure to be announced, and nothing important to disappear behind something trivial.
+
+### A toast's time is fixed when it appears, from its length, its kind and the timeout scale
+
+A passive toast with another passive one waiting yields after its short reading time; an Undo offer
+or a failure keeps its whole time. A later change of the scale changes only later toasts.
+
 ```quint
 type Toast = { message: str, chars: int, undo: str, failure: bool }
 type LauncherRead = ReadIdle | ReadLoading | ReadReady | ReadFailed
@@ -39,19 +49,6 @@ pure val readsValues = Set(0, 1, 2)
 pure val errorValues = Set("", "Notes could not be opened. Try again.")
 pure val errorCharsValues = Set(0, 37)
 pure val seqValues = Set(0, 1, 2, 3)
-```
-
-## Story: Read what just happened, at my own pace
-
-> As the owner, I want a toast to stay until I can read it, an Undo to stay its full ten seconds, a
-> failure to be announced, and nothing important to disappear behind something trivial.
-
-### A toast's time is fixed when it appears, from its length, its kind and the timeout scale
-
-A passive toast with another passive one waiting yields after its short reading time; an Undo offer
-or a failure keeps its whole time. A later change of the scale changes only later toasts.
-
-```quint
 pure def base(t: Toast): int = if (t.undo != "") 10000 else 1900
 pure def reading(t: Toast): int = if (t.chars * 50 + 500 > 12000) 12000 else t.chars * 50 + 500
 pure def durationOf(t: Toast, scale: int): int = (if (base(t) > reading(t)) base(t) else reading(t)) * scale / 100
@@ -95,18 +92,19 @@ overflow the oldest of the lowest rank (passive, then Undo, then failure) goes.
 ```quint
 pure def rank(t: Toast): int = if (t.failure) 2 else if (t.undo != "") 1 else 0
 pure def lowest(q: List[Toast]): int = q.foldl(2, (a, t) => if (rank(t) < a) rank(t) else a)
+type ToastCursor = { at: int, found: int }
 pure def dropAt(q: List[Toast]): int =
   q.foldl({ at: 0, found: -1 }, (c, t) => { at: c.at + 1, found: if (c.found < 0 and rank(t) == lowest(q)) c.at else c.found }).found
 pure def capped(q: List[Toast]): List[Toast] = if (q.length() > QueueLimit) q.removeAt(dropAt(q)) else q
 pure def toasted(t: Toast, s: Toasts): Toasts = {
   val shownPassive = passive(s.shown)
-  if (s.shown.message != "" and not(shownPassive and rank(t) > 0)) {
-    val tail = s.queued.nthOr(s.queued.length() - 1, s.shown)
-    val repeated = t.undo == "" and tail == t
-    val passiveTail = s.queued.length() > 0 and rank(tail) == 0 and rank(t) == 0
-    val waiting = { ...s, queued: if (passiveTail) s.queued.removeAt(s.queued.length() - 1).append(t) else capped(s.queued.append(t)) }
-    if (repeated) s else { ...waiting, delay: if (s.held or not(shownPassive)) s.delay else armed(waiting) }
-  } else presenting(t, s)
+  val back = s.queued.nthOr(s.queued.length() - 1, s.shown)
+  val repeated = t.undo == "" and back == t
+  val passiveTail = s.queued.length() > 0 and rank(back) == 0 and rank(t) == 0
+  val waiting = { ...s, queued: if (passiveTail) s.queued.removeAt(s.queued.length() - 1).append(t) else capped(s.queued.append(t)) }
+  if (s.shown.message != "" and not(shownPassive and rank(t) > 0))
+    (if (repeated) s else { ...waiting, delay: if (s.held or not(shownPassive)) s.delay else armed(waiting) })
+  else presenting(t, s)
 }
 pure def canShowToast(s: Toasts, message: str, chars: int, undo: str, failure: bool): bool =
   message != "" and chars >= 0 and not(undo != "" and failure)

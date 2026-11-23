@@ -108,9 +108,9 @@ call.
 type BackStep = StageReturns | ChatCloses | AppBack
 pure def backStep(c: Comms): BackStep = if (c.stage.length() > 0) StageReturns else if (c.height != SheetClosed) ChatCloses else AppBack
 pure def subjectShown(c: Comms, app: CommsApp, subject: Subject, key: str, by: Actor): Comms = {
-  val moved = c.height != SheetClosed and key != c.key
+  val shifted = c.height != SheetClosed and key != c.key
   { ...c, app: app, subject: subject, key: key,
-    stage: if (moved) c.stage.append({ app: c.app, subject: c.subject, key: c.key }) else c.stage,
+    stage: if (shifted) c.stage.append({ app: c.app, subject: c.subject, key: c.key }) else c.stage,
     height: if (c.emergency and c.height == SheetFull) SheetOpen else c.height }
 }
 pure def canStageReturned(c: Comms, by: Actor): bool = by != Alpha and c.stage.length() > 0

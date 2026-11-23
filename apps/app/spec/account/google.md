@@ -56,18 +56,17 @@ pure def closePanel(g: Google): Google = { ...g, panel: PanelClosed, verified: f
 pure def canReload(g: Google): bool = g.panel != PanelClosed and g.phase != GWaiting and g.phase != GDisconnecting
 pure def reload(g: Google): GoogleStep = withRead(g.reads + 1, { ...g, verified: false, held: Set(), choice: false, asked: Set() })
 pure def canAccountsRead(g: Google, readId: int, read: GrantRead): bool = g.readPending and readId >= 1 and readId <= g.reads
-pure def accountsRead(g: Google, readId: int, read: GrantRead): Google =
+pure def accountsRead(g: Google, readId: int, read: GrantRead): Google = {
+  val has = read.account != 0
   if (readId != g.reads or g.phase == GDisconnecting) { ...g, readPending: readId != g.reads and g.readPending }
   else if (not(read.readOk)) { ...g, readPending: false, verified: false, held: Set(), unverified: true, choice: false, asked: Set(),
     phase: if (g.phase == GRefreshing or g.phase == GDenied) GFailed else g.phase }
-  else {
-    val has = read.account != 0
-    { ...g, readPending: false, verified: g.panel != PanelClosed, held: capsOf(read), unverified: false,
-      phase: if (g.phase == GWaiting) GWaiting else GIdle, account: read.account,
-      readGrant: read.gmailRead and has, modifyGrant: read.gmailModify and read.gmailRead and has, sendGrant: read.gmailSend and read.gmailRead and has,
-      calendarGrant: read.calendar and has, calendarWrite: read.calendarEdit and read.calendar and has,
-      cacheVisible: false, review: false, outcome: NoDisconnect, rowsKnown: false }
-  }
+  else { ...g, readPending: false, verified: g.panel != PanelClosed, held: capsOf(read), unverified: false,
+    phase: if (g.phase == GWaiting) GWaiting else GIdle, account: read.account,
+    readGrant: read.gmailRead and has, modifyGrant: read.gmailModify and read.gmailRead and has, sendGrant: read.gmailSend and read.gmailRead and has,
+    calendarGrant: read.calendar and has, calendarWrite: read.calendarEdit and read.calendar and has,
+    cacheVisible: false, review: false, outcome: NoDisconnect, rowsKnown: false }
+}
 pure def alwaysAVerifiedReadIsTheOpenPanels(g: Google): bool = g.verified implies g.panel != PanelClosed
 pure def alwaysChangesIncludeReading(g: Google): bool = (g.modifyGrant or g.sendGrant) implies g.readGrant
 pure def alwaysCalendarEditsIncludeReading(g: Google): bool = g.calendarWrite implies g.calendarGrant
@@ -189,11 +188,11 @@ pure def canDisconnect(g: Google): bool = g.account != 0 and g.phase != GDisconn
 pure def disconnect(g: Google): GoogleStep =
   { state: { ...g, phase: GDisconnecting, review: false, cacheVisible: false, outcome: NoDisconnect, rowsKnown: false }, out: List(RevokeGrant) }
 pure val disconnectedValues = Set(Disconnected, StillConnected, DisconnectUnconfirmed)
-pure def canDisconnectRead(g: Google, outcome: DisconnectOutcome, rowsKnown: bool): bool =
-  g.phase == GDisconnecting and outcome != NoDisconnect and (not(rowsKnown) implies outcome == DisconnectUnconfirmed)
-pure def disconnectRead(g: Google, outcome: DisconnectOutcome, rowsKnown: bool): Google = {
-  val gone = outcome == Disconnected
-  { ...g, phase: if (gone) GIdle else GFailed, outcome: outcome, rowsKnown: rowsKnown,
+pure def canDisconnectRead(g: Google, disconnected: DisconnectOutcome, rowsKnown: bool): bool =
+  g.phase == GDisconnecting and disconnected != NoDisconnect and (not(rowsKnown) implies disconnected == DisconnectUnconfirmed)
+pure def disconnectRead(g: Google, disconnected: DisconnectOutcome, rowsKnown: bool): Google = {
+  val gone = disconnected == Disconnected
+  { ...g, phase: if (gone) GIdle else GFailed, outcome: disconnected, rowsKnown: rowsKnown,
     account: if (gone) 0 else g.account, readGrant: g.readGrant and not(gone), modifyGrant: g.modifyGrant and not(gone),
     sendGrant: g.sendGrant and not(gone), calendarGrant: g.calendarGrant and not(gone), calendarWrite: g.calendarWrite and not(gone),
     held: if (gone) Set() else g.held, cacheVisible: false, review: false }

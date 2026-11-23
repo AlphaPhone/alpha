@@ -122,7 +122,7 @@ export const googleService = Layer.effect(GoogleAccounts, effect {
     if (after !== undefined) try SubscriptionRef.set(rows, after)
     const still = after?.some((row) => row.connectionId === connectionId) ?? false
     const outcome = after === undefined || !sent ? "DisconnectUnconfirmed" : still ? "StillConnected" : "Disconnected"
-    try send({ type: "disconnectRead", outcome, rowsKnown: after !== undefined })
+    try send({ type: "disconnectRead", disconnected: outcome, rowsKnown: after !== undefined })
   }
 
   effect function perform(out: ReadonlyArray<GoogleEffect>): void!! {

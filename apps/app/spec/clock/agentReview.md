@@ -80,18 +80,20 @@ creation (`reminders.create.v1`) need the phone's reminder store. Clock never ad
 ```quint
 type ClockOffer = OfferHandoff | OfferRepeatDays | OfferRecordV1 | OfferRecordV2 | OfferCreate
 type ClockSupport = { handler: bool, repeatDays: bool, store: bool, recordV2Offered: bool }
-pure def advertises(s: ClockSupport, c: ClockOffer, offered: bool): bool =
+pure def advertises(support: ClockSupport, c: ClockOffer, offered: bool): bool =
   offered and (
-    if (c == OfferHandoff) s.handler
-    else if (c == OfferRepeatDays) s.handler and s.repeatDays
-    else if (c == OfferRecordV1) s.store and not(s.recordV2Offered)
-    else s.store)
-pure def lawNeverBothReminderVersions(s: ClockSupport): bool =
-  not(advertises(s, OfferRecordV1, true) and advertises(s, OfferRecordV2, s.recordV2Offered))
-pure def lawNoHandlerNoHandoff(s: ClockSupport, offered: bool): bool =
-  not(s.handler) implies not(advertises(s, OfferHandoff, offered) or advertises(s, OfferRepeatDays, offered))
-pure def lawNoStoreNoReminders(s: ClockSupport, offered: bool): bool =
-  not(s.store) implies not(advertises(s, OfferRecordV1, offered) or advertises(s, OfferRecordV2, offered) or advertises(s, OfferCreate, offered))
+    if (c == OfferHandoff) support.handler
+    else if (c == OfferRepeatDays) support.handler and support.repeatDays
+    else if (c == OfferRecordV1) support.store and not(support.recordV2Offered)
+    else support.store)
+pure def lawNeverBothReminderVersions(support: ClockSupport): bool =
+  not(advertises(support, OfferRecordV1, true) and advertises(support, OfferRecordV2, support.recordV2Offered))
+pure def lawNoHandlerNoHandoff(support: ClockSupport, offered: bool): bool =
+  not(support.handler) implies not(advertises(support, OfferHandoff, offered) or advertises(support, OfferRepeatDays, offered))
+pure def lawNoStoreNoReminders(support: ClockSupport, offered: bool): bool =
+  not(support.store) implies not(advertises(support, OfferRecordV1, offered) or advertises(support, OfferRecordV2, offered) or advertises(support, OfferCreate, offered))
+pure val supportValues = Set({ handler: true, repeatDays: true, store: true, recordV2Offered: true }, { handler: true, repeatDays: false, store: true, recordV2Offered: false },
+  { handler: false, repeatDays: true, store: false, recordV2Offered: false }, { handler: false, repeatDays: false, store: true, recordV2Offered: true })
 ```
 
 ### A Clock request is a handoff whose outcome may stay unresolved; a reminder change, a named reminder and a day read are not

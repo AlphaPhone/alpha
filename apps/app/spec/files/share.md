@@ -89,8 +89,8 @@ pure def choose(s: SharePanel, id: int, destination: Destination): SharePanel = 
 }
 pure def canReportDelivery(s: SharePanel, id: int): bool =
   s.effects.some(e => e.panel == id) and not(s.reported.includes(id))
-pure def reportDelivery(s: SharePanel, id: int, outcome: DeliveryOutcome): SharePanel =
-  { ...s, reported: s.reported.append(id), alerts: if (outcome == DeliveryFailed) s.alerts + 1 else s.alerts }
+pure def reportDelivery(s: SharePanel, id: int, result: DeliveryOutcome): SharePanel =
+  { ...s, reported: s.reported.append(id), alerts: if (result == DeliveryFailed) s.alerts + 1 else s.alerts }
 pure def alwaysAReportFollowsItsSend(s: SharePanel): bool =
   s.reported.every(id => s.effects.some(e => e.panel == id)) and s.alerts <= s.reported.length()
 pure def alwaysEachSendIsReportedOnce(s: SharePanel): bool = s.reported.every(id => s.reported.select(o => o == id).length() == 1)

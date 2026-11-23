@@ -1,7 +1,7 @@
 // spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Back closes the excerpt review the owner sees: Ask about page is closed, and a local reading is stopped"; spec/browser/reading.md, "Story: Ask about a page once I approve the excerpt"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"
 import { type Event, type ReadPage, type Reading, type ReadingEffect, Machine, machine, reviewShown } from "../../gen/browser__reading.effect.vibe"
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
-import { settled } from "../../gen/browser__page.effect.vibe"
+import { isSettled } from "../../gen/browser__page.effect.vibe"
 import { Assistant } from "../assistant/assistant.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Toasts } from "../shell/toasts.vibe"
@@ -46,7 +46,7 @@ export function questionDraft(name: string, url: string, excerpt: string): strin
 /** The selected tab's page as a reading reads it. */
 export function readPageOf(s: Session, shown: boolean): ReadPage {
   const tab = curTab(s)
-  return { tab: s.cur, url: tab.page.url, navigation: tab.page.navigation, revision: tab.revision, shown, settled: tab.stage === "Live" && settled(tab.page), secure: tab.page.secure }
+  return { tab: s.cur, url: tab.page.url, navigation: tab.page.navigation, revision: tab.revision, shown, settled: tab.stage === "Live" && isSettled(tab.page), secure: tab.page.secure }
 }
 
 function readingShown(state: ForegroundState): boolean {
@@ -126,7 +126,7 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
         const bound = (try reading.get()).bound
         const now = try page()
         const current = now.tab === bound.tab && now.navigation === bound.navigation && now.revision === bound.revision
-        try send({ type: "sourceSettled", found: source !== undefined && "text" in source, blockedText: source !== undefined && "blocked" in source, current, body: source !== undefined && "text" in source ? source.text : "" })
+        try send({ type: "sourceSettled", found: source !== undefined && "text" in source, blockedText: source !== undefined && "blocked" in source, present: current, body: source !== undefined && "text" in source ? source.text : "" })
       }
       when { tag: "SpeakLocally", let generation }: {
         const text = (try reading.get()).text
@@ -183,7 +183,7 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
       try send({ type: "readLocally", page: now, sensitiveAddress: sensitiveAddress(now.url) })
     },
     editLocal: (text: string) => send({ type: "localTyped", sensitive: sensitiveText(text), empty: text.trim() === "", body: text.slice(0, MAX_EXCERPT) }),
-    effect readLocal() { try send({ type: "localRead", current: try current() }) },
+    effect readLocal() { try send({ type: "localRead", present: try current() }) },
     stopLocal: () => send({ type: "localStopped" }),
     effect back() {
       const now = try reading.get()

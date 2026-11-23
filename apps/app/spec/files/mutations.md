@@ -66,15 +66,15 @@ A confirmed chunk that was the last, or that settled after the batch was retired
 pure def canSettleChunk(s: Batch, answered: int, done: int, renamed: int): bool =
   s.phase == Running and s.inFlight and answered >= 0 and answered <= chunkRows(s) and answered <= s.total - s.answered
     and done >= 0 and done <= answered and renamed >= 0 and renamed <= done
-pure def settleChunk(s: Batch, verdict: ChunkVerdict, answered: int, done: int, renamed: int): Batch =
-  if (verdict == ChunkConfirmed) {
-    val last = s.sent == s.chunks
+pure def settleChunk(s: Batch, verdict: ChunkVerdict, answered: int, done: int, renamed: int): Batch = {
+  val final = s.sent == s.chunks
+  if (verdict == ChunkConfirmed)
     { ...s, inFlight: false, answered: s.answered + answered, done: s.done + done, renamed: s.renamed + renamed,
       undo: s.undo + (if (s.op == TrashFiles) done else 0),
-      phase: if (last) Finished else if (s.retired) Stopped else Running }
-  }
+      phase: if (final) Finished else if (s.retired) Stopped else Running }
   else if (verdict == ChunkUnknown) { ...s, inFlight: false, phase: Uncertain }
   else { ...s, inFlight: false, phase: Stopped }
+}
 pure def alwaysReceiptsAreBounded(s: Batch): bool = 0 <= s.renamed and s.renamed <= s.done and s.done <= s.answered and s.answered <= s.total
 pure def alwaysOnlyATrashKeepsAnUndo(s: Batch): bool = s.undo <= s.done and (s.op != TrashFiles implies s.undo == 0)
 pure def lawAnUnknownChunkIsNeverConfirmed(b: Batch, answered: int, done: int, renamed: int): bool = {

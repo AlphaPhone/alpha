@@ -38,7 +38,7 @@ pure def retiredPlane(element: int, s: MapPlane): MapPlane = {
 pure val elementValues = Set(0, 1, 2)
 pure val ownerValues = Set(0, 1, 2, 3)
 pure val tokenValues = Set(1, 2, 3)
-pure val outcomeValues = Set(PlaneReady, PlaneFailed)
+pure val resultValues = Set(PlaneReady, PlaneFailed)
 ```
 
 ## Story: See the map for what I am looking at
@@ -50,14 +50,14 @@ pure val outcomeValues = Set(PlaneReady, PlaneFailed)
 ### Google content is drawn only on the Google raster, and other content on the world or open raster
 
 ```quint
-pure def basemapFor(kind: ProviderKind, map: bool, googleContent: bool): Basemap =
-  if (kind == GoogleProvider and map) GoogleRaster
+pure def basemapFor(kind: ProviderKind, raster: bool, googleContent: bool): Basemap =
+  if (kind == GoogleProvider and raster) GoogleRaster
   else if (googleContent) NoBasemap
-  else if (kind == OpenProvider and map) OpenRaster
+  else if (kind == OpenProvider and raster) OpenRaster
   else WorldMap
 pure def creditsFor(basemap: Basemap): Credits = if (basemap == GoogleRaster) BadgeOnly else CreditLinks
-pure def lawGoogleContentNeverOnTheWorldMap(kind: ProviderKind, map: bool): bool =
-  basemapFor(kind, map, true) == GoogleRaster or basemapFor(kind, map, true) == NoBasemap
+pure def lawGoogleContentNeverOnTheWorldMap(kind: ProviderKind, raster: bool): bool =
+  basemapFor(kind, raster, true) == GoogleRaster or basemapFor(kind, raster, true) == NoBasemap
 pure def lawGoogleMapShowsOnlyTheBadge(kind: ProviderKind): bool = creditsFor(basemapFor(kind, true, false)) == BadgeOnly iff kind == GoogleProvider
 ```
 
@@ -71,8 +71,8 @@ pure def canMountPlane(s: MapPlane, element: int, basemap: Basemap): bool = elem
 pure def mountPlane(s: MapPlane, element: int, basemap: Basemap): MapPlane =
   if (s.built and element == s.element and basemap == s.basemap) s
   else { ...retiredPlane(element, s), basemap: basemap, built: true }
-pure def canPlaneReports(s: MapPlane, owner: int, outcome: PlaneState): bool = s.built and owner == s.generation and outcome != PlaneLoading
-pure def planeReports(s: MapPlane, owner: int, outcome: PlaneState): MapPlane = { ...s, state: outcome }
+pure def canPlaneReports(s: MapPlane, owner: int, result: PlaneState): bool = s.built and owner == s.generation and result != PlaneLoading
+pure def planeReports(s: MapPlane, owner: int, result: PlaneState): MapPlane = { ...s, state: result }
 pure def canRetryMap(s: MapPlane): bool = s.built and s.state == PlaneFailed
 pure def retryMap(s: MapPlane): MapPlane = { ...retiredPlane(s.element, s), basemap: s.basemap, built: true, retries: s.retries + 1 }
 pure def canReleasePlane(s: MapPlane): bool = s.built or s.element > 0

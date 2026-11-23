@@ -52,11 +52,11 @@ pure val initial: EditorDraft = {
 ### What the simulator tries
 
 ```quint
-pure val ownerValues = Set("owner-a", "owner-b")
-pure val nextOwnerValues = ownerValues
+pure val owners = Set("owner-a", "owner-b")
+pure val nextOwnerValues = owners
 pure val targetValues = Set("", "event-1")
 pure val eventRevisionValues = Set("", "r1", "r2")
-pure val fieldsValues = Set("draft-a", "draft-b")
+pure val editsValues = Set("draft-a", "draft-b")
 pure val copyValues = Set("", "draft-a", "draft-b")
 pure val copyRevisionValues = Set("", "r1", "r2")
 ```
@@ -103,11 +103,11 @@ pure def alwaysOfferedHasText(s: EditorDraft): bool = s.offered implies s.text !
 Fields too large to retain are shown and marked; they are not stored.
 
 ```quint
-pure def canEdit(s: EditorDraft, fields: str, valid: bool): bool = s.alive and not(inert(s)) and fields != ""
-pure def edit(s: EditorDraft, fields: str, valid: bool): EditorDraft =
+pure def canEdit(s: EditorDraft, edits: str, valid: bool): bool = s.alive and not(inert(s)) and edits != ""
+pure def edit(s: EditorDraft, edits: str, valid: bool): EditorDraft =
   if (not(valid)) { ...s, invalid: true, form: TypedFields }
-  else { ...s, invalid: false, form: TypedFields, text: fields, textRevision: s.eventRevision,
-    stored: if (s.conflict or s.storageError) s.stored else fields,
+  else { ...s, invalid: false, form: TypedFields, text: edits, textRevision: s.eventRevision,
+    stored: if (s.conflict or s.storageError) s.stored else edits,
     storedRevision: if (s.conflict or s.storageError) s.storedRevision else s.eventRevision,
     synced: not(s.conflict or s.storageError) }
 pure def sometimesOfferedOnReopen(s: EditorDraft): bool = s.alive and s.opened and s.offered and inert(s)
@@ -168,11 +168,11 @@ pure def alwaysModalsOwned(s: EditorDraft): bool =
 ### A discard clears the slot first; the form returns to the event only once it has
 
 ```quint
-pure def canDiscardDone(s: EditorDraft, outcome: SlotOutcome): bool =
-  s.stage == StageDiscarding and (outcome == SlotCleared implies s.reviewStoreCurrent)
-pure def discardDone(s: EditorDraft, outcome: SlotOutcome): EditorDraft =
+pure def canDiscardDone(s: EditorDraft, result: SlotOutcome): bool =
+  s.stage == StageDiscarding and (result == SlotCleared implies s.reviewStoreCurrent)
+pure def discardDone(s: EditorDraft, result: SlotOutcome): EditorDraft =
   if (not(s.alive)) { ...s, stage: StageIdle, reviewStoreCurrent: true }
-  else match outcome {
+  else match result {
     | SlotCleared => { ...s, stage: StageIdle, reviewStoreCurrent: true, text: "", textRevision: s.eventRevision,
         form: BaselineFields, invalid: false, stored: "", storedRevision: "", synced: true, offered: false }
     | SlotConflict => { ...s, stage: StageIdle, reviewStoreCurrent: true, conflict: true, savedCopy: s.stored, savedRevision: s.storedRevision }
@@ -223,10 +223,10 @@ pure def commitDone(s: EditorDraft, ok: bool): EditorDraft =
   if (not(ok)) { ...s, stage: StageIdle, saving: if (s.alive) false else s.saving, saveResult: SaveFailed }
   else if (not(s.alive)) { ...s, stage: StageIdle, saves: s.saves + 1, staleSave: s.staleSave or stale(s), latch: true }
   else { ...s, stage: StageClearing, saves: s.saves + 1, staleSave: s.staleSave or stale(s) }
-pure def canClearDone(s: EditorDraft, outcome: SlotOutcome): bool = s.stage == StageClearing
-pure def clearDone(s: EditorDraft, outcome: SlotOutcome): EditorDraft =
+pure def canClearDone(s: EditorDraft, result: SlotOutcome): bool = s.stage == StageClearing
+pure def clearDone(s: EditorDraft, result: SlotOutcome): EditorDraft =
   if (not(s.alive)) { ...s, stage: StageIdle, latch: true }
-  else match outcome {
+  else match result {
     | SlotCleared => { ...s, stage: StageIdle, alive: false, text: "", stored: "", storedRevision: "", synced: true, saveResult: SavedCleared }
     | SlotConflict => { ...s, stage: StageIdle, latch: true, saving: false, saveResult: SavedKept, conflict: true, savedCopy: s.stored, savedRevision: s.storedRevision }
     | SlotError => { ...s, stage: StageIdle, latch: true, saving: false, saveResult: SavedKept, storageError: true }
@@ -303,12 +303,12 @@ A refused request keeps its note or scan open with a notice; a request for an ev
 event's edits are retained asks the owner to finish that draft first.
 
 ```quint
-pure def canAdmitHandoff(s: EditorDraft, origin: DraftOrigin, slotEmpty: bool, fields: str): bool =
-  origin != TypedHere and s.owner != "" and fields != ""
-pure def admitHandoff(s: EditorDraft, origin: DraftOrigin, slotEmpty: bool, fields: str): EditorDraft =
+pure def canAdmitHandoff(s: EditorDraft, origin: DraftOrigin, slotEmpty: bool, edits: str): bool =
+  origin != TypedHere and s.owner != "" and edits != ""
+pure def admitHandoff(s: EditorDraft, origin: DraftOrigin, slotEmpty: bool, edits: str): EditorDraft =
   if (s.alive or s.stage != StageIdle or not(slotEmpty)) { ...s, notice: HandoffRefused }
-  else { ...initial, owner: s.owner, origin: origin, alive: true, opened: true, text: fields, form: TypedFields,
-    stored: fields, synced: true, notice: HandoffAdmitted }
+  else { ...initial, owner: s.owner, origin: origin, alive: true, opened: true, text: edits, form: TypedFields,
+    stored: edits, synced: true, notice: HandoffAdmitted }
 pure def canRefuseOtherTarget(s: EditorDraft): bool = not(s.alive)
 pure def refuseOtherTarget(s: EditorDraft): EditorDraft = { ...s, notice: FinishDraftFirst }
 pure def sometimesNoteDraftOpened(s: EditorDraft): bool = s.alive and s.origin == FromNote

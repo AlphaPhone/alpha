@@ -129,7 +129,7 @@ effect function followEnd(machine: NavigationMachine.Shape, native: Native.Shape
 
 effect function followVisibility(machine: NavigationMachine.Shape, admitted: string[]) {
   for try (const _ of pageEvents("visibilitychange", "document")) {
-    if (pageHidden()) try sendTo(machine, { type: "hide" })
+    if (pageHidden()) try sendTo(machine, { type: "hidePage" })
     else {
       try sendTo(machine, { type: "show" })
       try sendTo(machine, { type: "refreshAdmission", admitted })
@@ -142,9 +142,9 @@ const DEV_COMMANDS: Readonly<Record<string, NavigationEvent>> = {
   back: { type: "nativeBack" },
   shade: { type: "openShade" },
   assistant: { type: "moveChat", detent: "Full" },
-  background: { type: "hide" },
+  background: { type: "hidePage" },
   resume: { type: "show" },
-  power: { type: "hide" },
+  power: { type: "hidePage" },
   unlock: { type: "show" },
 }
 

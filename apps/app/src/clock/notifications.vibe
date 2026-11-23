@@ -126,12 +126,12 @@ export const notificationsLayer = Layer.effect(Notifications, effect {
     effect clearAll() {
       const state = try shade.get()
       const keys = state.rows.filter((r) => r.clearable).map((r) => ({ id: r.id, revision: r.revision, source: r.source }))
-      if (step({ type: "clearAll", keys }) === undefined) return
+      if (step({ type: "clearAll", keyList: keys }) === undefined) return
       const result = call(NOTIFICATIONS, "clear", ClearOutcomes, { items: state.rows.filter((r) => r.clearable).map(refOf) }) catch () => undefined
       step({ type: "clearSettled", unavailable: result === undefined || result.outcomes.some((o) => o.status === "unavailable") })
       try refresh()
     },
-    select: (id: string, revision: string) => step({ type: "select", id, revision }),
+    select: (id: string, revision: string) => step({ type: "selectNotice", id, revision }),
     ask: (id: string, revision: string) => step({ type: "ask", id, revision }),
     effect answer(draft: string | undefined) {
       const state = try shade.get()

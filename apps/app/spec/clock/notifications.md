@@ -43,7 +43,7 @@ pure val rowsValues = Set(List(), List(own), List(own, { ...own, id: "mail-1", s
 pure val idValues = Set("reminder-1", "mail-1")
 pure val revisionValues = Set("v1", "v2")
 pure val visitValues = Set(1, 2, 3)
-pure val keysValues = Set(List(), List({ id: "reminder-1", revision: "v1", source: OwnNotice }))
+pure val keyListValues = Set(List(), List({ id: "reminder-1", revision: "v1", source: OwnNotice }))
 pure def canOpenShade(n: Shade): bool = not(n.open)
 pure def openShade(n: Shade): Shade = { ...n, open: true, visit: n.visit + 1, report: NoReport }
 pure def canCloseShade(n: Shade): bool = n.open
@@ -103,8 +103,8 @@ pure def sometimesChanged(n: Shade): bool = n.report == ReportChanged and n.rows
 A row the phone could no longer clear is reported as updated; the others were requested.
 
 ```quint
-pure def canClearAll(n: Shade, keys: List[NoticeKey]): bool = n.open and not(n.acting) and keys.length() > 0 and keys == clearableKeys(n)
-pure def clearAll(n: Shade, keys: List[NoticeKey]): Shade = { ...n, acting: true, actingVisit: n.visit }
+pure def canClearAll(n: Shade, keyList: List[NoticeKey]): bool = n.open and not(n.acting) and keyList.length() > 0 and keyList == clearableKeys(n)
+pure def clearAll(n: Shade, keyList: List[NoticeKey]): Shade = { ...n, acting: true, actingVisit: n.visit }
 pure def canClearSettled(n: Shade, unavailable: bool): bool = n.acting
 pure def clearSettled(n: Shade, unavailable: bool): Shade =
   { ...n, acting: false, report: if (n.actingVisit == n.visit and n.open and unavailable) ReportUpdated else n.report }
@@ -120,9 +120,9 @@ pure def sometimesPartlyCleared(n: Shade): bool = n.report == ReportUpdated
 ### Only an own row with an opaque identity becomes the agent's context, for this visit
 
 ```quint
-pure def canSelect(n: Shade, id: str, revision: str): bool =
+pure def canSelectNotice(n: Shade, id: str, revision: str): bool =
   n.open and listedRow(n, id, revision).some(x => x.source == OwnNotice and x.opaque)
-pure def select(n: Shade, id: str, revision: str): Shade = { ...n, selected: id, selectedRevision: revision }
+pure def selectNotice(n: Shade, id: str, revision: str): Shade = { ...n, selected: id, selectedRevision: revision }
 pure def alwaysSelectionIsOwn(n: Shade): bool =
   n.selected != "" implies n.rows.some(x => x.id == n.selected and x.revision == n.selectedRevision and x.source == OwnNotice and x.opaque)
 pure def sometimesSelected(n: Shade): bool = n.selected != ""

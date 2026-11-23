@@ -64,7 +64,7 @@ pure def sometimesApproved(r: Reviews): bool = r.open.length() == 0 and shown(r)
 The newest review is the dialog on top.
 
 ```quint
-pure def newest(r: Reviews): str = r.open.foldl("", (last, x) => x.id)
+pure def newest(r: Reviews): str = r.open.foldl("", (final, x) => x.id)
 pure def canBack(r: Reviews): bool = r.open.length() > 0
 pure def back(r: Reviews): ReviewsChange = dismiss(r, newest(r))
 pure def stepBackDeniesOnlyTheNewest(before: Reviews, via: str, after: Reviews): bool =

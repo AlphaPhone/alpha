@@ -59,7 +59,7 @@ pure def alwaysAReviewIsUsedOnce(s: Suggestions): bool = s.used.length() == s.in
 pure def alwaysTheShownReviewIsUnused(s: Suggestions): bool = s.review.id == 0 or not(s.used.includes(s.review.id))
 pure def sometimesInserted(s: Suggestions): bool = s.inserted >= 1
 pure def sometimesShownAgainForANewDestination(s: Suggestions): bool = s.notice == DestinationChanged and s.review.id >= 2
-pure def lawAnOverlongSuggestionNeverFits(token: str, append: bool): bool = not(openReview(initial, "x", { token: token, ready: true, room: false, append: append }, true).review.fits)
+pure def lawAnOverlongSuggestionNeverFits(token: str, appending: bool): bool = not(openReview(initial, "x", { token: token, ready: true, room: false, append: appending }, true).review.fits)
 pure val tokenValues = Set("k1", "k2")
-pure val appendValues = Set(true, false)
+pure val appendingValues = Set(true, false)
 ```

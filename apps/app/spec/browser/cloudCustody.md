@@ -57,9 +57,9 @@ pure def closeRequest(c: Custody, generation: int): Custody =
 pure def canFinishRequest(c: Custody, generation: int): bool = c.pending.contains(generation)
 pure def finishRequest(c: Custody, generation: int): Custody = {
   val slot = slotFor(c, generation)
-  val outcome = if (c.closed.contains(generation)) Disconnected else if (c.aborted.contains(generation)) Aborted else Succeeded
+  val result = if (c.closed.contains(generation)) Disconnected else if (c.aborted.contains(generation)) Aborted else Succeeded
   { ...c, owners: if (ownerOf(c, slot) == generation) c.owners.put(slot, 0) else c.owners,
-    pending: c.pending.exclude(Set(generation)), status: c.status.put(generation, outcome) }
+    pending: c.pending.exclude(Set(generation)), status: c.status.put(generation, result) }
 }
 pure def alwaysAnAbortedRequestNeverSucceeds(c: Custody): bool = c.aborted.forall(g => c.dispatched.contains(g) and statusOf(c, g) != Succeeded)
 pure def alwaysAClosedPendingRequestIsAborted(c: Custody): bool = c.closed.intersect(c.pending).subseteq(c.aborted)

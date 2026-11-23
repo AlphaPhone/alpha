@@ -22,13 +22,13 @@ export interface ReviewRowsViewProps {
  * @design design.md
  */
 export function ReviewRowsView({ actions, details, onChoose, onDismiss }: ReviewRowsViewProps) {
-  if (actions.run.tag !== "Choosing") return null;
-  const kind = actions.run.kind;
+  if (actions.ongoing.tag !== "Choosing") return null;
+  const kind = actions.ongoing.kind;
   const Icon = kind === "PlaceCall" || kind === "DialNumber" ? PhoneIcon : kind === "ComposeText" ? MessageSquare : kind === "ContactRemove" ? Trash2 : kind === "ContactAdd" ? Plus : Save;
   return (
     <div role="group" aria-label="Choose one" className="flex flex-col gap-1">
       {details.body && <p className="rounded-md bg-secondary px-3 py-2 whitespace-pre-wrap">{details.body}</p>}
-      {candidatesOf(actions.run).map((c) => {
+      {candidatesOf(actions.ongoing).map((c) => {
         const change = details.changes?.[c.candidateId];
         const lines = change
           ? change.after

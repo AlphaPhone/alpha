@@ -63,8 +63,8 @@ pure val factsValues: Set[AddressFacts] = List(
 
 ```quint
 pure def lawApprovedDestinationIsNeverSearched(facts: AddressFacts): bool = {
-  val outcome = classifyAddress(facts, true)
-  outcome == OpenAddress or outcome == RefusedAddress
+  val result = classifyAddress(facts, true)
+  result == OpenAddress or result == RefusedAddress
 }
 pure def lawOpenedAddressHasAHost(facts: AddressFacts, approved: bool): bool =
   classifyAddress(facts, approved) == OpenAddress implies facts.hasHost
@@ -108,9 +108,9 @@ pure val blankPage: TabPage = {
 pure val maxTabs = 8
 pure val maxHistory = 100
 pure val maxRestoreAttempts = 3
-pure def settled(p: TabPage): bool = p.committed and not(p.loading) and not(p.failed) and not(p.externalOnly) and p.url != ""
-pure def settledSecurely(p: TabPage): bool = settled(p) and p.secure
-pure def lawASettledSecurePageIsSettled(p: TabPage): bool = settledSecurely(p) implies settled(p)
+pure def isSettled(p: TabPage): bool = p.committed and not(p.loading) and not(p.failed) and not(p.externalOnly) and p.url != ""
+pure def settledSecurely(p: TabPage): bool = isSettled(p) and p.secure
+pure def lawASettledSecurePageIsSettled(p: TabPage): bool = settledSecurely(p) implies isSettled(p)
 pure val loadedPage: TabPage = { ...blankPage, url: "https://example.test/", title: "Example", navigation: "1", sequence: 2, committed: true, web: true, secure: true }
 pure val pValues: Set[TabPage] = List(blankPage, loadedPage, { ...loadedPage, loading: true, committed: false },
   { ...loadedPage, failed: true, committed: false }, { ...loadedPage, secure: false }, { ...loadedPage, externalOnly: true })

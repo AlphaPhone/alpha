@@ -5,7 +5,7 @@ import type { InstalledApp } from "@elizaos/os/bridges/system"
 import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
 import { Machine as ShadeMachine } from "../../gen/shell__shade.effect.vibe"
 import { Machine as HapticsMachine } from "../../gen/shell__haptics.effect.vibe"
-import { Machine as PermissionsMachine, stepCount, skippable } from "../../gen/shell__permissions.effect.vibe"
+import { Machine as PermissionsMachine, shownCount, skippable } from "../../gen/shell__permissions.effect.vibe"
 import { Machine as RecoveryMachine } from "../../gen/shell__recovery.effect.vibe"
 import { Machine as OverviewMachine, agenda, dateLine } from "../../gen/shell__overview.effect.vibe"
 import { Machine as FocusMachine } from "../../gen/shell__focus.effect.vibe"
@@ -316,7 +316,7 @@ describe("Startup access (spec/shell/permissions.md, \"Story: Grant Alpha what i
         try permissions.next(false)
         const second = try machine.get()
         try Effect.try(() => assert.deepStrictEqual(
-          [opened.phase, stepCount(opened), allowed.attempted, allowed.states.$PermNotifications, second.progress, stepCount(second)],
+          [opened.phase, shownCount(opened), allowed.attempted, allowed.states.$PermNotifications, second.progress, shownCount(second)],
           ["PhaseWalkthrough", 1, ["PermNotifications"], "AccessReady", 1, 2],
         ))
       }
@@ -424,7 +424,7 @@ describe("Recovery and Home (spec/shell/recovery.md, \"Story: Get my phone back 
     provide memoryStore, inBrowser {
       provide shell {
         const machine = try GeometryMachine
-        try machine.send({ type: "focusField", field: "ComposerField" })
+        try machine.send({ type: "focusField", fieldId: "ComposerField" })
         try machine.send({ type: "keyboardShown", visible: false, handoff: false })
         const uncovered = (try machine.get()).releases
         try machine.send({ type: "keyboardShown", visible: true, handoff: false })

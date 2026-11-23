@@ -54,7 +54,7 @@ pure val keyValues = Set("a", "b", "c")
 pure val chosenValues = Set(List(), List("a"), List("a", "b"))
 pure val volumesValues = Set(List(), List(primaryVolume), List(cardVolume, primaryVolume))
 pure val vValues = Set(primaryVolume, cardVolume, { ...primaryVolume, free: 100 })
-pure val ticketValues = Set(1, 2, 3)
+pure val tickets = Set(1, 2, 3)
 ```
 
 ## Story: Browse my files by category, folder and volume
@@ -99,8 +99,8 @@ pure def lawUsedIsAPercentage(v: Volume): bool = usedPercent(v) >= 0 and usedPer
 ### Only a complete read with no rows is empty; a partial read keeps its rows
 
 ```quint
-pure def claimsEmpty(outcome: ListingOutcome, rows: List[Row]): bool = outcome == Complete and rows.length() == 0
-pure def keptRows(outcome: ListingOutcome, rows: List[Row]): List[Row] = if (outcome == Failed or outcome == Unread) List() else rows
+pure def claimsEmpty(result: ListingOutcome, rows: List[Row]): bool = result == Complete and rows.length() == 0
+pure def keptRows(result: ListingOutcome, rows: List[Row]): List[Row] = if (result == Failed or result == Unread) List() else rows
 pure def lawOnlyACompleteReadIsEmpty(rows: List[Row]): bool =
   not(claimsEmpty(Partial, rows)) and not(claimsEmpty(Failed, rows)) and not(claimsEmpty(Unread, rows))
 pure def lawAPartialReadKeepsItsRows(rows: List[Row]): bool = keptRows(Partial, rows) == rows

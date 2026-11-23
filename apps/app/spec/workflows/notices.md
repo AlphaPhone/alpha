@@ -45,10 +45,10 @@ pure val workflowIdValues = Set("w1", "w2")
 ### A waiting step posts one notice for the current owner, lasting at most seven days
 
 ```quint
-pure def canStepWaiting(n: Notices, route: NoticeRoute, expiresAt: int): bool =
+pure def canAwaitingStep(n: Notices, route: NoticeRoute, expiresAt: int): bool =
   n.owner != "" and route.owner == n.owner and route.runId != "" and route.step != "" and
   expiresAt > n.now and expiresAt <= n.now + maximumApprovalMs and not(n.notices.some(x => sameStep(x.route, route)))
-pure def stepWaiting(n: Notices, route: NoticeRoute, expiresAt: int): Notices =
+pure def awaitingStep(n: Notices, route: NoticeRoute, expiresAt: int): Notices =
   { ...n, notices: n.notices.append({ route: route, state: NoticePosted, postedAt: n.now, expiresAt: expiresAt }),
     waiting: if (n.waiting.includes(route.workflowId)) n.waiting else n.waiting.append(route.workflowId) }
 pure def alwaysOneNoticePerStep(n: Notices): bool = n.notices.every(x => n.notices.select(o => sameStep(o.route, x.route)).length() == 1)
@@ -58,8 +58,8 @@ pure def alwaysANoticeLastsAtMostSevenDays(n: Notices): bool = n.notices.every(x
 ### A settled or expired step's notice is withdrawn
 
 ```quint
-pure def canStepSettled(n: Notices, runId: str, stepId: str): bool = noticeOf(n, runId, stepId).route.runId == runId and runId != ""
-pure def stepSettled(n: Notices, runId: str, stepId: str): Notices =
+pure def canSettledStep(n: Notices, runId: str, stepId: str): bool = noticeOf(n, runId, stepId).route.runId == runId and runId != ""
+pure def settledStep(n: Notices, runId: str, stepId: str): Notices =
   { ...n, notices: n.notices.select(x => not(x.route.runId == runId and x.route.step == stepId)) }
 pure def canTick(n: Notices, now: int): bool = now > n.now
 pure def tick(n: Notices, now: int): Notices = { ...n, now: now, notices: n.notices.select(x => x.expiresAt > now) }
@@ -88,7 +88,7 @@ pure def canRechecked(n: Notices, runId: str, stepId: str, stillPending: bool): 
 }
 pure def rechecked(n: Notices, runId: str, stepId: str, stillPending: bool): Notices =
   if (stillPending) { ...n, notices: n.notices.listMap(x => if (x.route.runId == runId and x.route.step == stepId) { ...x, state: NoticeQuiet } else x) }
-  else stepSettled(n, runId, stepId)
+  else settledStep(n, runId, stepId)
 pure def stepARecheckNeverAddsANotice(before: Notices, via: str, after: Notices): bool =
   via == "rechecked" implies after.notices.length() <= before.notices.length()
 pure def sometimesQuietRepost(n: Notices): bool = n.notices.some(x => x.state == NoticeQuiet)

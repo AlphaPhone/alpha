@@ -37,7 +37,7 @@ pure val grantedValues = Set(MediaFull, MediaSelected)
 pure val ticketValues = Set(-1, 0, 1, 2)
 pure val revisionValues = Set(0, 1)
 pure val reasonValues = Set(AccessRevoked, AppPaused, PhoneLocked, SourceChanged)
-pure val conversationValues = Set(1, 2)
+pure val chatValues = Set(1, 2)
 ```
 
 ## Story: Use a photo only as I selected it

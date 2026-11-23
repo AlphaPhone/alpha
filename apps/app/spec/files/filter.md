@@ -28,7 +28,7 @@ pure val initial: Filtering = { active: false, serial: 0, pending: 0, shown: 0, 
 pure val noOp: FilterOp = { id: 0, criteria: noCriteria, phase: FilterDone, ticket: 0, aborted: false, result: NoResult, count: 0 }
 pure def opOf(s: Filtering, id: int): FilterOp = s.ops.foldl(noOp, (found, o) => if (o.id == id) o else found)
 pure def hasOp(s: Filtering, id: int): bool = s.ops.some(o => o.id == id)
-pure def settled(o: FilterOp, result: FilterResult, count: int): FilterOp = { ...o, phase: FilterDone, result: result, count: count }
+pure def filterSettled(o: FilterOp, result: FilterResult, count: int): FilterOp = { ...o, phase: FilterDone, result: result, count: count }
 pure def withOp(ops: List[FilterOp], changed: FilterOp): List[FilterOp] = ops.listMap(o => if (o.id == changed.id) changed else o)
 ```
 
@@ -66,7 +66,7 @@ pure def accessReply(s: Filtering, id: int, granted: bool): Filtering = {
       ops: withOp(s.ops, { ...o, phase: FilterQuery, ticket: s.generation + 1 }) }
   else
     { ...s, pending: if (s.pending == id) 0 else s.pending,
-      ops: withOp(s.ops, settled(o, if (o.aborted) FilterAborted else if (not(granted)) FilterAccessNeeded else FilterFailed, 0)) }
+      ops: withOp(s.ops, filterSettled(o, if (o.aborted) FilterAborted else if (not(granted)) FilterAccessNeeded else FilterFailed, 0)) }
 }
 pure def sometimesAccessNeeded(s: Filtering): bool = s.ops.some(o => o.result == FilterAccessNeeded)
 ```
@@ -95,7 +95,7 @@ pure def queryReply(s: Filtering, id: int, ready: bool, rows: List[Row], complet
     rows: if (isCurrent) matching else s.rows,
     complete: if (isCurrent) success and complete else s.complete,
     unavailable: if (isCurrent) not(ready) else s.unavailable,
-    ops: withOp(s.ops, settled(o,
+    ops: withOp(s.ops, filterSettled(o,
       if (success) (if (complete) FilterShown else FilterIncomplete) else if (o.aborted) FilterAborted else FilterFailed,
       matching.length())) }
 }
@@ -133,8 +133,8 @@ pure def sometimesRequeried(s: Filtering): bool = s.shown != 0 and s.pending == 
 ### A filter says it found nothing only after a complete query
 
 ```quint
-pure def showsNoMatches(s: Filtering): bool = s.shown != 0 and s.pending == 0 and s.complete and not(s.unavailable) and s.rows.length() == 0
-pure def lawAnIncompleteSearchIsNotEmpty(s: Filtering): bool = not(s.complete) implies not(showsNoMatches(s))
+pure def showsNoMatches(filtering: Filtering): bool = filtering.shown != 0 and filtering.pending == 0 and filtering.complete and not(filtering.unavailable) and filtering.rows.length() == 0
+pure def lawAnIncompleteSearchIsNotEmpty(filtering: Filtering): bool = not(filtering.complete) implies not(showsNoMatches(filtering))
 pure val filteringValues = Set(initial, { ...initial, active: true, shown: 1, complete: false })
 ```
 

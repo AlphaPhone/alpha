@@ -163,6 +163,6 @@ already off but whose Cloud disconnect is unconfirmed is offered a plain retry.
 
 ```quint
 type GrantRemoval = RemoveGrant | RetryDisconnect
-pure def removalSent(kind: GrantRemoval, reviewed: bool): bool = kind == RetryDisconnect or reviewed
+pure def removalSent(removal: GrantRemoval, reviewed: bool): bool = removal == RetryDisconnect or reviewed
 pure def lawOnlyAPendingDisconnectSkipsTheReview(reviewed: bool): bool = removalSent(RemoveGrant, reviewed) iff reviewed
 ```

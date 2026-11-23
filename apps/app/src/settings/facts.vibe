@@ -148,7 +148,7 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
       try (facts.send({ type: "show" }) catch () => undefined)
       try readIfBegun(before)
     }),
-    hide: () => effect { try (facts.send({ type: "hide" }) catch () => undefined) },
+    hide: () => effect { try (facts.send({ type: "hideFacts" }) catch () => undefined) },
     requestScale: (percent: number) => within(effect {
       const issued = try (facts.send({ type: "requestScale", percent }) catch () => undefined)
       if (issued === undefined) return

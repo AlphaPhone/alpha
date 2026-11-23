@@ -98,7 +98,7 @@ export const requestsLayer = Layer.effect(AgentRequests, effect {
       try send({ type: "scene", view, sensitive, selected, permission })
     },
     effect eventChanged() { try send({ type: "eventChanges" }) },
-    effect hidden() { try send({ type: "hide" }) },
+    effect hidden() { try send({ type: "hideAction" }) },
     effect propose(op: CalendarOperation) { return (try send({ type: "propose", op })) !== undefined },
     effect approve(run: AgentRun) {
       const approved = try send({ type: "approve" })
@@ -119,7 +119,7 @@ export const requestsLayer = Layer.effect(AgentRequests, effect {
     },
     effect undoQueuedDelete() { try send({ type: "undo" }) },
     effect windowEnded() { try send({ type: "windowEnds" }) },
-    effect settle() { try send({ type: "settle" }) },
+    effect settle() { try send({ type: "settleAction" }) },
     effect confirmsDelete(firstReply: boolean, answer: "yes" | "title" | "no" | "question" | "other", plannerConfirmed: boolean, targetMatches: boolean) {
       const mapped = answer === "yes" ? "AnsweredYes" : answer === "title" ? "AnsweredTitle" : answer === "no" ? "AnsweredNo" : answer === "question" ? "AnsweredQuestion" : "AnsweredOther"
       return deleteConfirmed(firstReply, mapped, plannerConfirmed, targetMatches)

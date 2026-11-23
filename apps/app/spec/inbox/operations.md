@@ -381,9 +381,13 @@ pure def canAnnounce(s: Journal, requestId: str): bool = {
   hasRecord(s.owner, s) and r.requestId == requestId and r.phase == Observed and r.receipt.receiptState == SucceededReceipt and not(s.announced.includes(requestId))
 }
 pure val announcedLimit = 50
+type NewestKept = { skip: int, kept: List[str] }
+pure def newestOf(ids: List[str], limit: int): List[str] =
+  ids.foldl({ skip: ids.length() - limit, kept: List() }, (acc, x) =>
+    if (acc.skip > 0) { skip: acc.skip - 1, kept: acc.kept } else { skip: 0, kept: acc.kept.append(x) }).kept
 pure def announce(s: Journal, requestId: str): Journal = {
-  val next = s.announced.append(requestId)
-  { ...s, announced: if (next.length() > announcedLimit) next.slice(next.length() - announcedLimit, next.length()) else next }
+  val following = s.announced.append(requestId)
+  { ...s, announced: if (following.length() > announcedLimit) newestOf(following, announcedLimit) else following }
 }
 pure def alwaysTheAnnouncedListIsBounded(s: Journal): bool = s.announced.length() <= announcedLimit
 pure def alwaysAHeldCleanupFollowsAnObservedSend(s: Journal): bool = s.records.every(r => r.sourceHeld implies (r.kind == SendKind and r.phase == Observed))
@@ -419,12 +423,12 @@ came from a Gmail draft offers deleting that draft, which a send never does by i
 
 ```quint
 pure def undoKind(kind: OpKind): OpKind = if (kind == ArchiveKind) UnarchiveKind else UntrashKind
-pure def canUndo(r: OperationRecord): bool = (r.kind == ArchiveKind or r.kind == TrashKind) and r.receipt.receiptState == SucceededReceipt and r.receipt.historyId != ""
-pure def canContinueDraft(r: OperationRecord): bool =
+pure def undoable(r: OperationRecord): bool = (r.kind == ArchiveKind or r.kind == TrashKind) and r.receipt.receiptState == SucceededReceipt and r.receipt.historyId != ""
+pure def mayContinueDraft(r: OperationRecord): bool =
   (r.kind == DraftCreateKind or r.kind == DraftReplaceKind) and r.receipt.receiptState == SucceededReceipt and r.receipt.draftId != "" and r.receipt.providerDigest != ""
-pure def canDeleteGmailDraft(r: OperationRecord): bool =
+pure def mayDeleteGmailDraft(r: OperationRecord): bool =
   r.receipt.receiptState == SucceededReceipt and ((isDraftKind(r.kind) and r.kind != DraftDeleteKind and r.receipt.draftId != "") or (r.kind == SendKind and r.source.gmailDraft != ""))
 pure def lawUndoRestoresWhatWasMoved(kind: OpKind): bool = (kind == ArchiveKind implies undoKind(kind) == UnarchiveKind) and (kind == TrashKind implies undoKind(kind) == UntrashKind)
-pure def lawASendOffersNoDraftToContinue(r: OperationRecord): bool = r.kind == SendKind implies not(canContinueDraft(r))
+pure def lawASendOffersNoDraftToContinue(r: OperationRecord): bool = r.kind == SendKind implies not(mayContinueDraft(r))
 pure val rValues = Set(noRecord).union(Set({ ...noRecord, owner: "o1", requestId: "r1", receipt: { ...prepared1, receiptState: SucceededReceipt, messageId: "s1" } }))
 ```

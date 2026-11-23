@@ -16,15 +16,15 @@ phone's own Share review through the AlphaCalendar plugin), the selected object 
 ```quint
 type NamedOutcome = NamedShared | NamedNotOpen | NamedChanged | NamedMismatch | NamedCancelled | NamedUnavailable
 type Sentence = SaysShared | SaysOpenTheEvent | SaysEventChanged | SaysNameDiffers | SaysNotShared
-pure def namedSentence(outcome: NamedOutcome): Sentence =
-  match outcome {
+pure def namedSentence(result: NamedOutcome): Sentence =
+  match result {
     | NamedShared => SaysShared
     | NamedNotOpen => SaysOpenTheEvent
     | NamedChanged => SaysEventChanged
     | NamedMismatch => SaysNameDiffers
     | _ => SaysNotShared
   }
-pure def lawSharedOnlyWhenShared(outcome: NamedOutcome): bool = (namedSentence(outcome) == SaysShared) iff (outcome == NamedShared)
+pure def lawSharedOnlyWhenShared(result: NamedOutcome): bool = (namedSentence(result) == SaysShared) iff (result == NamedShared)
 ```
 
 ### The phone's Share review is offered only for the selected event of a non-sensitive Calendar view

@@ -98,8 +98,8 @@ pure def request(h: Host, kind: RequestKind, ids: Set[str], target: str, selecte
   else if (named.subseteq(h.inWindow)) complete(asked, h)
   else { ...h, ask: asked }
 }
-pure def canSettle(h: Host): bool = h.ask.phase == AskReading
-pure def settle(h: Host): Host = complete(h.ask, { ...h, ask: idleAsk })
+pure def canSettleAsk(h: Host): bool = h.ask.phase == AskReading
+pure def settleAsk(h: Host): Host = complete(h.ask, { ...h, ask: idleAsk })
 pure def alwaysSingleReview(h: Host): bool =
   (if (h.albumReview.size() > 0) 1 else 0) + (if (h.shareReview.size() > 0) 1 else 0) + (if (h.libraryReview) 1 else 0) <= 1
 pure def alwaysReviewOnlyWhileShown(h: Host): bool = (h.albumReview.size() > 0 or h.shareReview.size() > 0) implies visible(h)
@@ -142,8 +142,8 @@ pure def leave(h: Host): Host =
   { ...h, inPhotos: false, visit: h.visit + 1, selection: Set(), albumReview: Set(), shareReview: Set(), libraryReview: false, viewer: "" }
 pure def canEnter(h: Host): bool = not(h.inPhotos) and not(h.disposed)
 pure def enter(h: Host): Host = { ...h, inPhotos: true }
-pure def canHide(h: Host): bool = not(h.hidden)
-pure def hide(h: Host): Host = { ...h, hidden: true, visit: h.visit + 1, selection: Set(), albumReview: Set(), shareReview: Set(), libraryReview: false }
+pure def canHideHost(h: Host): bool = not(h.hidden)
+pure def hideHost(h: Host): Host = { ...h, hidden: true, visit: h.visit + 1, selection: Set(), albumReview: Set(), shareReview: Set(), libraryReview: false }
 pure def canShow(h: Host): bool = h.hidden
 pure def show(h: Host): Host = { ...h, hidden: false }
 pure def canDispose(h: Host): bool = not(h.disposed)

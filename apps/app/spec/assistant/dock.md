@@ -88,8 +88,8 @@ pure def tap(d: Dock): Dock = {
   if (d.drag.pressed == NoControl) { ...acted, ghost: false }
   else { ...acted, swallowAge: 0, ghost: true, ghostLabel: d.drag.pressed, effects: d.effects + changed(d, acted) }
 }
-pure def canSettle(d: Dock): bool = d.drag.active and d.drag.moved
-pure def settle(d: Dock, direction: Direction, zone: Zone, flick: bool, over: Control): Dock = {
+pure def canSettleDrag(d: Dock): bool = d.drag.active and d.drag.moved
+pure def settleDrag(d: Dock, direction: Direction, zone: Zone, flick: bool, over: Control): Dock = {
   val collapsed = d.drag.mode == Input or d.drag.mode == Hidden
   val target = release(d.drag.mode, direction, zone, flick, d.view == HomeView)
   val chat = if (target.lands == Hidden and not(collapsed)) restOf(d.view) else target.lands

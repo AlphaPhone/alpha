@@ -54,7 +54,7 @@ export const searchLayer = Layer.effect(ChatSearch, effect {
       latest = text
       try sleep(debounceMs)
       if (latest !== text || text.trim().length < minimumQuery) return
-      if (try quiet(search.send({ type: "query", length: text.trim().length }))) try ask(text, 0)
+      if (try quiet(search.send({ type: "query", len: text.trim().length }))) try ask(text, 0)
     },
     more: () => effect {
       if (try quiet(search.send({ type: "loadMore" }))) try ask(latest, (try search.get()).page * pageSize)

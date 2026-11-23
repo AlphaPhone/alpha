@@ -50,14 +50,13 @@ pure def canTypeText(s: Sends, text: List[int]): bool = text != s.composer
 pure def typeText(s: Sends, text: List[int]): Sends = { ...s, composer: text }
 pure def canSend(s: Sends, handed: bool, fresh: bool, prompt: List[int]): bool =
   not(s.typing) and not(holding(s)) and (if (handed) prompt.length() > 0 else s.composer.length() > 0)
-pure def send(s: Sends, handed: bool, fresh: bool, prompt: List[int]): Sends =
+pure def send(s: Sends, handed: bool, fresh: bool, prompt: List[int]): Sends = {
+  val a = { ...noAttempt, id: s.nextId, phase: Connecting, handed: handed, session: s.session,
+    text: if (handed) prompt else s.composer, held: if (handed) List() else s.composer }
   if (not(fresh)) s
-  else {
-    val a = { ...noAttempt, id: s.nextId, phase: Connecting, handed: handed, session: s.session,
-      text: if (handed) prompt else s.composer, held: if (handed) List() else s.composer }
-    { ...s, composer: if (handed) s.composer else List(), typing: true, owner: s.nextId, nextId: s.nextId + 1,
-      bubbles: s.bubbles.append(s.nextId), attempts: s.attempts.select(x => inFlight(x)).append(a) }
-  }
+  else { ...s, composer: if (handed) s.composer else List(), typing: true, owner: s.nextId, nextId: s.nextId + 1,
+    bubbles: s.bubbles.append(s.nextId), attempts: s.attempts.select(x => inFlight(x)).append(a) }
+}
 pure def alwaysOnlyComposerSendsHold(s: Sends): bool = s.attempts.every(a => a.handed implies a.held.length() == 0)
 pure def alwaysOneHeldComposerSend(s: Sends): bool = s.attempts.select(a => inFlight(a) and not(a.handed)).length() <= 1
 pure def alwaysAttemptsBelongToKnownSessions(s: Sends): bool = s.attempts.every(a => a.session <= s.session and a.id < s.nextId and a.id >= 1)
@@ -68,8 +67,8 @@ pure def sometimesAHandedPromptKeptTheComposer(s: Sends): bool =
 ### The typing indicator belongs to the newest send, and an older send settling never clears it
 
 ```quint
-pure def finished(s: Sends, id: int, outcome: SendOutcome): Sends =
-  { ...s, attempts: changedTo(s, id, { ...attemptOf(s, id), phase: Finished, outcome: outcome }),
+pure def finished(s: Sends, id: int, result: SendOutcome): Sends =
+  { ...s, attempts: changedTo(s, id, { ...attemptOf(s, id), phase: Finished, outcome: result }),
     owner: if (s.owner == id) 0 else s.owner,
     typing: if (s.owner == id or s.owner == 0) false else s.typing }
 pure def alwaysTypingHasALiveOwner(s: Sends): bool = s.typing implies (s.owner != 0 and inFlight(attemptOf(s, s.owner)))

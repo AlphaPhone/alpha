@@ -47,9 +47,9 @@ it.effect("Start a new chat without losing or duplicating my draft (spec/assista
     const drafts = try DraftsMachine
     const source = JSON.stringify(["https://agent.local", "o1", "a1", null])
     const destination = JSON.stringify(["https://agent.local", "o1", "a1", "c1"])
-    try drafts.send({ type: "select", binding: source })
+    try drafts.send({ type: "selectDraft", binding: source })
     try drafts.send({ type: "edit", text: unitsOf("Keep draft A") })
-    try drafts.send({ type: "select", binding: destination })
+    try drafts.send({ type: "selectDraft", binding: destination })
     const moving = fork moveFirstDraft(source, destination)
     try TestClock.adjust("3 seconds")
     const moved = join moving

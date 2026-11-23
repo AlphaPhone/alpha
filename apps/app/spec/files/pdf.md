@@ -50,11 +50,11 @@ pure def alwaysOneRequestAtATime(s: PdfPages): bool = s.pending implies s.ticket
 
 ```quint
 pure def canPageReply(s: PdfPages, ticket: int): bool = ticket >= 1 and ticket <= s.ticket
-pure def pageReply(s: PdfPages, ticket: int, outcome: PageOutcome, page: int, count: int, image: str): PdfPages = {
-  val accepted = outcome == PageRendered and page == s.requested and count >= 1 and page >= 0 and page < count and image != ""
+pure def pageReply(s: PdfPages, ticket: int, result: PageOutcome, page: int, count: int, image: str): PdfPages = {
+  val accepted = result == PageRendered and page == s.requested and count >= 1 and page >= 0 and page < count and image != ""
   if (not(s.pending) or ticket != s.ticket) s
-  else if (accepted) { ...s, pending: false, page: page, count: count, shown: true, image: image, outcome: outcome }
-  else { ...s, pending: false, shown: false, image: "", outcome: if (outcome == PageRendered) PageMalformed else outcome }
+  else if (accepted) { ...s, pending: false, page: page, count: count, shown: true, image: image, outcome: result }
+  else { ...s, pending: false, shown: false, image: "", outcome: if (result == PageRendered) PageMalformed else result }
 }
 pure def alwaysAShownPageIsInTheDocument(s: PdfPages): bool = s.shown implies (s.count >= 1 and s.page >= 0 and s.page < s.count and s.image != "")
 pure def stepOnlyTheNewestRequestRenders(before: PdfPages, via: str, after: PdfPages): bool =

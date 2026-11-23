@@ -47,8 +47,8 @@ pure def prepareSend(c: Custody): Custody =
 pure def canSettleStorage(c: Custody, accepted: bool): bool = c.preparing
 pure def settleStorage(c: Custody, accepted: bool): Custody = {
   val stored = if (accepted) c.saved.union(Set(slotKey(c.heldOwner, c.heldConversation))) else c.saved
-  val settled = { ...c, preparing: false, saved: stored }
-  if (accepted and held(c) and c.draft) { ...settled, draft: false, pending: true, sent: true, visible: true } else settled
+  val resolved = { ...c, preparing: false, saved: stored }
+  if (accepted and held(c) and c.draft) { ...resolved, draft: false, pending: true, sent: true, visible: true } else resolved
 }
 pure def canConfirmRecorded(c: Custody): bool = c.pending and c.sent and held(c)
 pure def confirmRecorded(c: Custody): Custody = { ...c, recorded: c.recorded.union(Set(slotKey(c.owner, c.conversation))) }

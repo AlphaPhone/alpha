@@ -1,7 +1,7 @@
 // spec/browser/handoff.md, "Story: Open the page I see in another browser"
 import { type Event, type HandoffEffect, type ShownPage, Machine, machine } from "../../gen/browser__handoff.effect.vibe"
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
-import { settled } from "../../gen/browser__page.effect.vibe"
+import { isSettled } from "../../gen/browser__page.effect.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Toasts } from "../shell/toasts.vibe"
 import { HANDOFF_NOTICES, refusalText } from "./messages.ts"
@@ -29,7 +29,7 @@ export function shownOf(s: Session, visible: boolean): ShownPage {
   const tab = curTab(s)
   return {
     visible, tab: s.cur, url: tab.page.url, navigation: tab.page.navigation, revision: tab.revision,
-    settled: tab.stage === "Live" && settled(tab.page), secure: tab.page.secure, priv: tab.profile === "Private",
+    settled: tab.stage === "Live" && isSettled(tab.page), secure: tab.page.secure, priv: tab.profile === "Private",
   }
 }
 

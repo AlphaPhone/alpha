@@ -96,7 +96,7 @@ export const overviewLive = Layer.effect(Overview, effect {
       try sendTo(machine, { type: "attentionReported", attention, unread, more, at, connected })
     },
     effect reportBrief(outcome: BriefOutcome, at: number, title: string) {
-      try sendTo(machine, { type: "briefReported", outcome, at, title: outcome === "NoBrief" ? "" : title })
+      try sendTo(machine, { type: "briefReported", result: outcome, at, title: outcome === "NoBrief" ? "" : title })
     },
     effect reportOverdue(reminders: readonly { id: string; title: string; at: number }[]) {
       const overdue = reminders.map((row) => ({ id: row.id, title: row.title, begin: row.at, end: row.at, allDay: false, overdue: true, video: false }))

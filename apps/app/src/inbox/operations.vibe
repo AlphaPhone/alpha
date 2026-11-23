@@ -1,7 +1,7 @@
 // spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "Swiping a listed message left reviews its archive at its current revision, and swiping right changes nothing"; spec/inbox/operations.md, "Send of the email on screen continues its open operation, and an unresolved one blocks another"; spec/inbox/operations.md, "Sent is said once, by the step that first learns of the success, and an unresolved send opens its receipt"; spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
 import {
   type Event as JournalEvent, type Journal, type OpKind, type Proposal, type ComposedMail, type ComposerRef, type SendSource, type OperationRecord, type Receipt,
-  Machine as JournalMachine, recordOf, noRecord, sendStep, swipeArchives, swipeDistance, cleanupReady, canUndo, undoKind, canContinueDraft, canDeleteGmailDraft, isLabelKind, notStarted
+  Machine as JournalMachine, recordOf, noRecord, sendStep, swipeArchives, swipeDistance, cleanupReady, undoable, undoKind, mayContinueDraft, mayDeleteGmailDraft, isLabelKind, notStarted
 } from "../../gen/inbox__operations.effect.vibe"
 import { type Event as DraftsEvent, type DraftFields, type Draft, type Mode, Machine as DraftsMachine, continuedDraft } from "../../gen/inbox__drafts.effect.vibe"
 import { InboxAccounts } from "./accounts.vibe"
@@ -262,14 +262,14 @@ export const layer = Layer.effect(MailOperations, effect {
     },
     effect undo() {
       const r = try record()
-      if (r === undefined || !canUndo(r) || r.proposal.tag !== "LabelProposal") return undefined
+      if (r === undefined || !undoable(r) || r.proposal.tag !== "LabelProposal") return undefined
       const proposal: Proposal = { tag: "LabelProposal", messageId: r.receipt.messageId || r.proposal.messageId, expectedHistoryId: r.receipt.historyId }
       try send({ type: "clear", requestId: r.requestId })
       return try prepare(undoKind(r.kind), proposal, { draftId: "", content: "" }, { localDraft: "", revision: 0, gmailDraft: "", gmailDigest: "" })
     },
     effect deleteGmailDraft() {
       const r = try record()
-      if (r === undefined || !canDeleteGmailDraft(r)) return undefined
+      if (r === undefined || !mayDeleteGmailDraft(r)) return undefined
       const draftId = r.kind === "SendKind" ? r.source.gmailDraft : r.receipt.draftId
       const digest = r.kind === "SendKind" ? r.source.gmailDigest : r.receipt.providerDigest
       try send({ type: "clear", requestId: r.requestId })
@@ -277,7 +277,7 @@ export const layer = Layer.effect(MailOperations, effect {
     },
     effect continueDraft() {
       const r = try record()
-      if (r === undefined || !canContinueDraft(r) || r.proposal.tag !== "MessageProposal") return "unavailable"
+      if (r === undefined || !mayContinueDraft(r) || r.proposal.tag !== "MessageProposal") return "unavailable"
       const fresh = gmail.draft(try grant(), r.receipt.draftId) catch () => undefined
       if (fresh === undefined) return "unavailable"
       if (fresh.digest !== r.receipt.providerDigest) return "changed"

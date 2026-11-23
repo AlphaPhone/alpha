@@ -94,8 +94,8 @@ pure def afterCommit(s: ListFilter): ListFilter =
   { ...s, outcome: if (s.shown == s.requested and stillCurrent(s)) FilterSucceeded else FilterUnknown }
 pure def canAbort(s: ListFilter): bool = running(s)
 pure def abort(s: ListFilter): ListFilter = { ...s, outcome: if (s.committed) FilterUnknown else FilterFailed }
-pure def canSettle(s: ListFilter): bool = not(idle(s)) and (s.proposal == RefusedProposal or s.outcome != Pending)
-pure def settle(s: ListFilter): ListFilter =
+pure def canSettleFilter(s: ListFilter): bool = not(idle(s)) and (s.proposal == RefusedProposal or s.outcome != Pending)
+pure def settleFilter(s: ListFilter): ListFilter =
   { ...s, proposal: NoProposal, authority: NoAuthority, committed: false, outcome: Pending, contextChanged: false }
 pure def canClearFilter(s: ListFilter): bool = idle(s) and s.shown != 0
 pure def clearFilter(s: ListFilter): ListFilter = { ...s, shown: 0 }

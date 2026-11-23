@@ -106,7 +106,7 @@ export const latencyService = Layer.effect(Latency, effect {
     const trialNow = try held.get()
     const answered = trialNow.kind === "DictatedDraft" ? trialNow.replied : trialNow.audible
     const final: Outcome = outcome === "Answered" && answered ? "Answered" : "Abandoned"
-    try send({ type: "finish", outcome: final })
+    try send({ type: "finish", result: final })
     const trial = try held.get()
     draft = undefined
     draftSentAlready = false

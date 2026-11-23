@@ -40,7 +40,8 @@ pure val initial: Catalog = {
 pure val windowLimit = 600
 pure def row(id: str, rank: int, revision: str): Row =
   { id: id, rank: rank, revision: revision, video: false, favorite: false, image: "", width: 4, height: 3, duration: 0, size: 1, folder: "", expiresAt: 0 }
-pure val rowsValues = Set(List())
+pure val rowsValues: Set[List[Row]] = Set(List())
+pure val pageValues = rowsValues
   .union(Set(List(row("a", 3, "1"))))
   .union(Set(List(row("b", 2, "1"))))
   .union(Set(List(row("a", 3, "2"), row("c", 1, "1"))))
@@ -64,13 +65,13 @@ pure def newestFirst(rows: List[Row]): List[Row] =
   rows.foldl(List(), (out, row) => out.select(p => p.rank >= row.rank).concat(List(row)).concat(out.select(p => p.rank < row.rank)))
 pure def keepNewest(rows: List[Row], limit: int): List[Row] = rows.foldl(List(), (out, row) => if (out.length() < limit) out.append(row) else out)
 pure def distinctIds(rows: List[Row]): bool = rows.every(r => rows.select(q => q.id == r.id).length() == 1)
-pure def mergeRows(kept: List[Row], page: List[Row]): List[Row] =
-  keepNewest(newestFirst(page.concat(kept.select(k => not(page.some(p => p.id == k.id))))), windowLimit)
+pure def mergeRows(rows: List[Row], page: List[Row]): List[Row] =
+  keepNewest(newestFirst(page.concat(rows.select(k => not(page.some(p => p.id == k.id))))), windowLimit)
 pure def alwaysRowsAppearOnce(c: Catalog): bool = distinctIds(c.main.rows) and distinctIds(c.trash.rows) and distinctIds(c.pending)
 pure def alwaysRowsNewestFirst(c: Catalog): bool = newestFirst(c.main.rows) == c.main.rows and newestFirst(c.trash.rows) == c.trash.rows
 pure def alwaysWindowBounded(c: Catalog): bool = c.main.rows.length() <= windowLimit and c.trash.rows.length() <= windowLimit
-pure def lawMergeReplacesARowByIdentity(kept: List[Row], page: List[Row]): bool =
-  (distinctIds(kept) and distinctIds(page)) implies distinctIds(mergeRows(kept, page))
+pure def lawMergeReplacesARowByIdentity(rows: List[Row], page: List[Row]): bool =
+  (distinctIds(rows) and distinctIds(page)) implies distinctIds(mergeRows(rows, page))
 ```
 
 ### One read runs at a time; a refresh asked for during a read starts again once it settles
@@ -112,15 +113,14 @@ pure def sometimesDeniedLibrary(c: Catalog): bool = c.scope == ScopeDenied and c
 ```quint
 pure def canPageReply(c: Catalog, rows: List[Row], cursor: str, ok: bool): bool =
   c.read == ReadPage and distinctIds(rows) and not(rows.some(r => c.pending.some(p => p.id == r.id)))
-pure def pageReply(c: Catalog, rows: List[Row], cursor: str, ok: bool): Catalog =
+pure def pageReply(c: Catalog, rows: List[Row], cursor: str, ok: bool): Catalog = {
+  val merged = c.pending.concat(rows)
   if (not(mainCurrent(c))) finishMain(c.main, c)
   else if (not(ok)) finishMain({ ...c.main, loaded: true, failed: true }, c)
-  else {
-    val all = c.pending.concat(rows)
-    if (cursor != "" and not(c.main.paging) and all.length() < c.want) { ...c, pending: all, cursor: cursor }
-    else finishMain({ ...c.main, rows: if (c.main.paging) mergeRows(c.main.rows, all) else keepNewest(newestFirst(all), windowLimit),
-      continueAt: cursor, loaded: true, failed: false }, c)
-  }
+  else if (cursor != "" and not(c.main.paging) and merged.length() < c.want) { ...c, pending: merged, cursor: cursor }
+  else finishMain({ ...c.main, rows: if (c.main.paging) mergeRows(c.main.rows, merged) else keepNewest(newestFirst(merged), windowLimit),
+    continueAt: cursor, loaded: true, failed: false }, c)
+}
 pure def sometimesPagedWindow(c: Catalog): bool = c.main.loaded and c.main.rows.length() >= 2 and not(c.main.loading)
 ```
 
@@ -162,19 +162,17 @@ pure def sometimesFailedTrashWaitsForRetry(c: Catalog): bool = c.trash.failed an
 ### A hidden page drops both windows and fences every read in flight; showing it again reads afresh
 
 ```quint
-pure def canHide(c: Catalog): bool = not(c.hidden)
-pure def hide(c: Catalog): Catalog =
+pure def canHideCatalog(c: Catalog): bool = not(c.hidden)
+pure def hideCatalog(c: Catalog): Catalog =
   if (c.disposed) { ...c, hidden: true }
   else { ...c, hidden: true, epoch: c.epoch + 1, trashEpoch: c.trashEpoch + 1,
     main: { ...c.main, rows: List(), loaded: false, continueAt: "" }, trash: { ...c.trash, rows: List(), loaded: false, continueAt: "" } }
 pure def canShow(c: Catalog): bool = c.hidden
 pure def show(c: Catalog): Catalog = {
   val shown = { ...c, hidden: false }
+  val reading = startMain(false, shown)
   if (c.disposed or not(c.active)) shown
-  else {
-    val reading = startMain(false, shown)
-    if (not(reading.trash.loaded) and not(reading.trash.failed)) startTrash(false, reading) else reading
-  }
+  else if (not(reading.trash.loaded) and not(reading.trash.failed)) startTrash(false, reading) else reading
 }
 pure def alwaysHiddenCatalogEmpty(c: Catalog): bool =
   (c.hidden and not(c.disposed)) implies (c.main.rows.length() == 0 and c.trash.rows.length() == 0 and not(c.main.loaded) and not(c.trash.loaded))

@@ -11,6 +11,16 @@ lists Alpha's apps in Alpha's order until the owner arranges them"), and the ins
 Alpha app is admitted. An earlier Alpha kept the list under `alpha.launcher.favorites.v1`; the
 shell imports that record once.
 
+## Story: Keep Home the way I arranged it
+
+> As the owner, I want the apps I put on Home to stay in my order, defaults to fill Home only
+> until I choose, and an older Alpha's arrangement to carry over.
+
+### Every key is current and listed once
+
+Earlier Alpha keys are renamed once: Workflows was `alpha:automations` and before that
+`alpha:workflows`, the assistant was `alpha:chat`, and Wallet (`alpha:inventory`) left the product.
+
 ```quint
 type Legacy = NoLegacy | LegacyV1 | LegacyBareDefaults | LegacyChoice
 type Favorites = {
@@ -24,26 +34,13 @@ pure val initial: Favorites = {
 type Cursor = { at: int, found: int }
 type Refill = { out: List[str], taken: int }
 pure val keyValues = Set("alpha:notes", "alpha:workflows", "org.fixture.clock")
-pure val keysValues = Set(List(), List("alpha:notes", "alpha:automations"), List("alpha:notes", "org.fixture.clock", "org.fixture.gone"))
+pure val keyListValues = Set(List(), List("alpha:notes", "alpha:automations"), List("alpha:notes", "org.fixture.clock", "org.fixture.gone"))
 pure val viewsValues = Set(List(), List("alpha:notes"), List("alpha:notes", "alpha:workflows"))
 pure val appsValues = Set(List(), List("org.fixture.clock"), List("org.fixture.clock", "org.fixture.camera"))
 pure val availableValues = Set(List("alpha:notes", "alpha:workflows", "org.fixture.clock"))
 pure val visibleValues = Set(List("alpha:notes", "org.fixture.clock"), List("alpha:notes", "alpha:workflows", "org.fixture.clock"))
 pure val overValues = Set("alpha:notes", "org.fixture.clock")
 pure val directionValues = Set(-1, 1)
-```
-
-## Story: Keep Home the way I arranged it
-
-> As the owner, I want the apps I put on Home to stay in my order, defaults to fill Home only
-> until I choose, and an older Alpha's arrangement to carry over.
-
-### Every key is current and listed once
-
-Earlier Alpha keys are renamed once: Workflows was `alpha:automations` and before that
-`alpha:workflows`, the assistant was `alpha:chat`, and Wallet (`alpha:inventory`) left the product.
-
-```quint
 pure def unique(xs: List[str]): List[str] = xs.foldl(List(), (acc, k) => if (acc.includes(k)) acc else acc.append(k))
 pure def renamed(key: str): str =
   if (key == "alpha:automations") "alpha:workflows" else if (key == "alpha:chat") "alpha:assistant" else key
@@ -52,7 +49,7 @@ pure def currentKeys(xs: List[str]): List[str] =
 pure def alwaysFavoritesAreCurrentAndUnique(f: Favorites): bool =
   f.entries == unique(f.entries) and not(f.entries.includes("alpha:automations")) and
   not(f.entries.includes("alpha:chat")) and not(f.entries.includes("alpha:inventory"))
-pure def lawRenamingIsIdempotent(keys: List[str]): bool = currentKeys(currentKeys(keys)) == currentKeys(keys)
+pure def lawRenamingIsIdempotent(keyList: List[str]): bool = currentKeys(currentKeys(keyList)) == currentKeys(keyList)
 ```
 
 ### An earlier record is imported once, and only into a list that was never stored
@@ -63,12 +60,12 @@ read, the installed apps the owner never placed are trimmed and the old list is 
 other v2 record is the owner's choice. A record that is missing or unreadable leaves the defaults.
 
 ```quint
-pure def canImportLegacy(f: Favorites, record: Legacy, keys: List[str]): bool = not(f.imported)
-pure def importLegacy(f: Favorites, record: Legacy, keys: List[str]): Favorites = match record {
+pure def canImportLegacy(f: Favorites, record: Legacy, keyList: List[str]): bool = not(f.imported)
+pure def importLegacy(f: Favorites, record: Legacy, keyList: List[str]): Favorites = match record {
   | NoLegacy => { ...f, imported: true }
-  | LegacyV1 => { ...f, imported: true, chosen: true, entries: currentKeys(keys), mergeViews: true }
-  | LegacyBareDefaults => { ...f, imported: true, chosen: true, entries: currentKeys(keys), trimBare: true, previous: keys }
-  | LegacyChoice => { ...f, imported: true, chosen: true, entries: currentKeys(keys) }
+  | LegacyV1 => { ...f, imported: true, chosen: true, entries: currentKeys(keyList), mergeViews: true }
+  | LegacyBareDefaults => { ...f, imported: true, chosen: true, entries: currentKeys(keyList), trimBare: true, previous: keyList }
+  | LegacyChoice => { ...f, imported: true, chosen: true, entries: currentKeys(keyList) }
 }
 pure def stepImportHappensOnce(before: Favorites, via: str, after: Favorites): bool =
   via == "importLegacy" implies not(before.imported)
@@ -144,11 +141,11 @@ pure def place(f: Favorites, key: str, over: str, visible: List[str]): Favorites
 }
 pure def lawMovingKeepsEveryKey(xs: List[str], key: str, over: str): bool = {
   val order = unique(xs)
-  val moved = moveTo(order, key, indexIn(order, over))
-  order.includes(key) implies (moved.length() == order.length() and order.every(k => moved.includes(k)))
+  val shifted = moveTo(order, key, indexIn(order, over))
+  order.includes(key) implies (shifted.length() == order.length() and order.every(k => shifted.includes(k)))
 }
-pure def lawHiddenSlotsStay(keys: List[str], visible: List[str], key: str): bool = {
-  val entries = unique(keys)
+pure def lawHiddenSlotsStay(keyList: List[str], visible: List[str], key: str): bool = {
+  val entries = unique(keyList)
   val shown = entries.select(k => visible.includes(k))
   val after = refill(entries, shown, moveTo(shown, key, 0))
   after.length() == entries.length() and entries.every(k => visible.includes(k) or indexIn(after, k) == indexIn(entries, k))

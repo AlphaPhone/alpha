@@ -174,10 +174,10 @@ pure def canPrepareFailed(d: Dialogs): bool = d.searchable.shown and d.searchabl
 pure def prepareFailed(d: Dialogs): Dialogs = { ...d, searchable: { ...d.searchable, busy: false } }
 pure def canProviderCancelled(d: Dialogs): bool = d.searchable.shown and d.searchable.busy and d.searchable.requested
 pure def providerCancelled(d: Dialogs): Dialogs = { ...d, searchable: { ...d.searchable, busy: false, requested: false } }
-pure def canProviderSettled(d: Dialogs, outcome: SearchResult): bool =
-  d.searchable.shown and d.searchable.busy and d.searchable.requested and (outcome == PdfExported or outcome == PdfFailed)
-pure def providerSettled(d: Dialogs, outcome: SearchResult): Dialogs =
-  { ...d, searchable: { ...d.searchable, shown: false, busy: false, result: outcome, requestedAtClose: true } }
+pure def canProviderSettled(d: Dialogs, searchOutcome: SearchResult): bool =
+  d.searchable.shown and d.searchable.busy and d.searchable.requested and (searchOutcome == PdfExported or searchOutcome == PdfFailed)
+pure def providerSettled(d: Dialogs, searchOutcome: SearchResult): Dialogs =
+  { ...d, searchable: { ...d.searchable, shown: false, busy: false, result: searchOutcome, requestedAtClose: true } }
 pure def canSearchableClose(d: Dialogs): bool = d.searchable.shown
 pure def searchableClose(d: Dialogs): Dialogs =
   { ...d, searchable: { ...d.searchable, shown: false, requestedAtClose: d.searchable.requested,

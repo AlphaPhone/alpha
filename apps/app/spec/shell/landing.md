@@ -11,6 +11,17 @@ summarised by the shell into counts and validity classes: how many `state`, `cod
 `error_description` values it holds, whether the state has the 43-character URL-safe shape, whether
 the code fits 4096 characters and a description 2000, and whether any other key is present.
 
+## Story: Come back to Alpha after authorizing a connection
+
+> As the owner returning from a provider's consent page, I want one plain way back into Alpha
+> that carries only what Alpha needs, and a clear message when the return cannot be used.
+
+### Only a well-formed return with exactly one result is handed back, after the address is cleaned
+
+Exactly one state of the right shape, at most one of each other key and no unknown key; a code or
+an error, never both; a description only beside an error. A reopened page with an empty query says
+to go back to Alpha.
+
 ```quint
 type Query = {
   states: int, stateValid: bool, codes: int, codeFits: bool, errors: int,
@@ -29,20 +40,6 @@ pure val qValues = Set(validCode, { ...validCode, states: 2 }, { ...validCode, s
   { ...validCode, errors: 1 }, { ...validCode, codes: 0, errors: 1, descriptions: 1 }, { ...validCode, descriptions: 1 },
   { ...validCode, codeFits: false }, { ...validCode, knownKeys: false },
   { ...validCode, states: 0, codes: 0, empty: true })
-```
-
-## Story: Come back to Alpha after authorizing a connection
-
-> As the owner returning from a provider's consent page, I want one plain way back into Alpha
-> that carries only what Alpha needs, and a clear message when the return cannot be used.
-
-### Only a well-formed return with exactly one result is handed back, after the address is cleaned
-
-Exactly one state of the right shape, at most one of each other key and no unknown key; a code or
-an error, never both; a description only beside an error. A reopened page with an empty query says
-to go back to Alpha.
-
-```quint
 pure def accepted(q: Query): bool =
   q.states == 1 and q.stateValid and q.codes <= 1 and q.errors <= 1 and q.descriptions <= 1 and
   (q.descriptions == 0 or (q.errors == 1 and q.descriptionFits)) and q.knownKeys and

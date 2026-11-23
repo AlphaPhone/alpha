@@ -57,7 +57,7 @@ pure val initial: ChatCards = {
 }
 pure def isCurrent(message: int, session: int, conversation: int, revision: int, s: ChatCards): bool =
   message > 0 and message == s.newest and session == s.session and conversation == s.conversation and revision == s.revision and s.fromAgent
-pure def quiet(c: Composer): bool = not(c.busy) and not(c.typing) and not(c.recording) and not(c.hidden) and not(c.sheetOpen)
+pure def quiet(composer: Composer): bool = not(composer.busy) and not(composer.typing) and not(composer.recording) and not(composer.hidden) and not(composer.sheetOpen)
 pure val composerValues = Set(quietComposer, { ...quietComposer, draft: true }, { ...quietComposer, editing: true }, { ...quietComposer, busy: true })
 pure val messageValues = Set(1, 2, 3)
 pure val sessionValues = Set(1, 2)

@@ -7,12 +7,6 @@ Android's App info, shade and default-app handoffs are the system bridge's own r
 "App info opens Android's details page for exactly the entry the owner chose" and "The shade opens
 only from a focused launcher build that holds the status bar permission").
 
-```quint
-type HomeStart = OwnPage | DeliverToLive | HandOffToLive
-type SettingsReply = SettingsOpened | SettingsUnavailable | SettingsUnsupported | SettingsPending
-type FontScale = FontNormal | FontLarge | FontLarger | FontTiny
-```
-
 ## Story: Keep one Alpha, sized the way I chose
 
 > As the owner, I want one Alpha behind every way I open it (HOME, a notification, a sign-in
@@ -27,6 +21,9 @@ next start keeps its own page instead, so the phone is never left without one. T
 delivered HOME as one "go Home".
 
 ```quint
+type HomeStart = OwnPage | DeliverToLive | HandOffToLive
+type SettingsReply = SettingsOpened | SettingsUnavailable | SettingsUnsupported | SettingsPending
+type FontScale = FontNormal | FontLarge | FontLarger | FontTiny
 pure def homeStart(sameTask: bool, live: bool, unreliable: bool): HomeStart =
   if (sameTask) DeliverToLive else if (live and not(unreliable)) HandOffToLive else OwnPage
 pure def unreliableAfter(unacked: int): bool = unacked >= 3
@@ -45,14 +42,14 @@ is reported only when Android stored it and the WebView applied it; a write Andr
 is reported unconfirmed.
 
 ```quint
-pure def preference(raw: int): int = if (raw >= 75 and raw <= 150) raw else 100
-pure def effectiveZoom(font: FontScale, raw: int): int = {
-  val percent = preference(raw)
+pure def preference(rawValue: int): int = if (rawValue >= 75 and rawValue <= 150) rawValue else 100
+pure def effectiveZoom(font: FontScale, rawValue: int): int = {
+  val percent = preference(rawValue)
   if (font == FontLarge) (percent * 3 + 1) / 2 else if (font == FontLarger) percent * 2 else if (font == FontTiny) 1 else percent
 }
-pure val rawValues = Set(0, 74, 75, 100, 150, 151)
-pure def lawZoomIsPositive(font: FontScale, raw: int): bool = effectiveZoom(font, raw) >= 1
-pure def lawOutOfRangeReadsAsDefault(raw: int): bool = (raw < 75 or raw > 150) implies preference(raw) == 100
+pure val rawValueValues = Set(0, 74, 75, 100, 150, 151)
+pure def lawZoomIsPositive(font: FontScale, rawValue: int): bool = effectiveZoom(font, rawValue) >= 1
+pure def lawOutOfRangeReadsAsDefault(rawValue: int): bool = (rawValue < 75 or rawValue > 150) implies preference(rawValue) == 100
 ```
 
 ### A Settings shortcut opens its own page first and a broader page only where one is listed

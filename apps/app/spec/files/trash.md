@@ -50,16 +50,15 @@ pure def canCloseTrash(s: TrashView): bool = s.active
 pure def closeTrash(s: TrashView): TrashView = { ...initial, ticket: s.ticket + 1, erasing: s.erasing }
 pure def canRefreshTrash(s: TrashView): bool = s.active
 pure def refreshTrash(s: TrashView): TrashView = { ...s, ticket: s.ticket + 1, loading: true }
-pure def canTrashReply(s: TrashView, ticket: int, items: List[TrashItem], outcome: ListingOutcome): bool =
-  ticket >= 1 and ticket <= s.ticket and outcome != Unread and noRepeats(trashKeys(items))
-pure def trashReply(s: TrashView, ticket: int, items: List[TrashItem], outcome: ListingOutcome): TrashView =
+pure def canTrashReply(s: TrashView, ticket: int, items: List[TrashItem], result: ListingOutcome): bool =
+  ticket >= 1 and ticket <= s.ticket and result != Unread and noRepeats(trashKeys(items))
+pure def trashReply(s: TrashView, ticket: int, items: List[TrashItem], result: ListingOutcome): TrashView = {
+  val shown = if (result == Failed) List() else items
+  val kept = s.selected.select(k => inTrash(shown, k))
   if (not(s.active) or ticket != s.ticket) s
-  else {
-    val shown = if (outcome == Failed) List() else items
-    val kept = s.selected.select(k => inTrash(shown, k))
-    { ...s, loading: false, items: shown, listing: outcome, selected: kept, selecting: s.selecting and shown.length() > 0,
-      opened: if (inTrash(shown, s.opened)) s.opened else "" }
-  }
+  else { ...s, loading: false, items: shown, listing: result, selected: kept, selecting: s.selecting and shown.length() > 0,
+    opened: if (inTrash(shown, s.opened)) s.opened else "" }
+}
 pure def showsEmptyTrash(s: TrashView): bool = s.active and not(s.loading) and s.listing == Complete and s.items.length() == 0
 pure def alwaysTrashKeysAreUnique(s: TrashView): bool = noRepeats(trashKeys(s.items))
 pure def alwaysTheSelectionIsInTrash(s: TrashView): bool = s.selected.every(k => inTrash(s.items, k)) and noRepeats(s.selected)
@@ -78,8 +77,8 @@ pure def sometimesTrashIsEmpty(s: TrashView): bool = showsEmptyTrash(s)
 ```quint
 pure def canToggleItem(s: TrashView, key: str): bool = s.active and inTrash(s.items, key) and s.confirm == NoConfirm and s.erasing.length() == 0
 pure def toggleItem(s: TrashView, key: str): TrashView = {
-  val next = if (s.selected.includes(key)) s.selected.select(k => k != key) else s.selected.append(key)
-  { ...s, selected: next, selecting: next.length() > 0 }
+  val following = if (s.selected.includes(key)) s.selected.select(k => k != key) else s.selected.append(key)
+  { ...s, selected: following, selecting: following.length() > 0 }
 }
 pure def canBeginSelectingItems(s: TrashView): bool = s.active and s.items.length() > 0 and not(s.selecting) and s.erasing.length() == 0
 pure def beginSelectingItems(s: TrashView): TrashView = { ...s, selecting: true }

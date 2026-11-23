@@ -132,7 +132,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     effect edit(fields: DraftFieldsRecord) {
       const text = JSON.stringify(fields)
       const valid = text.length <= MAX_DRAFT_BYTES && (decodeDraftFields(fields) catch () => undefined) !== undefined
-      const after = try send({ type: "edit", fields: text, valid })
+      const after = try send({ type: "edit", edits: text, valid })
       if (after === undefined || !valid || after.conflict || after.storageError) return
       const result = try writeSlot(fields, after.eventRevision)
       if (result === "conflict") {
@@ -151,7 +151,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
       const after = try send({ type: "answerReview", confirmed })
       if (after === undefined) return
       if (after.stage === "StageDiscarding") {
-        try send({ type: "discardDone", outcome: try clearSlot(before.text) })
+        try send({ type: "discardDone", result: try clearSlot(before.text) })
       } else if (before.review === "ReplaceReview" && confirmed && !after.conflict) {
         const fields = decoded(after.text)
         if (fields !== undefined) {
@@ -177,7 +177,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     effect saved(ok: boolean) {
       const before = try machine.get()
       const after = try send({ type: "commitDone", ok })
-      if (after?.stage === "StageClearing") try send({ type: "clearDone", outcome: try clearSlot(before.text) })
+      if (after?.stage === "StageClearing") try send({ type: "clearDone", result: try clearSlot(before.text) })
     },
     effect close() { try send({ type: "close" }) },
     effect handoff(origin: DraftOrigin, fields: DraftFieldsRecord) {
