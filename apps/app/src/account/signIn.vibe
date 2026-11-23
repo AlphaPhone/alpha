@@ -32,6 +32,8 @@ export service SignInScreen {
   google(): void!!
   /** The Google page was closed or lost: end the waiting attempt as Back does and start a new one. */
   reopenGoogle(): void!!
+  /** Whether the address field holds text the owner typed; the text itself is never kept. */
+  draft(drafted: boolean): void!!
   /** Send a code to the address or number the owner typed; it is never stored. */
   submit(address: string): void!!
   verify(code: string): void!!
@@ -310,6 +312,9 @@ export const signInService = Layer.effect(SignInScreen, effect {
     },
     effect open() { try send({ type: "ownerOpens" }) },
     effect choose(method: CodeMethod) { try send({ type: "chooseMethod", method }) },
+    effect draft(drafted: boolean) {
+      if ((try machine.get()).drafted !== drafted) try send({ type: "draftChanged", drafted })
+    },
     effect google() { try send({ type: "tapGoogle" }) },
     effect reopenGoogle() {
       if (!mayReopenGoogle(try machine.get())) return

@@ -32,7 +32,7 @@ type SignIn = {
   screen: Screen, work: Work, fault: Fault, method: CodeMethod, factor: FactorKind, methods: Methods, net: Net,
   automatic: bool, latch: bool, probes: int, late: bool, readinessOwner: bool, lateAdopted: int, lateDropped: int,
   attempt: int, attempts: int, stale: bool, prefill: bool, address: bool, cooldown: bool,
-  storedKey: int, adoptedKey: int, priorKey: int, hostCommitted: bool, adoptedByBack: bool
+  storedKey: int, adoptedKey: int, priorKey: int, hostCommitted: bool, adoptedByBack: bool, drafted: bool
 }
 pure val unknownMethods: Methods = { known: false, google: false, email: false, phone: false }
 pure val initial: SignIn = {
@@ -40,7 +40,7 @@ pure val initial: SignIn = {
   screen: ScreenClosed, work: NoWork, fault: NoFault, method: EmailCode, factor: TotpFactor, methods: unknownMethods, net: NetUnknown,
   automatic: false, latch: false, probes: 0, late: false, readinessOwner: false, lateAdopted: 0, lateDropped: 0,
   attempt: 0, attempts: 0, stale: false, prefill: false, address: false, cooldown: false,
-  storedKey: 0, adoptedKey: 0, priorKey: 0, hostCommitted: false, adoptedByBack: false
+  storedKey: 0, adoptedKey: 0, priorKey: 0, hostCommitted: false, adoptedByBack: false, drafted: false
 }
 pure def canFixHost(s: SignIn, host: Host, boundary: bool): bool = not(s.hostFixed) and s.probes == 0 and s.work == NoWork
 pure def fixHost(s: SignIn, host: Host, boundary: bool): SignIn = { ...s, host: host, commitBoundary: boundary and host == BrowserHost, hostFixed: true }
@@ -64,8 +64,8 @@ pure def entryOf(s: SignIn): Entry =
 pure def isPage(e: Entry): bool = e == RequiredEntry or e == FirstRunEntry
 pure def canSessionChanged(s: SignIn, usable: bool): bool = s.hostFixed and usable != s.signedIn and s.work == NoWork
 pure def sessionChanged(s: SignIn, usable: bool): SignIn =
-  if (usable) { ...s, signedIn: true, opened: false, screen: ScreenClosed, latch: false, fault: NoFault, attempt: 0, stale: false, address: false, prefill: false }
-  else { ...s, signedIn: false, screen: ScreenClosed, latch: false, attempt: 0, stale: false, address: false, prefill: false }
+  if (usable) { ...s, signedIn: true, opened: false, screen: ScreenClosed, latch: false, fault: NoFault, attempt: 0, stale: false, address: false, prefill: false, drafted: false }
+  else { ...s, signedIn: false, screen: ScreenClosed, latch: false, attempt: 0, stale: false, address: false, prefill: false, drafted: false }
 pure def alwaysAChooserNeedsAnEntry(s: SignIn): bool = s.screen != ScreenClosed implies entryOf(s) != NoEntry
 pure def sometimesRequiredPage(s: SignIn): bool = entryOf(s) == RequiredEntry and s.screen == Choose
 pure def sometimesFirstRunPage(s: SignIn): bool = entryOf(s) == FirstRunEntry and s.screen == Choose
@@ -242,6 +242,21 @@ pure def resendEnds(s: SignIn, accepted: bool): SignIn =
 pure def canCooldownEnds(s: SignIn): bool = s.cooldown
 pure def cooldownEnds(s: SignIn): SignIn = { ...s, cooldown: false }
 pure def sometimesFailedResendKeepsTheAttempt(s: SignIn): bool = s.fault == ResendFailed and s.screen == CodeStep and s.attempt != 0
+```
+
+### An address typed and not yet sent is the owner's work in progress
+
+Text in the address field, sent or not, means the card is no longer untouched, so a hands-off update
+waits for it (spec/settings/updates.md); clearing the field, or the card closing, makes it untouched
+again. The address itself is never kept.
+
+```quint
+pure def canDraftChanged(s: SignIn, drafted: bool): bool = s.screen == Choose or s.screen == CodeStep or not(drafted)
+pure def draftChanged(s: SignIn, drafted: bool): SignIn = { ...s, drafted: drafted }
+pure def untouched(s: SignIn): bool =
+  s.screen == Choose and s.work == NoWork and s.attempt == 0 and not(s.address) and not(s.prefill) and not(s.drafted)
+pure def alwaysADraftIsNotUntouched(s: SignIn): bool = s.drafted implies not(untouched(s))
+pure def sometimesDrafted(s: SignIn): bool = s.drafted and s.screen == Choose and s.work == NoWork
 ```
 
 ### A wrong code keeps the step, a spent code leaves only Resend, and any other failure returns to the choice

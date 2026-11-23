@@ -23,6 +23,8 @@ export interface SignInPanelProps {
   onGoogle: () => void;
   /** The Google page was closed or lost: start a new Google attempt. */
   onReopenGoogle: () => void;
+  /** The address field became empty, or holds text, so an update waits for what the owner is typing. */
+  onDraft: (drafted: boolean) => void;
   onSubmit: (address: string) => void;
   onVerify: (code: string) => void;
   onResend: (address: string) => void;
@@ -65,7 +67,7 @@ function CodeBoxes({ value, invalid, disabled, onChange }: { value: string; inva
  * @model spec/account/signIn.md
  * @design design.md
  */
-export function SignInPanel({ signIn, serviceName, terms, android = false, onRetry, onChoose, onGoogle, onReopenGoogle, onSubmit, onVerify, onResend, onBack, onOwnKeys, onWifiSettings }: SignInPanelProps) {
+export function SignInPanel({ signIn, serviceName, terms, android = false, onRetry, onChoose, onGoogle, onReopenGoogle, onDraft, onSubmit, onVerify, onResend, onBack, onOwnKeys, onWifiSettings }: SignInPanelProps) {
   const [address, setAddress] = useState("");
   const [code, setCode] = useState("");
   const [showTerms, setShowTerms] = useState(false);
@@ -108,7 +110,11 @@ export function SignInPanel({ signIn, serviceName, terms, android = false, onRet
             <Input
               id="sign-in-address" type={phone ? "tel" : "email"} autoComplete={phone ? "tel" : "email"} autoCapitalize="none" autoCorrect="off" spellCheck={false}
               maxLength={phone ? 32 : 320} required placeholder={phone ? "+1 415 555 0100" : undefined} value={address} disabled={working}
-              onChange={(event) => setAddress(event.currentTarget.value)}
+              onChange={(event) => {
+                const next = event.currentTarget.value;
+                if ((next.trim() !== "") !== (address.trim() !== "")) onDraft(next.trim() !== "");
+                setAddress(next);
+              }}
             />
             <Button type="submit" size="lg" loading={signIn.work === "Sending"} disabled={!canSubmitAddress(signIn) || !address.trim()}>
               {signIn.cooldown ? "Wait to send" : "Send code"}
