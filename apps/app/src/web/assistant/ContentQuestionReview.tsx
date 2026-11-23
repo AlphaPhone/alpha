@@ -60,7 +60,6 @@ function ReviewForm({ review }: FormProps) {
 
 /**
  * The review of a question another area handed to the assistant: the owner edits the question and excerpt, then adds them to the chat as a draft.
- * @model spec/assistant/index.md
  */
 export function ContentQuestionReview(_props: ContentQuestionReviewProps) {
   const review = useServiceStream("assistant/question-review", reviewStream, undefined);

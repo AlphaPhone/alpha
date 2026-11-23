@@ -18,7 +18,6 @@ export interface SpeechDisclosureProps {
 
 /**
  * Before network voice first listens: who receives the owner's speech, and what.
- * @model spec/voice/route.md
  */
 export function SpeechDisclosure({ route, sends, onContinue, onDismiss }: SpeechDisclosureProps) {
   const name = route === undefined ? "" : recipientName(route);
