@@ -5,7 +5,7 @@ import { MailSelection } from "./selection.vibe"
 import { Mailbox } from "./mailbox.vibe"
 
 /** One Back inside the Inbox, innermost first: the composer, an attachment view, the open message, a selection, then a search; not taken at the folder list. */
-export effect function inboxBack(): ComposerBack!! {
+export effect function inboxBack() {
   const composer = try MailComposer
   const reader = try Reader
   const selection = try MailSelection

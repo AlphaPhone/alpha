@@ -29,7 +29,7 @@ export effect function bindCalendar(binding: AgentBinding) {
 }
 
 /** The window Calendar reads for what is on screen now. */
-export effect function currentWindow(): CalendarWindow!! {
+export effect function currentWindow() {
   const state = try (try PresentationMachine).get()
   const now = try Clock.currentTimeMillis
   const zone = deviceZone()

@@ -25,7 +25,7 @@ function sourceOf(row: CalendarRow): EventSource {
   return row.source === "device" ? "DeviceSource" : "AgentSource"
 }
 
-effect function agentEvent(row: CalendarRow): (EventRecord | undefined)!! {
+effect function agentEvent(row: CalendarRow) {
   const view = try (try AgentCalendar).view()
   return view.feed?.events.find((event) => `agent:${agentEventKey(event)}` === row.id)
 }

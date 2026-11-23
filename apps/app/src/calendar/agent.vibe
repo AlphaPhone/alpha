@@ -306,8 +306,8 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       if (after === undefined || after.read.id === 0 || after.read.id === before.read.id) return
       try run(after.read.id)
     },
-    effect create(write: CreateRequest) {
-      const request = write.request
+    effect create(change: CreateRequest) {
+      const request = change.request
       const at = utcInstant(request.startAt) ?? Number.NaN
       let foundKey = ""
       const find = (events: readonly EventRecord[], reply: CalendarChangeReply): Readback => {
@@ -317,19 +317,19 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
         foundKey = found === undefined ? "" : agentEventKey(found)
         return found !== undefined ? "ReadbackFound" : "ReadbackMissing"
       }
-      const outcome = try write("CreateEvent", write.admitted && request.idempotencyKey !== "" && Number.isFinite(at),
-        () => api.createLifeOpsCalendarEvent(request), find, receiptSource(write.sourceKey), at, request.timeZone ?? "UTC")
+      const outcome = try write("CreateEvent", change.admitted && request.idempotencyKey !== "" && Number.isFinite(at),
+        () => api.createLifeOpsCalendarEvent(request), find, receiptSource(change.sourceKey), at, request.timeZone ?? "UTC")
       if (outcome === "Saved" && foundKey !== "" && request.idempotencyKey !== "") {
         const entry = [request.idempotencyKey, foundKey] as const
         try Ref.update(created, (all) => new Map<string, string>([...[...all].slice(-63), entry]))
       }
       return outcome
     },
-    effect update(write: UpdateRequest) {
-      const request = write.request
-      const event = try currentEvent(write.eventKey)
+    effect update(change: UpdateRequest) {
+      const request = change.request
+      const event = try currentEvent(change.eventKey)
       const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : ""
-      const admitted = write.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
+      const admitted = change.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
       const at = utcInstant(request.startAt ?? event?.startAt ?? "") ?? Number.NaN
       const find = (events: readonly EventRecord[], reply: CalendarChangeReply): Readback => {
         const changed = "event" in reply ? reply.event : null
@@ -340,12 +340,12 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       return try write("UpdateEvent", admitted, () => api.updateLifeOpsCalendarEvent(event?.id ?? "", request), find,
         receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
     },
-    effect remove(write: DeleteRequest) {
-      const request = write.request
-      const confirmed = write.confirmed !== undefined && agentEventKey(write.confirmed) === write.eventKey ? write.confirmed : undefined
-      const event = confirmed ?? (try currentEvent(write.eventKey))
+    effect remove(change: DeleteRequest) {
+      const request = change.request
+      const confirmed = change.confirmed !== undefined && agentEventKey(change.confirmed) === change.eventKey ? change.confirmed : undefined
+      const event = confirmed ?? (try currentEvent(change.eventKey))
       const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : ""
-      const admitted = write.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
+      const admitted = change.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
       const at = utcInstant(event?.startAt ?? "") ?? Number.NaN
       const find = (events: readonly EventRecord[]): Readback =>
         events.some((found) => found.id === event?.id && found.status !== "cancelled" && found.metadata.etag === event?.metadata.etag) ? "ReadbackFound" : "ReadbackMissing"

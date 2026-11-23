@@ -155,6 +155,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **agent:** a workflow device-offer helper is missing, so `read_selected_notes`/`create_note` can answer DEVICE_STEP_UNSUPPORTED.
 - **agent/voice:** `VoiceReplyAction` has no failure flag, so the "email action failed" line is unreachable.
 - **cloud:** the device route table lacks `creditsCheckout`.
+- **plugin-calendar:** `executeNamedCalendarRead` needs the reviewed-reads `Machine`, which only the package's generated code holds and its exports do not reach, so `src/calendar/requests.vibe` `namedRead` cannot type-check (EK3101) or run. Commit 6f27999c6bc (branch `calendar-client-named-read-machine` in `~/Work/eliza`, on vibestack-dp, not built) re-exports it as `NamedReadMachine`/`namedReadMachine()` from `@elizaos/plugin-calendar/client`; after a repin, Calendar's layer provides `namedReadMachine()` and `requestsLayer` hands it to each named read.
 - **plugin-inbox:** a read message carries no Reply-To (`GmailReadResult`/`wire.schema.vibe` have no `replyTo`), so `src/inbox/gmail.vibe` sets `replyTo: ""` and a reply always goes to the sender, never to a list's or ticket system's Reply-To.
 - **plugin-inbox:** `inboxComposeActionName` is exported only from the package root, so voice keeps a local copy.
 
