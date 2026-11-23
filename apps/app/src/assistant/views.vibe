@@ -1,6 +1,6 @@
 // spec/assistant/views.md, "Story: Have my agent open the screen it means"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/views.md, "Story: Let my agent press back or reload only on the page I am looking at"; spec/assistant/views.md, "A view command is claimed once, refused under \"Ask before Alpha acts\", run only in Browser, and answered once"
 import { observes } from "../../gen/assistant.effect.vibe"
-import { answerOf, assistantClaims, claimWaitMs, claims, delivered, interactionWaitMs, mapsDelivers, negativeSent, negativeWaitMs, reported, taken, type Delivered } from "../../gen/assistant__views.ts"
+import { answerOf, assistantClaims, claimWaitMs, claims, delivered, interactionWaitMs, mapsDelivers, negativeSent, negativeWaitMs, reported, taken, type Delivered } from "../../gen/assistant__views.effect.vibe"
 import { newId } from "../platform/ids.ts"
 import { Resident } from "../platform/resident.vibe"
 import { ResidentFeeds } from "../platform/view-events.vibe"
@@ -187,7 +187,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
     const screen = try host.screen()
     if (!taken(true, !observes(screen.exposure), running.has(frame.requestId))) return
     running.add(frame.requestId)
-    try ensuring(timeout(command(frame, screen.contextKey), interactionWaitMs) catch () => undefined, sync(() => { running.delete(frame.requestId) }))
+    try ensuring(effect { timeout(command(frame, screen.contextKey), interactionWaitMs) catch () => undefined }, sync(() => { running.delete(frame.requestId) }))
   }
 
   effect function listen() {
@@ -197,7 +197,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
   }
 
   effect function follow() {
-    try (listen() catch () => undefined)
+    listen() catch () => undefined
     following = false
   }
 

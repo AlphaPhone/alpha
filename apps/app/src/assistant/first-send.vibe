@@ -13,7 +13,7 @@ effect function holdMigration() {
 export effect function moveFirstDraft(source: string, destination: string) {
   const drafts = try DraftsMachine
   const migration = try holdMigration()
-  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => Effect.match(work, { onSuccess: () => true, onFailure: () => false })
   effect function read(binding: string) {
     const slot = slotOf(try drafts.get(), binding)
     return { revision: slot.revision, text: textOf(slot.text), sending: slot.sending } satisfies SlotRead

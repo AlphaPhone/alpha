@@ -16,7 +16,8 @@ export const cameraCallFactsLive = Layer.effect(CameraCallFacts, effect {
   return {
     of: (call: ExecutorCall) => effect {
       const facts = try review.callFacts(call)
-      const header = capabilityHeaders(try (advertised.names() catch () => [] as readonly string[]))[CAPABILITIES_HEADER]
+      const names = advertised.names() catch () => [] as readonly string[]
+      const header = capabilityHeaders(names)[CAPABILITIES_HEADER]
       return {
         reviewed: facts.reviewed, messageId: facts.messageId, ownerText: facts.reviewed ? "" : facts.ownerText,
         ...(header === undefined ? {} : { capabilities: header }),

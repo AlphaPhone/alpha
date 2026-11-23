@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "es2023",
     "module": "nodenext",
-    "lib": ["es2023", "dom", "dom.iterable"],
+    "lib": ["es2024", "dom", "dom.iterable"],
     "strict": true,
     "skipLibCheck": true,
     "types": ["node", "vite/client"],

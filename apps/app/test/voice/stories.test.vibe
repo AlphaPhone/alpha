@@ -16,16 +16,16 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
-import { initial as micInitial, barHeight, deniedSettingsOffered, levelBars } from "../../gen/voice__capture.ts"
+import { initial as micInitial, barHeight, deniedSettingsOffered, levelBars } from "../../gen/voice__capture.effect.vibe"
 import {
   claimScreen, cleanupSettled, endpointerOf, hidden as hideConversation, initial as conversationInitial, muteSpeaker, profileOf, returned as returnConversation, reviewNeeded, reviewSettled,
   screenPinned, screenSettled, sessionFailed, start as startConversation, stop as stopConversation, typedSend,
-} from "../../gen/voice__conversation.ts"
-import { initial as dictationInitial, start as startDictation } from "../../gen/voice__dictation.ts"
-import { cancel as cancelIme, finish as finishIme, initial as imeInitial, openPanel, startCapture, stopCapture, timedOut } from "../../gen/voice__keyboard.ts"
-import { boundedWaitSeconds, keyOf, privacyOf, sendsOf } from "../../gen/voice__route.ts"
-import { cleanupSettled as chainSettled, finished, initial as speechInitial, readingMayStart, speak, voiceEntry } from "../../gen/voice__speech.ts"
-import { gateWindow, initial as vadInitial, restart as restartVad, sample } from "../../gen/voice__vad.ts"
+} from "../../gen/voice__conversation.effect.vibe"
+import { initial as dictationInitial, start as startDictation } from "../../gen/voice__dictation.effect.vibe"
+import { cancel as cancelIme, finish as finishIme, initial as imeInitial, openPanel, startCapture, stopCapture, timedOut } from "../../gen/voice__keyboard.effect.vibe"
+import { boundedWaitSeconds, keyOf, privacyOf, sendsOf } from "../../gen/voice__route.effect.vibe"
+import { cleanupSettled as chainSettled, finished, initial as speechInitial, readingMayStart, speak, voiceEntry } from "../../gen/voice__speech.effect.vibe"
+import { gateWindow, initial as vadInitial, restart as restartVad, sample } from "../../gen/voice__vad.effect.vibe"
 
 /** What the fakes were asked, in order, as `plugin.method`. */
 type Calls = Array<{ readonly name: string; readonly args: unknown }>
@@ -34,7 +34,7 @@ type Answer = unknown | { readonly refuse: string } | ((args: Record<string, unk
 
 const onPhone: Record<string, Answer> = {
   "AlphaVoiceCloud.localSpeechStatus": { ready: true, execution: "device" },
-  "AlphaVoiceCloud.markVoiceTurn": (args) => ({ marked: true, voiceTurnId: typeof args.voiceTurnId === "string" ? args.voiceTurnId : "phone-turn-1" }),
+  "AlphaVoiceCloud.markVoiceTurn": (args: Record<string, unknown>) => ({ marked: true, voiceTurnId: typeof args.voiceTurnId === "string" ? args.voiceTurnId : "phone-turn-1" }),
   "AlphaVoiceCloud.nativeVoiceTiming": { format: "alpha-native-voice-timing-v3", records: [
     { turnId: "phone-turn-1", outcome: "passed", marks: { "last-user-audio": 1000, request: 1100, "first-pcm": 1350, "audible-playback": 1400 } },
   ] },
@@ -56,7 +56,10 @@ function platform(calls: Calls, native: Record<string, Answer>, variant: "launch
         const answer = native[`${plugin}.${method}`]
         if (answer === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
         if (refused(answer)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: answer.refuse }))
-        if (typeof answer === "function") return Effect.succeed(answer((args ?? {}) as Record<string, unknown>))
+        if (typeof answer === "function") return Effect.try({
+          try: () => answer((args ?? {}) as Record<string, unknown>),
+          catch: () => new NativeFailed({ plugin, method, message: "fixture failed" }),
+        })
         return Effect.succeed(answer)
       },
       listen: () => Stream.never,
@@ -271,8 +274,9 @@ it.live(`One voice surface at a time hears me (spec/voice/capture.md, "Story: On
     try microphone.foregroundChanged(false)
     const hidden = try microphone.get()
     const refusedHidden = try microphone.acquire("AssistantCapture")
+    const { refusal } = try microphone.get()
     try Effect.try(() => assert.deepStrictEqual({
-      replaced: [second !== undefined && second !== first, afterStale.owner, afterStale.replaced], hidden: [hidden.owner, hidden.open], refusedHidden, refusal: (try microphone.get()).refusal,
+      replaced: [second !== undefined && second !== first, afterStale.owner, afterStale.replaced], hidden: [hidden.owner, hidden.open], refusedHidden, refusal,
     }, {
       replaced: [true, "DictationCapture", 1], hidden: ["NoOwner", false], refusedHidden: undefined, refusal: "RefusedBackground",
     }))
@@ -367,7 +371,7 @@ it.live(`Start voice from my listener or the power button, once (spec/voice/list
   // spec/voice/listener.md, "A pending power press is discarded, never kept, while the screen cannot start voice"
   const coldLaunch: Record<string, Answer> = {
     ...listenerOnImage,
-    "ElizaSense.claimProtectedPowerLaunch": (args) => (args.accountRef === "account-1" ? { assistant: true, invocation: "power", locked: false } : { assistant: false }),
+    "ElizaSense.claimProtectedPowerLaunch": (args: Record<string, unknown>) => (args.accountRef === "account-1" ? { assistant: true, invocation: "power", locked: false } : { assistant: false }),
   }
   const launched: Calls = []
   provide voice(launched, coldLaunch, "aosp") {

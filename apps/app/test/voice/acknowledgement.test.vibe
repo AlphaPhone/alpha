@@ -3,8 +3,8 @@ import { assert, it } from "@effect/vitest"
 import { readReplyStream } from "@elizaos/agent/client"
 import { acknowledgement, voiceReplyHooks } from "../../src/voice/acknowledgement.vibe"
 import { Speech, SpeechInterrupted, type SpeakOptions } from "../../src/voice/speech.vibe"
-import { initial as speechInitial } from "../../gen/voice__speech.ts"
-import { acknowledged, audible, cancel, ended, initial, replyMayStart, replyReady } from "../../gen/voice__acknowledgement.ts"
+import { initial as speechInitial } from "../../gen/voice__speech.effect.vibe"
+import { acknowledged, audible, cancel, ended, initial, replyMayStart, replyReady } from "../../gen/voice__acknowledgement.effect.vibe"
 
 /** One line the fake speaker was asked to say: whether it was stopped, and its start report. */
 interface Said {
@@ -250,7 +250,7 @@ async function* agentStream(beforeTool: () => void): AsyncGenerator<Uint8Array> 
   yield frame({ type: "token", text: "Let me check your calendar." })
   yield frame({ type: "acknowledgment", text: "Let me check your calendar." })
   yield frame({ type: "token", fullText: "" })
-  await new Promise((resolve) => setTimeout(resolve, 0))
+  await runPromise(Effect.yieldNow)
   beforeTool()
   yield frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" })
   yield frame({ type: "token", text: "You have two meetings." })

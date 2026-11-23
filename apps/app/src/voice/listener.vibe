@@ -163,7 +163,7 @@ export const listenerService = Layer.effect(Listener, effect {
 
   effect function bindSession(authority: string | null) {
     if (!(try admitted())) return
-    const key = authority === null ? null : try (tryPromise(() => sessionKey(authority)) catch () => null)
+    const key = authority === null ? null : (tryPromise(() => sessionKey(authority)) catch () => null)
     if (key === boundKey && generation > 0) return
     generation += 1
     const answered = timeout(native.invoke(SENSE, "bindInvocationSession", { generation, bindingId, sessionKey: key }), STOP_DEADLINE) catch () => undefined

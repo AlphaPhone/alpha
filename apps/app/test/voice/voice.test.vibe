@@ -116,7 +116,8 @@ it.live(`Dictate into the draft I am writing (spec/voice/dictation.md, "Story: D
     try dictation.start()
     try dictation.cancel()
     try dictation.stop()
-    try Effect.try(() => assert.deepStrictEqual({ inserted: cancelled.inserted, stage: stageOf(try dictation.get()) }, { inserted: [], stage: "Closed" }))
+    const final = try dictation.get()
+    try Effect.try(() => assert.deepStrictEqual({ inserted: cancelled.inserted, stage: stageOf(final) }, { inserted: [], stage: "Closed" }))
   }
 })
 
