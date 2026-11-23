@@ -47,16 +47,19 @@ pure def lawOnlyAnAppliedReceiptIsCompleted(r: Result): bool = titleOf(r) == Com
 ### A reply cut off after an effect says so, and a queued approval request reads as needing approval
 
 On a failed live reply, the resident's negotiated applied-effect marker
-means an effect completed before the reply stopped.
+means an effect completed before the reply stopped. This remains true
+when a separate action left an approval request open.
 
 ```quint
 type CutOff = NotCutOff | DoneCutOff | NeedsApprovalCutOff
 pure def cutOffLabel(interrupted: bool, appliedEffects: int, approvalRequests: int, effectBeforeFailure: bool): CutOff =
   if (not(interrupted)) NotCutOff
+  else if (effectBeforeFailure) DoneCutOff
   else if (appliedEffects > 0 and appliedEffects == approvalRequests) NeedsApprovalCutOff
-  else if (appliedEffects > 0 or effectBeforeFailure) DoneCutOff
+  else if (appliedEffects > 0) DoneCutOff
   else NotCutOff
 pure def lawAQueuedApprovalIsNeverDone(approvals: int): bool = approvals >= 1 implies cutOffLabel(true, approvals, approvals, false) == NeedsApprovalCutOff
+pure def lawAnAppliedEffectStaysDoneWithAnApproval(approvals: int): bool = approvals >= 1 implies cutOffLabel(true, approvals, approvals, true) == DoneCutOff
 pure def lawAnUninterruptedReplyHasNoCutOff(applied: int, approvals: int, before: bool): bool = cutOffLabel(false, applied, approvals, before) == NotCutOff
 pure val appliedValues = Set(0, 1, 2)
 pure val approvalsValues = Set(0, 1)
