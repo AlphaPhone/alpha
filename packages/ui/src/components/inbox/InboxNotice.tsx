@@ -14,6 +14,7 @@ const notices = {
   sendingOff: { variant: "warn", text: "Sending is off for this account", action: "Turn on" },
   noReplyAddress: { variant: "warn", text: "No address to reply to" },
   notEditable: { variant: "warn", text: "Alpha cannot edit this draft safely", action: "Open in Gmail" },
+  forwardTextOnly: { variant: "info", text: "Forwarded as text: this account cannot forward the attachments" },
   mineRestored: { variant: "info", text: "Your edits are kept" },
   savedTaken: { variant: "info", text: "Using the latest saved draft" },
   saveFound: { variant: "info", text: "Your save reached Gmail" },
