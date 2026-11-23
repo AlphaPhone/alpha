@@ -2,7 +2,6 @@ package ai.alphacompute.alphaphone;
 
 import android.webkit.*;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.webkit.*;
@@ -73,8 +72,8 @@ public final class BrowserCookiePolicyInstrumentedTest {
     WebView web=build(activity,"rewrite_probe",false,AlphaBrowserStores.PERSISTENT_PROFILE);
     BrowserFlowInstrumentedTest.installSameDocumentFixture(web);
     View frame=(View)web.getParent();
-    ViewGroup content=activity.findViewById(android.R.id.content);
-    content.addView(frame,new FrameLayout.LayoutParams(-1,-1));
+    frame.setLayoutParams(new FrameLayout.LayoutParams(-1,-1));
+    frame.bringToFront();
     frame.setVisibility(View.VISIBLE);
     child.set(web);
     web.loadUrl(BrowserFlowInstrumentedTest.SAME+"head");
