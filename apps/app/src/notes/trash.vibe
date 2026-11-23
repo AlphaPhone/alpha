@@ -40,7 +40,7 @@ export service NotesTrash {
   dismissUndo(): void!!
   noticeShown(): void!!
   probeRetention(): boolean!!
-  entryFor(noteId: string): TrashRow | undefined!!
+  entryFor(noteId: string): (TrashRow | undefined)!!
 }
 
 const kindNames: Record<string, string> = { text: "Note", list: "Checklist", voice: "Voice note", link: "Link" }
@@ -73,11 +73,11 @@ const make = effect {
   const cleanups = try SubscriptionRef.make<readonly NotesTrashRecordingCleanup[]>([])
   const asked = try Ref.make<TrashRow | undefined>(undefined)
 
-  effect function send(event: TrashEvent): TrashView | undefined!! {
+  effect function send(event: TrashEvent): (TrashView | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
 
-  effect function snapshot(): NotesSnapshot | undefined!! {
+  effect function snapshot(): (NotesSnapshot | undefined)!! {
     return (try collection.current())?.snapshot
   }
 

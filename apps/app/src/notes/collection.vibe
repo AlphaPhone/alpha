@@ -20,12 +20,12 @@ export interface OwnedSnapshot { readonly owner: string; readonly snapshot: Note
 /** The canonical Notes collection of the bound owner: one read and one mutation at a time. */
 export service NotesCollection {
   readonly snapshots: Stream.Stream<OwnedSnapshot | undefined>
-  current(): OwnedSnapshot | undefined!!
+  current(): (OwnedSnapshot | undefined)!!
   bind(owner: string): void!!
   retire(): void!!
   refresh(): void!!
   invalidate(revision?: number): void!!
-  interact(capability: NotesCapability, params: Record<string, unknown>): NotesInteractResult!NotesFailure | NotesBusy | NotesRetired
+  interact(capability: NotesCapability, params: Record<string, unknown>): NotesInteractResult!(NotesFailure | NotesBusy | NotesRetired)
   needReview(): void!!
   clearReview(): void!!
   setClean(clean: boolean): void!!
@@ -41,7 +41,7 @@ const make = effect {
   const clean = try Ref.make(true)
   const reading = try Ref.make(0)
 
-  effect function send(event: CollectionEvent): Collection | undefined!! {
+  effect function send(event: CollectionEvent): (Collection | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
 

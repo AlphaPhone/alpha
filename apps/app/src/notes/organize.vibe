@@ -25,7 +25,7 @@ export interface OrganizeAdmission { readonly operation: NotesOrganizeOperation;
 /** The phone's executor of the agent's Notes organisation operations. */
 export service NotesOrganize {
   capabilities(): readonly string[]!!
-  admit(input: unknown, context: NotesDeviceContext, ownMessage: boolean, workflow: boolean, reviewFirst: boolean): OrganizeAdmission | undefined!!
+  admit(input: unknown, context: NotesDeviceContext, ownMessage: boolean, workflow: boolean, reviewFirst: boolean): (OrganizeAdmission | undefined)!!
   execute(operation: NotesOrganizeOperation): OrganizeReceipt!!
 }
 
