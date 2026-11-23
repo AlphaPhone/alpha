@@ -4476,6 +4476,7 @@
       "microphoneNoSoundTest",
       "limitStopSaysMaxLengthTest",
       "leavingFinishesRecordingTest",
+      "lightChangesWhileRecordingTest",
       "volumeKeyIsTheShutterTest"
     ],
     "sources": [
@@ -4489,8 +4490,8 @@
     "abstractions": [
       "One owner Camera visit: preview off, starting or ready; Photo or Video mode with the bound capture mode and one setCaptureMode call in flight; a recording idle, running or finishing; chat hidden, a portrait sheet (Camera laid out above it) or full; the chat grace as one flag; an agent capture or scan as one hold. `sync` is the adapter's `syncCamera`, run after shell commits and session changes.",
       "Owner controls (shutter, record, flip, light) are gated on `active()` as in the source: visible, and uncovered, or covered within the chat grace, or held. This is the current-source successor of the owner actions of legacy/CameraSession.qnt, whose guards require a closed chat (`ShotUnderChatGraceWitness` reaches a shot under a full chat within its grace).",
-      "Light changes and turning the light off on leaving Video are atomic here; the source runs them as camera controls and retries one that waited behind another control. Zoom, focus, flash modes and the photo write are outside this model (CameraFocusWrites, CameraPreviewRetirement and the shared session cover them). The volume-key shutter's dialog, agent and scan checks are folded into the request hold.",
-      "Model-only: no refinement adapter drives the camera adapter's closure. The rules were read from the listed source. The browser specs in test/browser/camera-controls.spec.ts exercise the microphone notice, the self-timer, the grid and the volume-key event in Chromium; Android key delivery and the light are not device-verified."
+      "Light changes and turning the light off on leaving Video are atomic here; the source runs them as camera controls (a change during a recording as the shared session's `torch` recording control) and retries one that waited behind another control. Zoom (also a recording control on the phone), focus, flash modes, the photo aspect ratio and the photo write are outside this model (CameraFocusWrites, CameraPreviewRetirement and the shared session cover them). The volume-key shutter's dialog, agent and scan checks are folded into the request hold.",
+      "Model-only: no refinement adapter drives the camera adapter's closure. The rules were read from the listed source. The browser specs in test/browser/camera-controls.spec.ts exercise the microphone notice, the self-timer, the grid and the volume-key event in Chromium; Android key delivery and the light (before and during a recording) are not device-verified."
     ],
     "invariants": [
       "ControlsOnlyWhileActive",
@@ -4507,7 +4508,8 @@
       "ShotUnderChatGraceWitness",
       "SoundlessRecordingWitness",
       "MaxLengthSavedWitness",
-      "PreviewStoppedRetryWitness"
+      "PreviewStoppedRetryWitness",
+      "LightWhileRecordingWitness"
     ],
     "bounds": {
       "maxSamples": 400,

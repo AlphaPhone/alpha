@@ -56,8 +56,31 @@ export function recordingLabel(duration: number, fileSize: number, limits: { max
   return left !== undefined && left <= RECORDING_WARNING ? `${elapsed} · ${clock(Math.ceil(left))} left` : elapsed;
 }
 
+/** Photo aspect ratios Camera offers, in the order the chip cycles them. 4:3 is the native camera's
+ * default; another ratio is the upstream `captureAspectRatio` preview option. */
+export const ASPECT_RATIOS = ['4:3', '16:9'] as const;
+export type AspectRatio = typeof ASPECT_RATIOS[number];
+/** The ratios a camera device lists (`supportedCaptureAspectRatios`) that Camera offers. */
+export function supportedAspects(device: { supportedCaptureAspectRatios?: unknown } | undefined): AspectRatio[] {
+  const listed = device?.supportedCaptureAspectRatios;
+  return Array.isArray(listed) ? ASPECT_RATIOS.filter(ratio => listed.includes(ratio)) : [];
+}
+/** The next listed ratio after `current`; with one ratio or none there is no other to pick. */
+export function nextAspect(current: AspectRatio, supported: readonly AspectRatio[]): AspectRatio {
+  if (supported.length < 2) return current;
+  const at = supported.indexOf(current);
+  return supported[(at + 1) % supported.length];
+}
+export function aspectLabel(ratio: AspectRatio): string {
+  return `Aspect ratio ${ratio}`;
+}
+/** The portrait viewfinder frame (and its grid) for a photo ratio, as a CSS aspect-ratio. */
+export function frameAspect(ratio: AspectRatio): string {
+  return ratio === '16:9' ? '9 / 16' : '3 / 4';
+}
+
 /** Video mode's light on the phone: the flash unit held on (the torch), since a flash cannot fire
- * during a recording. It is chosen before the recording starts. */
+ * during a recording. It can be turned on or off before and during the recording. */
 export function videoLightLabel(on: boolean): string {
   return on ? 'Light on' : 'Light off';
 }
