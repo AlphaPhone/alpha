@@ -7,7 +7,8 @@
     "skipLibCheck": true,
     "types": ["node", "vite/client"],
     "jsx": "react-jsx",
-    "rootDir": ".",
+    // Calendar requests use the pinned SDK's generated named-read machine.
+    "rootDir": "../..",
     "rootDirs": [".", ".vibe/declarations"],
     "outDir": "dist",
     "noEmitOnError": true,
