@@ -147,7 +147,7 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
       </header>
 
       {camera.countdown > 0 && (
-        <span role="timer" aria-label={`Photo in ${camera.countdown} seconds`} className="pointer-events-none relative z-10 mt-24 text-center font-serif text-8xl">
+        <span role="timer" aria-label={`Photo in ${camera.countdown} seconds`} className="pointer-events-none relative z-10 mt-24 text-center font-display text-8xl">
           {camera.countdown}
         </span>
       )}

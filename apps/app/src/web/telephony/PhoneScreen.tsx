@@ -69,7 +69,7 @@ function PhoneApp({ route }: PhoneScreenProps) {
   return (
     <section ref={visit} aria-label="Phone" className="flex h-full flex-col bg-background text-foreground">
       <header className="flex items-center gap-2 px-4 pt-4">
-        <h1 className="flex-1 font-serif text-2xl">Phone</h1>
+        <h1 className="flex-1 font-display text-2xl">Phone</h1>
       </header>
       <nav role="group" aria-label="Phone" className="flex gap-1 px-4 py-2">
         {TABS.filter(({ tab }) => tab !== "VoicemailTab" || phone.voicemailReady).map(({ tab, label }) => (

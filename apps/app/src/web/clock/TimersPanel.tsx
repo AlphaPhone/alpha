@@ -37,7 +37,7 @@ export function TimersPanel({ timers, now, onStart, onTimer, onDismiss }: Timers
             return (
               <li key={timer.id} className={cn("flex flex-col gap-2 rounded-lg border border-border p-4", ringing && "border-primary")}>
                 <div className="flex items-baseline justify-between gap-3">
-                  <span className={cn("font-serif text-4xl tabular-nums", ringing && "text-primary")}>{duration(left)}</span>
+                  <span className={cn("font-display text-4xl tabular-nums", ringing && "text-primary")}>{duration(left)}</span>
                   <span className="truncate text-sm text-muted-foreground">{timer.label}</span>
                 </div>
                 <Progress value={timer.durationMs - left} max={timer.durationMs} aria-label={`${timer.label || "Timer"} elapsed`} />

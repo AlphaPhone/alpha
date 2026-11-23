@@ -57,7 +57,7 @@ export function OverviewCards({ overview, agenda, onOpen }: OverviewCardsProps) 
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-4 px-5" data-alpha-home-date>
-          <p className="font-serif text-3xl">{dateLabel(overview.now)}</p>
+          <p className="font-display text-3xl">{dateLabel(overview.now)}</p>
           {setupLink(overview) && <Button variant="ghost" size="sm" onClick={() => onOpen("account")}>Set up Gmail</Button>}
         </div>
         {agenda !== undefined && <div className="flex px-5">{agenda}</div>}
@@ -86,7 +86,7 @@ export function OverviewCards({ overview, agenda, onOpen }: OverviewCardsProps) 
       {attentionCard(overview) && (
         <CardShell card="attention" state={overview.attention === "AttentionStale" ? "stale" : "ready"} label={mail.label} description={mail.status}
           icon={<Mail className="size-5" />} onOpen={() => onOpen("inbox")}>
-          <span className="font-serif text-4xl tabular-nums">{mail.count}</span>
+          <span className="font-display text-4xl tabular-nums">{mail.count}</span>
           <span className={cn("text-sm", overview.attention === "AttentionStale" ? "text-warn" : "text-muted-foreground")}>{mail.status}</span>
         </CardShell>
       )}
@@ -99,7 +99,7 @@ export function OverviewCards({ overview, agenda, onOpen }: OverviewCardsProps) 
       )}
       {workflowsCard(overview) && (
         <CardShell card="workflows" state="ready" label={flows.label} description={flows.status} icon={<Workflow className="size-5" />} onOpen={() => onOpen("workflows")}>
-          <span className="font-serif text-4xl tabular-nums">{flows.count}</span>
+          <span className="font-display text-4xl tabular-nums">{flows.count}</span>
           <span className="text-sm text-muted-foreground">{flows.status}</span>
         </CardShell>
       )}

@@ -116,7 +116,7 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
       <span ref={followRoute} hidden />
       <header className="flex items-center gap-2 px-2 py-2">
         <Button variant="ghost" size="icon" aria-label={browse.album !== "" ? "Back to albums" : "Back to apps"} onClick={() => (browse.album !== "" ? library((l) => l.openAlbum(undefined)) : onClose())}><ChevronLeft /></Button>
-        <h1 className="flex-1 font-serif text-2xl">Photos</h1>
+        <h1 className="flex-1 font-display text-2xl">Photos</h1>
         {!browse.selecting && browse.album.startsWith("custom:") && (
           <Button variant="ghost" size="icon" aria-label="Album options" disabled={!canAlbum({ type: "openDialog", target: browse.album.slice("custom:".length), media: "", mediaRevision: "" })}
             onClick={() => { setName(""); library((l) => l.openAlbumDialog(browse.album.slice("custom:".length), false)); }}><Settings2 /></Button>
@@ -165,7 +165,7 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
               <button type="button" onClick={() => library((l) => l.openAlbum(album.key))}
                 className={cn("flex w-full flex-col items-start gap-1 rounded-xl bg-card p-4 text-left", focusRing)}>
                 <Images aria-hidden />
-                <span className="font-serif">{album.label}</span>
+                <span className="font-display">{album.label}</span>
                 {album.count >= 0 && <span className="font-mono text-xs text-muted-foreground">{album.count}</span>}
               </button>
             </li>

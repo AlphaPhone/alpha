@@ -106,7 +106,7 @@ export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen,
   return (
     <>
       <div className="flex flex-col items-center gap-1 py-6">
-        <span className="font-serif text-3xl">Alpha</span>
+        <span className="font-display text-3xl">Alpha</span>
         <span className="font-mono text-xs uppercase tabular-nums text-muted-foreground">{read.version ? (read.versionCode > 0 ? `${read.version} (${read.versionCode})` : read.version) : "Development preview"}</span>
       </div>
       <Section>

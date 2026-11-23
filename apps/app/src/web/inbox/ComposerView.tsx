@@ -67,7 +67,7 @@ export function ComposerView({ draft, account, accounts, canSend, canSaveToGmail
     <form aria-label={heading[fields.mode]} className="flex flex-col gap-3 px-4 pb-6" onSubmit={(event) => { event.preventDefault(); onSend(); }}>
       <header className="flex items-center gap-2">
         <Button size="icon" variant="ghost" aria-label="Back" disabled={busy} onClick={onBack}><ChevronLeft aria-hidden /></Button>
-        <h2 className="font-serif text-2xl">{heading[fields.mode]}</h2>
+        <h2 className="font-display text-2xl">{heading[fields.mode]}</h2>
         <Button type="submit" className="ml-auto" disabled={!canSend || busy || fields.toList.length + fields.ccList.length + fields.bccList.length === 0} loading={busy}>
           <Send aria-hidden />Send
         </Button>

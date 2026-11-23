@@ -168,7 +168,7 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
     body = (
       <>
         <header className="flex items-center gap-2 px-4 pt-4">
-          <h1 className="flex-1 font-serif text-3xl">Notes</h1>
+          <h1 className="flex-1 font-display text-3xl">Notes</h1>
           <Button variant="ghost" size="icon" aria-label="Search notes" onClick={() => setSearching(!searching)}><Search aria-hidden /></Button>
           <Button variant="ghost" size="icon" aria-label="Folders" onClick={() => { foldersLayer.show(); void call(NotesFolders, (service) => service.list()); }}><Folder aria-hidden /></Button>
           <DropdownMenu>

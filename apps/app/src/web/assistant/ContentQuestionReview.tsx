@@ -31,7 +31,7 @@ function ReviewForm({ review }: FormProps) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open) dismiss(); }}>
       <DialogContent aria-label="Ask about selected content" closeLabel="Cancel">
-        <DialogTitle className="font-serif text-2xl">{review.label}</DialogTitle>
+        <DialogTitle className="font-display text-2xl">{review.label}</DialogTitle>
         <p role="note" aria-label="Selected source" className="break-words text-sm text-muted-foreground">{review.name}</p>
         {preview !== undefined && <img src={preview} alt="Image for question review" className="max-h-28 w-full rounded-lg object-contain" />}
         <Label className="flex flex-col gap-1">Question

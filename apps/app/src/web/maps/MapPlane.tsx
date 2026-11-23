@@ -49,13 +49,12 @@ let protocols = 0;
 /** The padding that keeps what the camera shows above the open sheets and below the search bar. */
 const SHEETS = { top: 220, bottom: 280, left: 30, right: 30 };
 
-function styleFor(basemap: Basemap, protocol: string, tileSize: number, minZoom: number, maxZoom: number, land: string): string | StyleSpecification {
+function styleFor(basemap: Basemap, protocol: string, tileSize: number, minZoom: number, maxZoom: number): string | StyleSpecification {
   if (basemap === "WorldMap") return WORLD_STYLE;
   return {
     version: 8,
     sources: { cloud: { type: "raster", tiles: [`${protocol}://tiles/{z}/{x}/{y}.png`], tileSize, minzoom: minZoom, maxzoom: Math.min(maxZoom, 20) } },
-    // Land shows beneath a tile still on its way, not the page behind the map.
-    layers: [{ id: "land", type: "background", paint: { "background-color": land } }, { id: "cloud-raster", type: "raster", source: "cloud" }],
+    layers: [{ id: "cloud-raster", type: "raster", source: "cloud" }],
   };
 }
 
@@ -143,9 +142,8 @@ export function MapPlane(props: MapPlaneProps) {
       return { data: tile.bytes.buffer.slice(tile.bytes.byteOffset, tile.bytes.byteOffset + tile.bytes.byteLength) };
     });
     const raster = basemap !== "WorldMap";
-    const land = getComputedStyle(node).getPropertyValue("--muted").trim() || "#e5e5e5";
     const instance = new maplibregl.Map({
-      container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom, land), center: OPENING.center,
+      container: node, style: styleFor(basemap, protocol, tileSize, minZoom, maxZoom), center: OPENING.center,
       zoom: raster ? Math.max(OPENING.zoom, minZoom) : OPENING.zoom,
       ...(raster ? { minZoom, maxZoom: Math.min(maxZoom, 22) } : {}),
       attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
@@ -207,7 +205,7 @@ export function MapPlane(props: MapPlaneProps) {
   if (basemap === "NoBasemap") return <div role="img" aria-label="Google map unavailable" className="size-full bg-muted" />;
   return (
     <div className="relative size-full">
-      <div ref={mount} role="application" aria-label={props.label} className="size-full" />
+      <div ref={mount} role="application" aria-label={props.label} className="size-full bg-muted" />
       {compassShown(turn.bearing, turn.pitch, props.follow) && (
         <Button variant="secondary" size="icon" aria-label="Turn map north up" className="absolute right-4 top-24 rounded-full shadow-md" onClick={northUp}>
           <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />

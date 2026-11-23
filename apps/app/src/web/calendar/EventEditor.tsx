@@ -111,7 +111,7 @@ export function EventEditor({ fields: opened, draft, recurring, repeats = true, 
           )}
           {draft.review !== "NoDraftReview" && (
             <div role="dialog" aria-label={draft.review === "DiscardReview" ? "Discard saved edits?" : "Replace saved edits?"} className="flex flex-col gap-2 rounded-md border border-border p-3">
-              <p className="font-serif text-lg">{draft.review === "DiscardReview" ? "Discard saved edits?" : "Replace saved edits?"}</p>
+              <p className="font-display text-lg">{draft.review === "DiscardReview" ? "Discard saved edits?" : "Replace saved edits?"}</p>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={() => onAnswerReview(false)}>Cancel</Button>
                 <Button variant="destructive" onClick={() => onAnswerReview(true)}>{draft.review === "DiscardReview" ? "Discard edits" : "Replace saved edits"}</Button>
