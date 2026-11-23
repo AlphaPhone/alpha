@@ -130,8 +130,10 @@ test('committed-view and navigation metadata never serialize the day hint',async
    if(path.endsWith('/interact-claim'))return {claimId:'claim'};
    return {accepted:true};
   },()=>true,context);
-  assert.deepEqual(Object.keys(navigation.metadata(context())).sort(),['uiView','viewClientId','viewDelivery']);
-  assert.equal(JSON.stringify(navigation.metadata(context())).includes('calendarDay'),false);
+  const metadata=navigation.metadata(context());
+  assert.deepEqual(Object.keys(metadata).sort(),['notesEditorNavigation','uiView','viewClientId','viewDelivery']);
+  assert.equal(metadata.notesEditorNavigation,1);
+  assert.equal(JSON.stringify(metadata).includes('calendarDay'),false);
   assert.equal(await navigation.observeCommittedView(),true);
   assert.equal(JSON.stringify(wires).includes('calendarDay'),false);
   navigation.dispose();
