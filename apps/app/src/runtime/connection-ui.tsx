@@ -3309,15 +3309,21 @@ export const connectionController = {
       if (selected.kind === 'remote' || selected.kind === 'local') {
         if (!selected.remote.session || selected.remote.session.expiresAt <= Date.now()) throw Object.assign(new Error('Your session has expired. Pair again.'), { code: 'session_expired' });
       }
+      // Reads this send needs later that depend on nothing above start now, beside the turn's other reads.
+      const preferencesRead=readDevicePreferences(requestSignal).catch(()=>{requestSignal.throwIfAborted();return {askBeforeAgentActions:true};});preferencesRead.catch(()=>{});
+      const foldersRead=this.getAppRecordClient()?chatNotesFolders():Promise.resolve({});
       const observationSession=clientObservationSession;
       // Legacy text/alphaPhone projections remain day- and position-free; plain-v1 alone never admits a field.
       // The open Browser page rides beside the observation, bound to its tab and revision.
       let browserPage:ClientBrowserPageObservation|undefined;
       if(selected.userTextFormatVersion===1&&observationSession){
-        const [location,page]=await Promise.all([isAndroid&&!context.sensitive?phoneLocationReader().read(requestSignal):undefined,browserPageForTurn(context,requestSignal)]);assertCurrent();
+        // The fresh status a turn's optional fields need is read beside the position and page, not after them.
+        const reading=isAndroid&&!context.sensitive;
+        const fresh=context.calendarDay||(reading&&phoneLocationEnabled())||observedBrowserTab(context)?observationSession.freshStatus(requestSignal):undefined;
+        const [location,page]=await Promise.all([reading?phoneLocationReader().read(requestSignal):undefined,browserPageForTurn(context,requestSignal)]);assertCurrent();
         const observed={...context,location};
         if(observed.calendarDay||observed.location||page){
-          const admitted=await observationSession.turn(observed,page,requestSignal);assertCurrent();
+          const admitted=await observationSession.turn(observed,page,requestSignal,fresh);assertCurrent();
           message=turnMessage(admitted.context);browserPage=admitted.browserPage;
         }
       }
@@ -3331,17 +3337,17 @@ export const connectionController = {
       // text; the observation travels only in metadata, never as a client-authored banner.
       const canonicalProse=selected.userTextFormatVersion===1;
       const wireText=attachmentOnly?'':canonicalProse||!testMocksEnabled?text:message.text;
-      const actionPreferences=await readDevicePreferences(requestSignal).catch(()=>{requestSignal.throwIfAborted();return {askBeforeAgentActions:true};});assertCurrent();
+      const actionPreferences=await preferencesRead;assertCurrent();
       const directRequestedActions=!actionPreferences.askBeforeAgentActions;
       const calendarAgendaSource=!message.context.sensitive&&selected.actions?await calendarAgendaObservation(selected.actions,message.context,assertCurrent):undefined;
       requestSignal.throwIfAborted();assertCurrent();
       await boundNavigation()?.observeCommittedView(true);
       requestSignal.throwIfAborted();assertCurrent();
       // The agent that keeps this owner's notes is told the phone's folder names with every message.
-      const notesFolders=this.getAppRecordClient()?await chatNotesFolders():{};
+      const notesFolders=await foldersRead;
       requestSignal.throwIfAborted();assertCurrent();
       if(message.context.location&&!phoneLocationEnabled())message=turnMessage({...message.context,location:undefined});
-      // The preferences read just before this send decide; unreadable ones share no page.
+      // The preferences read for this send decide; unreadable ones share no page.
       if(browserPage&&((actionPreferences as {agentBrowserPageEnabled?:boolean}).agentBrowserPageEnabled!==true||observedBrowserTab(message.context)?.id!==browserPage.tabId||observedBrowserTab(message.context)?.revision!==browserPage.revision))browserPage=undefined;
       const options = { signal: requestSignal, clientMessageId: requestId, channelType, images, metadata: { ...(directRequestedActions?{agentActionMode:'direct-request-v1'}:{}), ...notesFolders, ...(channelType==='VOICE_DM'&&voiceTurnSignal?{voiceTurnSignal}:{}), ...(replyTo?{replyToMessageId:replyTo.messageId}:{}), ...(message.context.timeZone===undefined?{}:{uiTimeZone:message.context.timeZone}), clientDevice: { context: message.context,...(browserPage?{browserPage}:{}),...(calendarAgendaSource?{calendarAgendaSource:{sourceId:calendarAgendaSource.sourceId,sourceRevision:calendarAgendaSource.sourceRevision}}:{}) }, ...boundNavigation()?.metadata(context), ...(canonicalProse?{userTextFormat:'plain-v1'}:{alphaPhone:{context:message.context}}) } };
       dispatched = { conversationId: id, at: Date.now() };

@@ -84,7 +84,10 @@ export class ClientObservationSupportSession {
  async context(context:ContextEnvelope,signal:AbortSignal):Promise<ContextEnvelope>{return (await this.turn(context,undefined,signal)).context;}
  /** The observation and the open Browser page (sent beside it), each optional field only to a
   * peer whose fresh status still declares it. */
- async turn(context:ContextEnvelope,browserPage:ClientBrowserPageObservation|undefined,signal:AbortSignal):Promise<{context:ContextEnvelope;browserPage?:ClientBrowserPageObservation}>{
+ /** This turn's fresh status read, started by the caller beside its other reads so it adds no
+  * wait of its own; `turn` compares it as it would one it fetched itself. */
+ freshStatus(signal:AbortSignal):Promise<unknown>{const pending=this.status(signal);pending.catch(()=>{});return pending;}
+ async turn(context:ContextEnvelope,browserPage:ClientBrowserPageObservation|undefined,signal:AbortSignal,fresh?:Promise<unknown>):Promise<{context:ContextEnvelope;browserPage?:ClientBrowserPageObservation}>{
   const ordinary={context:contextForObservationSupport(context,this.cache,undefined)};
   const wanted:ClientTurnObservationOptionalField[]=[...OPTIONAL_FIELDS.filter(field=>context[field]!==undefined),...(browserPage?['browserPage' as const]:[])];
   this.check(signal);if(!wanted.length)return ordinary;
@@ -92,7 +95,7 @@ export class ClientObservationSupportSession {
   const binding=this.known;
   if(!binding||!wanted.some(field=>this.cache.supports(binding,field)))return ordinary;
   try{
-   const status=await this.status(signal);this.check(signal);
+   const status=await (fresh??this.status(signal));this.check(signal);
    if(!this.cache.admit(status,binding)){this.known=undefined;return ordinary;}
    return {context:contextForObservationSupport(context,this.cache,binding),...(browserPage&&this.cache.supports(binding,'browserPage')?{browserPage}:{})};
   }catch{this.known=undefined;this.cache.clear();this.check(signal);return ordinary;}

@@ -22,7 +22,7 @@ import { approvedOpenTab, BrowserOpenRefused, matchingTabs, observedTabCurrent, 
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import type {BrowserTabsClosed} from '../runtime/action-message-presentation';
 import {parseClientBrowserPageObservation,type ClientBrowserPageObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
-import {agentPageTitle,pageAddress,registerBrowserPageSource,type ObservedBrowserTab} from '../runtime/browser-page-context';
+import {agentPageTitle,BrowserPageCache,browserPageEnabled,pageAddress,registerBrowserPageSource,type ObservedBrowserTab} from '../runtime/browser-page-context';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
 type Bag = Record<string, any>;
 /** What a chat request to switch or close a tab asks the owner when its words match several tabs. */
@@ -231,7 +231,34 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     try{return parseClientBrowserPageObservation({...base,...content});}
     catch{return parseClientBrowserPageObservation({...base,url:address,withheld:'unreadable'});}
   }
-  const unregisterPageSource=registerBrowserPageSource(pageContext);
+  // A turn takes the page from these captures instead of waiting on a read: Browser captures a page
+  // once it has settled after loading, and again when the assistant opens over it.
+  const pageCache=new BrowserPageCache(pageContext);
+  const unregisterPageSource=registerBrowserPageSource((tab,signal)=>pageCache.forTurn(tab,signal));
+  const PAGE_SETTLE_MS=700,PAGE_WARM_AGE_MS=20_000,PAGE_WARM_GAP_MS=5_000;
+  let pageSettleTimer:ReturnType<typeof setTimeout>|undefined,pageWarmedAt=Number.NEGATIVE_INFINITY;
+  /** The current tab's capturable page, or undefined: setting on, not private, a loaded public page. */
+  function capturableTab():ObservedBrowserTab|undefined{
+    // Only the native read is local; the web build would fetch the address again for every capture.
+    if(disposed||!Capacitor.isNativePlatform())return undefined;
+    // With Browser page for Alpha off, no capture is kept either.
+    if(!browserPageEnabled()){pageCache.clear();return undefined;}
+    const id=state()?.cur;if(!id||isPrivate(id))return undefined;
+    const info=tabInfo(id);if(!info?.committed||info.loading||info.error||info.externalOnly||!pageAddress(info.url))return undefined;
+    const selected=tabs.selection(id);
+    return selected&&typeof selected.revision==='string'?{id:selected.id,revision:selected.revision}:undefined;
+  }
+  function settlePageCapture(){
+    if(pageSettleTimer!==undefined)clearTimeout(pageSettleTimer);
+    pageSettleTimer=setTimeout(()=>{pageSettleTimer=undefined;const tab=capturableTab();if(tab&&shell?.S().view==='browser')void pageCache.refresh(tab);},PAGE_SETTLE_MS);
+  }
+  /** With the assistant open over Browser, the page is captured again unless a recent capture holds. */
+  function warmPageCapture(){
+    const now=Date.now();if(now-pageWarmedAt<PAGE_WARM_GAP_MS)return;
+    const tab=capturableTab();if(!tab)return;
+    const age=pageCache.age(tab);if(age!==undefined&&age<PAGE_WARM_AGE_MS)return;
+    pageWarmedAt=now;void pageCache.refresh(tab);
+  }
   function hide() {
     if (lastGeometry === hiddenGeometry) return;
     void presentBrowser({session,id:null});
@@ -793,7 +820,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // Navigation changes the revision so a proposal for an earlier document cannot
     // retain current authority.
     this.browserSelection = () => tabs.selection(state()?.cur);
-    const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||b.menu||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}return oldRender.call(this);};
+    const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||b.menu||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}if(S.view==='browser'&&['sheet','full'].includes(S.chat))warmPageCapture();return oldRender.call(this);};
   let listener: any, resumeListener: any, openedListener: any, closedListener: any, noticeListener: any, findListener: any, fullscreenListener: any, showDownloadsListener: any;
   void Browser.addListener('findResult',(event:BrowserFindResult)=>{
     const s=state(),found=s&&!disposed?tabs.findResult(event,s.findTab):undefined;if(!found)return;
@@ -814,6 +841,8 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // Resume must resend geometry even when the host's visibility event did not fire.
     if(change.surfaceResumed)lastGeometry='';
     if(reading && event.id===state()?.cur && change.documentChanged) stopReading();
+    // A page that has loaded in the shown tab is captured once it settles, ahead of any turn.
+    if(event.id===state()?.cur&&change.info.committed&&!change.info.loading&&!change.info.error)settlePageCapture();
     // Private tabs never enter history or saved tabs. The web build's frame surface reports a
     // committed load, and a page that navigated inside its frame reports an error instead.
     if(change.committedPage && state() && !isPrivate(event.id)){
@@ -930,5 +959,5 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   chromeObserver.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','inert','aria-hidden']});
   const chromeTransition=(event:Event)=>{if(chromeChanged(event.target as Node))schedulePresentation();};
   for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.addEventListener(event,chromeTransition,true);
-  return ()=>{unregisterPageSource();window.removeEventListener('alpha:bookmarks-document-changed',bookmarksDocumentChanged);window.removeEventListener('alpha:browser-open-view',openBrowserView);stopReading();unsubscribeReading();disposed=true;clearInterval(timer);if(presentationFrame!==undefined)window.cancelAnimationFrame(presentationFrame);browserBackdrop();window.removeEventListener('pointermove',schedulePresentation,true);chromeObserver.disconnect();for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.removeEventListener(event,chromeTransition,true);window.removeEventListener('resize',update);document.removeEventListener('visibilitychange',visibility);void resumeListener?.remove();void listener?.remove();void openedListener?.remove();void closedListener?.remove();void noticeListener?.remove();void findListener?.remove();void fullscreenListener?.remove();void showDownloadsListener?.remove();window.clearTimeout(findTimer);for(const id of tabs.dispose())void Browser.close({session,id}).catch(()=>{});};
+  return ()=>{unregisterPageSource();pageCache.clear();if(pageSettleTimer!==undefined)clearTimeout(pageSettleTimer);window.removeEventListener('alpha:bookmarks-document-changed',bookmarksDocumentChanged);window.removeEventListener('alpha:browser-open-view',openBrowserView);stopReading();unsubscribeReading();disposed=true;clearInterval(timer);if(presentationFrame!==undefined)window.cancelAnimationFrame(presentationFrame);browserBackdrop();window.removeEventListener('pointermove',schedulePresentation,true);chromeObserver.disconnect();for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.removeEventListener(event,chromeTransition,true);window.removeEventListener('resize',update);document.removeEventListener('visibilitychange',visibility);void resumeListener?.remove();void listener?.remove();void openedListener?.remove();void closedListener?.remove();void noticeListener?.remove();void findListener?.remove();void fullscreenListener?.remove();void showDownloadsListener?.remove();window.clearTimeout(findTimer);for(const id of tabs.dispose())void Browser.close({session,id}).catch(()=>{});};
 }
