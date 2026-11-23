@@ -35,7 +35,7 @@ test("an Alpha APK with a lock-screen surface or secure-camera handler is refuse
 });
 
 test("the shared Pixel 10a stager applies the same refusal to Alpha's composition", async () => {
-  const { enforceLauncherLockScreenPolicy } = await import("../vendor/eliza/packages/os/scripts/android/pixel10a-product.ts");
+  const { enforceLauncherLockScreenPolicy } = await import("../scripts/os-ported/os/pixel10a-product.ts");
   const product = JSON.parse(fs.readFileSync("android/aosp/pixel10a-composition.json", "utf8"));
   assert.equal(product.launcher.refuseLockScreenSurfaces, true);
   assert.equal(enforceLauncherLockScreenPolicy(product, tree()), true);

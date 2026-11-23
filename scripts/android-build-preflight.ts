@@ -188,6 +188,11 @@ export function strictBuildInputs(root: string, preparedSource: string | null, {
       'pnpm agent:build-embedding-host');
   }
 
+  {
+    const worker = path.join(root, '.eliza/workflow-worker');
+    const built = fs.existsSync(path.join(worker, 'manifest.json')) && fs.existsSync(path.join(worker, 'workflow-worker.json'));
+    add('workflow worker artifact', built, 'script', built ? '.eliza/workflow-worker' : '.eliza/workflow-worker is not built', 'pnpm agent:build-workflow-worker');
+  }
   const prepared = preparedSource !== null && fs.existsSync(preparedSource);
   add('resident agent bundle', prepared, 'script', preparedSource ? path.relative(root, preparedSource) : '.eliza/agent-bundle is not built', 'pnpm agent:bundle');
   const staged = path.join(root, 'android/app/src/main/assets/agent/alpha-source.json');

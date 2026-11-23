@@ -22,8 +22,8 @@ import android.widget.RemoteViews;
 import java.util.List;
 
 /**
- * Alpha's copy of the shared Autofill provider (plugin-native-passwords
- * ElizaPasswordAutofillService, elizaOS at 1803ea88, MIT), compiled in its place in the shared
+ * Alpha's copy of the shared Autofill provider (the os passwords module's
+ * ElizaPasswordAutofillService, at the upstream.lock.json pin, MIT), compiled in its place in the shared
  * module (android/shared-ui-overrides.json) so the offer row other apps show and the fill and save
  * request flow are Alpha's code. It keeps the shared name because Android keeps the selected Autofill
  * provider by this installed component name and a service has no alias. Below this declaration it

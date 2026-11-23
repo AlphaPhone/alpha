@@ -17,7 +17,7 @@ const scenarios = ['concurrent-load', 'concurrent-write', 'retry-first-sweep', '
 async function checkReviewedCopies(extraSources = []) {
   const sources = [...compiled, `${directory}/${harness}`, `${directory}/Trace.java`, `${directory}/java.mjs`,
     app + 'AlphaMailAttachmentsPlugin.java', 'android/app/src/main/res/xml/mail_attachment_paths.xml',
-    'android/app/src/main/AndroidManifest.xml', fileURLToPath(import.meta.url), ...extraSources];
+    'android/app/manifests/main/AndroidManifest.xml', fileURLToPath(import.meta.url), ...extraSources];
   const driverHashes = captureInputs(sources);
   const traces = javaTraceCampaign(harness, compiled, scenarios.map(name => [name]));
   return checkTraces({model, sources, driverHashes, traces, scope: 'bounded-component', assumptions: [

@@ -23,6 +23,10 @@ android/gradlew
 android/gradlew.bat
 android/gradle/wrapper/
 android/app/build.gradle
+# The generator copies the authored manifests (android/app/manifests) into the app module and writes its overlay
+android/app/src/main/AndroidManifest.xml
+android/app/src/launcher/AndroidManifest.xml
+android/app/eliza-host-manifest.xml
 android/eliza-consumer-host/
 
 # Capacitor sync output (regenerated from checked-in config)

@@ -20,29 +20,26 @@ export type EdgeRoute =
   | { readonly tag: "Forward"; readonly target: URL }
   | { readonly tag: "NotFound" }
 
-const hopByHop = new Set(["host", "forwarded", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade"])
+module node {
+  const hopByHop = new Set(["host", "forwarded", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade"])
 
-/** Classifies an address: only the web origin's own https addresses are forwarded, each to the same path and query on the API origin. */
-export function edgeRoute(url: URL, env: EdgeEnv): EdgeRoute {
-  if (url.protocol !== "https:" || url.username || url.password) return { tag: "NotFound" }
-  if (url.origin !== env.WEB_ORIGIN) return { tag: "NotFound" }
-  if (url.pathname === "/health") return { tag: "Health" }
-  const target = URL.parse(`${url.pathname}${url.search}`, env.PUBLIC_API_ORIGIN)
-  if (target === null || target.origin !== env.PUBLIC_API_ORIGIN) return { tag: "NotFound" }
-  return { tag: "Forward", target }
+  /**
+   * The headers sent on to the API Worker: the caller's own, without hop-by-hop or earlier forwarding headers, naming the web host it was asked for.
+   * @throws {TypeError}
+   */
+  export function forwardedHeaders(incoming: Headers, webHost: string): Headers {
+    const headers = new Headers()
+    incoming.forEach((value, name) => {
+      const lower = name.toLowerCase()
+      if (!hopByHop.has(lower) && !lower.startsWith("x-forwarded-")) headers.set(lower, value)
+    })
+    headers.set("x-forwarded-host", webHost)
+    headers.set("x-forwarded-proto", "https")
+    return headers
+  }
 }
-
-/** The headers sent on to the API Worker: the caller's own, without hop-by-hop or earlier forwarding headers, naming the web host it was asked for. */
-export function forwardedHeaders(incoming: Headers, webHost: string): Headers {
-  const headers = new Headers()
-  incoming.forEach((value, name) => {
-    const lower = name.toLowerCase()
-    if (!hopByHop.has(lower) && !lower.startsWith("x-forwarded-")) headers.set(lower, value)
-  })
-  headers.set("x-forwarded-host", webHost)
-  headers.set("x-forwarded-proto", "https")
-  return headers
-}
+import { forwardedHeaders } from node
+export { forwardedHeaders }
 
 const noStore = { "Cache-Control": "no-store" }
 

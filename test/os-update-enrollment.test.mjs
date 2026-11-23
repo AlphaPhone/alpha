@@ -6,7 +6,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {admitSystemUpdater} from '../vendor/eliza/packages/os/scripts/android/system-updater-staging.mjs';
+import {admitSystemUpdater} from '../scripts/os-ported/os/system-updater-staging.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');

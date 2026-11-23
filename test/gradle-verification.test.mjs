@@ -13,7 +13,7 @@ const read = rel => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const text = read(METADATA);
 const metadata = parseVerificationMetadata(text);
 
-const SYSTEM_PLUGIN = 'vendor/eliza/plugins/plugin-native-system/android/build.gradle';
+const SYSTEM_PLUGIN = 'vendor/eliza/packages/os/android/system/build.gradle';
 const CAPACITOR = 'node_modules/@capacitor/android/capacitor/build.gradle';
 const PRODUCT = 'android/app/product.gradle';
 
@@ -96,21 +96,21 @@ test('the check rejects a missing pin, a weaker checksum, a trust exception, an 
   assert.match(mutated(t, {[METADATA]: text.replace(/\s*<artifact name="aapt2-[^"]+-linux\.jar">[\s\S]*?<\/artifact>/, '')}).join('\n'), /aapt2 [^ ]+ has no linux archive recorded/);
   assert.deepEqual(mutated(t, {}), [], 'the unmodified copy passes');
   const rootScript = `${HOST_TEMPLATES}/build.gradle`;
-  assert.match(mutated(t, {[rootScript]: read(rootScript).replace('allprojects { repositories { google(); mavenCentral() } }', "allprojects { repositories { google(); mavenCentral(); maven { url 'https://jitpack.io' } } }")}).join('\n'), /consumer-host\/build\.gradle declares repository maven \{ url 'https:\/\/jitpack\.io' \}, which names https:\/\/jitpack\.io/);
-  // Included modules are part of the build: the pinned upstream plugins and Capacitor declare repositories of their own.
+  assert.match(mutated(t, {[rootScript]: read(rootScript).replace('allprojects { repositories { google(); mavenCentral() } }', "allprojects { repositories { google(); mavenCentral(); maven { url 'https://jitpack.io' } } }")}).join('\n'), /host-templates\/build\.gradle declares repository maven \{ url 'https:\/\/jitpack\.io' \}, which names https:\/\/jitpack\.io/);
+  // Included modules are part of the build: the pinned upstream os modules and Capacitor declare repositories of their own.
   const elsewhere = read(SYSTEM_PLUGIN).replace("'https://repo.maven.apache.org/maven2'", "'https://mirror.example/maven2'");
   assert.notEqual(elsewhere, read(SYSTEM_PLUGIN));
-  assert.match(mutated(t, {[SYSTEM_PLUGIN]: elsewhere}).join('\n'), /plugin-native-system\/android\/build\.gradle declares repository maven .*which names https:\/\/mirror\.example\/maven2/);
+  assert.match(mutated(t, {[SYSTEM_PLUGIN]: elsewhere}).join('\n'), /os\/android\/system\/build\.gradle declares repository maven .*which names https:\/\/mirror\.example\/maven2/);
   assert.match(mutated(t, {[CAPACITOR]: read(CAPACITOR).replace(/\nrepositories \{\n/, '\nrepositories {\n    flatDir { dirs \'libs\' }\n    mavenLocal()\n')}).join('\n'), /capacitor\/build\.gradle declares repository flatDir \{ dirs 'libs' \}, which is not a reviewed form[\s\S]*declares repository mavenLocal\(\), which is not a reviewed form/);
   assert.match(mutated(t, {[PRODUCT]: `${read(PRODUCT)}\nrepositories { maven { url = uri(System.getenv('SOMEWHERE')) } }\n`}).join('\n'), /android\/app\/product\.gradle declares repository maven .*which names no literal URL/);
-  assert.match(mutated(t, {[SYSTEM_PLUGIN]: null}).join('\n'), /plugin-native-system\/android\/build\.gradle is missing: the repositories it declares cannot be checked/);
+  assert.match(mutated(t, {[SYSTEM_PLUGIN]: null}).join('\n'), /os\/android\/system\/build\.gradle is missing: the repositories it declares cannot be checked/);
   assert.match(mutated(t, {[PRODUCT]: `${read(PRODUCT)}\nrootProject.ext { ${MIRROR_PROPERTY} = 'https://mirror.example/maven2' }\n`}).join('\n'), /android\/app\/product\.gradle mentions mavenCentralMirrorUrl: a Maven Central mirror is not a reviewed source/);
-  // The generator writes the host's gradle.properties itself, so its script is held to the same rule.
-  const generator = `${HOST_TEMPLATES}.mjs`;
-  assert.match(mutated(t, {[generator]: `${read(generator)}\n// ${MIRROR_PROPERTY}=https://mirror.example/maven2\n`}).join('\n'), /consumer-host\.mjs mentions mavenCentralMirrorUrl/);
+  // The generator writes the host's gradle.properties itself, so its program is held to the same rule.
+  const generator = 'vendor/eliza/packages/os/src/build/android-host.vibe';
+  assert.match(mutated(t, {[generator]: `${read(generator)}\n// ${MIRROR_PROPERTY}=https://mirror.example/maven2\n`}).join('\n'), /android-host\.vibe mentions mavenCentralMirrorUrl/);
   const missing = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-gradle-none-'));
   t.after(() => fs.rmSync(missing, {recursive: true, force: true}));
-  assert.match(checkVerification(missing).problems[0], /verification is off\. Run: bun run android:deps:write-verification/);
+  assert.match(checkVerification(missing).problems[0], /verification is off\. Run: pnpm android:deps:write-verification/);
 });
 
 test('every Gradle script of the build declares only reviewed repositories and every reviewed group is in use', () => {
@@ -123,9 +123,11 @@ test('every Gradle script of the build declares only reviewed repositories and e
   // Every module android/consumer-host.json includes is read, wherever its directory is.
   const scripts = buildScripts(ROOT);
   const {profile} = JSON.parse(read(HOST_DESCRIPTOR));
-  assert.equal(scripts.length, 3 + profile.appScripts.length + profile.modules.length, 'host templates, the product script and one build.gradle per module');
-  for (const expected of [PRODUCT, 'android/notification-fixture/build.gradle', CAPACITOR, SYSTEM_PLUGIN]) assert.ok(scripts.includes(expected), expected);
-  assert.equal(referencePath({root: 'patchedNative', path: 'plugins/plugin-native-system/android'}), 'vendor/eliza/plugins/plugin-native-system/android');
+  // One build.gradle per consumer and os module; local-inference also applies its consumer.gradle.
+  assert.equal(scripts.length, 3 + profile.appScripts.length + profile.modules.length + profile.osModules.length + 1, 'host templates, the product script and one build.gradle per module');
+  for (const expected of [PRODUCT, 'android/notification-fixture/build.gradle', CAPACITOR, SYSTEM_PLUGIN, 'vendor/eliza/packages/os/android/local-inference/consumer.gradle']) assert.ok(scripts.includes(expected), expected);
+  for (const {module} of profile.osModules) assert.ok(scripts.includes(`vendor/eliza/packages/os/android/${module}/build.gradle`), module);
+  assert.equal(referencePath({root: 'upstream', path: 'packages/os/android/system'}), 'vendor/eliza/packages/os/android/system');
   assert.throws(() => referencePath({root: 'elsewhere', path: 'x'}), /unknown root/);
   const urls = new Set();
   for (const script of scripts)
@@ -159,8 +161,8 @@ test('a host-specific archive is inserted in order and only once', () => {
   assert.throws(() => addArtifact(sample, {group: 'g', name: 'other', version: '1'}, 'x.jar', 'f'.repeat(64), 'origin'), /is not in the metadata/);
 });
 
-test('staged Java-only native patches retain their authenticated dependency descriptors', () => {
- assert.ok(buildScripts(ROOT).includes('vendor/eliza/plugins/plugin-native-secure-store/android-nativeonly/build.gradle'));
+test('the os secure-store module is built from its pinned descriptor, not a staged copy', () => {
+ assert.ok(buildScripts(ROOT).includes('vendor/eliza/packages/os/android/secure-store/build.gradle'));
  assert.ok(!buildScripts(ROOT).some(name=>name.includes('android/elizaos-capacitor-secure-store/')));
 });
 
@@ -171,11 +173,11 @@ test('dependency verification takes exactly one mode', () => {
   assert.throws(() => parseVerificationArgs(['--write','--other']), /Usage/);
 });
 
-test('pinned auth descriptor is scanned for unreviewed repositories', t => {
- const file = 'vendor/eliza/packages/auth/android/build.gradle';
+test('pinned sign-in descriptor is scanned for unreviewed repositories', t => {
+ const file = 'vendor/eliza/packages/os/android/sign-in/build.gradle';
  const withAuth = addition => mutated(t, {[file]: read(file) + addition});
  assert.deepEqual(withAuth("\ndependencies { implementation 'androidx.browser:browser:1.9.0' }\n"), []);
- assert.match(withAuth('\nrepositories { mavenLocal() }\n').join('\n'), /packages\/auth\/android\/build\.gradle declares repository mavenLocal\(\), which is not a reviewed form/);
- assert.match(withAuth("\nrepositories { maven { url 'https://unreviewed.example/m2' } }\n").join('\n'), /packages\/auth\/android\/build\.gradle declares repository maven .*unreviewed\.example/);
- assert.match(withAuth("\nrootProject.ext { mavenCentralMirrorUrl = 'https://unreviewed.example/m2' }\n").join('\n'), /packages\/auth\/android\/build\.gradle mentions mavenCentralMirrorUrl/);
+ assert.match(withAuth('\nrepositories { mavenLocal() }\n').join('\n'), /os\/android\/sign-in\/build\.gradle declares repository mavenLocal\(\), which is not a reviewed form/);
+ assert.match(withAuth("\nrepositories { maven { url 'https://unreviewed.example/m2' } }\n").join('\n'), /os\/android\/sign-in\/build\.gradle declares repository maven .*unreviewed\.example/);
+ assert.match(withAuth("\nrootProject.ext { mavenCentralMirrorUrl = 'https://unreviewed.example/m2' }\n").join('\n'), /os\/android\/sign-in\/build\.gradle mentions mavenCentralMirrorUrl/);
 });

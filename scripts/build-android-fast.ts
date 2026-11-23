@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { androidIdentity } from "./android-identity.ts";
 import { ANDROID_PUBLIC } from "./android-gzip-assets.ts";
 import { sha256File } from "./sha256.ts";
+import {APK_AGENT_ENTRY, STAGED_AGENT_ENTRY} from "./agent-payload.ts";
 
 export const FAST_OUTPUT = "artifacts/fast";
 export const FAST_APK = "launcher-debug.apk";
@@ -33,9 +34,9 @@ export const FAST_RECORD = "build-config.json";
 export const PACKAGED_FLAGS = path.posix.join(ANDROID_PUBLIC, "build-flags.json");
 /** Where PACKAGED_FLAGS and the staged runtime land inside the APK. */
 export const APK_FLAGS_ENTRY = "assets/public/build-flags.json";
-export const APK_RUNTIME_ENTRY = "assets/agent/agent-bundle.js";
+export const APK_RUNTIME_ENTRY = APK_AGENT_ENTRY;
 /** What `pnpm agent:stage-android` leaves behind; the same marker the SBOM uses (build-android.ts). */
-export const STAGED_RUNTIME = "android/app/src/main/assets/agent/agent-bundle.js";
+export const STAGED_RUNTIME = STAGED_AGENT_ENTRY;
 /** The prepare/stage chain of `android:build:local`, without its preflight and Gradle build. */
 export const RESTAGE_SCRIPTS = Object.freeze([
   "agent:build-embedding-host", "agent:bundle", "agent:stage-android", "licenses:packaged-runtime",
@@ -120,7 +121,7 @@ export function inspect(root: string) {
   const flags = JSON.parse(execFileSync("unzip", ["-p", apk, APK_FLAGS_ENTRY], { encoding: "utf8" }));
   if (flags.testMocks !== false) throw new Error(`${apk} packages testMocks=${flags.testMocks}`);
   if (flags.fastIteration !== true) throw new Error(`${apk} does not carry the fastIteration marker`);
-  // Exact entry names (`unzip -Z1`), so e.g. agent-bundle.js.map alone does not pass for the runtime.
+  // Exact entry names (`unzip -Z1`), so e.g. agent.mjs.map alone does not pass for the runtime.
   if (!execFileSync("unzip", ["-Z1", apk], { encoding: "utf8" }).split(/\r?\n/).includes(APK_RUNTIME_ENTRY))
     throw new Error(`${apk} does not package the staged resident runtime`);
   const row = { file: FAST_APK, variant: "launcher", mode: "debug", fastIteration: true, distributable: false, verified: false,

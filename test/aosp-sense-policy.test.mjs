@@ -87,7 +87,7 @@ test('pinned board patch selects complete Alpha listener policy without affectin
   const manifest = JSON.parse(fs.readFileSync(path.join(source, 'manifest.json')));
   const patch = fs.readFileSync(path.join(source, manifest.patch), 'utf8');
   assert.equal(sha(patch), manifest.patchSha256);
-  const inventory = fs.readFileSync(path.join(root, 'vendor/eliza/packages/os/android/sources/pixel10a-stallion.json'));
+  const inventory = fs.readFileSync(path.join(root, 'vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json'));
   assert.equal(sha(inventory), manifest.baselineLockSha256);
   assert.equal(JSON.parse(inventory).projects.find(project => project.path === manifest.project)?.commit, manifest.revision);
 

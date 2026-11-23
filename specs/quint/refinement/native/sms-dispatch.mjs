@@ -26,7 +26,7 @@ const product=[...historicalProduct,app+'AlphaTelephonyPlugin.java',app+'AlphaAp
   app+'SmsNoticeOpenRequest.java','android/app/src/main/java/ai/eliza/plugins/messages/AlphaTelephonyAccess.java'];
 const historicalPaths=['TelephonyPlugin',...members,...historicalCompiled].map(name=>shared+name+'.java');
 const currentPaths=[...members,...currentCompiled].map(name=>shared+name+'.java');
-const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
+const launcherManifest='android/app/manifests/launcher/AndroidManifest.xml';
 const patchManifest='android/upstream-native-sources.json';
 const harness='SmsDispatchTraces.java';
 const historicalInventory='specs/quint/refinement/native/mms-historical-sources.json';

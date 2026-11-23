@@ -13,7 +13,7 @@ const read=file=>readFileSync(file,'utf8');
 const javaFiles=dir=>readdirSync(dir).flatMap(name=>{const path=join(dir,name);return statSync(path).isDirectory()?javaFiles(path):path.endsWith('.java')?[path]:[];});
 
 test('the app opts in to Android back callbacks',()=>{
-  assert.match(read('android/app/src/main/AndroidManifest.xml'),/<application [^>]*android:enableOnBackInvokedCallback="true"/);
+  assert.match(read('android/app/manifests/main/AndroidManifest.xml'),/<application [^>]*android:enableOnBackInvokedCallback="true"/);
 });
 
 test('with the opt-in, no activity relies on onBackPressed or the Back key',()=>{

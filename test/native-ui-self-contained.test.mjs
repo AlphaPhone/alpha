@@ -321,7 +321,7 @@ const qualified = (name, pkg) => name.startsWith('.') ? pkg + name : name.includ
 
 test('every merged app manifest component resolves to Alpha\'s class, never to shared UI', () => {
   const declared = [
-    ...components('android/app/src/main/AndroidManifest.xml'), ...components('android/app/src/launcher/AndroidManifest.xml'),
+    ...components('android/app/manifests/main/AndroidManifest.xml'), ...components('android/app/manifests/launcher/AndroidManifest.xml'),
     ...sharedModules.filter(module => module.appDependency !== false)
       .map(module => VENDOR + module.source.path + '/src/main/AndroidManifest.xml').filter(file => fs.existsSync(file)).flatMap(file => components(file)),
   ].map(component => ({...component, name: qualified(component.name, APP_ID), target: component.target && qualified(component.target, APP_ID)}));

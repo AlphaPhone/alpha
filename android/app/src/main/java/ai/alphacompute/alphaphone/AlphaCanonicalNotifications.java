@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.elizaos.app.AlphaNotificationProjection;
 import android.Manifest;
 import android.app.NotificationManager;
 import android.content.Context;
@@ -28,7 +29,7 @@ final class AlphaCanonicalNotifications {
  private final AtomicInteger queued=new AtomicInteger();
  private JSONObject session,identity;
  private String owner,fence;
- private NativeNotificationInbox inbox;
+ private AlphaNotificationProjection.Inbox inbox;
  private volatile long attempt;
  private int failures;
  private NativeNotificationDiagnostics.Stage connectStage=NativeNotificationDiagnostics.Stage.CAPTURE_OWNER;
@@ -58,7 +59,7 @@ final class AlphaCanonicalNotifications {
    AlphaCredentialStore store=new AlphaCredentialStore(context);String saved=store.readCredentialSlot(NativeNotificationSession.SLOT),owner=null;
    if(saved!=null)try{String value=new JSONObject(saved).optString("projectionOwner","");if(AlphaUtil.isSha256Hex(value))owner=value;}catch(JSONException invalid){}
    store.removeCredentialSlot(NativeNotificationSession.SLOT);
-   if(owner!=null)NativeNotificationProjector.retireOwner(context,owner);
+   if(owner!=null)AlphaNotificationProjection.retireOwner(context,owner);
   }catch(Exception unavailable){throw new IllegalStateException("Notification recovery authority could not be retired");}
  }
  static boolean ownsSession(){AlphaCanonicalNotifications a=active;return a!=null&&!a.stopped;}
@@ -83,7 +84,7 @@ final class AlphaCanonicalNotifications {
   synchronized(AlphaCanonicalNotifications.class){if(retire){pendingTap=null;waitingTap=null;}}
   if(previous==null)return;previous.stopped=true;
   ElizaAgentService.LocalStreamHandle h=previous.stream;if(h!=null)h.cancel();
-  SERIAL.execute(()->{if(retire&&previous.owner!=null)try{NativeNotificationProjector.retireOwner(previous.context,previous.owner);}catch(Exception ignored){}});
+  SERIAL.execute(()->{if(retire&&previous.owner!=null)try{AlphaNotificationProjection.retireOwner(previous.context,previous.owner);}catch(Exception ignored){}});
  }
  private void check()throws Exception{
   if(stopped||active!=this)throw new SecurityException("Notification connection retired");
@@ -106,11 +107,11 @@ final class AlphaCanonicalNotifications {
    connectStage=NativeNotificationDiagnostics.Stage.PERSIST_OWNER;
    AlphaLocalAgentPlugin.rememberNotificationOwner(context,session,identity);
    connectStage=NativeNotificationDiagnostics.Stage.INBOX;
-   if(inbox==null)inbox=new NativeNotificationInbox(context.getNoBackupFilesDir().getCanonicalFile().toPath(),owner,record->{
+   if(inbox==null)inbox=new AlphaNotificationProjection.Inbox(context.getNoBackupFilesDir().getCanonicalFile().toPath(),owner,record->{
     check();return AlphaLocalAgentPlugin.withNotificationSession(session,()->{
-     check();boolean accepted=NativeNotificationProjector.post(context,owner,record);check();return accepted;
+     check();boolean accepted=AlphaNotificationProjection.post(context,MainActivity.class,owner,record);check();return accepted;
     });
-   },NativeNotificationProjector::syncDirectory,this::check);
+   },this::check);
    inbox.beginBaseline();
    ElizaAgentService.LocalStreamHandle handle=new ElizaAgentService.LocalStreamHandle();stream=handle;
    connectStage=NativeNotificationDiagnostics.Stage.SUBSCRIBE;
@@ -126,7 +127,7 @@ final class AlphaCanonicalNotifications {
       if(!"event".equals(type))return;
       JSONObject envelope=frame.optJSONObject("event");if(envelope==null)return;
       JSONObject notification;
-      try{notification=NativeNotificationWire.notification(envelope.toString());}
+      try{notification=AlphaNotificationProjection.notification(envelope.toString());}
       catch(JSONException|IllegalArgumentException invalid){return;}
       if(notification!=null)inbox.acceptLive(notification);
      }catch(Exception failure){fail(generation,failure);}finally{queued.decrementAndGet();}});
@@ -145,7 +146,7 @@ final class AlphaCanonicalNotifications {
    if(status==401||status==403)throw new SecurityException("Notification session revoked");
    if(status!=200)throw new IllegalStateException("Notification inbox unavailable");
    String body=response.getString("body");if(body.getBytes(StandardCharsets.UTF_8).length>262144)throw new IllegalArgumentException("Notification page too large");
-   JSONObject page=new JSONObject(body);NativeNotificationWire.page(page,cursor);check();
+   JSONObject page=new JSONObject(body);AlphaNotificationProjection.page(page,cursor);check();
    if(!inbox.acceptPage(page,cursor)){SERIAL.execute(()->hydrate(generation));return;}
    failures=0;consumeWaitingTap();
   }catch(Exception failure){fail(generation,failure);}
@@ -176,10 +177,10 @@ final class AlphaCanonicalNotifications {
   // The tap window runs from the user's tap, not from whenever the first connection lands.
   if(age>TAP_WINDOW_MS){synchronized(AlphaCanonicalNotifications.class){if(waitingTap==tap)waitingTap=null;}return;}
   try{
-   check();boolean valid=NativeNotificationProjector.onOpened(context,tap,owner);
+   check();boolean valid=AlphaNotificationProjection.onOpened(context,MainActivity.class,tap,owner);
    synchronized(AlphaCanonicalNotifications.class){if(waitingTap==tap)waitingTap=null;}
    if(!valid)return;check();
-   String view=NativeNotificationRoute.view(tap.getStringExtra("deepLink"));if(view==null)return;
+   String view=AlphaNotificationProjection.view(tap.getStringExtra("deepLink"));if(view==null)return;
    JSONObject pending=new JSONObject().put("token",java.util.UUID.randomUUID().toString()).put("notificationId",tap.getStringExtra("notificationId"))
     .put("view",view).put("ownerId",identity.getString("subjectUserId")).put("agentId",identity.getString("agentId")).put("expiresAt",System.currentTimeMillis()+TAP_WINDOW_MS-age);
    for(String field:new String[]{"conversationId","messageId"})if(tap.getStringExtra(field)!=null)pending.put(field,tap.getStringExtra(field));

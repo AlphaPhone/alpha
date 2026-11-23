@@ -35,6 +35,7 @@ import { releaseBlockers } from "./release-blockers.ts";
 import { androidEnv, tool } from "./toolchain.ts";
 import { updateArtifactDigest } from "./update-artifact.ts";
 import { apkUpdateChannelOrLegacy, assertProvisioningUpdateChannel, recordedProvisioningUpdateChannel, type UpdateChannel } from "./update-channel.ts";
+import {APK_AGENT_ENTRY} from "./agent-payload.ts";
 
 export const PACKAGE = "ai.alphacompute.alphaphone";
 
@@ -218,8 +219,8 @@ export function apkRuntimeIdentity(apk: string) {
   const stamp = spawnSync("unzip", ["-p", apk, "assets/agent/alpha-source.json"], { maxBuffer: 1 << 20 });
   if (stamp.status !== 0 || !stamp.stdout?.length) return { runtime: "NOT_PACKAGED" as const };
   const source: {base?: string; patches?: unknown[]} = JSON.parse(stamp.stdout.toString("utf8"));
-  const agentBundleSha256 = entrySha256(apk, "assets/agent/agent-bundle.js");
-  if (!agentBundleSha256) throw new Error(`${apk} stamps a packaged runtime but assets/agent/agent-bundle.js cannot be read`);
+  const agentBundleSha256 = entrySha256(apk, APK_AGENT_ENTRY);
+  if (!agentBundleSha256) throw new Error(`${apk} stamps a packaged runtime but ${APK_AGENT_ENTRY} cannot be read`);
   return { runtime: "PACKAGED" as const, base: source.base, patches: source.patches, agentBundleSha256 };
 }
 

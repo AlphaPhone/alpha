@@ -344,6 +344,9 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: 1.2.8
         version: 1.2.8(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@tesseract.js-data/eng':
+        specifier: 1.0.0
+        version: 1.0.0
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -381,6 +384,9 @@ importers:
         specifier: 3.7.0
         version: 3.7.0
       tesseract.js:
+        specifier: 7.0.0
+        version: 7.0.0
+      tesseract.js-core:
         specifier: 7.0.0
         version: 7.0.0
       vibelang-runtime:
@@ -4625,6 +4631,9 @@ packages:
     resolution: {integrity: sha512-BCNiY0a1ZjdOHVqw7kyb7U72BwfMF3dfUuN+tQsLWky/J5JOI/r7abibglXfygrZhVO/3u3V+E25kkKTeMkXaQ==}
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
+
+  '@tesseract.js-data/eng@1.0.0':
+    resolution: {integrity: sha512-mbTumm6KQPUHyzTPQaF3ObXYnx0SqqfV2nabqFVQBwD6Kl7PhGSLSzOlfFTWy0P3BjghaSKA2W9GB19Jk+ZcTg==}
 
   '@testing-library/dom@10.4.2':
     resolution: {integrity: sha512-yzr2S9HyAIdhz2/6qHgbs665Q7PKVcDF05vsOlHPxG1mo36gKVesdYVeDLnXgfjJ03CrKRk08knc6+E/9m8v2Q==}
@@ -10737,6 +10746,8 @@ snapshots:
       '@tailwindcss/oxide': 4.3.5
       tailwindcss: 4.3.5
       vite: 8.3.5(@types/node@26.6.6)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
+
+  '@tesseract.js-data/eng@1.0.0': {}
 
   '@testing-library/dom@10.4.2':
     dependencies:

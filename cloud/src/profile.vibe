@@ -31,18 +31,18 @@ export const requiredSecrets: ReadonlyArray<string> = [
   secretNames.stripe, secretNames.stripeWebhook, secretNames.inference, secretNames.speech, secretNames.maps,
 ]
 
-const Paragraphs = Schema.Array(Schema.String)
-const LegalDocument = Schema.Struct({ title: Schema.String, revision: Schema.String, sections: Schema.Array(Schema.Struct({ title: Schema.String, paragraphs: Paragraphs })) })
+const Paragraphs = Schema.NonEmptyArray(Schema.String)
+const LegalDocument = Schema.Struct({ title: Schema.String, revision: Schema.String, sections: Schema.NonEmptyArray(Schema.Struct({ title: Schema.String, paragraphs: Paragraphs })) })
 const PublicKey = Schema.Struct({ kid: Schema.String, kty: Schema.Literal("EC"), crv: Schema.Literal("P-256"), x: Schema.String, y: Schema.String })
 const PlanIds = Schema.Struct({ priceId: Schema.String, productId: Schema.String })
 const EnvironmentInputs = Schema.Struct({
   databaseIdentity: Schema.String,
   documents: Schema.Struct({ terms: LegalDocument, privacy: LegalDocument }),
-  entitlement: Schema.Struct({ keyId: Schema.String, publicKeys: Schema.Array(PublicKey) }),
+  entitlement: Schema.Struct({ keyId: Schema.String, publicKeys: Schema.NonEmptyArray(PublicKey) }),
   google: Schema.Struct({ clientId: Schema.String, serverClientId: Schema.String, nativeSignIn: Schema.Boolean }),
   billing: Schema.Struct({ publishableKey: Schema.String, plans: Schema.Struct({ plus_monthly: PlanIds, pro_monthly: PlanIds }) }),
   speech: Schema.Struct({
-    defaultVoiceId: Schema.String, defaultModelId: Schema.String, voiceIds: Schema.Array(Schema.String), modelIds: Schema.Array(Schema.String),
+    defaultVoiceId: Schema.String, defaultModelId: Schema.String, voiceIds: Schema.NonEmptyArray(Schema.String), modelIds: Schema.NonEmptyArray(Schema.String),
     microsPerCharacter: Schema.Int, microsPerSecond: Schema.Int, languageCodes: Schema.Array(Schema.String),
   }),
   maps: Schema.Struct({ coverage: Schema.String, datasetRevision: Schema.String }),
@@ -123,7 +123,7 @@ function environmentProfile(environment: CloudEnvironment, inputs: EnvironmentIn
       stt: { languageCodes: inputs.speech.languageCodes, microsPerSecond: inputs.speech.microsPerSecond },
     },
     maps: { provider: "google", baseUrl: "https://maps.googleapis.com", apiKeyEnv: secretNames.maps, coverage: inputs.maps.coverage, datasetRevision: inputs.maps.datasetRevision },
-  } as EnvironmentProfile
+  }
 }
 
 /** Alpha Cloud's whole profile for the operator's reviewed inputs, before the upstream deployment rules judge it. */

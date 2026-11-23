@@ -21,7 +21,7 @@ function assertSingleProductRegistration(output) {
   const staged = fs.readdirSync(output, {recursive:true});
   assert.deepEqual(staged.filter(file => path.basename(file) === 'AndroidProducts.mk'), ['AndroidProducts.mk']);
   assert.deepEqual(staged.filter(file => path.basename(file) === 'alpha_stallion_phone.mk'), ['alpha_stallion_phone.mk']);
-  const source = path.resolve('vendor/eliza/packages/os/android/devices/pixel10a');
+  const source = path.resolve('vendor/eliza/packages/os/aosp/devices/pixel10a');
   const composition = JSON.parse(fs.readFileSync('android/aosp/pixel10a-composition.json', 'utf8'));
   const hardware = JSON.parse(fs.readFileSync(path.join(output, 'physical-product.json'), 'utf8')).hardwareComposition;
   assert.equal(hardware.vendorDirectory, composition.vendorDirectory);
@@ -104,7 +104,7 @@ test('native admission fixtures cover corrupt provenance, policy, ELF and overla
 test('Pixel staging takes the shared stock stallion vendor API check before writing anything', t => {
   const source = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-stallion-api-'));
   t.after(() => fs.rmSync(source, {recursive:true, force:true}));
-  const api = JSON.parse(fs.readFileSync('vendor/eliza/packages/os/android/aosp.lock.json', 'utf8')).profiles.pixel10a.device.vendorApiLevel;
+  const api = JSON.parse(fs.readFileSync('vendor/eliza/packages/os/aosp/aosp.lock.json', 'utf8')).profiles.pixel10a.device.vendorApiLevel;
   const release = JSON.parse(fs.readFileSync('android/aosp/pixel10a-composition.json', 'utf8')).releaseConfig;
   const flag = path.join(source, 'build/release/flag_values', release, 'RELEASE_BOARD_API_LEVEL.textproto');
   const manifest = path.join(source, 'vendor/google_devices/stallion/vintf/vendor/manifest.xml');

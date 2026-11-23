@@ -18,7 +18,7 @@ import subprocess
 import sys
 
 SDK = json.loads((Path(__file__).resolve().parents[2] / 'upstream.lock.json').read_text(encoding='utf-8'))['commit']
-BUN = '1.4.2'
+PNPM = '10.24.0'
 HOST = 'f7a468ebb4ba87d2f985917f640ad5b4a43f2b96bc1ad5acf4acd478ebe8b5be'
 JSON_SHA = '3ea61b2a06e31edf1c91134fe9106b0ebb16628be169f3db75bc7a2b06b45796'
 ENTRY_SECONDS = 180  # <240s GHA timeout, leaving >=60s platform margin.
@@ -220,8 +220,8 @@ def main():
     require(safe_git(root / 'vendor/eliza', ['rev-parse', 'HEAD']) == SDK, 'Unexpected SDK checkout')
     host = root / 'android/app/src/main/java/ai/alphacompute/alphaphone/AlphaCalendarPlugin.java'
     require(digest(host) == HOST, 'Unexpected Alpha calendar host')
-    require(read_json(root / 'package.json', 65536).get('packageManager') == 'bun@' + BUN, 'Unexpected Bun declaration')
-    bun = Path(shutil.which('bun')).resolve(strict=True)
+    require(read_json(root / 'package.json', 65536).get('packageManager') == 'pnpm@' + PNPM, 'Unexpected package manager declaration')
+    node = Path(shutil.which('node')).resolve(strict=True)
     java_home = Path(os.environ['JAVA_HOME']).resolve(strict=True)
     jar = Path(os.environ['ALPHA_JSON_JAR']).resolve(strict=True)
     require(digest(jar) == JSON_SHA, 'Normal host-test JSON jar differs')
@@ -232,11 +232,11 @@ def main():
     config = namespace / 'inputs.json'
     driver = root / 'test/fixtures/calendar-bridge/bridge-check.mjs'
     provider = root / 'android/app/src/main/java/ai/alphacompute/alphaphone/CalendarProviderPlugin.java'
-    fixed = [host, provider, bun, jar, driver, java_home / 'bin/java', java_home / 'bin/javac',
+    fixed = [host, provider, node, jar, driver, java_home / 'bin/java', java_home / 'bin/javac',
         java_home / 'release', root / 'scripts/ci/calendar-bridge.init.gradle',
         root / 'scripts/ci/calendar-bridge.py', root / 'package.json',
         root / 'android/.eliza-consumer-profile.json', root / 'android/consumer-host.json',
-        root / 'upstream.lock.json', root / 'android/upstream-native-sources.json']
+        root / 'upstream.lock.json']
     fixture = driver.parent / 'bridge-runtime'
     for relative, expected in OWNING_SHA256.items():
         require(digest(root / relative) == expected, 'Owning bridge fixture changed')
@@ -259,9 +259,9 @@ def main():
     require(len(fixed) <= 64, 'Fixed input count exceeds bound')
     initial = {str(p): digest(p) for p in fixed}
     cfg = {'head': head, 'tree': tree, 'sdk': SDK, 'root': str(root),
-        'outputDirectory': str(receipt), 'bun': str(bun), 'driver': str(driver),
+        'outputDirectory': str(receipt), 'node': str(node), 'driver': str(driver),
         'json': str(jar), 'javaHome': str(java_home), 'fixedInputs': initial, 'sourceFrame': source_frame,
-        'readRoots': [str(root), str(java_home), str(bun.parent), str(jar.parent),
+        'readRoots': [str(root), str(java_home), str(node.parent), str(jar.parent),
             str(Path(os.environ['ANDROID_HOME']).resolve(strict=True)),
             str(Path(os.environ['GRADLE_USER_HOME']).resolve(strict=True))]}
     bounded_json(config, cfg, 65536)
@@ -281,7 +281,7 @@ def main():
     observations = 0
     process_roots = [root, namespace, java_home,
         Path(os.environ['ANDROID_HOME']).resolve(strict=True),
-        Path(os.environ['GRADLE_USER_HOME']).resolve(strict=True), bun.parent]
+        Path(os.environ['GRADLE_USER_HOME']).resolve(strict=True), node.parent]
     system_exes = {'/usr/bin/' + name for name in
         ['sh', 'dash', 'bash', 'env', 'git', 'patch', 'python3', 'uname', 'sed', 'xargs', 'dirname', 'readlink', 'tr']}
 

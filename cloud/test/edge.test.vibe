@@ -4,6 +4,14 @@ import { edgeRoute, edgeWorker, forwardedHeaders, type EdgeEnv } from "../src/ed
 import { EdgeRequest, EdgeResponse } from "../src/edge-platform.ts"
 
 const check = (assertion: () => void) => Effect.try(assertion)
+
+module node {
+  /** @throws {TypeError} */
+  export function headersOf(init: Record<string, string>): Headers {
+    return new Headers(init)
+  }
+}
+import { headersOf } from node
 const address = (text: string): URL => URL.parse(text) ?? URL.parse("https://invalid.invalid")!
 const refusingApi = { fetch: () => Promise.reject(new Error("the route tests never reach the API Worker")) }
 const env: EdgeEnv = { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: "https://api.alphacompute.cc", WEB_ORIGIN: "https://cloud.alphacompute.cc", API: refusingApi }
@@ -29,8 +37,8 @@ describe("Alpha Cloud's web host", () => {
 
   it.effect("names the web host it was asked for and drops earlier forwarding and hop-by-hop headers", () => effect {
     // spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
-    const incoming = new Headers({ host: "cloud.alphacompute.cc", "x-forwarded-host": "evil.example", forwarded: "host=evil.example", connection: "keep-alive", accept: "text/html" })
-    const sent = forwardedHeaders(incoming, "cloud.alphacompute.cc")
+    const incoming = try Effect.try(() => headersOf({ host: "cloud.alphacompute.cc", "x-forwarded-host": "evil.example", forwarded: "host=evil.example", connection: "keep-alive", accept: "text/html" }))
+    const sent = try Effect.try(() => forwardedHeaders(incoming, "cloud.alphacompute.cc"))
     try check(() => assert.strictEqual(sent.get("x-forwarded-host"), "cloud.alphacompute.cc"))
     try check(() => assert.strictEqual(sent.get("x-forwarded-proto"), "https"))
     try check(() => assert.strictEqual(sent.get("forwarded"), null))

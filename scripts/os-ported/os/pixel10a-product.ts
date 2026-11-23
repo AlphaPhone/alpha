@@ -27,7 +27,7 @@ import {
 } from "./system-updater-staging.mjs";
 
 const hardwareRoot = fileURLToPath(
-  new URL("../../android/devices/pixel10a/", import.meta.url),
+  new URL("../../../vendor/eliza/packages/os/aosp/devices/pixel10a/", import.meta.url),
 );
 const token = /^[a-z][a-z0-9_]*$/;
 const packageName = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/;

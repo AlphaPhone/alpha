@@ -27,7 +27,7 @@ const roleSource=shared+'SmsRoleConfiguration.java';
 const commonPaths=[...extracted,...compiled].map(name=>shared+name+'.java');
 const historicalPaths=[shared+'TelephonyPlugin.java',...commonPaths];
 const currentPaths=[...commonPaths,roleSource];
-const launcherManifest='android/app/src/launcher/AndroidManifest.xml';
+const launcherManifest='android/app/manifests/launcher/AndroidManifest.xml';
 const harness='MmsDispatchTraces.java';
 const historicalInventory='specs/quint/refinement/native/mms-historical-sources.json';
 const scenarios=[

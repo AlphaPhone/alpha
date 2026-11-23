@@ -12,7 +12,7 @@
     "production": "alpha_stallion_phone-cp2a-user"
   },
   "sourceLock": {
-    "file": "vendor/eliza/packages/os/android/sources/pixel10a-stallion.json",
+    "file": "vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json",
     "sha256": "b7041cce4faf186f5c6e410694b52d8ee4ef2edab8edbef58119e943089d2ce3"
   },
   "signer": {

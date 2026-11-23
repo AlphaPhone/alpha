@@ -17,7 +17,7 @@ import path from "node:path";
 import { manifestComponents } from "../../../vendor/eliza/packages/os/aosp/launcher-provisioning.mjs";
 
 export const SECURE_CAMERA_CONTRACT = new URL(
-  "../../android/sources/secure-camera.json",
+  "../../../vendor/eliza/packages/os/aosp/sources/secure-camera.json",
   import.meta.url,
 );
 export const secureCameraPackage = "com.android.camera2";

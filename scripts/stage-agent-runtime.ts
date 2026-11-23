@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Stage the resident agent's Android runtime payload (Node runtime, agent bundle, workflow worker) into the app's
+// Stage the resident agent's Android runtime payload (Node runtime, agent bundle, the workflow worker built by
+// scripts/build-workflow-worker.ts) into the app's
 // assets with @elizaos/os/build stageRuntimePayload, and stamp it with the pin and this stager's digest.
 //   node --conditions=eliza-source --import vibelang/register scripts/stage-agent-runtime.ts [--bundle DIR] [--abi arm64-v8a,x86_64]
 import fs from 'node:fs';
@@ -9,7 +10,10 @@ import {parseArgs} from 'node:util';
 import {sha256File} from './sha256.ts';
 import {pinnedCommit} from './upstream-pin.ts';
 import {AGENT_BUNDLE_DIRECTORY} from './build-agent-bundle.ts';
+import {workflowWorkerArtifact} from './build-workflow-worker.ts';
 import {imageNativeViewDeclarationsJson, nativeViewDeclarationsJson} from './native-view-policy.ts';
+import {AGENT_ENTRY, AGENT_MANIFEST} from './agent-payload.ts';
+export {AGENT_ENTRY, AGENT_MANIFEST} from './agent-payload.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** The staged payload the APK packages. */
@@ -19,9 +23,11 @@ export const TARGET_ABIS = Object.freeze(['arm64-v8a', 'x86_64'] as const);
 
 export async function stageAgentRuntime({bundleDir = AGENT_BUNDLE_DIRECTORY, abi = [...TARGET_ABIS] as string[], workflowWorker}: {bundleDir?: string; abi?: string[]; workflowWorker?: {dir: string; executable: string}} = {}) {
   const commit = pinnedCommit(root);
-  if (!fs.existsSync(path.join(bundleDir, 'bundle-manifest.json')) && !fs.existsSync(bundleDir)) throw new Error('Build the agent bundle first: pnpm agent:bundle');
+  if (!fs.existsSync(path.join(bundleDir, AGENT_MANIFEST)) || !fs.existsSync(path.join(bundleDir, AGENT_ENTRY))) throw new Error('Build the agent bundle first: pnpm agent:bundle');
+  // The bundle carries the workflow plugin, so its manifest pins the worker digest; the payload refuses a missing or different worker.
+  const worker = workflowWorker ?? await workflowWorkerArtifact();
   const {stageRuntimePayload} = await import('./upstream-os.ts');
-  const staged = await stageRuntimePayload({abi: abi as never, bundleDir, output: AGENT_ASSETS, ...(workflowWorker ? {workflowWorker} : {})});
+  const staged = await stageRuntimePayload({abi: abi as never, bundleDir, output: AGENT_ASSETS, workflowWorker: worker});
   fs.writeFileSync(path.join(AGENT_ASSETS, 'alpha-source.json'), JSON.stringify({
     base: commit, patches: [], lockSha256: sha256File(path.join(root, 'upstream.lock.json')), stagerSha256: sha256File(fileURLToPath(import.meta.url)),
   }, null, 2) + '\n');
