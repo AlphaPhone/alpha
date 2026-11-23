@@ -68,6 +68,15 @@ jobs:
         run: bash scripts/ci/prepare-host-test-json.sh
       - name: Prepare reviewed Kotlin compiler for native routing checks
         run: node test/fixtures/kotlin-tools.mjs --prepare
+      - name: Compile the pinned SDK CLI before the parallel launcher tests
+        working-directory: vendor/eliza/packages/os
+        run: |
+          status=0
+          VIBELANG_PROJECT="$PWD/tsconfig.build.json" node --no-warnings --conditions eliza-source --import vibelang/register src/cli.vibe > "$RUNNER_TEMP/alpha-os-cli.log" 2>&1 || status=$?
+          if [ "$status" -ne 2 ] || ! grep -Fq 'a command is required' "$RUNNER_TEMP/alpha-os-cli.log"; then
+            cat "$RUNNER_TEMP/alpha-os-cli.log" >&2
+            exit 1
+          fi
       - name: Verify launcher overlay staging from the pinned SDK
         run: pnpm --dir vendor/eliza/packages/os run test test/image.test.vibe test/image-product.test.vibe test/cli.test.vibe
       # The normal chain builds and verifies its native source/model inputs.
