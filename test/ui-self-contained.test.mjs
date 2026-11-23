@@ -272,6 +272,8 @@ const TEXT_EXEMPT = new Map([
   ['test/client-feature-preparation.test.mjs', {reason: 'negative assertion', file: true}],
   ['test/ui-self-contained.test.mjs', {reason: 'this guard', file: true}],
 ]);
+// The simplification audit is a dated record of each file as it was, so it quotes upstream paths.
+const AUDIT_RECORD = /^docs\/simplification-audit\/.+\.md$/;
 const scanned = () => listed('apps', 'scripts', 'specs', 'test', 'android', 'docs', 'cloud', '.github',
   'README.md', 'CONTRIBUTING.md', 'AGENTS.md', 'vite.config.ts', 'tsconfig.json', 'playwright.config.ts', 'capacitor.config.ts',
   'lemmascript.json', 'LemmaScript-files.txt', 'package.json');
@@ -283,7 +285,7 @@ test('no source, script, spec, test or document refers to upstream UI', () => {
   const offenders = [];
   for (const file of files) {
     const exempt = TEXT_EXEMPT.get(file);
-    if (exempt?.file) continue;
+    if (exempt?.file || AUDIT_RECORD.test(file)) continue;
     let text = fs.readFileSync(file, 'latin1');
     for (const allowed of exempt?.text ?? []) text = text.split(allowed).join('');
     if (references(text)) offenders.push(file);

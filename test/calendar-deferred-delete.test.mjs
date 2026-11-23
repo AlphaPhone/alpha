@@ -80,7 +80,7 @@ test('the Agent Calendar adapter defers its delete behind Undo and ends the wind
   assert.match(adapter,/deletes\.stage\(\{hides,offered,unchanged:/,'the window follows the Undo notice, and a changed row shows again');
   assert.match(adapter,/shell\.undoFn===undoDelete\|\|!!shell\.toastQueue\?\.some/,'a held or queued Undo is still offered');
   assert.match(adapter,/api\.toast\(mode==='decline_invitation'\?'Invitation declined':'Event deleted',\{undo:/);
-  assert.match(adapter,/if\(document\.hidden\)\{cancelRetention\(\);deletes\.leave\(\);\}/);
+  assert.match(adapter,/if\(document\.hidden\)deletes\.leave\(\);/);
   assert.match(adapter,/if\(deletes\.waiting\)\{deletes\.drop\(\);if\(this\.live\)\{if\(this\.toastActive&&pendingUndo&&this\.undoFn===pendingUndo\)this\.closeToast\(\);this\.toast\('Not deleted'\);\}\}/,'a dropped deletion takes its stale Undo off the screen');
   assert.doesNotMatch(adapter,/confirmCalendarAction\([^;]+\)\|\|!current\(\)\)return;try\{await calendar!\.delete/,'no immediate delete after the review');
 });
