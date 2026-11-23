@@ -96,7 +96,9 @@ test('the provider simulation caches whole prefix units in tools, system, messag
   assert.equal(cached({...next, tools: [tools[0]]}), 3072);
   assert.equal(cached({...next, tools: [...tools, {name: 'EXTRA', chars: 5_700, hash: 'eeee'}]}), 4096);
   // A prefix older than the provider keeps it, or one still being read, is not reused.
-  assert.equal(cached(stage1(400_000, receipts, 'two', {tools, system: longSystem})), 0);
+  assert.equal(cached(stage1(700_000, receipts, 'two', {tools, system: longSystem})), 0);
+  // Ten minutes: a prefix stored and not read again was still reused at 5 and 10 minutes and not at 20.
+  assert.equal(cached(stage1(400_000, receipts, 'two', {tools, system: longSystem})), 8192);
   assert.equal(cached({...next, at: 500, ms: 900}), 0);
   // Under one unit nothing is reused.
   assert.equal(simulateProvider([stage1(0, '[]', 'one'), stage1(20_000, '[]', 'one')]).cachedTokens, 0);
@@ -165,6 +167,14 @@ test('an allowance refills all the time, and a call is refused when what is left
   assert.equal(simulateProvider([used(0, 1_000), used(600_000, 1_000)], model).allowanceLeft.lowest, 59_000);
   assert.match(renderSimulation(result), /left once a call holds its share: p50 \d+, p10 \d+, lowest 1500; 0 of 3 calls start without enough/);
   assert.match(renderSimulation(result), /Cached \d+ of \d+ input tokens: \d+\.\d%/);
+});
+
+test('a cap above the provider ceiling holds the ceiling, the same as no cap', () => {
+  const model = {...PLAIN, uncachedTpm: 60_000, totalTpm: 600_000, uncappedOutputHold: 16_384, outputHoldCeiling: 16_384};
+  const lowest = maxTokens => simulateProvider([used(0, 20_000, {ms: 3_000, ...(maxTokens ? {maxTokens} : {}), usage: {input: 20_000, output: 300, cached: 0}})], model).allowanceLeft.lowest;
+  assert.equal(lowest(4096), 60_000 - 20_000 - 4096);
+  assert.equal(lowest(40_960), 60_000 - 20_000 - 16_384);
+  assert.equal(lowest(undefined), lowest(40_960));
 });
 
 test('a running call holds its input and its output cap; a finished one was charged only what it used', () => {
@@ -239,13 +249,13 @@ test('a cached count the provider did not report stays absent when a logged call
 // Measured on the provider: at admission a call holds its whole input, cached or not, estimated
 // about a quarter high, plus its output cap, or 16,384 tokens when it sends no cap.
 test('a call is admitted against its estimated input and its cap, and charged what it used', () => {
-  assert.equal(CEREBRAS_QWEN.admissionInputFactor, 1.25);
+  assert.equal(CEREBRAS_QWEN.admissionInputFactor, 1.24);
   assert.equal(CEREBRAS_QWEN.uncappedOutputHold, 16_384);
   const receipts = 'x '.repeat(4000);
   const call = (at, extra = {}) => stage1(at, receipts, 'go', extra);
   const input = simulateProvider([call(0)]).inputTokens;
   const over = (calls, uncachedTpm) => simulateProvider(calls, {...CEREBRAS_QWEN, uncachedTpm}).uncachedMinute.callsOver;
-  const held = Math.round(1.25 * input);
+  const held = Math.round(1.24 * input);
   // No cap sent: the provider holds 16,384 for the output.
   assert.equal(over([call(0)], held + 16_384), 0);
   assert.equal(over([call(0)], held + 16_383), 1);
