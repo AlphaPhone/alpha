@@ -235,7 +235,10 @@ from the collection. A new change wins for every note it touches; other notes ke
 change. When the slot still holds exactly the editor's last kept draft, the earlier session's copy is the
 base, so the editor can revert its own attempt. An empty slot adds nothing; a slot that cannot be read or
 validated stops the write. A compare-and-exchange that does not save reads and merges again, at most three
-attempts. Only a saved reply confirms the draft is kept; otherwise the words stay on screen.
+attempts. Only a saved reply confirms the draft is kept; otherwise the words stay on screen. An owner
+change or sign-out that closes an edited draft before its save keeps the draft the same way, under the
+owner it was written for, and tells the owner that edit was not saved (legacy said so; it never closes
+silently).
 
 ```quint
 type DraftSlotRead = SlotAbsent | SlotReadable | SlotInvalid | SlotUnavailable

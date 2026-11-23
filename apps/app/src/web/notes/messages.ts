@@ -34,6 +34,12 @@ export const shareNoticeText: Record<ShareNotice | "imported", string> = {
 };
 
 /** The days-left mark of a Recently deleted row. */
+/** When a note went to Recently deleted, in the phone's own date and time words; empty when the time is unreadable. */
+export function deletedText(deletedAt: string): string {
+  const at = Date.parse(deletedAt);
+  return Number.isFinite(at) ? `Deleted ${new Date(at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : "";
+}
+
 export function daysLeftText(days: number): string {
   return days === 0 ? "Deleting permanently" : days === 1 ? "1 day left" : `${days} days left`;
 }

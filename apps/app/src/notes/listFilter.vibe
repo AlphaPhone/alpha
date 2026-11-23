@@ -21,7 +21,7 @@ export service NotesListFilter {
   ownerLost(): void!!
   prefer(reviewFirst: boolean): void!!
   negotiate(offered: boolean): void!!
-  context(): { readonly kind: "canonical-note-source"; readonly id: "notes"; readonly revision: string } | undefined!!
+  context(): ({ readonly kind: "canonical-note-source"; readonly id: "notes"; readonly revision: string } | undefined)!!
   propose(filter: NotesFilter, own: boolean, workflow: boolean): FilterAdmission!!
   approve(): void!!
   run(): FilterReceipt!!
@@ -35,8 +35,8 @@ const make = effect {
   const filters = try Ref.make<ReadonlyMap<number, NotesFilter>>(new Map())
   const shown = try SubscriptionRef.make<NotesFilter | undefined>(undefined)
 
-  effect function send(event: FilterEvent): ListFilter | undefined!! {
-    return try (machine.send(event) catch () => undefined)
+  effect function send(event: FilterEvent): (ListFilter | undefined)!! {
+    return (machine.send(event) catch () => undefined)
   }
 
   effect function publish(state: ListFilter | undefined): void!! {

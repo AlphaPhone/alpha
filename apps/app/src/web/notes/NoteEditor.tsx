@@ -1,10 +1,10 @@
 // spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/list.md, "Each checklist row keeps its own place and a name a screen reader can say"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
-import { ArrowLeft, Calendar, Copy, Ellipsis, ExternalLink, Globe, Mail, Paperclip, Pause, Play, Plus, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowLeft, Calendar, Copy, Ellipsis, ExternalLink, Globe, ListChecks, Mail, Paperclip, Pause, Pin, PinOff, Play, Plus, Share2, Sparkles, Trash2, Type, X } from "lucide-react";
 import { useState } from "react";
 import type { NoteFormat } from "@elizaos/plugin-notes/types";
 import { Button, Checkbox, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Input, Textarea } from "../components/ui/index.ts";
 import type { DraftContent, DraftPatch } from "../../notes/editor.vibe";
-import type { CheckItem, NoteRow } from "../../notes/list.vibe";
+import { type CheckItem, type NoteRow, checklistItems, checklistText } from "../../notes/list.vibe";
 import type { ShareChannel } from "../../notes/share.vibe";
 import { recordingClock } from "../../notes/recorder.vibe";
 import { type ChecklistRows, itemName, rowAdded, rowRemoved } from "../../../gen/notes__list.ts";
@@ -53,6 +53,15 @@ export function NoteEditor({ draft, row, status, saved, playing, positionMs, tra
   while (placed.keys.length < list.length) placed = rowAdded(placed);
   if (placed !== rowKeys) setRowKeys(placed);
   const setItems = (next: CheckItem[]) => onEdit({ format: { kind: "list", data: { ...(draft.format?.data ?? {}), items: next.map((item) => ({ t: item.t, done: item.done })) } } });
+  const data = draft.format?.data ?? {};
+  const pinned = data.pinned === true;
+  // spec/notes/list.md: a pin is part of the note's saved format, and text and a checklist turn into each other keeping every item and its tick.
+  const togglePin = () => onEdit({ format: { kind, data: { ...data, pinned: !pinned } } });
+  const toChecklist = () => onEdit({ body: "", format: { kind: "list", data: { ...data, items: checklistItems(draft.body) } } });
+  const toText = () => {
+    const { items: _items, ...rest } = data;
+    onEdit({ body: checklistText(list), format: { kind: "text", data: rest } });
+  };
   const removeItem = (index: number) => {
     setRowKeys(rowRemoved(placed, index));
     setItems(list.filter((_, at) => at !== index));
@@ -65,6 +74,10 @@ export function NoteEditor({ draft, row, status, saved, playing, positionMs, tra
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Note actions"><Ellipsis aria-hidden /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={togglePin}>{pinned ? <PinOff aria-hidden /> : <Pin aria-hidden />}{pinned ? "Unpin" : "Pin"}</DropdownMenuItem>
+            {kind === "text" && <DropdownMenuItem onSelect={toChecklist}><ListChecks aria-hidden />Turn into checklist</DropdownMenuItem>}
+            {kind === "list" && <DropdownMenuItem onSelect={toText}><Type aria-hidden />Turn into text</DropdownMenuItem>}
+            <DropdownMenuSeparator />
             <DropdownMenuItem disabled={!saved} onSelect={() => onShare("system")}><Share2 aria-hidden />Share</DropdownMenuItem>
             <DropdownMenuItem disabled={!saved} onSelect={() => onShare("copy")}><Copy aria-hidden />Copy text</DropdownMenuItem>
             <DropdownMenuItem disabled={!saved} onSelect={() => onShare("email")}><Mail aria-hidden />Email draft</DropdownMenuItem>

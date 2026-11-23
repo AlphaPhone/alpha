@@ -128,8 +128,10 @@ pure def lawHiddenScreenSharesNothing(allPresent: bool, allReviewed: bool, colle
 
 ### A workflow's note is saved once, into the agent's collection, only from the open run in front
 
-A workflow's `create_note` carries the title and text the owner reviewed on the run. It runs only while
-Workflows is in front on a visible screen that is neither locked nor private, and only while the
+A workflow's `create_note` carries the title and text the owner reviewed on the run. It runs only for a
+call the assistant ran from that run's own step review (the call names its run and step; Workflows merely
+being in front is not a run), while Workflows is in front on a visible screen that is neither locked nor
+private, and only while the
 collection of the signed-in owner is read; otherwise nothing is saved. The note is created in the agent's
 collection under a creation id derived from the operation, so a repeated attempt never makes a second
 note. A save the agent confirmed for the same owner is a success; a collection busy with another change

@@ -3,7 +3,7 @@ import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
 import { askDialogName, eraseDialogName, type TrashView } from "../../../gen/notes__trash.ts";
 import { Button, Dialog, DialogContent, DialogTitle, ListRow } from "../components/ui/index.ts";
 import type { TrashRow } from "../../notes/trash.vibe";
-import { daysLeftText } from "./messages.ts";
+import { daysLeftText, deletedText } from "./messages.ts";
 
 export type NotesTrashProps = {
   /** The Trash machine's state. */
@@ -42,7 +42,7 @@ export function NotesTrash({ view, rows, asked, canAsk, canRestore, canAskErase,
       <ul className="flex flex-col divide-y divide-border overflow-y-auto">
         {rows.map((row) => (
           <li key={`${row.id}:${row.deletedAt}`}>
-            <ListRow title={row.title} detail={row.kind} disabled={!canAsk || view.busy !== "TrashIdle"}
+            <ListRow title={row.title} detail={[row.kind, deletedText(row.deletedAt)].filter(Boolean).join(" · ")} disabled={!canAsk || view.busy !== "TrashIdle"}
               trailing={view.retentionOn ? <span className="font-mono text-xs uppercase" aria-label={daysLeftText(row.daysLeft)}>{row.daysLeft}d</span> : undefined}
               aria-label={view.retentionOn ? `${row.title}, ${daysLeftText(row.daysLeft)}` : row.title}
               onClick={() => onAsk(row)} />
@@ -52,6 +52,7 @@ export function NotesTrash({ view, rows, asked, canAsk, canRestore, canAskErase,
       <Dialog open={view.asking && asked !== undefined} onOpenChange={(open) => { if (!open) onCloseAsk(); }}>
         <DialogContent aria-label={`${askDialogName(view.retentionOn) === "RecoverOrDeleteName" ? "Recover or delete" : "Recover"} ${reviewed}`}>
           <DialogTitle>{asked?.title}</DialogTitle>
+          {asked !== undefined && deletedText(asked.deletedAt) !== "" && <p className="text-sm text-muted-foreground">{deletedText(asked.deletedAt)}</p>}
           <div className="flex justify-end gap-2">
             {view.retentionOn && <Button variant="destructive" disabled={!canAskErase} onClick={() => onAskErase(false)}><Trash2 aria-hidden />Delete now</Button>}
             <Button disabled={!canRestore || asked === undefined} onClick={() => asked && onRestore(asked)}><RotateCcw aria-hidden />Recover</Button>

@@ -62,7 +62,9 @@ pure def open(l: Lifecycle, owner: str, workflowId: str, version: int, removed: 
 ### A change is reviewed before it is kept, never while a run is going, and an interrupted run is stopped first
 
 Removal is refused while a run is going; a run whose outcome is unknown is asked to stop before the
-removal is reviewed again (legacy `cancelReply`).
+removal is reviewed again (legacy `cancelReply`). Turning a workflow on or off is reviewed too, and
+goes at the version it was read at; a workflow that runs only when the owner taps Run is never turned
+on (legacy #1316, #1403).
 
 ```quint
 pure def canBeginReview(l: Lifecycle, op: LifeOp): bool =

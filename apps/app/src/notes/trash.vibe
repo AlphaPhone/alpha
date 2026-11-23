@@ -40,7 +40,7 @@ export service NotesTrash {
   dismissUndo(): void!!
   noticeShown(): void!!
   probeRetention(): boolean!!
-  entryFor(noteId: string): TrashRow | undefined!!
+  entryFor(noteId: string): (TrashRow | undefined)!!
 }
 
 const kindNames: Record<string, string> = { text: "Note", list: "Checklist", voice: "Voice note", link: "Link" }
@@ -73,11 +73,11 @@ const make = effect {
   const cleanups = try SubscriptionRef.make<readonly NotesTrashRecordingCleanup[]>([])
   const asked = try Ref.make<TrashRow | undefined>(undefined)
 
-  effect function send(event: TrashEvent): TrashView | undefined!! {
-    return try (machine.send(event) catch () => undefined)
+  effect function send(event: TrashEvent): (TrashView | undefined)!! {
+    return (machine.send(event) catch () => undefined)
   }
 
-  effect function snapshot(): NotesSnapshot | undefined!! {
+  effect function snapshot(): (NotesSnapshot | undefined)!! {
     return (try collection.current())?.snapshot
   }
 
@@ -97,7 +97,7 @@ const make = effect {
   }
 
   effect function probeRetention(): boolean!! {
-    const listed = try (client.readCleanups() catch effect (error) => match (error) {
+    const listed = (client.readCleanups() catch effect (error) => match (error) {
       when TrashRetentionOff: undefined;
       default: null;
     })
@@ -163,7 +163,7 @@ const make = effect {
       if (started === undefined || started.busy !== "Erasing") return shared ? "recording-shared" : "review-again"
       const review = target === undefined ? { scope: "all" as const, expectedRevision: current.revision }
         : { scope: "entry" as const, expectedRevision: current.revision, id: target.id, deletedAt: target.deletedAt }
-      const outcome = try (client.eraseTrash(review) catch (error) => error)
+      const outcome = (client.eraseTrash(review) catch (error) => error)
       const reply = "erased" in outcome ? outcome : undefined
       const conflict = outcome instanceof NotesRefused && outcome.status === 409
       const commit: EraseCommit = reply !== undefined ? "CommitSaved" : conflict ? "CommitConflict" : "CommitUnknownNotApplied"

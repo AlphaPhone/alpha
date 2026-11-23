@@ -47,6 +47,8 @@ export interface CallFacts {
   readonly reviewed: boolean
   readonly messageId: string
   readonly ownerText: string
+  /** The digest of the proposal the call runs, as the agent listed it; empty when the call is unknown. */
+  readonly digest: string
   /** The workflow run and step the call serves, for a workflow-bound proposal run from its step review. */
   readonly workflow?: WorkflowStepRef
 }
@@ -69,7 +71,12 @@ export service DeviceExecutors {
 }
 
 /** The outcome of one approval, as the transcript shows it. */
-export interface Approval { readonly card: ProposalCard; readonly receipt?: { readonly title: string; readonly summary: string } }
+export interface Approval {
+  readonly card: ProposalCard
+  readonly receipt?: { readonly title: string; readonly summary: string }
+  /** What the phone's executor reported, for a workflow step run from its run's review. */
+  readonly outcome?: "Applied" | "Unknown" | "NotStarted"
+}
 
 /** Device action review: cards, their two approval routes, decline and the direct pass of one message. */
 export service DeviceReview {
@@ -366,7 +373,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const identity = try host.identity()
     if (identity === undefined) return { kind: "invalid" } satisfies ApproveResult
     const messageId = proposal.requestMessageId ?? ""
-    facts.set(proposal.id, { reviewed, messageId, ownerText: texts.get(messageId) ?? "", ...(proposal.step === undefined ? {} : { workflow: proposal.step }) })
+    facts.set(proposal.id, { reviewed, messageId, ownerText: texts.get(messageId) ?? "", digest: proposal.digest, ...(proposal.step === undefined ? {} : { workflow: proposal.step }) })
     const execution = try executionFor(identity)
     const check = try screenCheck(reviewed, requestEligible, forceReview)
     const device: DeviceProposal = { id: proposal.id, digest: proposal.digest, expiresAt: expiryOf(proposal.expiresAt), operation: proposal.operation }
@@ -505,7 +512,10 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       consumed.add(found.id)
       const card = try drawCard(found, false, identity.session)
       const done = try custodied(found, false)
-      return { card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary } } satisfies Approval
+      return {
+        card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary },
+        outcome: done.outcome === "Applied" ? "Applied" : done.outcome === "Unknown" ? "Unknown" : "NotStarted",
+      } satisfies Approval
     },
     decline,
     expire: (card: ProposalCard) => effect {
@@ -566,7 +576,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       const execution = try executionFor(identity)
       promise(() => execution.sync()) catch () => undefined
     },
-    callFacts: (call: ExecutorCall) => sync(() => facts.get(call.proposalId) ?? { reviewed: false, messageId: "", ownerText: "" }),
+    callFacts: (call: ExecutorCall) => sync(() => facts.get(call.proposalId) ?? { reviewed: false, messageId: "", ownerText: "", digest: "" }),
     history: () => effect {
       const entries = tryPromise(() => journal.list()) catch () => undefined
       if (entries === undefined) return undefined

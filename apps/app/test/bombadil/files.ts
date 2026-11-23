@@ -4,7 +4,7 @@ import { extract } from "@antithesishq/bombadil/browser";
 
 const files = extract(({ document }) => {
   const main = document.querySelector('main[aria-label="Files"]');
-  if (!main) return undefined;
+  if (!main) return null;
   const statuses = [...main.querySelectorAll('[role="status"], [role="alert"]')].map((node) => node.textContent ?? "").join(" ");
   const text = main.textContent ?? "";
   const empty = /is empty|No files match|No (downloads|images|videos|audio|documents)/.test(text);
@@ -32,53 +32,53 @@ const files = extract(({ document }) => {
 /** Files never says a place is empty while it says the read was incomplete. */
 export const filesNeverEmptyWhenIncomplete = always(() => {
   const f = files.current;
-  return f === undefined || !(f.incomplete && f.empty);
+  return f === null || !(f.incomplete && f.empty);
 });
 
 /** The selection count Files shows is the rows it marks as selected. */
 export const filesSelectionCountMatchesTheRows = always(() => {
   const f = files.current;
-  return f === undefined || !f.selecting || f.count === f.pressed;
+  return f === null || !f.selecting || f.count === f.pressed;
 });
 
 /** Share is offered only for a selection of at least one row. */
 export const filesShareNeedsASelection = always(() => {
   const f = files.current;
-  return f === undefined || !f.selecting || f.count > 0 || f.shareDisabled;
+  return f === null || !f.selecting || f.count > 0 || f.shareDisabled;
 });
 
 /** A permanent deletion always says how many items it erases. */
 export const filesEraseNamesItsCount = always(() => {
   const f = files.current;
-  return f === undefined || !f.erase || f.erasing > 0;
+  return f === null || !f.erase || f.erasing > 0;
 });
 
 /** A permanent deletion lists exactly the rows it says it erases. */
 export const filesEraseListsWhatItErases = always(() => {
   const f = files.current;
-  return f === undefined || !f.erase || f.listedToErase === f.erasing;
+  return f === null || !f.erase || f.listedToErase === f.erasing;
 });
 
 /** Browse has no listing, so it offers neither sort nor view, and nothing on it can be selected. */
 export const filesBrowseOffersNoSortOrSelection = always(() => {
   const f = files.current;
-  return f === undefined || !f.browse || (!f.sortOrView && !f.selecting);
+  return f === null || !f.browse || (!f.sortOrView && !f.selecting);
 });
 
 /** While Files asks for storage access, it lists no file, Trash item or result. */
 export const filesNothingListedWithoutAccess = always(() => {
   const f = files.current;
-  return f === undefined || !f.allow || f.listed === 0;
+  return f === null || !f.allow || f.listed === 0;
 });
 
 /** Every Trash item has between 0 and 30 days left. */
 export const filesTrashDaysWithinRetention = always(() => {
   const f = files.current;
-  return f === undefined || f.days.every((d) => d >= 0 && d <= 30);
+  return f === null || f.days.every((d) => d >= 0 && d <= 30);
 });
 
 /** The filter chip counts exactly the results it shows. */
 export const filesFilterChipCountsItsResults = always(() => {
   const f = files.current;
-  return f === undefined || f.chipCount < 0 || f.chipCount === f.results;
+  return f === null || f.chipCount < 0 || f.chipCount === f.results;
 });

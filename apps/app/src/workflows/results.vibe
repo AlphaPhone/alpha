@@ -59,9 +59,9 @@ export const hostedResults = Layer.unwrap(effect {
     const tap = try Ref.make<{ token: string; runId: string; workflowId: string; question: boolean }>({ token: "", runId: "", workflowId: "", question: false })
 
     effect function bind() {
-      const scope = try (agent.scope() catch () => undefined)
+      const scope = (agent.scope() catch () => undefined)
       if (scope === undefined) return (try Ref.get(scopeRef))
-      const hash = try (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
+      const hash = (tryPromise(() => sha256Hex(JSON.stringify([scope.origin, scope.ownerId, scope.agentId]))) catch () => "")
       const owner = `${scope.origin}|${scope.ownerId}|${scope.agentId}`
       const before = try Ref.get(scopeRef)
       if (before.owner !== owner) {
@@ -72,7 +72,7 @@ export const hostedResults = Layer.unwrap(effect {
     }
 
     effect function digestOrdinal(key: string, result: DigestResult) {
-      const bytes = try (tryPromise(() => sha256Hex(JSON.stringify(result))) catch () => "")
+      const bytes = (tryPromise(() => sha256Hex(JSON.stringify(result))) catch () => "")
       const known = try Ref.get(digests)
       const list = known.get(key) ?? []
       if (list.includes(bytes)) return list.indexOf(bytes) + 1
@@ -82,7 +82,7 @@ export const hostedResults = Layer.unwrap(effect {
 
     effect function readPending() {
       if (!native) return {}
-      return try (effect { return try Schema.decodeUnknownEffect(PendingResult)(try bridge.invoke(plugin, "pendingResult", {})) } catch () => ({}))
+      return (effect { return try Schema.decodeUnknownEffect(PendingResult)(try bridge.invoke(plugin, "pendingResult", {})) } catch () => ({}))
     }
 
     return {
@@ -91,15 +91,16 @@ export const hostedResults = Layer.unwrap(effect {
         if (!native && !mocks) return
         const bound = try bind()
         if (bound.scope === undefined) return
+        const scope = bound.scope
         for (const result of results) {
           const key = keyOf(result.runId)
           const digest = try digestOrdinal(key, result)
           const before = (try held.get()).notices.find((n) => n.key === key)
           if (before !== undefined && before.digest === digest) continue
           if (native) {
-            const phase = try (effect {
+            const phase = (effect {
               return (try Schema.decodeUnknownEffect(PublishedPhase)(try bridge.invoke(plugin, "publishResult", {
-                scope: bound.hash, origin: bound.scope.origin, ownerId: bound.scope.ownerId, agentId: bound.scope.agentId,
+                scope: bound.hash, origin: scope.origin, ownerId: scope.ownerId, agentId: scope.agentId,
                 runId: result.runId, workflowId: result.workflowId, workflowVersionId: result.workflowVersionId,
               }))).phase
             } catch () => "rejected")
@@ -124,7 +125,7 @@ export const hostedResults = Layer.unwrap(effect {
         const captured = try Ref.get(tap)
         if (state.pending === "" || captured.token === "") return false
         if (native) {
-          const ok = try (effect { try bridge.invoke(plugin, "consumeResult", { token: captured.token }); return true } catch () => false)
+          const ok = (effect { try bridge.invoke(plugin, "consumeResult", { token: captured.token }); return true } catch () => false)
           if (!ok) return false
         }
         held.send({ type: "consume", token: state.token }) catch () => undefined
@@ -137,7 +138,7 @@ export const hostedResults = Layer.unwrap(effect {
         if (native && runIds.length > 0) bridge.invoke(plugin, "withdrawResult", { scope: bound.hash, runIds: runIds.slice(0, 200) }) catch () => undefined
       },
       effect askReview(sensitive: boolean) {
-        return (try (held.send({ type: "reviewQuestion", sensitive }) catch () => undefined)) !== undefined
+        return ((held.send({ type: "reviewQuestion", sensitive }) catch () => undefined)) !== undefined
       },
       effect askSubmit(valid: boolean) {
         held.send({ type: "submitQuestion", valid }) catch () => undefined
@@ -154,7 +155,7 @@ export const hostedResults = Layer.unwrap(effect {
         const exact = !native || (fresh.token === captured.token && fresh.runId === captured.runId && fresh.retained === true && fresh.question === true)
         held.send({ type: "recheckAnswered", exact, canCompose }) catch () => undefined
         if ((try held.get()).question !== "QuestionConsume") return false
-        const ok = native ? try (effect { try bridge.invoke(plugin, "consumeResult", { token: captured.token }); return true } catch () => false) : true
+        const ok = native ? (effect { try bridge.invoke(plugin, "consumeResult", { token: captured.token }); return true } catch () => false) : true
         const current = tappedBy !== "" && (try bind()).owner === tappedBy
         held.send({ type: "questionConsumed", ok, live: current }) catch () => undefined
         return ok && current
@@ -166,18 +167,19 @@ export const hostedResults = Layer.unwrap(effect {
           if (native) bridge.invoke(plugin, "disableBackground", { sessionId: bound.hash }) catch () => undefined
           return
         }
-        const started = try (held.send({ type: "startBackground" }) catch () => undefined)
+        const started = (held.send({ type: "startBackground" }) catch () => undefined)
         if (started === undefined || !native || bound.scope === undefined) return
+        const scope = bound.scope
         const attemptId = newId()
-        const begun = try (effect { try bridge.invoke(plugin, "beginBackground", { attemptId }); return true } catch () => false)
+        const begun = (effect { try bridge.invoke(plugin, "beginBackground", { attemptId }); return true } catch () => false)
         held.send({ type: "begun", ok: begun }) catch () => undefined
         if ((try held.get()).background !== "Configuring") {
           bridge.invoke(plugin, "cancelBackground", { attemptId }) catch () => undefined
           return
         }
-        const configured = try (effect {
+        const configured = (effect {
           try Schema.decodeUnknownEffect(BackgroundConfigured)(try bridge.invoke(plugin, "configureBackground", {
-            attemptId, mode: "resident", origin: bound.scope.origin, ownerId: bound.scope.ownerId, agentId: bound.scope.agentId, sessionId: bound.hash,
+            attemptId, mode: "resident", origin: scope.origin, ownerId: scope.ownerId, agentId: scope.agentId, sessionId: bound.hash,
           }))
           return true
         } catch () => false)

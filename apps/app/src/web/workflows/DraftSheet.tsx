@@ -43,6 +43,7 @@ export function DraftSheet({ open, authoring, text, textKept, described, note, o
           {!textKept && <Alert variant="warn" role="status" className="text-sm">This phone couldn’t keep your description. Copy it before closing.</Alert>}
           <Button size="lg" variant="outline" disabled={!can.edit || text.trim() === ""} onClick={() => onDescribe(text)}>Draft</Button>
           {described?.kind === "refused" && <Alert variant="warn" role="status">{described.message}</Alert>}
+          {described?.kind === "clarify" && <Alert variant="info" role="status">{described.message}</Alert>}
           {described?.kind === "unavailable" && <Alert variant="warn" role="status">A draft isn’t available from your agent right now. Nothing was saved.</Alert>}
           {described?.kind === "draft" && (
             <ol aria-label="Steps" className="flex list-decimal flex-col gap-1 pl-5">

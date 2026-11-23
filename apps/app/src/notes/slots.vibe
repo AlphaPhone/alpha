@@ -1,7 +1,8 @@
 // spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
-import { Native } from "../platform/native.vibe"
+import { Native, NativeUnavailable } from "../platform/native.vibe"
+import { LegacySlotRead } from "../platform/native.schema.vibe"
 import { decodeSecureExchange, decodeSecureRead } from "./notes.schema.vibe"
 
 /** The slot could not be read or written; nothing was changed. */
@@ -17,6 +18,22 @@ export const slots = {
   legacyTrash: "notes-trash:v1:device",
 } as const
 
+/** The earlier Alpha's own device collection of notes, which this version neither reads nor moves (docs/vibestack-open-items.md, "Upgrade requirement"). */
+export const earlierRecordsSlot = "notes-records:v1:device"
+
+/**
+ * Whether the earlier Alpha's device collection may still hold notes: false only where the phone has no earlier store, or reads its
+ * slot as empty. A slot that cannot be read counts as kept. Nothing is moved or written.
+ */
+export effect function earlierNotesKept(): boolean!!(Native) {
+  const native = try Native
+  if (!(try native.available("AlphaConnection"))) return false
+  const raw = native.invoke("AlphaConnection", "secureRead", { slot: earlierRecordsSlot }) catch (error) => error
+  if (raw instanceof NativeUnavailable) return false
+  const read = Schema.decodeUnknownEffect(LegacySlotRead)(raw) catch () => undefined
+  return read === undefined || (typeof read.value === "string" && read.value !== "")
+}
+
 /** The earlier Alpha's encrypted connection slot each Notes slot moves from; its kept draft was a change set over the old device collection, which no slot of this version reads. */
 export const legacySlots: Readonly<Record<string, string>> = {
   [slots.folders]: "notes-folders:v1:device",
@@ -25,13 +42,13 @@ export const legacySlots: Readonly<Record<string, string>> = {
 }
 
 /** One slot's raw value: the hardware-backed secure store on Android, after moving what the earlier Alpha kept for it, and the WebView's private storage elsewhere. */
-export effect function readSlot(slot: string): string | undefined!SlotUnavailable {
+export effect function readSlot(slot: string): (string | undefined)!SlotUnavailable!(Native | KeyValueStore.KeyValueStore) {
   const native = try Native
   if (try native.available(plugin)) {
     const legacy = legacySlots[slot]
     if (legacy !== undefined) try adoptLegacySlot(legacy, slot)
-    const answer = try (native.invoke(plugin, "get", { key: slot }) catch effect () => { throw new SlotUnavailable({ slot }) })
-    const read = try (decodeSecureRead(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const answer = (native.invoke(plugin, "get", { key: slot }) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const read = (decodeSecureRead(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
     if ("error" in read) {
       if (read.error === "not_found") return undefined
       throw new SlotUnavailable({ slot })
@@ -39,16 +56,16 @@ export effect function readSlot(slot: string): string | undefined!SlotUnavailabl
     return read.value ?? undefined
   }
   const store = try KeyValueStore.KeyValueStore
-  return try (store.get(`alpha.browser.${slot}`) catch effect () => { throw new SlotUnavailable({ slot }) })
+  return (store.get(`alpha.browser.${slot}`) catch effect () => { throw new SlotUnavailable({ slot }) })
 }
 
 /** Replace a slot's value only when it still holds `expected`; false when another writer got there first. */
-export effect function compareExchangeSlot(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable {
+export effect function compareExchangeSlot(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable!(Native | KeyValueStore.KeyValueStore) {
   const native = try Native
   if (try native.available(plugin)) {
-    const answer = try (native.invoke(plugin, "compareAndExchange", { key: slot, expected: expected ?? null, value: value ?? null })
+    const answer = (native.invoke(plugin, "compareAndExchange", { key: slot, expected: expected ?? null, value: value ?? null })
       catch effect () => { throw new SlotUnavailable({ slot }) })
-    const result = try (decodeSecureExchange(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const result = (decodeSecureExchange(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
     if ("exchanged" in result) return result.exchanged
     if (result.ok) return true
     if (result.error === "conflict") return false
@@ -56,8 +73,27 @@ export effect function compareExchangeSlot(slot: string, expected: string | unde
   }
   const store = try KeyValueStore.KeyValueStore
   const key = `alpha.browser.${slot}`
-  const held = try (store.get(key) catch effect () => { throw new SlotUnavailable({ slot }) })
+  const held = (store.get(key) catch effect () => { throw new SlotUnavailable({ slot }) })
   if (held !== expected) return false
-  try ((value === undefined ? store.remove(key) : store.set(key, value)) catch effect () => { throw new SlotUnavailable({ slot }) })
+  const write = value === undefined ? store.remove(key) : store.set(key, value)
+  write catch effect () => { throw new SlotUnavailable({ slot }) }
   return true
+}
+
+/** A slot's reads and compare-and-exchanges over the services in scope when it is made, for a layer to keep for its methods. */
+export interface SlotAccess {
+  read(slot: string): (string | undefined)!SlotUnavailable
+  compareExchange(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable
+}
+
+/** The slots over the phone's secure store, or the WebView's private storage, as this layer was built with them. */
+export effect function slotAccess() {
+  const native = try Native
+  const store = try KeyValueStore.KeyValueStore
+  const access: SlotAccess = {
+    read: (slot) => Effect.provideService(Effect.provideService(readSlot(slot), Native, native), KeyValueStore.KeyValueStore, store),
+    compareExchange: (slot, expected, value) =>
+      Effect.provideService(Effect.provideService(compareExchangeSlot(slot, expected, value), Native, native), KeyValueStore.KeyValueStore, store),
+  }
+  return access
 }
