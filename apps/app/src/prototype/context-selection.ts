@@ -18,9 +18,9 @@ const SETTINGS_SECTION = /^[a-z][a-z0-9-]{0,63}$/;
 //@ skip
 const SETTINGS_CATEGORIES = new Set(['settings-account','settings-general','settings-privacy','settings-apps','settings-help']);
 //@ skip
-const SENSITIVE_SETTINGS = /pass|credential|vault|secret|token|key|unlock|pin|biometric/;
+const SENSITIVE_SETTINGS = /pass|credential|vault|secret|token|key|unlock|pin|biometric|carrier/;
 /** The open Settings page as an identity: its section slug only, never a value shown on it.
- * Credential and unlock pages have no identity (the screen is also paused as sensitive). */
+ * Credential, unlock and carrier pages have no identity (also paused as sensitive). */
 export function settingsSelection(state: Bag | undefined): { kind: 'settings'; id: string } | undefined {
   const page = state?.page ?? (SETTINGS_CATEGORIES.has(state?.settingsCategory) ? state?.settingsCategory : undefined);
   if (typeof page !== 'string' || !SETTINGS_SECTION.test(page) || SENSITIVE_SETTINGS.test(page)) return undefined;

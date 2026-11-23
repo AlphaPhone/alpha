@@ -1,3 +1,4 @@
+import {carrierSetupSurfaceOpen} from '../runtime/carrier-setup';
 import {createImagePreview} from '../runtime/image-preview';
 import {ChatAttachmentPicker,encodeChatAttachments} from './attachment-picker';
 import {storedChatFiles,type ChatFile,type SelectedChatFile} from './chat-attachment-files';
@@ -856,8 +857,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       view: (view === 'wallet' ? 'passwords' : view) as AlphaView,
       // Suspension invalidates this turn and approvals, but retains the account
       // and conversation. Visibility is not a claim about Android lock state.
-      // Password manager pages pause observation entirely: no view, selection or revision.
-      sensitive: view === 'wallet' || (view === 'settings' && passwordSurfaceOpen(shell.vget('settings'))) || s.secure === true || s.screen === 'lock' || s.screen === 'off' || document.hidden || shell.pageSuspended === true || connectionController.getSnapshot().open,
+      // Password and carrier-identifier pages pause observation: no view, selection or revision.
+      sensitive: view === 'wallet' || (view === 'settings' && (passwordSurfaceOpen(shell.vget('settings'))||carrierSetupSurfaceOpen(shell.vget('settings')))) || s.secure === true || s.screen === 'lock' || s.screen === 'off' || document.hidden || shell.pageSuspended === true || connectionController.getSnapshot().open,
       ...(view==='notes'&&shell.notesSelection ? { selectedObject: shell.notesSelection } : previousNotesScope ? { selectedObject:previousNotesScope } : providerSelection ? { selectedObject: providerSelection } : ['files','photos'].includes(view) && shell.vget(view).open === '__native_selected_document' && shell.selectedContext ? { selectedObject: shell.selectedContext } : {}),
     },telephonySelection);
     const published=alphaClient.getState().context;

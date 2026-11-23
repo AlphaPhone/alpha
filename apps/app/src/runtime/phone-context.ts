@@ -19,8 +19,8 @@ const kinds = new Set(['legacy-app-notes-source','note-source','canonical-note',
 /** Marker for Alpha Phone's own notifications; other apps' and hosted notices never become context. */
 export const OWN_NOTIFICATION_SOURCE = 'own';
 const SETTINGS_SECTION = /^[a-z][a-z0-9-]{0,63}$/;
-// Credential, vault and unlock surfaces are paused as sensitive; their names never become identities.
-const SENSITIVE_SETTINGS = /pass|credential|vault|secret|token|key|unlock|pin|biometric/;
+// Credential, vault, unlock and carrier pages are paused as sensitive; their names never become identities.
+const SENSITIVE_SETTINGS = /pass|credential|vault|secret|token|key|unlock|pin|biometric|carrier/;
 function opaque(value: unknown): string {
   // Identifiers only: no prose, control characters, URLs, query strings or email.
   if (typeof value !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value)) throw new Error('The selected object has an unsupported identifier.');
