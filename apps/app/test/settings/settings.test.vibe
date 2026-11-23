@@ -491,11 +491,12 @@ it.effect("Get updates hands-off (spec/settings/updates.md, \"Story: Get updates
     }
   }
   const idleRun = try run(false)
-  // spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"
+  // spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight";
+  // spec/settings/updates.md, "A failed poll retries after one minute, doubling to fifteen": an install that was due on a call retries in a minute.
   const onACall = try run(true)
   try Effect.try(() => assert.deepStrictEqual(
     { idleRun: idleRun.automatic, onACall: [onACall.automatic, onACall.wakeAt] },
-    { idleRun: [{ apkUrl: row.apkUrl, sha256: row.sha256, sizeBytes: row.sizeBytes, versionCode: row.versionCode, automatic: true, manifestSha256: DIGEST }], onACall: [[], 900000] },
+    { idleRun: [{ apkUrl: row.apkUrl, sha256: row.sha256, sizeBytes: row.sizeBytes, versionCode: row.versionCode, automatic: true, manifestSha256: DIGEST }], onACall: [[], 60000] },
   ))
 })
 
