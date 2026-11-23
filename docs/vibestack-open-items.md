@@ -28,11 +28,16 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - the origin-local meeting preview;
   - foreground alert catch-up (legacy `calendar-alerts.ts`), which would belong to Clock.
 
-  The Calendar "Not connected" Settings button still opens account > google; confirm that target.
-- **Upgrade requirement:** Keep access to existing on-device Notes and unsaved drafts in the current Alpha package, as required by the PRD. The agent's earlier Notes importer reads its own state file. Verify the separate read-only recovery path from the encrypted `notes-records:v1:device` and `notes-draft:v1:device` slots, in a same-package Android upgrade, including an unreadable slot, an interrupted retry, and access to archived data and legacy recordings. Keep the earlier data until the upgrade or recovery is verified.
-- **OWNER:** Other legacy slots not carried over:
-  - old inbox operation records (`inbox-operation:v1:<sha256>`), possibly including a send in flight during the update: move to `device:<key>` in MailOperations, or drop?
+  The Calendar "Not connected" Settings button opens account > google, now with the Google panel's Calendar intent (the same as the Calendars sheet's Connect); confirm that target.
+- **OWNER:** Reminders are no longer Calendar rows: legacy listed saved reminders in Calendar and its form could make one, and Home's next line took whichever came first (`nextLead` in `spec/calendar/home.md` has no caller). Clock owns reminders now. Show them in Calendar again through a port Clock fills, or drop `nextLead`?
+- **OWNER:** Saved mail moved from the encrypted `connected-read-cache:v1:<sha256>` slot to the WebView's KeyValueStore (localStorage), up to 8 lists and 16 bodies at rest unencrypted, and the legacy slot is never read or cleared. Move saved mail to the mail store's secure slots (`keys.savedMail` is unused), or accept it?
+- **OWNER:** Inbox keeps all accounts' drafts in one 8 MiB secure slot and all operations in another, and an operation record stores its attachments twice (`proposal.mail.files` and `composer.content`), so a send with more than about 2.9 MiB of attachments cannot be journaled although `proposalLimit` (7.5 MiB) admits it. Key the slots per account, drop file bytes from `ComposerRef.content` (bind a digest), or raise the native limit?
+- **OWNER:** The agent's Gmail body reads and mailbox changes (legacy gmail-agent-read-host: 32,000-character body reads, agent archive, Trash and read state) have no counterpart: `android/agent/policy.json` admits only `INBOX_READ` and `INBOX_COMPOSE_EMAIL`, and upstream has no change action. Keep them retired?
+- **Upgrade requirement:** Keep access to existing on-device Notes and unsaved drafts in the current Alpha package, as required by the PRD. The agent's earlier Notes importer reads its own state file. Verify a separate upgrade path from the encrypted `notes-records:v1:device` and `notes-draft:v1:device` slots, including an unreadable slot and an interrupted retry. Keep the earlier data until the upgrade or recovery is verified.
+- **OWNER:** Legacy slots not carried over:
+  - old inbox operation records (`inbox-operation:v1:<sha256>`), possibly including a send in flight during the update: move to `device:<key>` in MailOperations, or drop? Dropping can send twice: the draft of that send is adopted onto the shelf as an ordinary draft (not marked earlier), one tap sends it under a new request id, and chat-reviewed emails now derive their request id differently (SHA-256 over the reviewed content, where legacy used uuidv5 over the message, grant, sender and proposal), so Cloud's request-id idempotency catches neither. The legacy slot is never cleared.
   - `inbox-drafts:v1:chat:<sha256>` is not adopted by Inbox. The assistant's email shelf now uses the same key shape; confirm the old slots may be read as shelves.
+  - the legacy Notes draft `notes-draft:v1:device` is deliberately not adopted, because `notes-canonical-draft:v1:device` cannot read its change set; accept losing it?
 - **OWNER:** Telephony:
   - an Alpha `mms_send` operation settles as unavailable, with no card;
   - legacy kept `alpha-proposal:v1` in a native secure slot, while the port keeps it in the owner-keyed KeyValueStore. Nothing is migrated (the slot holds one card to redraw). Should it move to ElizaSecureStore?
@@ -46,6 +51,12 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **OWNER:** Browser's `GoogleLink` (`src/browser/googleReturn.vibe`) and `CloudRequests` (`src/browser/cloudCustody.vibe`) have no consumer, and GoogleLink overlaps account's google.md readback. Absorb them or drop them?
 - **OWNER:** These developer-only test-mock pieces are not ported: Browser's simulated agent Clock handoff and its exact-byte bookmark backup/reset dialog.
 - **OWNER:** Accept the legacy Trash import limits in Notes: imported rows get new IDs and a fresh deletedAt, and their recordings stay in the device audio trash.
+- **OWNER:** An upward swipe on Home opens the chat sheet (`spec/shell/gestures.md`, `RaiseAssistant`); legacy Home scrolled freely and only the dock opened chat. Keep the swipe, or drop `RaiseAssistant`? Gestures that start in the conversation or the composer, or end with text selected, are now ignored either way.
+- **OWNER:** Home grew a Notifications bell (launcher and standalone browser builds) and a Clock tile with timers, a stopwatch and world clocks; legacy removed Home's notifications control (#416/#417) and kept alarms inside Workflows. Keep them, gate the bell on test mocks off the phone, or remove them?
+- **OWNER:** Reminders has no way in from Home or the Add sheet (`reminders` has no `homeRank`), and Calendar no longer lists reminders. Give Reminders a Home rank, or restore the Calendar listing?
+- **OWNER:** Persistent notices are listed at the top of every screen, where legacy kept them in the chat. Keep the placement?
+- **OWNER:** The minimum supported WebView: legacy supported WebView 113 (no `AbortSignal.any`); state the floor or add the fallback.
+- **OWNER:** Legacy page-storage keys (theme, saved Maps places, conversation, voice and calendar choices, Gmail account choice, a pending photo copy) and the legacy slots `assistant-draft:v1:*`, `workflow-draft:v1:*`, `reminder-creations:v1:device`, `reminder-deletions:v1:device`, `clock-handoff:v1:device`, `stage-session:v1` are not adopted. Adopt each, or accept losing it?
 - **OWNER:** The resident's stored state is not carried over an app update. Legacy kept the agent database in `files/.eliza`; upstream `AgentService` launches with `files/agent/<sha256(user, org)>`, and nothing adopts the old directory (`GoogleAgentAccessFile` and `AlphaLocalAgentPlugin.notificationInstallation` still read `files/.eliza`). Adopt the legacy state (if the new agent can read the old PGlite schema), or accept a reset on update?
 - **OWNER:** Upstream's `AgentStartReceiver` (agent-service module manifest) starts the resident at boot and after every update whenever `AgentService.signedIn()`, and `AlphaAgentCredentials.current()` always answers, so Alpha's `ResidentScheduleReceiver` gate (`shouldAutoStart`: on-device or hybrid only) no longer decides. Keep "the resident always runs" (P-43) and drop the gate, or remove the upstream receiver with `tools:node="remove"`?
 - **OWNER:** Native request gates that lost their only caller when `AlphaLocalAgent.request`/`AlphaConnection.request` went: `CalendarSyncConsent`, `PreparedViewNavigation.allowed`, `OwnerRoutes.requestAllowed` and the owner-mismatch 409, reply drafting only on the verified image, and `ConnectionRoutes.managedService`/`admittedHeader`/`billingRequestIdentity`. For each: a `host.json` body or query rule, a renderer rule with a model, or retire the class.
@@ -60,18 +71,35 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Shell (integration)
 
-- Fill the assistant's ports in `PortCells` (declared in `src/assistant/ports.vibe`):
-  - `BrowserPages` with `browserPagesFromBrowser`, `MapsViews` with `mapsViewsFromMaps`, `BrowserViews` with `browserViewsFromBrowser` (all in `src/assistant/fills.vibe`);
-  - `AdvertisedCapabilities.names()` with `DeviceCapabilities.advertise(offered)`. Until then no `x-eliza-device-capabilities` header is sent.
-- `PeerFacts` (`src/assistant/host.vibe`) no longer has `browserPage`: the page goes to the peer compared for the turn (`optionalFields`), as upstream's `encodeTurnContext` gates it. A `browserPage:` field set in `AssistantHost.peer()` must be dropped.
-- Requests to `/api/client-devices/proposals` (claim, decision, receipt) and turns must carry `DeviceEnrollment.headers()`. Device actions must be refused while `AgentSession.enrollmentId` is empty, and the ChatOnly phase should show legacy's "Chat only" reason; no UI shows it yet.
-- `AppServices` must contain the Machine services of `gen/clock__notifications` and `gen/clock__reminderTaps`, plus ApprovalReviews, AgentRequests, FilePicker, Notifications and ReminderTaps; their change streams must emit the current value first (assumed by `src/shell/surfaceSheets.vibe`).
-- Browser has no always-mounted sheet; the "Browser shade sheet" was read as the browser build's notification shade in clock-notices. If another Browser sheet was meant, it needs its own surface and Back.
-- `src/shell/assistantHost.vibe` keeps local copies of `learnPeer`/`comparePeer`/`statusRead`, because upstream `./client` does not re-export them.
+- `PeerFacts` (`src/assistant/host.vibe`) no longer has `browserPage`: the page goes to the peer compared for the turn (`optionalFields`), as upstream's `encodeTurnContext` gates it. `AssistantHost.peer()` now passes it via `optionalFields`.
+- `src/shell/assistantHost.vibe` keeps local copies of `learnPeer`/`comparePeer`/`statusRead`, because upstream `./client` does not re-export them at the pin (`elizaOS/eliza` `vibestack-dp-alpha-peer-exports` adds the re-exports; check during upstream reconciliation).
+- `src/web/runtime.ts` type-checking across all merged areas still needs to be verified once syntax errors in individual areas are resolved.
 - Hardware Back does not close an open Inbox search field that has no submitted query, because that state is UI-local in InboxScreen (Inbox). The on-screen Back does close it.
-- `index.html` carries no CSP for the delegation-return landing route.
+- Preparing an app update does not write Inbox's waiting edit: `keepDrafts` in `src/shell/activity.vibe` only blurs the focused field. The shell needs a keeper port that Inbox fills with `MailComposer.flush` (answering false on a refusal), and the update must refuse while an Inbox review, selection or attachment is open (`spec/inbox/drafts.md`, `spec/settings/updates.md`).
+- The assistant's advertised capabilities are re-selected for each request from those advertised at registration (`EnrolledDevice.capabilities`), not from everything the agent offered: a capability that becomes available after registration is advertised only after the next enrollment. Keeping the offered list in `EnrolledDevice` (account) would close this.
+- Not yet ported from the shell/clock audit (`alpha-shell-clock.md`):
+  - G5: no landscape arrangement and no fitted 412 px canvas; `swipe` takes raw client pixels, so the right-edge Back and the bottom-bar HOME zones assume a 412 x 872 window;
+  - G6: Home's brief card is never fed: `Overview.reportBrief` has no caller, and Workflows' digest panel keeps the brief's text but not its outcome (Workflows);
+  - G7 (upcoming): an upcoming, not yet overdue, reminder never leads Home's agenda; `spec/calendar/home.md` `nextLead` has no caller (Calendar). Overdue reminders now reach Home;
+  - G8: the legacy `reminder-creations:v1:device`, `reminder-deletions:v1:device` and `clock-handoff:v1:device` slots are neither adopted nor listed below as accepted losses;
+  - G10: the held Back gesture previews nothing; Android still posts `alpha-back-preview` and no rule covers it;
+  - the toast in a dialog is drawn in the topmost open Radix dialog found in the DOM, not chosen by the spec's `toastHost(nav.layers)`;
+  - V1/V2: no Dafny proof and no conformance driver exists for any shell, clock or platform machine.
+- Not yet ported from the platform audits (`alpha-platform-a.md`, `alpha-platform-b.md`):
+  - legacy page-storage keys (`alpha.appearance.v1`, `alpha.maps.saved-places.v1`, `alpha.connection.conversations.v1`, voice and calendar preferences and others) are not adopted on update, so saved Maps places and the theme are lost at the cutover (see the OWNER item above);
+  - no fallback for a WebView without `AbortSignal.any` (WebView 113); either an upstream `anySignal` helper or a stated minimum WebView is needed;
+  - the device's locale and 12/24-hour setting (`System.getLocaleInfo`) are not read; every time uses the WebView's `Intl` default;
+  - an agent start refused with nothing held for review is a dead end (`resident-live.vibe` answers `needs-recovery` until the page restarts, and `control.recovered()` has no caller); legacy offered Try again and named each refusal;
+  - `DeviceStorage.reset()` and `resetOwner` have no caller, and about 30 stores use the literal `device` namespace instead of the bound owner;
+  - nothing holds Home until the sign-in page or the agent is ready (#1357), so Home flashes before the required sign-in page;
+  - `spec/platform/rendererRecovery.md` has no consumer and no native conformance driver over `RendererRecoveryBudget.java`;
+  - a cancelled connect no longer withdraws the native start (no `cancelStart` upstream);
+  - native voice turns carry no `X-Eliza-Trace-Id`, and the stream's 60 s idle and 600 s turn limits are shell constants with no Quint value or clocked test.
 
 ## Assistant
+
+- The composer sends the Browser page as `metadata.clientDevice.browserPage`, but upstream at the pin reads it only as `metadata.browserPage` (`readTurnContext`, `turns.vibe`), so the page never reaches the agent even now that the peer declares it.
+- A Calendar approval request the agent queued can never be reviewed on the phone: `src/assistant/reply-lines.vibe` admits only `maps-share` and `checkin-*` choice blocks, so `[CHOICE:approval-<id>]` shows as text. Classify it through Calendar's `calendarReviewText` into a transcript row, render it in `src/web/assistant/Transcript.tsx` with its status and a Review button that calls `ApprovalReviews.open(id)`, and call `ApprovalReviews.retire()` on a conversation change (a hidden page now retires it). The rule belongs in `spec/assistant/reply.md`.
 
 - `metadata.clientDevice.calendarAgendaSource` is not sent. Legacy sent it only from the browser build, for the browser-local Calendar source (`AlphaCalendar.prepareAgentSource`), which is also the only build that advertises `calendar.agenda-read.v1` (`spec/calendar/deviceActions.md`). The port has no browser-local Calendar (see the owner item on browser-build stores), so this waits on that decision; if kept, Calendar must export the shown source and the assistant sends it beside `calendarDay`.
 - A turn names no selected record other than the Notes list, a Browser tab or a Maps object: legacy also sent Calendar events and sources, reminders, notes, Files folders, own notifications, Settings sections, the SMS subscription and workflow runs as `selectedObject`. It needs a per-area `TurnSources` member and a rule in `spec/assistant/context.md`.
@@ -85,10 +113,36 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 ## Areas consuming assistant changes
 
 - **Telephony:** `useComms.approve/decline` now run through `commsReviewFromAssistant()` after CommsStage, but no screen draws the bar's proposal card with an Approve button, so nothing calls `useComms.approve` yet (`RestoredProposal` only dismisses). The CallBar has no approve or decline of its own.
-- **Clock:** the workflow notice tap calls `flows.askAboutNotice(id, revision, …)` (`src/clock/notifications.vibe`); it should build its question with the assistant's `workflowStepSource(notice, workflow, step, excerpt)` (`src/assistant/draft.vibe`). The clock area has no listener yet for the new native `remindersChanged`, `notificationsChanged` and `mirrorChanged` events.
+- **Clock:** a tapped workflow approval notice now asks through `workflowStepSource`, but the tap names neither the workflow nor the step, so the review is titled "Workflow step"; naming them needs the run's workflow and pending step from Workflows.
 - **Workflows:** `src/workflows/notices.vibe` should call `DeviceReview.workflowStep(runId, stepId)` in its Executing phase, so an admitted phone step actually runs. `WorkflowCalendar` (`src/workflows/calendarRanges.vibe`) has no screen consumer; the simulator still uses the pure range helpers. The `post_notification` bindingHash omits the proposal digest, because `ExecutorCall` carries none.
-- **Notes:** `create_note` still treats "Workflows in front" as a workflow run. Notes sits before the assistant in the runtime order, so it needs a port, filled by the shell from `DeviceReview.callFacts(call).workflow`. `NotesListFilter.negotiate` and `filesCapabilities` can read the advertised names once the shell fills `AdvertisedCapabilities`.
-- **Calendar:** `surfacesBack()` in `src/web/calendar/index.tsx` is no longer used and can be dropped. A device-calendar event saved from a note is not back-linked, because Calendar's new-event form always writes to the agent calendar. `linkedProviderEvents` mapped-copy suppression is not wired (legacy did not use it either).
+- **Notes:** `create_note` still treats "Workflows in front" as a workflow run. Notes sits before the assistant in the runtime order, so it needs a port, filled by the shell from `DeviceReview.callFacts(call).workflow`. `NotesListFilter.negotiate` (`notes_list_filter`) and `filesCapabilities` now read `AdvertisedCapabilities.names()` (filled by the shell in `compose/fills.vibe`).
+- **Calendar:** a device-calendar event saved from a note is not back-linked. The new-event form can now save to a phone calendar, but `linkSavedNote` links only an agent event a readback confirmed (`AgentCalendar.createdEvent`), so a phone event from a note says "Saved · note not linked". The device create's confirmed id needs to reach Notes' origins.
+
+## Inbox and Calendar (after the area pass)
+
+- **OWNER:** Home shows Inbox's unread count only and reads no mail (`spec/shell/overview.md`, "Home never reads mail"), where legacy showed unread subjects and senders from one header read; and To suggestions come from recent mail only, no longer from Contacts (`spec/inbox/drafts.md`). Both are deliberate in the spec; confirm.
+- Calendar's device create is reachable now (a phone calendar chosen in the form), but its recovery surfaces are not: `useDeviceWrites`' pending creation and failed recovery have no "Check" or "Create separately" control (`DeviceCalendar.checkCreations`, `openForm(…, separate)`), Android Calendar's hand-off and editor (`handoff`, `openExternal`) are reached only through `deviceRoute`, and the form has no guests, alert or video fields. An existing all-day, other-zone or repeating phone event is still saved through the plain `save` with instants only, where legacy opened Android Calendar's editor.
+- Calendar decisions the spec models that the shell re-implements or never calls: `confirmsDelete`/`deleteConfirmed`, `undoQueuedDelete`, `eventChanged`, `shiftedOffset`, `scopeNeeded`, `editorMutability`, `returnDay`, `sourceShown`, `phoneFreshness`, `readStart`, `agentAllDayUpdateAllowed`; `namedOutcome` reads the outcome from upstream's English summary (`src/calendar/requests.vibe`).
+- A held agent Calendar deletion still re-finds its event in the published feed when it is sent, so one confirmed and then moved out of the window during the Undo is refused (now with "Event not deleted"); capture the event record at confirm time. `CalendarScreen` discards `deleteRow`'s result (`changed`, `external`, `unconfirmed`, `not-staged`).
+- Inbox's mark read and unread prepare and dispatch directly under a fresh id with no journal record, while `spec/inbox/operations.md` says every change is one journaled operation; and drafts written on a legacy Alpha Cloud (cutover) build are not adopted, because `previousEnvironments` maps only `ElizaCloud/*`.
+- Tests and proofs: no conformance driver for any `inbox__*` or `calendar__*` module, no `.proof.dfy` under `spec/inbox` or `spec/calendar` (legacy proved `inbox-operation`, `inbox-edit-coalescer`, `gmail-mailbox` and `calendar-days`), and `InboxScreen.tsx`, `CalendarScreen.tsx`, `HomeAgendaCard.tsx` and `Surfaces.tsx` have no `.meta.tsx`. `scripts/legacy-retirement.json` maps inbox entries to `spec/inbox/digest.md` and `agentDrafts.md` and calendar entries to `googleLink.md` (now restored), `sync.md`, `nativeSync.md`, `linkedLocal.md`, `preservation.md` and `disconnect.md`, most of which do not exist; the Google disconnect now lives in `googleLink.md`.
+
+## Notes, Files and Workflows (parity audit, still open)
+
+- **OWNER:** The legacy manual workflow step editor (palette, per-step settings, Manual/Time trigger with weekday chips, "From run day"/"Fixed dates") is not ported: a workflow is made only by describe → draft → save, and the screen always saves a new workflow. Retire the editor, or port it? Either way the draft review should show each step's scope (which notes, calendars, text or notification), not only its operation label, and a saved workflow needs a "Change" that calls `WorkflowDefinitions.save(workflowId)`.
+- **Workflows, upstream routes:** `ReminderSource` and `DefinitionSource` (`src/workflows/automations.vibe`) read `/api/lifeops/reminders` and `/api/lifeops/definitions`, and reminder snooze posts to `/api/lifeops/occurrences/{id}/snooze`; vibestack-dp serves none of them. Routines now live at `/api/personal-assistant/routines` (GET, POST, PATCH, DELETE, `/{id}/occurrence`), with another record shape and PATCH, which `WorkflowApi` does not send. Port the two sources and their changes (and `familyOf`, `spec/workflows/automations.md`), or add the routes upstream.
+- **Workflows, upstream routes:** `src/workflows/sources.vibe` calls `/api/workflow/hosted/cloud-delegation/{start,status,complete,cancel,revoke}`, which vibestack-dp does not serve, so a Google-through-Cloud digest grant cannot start. Add the routes upstream, or move the grant to Account's delegation service.
+- **Workflows, screens not ported:** creating, retiming, rezoning or removing a digest schedule (the panel offers pause, resume, Run now, retry and discard; `zoneChoices` has no caller, and `DigestSourcesService.validGoogle`/`consent`/`revokeImpact`/`tick` have none either); the Background checks and Notifications switches of the digest panel (`HostedResults.setNotifications` has no caller; background delivery is now configured on Android when the account binds); the check that notifications are on when a workflow is turned on (legacy #1403); the run's steps and a failed run's reason in `RunPanel` (`WorkflowRun.events`/`error` are read nowhere; the run's own output is shown); the open run as the chat's selected object (`workflow-run`); prompt presets and the delivery conversation in `PromptSheet` (`savePrompt` sends no `deliveryConversationId`, so `saveConfirmed`'s check is vacuous); Home's workflows card names and states (it shows a count); each pending approval of a run in its own review (one is shown at a time); and a screen for the browser simulator and request recovery (test mocks only).
+- **Workflows, refusal details:** `ResidentRefused` (`src/platform/resident-live.vibe` `refusalOf`) keeps only status, code and message, so a refusal's `workflowId`, `submissionId`, `mutationId` and `expectedVersionId` never reach `workflowHttpError`. Digests' `ExactStale` (409 `WORKFLOW_TYPED_NOT_APPLIED` for the kept workflow) can therefore never match. The platform area owns the fix.
+- **Notes:** "Review reminder" on a note toasts "Check time" and opens nothing: Calendar's handoff takes only `event` drafts, and nothing calls `NotesOrigins.remember("reminder", …)`. Clock must consume a `calendar-draft` of kind `reminder` and store the back-link after the save reads back.
+- **Notes:** a kept draft of a never-saved new note is kept under `noteId: ""`, so two new notes overwrite each other and neither is ever offered back (`spec/notes/editor.md` promises "closing Alpha loses nothing"). Key kept additions by `creationId` and offer them through the kept-review bar.
+- **Notes:** a denied microphone shows "Mic off" and a retry, but does not open the startup-permissions step for the microphone as legacy did; `ShellPermissions.reopen` takes a step index that Notes does not know.
+- **Notes:** the voice-note view has no "Ask Alpha about this transcript", no action-item ticks and no seek from a transcript line (Cancel transcript is back, and leaving the note stops the upload).
+- **Notes:** an earlier device Trash row this version cannot read is held in its slot, and nothing tells the owner that earlier deleted notes need review.
+- **Notes, models:** `recordingClock` (`src/notes/recorder.vibe`) has no rule (legacy proved it in `note-recorder.dfy`), and `priorNeedsReview` matches upstream's English sentence.
+- **Files:** the legacy Recent index (`alpha.files.recent.v1`, `alpha.files.open.v1`) is not read into Recent, and the Move/Copy destination picker in `FilesScreen.tsx` is React-local state with no rule in `spec/files/mutations.md`.
+- **Files/assistant:** a chat attachment picked from storage is read through `AlphaMailAttachments.readSelected` (PDF, PNG, JPEG, WebP and .txt, up to 5 MiB), while `src/assistant/files-bridge.vibe` still offers GIF, CSV, Markdown and JSON and legacy read 20 MiB; those picks fail with ReadFailed.
+- **No meta file (Notes, Files, Workflows):** `WorkflowsScreen`, `ResultNoticeSurface`, `NotesScreen`, `NotesRecordingIndicator` and `FilesScreen` have no `.meta.tsx`.
 
 ## Voice
 
@@ -151,7 +205,9 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - The qualified host records (`voice-host/qualified-voice-host.json`, `embedding-host/qualified-host.json`) changed only `forkPin`; the staged binaries were not rebuilt at the pin. The upstream embedding producer inputs Alpha's recipe names (`local-inference/scripts/aosp/*`, `omnivoice-merged.ts`, `scripts/lib/repo-root.ts`) are gone at the pin, so `agent:build-embedding-host` cannot run until the producer is re-homed.
 - An AOSP image boot is needed for the new abstract socket `<package>.workflow.v1` under the privileged-app domain.
 - The native channel takes no headers, so `X-Eliza-Device-*` and `X-ElizaOS-Client-Id` are no longer forwarded on native requests (needs the upstream items below).
-- ElizaSecureStore must accept the exact `inbox-drafts:v1:*` names the renderer reads and the keys `device:alpha/device/inbox/drafts~held` and `device:alpha/device/inbox/operations~held` (keys over 200 characters are refused). AlphaConnection must keep answering `secureRead`/`secureCompareExchange` for the `inbox-drafts:v1:*` slots and `notes-folders:v1:device`, `note-origins:v1:device` and `notes-trash:v1:device`.
+- ElizaSecureStore must accept the exact `inbox-drafts:v1:*` names the renderer reads and the keys `device:alpha/device/inbox/drafts~held` and `device:alpha/device/inbox/operations~held` (keys over 200 characters are refused). `RendererCredentialSlots` now admits the `~held` suffix; that the whole store path accepts them on a phone is not checked. Until it does, Inbox runs its journal in memory after a bad stored value, and now refuses to dispatch from it rather than sending un-journaled. AlphaConnection must keep answering `secureRead`/`secureCompareExchange` for the `inbox-drafts:v1:*` slots and `notes-folders:v1:device`, `note-origins:v1:device` and `notes-trash:v1:device`.
+- The agent's Gmail-changes and Calendar-edits switches are saved and published, but `android/agent/host.json` launches the agent with `gmailChanges: false, calendarEdits: false` and nothing reads `ALPHA_GOOGLE_AGENT_ACCESS_FILE` (upstream takes consent only from the launch document), so agent-side Google writes are always refused whatever Settings shows. The launch must carry the saved switches (and restart the agent on a change).
+- `android/agent/host.json` sets no `CEREBRAS_RATE_LIMIT_MAX_HOLD_SECONDS`, so one hosted-model 429 holds the account for the provider's whole retry time instead of legacy's under five seconds (#1417/#1428/#1448).
 - `WorkflowBridgeHost.perform` still reads `read_calendar_range` in-process with SelectedCalendarReader instead of forwarding to the renderer's Calendar operationPorts.
 - `spec/shell/system.md` (home-start handoff, text zoom, Settings shortcuts) has no renderer path.
 - The Google App Link `appReturn` has no native source. The delegation-callback and workspace-return methods stay on AlphaConnection.
@@ -193,10 +249,9 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - the strict DoneFrame refuses `awaitingReview`, and DoneFrame notices are never produced;
   - there is no shared-note read-reply lease (`readReply`/`completeReadReply`);
   - `./client` does not re-export `learnPeer`/`comparePeer`/`statusRead`.
-- **agent:** a workflow device-offer helper is missing, so `read_selected_notes`/`create_note` can answer DEVICE_STEP_UNSUPPORTED.
 - **agent/voice:** `VoiceReplyAction` has no failure flag, so the "email action failed" line is unreachable.
-- **cloud:** `@elizaos/cloud` has no `CloudServices.client.googleCalendarSync(request, { signal })` (assumed signature, used by `src/calendar/deviceSync.vibe`), and the device route table lacks `creditsCheckout`.
-- **plugin-inbox:** `inboxComposeActionName` is exported only from the package root, so voice keeps a local copy.
+- **cloud:** the device route table lacks `creditsCheckout`.
+- **plugin-inbox:** `inboxComposeActionName` is exported only from the package root, so voice keeps a local copy. Also a read message carries no Reply-To (`GmailReadResult`/`wire.schema.vibe` have no `replyTo`), so `src/inbox/gmail.vibe` sets `replyTo: ""` and a reply always goes to the sender, never to a list's or ticket system's Reply-To.
 
 ## Unverified in the code-only phase
 
@@ -206,15 +261,12 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - voice: `voice__acknowledgement` (CueTurn, acknowledged, audible, replyReady, ended, cancel, replyMayStart), cross-module `R::cueReplyBoundMs`, `R::ackLimit`, `R::Cue`, plus the extended `voice__latency`;
   - account: `account__enrollment`, `paymentPageOpens`, `authorizePageOpens`;
   - browser: `browser__pageContext`;
-  - calendar: `calendar__deviceSync`;
+  - calendar: `calendar__googleLink` (GoogleRow, PauseReport, googleRow, grantOf, pauseNeeded, pauseReport, accessContinuation), `calendar__home` homeReads, `calendar__presentation` replyRereads, `calendar__editor` agentRepeatSendable and newEventTarget;
   - camera: `camera__agentCapture` `panelLimitMs`;
   - clock: `clock__agentReview`, `clock__notifications` ConsumeAnswer and consumeAccepted;
   - inbox: keepPrevious, inboxAdvertised, `decodeState`/`machine` of `inbox__drafts` and `inbox__operations`;
-  - notes: `noteSaveResult`;
   - settings: Elsewhere, calendarSettingsRoute and others;
-  - telephony: askLeavesField, `searching`;
-  - files: `shell__navigation` `initial`/`Nav`;
-  - workflows: Kept, PageWrite, PageEnd, historyLimit, `workflows__deviceSteps` noticePath, postedOutcome, PostedAnswer.
+  - telephony: askLeavesField, `searching`.
 - **Effect and VibeLang typing:**
   - `Layer.unwrap` in `storedOrHeld`;
   - `Effect.onInterrupt`;
@@ -224,7 +276,6 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - `let` rebinding of a `catch` expression;
   - a getter inside `satisfies Pick<…>`;
   - the `Stream.filter` refinement, `Stream.mapEffect`/`Stream.concat` and `Ref.Ref` in the resident stream relay;
-  - `createCalendarSyncHost`'s effect members called from VibeLang;
   - whether `Stream.drop` over `WorkflowsPlace.moves` and `Foreground.changes`/`AssistantDraft.review` emit their current value first;
   - `Machine.send` returning Cue for a spec with no out.
 - **Build and tooling:**
@@ -271,7 +322,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 ## After merging develop through #1449 (#1422 retirement)
 
 - Android code that #1422 itself kept: `PairedAgentCredential`, `PairedSpeechContract`, `HostedTransport`, the paired branch in `AlphaVoiceCloudPlugin`, `ConnectionRoutes.retiredPairing`, `CalendarSyncBridge` and Android `AlphaCalendar.sync`. **OWNER:** retire these too, now that client Calendar linked sync is gone from the app?
-- `owner-routes.json` still lists `/api/lifeops/calendar/sync-control` and `/links`.
+- Calendar's Google link (`src/calendar/link.vibe`) uses `/api/lifeops/calendar/sync-control`, `/sync-control/destinations` and `/links` again; `owner-routes.json` and `android/agent/host.json` admit all three; whether the resident at the pin serves `/sync-control/destinations` on the phone is not checked.
 - Some androidTest files still call `AlphaConnection.secureWrite`/`secureRemove`, which the branch removed.
 - `docs/simplification-audit/**` (4,666 files) came in with #1422 and describes the legacy renderer.
 
