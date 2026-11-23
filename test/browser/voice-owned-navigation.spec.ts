@@ -428,6 +428,81 @@ test('a spoken exact note title opens its editor from Home and keeps Talk listen
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
 });
 
+for(const mode of ['polite title','follow-up','one request','existing identical note'] as const)test(`Talk opens the actual saved note for a ${mode}`,async({page},info)=>{
+ await setup(page,'sheet',false,true);
+ await page.evaluate(mode=>{
+  const f=(window as any).ownedVoiceNavigation;
+  const at='2026-11-21T12:00:00Z';
+  const make=(id:string,title:string)=>({id,title,body:'\nAvocados, limes, and cheese.',color:'yellow',createdAt:at,updatedAt:at});
+  const note=make('record-from-receipt','Shopping List');
+  f.notes=[make('other-record',mode==='polite title'?'Taco Night Plan':'Shopping List')];
+  if(mode==='polite title')f.notes.push(note);
+  else {
+   f.answer=mode==='follow-up'?'I made the checklist.':'The list is saved, but I could not open it.';
+   const reused=mode==='existing identical note';
+   f.actionResults=[{effectReceipts:[{
+    receiptId:crypto.randomUUID(),operation:'notes.note.create',resource:{kind:'notes.note',id:note.id,version:'1'},
+    artifacts:[],idempotency:{key:reused?note.id:null,replayed:reused},observedAt:at,
+    ...(reused?{outcome:'noop',reason:'An identical note already exists.'}:{outcome:'applied',commit:{kind:'durable',id:note.id,committedAt:at}}),
+   }]}];
+   if(reused)f.notes.push(note);else f.noteToCommit=note;
+  }
+  f.prompt=mode==='polite title'?'Can you open the shopping list note, please?':
+   mode==='follow-up'?'Make a checklist in Notes and name it Shopping List.':
+   'Make a checklist in Notes called Shopping List and open it.';
+  f.releaseNotesRead();
+ },mode);
+ await utterance(page);
+ if(mode==='follow-up'){
+  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+  await page.evaluate(()=>{
+   const f=(window as any).ownedVoiceNavigation;
+   f.finishPlayback();f.prompt="Yeah. Can you, why didn't you just open the notes view? and switch to that note or open that note?";
+  });
+  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+  await utterance(page);
+ }
+ await expect(page.locator('[data-alpha-subview="notes-editor"]').getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Shopping List');
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.shell.canonicalNotesUi.open)).toBe('record-from-receipt');
+ await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken.at(-1)))
+  .toBe(mode==='one request'?'Saved and opened "Shopping List" in Notes.':'Opened "Shopping List" in Notes.');
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(mode==='polite title'?0:1);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await page.screenshot({path:info.outputPath('opened-note.png'),animations:'disabled'});
+});
+
+test('typed create and open preserves the composer and opens the committed record',async({page})=>{
+ await setup(page,'sheet',false,true);
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();
+ await page.evaluate(async()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  connectionController.getSelectedConversationId=()=>f.room;
+  f.allowTyped=true;
+  const at='2026-11-21T12:00:00Z',id='typed-new-note';
+  f.notes=[];
+  f.noteToCommit={id,title:'Trip Budget',body:'\nTrain and hotel.',color:'yellow',createdAt:at,updatedAt:at};
+  f.answer='Saved your note.';
+  f.actionResults=[{effectReceipts:[{
+   receiptId:crypto.randomUUID(),operation:'notes.note.create',resource:{kind:'notes.note',id,version:'1'},
+   artifacts:[],idempotency:{key:null,replayed:false},observedAt:at,outcome:'applied',
+   commit:{kind:'durable',id,committedAt:at},
+  }]}];
+  f.releaseNotesRead();
+  f.shell.messageReplyTarget=f.shell.messageEditTarget=undefined;
+ });
+ const composer=page.getByRole('textbox',{name:'Message Alpha',exact:true}).filter({visible:true});
+ await composer.fill('Write a note called Trip Budget, then show it.');
+ await page.getByRole('button',{name:'Send',exact:true}).filter({visible:true}).click();
+ const editor=page.locator('[data-alpha-subview="notes-editor"]');
+ await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Trip Budget');
+ await expect(composer).toBeVisible();
+ await expect(composer).toHaveValue('');
+ await expect(page.getByText('Saved and opened “Trip Budget” in Notes.',{exact:true})).toBeVisible();
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(1);
+});
+
 test('a spoken title matching two notes asks the owner to choose and opens neither',async({page})=>{
  await setup(page,'sheet',false,true);
  await page.evaluate(()=>{

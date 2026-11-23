@@ -4,6 +4,7 @@ import {storedChatFiles,type ChatFile,type SelectedChatFile} from './chat-attach
 import {CHAT_IMAGE_MIME_TYPE_SET,MAX_CHAT_UPLOAD_ATTACHMENTS} from '../../../../.eliza/client-features/packages/core/src/chat-upload-limits';
 import type {BrowserPresentation} from "../ui/device-actions/client-coordinator";
 import type {AgentReply,ContextEnvelope,VerifiedSession} from '../runtime/alpha-client';
+import {noteCreationTarget} from '../runtime/app-record-completion';
 import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
@@ -52,7 +53,7 @@ import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
 import {notesRecorderControl} from './notes-recorder-control';
 import {cachedDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
-import {namedNoteOpenRequest,sendsSavedEmail} from '../ui/device-actions/owner-request';
+import {namedNoteOpenRequest,openAfterNoteCreate,referencedNoteOpenRequest,sendsSavedEmail} from '../ui/device-actions/owner-request';
 import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
@@ -706,7 +707,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(view==='home')shell.goHome(chat);else shell.openView(view,undefined,chat);
     return true;
   }
-  async function resolveNamedNote(shell:Shell,title:string,current:()=>void):Promise<
+  type NoteRequest = {title:string}|{id:string};
+  const recentNotes=new WeakMap<Shell,{conversationId:string;session:VerifiedSession;messageId:string;id:string}>();
+  function recentNote(shell:Shell,text:string,conversationId:string|undefined,session:VerifiedSession|null|undefined): NoteRequest|undefined {
+    const note=recentNotes.get(shell);
+    if(note&&note.conversationId===conversationId&&JSON.stringify(note.session)===JSON.stringify(session)&&
+      shell.S().msgs?.findLast((message:Shell)=>message.from==='user')?.id===note.messageId&&referencedNoteOpenRequest(text))return {id:note.id};
+  }
+  async function resolveNote(shell:Shell,request:NoteRequest,current:()=>void):Promise<
     {notes:CanonicalNotesUi;id:string;title:string}|{message:string}
   > {
     current();
@@ -716,29 +724,34 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     if(shell.notesSourceMode!=='canonical'||!notes?.current)return unavailable;
     // The visible Notes collection already owns its current records and receives invalidations.
     // Refresh offscreen or on first load. A second foreground read can briefly retire the list's context.
-    if(shell.S().view!=='notes'||notes.controller.revision===null){
+    if('id' in request||shell.S().view!=='notes'||notes.controller.revision===null){
       try{await notes.refresh();}catch{return unavailable;}
     }
     current();
     if(shell.canonicalNotesUi!==notes||!notes.current||notes.pending)return unavailable;
-    const titleKey=(value:string)=>value.normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
-    const key=titleKey(title),saved=notes.notes();
-    const exact=saved.filter(note=>titleKey(note.title)===key);
-    const words=(value:string)=>titleKey(value).match(/[\p{L}\p{N}]+/gu)??[];
-    const query=words(title);
-    // Exact titles take precedence. Shorthand must match complete title words in order.
-    // A second matching record makes the selection ambiguous even when one is newer.
-    const matches=exact.length||!query.length?exact:saved.filter(note=>{
-      const titleWords=words(note.title);
-      let next=0;
-      for(const word of titleWords)if(word===query[next])next++;
-      return next===query.length;
-    });
-    if(matches.length>1)return {message:exact.length?
-      `More than one note is titled “${title}”. Open Notes and choose the one you want.`:
-      `More than one note matches “${title}”. Give me the full title.`};
-    const note=matches[0];
-    if(!note)return {message:`I couldn’t find a note titled “${title}”.`};
+    const saved=notes.notes();
+    let note:typeof saved[number]|undefined;
+    if('id' in request){
+      note=saved.find(candidate=>candidate.id===request.id);
+      if(!note)return {message:'I couldn’t find that saved note.'};
+    }else{
+      const {title}=request;
+      const titleKey=(value:string)=>value.normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
+      const key=titleKey(title),exact=saved.filter(note=>titleKey(note.title)===key);
+      const words=(value:string)=>titleKey(value).match(/[\p{L}\p{N}]+/gu)??[];
+      const query=words(title);
+      // Shorthand must match complete title words in order and identify one saved note.
+      const matches=exact.length||!query.length?exact:saved.filter(note=>{
+        let next=0;
+        for(const word of words(note.title))if(word===query[next])next++;
+        return next===query.length;
+      });
+      if(matches.length>1)return {message:exact.length?
+        `More than one note is titled “${title}”. Open Notes and choose the one you want.`:
+        `More than one note matches “${title}”. Give me the full title.`};
+      note=matches[0];
+      if(!note)return {message:`I couldn’t find a note titled “${title}”.`};
+    }
     if(notes.dirty&&notes.open!==note.id)return {message:'Finish the unsaved edits in your note before opening another one.'};
     return {notes,id:note.id,title:note.title};
   }
@@ -755,6 +768,20 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         resolve(opened);
       }catch(error){reject(error);}
     }));
+  }
+  async function openVoiceNote(shell:Shell,target:{notes:CanonicalNotesUi;id:string},navigation:import('../runtime/alpha-client').VoiceNavigationContinuation,current:()=>void,accept:(value:ContextEnvelope)=>void):Promise<boolean>{
+    let opened=false;
+    try{
+      opened=await navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(shell,target,chat,onCommitted),{kind:'canonical-note',id:target.id});
+      return opened;
+    }finally{
+      const next=navigation.finish(opened);
+      if(next)accept(next);
+    }
+  }
+  function noteCreationReply(reused:boolean,title?:string):string {
+    if(title!==undefined)return `${reused?'Opened':'Saved and opened'} “${title}” in Notes.`;
+    return reused?'That note is already saved. I couldn’t open it.':'I saved the note, but couldn’t open it.';
   }
   /** Opens Camera for a photo the agent proposed without showing Camera: the same navigation as the Camera app icon. */
   function openRequestedCamera(shell:Shell):Promise<boolean>{
@@ -2168,22 +2195,18 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
     }
     const noteTitle=input.navigation?namedNoteOpenRequest(text):undefined;
-    if(noteTitle&&input.navigation){
+    const noteRequest=noteTitle?{title:noteTitle}:recentNote(this,text,binding.conversationId,binding.session);
+    if(noteRequest&&input.navigation){
       this.voiceSendTurnId=turnId;
       try{
-        const target=await resolveNamedNote(this,noteTitle,current);
+        const target=await resolveNote(this,noteRequest,current);
         current();
         let answer:string;
         if('message' in target)answer=target.message;
         else{
-          let opened=false;
-          try{
-            opened=await input.navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(this,target,chat,onCommitted),{kind:'canonical-note',id:target.id});
-          }finally{
-            const next=input.navigation.finish(opened);
-            if(next)acceptedContext=next;
-          }
+          const opened=await openVoiceNote(this,target,input.navigation,current,next=>{acceptedContext=next;});
           answer=opened?`Opened “${target.title}” in Notes.`:'I couldn’t open that note. Try again from Notes.';
+          if(opened)recentNotes.set(this,{conversationId:binding.conversationId,session:binding.session,messageId:turnId,id:target.id});
         }
         current();
         const replyId=`voice-note-open:${turnId}`;
@@ -2197,6 +2220,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     const continuation=input.navigation;
+    const revealCreatedNote=!!continuation&&openAfterNoteCreate(text);
     const projectRequestedView=continuation?async(target:string,actionSignal:AbortSignal)=>{
       const view=alphaViewKey(target);
       const check=()=>{actionSignal.throwIfAborted();current();};
@@ -2243,14 +2267,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const replyStarted=(event:Event)=>{const value=(event as CustomEvent<BatchProgressCue>).detail;if(belongs()&&value.turnId===turnId&&value.conversationId===binding.conversationId&&value.ownerId===binding.session.ownerId)input.onReplyStarted?.();};
       batchVoiceProgressEvents.addEventListener('progress',progress);
       batchVoiceReplyEvents.addEventListener('reply',replyStarted);
-      let reply;
+      let reply:AgentReply;
       // Only confirmed text reaches the voice session's early speech. Provisional text (a Stage-1
       // draft or action status) is shown but never spoken, and after it this turn's confirmed reply
       // decides what is spoken.
       let provisionalSeen=false;
       try{reply=await alphaClient.send(text,(value,frame)=>{current();streamed=true;
         if(frame?.provisional!==false)provisionalSeen=true;
-        else if(input.onText&&!provisionalSeen&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
+        else if(input.onText&&!revealCreatedNote&&!provisionalSeen&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
         this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal,projectRequestedView,...(images?{images}:{})});}
       finally{batchVoiceProgressEvents.removeEventListener('progress',progress);batchVoiceReplyEvents.removeEventListener('reply',replyStarted);}
       input.onReplyStarted?.();
@@ -2271,8 +2295,18 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const emailOutcome=await this.stageAgentEmailDraft?.(reply,text,belongs);
       const emailCardReady=emailOutcome===true;
       const present=reply.completedActions?.find(receipt=>receipt.presentBrowser)?.presentBrowser;
+      const created=noteCreationTarget(reply.actionResults);
+      if(created)recentNotes.set(this,{...identity,messageId:reply.userMessageId,id:created.id});
       let delivered=false;
-      try{
+      let presentedReply=reply;
+      if(created&&revealCreatedNote&&continuation&&!present&&!reply.proposals?.length){
+        const target=await resolveNote(this,created,current);
+        if('id' in target)delivered=await openVoiceNote(this,target,continuation,current,next=>{acceptedContext=next;});
+        const text=noteCreationReply(created.reused,delivered&&'title' in target?target.title:undefined);
+        current();
+        this.setState((previous:Shell)=>({msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,text}:m)}));
+        presentedReply={...reply,text};
+      }else try{
         delivered=present&&input.navigation
           ?await input.navigation.apply('browser',current,(chat,onCommitted)=>commitNavigation(this,'browser',()=>present(chat)===true,onCommitted),present.selection)
           :await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
@@ -2324,8 +2358,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         :smsReview==='addressed-draft'?'Your draft is ready. Review it on your phone. You can confirm by voice.'
         :smsReview==='send'?'Review the text on your phone. You can confirm by voice or tap Send.'
         :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
-        :spokenActionReply(text,reply,emailCardReady);
-      return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
+        :spokenActionReply(text,presentedReply,emailCardReady);
+      return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:presentedReply.text,...(speechText===presentedReply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
     }catch(error){
       input.navigation?.finish(false);
       if(streamed&&this.live)this.setState((previous:Shell)=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{msgs:previous.msgs.map((m:Shell)=>m.id===streamId?{...m,streaming:false,interrupted:true}:m)}:null);
@@ -2357,9 +2391,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // A prompt sent from elsewhere (a suggestion, a Calendar decision, a reviewed email) is not the
     // composer's text: the composer keeps its draft, its saved copy, its reply target and source.
     const fromComposer=argument===undefined;
-    const noteTitle=fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment
-      ?namedNoteOpenRequest(text):undefined;
-    if(noteTitle){
+    const plainComposer=fromComposer&&!hasBinaryAttachment&&!edit&&!reply&&!this.mailAttachment&&!this.transcriptAttachment;
+    const noteTitle=plainComposer?namedNoteOpenRequest(text):undefined;
+    const noteSession=connectionController.getSnapshot().session;
+    const noteRequest=noteTitle?{title:noteTitle}:plainComposer?recentNote(this,text,selectedConversation,noteSession):undefined;
+    if(noteRequest){
       const bound=sendBinding();
       context(this);
       if(alphaClient.getState().context.sensitive||connectionController.getSnapshot().open)return;
@@ -2375,12 +2411,16 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       };
       this.draftSendPending=true;
       try{
-        const target=await resolveNamedNote(this,noteTitle,current);
+        const target=await resolveNote(this,noteRequest,current);
         current();
         const chat=this.S().chat==='full'?'full':'sheet';
-        this.setState((previous:Shell)=>({draft:'',chat,msgs:[...previous.msgs,{id:crypto.randomUUID(),from:'user',text}]}));
-        const answer='message' in target?target.message:
-          await openNamedNote(this,target,chat)?`Opened “${target.title}” in Notes.`:'I couldn’t open that note. Try again from Notes.';
+        const messageId=crypto.randomUUID();
+        this.setState((previous:Shell)=>({draft:'',chat,msgs:[...previous.msgs,{id:messageId,from:'user',text}]}));
+        let answer='message' in target?target.message:'I couldn’t open that note. Try again from Notes.';
+        if('id' in target&&await openNamedNote(this,target,chat)){
+          answer=`Opened “${target.title}” in Notes.`;
+          if(selectedConversation&&noteSession)recentNotes.set(this,{conversationId:selectedConversation,session:noteSession,messageId,id:target.id});
+        }
         if(this.live&&!document.hidden&&sendBinding()===bound)this.agentSay(answer);
       }catch{
         if(this.live&&!document.hidden&&sendBinding()===bound)this.toast('Couldn’t open that note.');
@@ -2524,7 +2564,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{return await commitNavigation(this,view,()=>openInternalView(this,view,this.S().chat));}
         finally{release();}
       };
-      navigation=connectionController.captureViewNavigation(alphaClient.getState().context);
+      const navigationContext=alphaClient.getState().context;
+      navigation=connectionController.captureViewNavigation(navigationContext);
       if(!transcriptCurrent())throw new NotDispatched('The recording changed. Attach the transcript again.');
       if(mail){await mail.validate();if((this.mailAttachment??null)!==mail)throw new NotDispatched('The attached email changed. Nothing was sent.');}
       if(sentAttachment?.fileAttachments?.length&&(!sameChat()||!filesCurrent()||!this.live||document.hidden))
@@ -2574,6 +2615,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // A conversation delivery can land the saved reply before this rename; keep its content and enrich only a missing plan control.
       if(streamed)this.setState((previous:Shell)=>settlementCurrent()?{msgs:reply.messageId&&previous.msgs.some((m:Shell)=>m.id===reply.messageId)?previous.msgs.filter((m:Shell)=>m.id!==streamedId).map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planCard,identity):m):previous.msgs.map((m:Shell)=>m.id===streamedId?{...m,id:reply.messageId||m.id,messageBinding:reply.messageId?identity:undefined,text:reply.text,streaming:false,...(planCard?{card:planCard}:{})}:m)}:null);else this.agentSay(reply.text,planCard,reply.messageId&&identity?{id:reply.messageId,messageBinding:identity}:undefined,settlementCurrent);
       if(reply.userMessageId&&identity)await new Promise<void>(resolve=>this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m)}:null,resolve));
+      const created=noteCreationTarget(reply.actionResults);
+      if(created&&identity&&reply.userMessageId&&settlementCurrent())recentNotes.set(this,{...identity,messageId:reply.userMessageId,id:created.id});
       keepWorkflowChanges(this,reply,settlementCurrent);
       await this.stageAgentEmailDraft?.(reply,text,settlementCurrent);
       if(this.messageReplyTarget===replyTarget)this.messageReplyTarget=undefined;
@@ -2586,7 +2629,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       try{
         const present=reply.completedActions?.find(receipt=>receipt.presentBrowser)?.presentBrowser;
-        let delivered=present&&settlementCurrent()&&!attempt.stop.signal.aborted
+        let delivered=false;
+        if(created&&plainComposer&&openAfterNoteCreate(text)&&!present&&!reply.proposals?.length&&settlementCurrent()&&
+          !attempt.stop.signal.aborted&&alphaClient.continuesContext(navigationContext)){
+          const current=()=>{
+            attempt.stop.signal.throwIfAborted();
+            if(!settlementCurrent()||document.hidden||connectionController.getSnapshot().open||
+              !alphaClient.continuesContext(navigationContext))throw Error('The conversation changed.');
+          };
+          const target=await resolveNote(this,created,current);
+          current();
+          delivered='id' in target&&await openNamedNote(this,target,this.S().chat);
+          const text=noteCreationReply(created.reused,delivered&&'title' in target?target.title:undefined);
+          const messageId=reply.messageId||streamedId;
+          this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===messageId?{...m,text}:m)}:null);
+        }else delivered=present&&settlementCurrent()&&!attempt.stop.signal.aborted
           ?await commitNavigation(this,'browser',()=>present(this.S().chat)===true)
           :await deliverNavigation(reply.actionResults);
         // The agent may propose the photo without showing Camera in the same turn. When that photo is this reply's

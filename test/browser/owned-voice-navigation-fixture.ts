@@ -41,7 +41,7 @@ export async function setup(page:Page,detent='sheet',development=false,canonical
   c.voiceConversationCurrent=(binding,foreground=true)=>binding.connectionEpoch===1&&binding.conversationId===f.room&&JSON.stringify(binding.session)===JSON.stringify(f.session)&&(!foreground||!snapshot.open&&!document.hidden);
   const navigation=f.navigation=new ViewNavigationClient(async(path,body,signal)=>{signal.throwIfAborted();f.requests.push({path,body:structuredClone(body)});if(path.endsWith('interact-claim')){f.claims++;if(f.holdClaim)await new Promise<void>(resolve=>f.releaseClaim=resolve);return {claimId:'claim-'+(body as any).requestId};}f.acks++;if(f.holdAck)await new Promise<void>(resolve=>f.releaseAck=resolve);return {accepted:true};},()=>snapshot.session===f.session&&!snapshot.open,()=>alphaClient.getState().context);
   c.captureViewNavigation=context=>({client:navigation,attempt:navigation.capture(context)});
-  const transport={session:f.session,send:async input=>{input.signal.throwIfAborted();if(input.channelType!=='VOICE_DM')throw Error('Only new voice turns expected');f.inputs.push({requestId:input.requestId,context:structuredClone(input.context),text:input.text,conversationId:input.expectedConversationId});
+  const transport={session:f.session,send:async input=>{input.signal.throwIfAborted();if(input.channelType!=='VOICE_DM'&&!(f.allowTyped&&input.channelType==='DM'))throw Error('Only new voice turns expected');f.inputs.push({requestId:input.requestId,context:structuredClone(input.context),text:input.text,conversationId:input.expectedConversationId});
    if(f.browserDestination){
     const present=await f.shell.browserNavigateApproved(f.browserDestination,input.signal,true);
     f.browserDestination=undefined;
@@ -60,8 +60,9 @@ export async function setup(page:Page,detent='sheet',development=false,canonical
     return {text:'Here is the text to review.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},proposals:[proposal]};
    }
    if(f.answer){
+    if(f.noteToCommit){f.notes.push(f.noteToCommit);f.noteToCommit=null;}
     input.onText?.(f.answer,{provisional:false,direct:true});
-    return {text:f.answer,messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session}};
+    return {text:f.answer,messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},actionResults:f.actionResults};
    }
    const id=crypto.randomUUID(),viewId=f.target==='home'?'chat':f.target,values={mode:'show',viewId,viewPath:'/'+viewId,viewType:'gui',label:f.target,completedActionDelivered:true,completedActionHandoffId:id,navigationPrepared:true,navigationBinding:{clientId:navigation.clientId,requestId:id,viewId,viewType:'gui',installationId:f.installationId}};return {text:'Opened '+f.target+'.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},actionResults:[{actionName:'VIEWS_SHOW',success:true,values}]};},execute:async({proposal,signal,approval})=>{
     signal.throwIfAborted();

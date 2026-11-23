@@ -14,10 +14,17 @@ function word(value: string) {
   return unquote(value).replace(/\.$/, "").toLowerCase();
 }
 
+function noteCommand(text: string) {
+  return ownerCommand(text).replace(/[.!?]+$/, "")
+    .replace(/(\b(?:note|notes app|in notes)|["”])\s+please$/i, "$1")
+    .replace(/\s*,\s*please$/i, "").trim();
+}
+
 /** A local editor navigation request. An app name alone or an unspecified note stays in chat. */
 export function namedNoteOpenRequest(text: string): string | undefined {
-  const request = ownerCommand(text).replace(/[.!?]+$/, "").trim();
-  const command = request.replace(/^(?:(?:in|from) (?:the )?notes(?: app)?[, ]+|(?:go|switch) to (?:the )?notes(?: app)? and )/i, "");
+  const request = noteCommand(text);
+  const command = request.replace(/^(?:(?:in|from) (?:the )?notes(?: app)?[, ]+|(?:open|(?:go|switch) to) (?:the )?notes(?: app| view)? and )/i, "")
+    .replace(/^(?:take me to|(?:go|switch) to) /i, "open ");
   const named = /^(?:open|show)(?: me)? (?:the |my )?note (?:called|named|titled) (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command);
   const quoted = /^(?:open|show)(?: me)? ((?:the |my )?note )?(".+"|“.+”)( in (?:the )?notes(?: app)?)?$/i.exec(command);
   const quotedTitle = quoted && (request !== command || quoted[1] || quoted[3]) ? quoted[2] : undefined;
@@ -33,6 +40,20 @@ export function namedNoteOpenRequest(text: string): string | undefined {
   if (!named && !quotedTitle && (generic.test(reference) || relativeAction.test(reference))) return;
   const title = unquote(target).trim();
   if (title && !/[\r\n]/.test(title)) return title;
+}
+
+export function referencedNoteOpenRequest(text: string): boolean {
+  const command = noteCommand(text)
+    // A spoken correction can ask why a view did not open, then restate the navigation.
+    .replace(/^(?:(?:yeah|yes|ok(?:ay)?)[.!:,]\s+)?(?:(?:can|could|would) you,\s+)?why\b[^?\r\n]+\?\s+and\s+/i, "")
+    .replace(/^(?:(?:open|go to|switch to) (?:the )?notes(?: app| view)? and )/i, "");
+  const targets = command.split(/\s+or\s+/i).map(alternative =>
+    /^(?:open|show(?: me)?|(?:go|switch) to) ((?:this|that) note|it|the note (?:you|we) (?:just )?(?:made|wrote|created|saved|opened))$/i.exec(alternative)?.[1].toLowerCase());
+  return !!targets[0] && targets.every(target => target === targets[0]);
+}
+
+export function openAfterNoteCreate(text: string): boolean {
+  return /^(?:create|make|write|save)\s+[^\n]*\b(?:note|checklist)\b[^\n]*\b(?:and (?:then )?|then )(?:open|show(?: me)?) (?:it|(?:the|that) (?:note|checklist))(?: in (?:the )?notes(?: app)?)?$/i.test(noteCommand(text));
 }
 
 // Punctuation from dictation can separate the end of the instruction from its
