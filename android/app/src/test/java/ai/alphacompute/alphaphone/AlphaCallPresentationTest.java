@@ -7,6 +7,8 @@
 package ai.alphacompute.alphaphone;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import android.telecom.Call;
 import android.app.Notification;
 import android.app.NotificationManager;
@@ -14,6 +16,7 @@ import android.os.Looper;
 import java.lang.reflect.Constructor;
 import org.junit.runner.RunWith;
 import org.robolectric.Robolectric;
+import org.robolectric.RuntimeEnvironment;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
@@ -146,6 +149,7 @@ public class AlphaCallPresentationTest {
         AlphaInCallService owner = owner();
         try {
             owner.onCallAdded(activeCall());
+            assertNotNull(Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity());
             Notification notice = owner.getSystemService(NotificationManager.class).getActiveNotifications()[0].getNotification();
             assertEquals(R.drawable.ic_call, notice.getSmallIcon().getResId());
             // A call with no handle names nobody.
@@ -170,6 +174,8 @@ public class AlphaCallPresentationTest {
             Call call = activeCall();
             ReflectionHelpers.setField(call, "mState", Call.STATE_RINGING);
             owner.onCallAdded(call);
+            assertNull("Android owns the incoming call alert",
+                Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity());
             Notification ringing = manager.getActiveNotifications()[0].getNotification();
             assertEquals("alpha-phone-calls", ringing.getChannelId());
             assertEquals("Phone calls", manager.getNotificationChannel(ringing.getChannelId()).getName().toString());
@@ -188,6 +194,42 @@ public class AlphaCallPresentationTest {
             assertEquals(AlphaInCallService.ONGOING_CHANNEL_DESCRIPTION, quiet.getDescription());
             org.junit.Assert.assertNull(quiet.getSound());
             org.junit.Assert.assertFalse(quiet.shouldVibrate());
+        } finally {
+            owner.onDestroy();
+        }
+    }
+
+    @Test public void aScreenedCallAlsoUsesOneIncomingAlert() throws Exception {
+        AlphaInCallService owner = owner();
+        try {
+            NotificationManager manager = owner.getSystemService(NotificationManager.class);
+            Call call = activeCall();
+            ReflectionHelpers.setField(call, "mState", Call.STATE_SIMULATED_RINGING);
+            owner.onCallAdded(call);
+            assertNull(Shadows.shadowOf(RuntimeEnvironment.getApplication()).getNextStartedActivity());
+            assertEquals(1, manager.getActiveNotifications().length);
+            Notification notice = manager.getActiveNotifications()[0].getNotification();
+            assertEquals("Incoming call", notice.extras.getCharSequence(Notification.EXTRA_TEXT).toString());
+            assertNotNull(notice.fullScreenIntent);
+            assertEquals(Arrays.asList("answer", "decline"), offered(Call.STATE_SIMULATED_RINGING, false, false, false));
+        } finally {
+            owner.onDestroy();
+        }
+    }
+
+    @Test public void aDisabledRingingChannelFallsBackToOneIncomingScreen() throws Exception {
+        AlphaInCallService owner = owner();
+        try {
+            NotificationManager manager = owner.getSystemService(NotificationManager.class);
+            manager.deleteNotificationChannel(AlphaInCallService.CHANNEL_ID);
+            Call call = activeCall();
+            ReflectionHelpers.setField(call, "mState", Call.STATE_RINGING);
+            owner.onCallAdded(call);
+            var activity = Shadows.shadowOf(RuntimeEnvironment.getApplication());
+            assertNotNull(activity.getNextStartedActivity());
+            queueState(call);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+            assertNull(activity.getNextStartedActivity());
         } finally {
             owner.onDestroy();
         }

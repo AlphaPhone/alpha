@@ -14,7 +14,7 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
-import { replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
+import { formatSpeechText, planReply, replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
 import { ReadingVoice } from "../../src/browser/ports.vibe"
 import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
 
@@ -242,4 +242,25 @@ it.effect(`Hear a short line for an action (spec/voice/speech.md, "Story: Hear a
   const plain = spokenLineOf("It is sunny.", replyActionOf(undefined))
   const verbatim = spokenLineOf("Event ID: ev_123 is booked.", replyActionOf({ kind: "CALENDAR_CREATE", validatedCard: false, verbatimAsked: true }))
   try Effect.try(() => assert.deepStrictEqual({ drafted, plain, verbatim }, { drafted: EMAIL_DRAFT_READY, plain: "It is sunny.", verbatim: "Event ID: ev_123 is booked." }))
+})
+
+it.effect(`Speak abbreviated dates and clock times naturally without touching URLs, IDs or secrets (spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause")`, () => effect {
+  const reply = planReply("Availability: Sun, Nov 22, 12:00 PM - 12:30 PM.")
+  const heading = formatSpeechText("Here are three 30-minute options for tomorrow, Sun, Nov 22:")
+  const clocks = formatSpeechText("Times: 2-3 p.m., 09:05–10:00, 18:30 to 19:00.")
+  const untouched = formatSpeechText("2% of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.")
+  const secret = formatSpeechText("Your wifi password is: hunter2")
+  try Effect.try(() => assert.deepStrictEqual({
+    reply: reply.kind === "speak" ? reply.pieces.join(" ") : reply.reason,
+    heading,
+    clocks,
+    untouched,
+    secret,
+  }, {
+    reply: "Availability, Sunday, November twenty second, noon to twelve thirty P M.",
+    heading: "Here are three 30-minute options for tomorrow, Sunday, November twenty-second.",
+    clocks: "Times, two to three P M, nine oh five to ten o'clock, six thirty P M to seven P M.",
+    untouched: "2 percent of $1,299.50. Ratio 2:10. Call 415-555-0100 on 2026-11-21. UTC+01:00.",
+    secret: "Your wifi password is: hunter2",
+  }))
 })

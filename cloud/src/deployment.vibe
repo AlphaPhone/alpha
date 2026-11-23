@@ -153,7 +153,7 @@ function parts(origin: string): { readonly host: string; readonly hostname: stri
 /** The committed build outputs, by repository path. */
 export type DeploymentOutputs = Readonly<Record<string, string>>
 
-/** The renderer authority path, exported from this package as `./client-deployment`. */
+/** The renderer authority path, generated from cloud/deployment.json and re-exported by this package. */
 export const clientDeploymentFile = "cloud/generated/client-deployment.ts"
 
 /** The renderer, Java and Gradle authorities the selected deployment produces for the application id. */

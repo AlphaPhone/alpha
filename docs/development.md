@@ -284,6 +284,24 @@ product build configuration. Dependency checksums remain in
 `android/gradle/verification-metadata.xml`; regenerate and review them with
 `pnpm android:deps:write-verification` after dependency changes.
 
+### Carrier activation details
+
+On Android, **Settings → General → Carrier & SIM setup → Show identifiers** reads
+this phone’s IMEI slots before a SIM is installed, active SIM/ICCID and network
+state, and hardware/baseband facts. **Read eSIM EID (optional)** is a separate
+explicit read so an unavailable eSIM service cannot block physical-SIM setup.
+Each available identifier has its own Copy action. Values stay in the foreground
+page’s memory and clear on leaving/backgrounding; they are excluded from normal
+snapshots, diagnostics, saved app state and agent context.
+
+Android controls access. Default SMS/carrier eligibility or an actual signature
+grant can permit identifiers; an ordinary APK install does not acquire privileged
+phone access. The launcher declares the optional signature permission without
+changing its nonprivileged image placement or claiming a grant. The page shows
+denial/unavailable states and opens Android About phone, SIM, mobile and APN
+settings. Displayed identifiers do not establish carrier compatibility,
+activation, working calls/data or physical-device acceptance.
+
 ## Device and image tooling
 
 ```sh
@@ -354,10 +372,10 @@ The canonical package reads the `app-stable-alphacompute` release. The publisher
 still checks the version floor from `app-stable`. Android may require
 installation confirmation.
 
-The app and OS update URLs target `alphacompute/alpha`. Release hosting must be
-available there before distribution. Verify anonymous readback of the app
-manifest, the pilot OTA manifest and their downloads at the new URLs. Existing
-release pointers may need their APK URLs updated to the canonical repository.
+The app update URL uses `eliza-research/alpha`. Verify anonymous readback of the
+app manifest and its APK there before distribution. Devices with an older
+canonical APK built for the planned `alphacompute/alpha` URL need one in-place
+signed installation to switch feeds. The OS pilot uses its separate enrollment URL.
 
 Protected release jobs bind dispatches to the reviewed commit on `main`.
 After the repository moves, the release owner applies the repository ID,

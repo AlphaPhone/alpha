@@ -26,7 +26,7 @@ import zipfile
 from app_update_producer import HOSTED_DISPATCH, RetiredSignerRecord, apk_member_limit, copy_verified, decode, input_contract, producer_kind, release_contract
 
 ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY = "alphacompute/alpha"
+REPOSITORY = "eliza-research/alpha"
 REPOSITORY_ID = 1396333361
 SIGNING_WORKFLOW = ".github/workflows/release.yml"
 HEX = re.compile(r"[0-9a-f]{64}")

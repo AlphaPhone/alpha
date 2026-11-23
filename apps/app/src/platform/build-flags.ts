@@ -1,6 +1,6 @@
 // spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"; spec/platform/index.md, "Eliza Cloud stays the live host until the Alpha Cloud cutover flag is set"
 import appConfigText from "../../../../app.config.json?raw";
-import deploymentText from "../../../../cloud/deployment.json?raw";
+import deploymentText from "@alphacompute/alpha-cloud/deployment.json?raw";
 
 declare const __ALPHA_TEST_MOCKS__: boolean | undefined;
 

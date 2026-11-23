@@ -214,7 +214,7 @@ export const operationPorts = effect {
 
   effect function run(operation: unknown, call: ExecutorCall) {
     const facts = try calls.of(call)
-    const done = try (actions.run(operation, call.operationId, { text: facts.ownerText }) catch (failure) => failure)
+    const done = try (actions.run(operation, call.operationId, { text: facts.ownerText }, call.proposalId) catch (failure) => failure)
     if (done instanceof AlreadyRan) return undefined
     if (done instanceof NotATelephonyOperation) return { kind: "refused" as const, code: "unsupported" }
     remember(operation, { settled: done.settled, status: statusOf(done.result), refusal: done.refusal })

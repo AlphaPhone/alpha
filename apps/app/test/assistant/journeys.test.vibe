@@ -371,6 +371,27 @@ it.effect("Let my agent know where I am when I allow it, indoors (spec/assistant
   }
 })
 
+it.effect("A turn with no fix starts one background network lookup without waiting (#1463) (spec/assistant/context.md, \"The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again\")", () => effect {
+  const said = { asks: false, shares: true }
+  const lookups = { count: 0 }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), networkNative({ latitude: 48.8566, longitude: 2.3522, accuracy: 25000 }, lookups), fakePreferences(said)) {
+    const location = try PhoneLocation
+    said.shares = false
+    const whileOff = try location.forTurn(true, true)
+    try settle()
+    const lookupsWhileOff = lookups.count
+    said.shares = true
+    const first = try location.forTurn(true, true)
+    try settle()
+    const second = try location.forTurn(true, true)
+    try settle()
+    try Effect.try(() => assert.deepStrictEqual(
+      { whileOff, lookupsWhileOff, first, second: second?.accuracyMeters, lookups: lookups.count },
+      { whileOff: undefined, lookupsWhileOff: 0, first: undefined, second: 25000, lookups: 1 },
+    ))
+  }
+})
+
 it.effect("Tell my agent what my screen shows, and nothing more (spec/assistant/context.md, \"A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn\")", () => effect {
   const seen: Seen = { calls: [] }
   provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Hi." }, proposals: [] }), fakeHost([], privateScreen), countingExecutors({ count: 0 })) {

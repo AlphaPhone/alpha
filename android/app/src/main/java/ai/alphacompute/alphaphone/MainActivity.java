@@ -376,7 +376,7 @@ public class MainActivity extends BridgeActivity {
   }
   registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
-  registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
+  registerPlugin(AlphaElizaCloudPlugin.class);
   registerPlugin(ai.eliza.plugins.networkpolicy.NetworkPolicyPlugin.class);
   registerPlugin(ElizaSecureStorePlugin.class);
   registerPlugin(AlphaResetPlugin.class);
@@ -397,6 +397,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaFilesPlugin.class);
   registerPlugin(AlphaMailAttachmentsPlugin.class);
   registerPlugin(AlphaDevicePlugin.class);
+  // Explicit foreground-only carrier & SIM identifier reads + Android settings recovery.
+  registerPlugin(AlphaCarrierSetupPlugin.class);
   // AP-16 AC-19: Telecom's call state, read-only.
   registerPlugin(AlphaCallStatePlugin.class);
   registerPlugin(AlphaConnectionPlugin.class);

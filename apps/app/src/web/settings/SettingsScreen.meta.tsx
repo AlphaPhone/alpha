@@ -6,7 +6,7 @@ import type { SettingsScreenProps } from "./SettingsScreen.tsx";
 
 const none = () => undefined;
 const act = {
-  open: none, back: none, openLicence: none, openApp: none, openAccount: none, openElsewhere: none, accessSetup: none, openPage: none, openShade: none,
+  open: none, back: none, openLicence: none, openApp: none, openAccount: none, openElsewhere: none, openCarrierSetup: none, accessSetup: none, openPage: none, openShade: none,
   askHome: none, textScale: none, choose: none, legible: none, preference: none, resetPreferences: none, scan: none, join: none,
   openPanel: none, check: none, install: none, allowAutomatic: none, eraseAll: none,
 };

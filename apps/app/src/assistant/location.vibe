@@ -39,6 +39,7 @@ export const locationLayer = Layer.effect(PhoneLocation, effect {
   const preferences = try Preferences
   const network = try NetworkLocation
   const reading = try Semaphore.make(1)
+  const looking = try Semaphore.make(1)
   let gps: TurnLocation | undefined
   let adopted: NetworkPosition | undefined
   let clockAt = try Clock.currentTimeMillis
@@ -97,10 +98,24 @@ export const locationLayer = Layer.effect(PhoneLocation, effect {
     try send({ type: "fixArrives", ageS })
   }
   const refresh = () => Semaphore.withPermit(reading, readGps())
+  effect function lookUpNetwork(warm: boolean) {
+    if (!(try consent())) return
+    try tick()
+    try adopt()
+    if (!canLookUp(try locator.get(), warm)) return
+    try send({ type: "lookUp", warm })
+    try network.locate()
+    if (!(try consent())) return
+    try adopt()
+  }
+  const runNetwork = (warm: boolean) => Semaphore.withPermit(looking, lookUpNetwork(warm))
   effect function background() {
     if (refreshing) return
     refreshing = true
-    try ensuring(refresh(), sync(() => { refreshing = false }))
+    try ensuring(effect {
+      try refresh()
+      try runNetwork(false)
+    }, sync(() => { refreshing = false }))
   }
   return {
     setEnabled: (on: boolean) => effect {
@@ -129,12 +144,7 @@ export const locationLayer = Layer.effect(PhoneLocation, effect {
     },
     warm: () => effect {
       try refresh()
-      try tick()
-      try adopt()
-      if (!canLookUp(try locator.get(), true)) return
-      try send({ type: "lookUp", warm: true })
-      try network.locate()
-      try adopt()
+      try runNetwork(true)
     },
   }
 })

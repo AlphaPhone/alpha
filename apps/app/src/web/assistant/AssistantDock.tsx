@@ -1,9 +1,11 @@
 // spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/dock.md, "A click the platform still owes a gesture is swallowed inside its window"
 import { Effect } from "effect";
 import { Maximize2, Minimize2, Sparkles } from "lucide-react";
-import { useRef, useState, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { clampSheet, halfHeight, initial, isFlick, isTap, zoneOf, type Control } from "../../../gen/assistant__dock.ts";
 import { useMachine } from "../../../gen/assistant__dock.react.ts";
+import { useMachine as useNavigation } from "../../../gen/shell__navigation.react.ts";
+import { useMachine as useDictation } from "../../../gen/voice__dictation.react.ts";
 import type { AppId } from "../app-screen.ts";
 import { Assistant } from "../../assistant/assistant.vibe";
 import { Button } from "../components/ui/index.ts";
@@ -28,15 +30,23 @@ const floorOffset = 90;
  */
 export function AssistantDock({ open }: AssistantDockProps) {
   const { state = initial, can, send } = useMachine(runtime);
+  const { state: nav } = useNavigation(runtime);
+  const { state: dictation } = useDictation(runtime);
+  const voiceLocked = Boolean(nav?.voice) || (dictation !== undefined && dictation.stage !== "Closed" && dictation.stage !== "Recorded");
   const track = useRef<Track | undefined>(undefined);
   const [height, setHeight] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (!voiceLocked || track.current === undefined) return;
+    track.current = undefined;
+    if (can({ type: "cancelDrag" })) void send({ type: "cancelDrag" });
+  }, [can, send, voiceLocked]);
   const viewport = typeof window === "undefined" ? 800 : window.visualViewport?.height ?? window.innerHeight;
   const full = Math.max(200, viewport - 72);
   const half = halfHeight(viewport, full);
   const sheet = state.chat === "Full" ? full : clampSheet(state.remembered && height !== undefined ? height : half, half, full);
   const shown = track.current !== undefined && height !== undefined ? height : sheet;
   const press = (label: Control) => (event: PointerEvent<HTMLElement>) => {
-    if (event.button !== 0 || !event.isPrimary || !can({ type: "down", label })) return;
+    if (voiceLocked || event.button !== 0 || !event.isPrimary || !can({ type: "down", label })) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     track.current = { startY: event.clientY, startHeight: state.chat === "Sheet" || state.chat === "Full" ? sheet : 0, samples: [{ y: event.clientY, t: event.timeStamp }] };
     void send({ type: "down", label });

@@ -1,6 +1,7 @@
 package ai.alphacompute.alphaphone;
 
 import ai.eliza.plugins.actionjournal.ActionJournal;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
@@ -40,7 +41,30 @@ final class AlphaApprovedSms {
  /** Admits one dispatch of exactly this text for the approved card {@code identity}, or refuses without dispatch. */
  static void claim(ActionJournal journal, OperationClaim deviceClaim, JSONObject identity, String operationId, String[] recipients, String body, int subscriptionId,
    Predicate<String> contactNumber, long now) throws Exception {
-  if (identity == null || identity.length() != 2) throw new SecurityException("No approved card names this text");
+  claim(journal, null, deviceClaim, identity, operationId, recipients, body, subscriptionId, contactNumber, now);
+ }
+
+ /** Admits one dispatch against either the device-execution journal ({@code {proposalId}}) or the legacy action journal ({@code {scope, proposalId}}). */
+ static void claim(ActionJournal journal, DeviceExecutionJournal deviceJournal, OperationClaim deviceClaim, JSONObject identity, String operationId, String[] recipients, String body, int subscriptionId,
+   Predicate<String> contactNumber, long now) throws Exception {
+  if (identity == null) throw new SecurityException("No approved card names this text");
+  if (identity.length() == 1 && identity.has("proposalId")) {
+   if (deviceJournal == null) throw new SecurityException("No device execution journal");
+   String proposal = DeviceExecutionJournal.proposalId(identity.optString("proposalId", null));
+   JSONObject operation = openDevice(deviceJournal.get(proposal), operationId);
+   // The contact lookup is a provider read, so it runs before the journal lock; the record it checks never changes.
+   if (!approves(operation, proposal, operationId, recipients, body, subscriptionId, contactNumber))
+    throw new SecurityException("The approved card names another text");
+   synchronized (DeviceExecutionJournal.lock()) {
+    JSONObject entry = deviceJournal.get(proposal);
+    openDevice(entry, operationId);
+    JSONObject binding = new JSONObject().put("proposalId", proposal)
+     .put("operationHash", DeviceExecutionJournal.operationHash(entry));
+    if (!deviceClaim.reserve(operationId, binding.toString())) throw new SecurityException("This operation was already claimed");
+   }
+   return;
+  }
+  if (identity.length() != 2 || journal == null) throw new SecurityException("No approved card names this text");
   String scope = ActionJournal.scope(identity.optString("scope", null)), proposal = ActionJournal.id(identity.optString("proposalId", null));
   // The contact lookup is a provider read, so it runs before the journal lock; the record it checks never changes.
   if (!approves(open(journal.get(scope, proposal), operationId, now), proposal, operationId, recipients, body, subscriptionId, contactNumber))
@@ -53,6 +77,18 @@ final class AlphaApprovedSms {
    if (!deviceClaim.reserve(operationId, binding.toString())) throw new SecurityException("This operation was already claimed");
    journal.update(scope, proposal, current -> current.put(CLAIM, new JSONObject().put("operationId", operationId)));
   }
+ }
+
+ /** The approved operation of a device-execution entry that may still admit this send. */
+ private static JSONObject openDevice(JSONObject entry, String operationId) throws Exception {
+  if (entry == null || !operationId.equals(entry.optString("operationId")) || entry.optBoolean("acknowledged", false))
+   throw new SecurityException("The approval is not open for this send");
+  DeviceExecutionJournal.Attempt attempt = DeviceExecutionJournal.attemptOf(entry);
+  if (!Set.of("Applying", "Called").contains(attempt.phase) || attempt.attemptId <= 0 || attempt.retired)
+   throw new SecurityException("The approval is not active");
+  for (String field : new String[]{"ownerId", "agentId", "origin", "installationId", "enrollmentId"})
+   if (entry.optString(field).isEmpty()) throw new SecurityException("The approval binding is incomplete");
+  return new JSONObject(entry.getString("operation"));
  }
 
  /** The approved operation of an entry that may still admit this send. */

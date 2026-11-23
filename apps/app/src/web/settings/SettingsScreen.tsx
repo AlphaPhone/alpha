@@ -71,6 +71,8 @@ export interface SettingsActions {
   readonly openAccount: (section: "plans" | "google" | "provider") => void;
   /** General's Phone row or About's Agent activity: the app that answers it. */
   readonly openElsewhere: (elsewhere: Elsewhere) => void;
+  /** Open the on-demand Carrier & SIM setup overlay on native builds. */
+  readonly openCarrierSetup?: () => void;
   /** Android's own page, Alpha's App info, or an Android access dialog. */
   readonly openPage: (page: SettingsPage) => void;
   readonly openShade: () => void;
@@ -215,6 +217,7 @@ function General({ model, act, native, erasing, onDialog }: {
           <SettingRow label="Assistant app" state={ROLE[read.assistant]} />
           {(canAskHome || facts.roleAsking) && <SettingRow label="Set as Home" ariaLabel="Make Alpha your Home app" busy={facts.roleAsking} onOpen={act.askHome} />}
           <SettingRow label="Default apps" onHandoff={() => act.openPage("PageDefaultApps")} ariaLabel="Default apps in Android" />
+          {act.openCarrierSetup && <SettingRow label="Carrier & SIM setup" icon={<Phone aria-hidden className="size-5" />} onOpen={act.openCarrierSetup} />}
         </Section>
       )}
       {native && (

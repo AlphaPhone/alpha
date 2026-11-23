@@ -881,6 +881,8 @@ public abstract class AlphaTelephonyBase extends Plugin {
  }
  /** The action journal the chat records each approved card in ({@link AlphaApprovedSms}). */
  protected ActionJournal approvals() { return AlphaActionJournal.get(getContext()); }
+ /** The agent device-execution journal the assistant records approved proposals in. */
+ protected DeviceExecutionJournal deviceExecutions() { return DeviceExecutionJournal.of(getContext()); }
  protected boolean reserveSmsClaim(String operationId, String binding) throws Exception {
   return new AlphaCredentialStore(getContext()).compareExchangeCredentialSlot(
    "alpha-sms-operation:claim:v1:" + SmsSendJournal.sha256(operationId), null, binding);
@@ -936,7 +938,7 @@ public abstract class AlphaTelephonyBase extends Plugin {
    catch (Exception unreadable) { call.reject("The send record could not be read. Nothing was sent.", "unavailable"); return; }
    if (existing != null) { call.resolve(SmsTelephony.result(existing)); return; }
    if (call.ownerGuard == null) {
-    try { AlphaApprovedSms.claim(approvals(), this::reserveSmsClaim, approval, operationId, recipients, body, subscriptionId, this::contactNumber, System.currentTimeMillis()); }
+    try { AlphaApprovedSms.claim(approvals(), deviceExecutions(), this::reserveSmsClaim, approval, operationId, recipients, body, subscriptionId, this::contactNumber, System.currentTimeMillis()); }
     catch (Exception notApproved) { call.reject("This text is not the one approved on its card. Nothing was sent.", "not-approved"); return; }
    }
    main.post(() -> sendSmsOnMain(call, journal, binding, operationId, recipients, body, subscriptionId));

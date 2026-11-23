@@ -30,6 +30,7 @@ final class ResetBeforeDispatch {
    long deadline=System.nanoTime()+timeoutMs*1_000_000L;
    deleteLocalCalendar(context,Math.min(CALENDAR_BUDGET_MS,timeoutMs));
    cloud.run(context,remaining(deadline));
+   AlphaElizaCloudPlugin.clearMirroredCustody(context);
   };
  }
  private static long remaining(long deadline){return Math.max(0,(deadline-System.nanoTime())/1_000_000L);}

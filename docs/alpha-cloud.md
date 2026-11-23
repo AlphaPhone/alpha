@@ -185,7 +185,7 @@ funds (subscription allowances only). A top-up surface is a separate change.
 ## 6. OTA updates
 
 Installed `ai.alphacompute.alphaphone` builds read the channel in `app.config.json` (`updateManifestUrl`,
-currently `https://github.com/alphacompute/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json`).
+currently `https://github.com/eliza-research/alpha/releases/download/app-stable-alphacompute/alpha-update-stable.json`).
 `node scripts/update-channel-status.ts` checks that channel the way a phone does. As of 2026-11-15 it fails: nothing
 has been published there. The only published channel is the legacy package's `app-stable`
 (versionCode 75). Version 78 of `ai.alphacompute.alphaphone` was signed on 2026-11-15 (Release

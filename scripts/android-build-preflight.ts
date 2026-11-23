@@ -69,15 +69,23 @@ const git = (directory: string, args: string[]) => execFileSync('git', ['-C', di
  *        | 'shallow' (vendor/eliza history too short to decide) | 'unavailable' (no origin/main ref)
  */
 export function mainPinStatus(root: string, pin: string) {
-  let mainPin: unknown = null, ref: string | null = null;
+  let mainLock: {commit?: unknown; branch?: unknown} | null = null, ref: string | null = null;
   for (const candidate of MAIN_REFS) {
     try {
-      mainPin = JSON.parse(git(root, ['show', `${candidate}:upstream.lock.json`])).commit;
+      mainLock = JSON.parse(git(root, ['show', `${candidate}:upstream.lock.json`]));
       ref = candidate;
       break;
     } catch { /* try the next spelling of the ref */ }
   }
+  const mainPin = mainLock?.commit;
   if (typeof mainPin !== 'string' || !mainPin) return {state: 'unavailable', mainPin: null, ref: null};
+  const mainBranch = typeof mainLock?.branch === 'string' && mainLock.branch ? mainLock.branch : 'develop';
+  let currentBranch = 'develop';
+  try {
+    const local = JSON.parse(fs.readFileSync(path.join(root, 'upstream.lock.json'), 'utf8'));
+    if (typeof local?.branch === 'string' && local.branch) currentBranch = local.branch;
+  } catch { /* default to develop */ }
+  if (mainBranch !== currentBranch) return {state: 'branch-cutover', mainPin, mainBranch, branch: currentBranch, ref};
   if (mainPin === pin) return {state: 'equal', mainPin, ref};
   const upstream = path.join(root, 'vendor/eliza');
   try { git(upstream, ['cat-file', '-e', `${mainPin}^{commit}`]); } catch { return {state: 'unknown', mainPin, ref}; }
@@ -97,6 +105,9 @@ export function mainPinProblem(root: string, pin: string, {notes = []}: PinOptio
   switch (status.state) {
     case 'unavailable':
       notes.push(`No origin/main ref in this clone, so the upstream pin ${pin} was not compared with main's (git fetch origin main to check it).`);
+      return null;
+    case 'branch-cutover':
+      notes.push(`Skipped comparing upstream pin ${pin} (branch ${status.branch}) against ${status.ref}'s pin ${status.mainPin} (branch ${status.mainBranch}).`);
       return null;
     case 'older':
     case 'shallow':

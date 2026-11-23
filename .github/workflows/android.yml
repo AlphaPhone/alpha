@@ -10,7 +10,7 @@ on:
       - 'licenses/**'
       - app.config.json
       - capacitor.config.ts
-      - vite.config.ts
+      - apps/app/vite.config.ts
       - package.json
       - pnpm-lock.yaml
       - pnpm-workspace.yaml

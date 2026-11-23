@@ -11,29 +11,9 @@
     "alpha-cloud": "./src/cli.vibe"
   },
   "exports": {
-    "./profile": {
-      "eliza-source": "./src/profile.vibe",
-      "default": "./src/profile.vibe"
-    },
-    "./deployment": {
-      "eliza-source": "./src/deployment.vibe",
-      "default": "./src/deployment.vibe"
-    },
-    "./registration": {
-      "eliza-source": "./src/registration.vibe",
-      "default": "./src/registration.vibe"
-    },
-    "./client-deployment": {
-      "eliza-source": "./generated/client-deployment.ts",
-      "default": "./generated/client-deployment.ts"
-    },
-    "./worker": {
-      "eliza-source": "./src/worker.vibe",
-      "default": "./src/worker.vibe"
-    },
-    "./edge": {
-      "eliza-source": "./src/edge.vibe",
-      "default": "./src/edge.vibe"
+    ".": {
+      "eliza-source": "./src/index.vibe",
+      "default": "./src/index.vibe"
     },
     "./deployment.json": "./deployment.json",
     "./resources.json": "./resources.json",
