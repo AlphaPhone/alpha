@@ -148,12 +148,12 @@ export function silentResident(withdrawn: string[]) {
   })
 }
 
-/** A phone whose only plugin is `ElizaLocation`, granted, with one fix taken at time zero. */
-export function locationNative(fix: { readonly latitude: number; readonly longitude: number; readonly accuracy: number }, reads: { count: number }) {
+/** A phone whose only plugin is `ElizaLocation`, with mutable permission and one fix taken at time zero. */
+export function locationNative(fix: { readonly latitude: number; readonly longitude: number; readonly accuracy: number }, reads: { count: number; granted: boolean }) {
   return Layer.succeed(Native, {
     available: (plugin: string) => succeed(plugin === "ElizaLocation"),
     invoke: (plugin: string, method: string) => effect {
-      if (plugin === "ElizaLocation" && method === "checkPermissions") return { location: "granted" }
+      if (plugin === "ElizaLocation" && method === "checkPermissions") return { location: reads.granted ? "granted" : "denied" }
       if (plugin === "ElizaLocation" && method === "getCurrentPosition") {
         reads.count += 1
         return { coords: fix, timestamp: 0 }
