@@ -97,6 +97,50 @@ pure def lawANorthUpMapHasNoCompass(following: bool): bool = not(compassShown(0,
 pure def lawFollowingHidesTheCompass(bearing: int, pitch: int): bool = not(compassShown(bearing, pitch, true))
 ```
 
+### A failed tile never fails a plane whose style has loaded, and a cancelled tile fails nothing
+
+Tiles draw as they arrive. Once the plane's style has loaded, a tile the provider refused or could
+not send leaves the rest of the map in place and is asked again when it is next in view; a tile
+MapLibre stopped asking for is cancelled, and its request with it. Only an error before the style
+loaded, or one that is not a tile's, fails the plane and offers Retry. The plane never zooms out
+below the provider's least zoom or in past its greatest, so it never asks for a tile the provider
+does not serve.
+
+```quint
+pure def failsThePlane(styleLoaded: bool, tileError: bool, cancelled: bool): bool =
+  not(cancelled) and not(tileError and styleLoaded)
+pure def lawATileNeverFailsALoadedPlane(cancelled: bool): bool = not(failsThePlane(true, true, cancelled))
+pure def lawACancelFailsNothing(styleLoaded: bool, tileError: bool): bool = not(failsThePlane(styleLoaded, tileError, true))
+pure def zoomServed(zoom: int, minZoom: int, maxZoom: int): bool = zoom >= minZoom and zoom <= maxZoom
+```
+
+### The camera goes to what the owner picked, on every map
+
+Every map Alpha draws, the world map and the Cloud rasters alike, covers the world, so the camera
+treats them alike. Guidance following the phone owns the camera. Otherwise a new route is fitted
+into view up to street zoom (17); a newly picked place is centred at zoom 14 above the sheets; and
+a new set of result pins, with no place picked and no route, is fitted into view up to zoom 14.
+Leaving guidance turns the map north up again. Anything else keeps the camera where the owner left it.
+
+```quint
+type CameraAim = KeepCamera | CenterOnPlace | FitResults | FitRoute | FollowPhone
+pure val placeZoom = 14
+pure val resultsMaxZoom = 14
+pure val routeMaxZoom = 17
+pure def cameraAim(following: bool, routed: bool, newRoute: bool, selected: bool, newSelection: bool, newPins: bool, pins: int): CameraAim =
+  if (following) FollowPhone
+  else if (routed) (if (newRoute) FitRoute else KeepCamera)
+  else if (selected) (if (newSelection) CenterOnPlace else KeepCamera)
+  else if (newPins and pins >= 1) FitResults
+  else KeepCamera
+pure def northUpAfterGuidance(wasFollowing: bool, following: bool): bool = wasFollowing and not(following)
+pure val pinsValues = Set(0, 1, 2)
+pure def lawFollowingOwnsTheCamera(routed: bool, newRoute: bool, selected: bool, newSelection: bool, newPins: bool, pins: int): bool =
+  cameraAim(true, routed, newRoute, selected, newSelection, newPins, pins) == FollowPhone
+pure def lawANewPlaceIsCentred(newPins: bool, pins: int): bool = cameraAim(false, false, false, true, true, newPins, pins) == CenterOnPlace
+pure def lawNewResultsAreFitted(pins: int): bool = pins >= 1 implies cameraAim(false, false, false, false, false, true, pins) == FitResults
+```
+
 ## Story: Show the right copyright for the map I am looking at
 
 > As the owner, I want the credits on the map to belong to the area I look
