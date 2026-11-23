@@ -1,7 +1,13 @@
-// spec/settings/appearance.md, "A choice applies at once, and one whose save failed still applies for the session"; spec/settings/updates.md, "A check is due fifteen minutes after the last answer, or at once for an unknown or future clock"
+// spec/settings/appearance.md, "A choice applies at once, and one whose save failed still applies for the session"; spec/settings/updates.md, "A check is due fifteen minutes after the last answer, or at once for an unknown or future clock"; spec/settings/preferences.md, "A phone updated from the previous Alpha keeps the choices it saved there"
 
 /** What is kept of the appearance: the choice and legible text. */
 export schema SavedAppearance { choice: "FollowSystem" | "Light" | "Dark"; legible: boolean }
 
 /** The last feed answer kept on the phone: when it came, the feed, and Android's digest of it. */
 export schema SavedFeed { checkedAt: number; feed: unknown; digest?: string }
+
+/** The device choices the previous Alpha kept in its device document; a choice it lacked is left out. */
+export schema PreviousDeviceChoices {
+  askBeforeAgentActions?: boolean; agentLocationEnabled?: boolean; agentBrowserPageEnabled?: boolean
+  agentGmailChanges?: boolean; agentCalendarEdits?: boolean; autoLoadMailImages?: boolean
+}

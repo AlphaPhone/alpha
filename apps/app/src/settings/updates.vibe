@@ -17,14 +17,14 @@ const PERMISSION: Record<string, Permission> = {
   starting: "AndroidStarting", "permission-required": "PermissionRequired", supported: "AutomaticAllowed", unsupported: "AutomaticUnsupported",
 }
 const INSTALL: Record<string, InstallAnswer> = {
-  started: "Accepted", "offer-unavailable": "OfferUnavailable", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged",
+  "offer-unavailable": "OfferUnavailable", "offer-withdrawn": "OfferWithdrawn", "offer-response-changed": "OfferChanged",
   starting: "StillStarting", "permission-required": "NeedsPermission", unsupported: "Unsupported",
 }
 
 /** Alpha's launcher updates: the offer, checks, installs, the hands-off schedule and Android's activation. */
 export service Updates {
   /** The offer the saved feed holds for this install, for the Install row. */
-  offer(): Offer | undefined!!
+  offer(): (Offer | undefined)!!
   check(manual: boolean): void!!
   install(): void!!
   /** Open Android's page that allows installs from Alpha. */
@@ -88,12 +88,18 @@ export const updates = Layer.unwrap(effect {
     effect function install(automatic: boolean) {
       const mine = try installed()
       const offer = offerFor(feed.feed, mine)
-      if (offer === undefined || (automatic && !isDigest(feed.digest))) return
+      if (offer === undefined || (automatic && !isDigest(feed.digest))) {
+        // No offer to install still answers the attempt, so the updater returns to idle and the next tap or poll retries.
+        try (held.send({ type: "installAnswered", answer: "OfferUnavailable" }) catch () => undefined)
+        return
+      }
       const reply = try attempt(call("AlphaDevice", "installUpdate", InstallReply, {
         apkUrl: offer.apkUrl, sha256: offer.sha256, sizeBytes: offer.sizeBytes, versionCode: offer.versionCode,
         ...(automatic ? { automatic: true, manifestSha256: feed.digest } : {}),
       }))
-      const answer = reply?.status === undefined ? "OfferUnavailable" : INSTALL[reply.status]
+      // AlphaDevice.installUpdate resolves with no status once its attempt ran (or another attempt holds the updater):
+      // only a named status refuses the offer.
+      const answer: InstallAnswer = reply === undefined ? "OfferUnavailable" : reply.status === undefined ? "Accepted" : INSTALL[reply.status] ?? "OfferUnavailable"
       if (answer === "OfferWithdrawn" || (answer === "OfferChanged" && typeof reply?.manifest === "string" && completeFeed(reply.manifest) !== undefined)) try keep({ checkedAt: -1, feed: null })
       else if (answer === "OfferUnavailable" || answer === "OfferChanged") try keep({ checkedAt: feed.checkedAt, feed: feed.feed })
       try (held.send({ type: "installAnswered", answer: answer === "OfferChanged" && feed.feed === null ? "OfferWithdrawn" : answer }) catch () => undefined)

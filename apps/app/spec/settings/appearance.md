@@ -63,6 +63,21 @@ pure def restored(a: Appearance, choice: Choice, legible: bool): Appearance =
 pure def sometimesFollowingADarkSystem(a: Appearance): bool = a.choice == FollowSystem and dark(a)
 ```
 
+### A phone updated from the previous Alpha keeps the theme it chose there
+
+The previous Alpha kept light, dark or the system's choice on its own. When this version has saved
+no appearance, it starts on that theme and saves it as its own; anything else the previous Alpha
+kept there, or nothing, is light. Legible text is new and starts off.
+
+```quint
+type PreviousTheme = PreviousLight | PreviousDark | PreviousSystem
+pure def previousChoice(t: PreviousTheme): Choice =
+  if (t == PreviousDark) Dark else if (t == PreviousSystem) FollowSystem else Light
+pure def lawThePreviousThemeStays(t: PreviousTheme): bool =
+  (t == PreviousDark implies previousChoice(t) == Dark) and (t == PreviousSystem implies previousChoice(t) == FollowSystem)
+    and (t == PreviousLight implies previousChoice(t) == Light)
+```
+
 ### Only a build with test mocks can preview a theme it does not save
 
 The page's `theme` query, `light` or `dark`, starts such a build on that preview.

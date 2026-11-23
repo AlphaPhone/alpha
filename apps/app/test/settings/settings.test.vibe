@@ -460,7 +460,7 @@ it.effect("Install only the reviewed update, once (spec/settings/native.md, \"St
     "AlphaDevice.snapshot": { appVersionCode: 140, appSigner: SIGNER, appAutomaticUpdates: "permission-required" },
     "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
     "AlphaDevice.checkForUpdate": () => ({ manifest: JSON.stringify(row), manifestSha256: DIGEST }),
-    "AlphaDevice.installUpdate": { status: "started" },
+    "AlphaDevice.installUpdate": {},
   })
   provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
     const u = try Updates
@@ -479,7 +479,7 @@ it.effect("Get updates hands-off (spec/settings/updates.md, \"Story: Get updates
       "AlphaDevice.snapshot": { appVersionCode: 140, appSigner: SIGNER, appAutomaticUpdates: "supported" },
       "ElizaSystem.getBuildInfo": { launcher: true, version: "1.4.0" },
       "AlphaDevice.checkForUpdate": () => ({ manifest: JSON.stringify(row), manifestSha256: DIGEST }),
-      "AlphaDevice.installUpdate": { status: "started" },
+      "AlphaDevice.installUpdate": {},
     })
     provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), activity(busy))) {
       const u = try Updates
@@ -503,8 +503,8 @@ it.effect("Let Android finish an update without losing what I typed (spec/settin
   let state: unknown = { pending: true, phase: "preparing", activationId: "act-1", bridgeId: "bridge-1" }
   const { calls, native } = android({
     "AlphaDevice.updateState": () => state,
-    "AlphaDevice.activateUpdate": { status: "acknowledged" },
-    "AlphaDevice.continueUpdate": { status: "continued" },
+    "AlphaDevice.activateUpdate": {},
+    "AlphaDevice.continueUpdate": {},
   })
   provide Layer.provideMerge(updates, Layer.mergeAll(memoryStore, native, build(), idle)) {
     const u = try Updates

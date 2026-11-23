@@ -1,8 +1,10 @@
-// spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/preferences.md, "A preference an update added starts at its new-phone value, and the owner's saved choices stay"
+// spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/preferences.md, "A preference an update added starts at its new-phone value, and the owner's saved choices stay"; spec/settings/preferences.md, "A phone updated from the previous Alpha keeps the choices it saved there"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type Preference, type Preferences as State, Machine, asksBefore, decodeState, initial, loadsMailImages, machine, sensorAllowed, sharesBrowserPage, sharesLocation, stored, allowsCalendarEdits, allowsGmailChanges } from "../../gen/settings__preferences.effect.vibe"
+import { type Preference, type Preferences as State, Machine, adoptPrevious, asksBefore, decodeState, initial, loadsMailImages, machine, sensorAllowed, sharesBrowserPage, sharesLocation, stored, allowsCalendarEdits, allowsGmailChanges } from "../../gen/settings__preferences.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { ownerKey } from "../platform/storage.vibe"
+import { previousDeviceChoices } from "./previous.ts"
+import { PreviousDeviceChoices } from "./stored.schema.vibe"
 
 export const PREFERENCES_KEY = ownerKey("device", "settings/preferences")
 
@@ -29,10 +31,31 @@ export service Preferences {
   reset(): void!!
 }
 
+/** Take the previous Alpha's saved choices once, when this version keeps none: whether the preferences are readable after. */
+effect function adoptPreviousChoices() {
+  const store = try KeyValueStore.KeyValueStore
+  const raw = try (tryPromise(() => previousDeviceChoices()) catch () => null)
+  if (raw === undefined) return true
+  if (raw === null) return false
+  const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => null)
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const previous = try (Schema.decodeUnknownEffect(PreviousDeviceChoices)(value) catch () => undefined)
+  if (previous === undefined) return false
+  const adopted = adoptPrevious({
+    askBeforeActions: previous.askBeforeAgentActions ?? initial.askBeforeActions,
+    agentLocation: previous.agentLocationEnabled ?? initial.agentLocation,
+    browserPage: previous.agentBrowserPageEnabled ?? initial.browserPage,
+    gmailChanges: previous.agentGmailChanges ?? initial.gmailChanges,
+    calendarEdits: previous.agentCalendarEdits ?? initial.calendarEdits,
+    mailImages: previous.autoLoadMailImages ?? initial.mailImages,
+  })
+  return try (Effect.as(store.set(PREFERENCES_KEY, JSON.stringify(adopted)), true) catch () => false)
+}
+
 effect function readable() {
   const store = try KeyValueStore.KeyValueStore
   const raw = try (store.get(PREFERENCES_KEY) catch () => null)
-  if (raw === undefined) return true
+  if (raw === undefined) return try adoptPreviousChoices()
   if (raw === null) return false
   const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => null)
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false
