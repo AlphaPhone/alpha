@@ -32,10 +32,12 @@ it.effect("Hear what my actions actually did (spec/assistant/receipts.md, \"An a
       result, title: receiptTitle(titleOf(result)), unknown: receiptTitle(titleOf("Unknown")),
       lost: actionResultText("The action could not reach a confirmed result."), unsynced: unsyncedSummary("Saved note."),
       cut: cutOffText(cutOffLabel(true, 1, 1, false)),
+      alongsideApproval: cutOffText(cutOffLabel(true, 1, 1, true)),
     },
     {
       result: "Applied", title: "Completed", unknown: "Not confirmed", lost: copy.unconfirmed, unsynced: "Saved note, but it isn't synced yet.",
       cut: "Needs your approval · reply cut off",
+      alongsideApproval: "Done · reply cut off",
     },
   ))
 })
