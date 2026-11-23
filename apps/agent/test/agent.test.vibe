@@ -1,4 +1,5 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports -- ConversationRecord is the schema `schema Created` decodes with, a value the projection ESLint reads does not show
 import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { describe, expect, it } from "@effect/vitest"
 import { configurationExit } from "../gen/agent.effect.vibe"
@@ -47,7 +48,8 @@ describe("Run Alpha's agent on the phone", () => {
         const status = route.stream === true
           ? try promise(async () => {
             const streamed = await runtime.stream(target, { text: "Again." })
-            for await (const _ of streamed.body) {}
+            const chunks: Uint8Array[] = []
+            for await (const chunk of streamed.body) chunks.push(chunk)
             return streamed.status
           })
           : (try promise(() => call(first, route.method, target, target.endsWith("/messages") ? { text: "Again." } : {}))).status
