@@ -1,0 +1,48 @@
+// spec/kit/attempt.md, "A retry keeps the number of the attempt it retries"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+
+module web {
+  /** @throws {never} */
+  export function fresh(): string {
+    return crypto.randomUUID()
+  }
+  /** `text` as a UUID that is the same for the same text: what a service takes as an idempotency key. */
+  export async function named(text: string): Promise<string> {
+    const bytes = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)))].slice(0, 16)
+    const hex = bytes.map((byte, at) => (at === 6 ? (byte & 0x0f) | 0x50 : at === 8 ? (byte & 0x3f) | 0x80 : byte).toString(16).padStart(2, "0")).join("")
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+}
+import { fresh, named } from web
+export { fresh }
+
+/** This installation of Alpha, named once and kept, and this launch of it. */
+export service Install {
+  readonly id: string
+  readonly launch: string
+}
+
+const key = "alpha.install"
+
+/** The installation's name from the store, made the first time; a store that cannot keep it gives one per launch. */
+export const install = Layer.effect(Install, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const found = store.get(key) catch () => undefined
+  const id = found ?? fresh()
+  if (found === undefined) try ignore(store.set(key, id))
+  return { id, launch: fresh() }
+})
+
+/**
+ * The attempts of the machine whose job is running: the reactor provides it to every job. `key(id)` is the
+ * idempotency key of that machine's attempt `id`: the same for a retry of it, also after a restart where the machine
+ * is kept, and never that of another machine, another installation or, for a machine in memory, another launch.
+ */
+export service Attempts {
+  key(id: number): string!!
+}
+
+/** The attempts of the machine `scope` names. */
+export function attemptsOf(install: Install.Shape, scope: string): Attempts.Shape {
+  return { key: (id: number) => promise(() => named(`${install.id}/${scope}/${id}`)) }
+}

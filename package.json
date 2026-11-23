@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "turbo run dev //#studio",
     "studio": "node vibestack/spec.ts studio",
+    "eliza": "pnpm --filter @repo/app eliza",
     "check": "node vibestack/spec.ts check",
     "gen": "node vibestack/spec.ts gen",
     "accept": "node vibestack/spec.ts accept",

@@ -1,0 +1,39 @@
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+import { TestClock } from "effect/testing"
+import { agentAt } from "../../src/platform/agent.vibe"
+import { cloudAt } from "../../src/platform/cloud.vibe"
+import { type Platform, pagePlatform, phonePlatform } from "../../src/platform/platform.vibe"
+import { plugIn } from "./phone.ts"
+import { plugins } from "./plugins.ts"
+import { type Answering, fetched } from "./routes.ts"
+import { type Scene, services } from "./scene.ts"
+
+/** An HttpClient that hands each request to a fake service as fetch would: a web Request, with its abort signal. */
+function fetching(answer: Answering) {
+  return Layer.succeed(HttpClient.HttpClient, HttpClient.make((request, url, signal) => effect {
+    const body = request.body._tag === "Uint8Array" ? request.body.body : undefined
+    const response = try tryPromise({
+      try: () => fetched(answer, url, { method: request.method, headers: request.headers, body, signal }),
+      catch: (cause) => new HttpClientError.HttpClientError({ reason: new HttpClientError.TransportError({ request, cause }) }),
+    })
+    return HttpClientResponse.fromWeb(request, response)
+  }))
+}
+
+/** A clock the journey moves, at the world's time: time never goes back when Alpha opens again. */
+function clockAt(world: Scene) {
+  return Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(world.now)), TestClock.layer())
+}
+
+/**
+ * The world outside Alpha, faked over `world` at its two boundaries, with Alpha's own platform layers over them: a
+ * browser's fetch, answered by the fake services' routes, or, where `world.phone`, the plugins Android gives the page,
+ * over the same routes.
+ */
+export function fakeWorld(world: Scene): Layer.Layer<Platform | TestClock.TestClock> {
+  const { agent, cloud } = services(world)
+  const platform = world.phone
+    ? Layer.provide(phonePlatform(), Layer.effectDiscard(acquireRelease(sync(() => plugIn(plugins(world, { agent, cloud }))), (unplug) => sync(unplug))))
+    : pagePlatform(Layer.provide(agentAt("http://agent.test"), fetching(agent)), Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)))
+  return Layer.provideMerge(platform, clockAt(world))
+}

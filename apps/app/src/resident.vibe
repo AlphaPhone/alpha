@@ -1,0 +1,15 @@
+// spec/app/shell/index.md, "Story: Move between Home and the apps"
+import { together, whole } from "./runtime/reactor.vibe"
+import { shell } from "./shell/shell.vibe"
+
+/**
+ * The machines that live from launch to exit: those another area follows or tells, and those that must act while
+ * their screen has never been loaded. Every other machine is its area's own (runtime/area.tsx). One line each, in
+ * any order: they find each other once all are built. Lines are only ever added.
+ */
+const machines = together(
+  shell,
+)
+
+/** The resident machines, closed: each machine one of them follows or tells is among them. */
+export const resident = whole(machines)

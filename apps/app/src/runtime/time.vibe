@@ -1,0 +1,48 @@
+// spec/kit/undo.md, "A held change takes effect only once its time has come"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+
+/**
+ * Alpha's time, in milliseconds: every event's `now`. It never goes back, across a restart or a clock that was set
+ * back, so a stamp a machine keeps is never later than a `now` it is given afterwards. Where the phone's clock is
+ * behind it, it runs at half speed until the clock has caught up.
+ */
+export service Time {
+  /** The time now. */
+  now(): number!!
+  /** The latest time `now` gave: what a screen's `can` is asked with, since a component reads no clock. */
+  latest(): number!!
+  /** Returns once the time is `at`, however long the phone slept meanwhile. */
+  until(at: number): void!!
+}
+
+/** Where the latest time is kept, and how far it runs ahead of what is kept before it is written again. */
+const key = "alpha.time"
+const kept = 5000
+
+/**
+ * Time over Effect's `Clock` and the store. `resumed` says each time the page may have slept, which stops its timers:
+ * every wait looks at the clock again then.
+ */
+export function timeOver(resumed: Stream.Stream<unknown>) {
+  return Layer.effect(Time, effect {
+    const store = try KeyValueStore.KeyValueStore
+    const before = Number((store.get(key) catch () => undefined) ?? 0)
+    let wall = try Clock.currentTimeMillis
+    let latest = Number.isSafeInteger(before) && before > wall ? before : wall
+    let saved = latest
+    effect function now(): number!! {
+      const read = try Clock.currentTimeMillis
+      latest = read >= latest ? read : latest + Math.max(0, Math.ceil((read - wall) / 2))
+      wall = read
+      if (latest - saved >= kept) {
+        saved = latest
+        try ignore(store.set(key, String(latest)))
+      }
+      return latest
+    }
+    effect function until(at: number): void!! {
+      for (let left = at - (try now()); left > 0; left = at - (try now())) try race(sleep(left), Stream.runHead(resumed))
+    }
+    return { now, latest: () => sync(() => latest), until }
+  })
+}

@@ -270,6 +270,18 @@ importers:
 
   apps/app:
     dependencies:
+      '@capacitor/core':
+        specifier: 8.5.2
+        version: 8.5.2
+      '@elizaos/agent':
+        specifier: link:../../.eliza/packages/agent
+        version: link:../../.eliza/packages/agent
+      '@elizaos/cloud':
+        specifier: link:../../.eliza/packages/cloud
+        version: link:../../.eliza/packages/cloud
+      '@elizaos/os':
+        specifier: link:../../.eliza/packages/os
+        version: link:../../.eliza/packages/os
       '@repo/design-system':
         specifier: workspace:*
         version: link:../../packages/design-system
@@ -292,6 +304,9 @@ importers:
       '@antithesishq/bombadil':
         specifier: 0.7.10
         version: 0.7.10
+      '@effect/platform-node':
+        specifier: 4.1.1
+        version: 4.1.1(effect@4.1.1)(redis@6.3.1(@opentelemetry/api@1.10.0))
       '@effect/vitest':
         specifier: 4.1.1
         version: 4.1.1(effect@4.1.1)(vitest@5.1.0)
@@ -744,6 +759,9 @@ packages:
 
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
+
+  '@capacitor/core@8.5.2':
+    resolution: {integrity: sha512-agnQbGdhGw/KZFuLf7H9SY2o+oE7upkr/WPQsYaokXP6f9chaE8iVmbKkfN6SVl4w3pmz7oZ3Ur1hbkmy1hx+w==}
 
   '@cloudflare/workerd-darwin-64@1.20261113.1':
     resolution: {integrity: sha512-UcShHyWJVZNbuI8jL3F5QZXMrJm7oScge33D5p3hAyhIIkoVj72+bior+VcUcr1SBWkh5w3Umnrx179WE7Wvpw==}
@@ -5827,6 +5845,10 @@ snapshots:
     dependencies:
       hashery: 1.5.1
       keyv: 5.6.0
+
+  '@capacitor/core@8.5.2':
+    dependencies:
+      tslib: 2.9.1
 
   '@cloudflare/workerd-darwin-64@1.20261113.1':
     optional: true

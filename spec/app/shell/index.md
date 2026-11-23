@@ -101,6 +101,12 @@ pure def canGoHome(s: Shell): bool = layers(s) > 0
 pure def goHome(s: Shell): Shell = { ...s, trail: List(), drawer: false, assistant: Bar }
 ```
 
+### When Alpha opens again the trail is kept, and the drawer and Ask Alpha are closed
+
+```quint
+pure def reopen(s: Shell): Shell = { ...s, drawer: false, assistant: Bar }
+```
+
 ### The trail never holds more than six apps
 
 ```quint

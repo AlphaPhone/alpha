@@ -10,3 +10,6 @@ rules.
 - [Assistant](./assistant/): Ask Alpha, its conversation, composer and cards
 - [Settings](./settings/): the phone's facts, preferences, agent activity and reset
 - [Inbox](./inbox/): Gmail's list, a message, drafts and the agent's operations
+- [Ask Alpha](./ask/): one conversation with the resident agent
+- [Reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
+- [Text size](./sample/size.md): the second sample, which only its own journeys mount: senders, an opening that asks the phone, the phone's signals and a page-wide effect

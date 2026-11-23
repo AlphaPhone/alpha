@@ -1,0 +1,56 @@
+// spec/app/sample/index.md, "Story: See and dismiss reminders"
+import * as Sample from "../../gen/app__sample.effect.vibe"
+import type { Effect as Out, Event, Reminders } from "../../gen/app__sample.effect.vibe"
+import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
+import { Agent } from "../../src/platform/agent.vibe"
+import { ask, attempted, listen } from "../../src/platform/remote.vibe"
+import { type Job, answer, due, following, reacting, stop, stream, together, untimed } from "../../src/runtime/reactor.vibe"
+
+/** The agent's answer to GET /api/reminders, and each event of GET /api/reminders/feed. */
+schema ReminderList { readonly titles: ReadonlyArray<string> }
+
+// spec/app/sample/index.md, "Only the newest asking's answer is taken: the titles, or a failure that keeps the titles last read"
+effect function fetched(ticket: number): Event!!Agent {
+  return effect {
+    const list = try ask(Agent, HttpClientRequest.get("/api/reminders"), ReminderList)
+    return { type: "loaded", ticket, titles: [...list.titles] }
+  } catch () => ({ type: "failed", ticket })
+}
+
+// spec/app/sample/index.md, "Only the open feed's pushes are taken, until it drops"
+function fed(ticket: number): Stream.Stream<Event, never, Agent> {
+  return listen(Agent, HttpClientRequest.get("/api/reminders/feed"), ReminderList)
+    |> Stream.map(%, (list): Event => ({ type: "pushed", ticket, titles: [...list.titles] }))
+    |> Stream.catch(%, () => Stream.empty)
+    |> Stream.concat(%, Stream.succeed<Event>({ type: "dropped", ticket }))
+}
+
+// spec/app/sample/index.md, "The deletion ends as the agent's answer says, or unknown when no answer can be trusted"
+effect function deleted(id: number, title: string) {
+  const { confirmed, known } = try attempted(Agent, HttpClientRequest.delete("/api/reminders", { urlParams: { title } }), id)
+  return { type: "deleted" as const, id, confirmed, known }
+}
+
+function carry(fx: Out): Job<Event, Agent, []> {
+  return match (fx) {
+    when { tag: "Fetch", let ticket }: answer("fetch", fetched(ticket), { type: "failed", ticket });
+    when { tag: "Listen", let ticket }: stream("feed", fed(ticket), { type: "dropped", ticket });
+    when { tag: "Unlisten" }: stop("feed");
+    when { tag: "Wake" }: stop("wake");
+    when { tag: "Delete", let id, let title }: answer(`delete ${id}`, deleted(id, title), { type: "deleted", id, confirmed: false, known: false });
+  }
+}
+
+// spec/app/sample/index.md, "Once the five seconds are over the deletion is recorded as sent, and only then asked of the agent"
+function timers(state: Reminders) {
+  return state.undo.holding === "Held" ? [due<Event, []>("undo", state.undo.until, { type: "expire", now: untimed })] : []
+}
+
+// spec/app/sample/index.md, "When Alpha opens again, a read and a hold under way are taken up again, the feed is closed, and a deletion sent is unknown"
+const kept = reacting(Sample, { keep: 1, open: [{ type: "reopen" }], carry, timers })
+
+// spec/app/sample/index.md, "Shown, the list is read and its feed opened under the next tickets; hidden, the feed is closed"
+const told = following(Shell, (shell) => showing(shell, "Notes"), Sample.Machine, (shown): Event => ({ type: "show", showing: shown }))
+
+/** Reminders: kept across restarts, carried out through the resident agent, and told by the shell whether its view is showing. */
+export const reminders = together(kept, told)

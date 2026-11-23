@@ -1,0 +1,19 @@
+// spec/kit/read.md, "Story: Read from outside"
+
+/**
+ * The services over the phone's other plugins, one line per plugin in each of the three lists below: its service in
+ * `Plugins`, its phone layer in `phonePlugins` and its browser layer in `browserPlugins`. Lines are only ever added,
+ * and git keeps every branch's (`.gitattributes`). A plugin's own file is `src/platform/<plugin>.vibe`.
+ */
+export type Plugins =
+  | never
+
+/** On the phone: each plugin's service over eliza's client of it (`@elizaos/os/bridges/<plugin>`). */
+export const phonePlugins = Layer.mergeAll(
+  Layer.empty,
+)
+
+/** In a browser: each plugin's service saying the phone's part is absent. */
+export const browserPlugins = Layer.mergeAll(
+  Layer.empty,
+)

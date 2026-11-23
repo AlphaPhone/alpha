@@ -5,12 +5,19 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "typecheck": "vibelang --noEmit -p .",
-    "test": "vitest run",
-    "test:browser": "vitest run --project browser"
+    "build": "node test/eliza/checkout.ts --ready && vite build",
+    "typecheck": "node test/eliza/checkout.ts --ready && vibelang --noEmit -p .",
+    "test": "node test/eliza/checkout.ts --ready && vitest run",
+    "test:browser": "node test/eliza/checkout.ts --ready && vitest run --project browser",
+    "prepare": "node test/eliza/checkout.ts --link",
+    "eliza": "node test/eliza/checkout.ts",
+    "eliza:page": "node test/eliza/page.ts"
   },
   "dependencies": {
+    "@capacitor/core": "8.5.2",
+    "@elizaos/agent": "link:../../.eliza/packages/agent",
+    "@elizaos/cloud": "link:../../.eliza/packages/cloud",
+    "@elizaos/os": "link:../../.eliza/packages/os",
     "@repo/design-system": "workspace:*",
     "@repo/ui": "workspace:*",
     "effect": "4.1.1",
@@ -20,6 +27,7 @@
   },
   "devDependencies": {
     "@antithesishq/bombadil": "0.7.10",
+    "@effect/platform-node": "4.1.1",
     "@effect/vitest": "4.1.1",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
