@@ -2,7 +2,6 @@ package ai.alphacompute.alphaphone;
 
 import ai.alphacompute.alphaphone.browser.AlphaBrowserCopy;
 import ai.alphacompute.alphaphone.browser.AlphaBrowserDownloads;
-import ai.alphacompute.alphaphone.browser.AlphaPageText;
 import ai.alphacompute.alphaphone.browser.AlphaReviewedReading;
 import ai.alphacompute.alphaphone.browser.AlphaSignInFields;
 import ai.alphacompute.alphaphone.browser.HostRect;
@@ -58,9 +57,8 @@ import java.util.*;
  * WebViews drawn above or below Alpha's WebView and presented one at a time at renderer-supplied
  * geometry. Alpha owns its native windows: the site permission, website sign-in and photo prompts,
  * the tab frame's loading and failure message, the file, share and other-browser choosers,
- * fullscreen video, the download review and list ({@link AlphaBrowserDownloads}), the reviewed
- * Read aloud ({@link AlphaReviewedReading}) and the page text agent turns carry ({@link
- * AlphaPageText}). This is Alpha's fork of the shared
+ * fullscreen video, the download review and list ({@link AlphaBrowserDownloads}) and the reviewed
+ * page reading ({@link AlphaReviewedReading}). This is Alpha's fork of the shared
  * plugin-native-browser-surface tab host; the stores, profile rules, link, origin, download and
  * reading policies, attested login fields and blob capture stay shared at the reviewed pin.
  *
@@ -74,7 +72,7 @@ import java.util.*;
  * the opener's profile), app links ({@code tel:}, {@code mailto:}, {@code sms:}, {@code geo:}, {@code intent:}, {@code market:}
  * handed to Android once per tap), confirmed clearing of all or one site's data, find in page,
  * site permission and HTTP sign-in prompts, engine-attested login fields, downloads, fullscreen
- * video, sharing, and the Read aloud excerpt and page text, both read in an isolated world.
+ * video, sharing and the reviewed page excerpt read in an isolated world.
  *
  * <p>Refusals, notices and page errors reach the renderer as the shared host's fixed sentences,
  * which apps/app/src/ui/browser/browser-messages.ts words for the screen; keep them unchanged.
@@ -1014,35 +1012,13 @@ public class AlphaBrowserPlugin extends Plugin {
  }); }
  /** A fact about this WebView provider, not about a page, tab or session: whether page reading can work at all. */
  @PluginMethod public void readingSupport(PluginCall call) { JSObject out=new JSObject();out.put("available",BrowserReadingWorld.supported());call.resolve(out); }
- /**
-  * The readable text of a tab's current document for the Browser page block (AlphaPageText), read
-  * silently in its isolated reading world on every call: no dialog, no network and no cache, so
-  * text that changed in place (a price, a cart, "show more") is current. Private tabs are refused.
-  */
- @PluginMethod public void pageText(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
-  if(!Objects.equals(session,call.getString("session"))){call.reject("Expired browser session");return;}
-  Tab t=tabs.get(call.getString("id"));
-  if(t==null||t.dead){call.reject("Browser tab is unavailable");return;}
-  if(t.priv){call.reject("Private tabs are not read");return;}
-  String live=t.web.getUrl(),url=live==null?t.url:live;
-  JSObject page=new JSObject();page.put("url",url);page.put("title",t.web.getTitle()==null?"":t.web.getTitle());
-  BrowserReadingWorld world=t.readingWorld;
-  String unavailable=!t.error.isEmpty()||world==null||!world.available()||!url.startsWith("https://")?"not readable"
-   :!t.committed||(t.loading&&!world.ready())?"loading"
-   :!world.ready()?"not readable":null;
-  if(unavailable!=null){page.put("textUnavailable",unavailable);call.resolve(page);return;}
-  Runnable unreadable=()->{page.put("textUnavailable","not readable");call.resolve(page);};
-  world.evaluate(AlphaPageText.expression(),encoded->{
-   JSObject result;
-   try{result=AlphaPageText.result(encoded,page);}catch(Exception invalid){unreadable.run();return;}
-   call.resolve(result);
-  },unreadable);
- }); }
- @PluginMethod public void reviewReading(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+ @PluginMethod public void reviewQuestion(PluginCall call) { reviewPage(call,true); }
+ @PluginMethod public void reviewReading(PluginCall call) { reviewPage(call,false); }
+ private void reviewPage(PluginCall call,boolean question) { getActivity().runOnUiThread(()->{if(closed(call))return;
   Tab tab=tabs.get(call.getString("id"));String owner=session,url=call.getString("url"),navigation=call.getString("navigation");
   java.util.function.BooleanSupplier current=()->!destroyed&&!paused&&Objects.equals(owner,session)&&Objects.equals(session,call.getString("session"))&&tab!=null&&tabs.get(tab.id)==tab&&!tab.dead&&Objects.equals(presentedId,tab.id)&&tab.web.isShown()&&tab.committed&&!tab.loading&&tab.error.isEmpty()&&Objects.equals(url,tab.url)&&Objects.equals(url,tab.web.getUrl())&&Objects.equals(navigation,String.valueOf(tab.navigation))&&url!=null&&url.startsWith("https://");
   if(!current.getAsBoolean()){call.reject("Load a visible HTTPS page before reading");return;}
-  reading.review(call,tab.id,tab.web,tab.readingWorld,current);
+  if(question)reading.reviewQuestion(call,tab.id,tab.web,tab.readingWorld,current);else reading.review(call,tab.id,tab.web,tab.readingWorld,current);
  }); }
  @PluginMethod public void cancelReading(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;if(Objects.equals(session,call.getString("session")))reading.cancel();call.resolve();}); }
  /** Releases the approved excerpt once to the host's bound speech request. */

@@ -274,7 +274,7 @@ paired-host campaigns. Their old receipts do not qualify this launcher. Native
 resident speech, recording/permission/cancellation checks and the real provider
 contracts remain separate from browser fixtures. The Home Calendar provider and
 permission-loss acceptance cases are retained, but need an independently admitted
-signed-in launcher fixture and distinct granted/revoked process phases. The Browser page-text journey also retains its explicit sign-in prerequisite;
+signed-in launcher fixture and distinct granted/revoked process phases. The Browser page-question journey also retains its explicit sign-in prerequisite;
 the fresh signed-out hosted reading lane covers only isolated-document navigation.
 Real provider responses, decoded/audible audio and physical-device acceptance still
 need current evidence; deleting a retired fixture does not close those gates.

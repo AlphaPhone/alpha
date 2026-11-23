@@ -178,8 +178,8 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   CameraScan: {},
   CameraLatency: { args: { cameraLatency: "1" }, note: "cold/warm first frame (PreviewView STREAMING, also traced as alpha.camera.firstFrame) and shutter-to-thumbnail, reported as cameraLatency.* status; -e cameraLatencyAssert 1 fails on a missed Pixel 10a target; emulator numbers are not device evidence" },
   StorageLegacyAccess: { note: "API 29: legacy storage in effect, both storage permissions granted by the test, one uniquely named Download/ folder created and removed; API 30+: all-files access unchanged" },
-  // J05-2: the silent native page text for agent turns -> Send without inference; a note's web source across recreation.
-  BrowserPageText: { args: { browserPageText: "1" }, note: "requires a launcher its owner already signed in; a fresh signed-out hosted emulator cannot qualify this journey. Offline: every page is served from memory to the tab's WebView (the first tab opens on https://reading.invalid/start, which never resolves); needs a WebView provider with isolated-world injection; the agent's answer needs a connected agent and is not covered" },
+  // J05-2: native page excerpt -> reviewed question -> composer; a note's web source across recreation.
+  BrowserPageQuestion: { args: { browserPageQuestion: "1" }, note: "requires a launcher its owner already signed in; a fresh signed-out hosted emulator cannot qualify this journey. Offline: every page is served from memory to the tab's WebView (the first tab opens on https://reading.invalid/start, which never resolves); needs a WebView provider with isolated-world injection; the agent's answer and the summary-note save that follows it need a connected agent and are not covered" },
   // Round-9 additions (WP2). None has a recorded run; each is compiled into both instrumentation APKs.
   RendererRecovery: { note: "ends the host WebView renderer (WebViewRenderProcess.terminate, else chrome://crash in a debuggable build); LauncherHome repeats it while Alpha is HOME" },
   ConnectionRoutes: { note: "ConnectionRoutes policy inside the APK" },
@@ -190,7 +190,7 @@ export const CLASS_REGISTRY: Record<string, ClassSpec> = {
   PasswordEditor: { note: "synthetic UI grant over MainActivity; covers it with Android Settings to check the plugin closes the editor on stop; no vault key or device setting" },
   PasswordAutofillOffer: {},
   // Round-9 journeys and links (WP2, second pass). Compiled into both instrumentation APKs; no recorded run.
-  JourneyJ05: { args: { journeyJ05: "1" }, note: "J05 on the flag-off pair, offline: page -> a typed question -> Send while inference is unavailable (resident present, P-43; nothing dispatched) -> a source note for that page across recreation; needs a WebView provider with isolated-world injection; no agent answer" },
+  JourneyJ05: { args: { journeyJ05: "1" }, note: "J05 on the flag-off pair, offline: page -> Ask about page -> native review -> composer -> Send while inference is unavailable (resident present, P-43; nothing dispatched) -> a source note for that page across recreation; needs a WebView provider with isolated-world injection; no agent answer" },
   NoteOrigin: { note: "storage level: a reminder's note link in note-origins:v1:device, read back exactly and across recreation; needs the slot admitted for compare-and-exchange (WP1). The Calendar 'From note' line is not driven" },
   Maps: { args: { mapsEventReturn: "1" }, note: "calendarLocationReturnsToTheSameEventAndFailsClosed owns a local calendar and grants itself Calendar access; explicitRecenterUsesInjectedNativeLocationAndStopsWatch is skipped without host GPS injection (mapsLatitude/mapsLongitude)" },
   // Self-contained classes with an explicit gate. Registered so the gate is passed.

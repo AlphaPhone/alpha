@@ -4,16 +4,16 @@
  *
  * Real code: browser-adapter.ts with the shared tab session, address parser, browsing session and
  * page-reading rules, Alpha's page-reading copy (ui/browser/page-reading.ts), browser/review.ts,
- * the Browser page context (browser/page-context.ts),
  * browser-external-handoff.ts, browser-poll.ts and browser-errors.ts. Ports, each a small stand-in
  * the driver controls: the native Browser plugin (every call is recorded and settles when the
  * driver says, or at once for calls listed in `instant`), Capacitor's platform answers, the
- * connection controller (which records the page context the adapter registers), the reading voice,
- * the web reading review and the documents behind the dynamic imports.
+ * connection controller, the reading voice, the question review, the web page-text reader and the
+ * documents behind the dynamic imports.
  * The shell is a stand-in component holding the Browser view state and the shell state; `sync()`
  * runs the component's render pass as a state change does in the product. */
 import {installDocument, loadBundled, settle} from './browser-model-traces.mjs';
 
+const pageSource = '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-source.ts';
 const stubs = {
   '../build-flags': 'export const cloudRuntimeEnabled=false,testMocksEnabled=false,devSurfacesEnabled=false;',
   '../platform-plugins': 'export const registerPlugin=()=>globalThis.__alphaBrowserHost.Browser;',
@@ -23,9 +23,10 @@ const stubs = {
     export const Capacitor={isNativePlatform:()=>host().native,getPlatform:()=>host().native?'android':'web',isPluginAvailable:()=>true};`,
   '../daily': 'export const DailyApps={addListener:()=>Promise.resolve({remove(){}})};',
   '../runtime/native-reading-voice': 'export const createNativeReadingVoice=()=>globalThis.__alphaBrowserHost.voice();',
+  [pageSource]: 'export const readPublicPageSource=(url,signal)=>globalThis.__alphaBrowserHost.pageSource(url,signal);',
   './agent-calendar-adapter': 'export const browserCalendarScope=()=>false;',
   '../runtime/connection-ui': `const host=()=>globalThis.__alphaBrowserHost;
-    export const connectionController={subscribe(run){host().connectionListeners.add(run);return()=>host().connectionListeners.delete(run);},getSnapshot:()=>host().connection,setBrowserPageContext(context){host().pageContext=context;}};
+    export const connectionController={subscribe(run){host().connectionListeners.add(run);return()=>host().connectionListeners.delete(run);},getSnapshot:()=>host().connection};
     export const agentPendingText=()=>'Your agent is still starting.';`,
   '../browser/preference-documents': 'export const bookmarkDocument={read:async fallback=>fallback()};',
   '../browser/preference-recovery': 'export const openBookmarkRecovery=()=>{};',
@@ -55,7 +56,7 @@ export async function browserAdapterHost({native = true, instant = ['bookmarks',
     };
   }});
   const host = globalThis.__alphaBrowserHost = {Browser, native, connection: {open: false, session: true}, connectionListeners: new Set(),
-    voice: () => undefined, readingReview: async () => {}, pageContext: undefined};
+    voice: () => undefined, pageSource: async () => ({text: ''}), readingReview: async () => {}};
   const views = {browser: {state: {editing: false, addr: '', tabsOpen: false, menu: false, lib: null, share: false, ag: null, confirm: null}, render: () => ({})}};
   const shellState = {screen: 'home', view: 'browser', shade: false, chat: 'closed'};
   const viewOpens = [];

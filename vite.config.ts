@@ -10,7 +10,6 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { localAgentDevBridge } from './scripts/local-agent-dev-bridge.ts';
-import { browserPageDevProxy } from './scripts/browser-page-dev-proxy.ts';
 
 // One switch, upstream name (vendor/eliza/packages/app/scripts/dev-ui.ts): "1" opts
 // test-only mocks, fixtures and developer surfaces into a build. Anything else is off.
@@ -110,7 +109,7 @@ export default defineConfig({
   // Concurrent browser-test runs in one worktree must not share one either: playwright.config.ts
   // scopes its servers' caches by port. Plain dev:ui and builds keep the unscoped directory.
   cacheDir: fileURLToPath(new URL(`./test-results/vite-cache/${flagOn ? "mocks" : "production"}${viteCacheScope ? `-${viteCacheScope}` : ""}/`, import.meta.url)),
-  plugins: [productionSurface(), localOcrAssets(), browserPdfAssets(), browserFullReload(), react(), localAgentDevBridge(), browserCloudDevBridge(), browserPageDevProxy()],
+  plugins: [productionSurface(), localOcrAssets(), browserPdfAssets(), browserFullReload(), react(), localAgentDevBridge(), browserCloudDevBridge()],
   define: {
     'import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS': JSON.stringify(flagOn ? '1' : ''),
     // The local agent's product connection sheet: only bun run dev (scripts/dev-local.ts) passes '0'.

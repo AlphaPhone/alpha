@@ -16,11 +16,12 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 
 /**
- * One foreground, immutable page excerpt for Alpha's Browser Read aloud. No remote-page bridge:
- * the text comes from the tab's {@link BrowserReadingWorld}. An excerpt for speech that leaves the
- * phone is shown in full in Alpha's review before the owner releases it; on-device speech is
- * released without a review, since nothing leaves the phone. Speech is bound to one route, owner
- * and session, and a single speech request consumes it once.
+ * One foreground, immutable page excerpt for Alpha's Browser: Read aloud and Ask about page. No
+ * remote-page bridge: the text comes from the tab's {@link BrowserReadingWorld}. An excerpt for a
+ * question, or for speech that leaves the phone, is shown in full in Alpha's review before the
+ * owner releases it; on-device speech is released without a review, since nothing leaves the
+ * phone. Speech is bound to one route, owner and session, and a single speech request consumes it
+ * once.
  *
  * <p>The sensitive-address refusal, the extraction script and the reject codes are the shared
  * {@link BrowserPageReading} policy. The heuristic is not a credential detector: a blocked page has
@@ -53,16 +54,20 @@ public final class AlphaReviewedReading {
   if(uri.getHost()==null||(!"https".equals(uri.getScheme())&&!local)||uri.getRawUserInfo()!=null||uri.getRawQuery()!=null||uri.getRawFragment()!=null||!"".equals(uri.getRawPath()))throw new IllegalArgumentException();
   return new JSONObject().put("origin",origin).put("owner",owner).put("session",session).put("expires",expires).toString();
  }
+ public void review(PluginCall call,String tab,WebView web,BrowserReadingWorld world,BooleanSupplier stillCurrent){
+  review(call,tab,web,world,stillCurrent,false);
+ }
+ public void reviewQuestion(PluginCall call,String tab,WebView web,BrowserReadingWorld world,BooleanSupplier stillCurrent){review(call,tab,web,world,stillCurrent,true);}
  /**
   * Stable reject codes, so the renderer never parses message text (J05). A missing isolated world
   * may fall back to a pasted excerpt; a sensitive page never may.
   */
  private static final String ISOLATED_MESSAGE="Isolated page reading is unavailable. Update Android System WebView, then reload this page.";
- public void review(PluginCall call,String tab,WebView web,BrowserReadingWorld world,BooleanSupplier stillCurrent){
+ private void review(PluginCall call,String tab,WebView web,BrowserReadingWorld world,BooleanSupplier stillCurrent,boolean question){
   cancel();final long expected=generation;tabId=tab;
   // The provider cannot read in isolation: say so before anything else. No speech route, other page or reload can help, and nothing falls back to the page's own world.
   if(world==null||!world.available()){call.reject(BrowserPageReading.UNSUPPORTED_MESSAGE,BrowserPageReading.READING_UNSUPPORTED);return;}
-  try{binding=binding(call);}catch(Exception error){call.reject("Select an available speech route before reading");return;}
+  try{if(!question)binding=binding(call);}catch(Exception error){call.reject("Select an available speech route before reading");return;}
   if(BrowserPageReading.sensitiveUrl(web.getUrl())){call.reject("Reading unavailable on a sensitive or unverified page",BrowserPageReading.SENSITIVE_PAGE);return;}
   if(!world.ready()){call.reject("This page is not ready for private reading. Reload this page, then try again.",BrowserPageReading.READING_NOT_READY);return;}
   current=stillCurrent;pending=call;expires=System.currentTimeMillis()+120000;
@@ -76,11 +81,11 @@ public final class AlphaReviewedReading {
     String extracted=result.getString("text");if(extracted.isBlank()||extracted.length()>BrowserPageReading.MAX_EXCERPT)throw new IllegalStateException();text=extracted;token=UUID.randomUUID().toString();
     String source=android.net.Uri.parse(web.getUrl()).getHost();
     // On-device speech: nothing leaves the phone and the menu tap is the request, so the token is issued without a review.
-    if("device".equals(call.getString("execution"))){if(!valid())throw new IllegalStateException();approved=true;PluginCall accepted=pending;pending=null;JSObject response=new JSObject();response.put("readingToken",token);accepted.resolve(response);return;}
-    TextView preview=new TextView(activity);preview.setText("Source: "+source+"\nVoice service: "+call.getString("origin")+"\n\nRead aloud sends exactly the text below to this voice service to be spoken.\n"+text.length()+" characters"+(result.optBoolean("truncated")?" (shortened; nothing more will be sent)":"")+"\n\n"+text);preview.setTextIsSelectable(true);int padding=(int)(20*activity.getResources().getDisplayMetrics().density);preview.setPadding(padding,padding,padding,padding);
+    if(!question&&"device".equals(call.getString("execution"))){if(!valid())throw new IllegalStateException();approved=true;PluginCall accepted=pending;pending=null;JSObject response=new JSObject();response.put("readingToken",token);accepted.resolve(response);return;}
+    TextView preview=new TextView(activity);preview.setText(question?"Source: "+source+"\n\nReview question puts this excerpt in your question. Nothing is sent until you tap Send.\n\n"+text:"Source: "+source+"\nVoice service: "+call.getString("origin")+"\n\nRead aloud sends exactly the text below to this voice service to be spoken.\n"+text.length()+" characters"+(result.optBoolean("truncated")?" (shortened; nothing more will be sent)":"")+"\n\n"+text);preview.setTextIsSelectable(true);int padding=(int)(20*activity.getResources().getDisplayMetrics().density);preview.setPadding(padding,padding,padding,padding);
     ScrollView scroll=new ScrollView(activity);scroll.addView(preview);
-    dialog=new AlertDialog.Builder(activity).setTitle("Read this page aloud?").setView(scroll).setNegativeButton("Cancel",(d,w)->cancel()).setPositiveButton("Read aloud",(d,w)->{
-     if(expected!=generation||!valid()){cancel();return;}approved=true;PluginCall accepted=pending;pending=null;dialog=null;JSObject response=new JSObject();response.put("readingToken",token);accepted.resolve(response);
+    dialog=new AlertDialog.Builder(activity).setTitle(question?"Ask about this page?":"Read this page aloud?").setView(scroll).setNegativeButton("Cancel",(d,w)->cancel()).setPositiveButton(question?"Review question":"Read aloud",(d,w)->{
+     if(expected!=generation||!valid()){cancel();return;}if(question){PluginCall accepted=pending;pending=null;JSObject response=new JSObject();response.put("text",text);cancel();accepted.resolve(response);return;}approved=true;PluginCall accepted=pending;pending=null;dialog=null;JSObject response=new JSObject();response.put("readingToken",token);accepted.resolve(response);
     }).setOnCancelListener(d->cancel()).create();dialog.show();
    }catch(Exception error){cancel();}
   },()->{

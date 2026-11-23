@@ -9,7 +9,7 @@
  *                   launcher APK.
  * browser-reading   the same runner after the pinned Chromium 157 WebView is installed
  *                   (scripts/prepare-ci-webview.ts): BrowserReadingNavigation. The real
- *                   page-text journey additionally needs independently admitted sign-in.
+ *                   page-question journey additionally needs independently admitted sign-in.
  *
  * A preparation step that fails stops the suite. Evidence steps are independent: each runs, and
  * the suite fails when any of them did not pass (a failed, skipped or missing class fails the
