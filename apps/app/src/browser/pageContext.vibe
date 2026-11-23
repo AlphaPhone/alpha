@@ -95,6 +95,12 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
 
   const nativeCapture = (target: CaptureTarget) => (signal: AbortSignal) => runPromise(Effect.timeout(capture(target), waitMs), { signal })
 
+  effect function keptPage(target: CaptureTarget) {
+    if (cache === undefined) return undefined
+    const now = try Clock.currentTimeMillis
+    return try sync(() => cache.cached(target.key, now, captureMaxAgeMs))
+  }
+
   if (cache !== undefined) {
     try addFinalizer(() => sync(() => { cache.select(undefined) }))
     const tabChanges = Stream.map(tabs.changes, (tabs: Session) => ({ kind: "tabs" as const, tabs }))
@@ -112,16 +118,16 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
         const open = target !== undefined && front.chat !== "closed"
         const opened = open && !wasOpen
         wasOpen = open
-        const changed = cache.select(target?.key)
+        const changed = try sync(() => cache.select(target?.key))
         if (target === undefined) continue
         const refresh = nativeCapture(target)
-        if (changed) cache.schedule(target.key, settleMs, refresh)
+        if (changed) try sync(() => cache.schedule(target.key, settleMs, refresh))
         if (opened) {
           const now = try Clock.currentTimeMillis
-          const age = cache.age(target.key, now) ?? warmAgeMs
+          const age = (try sync(() => cache.age(target.key, now))) ?? warmAgeMs
           if (shouldWarmOnOpen(age, warmedAt === undefined ? warmGapMs : now - warmedAt)) {
             warmedAt = now
-            void cache.refresh(target.key, refresh)
+            try sync(() => { void cache.refresh(target.key, refresh) })
           }
         }
       }
@@ -150,15 +156,15 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     })
     const begun = try step({ type: "begin", turn, tab: state.cur, revision: tab.revision, allowed })
     if (begun?.stage !== "Reading" || target === undefined) return undefined
-    const kept = cache?.cached(target.key, try Clock.currentTimeMillis, captureMaxAgeMs)
-    if (cache !== undefined) cache.select(target.key)
+    const kept = try keptPage(target)
+    if (cache !== undefined) try sync(() => cache.select(target.key))
     const pageRead = cache === undefined ? capture(target) : promise(() => cache.refresh(target.key, nativeCapture(target)))
     const answer = timeout(pageRead, captureWait(kept !== undefined)) catch () => "late" as const
     if (answer === "late" && kept === undefined) {
       try step({ type: "timedOut", turn })
       return undefined
     }
-    const page = answer === "late" ? cache?.cached(target.key, try Clock.currentTimeMillis, captureMaxAgeMs) : answer
+    const page = answer === "late" ? try keptPage(target) : answer
     const after = try tabs.get()
     const withheld: Withheld = page?.withheld === undefined ? "NotWithheld" : withheldOf[page.withheld]
     const settledRead = try step({ type: "answered", turn, tab: after.cur, revision: curTab(after).revision, valid: page !== undefined, withheld })
