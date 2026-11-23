@@ -1,4 +1,4 @@
-# Deploying Alpha Cloud at cloud.alphacompute.cc
+# Deploying Alpha Cloud at alphaphone.dev
 
 This runbook is for the person deploying Alpha Cloud. It covers every account, value and command,
 in order. Background and design are in [docs/alpha-cloud.md](../alpha-cloud.md). You do not need
@@ -16,21 +16,19 @@ the current Cloud until a separate cutover release, which the owner approves (se
 
 ## 1. Hostnames
 
-All hostnames are in the `alphacompute.cc` Cloudflare zone, one level deep, so Cloudflare's free
-certificate covers them.
+The web, API and blob hostnames are on the apex or one level below it in the
+`alphaphone.dev` Cloudflare zone. Cloudflare's Universal SSL covers them.
 
 | Role | Production | Staging | Created by |
 |---|---|---|---|
-| Web / App Link host (`cloud/src/edge.vibe` Worker) | `cloud.alphacompute.cc` | `cloud-staging.alphacompute.cc` | Worker custom domain, on `deploy` |
-| API (`cloud/src/worker.vibe`, upstream's Cloud Worker) | `api.alphacompute.cc` | `api-staging.alphacompute.cc` | Worker custom domain, on `deploy`; DNS checked by `provision` |
-| Blob storage (R2, same account) | `blob.alphacompute.cc` | `blob-staging.alphacompute.cc` | Proxied DNS, on `provision` |
-| Sign-in base recorded for the Cloud | `login.alphacompute.cc` | `login-staging.alphacompute.cc` | `cloud/resources.json` (`loginApiUrl`) |
+| Web / App Link host (`cloud/src/edge.vibe` Worker) | `alphaphone.dev` | `staging.alphaphone.dev` | Worker custom domain, on `deploy` |
+| API (`cloud/src/worker.vibe`, upstream's Cloud Worker) | `api.alphaphone.dev` | `api-staging.alphaphone.dev` | Worker custom domain, on `deploy`; DNS checked by `provision` |
+| Blob storage (R2, same account) | `blob.alphaphone.dev` | `blob-staging.alphaphone.dev` | Proxied DNS, on `provision` |
 | Sign-in email sender | `noreply@alphacompute.cc` | same | Resend domain verification |
 
-The phone talks to `api.` directly. `cloud.` is the address Android verifies for the app's links:
+The phone talks to the API host directly. Android verifies the web host for the app's links:
 it serves `/.well-known/assetlinks.json` and the sign-in and checkout return pages, which the web
-Worker asks the API Worker for through a Cloudflare service binding. There is no website at
-`cloud.` beyond those paths.
+Worker asks the API Worker for through a Cloudflare service binding. The web Worker also serves `/health`.
 
 The hostnames are data: `api` and `web` in `cloud/deployment.json` (`alphaCloudHosts`), the
 sender in `cloud/src/profile.vibe`, and `zone`, `blobHost`, `loginApiUrl` and `mailFrom` in
@@ -50,13 +48,13 @@ Worker names (from `cloud/resources.json`):
 
 | Account | What you need from it |
 |---|---|
-| **Cloudflare** (shared by both environments) | The account that owns the `alphacompute.cc` zone, on **Workers Paid**. Note its account ID. Create an API token for that account with Workers Scripts, Workers Routes, Workers KV, R2 and Hyperdrive **Edit**, plus Zone **Read** and DNS **Edit** on `alphacompute.cc`. Do **not** use the Eliza Labs Cloudflare account. |
+| **Cloudflare** (shared by both environments) | The account that owns the `alphaphone.dev` zone, on **Workers Paid**. Note its account ID. Create an API token for that account with Workers Scripts, Workers Routes, Workers KV, R2 and Hyperdrive **Edit**, plus Zone **Read** and DNS **Edit** on `alphaphone.dev`. Do **not** use the Eliza Labs Cloudflare account. |
 | **Postgres**, one database per environment | `DATABASE_URL`. Use Neon, Supabase or Railway, reachable from the internet over TLS (Cloudflare Hyperdrive connects to it). Use a **direct** connection string, not a transaction pooler (Supabase: port 5432, not 6543). The database must be empty before its first `migrate`. |
 | **Cerebras** | An API key (inference model `qwen-3.8-27b`). |
 | **Cartesia** | An API key (speech to text and text to speech). |
 | **Resend** | Add and verify the domain `alphacompute.cc` (it gives you DNS records to add in Cloudflare), then create an API key. |
-| **Google Cloud** (one AlphaCompute project) | An OAuth client of type *Web application* for sign-in, and one for the Gmail/Calendar connector (it may be the same client). **Authorized redirect URIs** for each environment you deploy: `https://api.alphacompute.cc/api/v1/auth/google/callback` (sign-in) and `https://api.alphacompute.cc/api/v1/oauth/google/callback` (connector), and the same two on `api-staging.`. Configure the OAuth consent screen. Gmail and Calendar scopes need Google's verification before the public can use them; start that early (it can take weeks). A Maps Platform key restricted to Geocoding, Places and Routes. |
-| **Stripe** | Test mode for staging, live mode for production. Create two products with **recurring monthly prices in USD**: "Plus" at **exactly $30.00** and "Pro" at **exactly $100.00**, licensed, no trial. The Cloud checks these amounts and refuses other prices. Create a webhook endpoint at `https://api.alphacompute.cc/api/stripe/webhook` (staging: `api-staging.`) for the events in section 3. |
+| **Google Cloud** (one AlphaCompute project) | An OAuth client of type *Web application* for sign-in, and one for the Gmail/Calendar connector (it may be the same client). **Authorized redirect URIs** for each environment you deploy: `https://api.alphaphone.dev/api/v1/auth/google/callback` (sign-in) and `https://api.alphaphone.dev/api/v1/oauth/google/callback` (connector), and the same two on `api-staging.`. Configure the OAuth consent screen. Gmail and Calendar scopes need Google's verification before the public can use them; start that early (it can take weeks). A Maps Platform key restricted to Geocoding, Places and Routes. |
+| **Stripe** | Test mode for staging, live mode for production. Create two products with **recurring monthly prices in USD**: "Plus" at **exactly $30.00** and "Pro" at **exactly $100.00**, licensed, no trial. The Cloud checks these amounts and refuses other prices. Create a webhook endpoint at `https://api.alphaphone.dev/api/stripe/webhook` (staging: `api-staging.`) for the events in section 3. |
 | **Terms and Privacy text** | Alpha Compute's approved Terms of Service and Privacy Policy, shown on the in-app sign-in screen (format in section 4). |
 | **GitHub** (optional, for the CI deploy in section 8) | Admin on `eliza-research/alpha` to create environments and secrets. |
 
@@ -174,7 +172,7 @@ pnpm cloud:worker smoke     --environment $E                           # public 
 
 Notes:
 - `seed` writes the reviewed registration file (`alpha-cloud registration`: callback, billing and
-  connector returns on `cloud.`, the Android package and its release signers) and applies it with
+  connector returns on the web host, the Android package and its release signers) and applies it with
   upstream's `elizaos-cloud client apply --file`. Rerunning it applies the same file again.
 - `deploy` renders the Workers into a private directory: the API Worker's static assets are
   upstream's return pages plus the environment's profile (`alpha-cloud/profile.json`), and its
@@ -182,7 +180,7 @@ Notes:
   API Worker answers `503` until the asset it was deployed with is readable. The web Worker
   reaches the API Worker only through its `API` service binding, so the API Worker is deployed
   first. Use `--component api|edge` to redeploy one Worker.
-- The `api.` and `cloud.` hostnames get their certificates on first deploy. `smoke` can fail for a
+- The API and web hostnames get their certificates on first deploy. `smoke` can fail for a
   few minutes until they are active; rerun it.
 
 ## 7. Verify
@@ -200,10 +198,10 @@ Notes:
 Then check by hand:
 
 ```bash
-curl -s https://api-staging.alphacompute.cc/api/health
-curl -s https://api-staging.alphacompute.cc/api/v1/subscriptions/plans    # Plus $30 and Pro $100
-curl -s https://cloud-staging.alphacompute.cc/.well-known/assetlinks.json # contains ai.alphacompute.alphaphone
-curl -s https://api-staging.alphacompute.cc/api/v1/auth/methods           # email and google offered
+curl -s https://api-staging.alphaphone.dev/api/health
+curl -s https://api-staging.alphaphone.dev/api/v1/subscriptions/plans    # Plus $30 and Pro $100
+curl -s https://staging.alphaphone.dev/.well-known/assetlinks.json # contains ai.alphacompute.alphaphone
+curl -s https://api-staging.alphaphone.dev/api/v1/auth/methods           # email and google offered
 ```
 
 - **Stripe:** Dashboard → Webhooks → your endpoint → *Send test webhook*. It must return 200.
@@ -277,7 +275,7 @@ When staging (and later production) passes section 7, send the owner:
 | `STRIPE_SECRET_KEY must be a live key in production` (or test in staging) | Wrong Stripe mode for this environment. |
 | `OperatorInputsInvalid` | The inputs file is not the `OperatorInputs` shape; compare it with `cloud/test/fixtures/operator.json`. |
 | `… is not provisioned; run provision first` | `cloud/resources.json` still has placeholder IDs for this environment. |
-| `Zone alphacompute.cc is not in this Cloudflare account` | Wrong account ID or token. |
+| `Zone alphaphone.dev is not in this Cloudflare account` | Wrong account ID or token. |
 | `migrate` or `seed` refuses the database identity | The connection string names another database than the one `databaseIdentity` was written into; recheck `DATABASE_URL`. |
 | `smoke`: every gate answers `503` | The API Worker cannot read its profile asset; redeploy the API with `deploy --component api`. |
 | `smoke`: `asset links` or `callback page` fail right after the first deploy | The custom-domain certificate is still being issued; wait a few minutes and rerun. |

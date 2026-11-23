@@ -20,6 +20,6 @@ describe("the resident agent's cloud runtime configuration", () => {
     const text = JSON.stringify(cloudLaunchDocument(alphaDeployment, "production"))
     try check(() => assert.ok(!/apiKey|credential|token/i.test(text)))
     const staging = cloudModel(alphaDeployment, "staging")
-    try check(() => assert.strictEqual(staging.backend === "cloud" ? staging.cloudBaseUrl : staging.backend, "https://api-staging.alphacompute.cc"))
+    try check(() => assert.strictEqual(staging.backend === "cloud" ? staging.cloudBaseUrl : staging.backend, "https://api-staging.alphaphone.dev"))
   })
 })
