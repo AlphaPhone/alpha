@@ -270,12 +270,12 @@ pure def canDeleted(d: Reminders, number: int, by: O::Actor): bool = d.numbers.c
 pure def deleted(d: Reminders, number: int, by: O::Actor): Acted = routed(number, d, M::deleted(held(d, number), by))
 ```
 
-### Reminders can be posted while another is snoozed, and one can be deleted while another is completed
+### One reminder can ring while the owner completes or snoozes another, and one can be deleted while another is completed
 
 ```quint
 pure def sometimesTwoReminders(d: Reminders): bool =
-  d.numbers.exists(n => held(d, n).status == M::Posted)
-    and d.numbers.exists(m => held(d, m).change == M::Snooze and held(d, m).status == M::Scheduled and held(d, m).attempt.outcome == A::Confirmed)
+  d.numbers.exists(n => held(d, n).status == M::Posted and held(d, n).change == M::Schedule)
+    and d.numbers.exists(m => held(d, m).change == M::Complete or held(d, m).change == M::Snooze)
 
 pure def sometimesDeletedBesideCompleted(d: Reminders): bool =
   d.numbers.exists(n => held(d, n).status == M::Deleted) and d.numbers.exists(m => held(d, m).status == M::Completed)

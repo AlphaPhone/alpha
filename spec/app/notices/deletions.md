@@ -251,12 +251,20 @@ pure def leadsToAnotherOwnersUndoIsWithdrawn(d: Deletions, later: Deletions): bo
 pure val fair_conceal = "weak"
 ```
 
-### A restart marks every deletion to be picked up, and each is then picked up once: written again, paused, or read back
+### A restart marks every deletion it left unsettled to be picked up, and each is then picked up once: written again, paused, or read back
+
+A deletion is unsettled while it is being written, in its window and not
+paused, being undone or dismissed, offered for Undo, or sent without an
+answer. Picking up any other would change nothing.
 
 ```quint
+pure def unsettled(x: X::Deletion): bool =
+  x.writing or (x.window.holding == U::Held and not(x.paused)) or x.undoing or x.dismissing or x.offered or x.attempt.outcome == A::Sent
+
 pure def canRestart(d: Deletions): bool = d.numbers.size() > 0
 
-pure def restart(d: Deletions): Deletions = { ...d, interrupted: d.numbers, status: { ...d.status, status: R::Idle } }
+pure def restart(d: Deletions): Deletions =
+  { ...d, interrupted: d.numbers.filter(n => unsettled(held(d, n))), status: { ...d.status, status: R::Idle } }
 
 pure def canRecover(d: Deletions, number: int): bool = d.interrupted.contains(number)
 
