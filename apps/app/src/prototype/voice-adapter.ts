@@ -188,7 +188,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
   // list question that is sent to Alpha when the owner confirms the transcript.
   type ChatDestination={mode?:'dictation';comms?:'person'|'filter';commsKey?:string;commsValue?:string;shell:any;view:string|null;chat:string;draft:string;reply:unknown;edit:unknown;binding:string;opener?:HTMLElement};
   let chatDestination:ChatDestination|undefined;
-  let ownedNavigation:{chat:ChatDestination;view:string;detent:string;applying:boolean;turnId:string;context?:import('../runtime/alpha-client').ContextEnvelope}|undefined;
+  let ownedNavigation:{chat:ChatDestination;view:string;detent:string;applying:boolean;placing:boolean;turnId:string;context?:import('../runtime/alpha-client').ContextEnvelope}|undefined;
   let conversationVoice:Pick<BatchVoiceConversation<VoiceClip>,'start'|'stop'|'recheck'|'resume'>|Awaited<ReturnType<typeof developmentCartesiaConversation>>|undefined;
   let conversationState:BatchVoiceState & {progressText?:string}={phase:'idle'};
   let conversationReviewRequired=false;
@@ -457,7 +457,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
     const chat=chatDestination;if(!chat)return false;const state=chat.shell.S(),view=state.view||'home',owned=ownedNavigation?.chat===chat?ownedNavigation:undefined;
     let contextCurrent=!conversationPrepared||chat.shell.voiceConversationCurrent(conversationPrepared);
     // Only the claimed destination may transition before its React callback pins the exact ACK context.
-    if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);contextCurrent=actual.view===owned.view&&(owned.context?JSON.stringify(actual)===JSON.stringify(owned.context):owned.view!==(chat.view||'home'));}catch{contextCurrent=false;}}
+    // While its commit is still placing the view (a held step that opens the draft's conversation in
+    // Messages, which may be the view the conversation is already on), its own changes there are the
+    // navigation's, not the owner leaving; the pin then checks the context it finished on.
+    if(!contextCurrent&&owned&&view===owned.view&&conversationPrepared){try{const actual=chat.shell.voiceConversationContext(conversationPrepared.binding);contextCurrent=actual.view===owned.view&&(owned.context?JSON.stringify(actual)===JSON.stringify(owned.context):owned.placing||owned.view!==(chat.view||'home'));}catch{contextCurrent=false;}}
     return chat.shell.live!==false&&!document.hidden&&!connectionController.getSnapshot().open
       &&(['sheet','full'].includes(state.chat)||chat.chat==='hidden'&&state.chat==='hidden'||!!chat.comms&&['input','hidden'].includes(state.chat))&&((state.view||null)===chat.view||!!owned&&view===owned.view)&&String(state.draft||'')===chat.draft
       &&chat.shell.messageReplyTarget===chat.reply&&chat.shell.messageEditTarget===chat.edit&&composerBinding()===chat.binding&&contextCurrent
@@ -472,9 +475,9 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         // Messages, Contacts) rest the chat on a bar instead, which cannot hold a conversation: there
         // it continues in the sheet, as a conversation started from the bar does.
         const from=chat.shell.S().chat,toSheet=from==='hidden'&&(view==='home'||chat.shell.defaultChat?.(view)==='input');
-        held={chat,view,detent:toSheet?'sheet':from,applying:true,turnId};ownedNavigation=held;
+        held={chat,view,detent:toSheet?'sheet':from,applying:true,placing:true,turnId};ownedNavigation=held;
         let pending:Promise<boolean>;try{pending=commit(held.detent,value=>{if(chat.shell.voiceSendTurnId!==turnId||ownedNavigation!==held||token!==generation||chatDestination!==chat)throw Error('Voice navigation changed.');const actual=chat.shell.voiceConversationContext(conversationPrepared!.binding);if(value.view!==held!.view||JSON.stringify(actual)!==JSON.stringify(value))throw Error('Voice navigation changed.');held!.context=value;});}finally{held.applying=false;}
-        const switched=await pending;
+        let switched:boolean;try{switched=await pending;}finally{held.placing=false;}
         if(!switched||ownedNavigation!==held||token!==generation||chatDestination!==chat||!chatCurrent())return false;
         // When the conversation ends, the chat returns to that view's bar.
         if(toSheet)chat.chat='input';

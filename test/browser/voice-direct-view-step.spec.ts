@@ -43,3 +43,51 @@ for(const [view,answer] of [['phone','Opening the keypad.'],['contacts','Here ar
   await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await expect(voice(page)).toHaveCount(0);
   await expect(page.locator('html')).toHaveAttribute('data-active-view',view);
  });
+// Review (nav-lease, Messages step): the draft step for another Messages conversation keeps working
+// once Messages is in front. sms-adapter's `place` waits for Messages to settle, then opens the
+// draft's thread, and the open thread is published as the selection (openSmsThreadSelection), a
+// context change after the view itself changed. Pinned before that, the change read as the owner
+// moving on and the voice conversation was torn down. The step's promise now settles once the
+// thread is open, and the conversation continues from the context the step finished on.
+// sms-adapter installs only on Android, so this page makes the same openView call and publishes a
+// thread selection the way the open thread does; no SIM, radio or Messages provider is involved.
+test('a spoken draft into another Messages conversation keeps the conversation after the thread opens',async({page})=>{
+ await setup(page,'sheet',true);
+ await page.evaluate(async()=>{
+  const f=(window as any).ownedVoiceNavigation,{alphaClient}=await import('/src/runtime/alpha-client.ts');
+  f.answer='I put the draft in your conversation with Ada.';f.prompt='Text Ada that I am running late.';
+  // The thread the step opens is published as the local selection, as openSmsThreadSelection does.
+  const setViewContext=alphaClient.setViewContext.bind(alphaClient);
+  alphaClient.setViewContext=(context:any,selection:string|null=null)=>setViewContext(context,f.threadOpen&&context.view==='messages'?'synthetic-thread':selection);
+  const transport=(alphaClient as any).transport,send=transport.send;
+  transport.send=async(input:any)=>{
+   const reply=await send(input);
+   const expected=alphaClient.getState().context,shell=f.shell;
+   const step=async(detent?:string)=>{
+    shell.openView('messages',undefined,detent??'sheet');
+    await new Promise<void>(resolve=>shell.setState({},()=>resolve()));
+    // As `place` does: wait for Messages to settle, then open the thread (chooseThread).
+    await new Promise(resolve=>setTimeout(resolve,20));
+    f.revisionInFront=alphaClient.getState().context.revision;f.threadOpen=true;
+    await new Promise<void>(resolve=>shell.setState({},()=>resolve()));
+    f.revisionThreadOpen=alphaClient.getState().context.revision;
+    return true;
+   };
+   f.stepRegistered=true;
+   alphaClient.afterRequestSettles({view:'messages',current:()=>{if(!alphaClient.followsTurnContext(expected))throw Error('Phone context changed');},show:step});
+   return reply;
+  };
+ });
+ await utterance(page);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','messages');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ const answer='I put the draft in your conversation with Ada.';
+ expect(await observed(page)).toMatchObject({chat:'sheet',toast:'',spoken:[answer],last:answer,error:null});
+ // The thread really changed the published context after Messages was in front.
+ const revisions=await page.evaluate(()=>{const f=(window as any).ownedVoiceNavigation;return {registered:f.stepRegistered,inFront:f.revisionInFront,threadOpen:f.revisionThreadOpen};});
+ expect(revisions.registered).toBe(true);expect(revisions.threadOpen).toBeGreaterThan(revisions.inFront);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await expect(voice(page)).toHaveCount(0);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','messages');
+});

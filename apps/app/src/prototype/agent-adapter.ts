@@ -1144,7 +1144,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // A view step held for this turn also runs after the turn's own screen change (a VIEWS
         // navigation delivered with this reply), which the exact context check above would refuse.
         const stepCurrent=()=>{signal.throwIfAborted();context(this);if(!owned()||!alphaClient.followsTurnContext(expectedContext))throw Error('Phone context changed');};
-        const viewStep=(view:string,step:(detent?:string)=>void)=>()=>alphaClient.afterRequestSettles({view,current:stepCurrent,show:step});
+        const viewStep=(view:string,step:(detent?:string)=>void|Promise<unknown>)=>()=>alphaClient.afterRequestSettles({view,current:stepCurrent,show:step});
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
@@ -2115,13 +2115,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       // A plain view change would read as leaving the conversation and end it (voice-adapter
       // chatCurrent), losing this reply. Each held step goes through the voice session's own
-      // navigation hold instead, as a spoken VIEWS move does, so the conversation follows it.
+      // navigation hold instead, as a spoken VIEWS move does, so the conversation follows it. A step
+      // that keeps changing its view once in front (Messages opening the draft's conversation) is
+      // waited for, and the context it finished on is the one the conversation continues from.
       await viewSteps.release(async step=>{
         if(typeof step==='function'||!input.navigation){afterTurn.push(typeof step==='function'?step:()=>{step.current();step.show();});return;}
         const live=()=>{signal.throwIfAborted();input.assertCurrent();if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');};
         let shown=false;
         try{
-          shown=await input.navigation.apply(step.view,()=>{live();step.current();},(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{step.show(chat);this.setState({},()=>{try{live();context(this);const switched=(this.S().view||'home')===step.view&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
+          shown=await input.navigation.apply(step.view,()=>{live();step.current();},(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{Promise.resolve(step.show(chat)).then(()=>this.setState({},()=>{try{live();context(this);const switched=(this.S().view||'home')===step.view&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}}),reject);}catch(error){reject(error);}}));
         }catch{shown=false;}finally{const next=input.navigation.finish(shown);if(next)acceptedContext=next;}
       });
       current();

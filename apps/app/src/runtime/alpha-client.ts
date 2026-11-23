@@ -97,8 +97,11 @@ export interface VoiceNavigationContinuation {
  * A step that brings another view in front after a request (see `AlphaClient.afterRequestSettles`).
  * `view` names the view it shows, so a voice turn can carry its conversation there; `current`
  * throws once the step is no longer current; `show` takes the chat detent the view should open with.
+ * A step that keeps changing its view after bringing it in front (Messages opening the draft's
+ * conversation, which publishes that thread as the selection) returns a promise that settles once
+ * it is done, so a voice turn pins the context the step finished on, not the one it passed through.
  */
-export interface ViewStep { view: string; current: () => void; show: (detent?: string) => void }
+export interface ViewStep { view: string; current: () => void; show: (detent?: string) => void | Promise<unknown> }
 /** The view steps a chat turn's own request performs, held until that turn has delivered its reply. */
 export interface TurnViewSteps {
   /** The turn's own navigation moved the context from `from` to the context now published. */
