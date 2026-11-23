@@ -126,3 +126,141 @@ test('a website is not reloaded or scrolled when Browser is left and opened agai
  expect(await site.evaluate(()=>scrollY)).toBe(600);
  expect(loads()).toBe(1);
 });
+
+type InputProbeEvent={type:string;pointerType:string|null;defaultPrevented:boolean;targetTag:string|null;activeTag:string|null};
+type InputProbeWindow=Window&{__browserInputEvents?:InputProbeEvent[];__browserComposerBlurs?:number;__browserComposerRef?:Element|null};
+
+async function touchTapPoint(page:Page,x:number,y:number){
+ const client=await page.context().newCDPSession(page);
+ try{
+  await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,radiusX:4,radiusY:4,force:1,id:1}]});
+  await page.waitForTimeout(30);
+  await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ }finally{
+  await client.detach();
+ }
+}
+
+test('tapping browser input bar opens half-sheet with focused preserved textarea and allows IME touch activation',async({page},testInfo)=>{
+ const {geometry,settled}=await openSite(page);
+ const screen=page.locator('[data-screen]');
+ const layer=page.locator('[data-alpha-layer="composer"]');
+ const input=layer.locator('textarea[data-alpha-composer="true"]');
+ await expect(input).toBeVisible();
+ await expect(input).not.toBeFocused();
+ await expect(screen).toHaveAttribute('data-alpha-chat-half','false');
+
+ await page.evaluate(()=>{
+  const w=window as InputProbeWindow;
+  w.__browserInputEvents=[];
+  w.__browserComposerBlurs=0;
+  w.__browserComposerRef=document.querySelector('[data-alpha-layer="composer"] textarea[data-alpha-composer="true"]');
+  const textarea=w.__browserComposerRef;
+  textarea?.addEventListener('blur',()=>{w.__browserComposerBlurs=(w.__browserComposerBlurs??0)+1;});
+  for(const type of ['touchstart','pointerdown','touchend','pointerup','focusin'] as const){
+   document.addEventListener(type,event=>{
+    const target=event.target as Element|null;
+    if(!target?.closest('[data-alpha-layer="composer"]'))return;
+    w.__browserInputEvents?.push({
+     type:event.type,
+     pointerType:'pointerType' in event?String((event as PointerEvent).pointerType):null,
+     defaultPrevented:event.defaultPrevented,
+     targetTag:target.tagName??null,
+     activeTag:document.activeElement?.tagName??null,
+    });
+   },{capture:true});
+  }
+ });
+
+ // 1. Touch tap empty textarea: native touchstart/pointerdown are not defaultPrevented, sheet opens, and same textarea stays focused in dock.
+ const box=(await input.boundingBox())!;
+ await touchTapPoint(page,box.x+box.width/2,box.y+box.height/2);
+ await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toBeVisible();
+ await expect(screen).toHaveAttribute('data-alpha-chat-half','true');
+ await expect(layer).toHaveAttribute('data-alpha-promoted-editor','true');
+ await expect(input).toBeFocused();
+ await settleScreen(page);
+ await page.screenshot({animations:'disabled',path:testInfo.outputPath('browser-input-tap-sheet.png')});
+
+ const probe=await page.evaluate(()=>{
+  const w=window as InputProbeWindow;
+  const active=document.querySelector('[data-alpha-layer="composer"] textarea[data-alpha-composer="true"]');
+  return {events:w.__browserInputEvents??[],blurs:w.__browserComposerBlurs??0,sameNode:active===w.__browserComposerRef&&!!active?.isConnected};
+ });
+ expect(probe.events.find(e=>e.type==='touchstart'&&e.targetTag==='TEXTAREA')?.defaultPrevented).toBe(false);
+ expect(probe.events.find(e=>e.type==='pointerdown'&&e.targetTag==='TEXTAREA')?.defaultPrevented).toBe(false);
+ expect(probe.blurs).toBe(0);
+ expect(probe.sameNode).toBe(true);
+
+ await page.keyboard.type('hello browser');
+ await expect(input).toHaveValue('hello browser');
+
+ // Minimize returns to resting bar with draft preserved and unfocused, then tapping non-empty textarea re-opens half-sheet with focus.
+ await page.getByRole('button',{name:'Minimize chat',exact:true}).click();
+ await expect(screen).toHaveAttribute('data-alpha-chat-half','false');
+ await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toHaveCount(0);
+ await expect(input).not.toBeFocused();
+ await expect(input).toHaveValue('hello browser');
+
+ const nonEmptyBox=(await input.boundingBox())!;
+ await touchTapPoint(page,nonEmptyBox.x+nonEmptyBox.width/2,nonEmptyBox.y+nonEmptyBox.height/2);
+ await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toBeVisible();
+ await expect(screen).toHaveAttribute('data-alpha-chat-half','true');
+ await expect(layer).toHaveAttribute('data-alpha-promoted-editor','true');
+ await expect(input).toBeFocused();
+ await expect(input).toHaveValue('hello browser');
+ expect(await geometry()).toEqual(settled);
+});
+
+test('tapping browser input drag background opens half-sheet with focused composer',async({page})=>{
+ const {geometry,settled}=await openSite(page);
+ const screen=page.locator('[data-screen]');
+ const layer=page.locator('[data-alpha-layer="composer"]');
+ const input=layer.locator('textarea[data-alpha-composer="true"]');
+ await expect(screen).toHaveAttribute('data-alpha-chat-half','false');
+ const bgPoint=await page.evaluate(()=>{
+  const bg=document.querySelector<HTMLElement>('[data-alpha-input-drag-background]');
+  if(!bg)return null;
+  const rect=bg.getBoundingClientRect();
+  for(const [px,py] of [
+   [rect.left+8,rect.top+rect.height/2],
+   [rect.right-8,rect.top+rect.height/2],
+   [rect.left+rect.width/2,rect.top+3],
+   [rect.left+rect.width/2,rect.bottom-3],
+  ]){
+   if(document.elementFromPoint(px,py)===bg)return {x:px,y:py};
+  }
+  return {x:rect.left+rect.width/2,y:rect.top+3};
+ });
+ expect(bgPoint).not.toBeNull();
+ await touchTapPoint(page,bgPoint!.x,bgPoint!.y);
+ await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toBeVisible();
+ await expect(screen).toHaveAttribute('data-alpha-chat-half','true');
+ await expect(layer).toHaveAttribute('data-alpha-promoted-editor','true');
+ await expect(input).toBeFocused();
+ expect(await geometry()).toEqual(settled);
+});
+
+test('dragging up from empty browser textarea opens half-sheet without premature focus',async({page})=>{
+ const {geometry,settled}=await openSite(page);
+ const screen=page.locator('[data-screen]');
+ const input=page.locator('[data-alpha-layer="composer"] textarea[data-alpha-composer="true"]');
+ await expect(input).toBeVisible();
+ const box=(await input.boundingBox())!;
+ const x=box.x+box.width/2,y=box.y+box.height/2;
+ const client=await page.context().newCDPSession(page);
+ try{
+  await client.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,radiusX:4,radiusY:4,force:1,id:1}]});
+  for(let step=1;step<=14;step++){
+   await client.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y-step*16,radiusX:4,radiusY:4,force:1,id:1}]});
+   await nextFrame(page);
+  }
+  await client.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+ }finally{
+  await client.detach();
+ }
+ await expect(page.getByRole('button',{name:'Resize chat',exact:true})).toBeVisible();
+ await expect(screen).toHaveAttribute('data-alpha-chat-half','true');
+ await expect(page.locator('textarea[data-alpha-composer="true"]')).not.toBeFocused();
+ expect(await geometry()).toEqual(settled);
+});

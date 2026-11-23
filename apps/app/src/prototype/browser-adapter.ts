@@ -891,8 +891,12 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   const hostModalOpen = (root: { querySelector(selector: string): unknown }, nativeSurface: boolean): boolean => nativeSurface && !!root.querySelector('dialog:modal, .alpha-connection-scrim');
   // host-modal:end
   const nativeUnderlay = () => Capacitor.getPlatform()==='android';
+  const assistantComposerFocused = () => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && !!active.closest('[data-alpha-layer="composer"],[data-alpha-layer="conversation"]');
+  };
   /** Keep the native page drawn while the host owns interaction with the assistant. */
-  const nativeUnderAssistant = () => Capacitor.isNativePlatform() && (['sheet','full'].includes(shell?.S().chat) || !!shell?.chatMotion?.moved);
+  const nativeUnderAssistant = () => Capacitor.isNativePlatform() && (['sheet','full'].includes(shell?.S().chat) || !!shell?.chatMotion?.moved || !!shell?.chatInputFocused || !!shell?.promotedEditorInDock || assistantComposerFocused());
   function browserBackdrop(rect?:Bag){
     const html=document.documentElement;
     if(!rect){if(html.getAttribute('data-alpha-browser-underlay')!==session)return;html.removeAttribute('data-alpha-browser-underlay');html.style.removeProperty('--alpha-browser-clear-top');html.style.removeProperty('--alpha-browser-clear-bottom');return;}
@@ -902,7 +906,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     html.style.setProperty('--alpha-browser-clear-bottom',`${Math.max(0,(rect.y+rect.height-(box?.top||0))/scale)}px`);
     html.setAttribute('data-alpha-browser-underlay',session);
   }
-  const browserChromeSelector='[data-alpha-layer="composer"],[data-alpha-layer="pill"] > *,[data-alpha-layer="conversation"],.alpha-plan-notice,[data-alpha-toast] > *,[data-screen] > button[aria-label="Home"],[role="search"][aria-label="Find in page"]';
+  const browserChromeSelector='[data-alpha-layer="composer"],[data-alpha-promoted-editor="true"] textarea[data-alpha-composer],[data-alpha-layer="pill"] > *,[data-alpha-layer="conversation"],.alpha-plan-notice,[data-alpha-toast] > *,[data-screen] > button[aria-label="Home"],[role="search"][aria-label="Find in page"]';
   function browserHostRects(page:Bag){
     if(nativeUnderAssistant())return [{x:page.x,y:page.y,width:page.width,height:page.height,cornerRadius:0}];
     return [...document.querySelectorAll<HTMLElement>(browserChromeSelector)].flatMap(element=>{

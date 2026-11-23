@@ -851,6 +851,10 @@ export function installChatOverlayMotion(Component: Shell) {
 		if (this.props.assistantSurface && !this.S().view && next.chat === "hidden") return this.closeAssistant();
 		// An open chat collapses to its resting form; only the bar itself dismisses to the pill,
 		// and never on Home.
+		if (next.chat === "hidden") {
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.matches("[data-alpha-composer]")) active.blur();
+		}
 		this.setState({
 			chat: next.chat === "hidden" && !collapsed ? this.rest() : next.chat,
 		});
@@ -979,6 +983,44 @@ export function installChatOverlayMotion(Component: Shell) {
 			if (rest === "input") out.showComposer = true;
 			if (rest === "hidden") out.showPill = true;
 		}
+		// Both layouts and their gesture targets stay where they are. The text field
+		// has one owner so promoting a typed send does not replace its input session.
+		const composerSlots = (shell.composerSlots ??= { dock: null, chat: null });
+		shell.composerDockRef ??= (node: HTMLElement | null) => {
+			composerSlots.dock = node;
+		};
+		shell.composerChatRef ??= (node: HTMLElement | null) => {
+			composerSlots.chat = node;
+		};
+		out.composerDockRef = shell.composerDockRef;
+		out.composerChatRef = shell.composerChatRef;
+		const browserInput = () =>
+			shell.S().view === "browser" &&
+			(out.chatMode ?? shell.S().chat) === "input" &&
+			!shell.S().shade &&
+			shell.S().voice === "off" &&
+			!shell.props.assistantSurface;
+		const focusDockComposer = (target?: EventTarget | null) => {
+			const dockEl: HTMLElement | null =
+				composerSlots.dock instanceof HTMLElement ? composerSlots.dock : null;
+			const textarea =
+				target instanceof HTMLTextAreaElement
+					? target
+					: dockEl?.querySelector<HTMLTextAreaElement>(
+							"textarea[data-alpha-composer]",
+						) ??
+						document.querySelector<HTMLTextAreaElement>(
+							'[data-alpha-layer="composer"] textarea[data-alpha-composer]',
+						);
+			if (textarea && document.activeElement !== textarea) textarea.focus();
+			return textarea;
+		};
+		const openBrowserInput = (target?: EventTarget | null) => {
+			shell.swallow = 0;
+			shell.promotedEditorInDock = true;
+			focusDockComposer(target);
+			if (shell.S().chat === "input") out.openSheet?.();
+		};
 		const binding = shell.props.chatPullBinding;
 		const handlers = {
 			down(event: PointerEvent) {
@@ -1014,7 +1056,9 @@ export function installChatOverlayMotion(Component: Shell) {
 				// Under voice the handle keeps its press and moves nothing: the screen's own swipe
 				// must not lower the sheet from under the voice controls either.
 				if (shell.chatOwnedByVoice) return;
-				if (emptyInput) event.preventDefault();
+				// Preserve Chromium/Android WebView native touch tap activation so focusing the
+				// composer opens the soft keyboard instead of suppressing GestureTap.
+				if (emptyInput && event.pointerType === "mouse") event.preventDefault();
 				const g = bounds(),
 					// A comms view rests on its bar even when the chat state says hidden (D2).
 					mode = (out.chatMode ?? shell.S().chat) as Mode,
@@ -1027,7 +1071,7 @@ export function installChatOverlayMotion(Component: Shell) {
 					label = target?.closest("button")?.getAttribute("aria-label"),
 					alpha = !!target?.closest("[data-alpha-input-drag-alpha],[data-alpha-pill-alpha]"),
 					tap = emptyInput
-						? () => owner.focus()
+						? () => (browserInput() ? openBrowserInput(owner) : owner.focus())
 						: alpha || label === "Open conversation"
 							? out.openSheet
 							: label === "Type"
@@ -1040,7 +1084,9 @@ export function installChatOverlayMotion(Component: Shell) {
 											? out.strip?.tap
 											: label === "Stop reply"
 												? out.stopReply
-												: undefined;
+												: browserInput() && target?.closest("[data-alpha-input-drag-background]")
+													? () => openBrowserInput()
+													: undefined;
 				shell.swallow = 0;
 				shell.chatMotion = {
 					id: event.pointerId,
@@ -1126,7 +1172,35 @@ export function installChatOverlayMotion(Component: Shell) {
 				String(out.barValue ?? out.draft ?? "").length === 0
 			)
 				handlers.down(event);
-			else out.composerPointer(event);
+			else {
+				if (browserInput() && event.isPrimary !== false && event.button === 0) {
+					shell.swallow = 0;
+					const textarea =
+						event.target instanceof HTMLTextAreaElement ? event.target : null;
+					if (textarea && document.activeElement === textarea) {
+						const startX = event.clientX,
+							startY = event.clientY,
+							pointerId = event.pointerId;
+						const cleanup = () => {
+							window.removeEventListener("pointerup", onUp, true);
+							window.removeEventListener("pointercancel", cleanup, true);
+						};
+						const onUp = (upEvent: PointerEvent) => {
+							if (upEvent.pointerId !== pointerId) return;
+							cleanup();
+							if (
+								Math.hypot(upEvent.clientX - startX, upEvent.clientY - startY) <
+									TAP_SLOP * bounds().scale &&
+								browserInput()
+							)
+								openBrowserInput(textarea);
+						};
+						window.addEventListener("pointerup", onUp, true);
+						window.addEventListener("pointercancel", cleanup, true);
+					}
+				}
+				out.composerPointer(event);
+			}
 		};
 		// A captured drag may end over a former pill button. It must not synthesize
 		// a second action (including Type/Talk) after committing its detent.
@@ -1205,6 +1279,8 @@ export function installChatOverlayMotion(Component: Shell) {
 		};
 		out.closeChat = () => {
 			retire(shell, false);
+			const active = document.activeElement;
+			if (active instanceof HTMLElement && active.matches("[data-alpha-composer]")) active.blur();
 			if (shell.props.assistantSurface && !shell.S().view) return shell.closeAssistant();
 			// A voice session in the chat keeps its controls on the pill.
 			shell.setState({
@@ -1219,7 +1295,16 @@ export function installChatOverlayMotion(Component: Shell) {
 			shell.chatInputFocused = focused;
 			shell.setState({});
 		};
-		out.inputComposerFocus = () => setInputFocus(true);
+		out.inputComposerFocus = () => {
+			if (browserInput() && !shell.chatMotion?.moved) {
+				shell.swallow = 0;
+				shell.chatInputFocused = true;
+				shell.promotedEditorInDock = true;
+				out.openSheet?.();
+				return;
+			}
+			setInputFocus(true);
+		};
 		out.inputComposerBlur = () => setInputFocus(false);
 		// A comms view's bar is the app's own field (D3): the app stays live while it is typed in, so a
 		// filtered list, the thread accessories and Back keep their taps.
@@ -1321,13 +1406,6 @@ export function installChatOverlayMotion(Component: Shell) {
 				if (ownedPress(event)) settleScrim();
 			},
 		};
-		// Both layouts and their gesture targets stay where they are. The text field
-		// has one owner so promoting a typed send does not replace its input session.
-		const composerSlots = shell.composerSlots ??= {dock:null,chat:null};
-		shell.composerDockRef ??= (node: HTMLElement | null) => { composerSlots.dock = node; };
-		shell.composerChatRef ??= (node: HTMLElement | null) => { composerSlots.chat = node; };
-		out.composerDockRef = shell.composerDockRef;
-		out.composerChatRef = shell.composerChatRef;
 		const openEditor = out.panelComposer && (!out.showComposer || isOpen(s.chat));
 		// Android ends the native input session when the focused editor is reparented,
 		// even when moveBefore preserves DOM focus. Keep its original slot and position
