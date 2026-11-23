@@ -3,7 +3,7 @@ import { readReplyStream } from "@elizaos/agent/client"
 import type { AssistantCapture, AssistantListenHandlers, CloudStreamingSpeech } from "@elizaos/os/bridges/voice"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
 import { AdvertisedCapabilities } from "../assistant/ports.vibe"
-import { capabilityHeaders } from "../assistant/transport.vibe"
+import { deviceHeaders } from "../assistant/transport.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -352,8 +352,8 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   effect function answerOf(conversationId: string, body: TurnBody, ack: Acknowledgement, microphoneClear: () => boolean, signal: AbortSignal) {
     const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`
     const hooks = voiceReplyHooks(ack, microphoneClear, () => { runFork(latency.mark("FirstToken")) })
-    // A voice turn carries the capabilities this phone advertises, read again for each turn, as the assistant's own turns do.
-    const headers = capabilityHeaders(try (advertised.names() catch () => [] as readonly string[]))
+    // A voice turn carries the device headers, read again for each turn, as the assistant's own turns do.
+    const headers = try Effect.provideService(deviceHeaders(), AdvertisedCapabilities, advertised)
     const outcome = tryPromise(() => readReplyStream(Stream.toAsyncIterable(resident.stream(`${path}/stream`, body, headers)), hooks, signal)) catch effect (error) => {
       lastCause = error
       throw error
