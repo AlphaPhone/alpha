@@ -6,6 +6,7 @@ import { Assistant } from "../assistant/assistant.vibe"
 import { Machine as RemindersMachine } from "../../gen/clock__reminders.effect.vibe"
 import { Reminders } from "../clock/reminders.vibe"
 import { overdue } from "../clock/schedule.ts"
+import { Composer } from "../assistant/composer.vibe"
 import { Conversations } from "../assistant/conversations.vibe"
 import { DeviceFacts } from "../settings/facts.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
@@ -29,6 +30,7 @@ export const integrationLive = Layer.effectDiscard(effect {
   const sheet = try AccountSheet
   const voice = try VoiceConversation
   const conversations = try Conversations
+  const composer = try Composer
   const assistant = try Assistant
   const calls = try CallWatch
   const navigation = try Navigation
@@ -57,6 +59,28 @@ export const integrationLive = Layer.effectDiscard(effect {
     }
     if (try voice.startFromInvocation(screen, start)) try navigation.send({ type: "startVoice" })
   }
+
+  // Talk in the chat (spec/voice/conversation.md, "Voice starts only from the owner, …"): voice goes to the chat's own
+  // conversation, a new chat first gets one, and the chat stays current while the transcript shows it.
+  let chatNow: string | null = null
+  fork.scoped (effect { for try (const shown of composer.transcript) chatNow = shown.conversation })
+  effect function talkFromChat() {
+    const nav = try navigation.get()
+    const front = try foreground.get()
+    const open = chatNow
+    const row = open === null ? (conversations.create() catch () => undefined) : (conversations.list() catch () => []).find((each) => each.id === open)
+    if (open === null && row !== undefined) try composer.open(row.id, true)
+    const started = open ?? row?.id
+    if (started === undefined) return
+    const start = {
+      admitted: !nav.hidden && nav.holds.length === 0 && !front.locked, callActive: !(try calls.allowed()),
+      conversationId: started, roomId: row?.roomId ?? started,
+      chatCurrent: () => chatNow === started,
+    }
+    try voice.start(start)
+    if ((try voice.get()).shown === "Starting") try navigation.send({ type: "startVoice" })
+  }
+  fork.scoped (effect { for try (const _ of assistant.voiceRequests) try talkFromChat() })
 
   fork.scoped assistant.follow()
   fork.scoped (effect {
