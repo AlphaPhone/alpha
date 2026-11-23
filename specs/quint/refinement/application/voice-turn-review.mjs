@@ -13,8 +13,8 @@
  * Correspondence notes.
  *  - Losing currency is the connection chooser opening without the shell having been told yet;
  *    the panel is read with the chooser momentarily reported closed.
- *  - A failed reply is a rejected `sendVoiceTurn`; a review requirement is the reply the shell
- *    returns for one (`complete: false, reviewRequired: true`), an owner-input pause the reply with
+ *  - A failed reply is a rejected `sendVoiceTurn`; a review card reply is the reply the shell
+ *    returns for one (`complete: true, reviewRequired: true`), an owner-input pause the reply with
  *    `awaitingUserInput`.
  *  - After a spoken reply the clock runs until the conversation listens again.
  *  - `reviewRequired` is compared while voice is open. */
@@ -22,12 +22,11 @@ import assert from 'node:assert/strict';
 import {modelTraces, replayTraces, repositoryRoot} from '../assistant-model-traces.mjs';
 
 export const model = {path: 'specs/quint/application/VoiceTurnReview.qnt', module: 'VoiceTurnReview'};
-export const scenarios = ['reviewRequiredDoesNotResumeTest', 'staleReplyClosesVoiceTest', 'failedReplyStartsOverTest', 'ownerInputPauseIsNotAReviewRequirementTest'];
-export const witnesses = ['ReviewRequiredClosesWitness'];
+export const scenarios = ['reviewRequiredKeepsListeningTest', 'staleReplyClosesVoiceTest', 'failedReplyStartsOverTest', 'ownerInputPauseIsNotAReviewRequirementTest'];
+export const witnesses = ['ReviewRequiredListeningWitness'];
 
 const {cloudVoiceViewFixture} = await import(`${repositoryRoot}/test/fixtures/cloud-voice-view.mjs`);
 const {voiceFakeClock} = await import(`${repositoryRoot}/test/fixtures/shared-batch-voice.mjs`);
-const REVIEW_LINE = 'Mic off · use keyboard';
 
 export function project(state) {
   return {...state, reviewRequired: state.voice && state.reviewRequired};
@@ -60,7 +59,7 @@ export function createDriver() {
       const {input, resolve, reject} = replies.at(-1);
       if (failed) reject(Error('The agent did not answer.'));
       else resolve({requestId: input.turnId, conversationId: f.conversation, userMessageId: 'user-message', assistantMessageId: 'agent-message', text: 'Synthetic reply.',
-        complete: !reviewRequired && !awaitingInput, ...(reviewRequired ? {reviewRequired: true} : {}), ...(awaitingInput ? {awaitingUserInput: {proposalId: 'proposal', digest: 'digest'}} : {})});
+        complete: !awaitingInput, ...(reviewRequired ? {reviewRequired: true} : {}), ...(awaitingInput ? {awaitingUserInput: {proposalId: 'proposal', digest: 'digest'}} : {})});
       await settle();
       for (let waited = 0; waited < 6000 && ['preparing-speech', 'speaking', 'starting'].includes(panel()?.state); waited += 100) await clock.advance(100);
     },
@@ -71,7 +70,7 @@ export function createDriver() {
       if (voice) assert.ok(['listening', 'thinking', 'error', 'awaiting-user-input'].includes(view.state), `settled panel state ${view.state}`);
       if (replies.length) assert.equal(replies.at(-1).input.text, 'spoken', 'the spoken transcript is the text handed to the agent');
       return {voice, current: !f.open, sends: replies.length,
-        reviewRequired: voice && String(view.lines[0].t).startsWith(REVIEW_LINE), phase: voice ? view.state : 'idle', restarts: prepares};
+        reviewRequired: voice && view.reviewAvailable === true, phase: voice ? view.state : 'idle', restarts: prepares};
     },
     async dispose() { f.open = false; try { f.close(); } catch {} for (const reply of replies) reply.reject(Error('closed')); await clock.flush(); },
   };
