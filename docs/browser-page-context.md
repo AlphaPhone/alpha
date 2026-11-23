@@ -40,6 +40,11 @@ Brave Leo, Firefox AI chatbot).
   off switch (Edge "Context clues", Gemini, Dia).
 - Give the agent link targets it can act on, tied to the page revision so a
   stale target is refused.
+- Rank the targets: on a link-aggregator page (Hacker News) the site's own
+  navigation, user, time and hide links filled 17 of 20 slots and left three
+  stories. Headline-like links (at least four words or 24 characters) now come
+  first, and links to action endpoints (hide, vote, flag, delete, ...) are never
+  offered, since opening one changes something.
 
 ## What this change does
 

@@ -14,7 +14,8 @@ import org.json.JSONObject;
  * committed HTTPS page whose address the shared sensitive-address policy did not refuse.
  *
  * <p>The script reads visible text of the page's main content as lines (headings and list items
- * marked), the owner's selection and up to {@link #LINKS_MAX} visible links. It reads no field
+ * marked), the owner's selection and up to {@link #LINKS_MAX} visible links, headline-like links
+ * first and never a link to an action endpoint such as hide or vote. It reads no field
  * values, cookies, storage, editable regions or frame documents. A visible password, one-time-code
  * or card field, or credential-looking text, withholds the page: only its address and title go to
  * the agent. Six-to-eight digit runs are replaced with "[number]". Text over {@link #TEXT_MAX}
@@ -205,26 +206,30 @@ public final class AlphaPageContext {
      const value=whole(redact(line(selection.toString())).slice(0,SELECTION_MAX));
      if(value&&!(at&&at.closest('input,textarea,[contenteditable]:not([contenteditable="false"])'))&&!secret.test(value))result.selection=value;
     }
-    // Links the page shows: those on screen first, then the main content's, in page order.
+    // Links the page shows. Headline-like links come first, then short ones (names, times, glosses);
+    // within each, those on screen first, then in page order. A link to an action endpoint (hide, vote,
+    // delete, ...) changes something when opened, so it is never offered.
+    const action=/^(?:hide|unhide|vote|upvote|downvote|flag|unflag|fave|favorite|favourite|like|unlike|delete|remove|edit|reply|follow|unfollow|subscribe|share|print|logout|signout)$/i;
     const route=/(?:^|[^a-z0-9])(?:signin|sign-in|login|log-in|logout|log-out|signout|sign-out|auth|oauth|sso|account|accounts|password|reset|recovery|token|session|checkout|cart|unsubscribe)(?:$|[^a-z0-9])/i;
-    const here=location.href.replace(/#.*$/,''),seen=new Set([here]),onScreen=[],rest=[];let anchors=0;
+    const here=location.href.replace(/#.*$/,''),seen=new Set([here]),buckets=[[],[],[],[]];let anchors=0;
     for(const a of root.querySelectorAll('a[href]')){
-     if(++anchors>3000||onScreen.length>=LINKS_MAX||(rest.length>=LINKS_MAX&&late()))break;
+     if(++anchors>3000||buckets[0].length>=LINKS_MAX||(buckets[0].length+buckets[1].length>=LINKS_MAX&&late()))break;
      let url;try{url=new URL(a.href);}catch{continue;}
      if(url.protocol!=='https:'||url.username||url.password)continue;
      url.hash='';const href=url.href;
      if(href.length>2048||seen.has(href))continue;
      let decoded;try{decoded=decodeURIComponent(href);}catch{continue;}
-     if(route.test(decoded))continue;
+     if(route.test(decoded)||url.pathname.split('/').some(part=>action.test(part.replace(/\\.[a-z0-9]{1,5}$/i,''))))continue;
      if(a.closest('nav,footer,aside,[role="navigation"],[aria-hidden="true"]')||!shown(a))continue;
      let words=whole(redact(line(a.innerText||a.getAttribute('aria-label')||a.getAttribute('title')||'')));
      if(!words||words.length<2)continue;
      if(words.length>LINK_TEXT_MAX)words=whole(words.slice(0,LINK_TEXT_MAX-1)).replace(/\\s+\\S*$/,'')+'\\u2026';
      if(secret.test(words))continue;
      seen.add(href);
-     const r=a.getBoundingClientRect();(r.bottom>0&&r.top<height?onScreen:rest).push({text:words,url:href});
+     const r=a.getBoundingClientRect(),visible=r.bottom>0&&r.top<height,headline=words.length>=24||words.split(' ').length>=4;
+     buckets[(headline?0:2)+(visible?0:1)].push({text:words,url:href});
     }
-    const links=[...onScreen,...rest].slice(0,LINKS_MAX);
+    const links=buckets.flat().slice(0,LINKS_MAX);
     if(links.length)result.links=links;
     return result;
     })()

@@ -92,6 +92,16 @@ test('links are public HTTPS targets without fragments or sign-in routes, on-scr
  expect(many.links).toHaveLength(20);
 });
 
+test('headline links come before names, times and site links, and action links are never offered',async({page})=>{
+ // A link-aggregator front page: each story carries a title and several short utility links.
+ const story=(i:number)=>`<tr><td><a href="https://story${i}.example/post">The long headline of story number ${i}</a> <a href="https://agg.example/from?site=story${i}.example">story${i}.example</a></td></tr>
+  <tr><td><a href="https://agg.example/user?id=u${i}">u${i}</a> <a href="https://agg.example/item?id=${i}">${i} hours ago</a> | <a href="https://agg.example/hide?id=${i}&goto=news">hide</a> | <a href="https://agg.example/vote/${i}/">vote</a></td></tr>`;
+ const result=await read(page,`<main><table><tr><td><a href="https://agg.example/newest">new</a> | <a href="https://agg.example/ask">ask</a></td></tr>${Array.from({length:25},(_,i)=>story(i+1)).join('')}</table></main>`);
+ expect(result.links.map((link:{url:string})=>link.url)).toEqual(Array.from({length:20},(_,i)=>`https://story${i+1}.example/post`));
+ const few=await read(page,`<main><table>${story(1)}</table><p><a href="https://agg.example/edit">Edit</a> <a href="https://agg.example/posts/delete.php?id=1">Delete this post</a></p></main>`);
+ expect(few.links.map((link:{url:string})=>link.url)).toEqual(['https://story1.example/post','https://agg.example/from?site=story1.example','https://agg.example/user?id=u1','https://agg.example/item?id=1']);
+});
+
 test('the owner selection is shared unless it is inside a field',async({page})=>{
  const selected=await read(page,'<main><p id="p">Octopuses have blue blood.</p><textarea id="t">private draft</textarea></main>',{before:async page=>{await page.evaluate(()=>{const range=document.createRange();range.selectNodeContents(document.getElementById('p')!);getSelection()!.addRange(range);});}});
  expect(selected.selection).toBe('Octopuses have blue blood.');
