@@ -153,7 +153,10 @@ test('the one constant decides whether an unresolved font withholds distribution
 });
 
 test('the bundle audit prints licence flags and the font check as flag lines, never as a release blocker', t => {
-  const files = {'index.html': '<!doctype html>', 'build-flags.json': JSON.stringify({testMocks: false})};
+  const files = {
+    'index.html': `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'">`,
+    'build-flags.json': JSON.stringify({testMocks: false}),
+  };
   const audit = dir => spawnSync(process.execPath, [path.join(ROOT, 'scripts/audit-production-bundle.ts'), dir], {encoding: 'utf8'});
   const run = audit(payload(t, {notices: committedNotices, files: {...files, 'denton-300.woff2': dentonBytes}}));
   assert.equal(run.status, 0, run.stderr);
