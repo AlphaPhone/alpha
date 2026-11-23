@@ -13,6 +13,7 @@ export error PreferencesUnreadable
 
 /** What Alpha may do and read; other areas read it here. */
 export service Preferences {
+  readonly browserPageChanges: Stream.Stream<boolean>
   /** The stored preferences and whether they could be read. */
   current(): { readonly value: State; readonly readable: boolean }!!
   /** Whether Alpha asks before a reviewed action: always where the preferences cannot be read. */
@@ -78,6 +79,7 @@ export const preferences = Layer.unwrap(effect {
     const read = effect () => ({ value: try held.get(), readable: lock.open })
     return {
       current: read,
+      browserPageChanges: Stream.changes(Stream.map(held.changes, (value: State) => sharesBrowserPage(value, lock.open))),
       asksBeforeActions: effect () => { const { value, readable } = try read(); return asksBefore(value, readable) },
       sharesLocation: effect () => { const { value, readable } = try read(); return sharesLocation(value, readable) },
       sharesBrowserPage: effect () => { const { value, readable } = try read(); return sharesBrowserPage(value, readable) },

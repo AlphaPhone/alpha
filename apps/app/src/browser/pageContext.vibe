@@ -1,11 +1,12 @@
-// spec/browser/pageContext.md, "Story: Let Alpha see the page I have open"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"; spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"; spec/browser/pageContext.md, "A withheld page tells the agent only its address and title, and a sensitive page's address loses its query"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
-import { type Event, type PageRead, type Withheld, Machine, machine, mayRead, waitMs } from "../../gen/browser__pageContext.effect.vibe"
-import { curTab, isPrivateTab } from "../../gen/browser__session.effect.vibe"
+// spec/browser/pageContext.md, "Story: Let Alpha see the page I have open"; spec/browser/pageContext.md, "A message can carry only the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"; spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"; spec/browser/pageContext.md, "A withheld page tells the agent only its address and title, and a sensitive page's address loses its query"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"; spec/browser/pageContext.md, "Browser prepares one native capture of the open page ahead of a message"
+import { type Event, type PageRead, type Withheld, Machine, machine, mayRead, settleMs, warmAgeMs, warmGapMs, captureMaxAgeMs, captureWait, shouldWarmOnOpen, waitMs } from "../../gen/browser__pageContext.effect.vibe"
+import { covered, curTab, isPrivateTab, type Session } from "../../gen/browser__session.effect.vibe"
 import { settledSecurely } from "../../gen/browser__page.effect.vibe"
 import { PageContextReply } from "../platform/native.schema.vibe"
 import { Preferences } from "../settings/preferences.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { type BrowserPageObservation, type PageReadAnswer, type PageWithheld, boundPage, pageAddress } from "./page-context.ts"
+import { BrowserPageCache } from "./page-cache.ts"
 import { publicPageText } from "./page-text.ts"
 import { BrowserTabs } from "./session.vibe"
 import { TabHost } from "./tabHost.vibe"
@@ -29,7 +30,28 @@ export service BrowserPageContext {
 const withheldOf: Readonly<Record<PageWithheld, Withheld>> = { "sensitive-page": "SensitivePage", unreadable: "Unreadable" }
 
 function onBrowser(state: ForegroundState): boolean {
-  return state.visible && !state.locked && state.screen === "home" && state.view === "browser"
+  return state.visible && !state.locked && state.screen === "home" && state.view === "browser" && !state.shade && !state.modal
+}
+
+type CaptureTarget = {
+  readonly key: string
+  readonly tabId: string
+  readonly hostTab: string
+  readonly revision: string
+  readonly navigation: string
+  readonly url: string
+  readonly address: string
+  readonly title: string
+}
+
+function targetOf(state: Session, session: string): CaptureTarget | undefined {
+  const tab = curTab(state)
+  const { navigation, url, title } = tab.page
+  const address = pageAddress(url)
+  if (address === undefined || covered(state) || isPrivateTab(state, state.cur) || tab.stage !== "Live" || !settledSecurely(tab.page)) return undefined
+  const tabId = `${session}:${state.cur}`
+  const revision = String(tab.revision)
+  return { key: JSON.stringify([tabId, revision, navigation, url]), tabId, hostTab: state.cur, revision, navigation, url, address, title }
 }
 
 /** BrowserPageContext over the page-read machine in memory: the native tab host's isolated read on a device, the public address fetched again without credentials on the browser build. */
@@ -40,6 +62,7 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
   const foreground = try Foreground
   const preferences = try Preferences
   const links = try Ref.make<readonly string[]>([])
+  const cache = host.onDevice ? new BrowserPageCache() : undefined
   const step = (event: Event) => reads.send(event) catch () => undefined
 
   effect function read(tab: string, url: string, navigation: string) {
@@ -57,10 +80,51 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     return answer
   }
 
-  effect function still(tab: string, revision: number, navigation: string) {
-    const state = try tabs.get()
-    const now = curTab(state)
-    return state.cur === tab && now.revision === revision && now.page.navigation === navigation && !isPrivateTab(state, tab) && onBrowser(try foreground.get())
+  effect function still(target: CaptureTarget) {
+    return targetOf(try tabs.get(), host.session)?.key === target.key && onBrowser(try foreground.get())
+  }
+
+  effect function capture(target: CaptureTarget) {
+    if (!(try still(target)) || !(try preferences.sharesBrowserPage())) return undefined
+    const answer = try read(target.hostTab, target.url, target.navigation)
+    if (answer === undefined || !(try still(target)) || !(try preferences.sharesBrowserPage())) return undefined
+    const capturedAt = try Clock.currentTimeMillis
+    return boundPage(answer, { ...target, capturedAt })
+  }
+
+  const fetch = (target: CaptureTarget) => (signal: AbortSignal) => runPromise(Effect.timeout(capture(target), waitMs), { signal })
+
+  if (cache !== undefined) {
+    try addFinalizer(() => sync(() => { cache.select(undefined) }))
+    const tabChanges = Stream.map(tabs.changes, (tabs: Session) => ({ kind: "tabs" as const, tabs }))
+    const frontChanges = Stream.map(foreground.changes, (front: ForegroundState) => ({ kind: "front" as const, front }))
+    const privacyChanges = Stream.map(preferences.browserPageChanges, (enabled: boolean) => ({ kind: "privacy" as const, enabled }))
+    const changes = Stream.merge(Stream.merge(tabChanges, frontChanges), privacyChanges)
+    fork.scoped (effect {
+      let wasOpen = false
+      let warmedAt: number | undefined
+      for try (const event of changes) {
+        const front = event.kind === "front" ? event.front : try foreground.get()
+        const state = event.kind === "tabs" ? event.tabs : try tabs.get()
+        const enabled = event.kind === "privacy" ? event.enabled : try preferences.sharesBrowserPage()
+        const target = onBrowser(front) && enabled ? targetOf(state, host.session) : undefined
+        const open = target !== undefined && front.chat !== "closed"
+        const opened = open && !wasOpen
+        wasOpen = open
+        const changed = cache.select(target?.key)
+        if (target === undefined) continue
+        const refresh = fetch(target)
+        if (changed) cache.schedule(target.key, settleMs, refresh)
+        if (opened) {
+          const now = try Clock.currentTimeMillis
+          const age = cache.age(target.key, now) ?? warmAgeMs
+          if (shouldWarmOnOpen(age, warmedAt === undefined ? warmGapMs : now - warmedAt)) {
+            warmedAt = now
+            void cache.refresh(target.key, refresh)
+          }
+        }
+      }
+    })
   }
 
   effect function serve(turn: number, observation: PageTurnObservation, peerTakesIt: boolean) {
@@ -70,33 +134,35 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     const prefix = `${host.session}:`
     const observedTab = selected !== undefined && selected.kind === "browser-tab" && selected.id.startsWith(prefix) ? selected.id.slice(prefix.length) : ""
     const tab = curTab(state)
-    const address = pageAddress(tab.page.url)
+    const target = targetOf(state, host.session)
     const allowed = mayRead({
       browserView: observation.view === "browser",
       sensitive: observation.sensitive === true,
-      shown: onBrowser(try foreground.get()),
+      shown: !covered(state) && onBrowser(try foreground.get()),
       sameTab: observedTab !== "" && observedTab === state.cur,
       sameRevision: selected?.revision === String(tab.revision),
       priv: isPrivateTab(state, state.cur),
       settled: tab.stage === "Live" && settledSecurely(tab.page),
-      publicHttps: address !== undefined,
+      publicHttps: pageAddress(tab.page.url) !== undefined,
       enabled: try preferences.sharesBrowserPage(),
       peerTakesIt,
     })
     const begun = try step({ type: "begin", turn, tab: state.cur, revision: tab.revision, allowed })
-    if (begun?.stage !== "Reading" || address === undefined || selected === undefined || selected.revision === undefined) return undefined
-    const answer = timeout(read(state.cur, tab.page.url, tab.page.navigation), waitMs) catch () => "late" as const
-    if (answer === "late") {
+    if (begun?.stage !== "Reading" || target === undefined) return undefined
+    const kept = cache?.cached(target.key, try Clock.currentTimeMillis, captureMaxAgeMs)
+    if (cache !== undefined) cache.select(target.key)
+    const pageRead = cache === undefined ? capture(target) : promise(() => cache.refresh(target.key, fetch(target)))
+    const answer = timeout(pageRead, captureWait(kept !== undefined)) catch () => "late" as const
+    if (answer === "late" && kept === undefined) {
       try step({ type: "timedOut", turn })
       return undefined
     }
+    const page = answer === "late" ? cache?.cached(target.key, try Clock.currentTimeMillis, captureMaxAgeMs) : answer
     const after = try tabs.get()
-    const capturedAt = try Clock.currentTimeMillis
-    const page = answer === undefined ? undefined : boundPage(answer, { tabId: selected.id, revision: selected.revision, capturedAt, address, title: tab.page.title })
     const withheld: Withheld = page?.withheld === undefined ? "NotWithheld" : withheldOf[page.withheld]
     const settledRead = try step({ type: "answered", turn, tab: after.cur, revision: curTab(after).revision, valid: page !== undefined, withheld })
     if (settledRead?.stage !== "Answered" || page === undefined) return undefined
-    const checked = try step({ type: "rechecked", turn, isOn: try preferences.sharesBrowserPage(), present: try still(state.cur, tab.revision, tab.page.navigation) })
+    const checked = try step({ type: "rechecked", turn, isOn: try preferences.sharesBrowserPage(), present: try still(target) })
     if (checked?.stage !== "Answered") return undefined
     const handed = try step({ type: "delivered", turn })
     if (handed?.stage !== "Delivered") return undefined

@@ -26,7 +26,7 @@ export interface FakeOptions {
   /** The tab host's answer to a method; an Error is a native refusal with its message, and an Effect is run for the answer. */
   readonly answers?: Record<string, (args: Record<string, unknown>) => unknown>
   /** Settings › Privacy › Browser page for Alpha; on when not given. */
-  readonly sharing?: Ref.Ref<boolean>
+  readonly sharing?: SubscriptionRef.SubscriptionRef<boolean>
   /** Cloud's answer to one request. */
   readonly cloud?: (method: string, path: string, body?: unknown) => Effect.Effect<unknown>
   /** Whether this device has an on-device reading voice, and whether its speech ends cleanly. */
@@ -54,7 +54,7 @@ export effect function fakeHost(options: FakeOptions = {}) {
   const cloudCalls = try Ref.make<string[]>([])
   const foreground = try SubscriptionRef.make(shownBrowser)
   const voice = options.voice ?? { binding: false, ready: false, speaks: true }
-  const sharing = options.sharing ?? (try Ref.make(true))
+  const sharing = options.sharing ?? (try SubscriptionRef.make(true))
   const native = Layer.succeed(Native, {
     available: () => succeed(true),
     effect invoke(_plugin: string, method: string, args?: unknown) {
@@ -89,7 +89,8 @@ export effect function fakeHost(options: FakeOptions = {}) {
     Layer.succeed(Toasts, { show: (text: string) => Ref.update(toasts, (all) => [...all, text]) } as unknown as Toasts.Shape),
     Layer.succeed(Foreground, { changes: SubscriptionRef.changes(foreground), get: () => SubscriptionRef.get(foreground) }),
     Layer.succeed(Preferences, {
-      sharesBrowserPage: () => Ref.get(sharing),
+      browserPageChanges: SubscriptionRef.changes(sharing),
+      sharesBrowserPage: () => SubscriptionRef.get(sharing),
       asksBeforeActions: () => succeed(false),
     } as unknown as Preferences.Shape),
     Layer.succeed(Assistant, { openWith: (draft: string) => Ref.update(drafts, (all) => [...all, draft]) } as unknown as Assistant.Shape),

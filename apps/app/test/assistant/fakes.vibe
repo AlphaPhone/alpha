@@ -377,6 +377,7 @@ export function fakePreferences(said: { asks: boolean; shares: boolean }) {
     current: () => die("not read by the assistant"),
     asksBeforeActions: () => sync(() => said.asks),
     sharesLocation: () => sync(() => said.shares),
+    browserPageChanges: Stream.succeed(false),
     sharesBrowserPage: () => succeed(false),
     loadsMailImages: () => succeed(false),
     allowsGmailChanges: () => succeed(false),

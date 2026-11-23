@@ -21,7 +21,7 @@ do for one message.
 > "summarize this page" or "what does it say about prices" works without copying anything, and I
 > want it never to share a private tab, a sign-in page or a page I have moved away from.
 
-### A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it
+### A message can carry only the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it
 
 The observation must be the non-sensitive Browser view, and its selected `browser-tab` must be the
 tab Browser shows on the unlocked phone, at the same revision. A message that fails any of these
@@ -58,7 +58,8 @@ pure val fValues: Set[TurnFacts] = List(
 
 ### A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts
 
-A read begins for each message; a message that may not read begins with nothing to wait for. The
+Each message uses the matching native capture or begins its own read. A message that may
+not read begins with nothing to wait for. The
 answer counts only for the tab and revision the read began on, and only while that read is the
 latest. The owner's setting is read again after the answer, with the page still the one Browser
 shows, and only then is the page handed to the message. Cancelling the message withdraws its read.
@@ -96,6 +97,36 @@ pure def sometimesAReadIsWithdrawn(r: PageRead): bool = r.stage == Withdrawn and
 pure val turnValues = Set(1, 2, 3)
 pure val tabValues = Set("t1", "t2")
 pure val revisionValues = Set(0, 1)
+```
+
+### Browser prepares one native capture of the open page ahead of a message
+
+The native host may capture a normal public page after it settles for 700 milliseconds. Opening
+Ask Alpha also refreshes a capture at least 20 seconds old, at most once every five seconds.
+Only the unlocked foreground Browser with its page-sharing setting on can begin or complete a
+capture. A change of tab, revision, navigation, address, foreground eligibility or page-sharing
+permission retires the capture and its outstanding read. A capture stays in memory and is never
+sent outside a message. The browser build still reads only when sending because its read fetches
+the address again.
+
+A turn with a matching capture up to ten minutes old waits at most 250 milliseconds for a
+fresher capture, joining any refresh already pending. A cold turn keeps the existing 1.2-second bound. Every result still passes the
+message's exact page, peer and preference checks before it can travel.
+
+```quint
+pure val settleMs = 700
+pure val warmAgeMs = 20000
+pure val warmGapMs = 5000
+pure val captureMaxAgeMs = 600000
+pure val cachedWaitMs = 250
+pure def captureWait(matchingCapture: bool): int = if (matchingCapture) cachedWaitMs else waitMs
+pure def lawAWarmTurnWaitsAtMost250Ms: bool = captureWait(true) <= 250
+pure def lawAColdTurnKeepsItsWait: bool = captureWait(false) == waitMs
+pure def shouldWarmOnOpen(age: int, sinceWarm: int): bool = age >= warmAgeMs and sinceWarm >= warmGapMs
+pure def lawOpeningNeverRefreshesARecentCapture(age: int, sinceWarm: int): bool =
+  age < warmAgeMs implies not(shouldWarmOnOpen(age, sinceWarm))
+pure def lawOpeningNeverRefreshesTooSoon(age: int, sinceWarm: int): bool =
+  sinceWarm < warmGapMs implies not(shouldWarmOnOpen(age, sinceWarm))
 ```
 
 ### A withheld page tells the agent only its address and title, and a sensitive page's address loses its query

@@ -23,7 +23,7 @@ effect function observing(agent: BrowserAgent.Shape) {
   return { view: "browser", sensitive: false, ...(selected === undefined ? {} : { selectedObject: selected }) }
 }
 
-// spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
+// spec/browser/pageContext.md, "A message can carry only the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
 it.live("a message sent on the page Browser shows carries that page, bound to the observed tab and revision", () => effect {
   const fake = try fakeHost({ answers: { pageContext: () => story } })
   try scoped(effect {
@@ -52,7 +52,7 @@ it.live("a message sent on the page Browser shows carries that page, bound to th
   })
 })
 
-// spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
+// spec/browser/pageContext.md, "A message can carry only the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
 it.live("nothing is read with the setting off, for a peer that does not take it, off Browser, for another revision or a private tab", () => effect {
   const fake = try fakeHost({ answers: { pageContext: () => story } })
   try scoped(effect {
@@ -66,9 +66,9 @@ it.live("nothing is read with the setting off, for a peer that does not take it,
       const observation = try observing(agent)
       const selected = observation.selectedObject
       const results: unknown[] = []
-      try Ref.set(fake.sharing, false)
+      try SubscriptionRef.set(fake.sharing, false)
       results.push(try context.forTurn(observation, true))
-      try Ref.set(fake.sharing, true)
+      try SubscriptionRef.set(fake.sharing, true)
       results.push(try context.forTurn(observation, false))
       results.push(try context.forTurn({ ...observation, view: "notes" }, true))
       results.push(try context.forTurn({ ...observation, sensitive: true }, true))
@@ -90,6 +90,37 @@ it.live("nothing is read with the setting off, for a peer that does not take it,
         results: results.map((r) => r === undefined),
         reads: (try callsTo(fake.calls, "pageContext")).length,
       }, { results: results.map(() => true), reads: 0 }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "Browser prepares one native capture of the open page ahead of a message"
+it.live("a settled native page warms before a message, bounds a slow refresh, and withdraws the capture when sharing is turned off", () => effect {
+  let refused = false
+  const warmed = try Deferred.make<void>()
+  const fake = try fakeHost({ answers: { pageContext: () => refused ? Effect.never : Effect.as(Deferred.succeed(warmed, undefined), story) } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), story.url, "1", 1)
+      try timeout(Deferred.await(warmed), "2 seconds")
+      try sleep("20 millis")
+      const warmCalls = (try callsTo(fake.calls, "pageContext")).length
+      const observation = try observing(agent)
+      refused = true
+      const started = try Clock.currentTimeMillis
+      const hot = try context.forTurn(observation, true)
+      const elapsed = (try Clock.currentTimeMillis) - started
+      try SubscriptionRef.set(fake.sharing, false)
+      try sleep("20 millis")
+      const off = try context.forTurn(observation, true)
+      try SubscriptionRef.set(fake.sharing, true)
+      const cold = try context.forTurn(observation, true)
+      try Effect.try(() => assert.deepStrictEqual({ warmCalls, text: hot?.text, withinHotBudget: elapsed < 900, off, cold },
+        { warmCalls: 1, text: story.text, withinHotBudget: true, off: undefined, cold: undefined }))
     }
   })
 })
@@ -133,12 +164,12 @@ it.live("a withheld page sends only its address and title, a sensitive one witho
 // spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"
 it.live("a slow read never holds the message past its wait, and a page that changed or a setting turned off during the read is dropped", () => effect {
   let mode = "slow"
-  const sharing = try Ref.make(true)
+  const sharing = try SubscriptionRef.make(true)
   const fake = try fakeHost({
     sharing,
     answers: {
       pageContext: (args) => mode === "slow" ? Effect.never
-        : mode === "off" ? Effect.as(Ref.set(sharing, false), story)
+        : mode === "off" ? Effect.as(SubscriptionRef.set(sharing, false), story)
         : Effect.as(report(fake.events, String(args.session), { id: args.id, sequence: 2, navigation: "2", url: "https://news.example/next", title: "Next", committed: true }), story),
     },
   })
@@ -156,7 +187,7 @@ it.live("a slow read never holds the message past its wait, and a page that chan
       const afterSlow = (try Stream.runHead(context.changes))
       mode = "off"
       const turnedOff = try context.forTurn(observation, true)
-      try Ref.set(sharing, true)
+      try SubscriptionRef.set(sharing, true)
       mode = "moved"
       const moved = try context.forTurn(observation, true)
       try Effect.try(() => assert.deepStrictEqual({
