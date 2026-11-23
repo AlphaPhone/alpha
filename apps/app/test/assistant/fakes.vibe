@@ -237,12 +237,12 @@ export const browserScreen: ScreenFacts = {
 }
 
 /** The shell's side of the assistant, signed in on Home, and Inbox delivering email cards; toasts and emails are collected; `compared` when the peer was compared for this turn and takes the optional fields, such as the Browser page. */
-export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = [], compared = false) {
-  const inbox = Layer.succeed(AssistantEmail, {
+export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = [], compared = false): Layer.Layer<AssistantHost | AssistantEmail> {
+  const inbox: Layer.Layer<AssistantEmail> = Layer.succeed(AssistantEmail, {
     send: (email: ReviewedEmail) => sync(() => { emails.push(email); return "Delivered" as const }),
     address: () => succeed("owner@example.com"),
   })
-  return Layer.mergeAll(inbox, Layer.succeed(AssistantHost, {
+  return Layer.merge(inbox, Layer.succeed(AssistantHost, {
     identity: () => succeed({ origin: "https://agent.local", owner: "o1", agent: "a1", session: "s1", installationId: "i1", enrollmentId: "e1" }),
     screen: () => succeed(screen),
     peer: () => succeed({ optionalFields: compared, takesLocation: false }),

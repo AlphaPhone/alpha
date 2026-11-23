@@ -26,7 +26,7 @@ it.effect("At most five reply notices of at most 500 characters reach the transc
 })
 
 it.effect("Hear what my actions actually did (spec/assistant/receipts.md, \"An action's result in a turn is its latest receipt from that turn, and a success is never replaced by a later failure\")", () => effect {
-  const result = attributed([{ turn: 1, action: 1, result: "Failed" }, { turn: 1, action: 1, result: "Applied" }, { turn: 1, action: 1, result: "Failed" }, { turn: 2, action: 1, result: "Failed" }], 1, 1)
+  const result = try Effect.try(() => attributed([{ turn: 1, actionId: 1, result: "Failed" }, { turn: 1, actionId: 1, result: "Applied" }, { turn: 1, actionId: 1, result: "Failed" }, { turn: 2, actionId: 1, result: "Failed" }], 1, 1))
   try Effect.try(() => assert.deepStrictEqual(
     {
       result, title: receiptTitle(titleOf(result)), unknown: receiptTitle(titleOf("Unknown")),
