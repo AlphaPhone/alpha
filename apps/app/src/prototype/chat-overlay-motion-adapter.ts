@@ -717,7 +717,7 @@ export function installChatOverlayMotion(Component: Shell) {
 				s.screen !== drag.screen ||
 				// A comms view's hidden chat rests on its bar (D2), the mode the drag started from.
 				(s.chat === "hidden" && this.isCommsView(s.view) ? "input" : s.chat) !== drag.mode ||
-				s.voice !== "off")
+				this.chatOwnedByVoice)
 		)
 			retire(this);
 		const change = this.chatChange;
@@ -861,6 +861,8 @@ export function installChatOverlayMotion(Component: Shell) {
 			s = this.S(),
 			geometry = bounds(),
 			drag: Drag | undefined = this.chatMotion;
+		// A conversation, dictation or a retiring recorder can hold the chat with S().voice off.
+		shell.chatOwnedByVoice = s.voice !== "off" || !!out.chatRecorder;
 		out.panelH = drag
 			? paintedHeight(drag)
 			: s.chat === "full"
@@ -969,7 +971,7 @@ export function installChatOverlayMotion(Component: Shell) {
 			out.panelR = drag.height >= drag.full ? "0px" : "30px 30px 0 0";
 		}
 		// An open chat dragged down hands over to the form it collapses to, drawn under it in place.
-		if (drag?.moved && isOpen(drag.mode) && s.voice === "off") {
+		if (drag?.moved && isOpen(drag.mode) && !shell.chatOwnedByVoice) {
 			const rest = shell.rest();
 			if (rest === "input") out.showComposer = true;
 			if (rest === "hidden") out.showPill = true;
@@ -1004,14 +1006,10 @@ export function installChatOverlayMotion(Component: Shell) {
 						))
 				)
 					return;
-				if (
-					!binding ||
-					document.hidden ||
-					shell.live === false ||
-					shell.S().voice !== "off"
-				)
-					return;
+				if (!binding || document.hidden || shell.live === false) return;
 				event.stopPropagation();
+				// Keep a press on the handle from reaching the screen swipe while the recorder owns chat.
+				if (shell.chatOwnedByVoice) return;
 				if (emptyInput) event.preventDefault();
 				const g = bounds(),
 					// A comms view rests on its bar even when the chat state says hidden (D2).
