@@ -111,7 +111,10 @@ def verify_native_source(native, files, pin, source_root=None):
     require(recipe["models"] == voice["models"] and recipe["asrSlot"] == voice["asrSlot"] and
             recipe["toolchain"] == json.loads(product("android/embedding-host/build-toolchain.json")),
             "Native models or toolchain differ from reviewed product source")
-    expected = {**recipe["sourceTrees"], "packages/os/android/local-inference/llama.cpp": recipe["engineCommit"]}
+    engine_lock_path = "packages/os/android/local-inference/engine.lock.json"
+    expected = dict(recipe["sourceTrees"])
+    if engine_lock_path not in expected:
+        expected["packages/os/android/local-inference/llama.cpp"] = recipe["engineCommit"]
     for commit in {pin["sdkCommit"], native["producer"]["sdkCommit"]}:
         try:
             result = subprocess.run(["git", "--no-replace-objects", "-C", str(sdk), "rev-parse",
@@ -122,6 +125,12 @@ def verify_native_source(native, files, pin, source_root=None):
             raise ValueError("Reviewed native SDK source objects are unavailable") from error
         require(result.stdout.decode().splitlines() == list(expected.values()),
                 "Native producer source differs from reviewed SDK")
+        if engine_lock_path in expected:
+            engine_lock = json.loads(checked_source_bytes(sdk, commit, engine_lock_path))
+            require(engine_lock["schema"] == 1 and engine_lock["engine"]["commit"] == recipe["engineCommit"] and
+                    engine_lock["engine"]["repository"] == recipe["toolchain"]["engineRepository"] and
+                    engine_lock["toolchain"]["ndk"] == recipe["toolchain"]["ndk"],
+                    "Native engine differs from the reviewed SDK engine lock")
 
 
 def candidate_evidence(data, pin, apk_manifest, source_root=None):
@@ -210,6 +219,19 @@ def native_evidence(data, pin, candidate, source_root=None):
         'packages/os/android/local-inference',
         'packages/os/android/local-inference/model-catalog/voice-model-versions.json',
     }
+    native_module = "packages/os/android/local-inference"
+    if f"{native_module}/engine.lock.json" in recipe["sourceTrees"]:
+        expected_trees = {
+            "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/os/package.json",
+            native_module, f"{native_module}/engine.lock.json", f"{native_module}/scripts/engine.ts",
+            f"{native_module}/scripts/build-helpers/arm64-simd.ts",
+            f"{native_module}/scripts/build-helpers/elizavoice-build-flags.ts",
+            f"{native_module}/scripts/build-helpers/verify-fused-symbols.ts",
+            f"{native_module}/scripts/stage-elizavoice-lib.ts",
+            f"{native_module}/src/main/elizavoice-jni/CMakeLists.txt",
+            f"{native_module}/src/main/elizavoice-jni/elizavoice-jni.cpp",
+            f"{native_module}/src/main/java/ai/eliza/voice/VoiceNative.java",
+        }
     require(set(recipe["sourceTrees"]) == expected_trees and
             all(matches(COMMIT, value) for value in recipe["sourceTrees"].values()),
             "Candidate native source trees differ")

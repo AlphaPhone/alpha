@@ -25,8 +25,20 @@ SPEC = importlib.util.spec_from_file_location(
 ADMISSION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(ADMISSION)
 
-NATIVE_SOURCE_PATHS = ('packages/app/scripts', 'plugins/plugin-native-inference/src/model-catalog', 'bun.lock', 'package.json', 'packages/agent/package.json', 'packages/app/package.json', 'packages/app/platforms/android/app/src/main/elizavoice-jni/CMakeLists.txt', 'packages/app/platforms/android/app/src/main/elizavoice-jni/elizavoice-jni.cpp', 'packages/app/platforms/android/app/src/main/java/ai/elizaos/app/ElizaVoiceNative.java', 'packages/app/scripts/aosp/compile-libllama-paths.ts', 'packages/app/scripts/aosp/compile-libllama.ts', 'packages/app/scripts/aosp/compile-shim.ts', 'packages/app/scripts/aosp/vulkan-source-contract.ts', 'packages/app/scripts/aosp/zig-toolchain.ts', 'packages/app/scripts/build-helpers/arm64-simd.ts', 'packages/app/scripts/build-helpers/elizavoice-build-flags.ts', 'packages/app/scripts/build-helpers/omnivoice-merged.ts', 'packages/app/scripts/build-helpers/verify-fused-symbols.ts', 'packages/app/scripts/lib/repo-root.ts', 'packages/app/scripts/paradee-voice/build-native.ts', 'packages/app/scripts/stage-elizavoice-lib.ts', 'packages/app/scripts/voice/build-phonon2-gguf.ts', 'plugins/plugin-local-inference/native/android', 'plugins/plugin-native-inference/src/model-catalog/voice-model-versions.json')
-NATIVE_PRODUCT_PATHS = ('app.config.json', 'android/consumer-host.json', 'android/embedding-host/build-toolchain.json', 'android/embedding-host/native-requirements.txt', 'android/embedding-host/bootstrap-requirements.txt', 'android/paradee-voice/asr-inputs.json', 'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts', 'scripts/embedding-native-contract.ts', 'scripts/embedding-build-remap.ts', 'scripts/native-build-inputs.ts', 'scripts/android-identity.ts', 'scripts/android-stage-voice-models.ts', 'scripts/local-agent-source.ts', 'scripts/voice-host.ts', 'scripts/paradee-runtime.ts', 'scripts/android-abis.ts', 'scripts/copy-file-clone.ts', 'scripts/stage-embedding-host.ts')
+NATIVE_MODULE = "packages/os/android/local-inference"
+NATIVE_ENGINE_LOCK = f"{NATIVE_MODULE}/engine.lock.json"
+NATIVE_SOURCE_PATHS = (
+    "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/os/package.json",
+    NATIVE_MODULE, NATIVE_ENGINE_LOCK, f"{NATIVE_MODULE}/scripts/engine.ts",
+    f"{NATIVE_MODULE}/scripts/build-helpers/arm64-simd.ts",
+    f"{NATIVE_MODULE}/scripts/build-helpers/elizavoice-build-flags.ts",
+    f"{NATIVE_MODULE}/scripts/build-helpers/verify-fused-symbols.ts",
+    f"{NATIVE_MODULE}/scripts/stage-elizavoice-lib.ts",
+    f"{NATIVE_MODULE}/src/main/elizavoice-jni/CMakeLists.txt",
+    f"{NATIVE_MODULE}/src/main/elizavoice-jni/elizavoice-jni.cpp",
+    f"{NATIVE_MODULE}/src/main/java/ai/eliza/voice/VoiceNative.java",
+)
+NATIVE_PRODUCT_PATHS = ('app.config.json', 'android/consumer-host.json', 'android/embedding-host/build-toolchain.json', 'android/embedding-host/native-requirements.txt', 'android/embedding-host/bootstrap-requirements.txt', 'android/paradee-voice/asr-inputs.json', 'scripts/build-embedding-host.ts', 'scripts/prepare-embedding-host.ts', 'scripts/embedding-native-contract.ts', 'scripts/embedding-build-remap.ts', 'scripts/native-build-inputs.ts', 'scripts/android-identity.ts', 'scripts/android-stage-voice-models.ts', 'scripts/voice-host.ts', 'scripts/paradee-runtime.ts', 'scripts/android-abis.ts', 'scripts/copy-file-clone.ts', 'scripts/stage-embedding-host.ts')
 
 class CloudSigningInputTest(unittest.TestCase):
     def setUp(self):
@@ -138,14 +150,18 @@ class CloudSigningInputTest(unittest.TestCase):
             git(base, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "Synthetic reviewed source")
             return git(base, "rev-parse", "HEAD")
         git(sdk, "init", "-q")
-        directories = {"packages/app/scripts", "plugins/plugin-native-inference/src/model-catalog"}
+        engine_repository = "https://github.com/elizaOS/llama.cpp.git"
+        toolchain = {"ndk": "28.2.13676358", "cmake": "4.0.3", "engineRepository": engine_repository}
         for name in NATIVE_SOURCE_PATHS:
-            if name not in directories:
-                put(sdk, name + "/CMakeLists.txt" if name.endswith("/android") else name, b"synthetic upstream source")
+            if name != NATIVE_MODULE:
+                put(sdk, name, b"synthetic upstream source")
+        put(sdk, NATIVE_ENGINE_LOCK, json.dumps({
+            "schema": 1,
+            "engine": {"commit": "e" * 40, "repository": engine_repository},
+            "toolchain": {"ndk": toolchain["ndk"]},
+        }).encode())
         git(sdk, "add", ".")
-        git(sdk, "update-index", "--add", "--cacheinfo", "160000," + "e" * 40 + ",plugins/plugin-local-inference/native/llama.cpp")
         sdk_commit = commit(sdk)
-        toolchain = {"ndk": "28.2.13676358", "cmake": "4.0.3"}
         for name in NATIVE_PRODUCT_PATHS:
             put(root, name, b"synthetic producer input")
         put(root, "android/embedding-host/build-toolchain.json", json.dumps(toolchain).encode())
@@ -535,7 +551,10 @@ class CloudSigningInputTest(unittest.TestCase):
         def change_embedding_recipe(value):
             value["recipe"]["embeddingModel"] = value["embedding"]["model"] = {"id": "forged-model"}
             rehash(value)
-        for change in (change_tree, change_input, change_models, change_python, change_embedding_model, change_embedding_recipe):
+        def change_engine(value):
+            value["recipe"]["engineCommit"] = value["voice"]["forkPin"] = value["embedding"]["forkPin"] = "f" * 40
+            rehash(value)
+        for change in (change_tree, change_input, change_models, change_python, change_embedding_model, change_embedding_recipe, change_engine):
             with self.subTest(change=change.__name__):
                 self.write_candidate(change_native=change)
                 with self.assertRaisesRegex(ValueError, "reviewed"):
