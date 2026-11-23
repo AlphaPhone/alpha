@@ -59,8 +59,9 @@ pure def one(recording: int): List[int] = if (recording > 0) List(recording) els
 
 The requirements say three days for the agent's notes; the notes kept on
 the phone before were held for thirty. This is the one place the time is
-written, in milliseconds. A clock set back delays the erasure and never
-brings it forward.
+written, in milliseconds. Recently deleted keeps the latest time its
+maintenance has read, so a clock set back never delays an erasure once it
+is due.
 
 ```quint
 pure val retention = 259200000
@@ -94,7 +95,7 @@ pure val revisionValues = Set(1, 2)
 pure val recordingValues = Set(0, 7)
 pure val askedValues = Set(1, 2)
 pure val nowValues = Set(0, 1, retention, retention + 1)
-pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+pure val ticketValues = Set(1, 2, 3, 4, 5, 6)
 pure val ownerValues = Set(0, 1, 2)
 pure val entriesValues = Set(
   List(), List({ id: 1, at: 0, revision: 1, recording: 0 }),
@@ -102,6 +103,10 @@ pure val entriesValues = Set(
 )
 pure val weight_kept = 6
 pure val weight_finished = 6
+pure val weight_listed = 6
+pure val weight_askErase = 3
+pure val weight_confirm = 3
+pure val weight_audioErased = 6
 ```
 
 ### Opening Recently deleted reads it, when nothing else of Notes is open
@@ -114,14 +119,16 @@ pure def show(s: Trash, covered: bool, by: Actor): Moved =
   { state: { ...s, showing: true, read: read }, out: List(Lists({ ticket: read.ticket, owner: s.owner })) }
 ```
 
-### The phone's maintenance, at its start, on resuming and every fifteen minutes, reads Recently deleted again with the time
+### The phone's maintenance, at its start, on resuming and every fifteen minutes, reads Recently deleted again with the time, which never goes back
 
 ```quint
 pure def canMaintain(s: Trash, now: int, by: Actor): bool = by == Phone and isOwner(s.owner) and s.read.status != R::Loading
 
 pure def maintain(s: Trash, now: int, by: Actor): Moved =
   val read = R::ask(s.read)
-  { state: { ...s, read: read, clock: now }, out: List(Lists({ ticket: read.ticket, owner: s.owner })) }
+  { state: { ...s, read: read, clock: if (now > s.clock) now else s.clock }, out: List(Lists({ ticket: read.ticket, owner: s.owner })) }
+
+pure def stepTheTimeNeverGoesBack(before: Trash, via: str, after: Trash): bool = after.clock >= before.clock
 ```
 
 ### Only the phone answers a reading, only the newest reading is taken, and a reading that fails shows no notes and closes the one open
