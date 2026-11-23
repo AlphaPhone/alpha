@@ -32,7 +32,7 @@ final class AlphaCredentialStore {
   slots=open(this.context);
  }
  private static JsonCredentialSlots open(Context context){
-  return new JsonCredentialSlots(new File(context.getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",AlphaCredentialStore::slotLimit);
+  return new JsonCredentialSlots(new File(context.getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",AlphaCredentialStore::slotLimit,AlphaCredentialStore::retainedLimit);
  }
  static int slotLimit(String name){
   if(Slots.SMS_SEND_LEDGER.equals(name))return 1024*1024;
@@ -55,14 +55,18 @@ final class AlphaCredentialStore {
   if(name!=null&&name.matches(Slots.CONNECTED_READ_CACHE_PATTERN))return 4*1024*1024;
   return 256*1024;
  }
+ static int retainedLimit(String name){
+  if(NOTES_TRASH.equals(name))return 32*1024*1024;
+  return slotLimit(name);
+ }
  /** Notes Trash policy limit (30 MiB), also its slot cap. */
  static final int NOTES_TRASH_BYTES=30*1024*1024;
- /** Refuses a value above its slot's cap before any shutdown or write. */
+ /** Refuses a value no stored data may reach (its retained cap) before any shutdown or write. */
  private static void requireCapacity(String name,String value)throws StorageFullException{
   if(value==null)return;
   // UTF-8 encodes a char in at most 3 bytes, so a short string cannot exceed the cap.
-  if(value.length()<=slotLimit(name)/3)return;
-  if(value.getBytes(StandardCharsets.UTF_8).length>slotLimit(name))throw new StorageFullException();
+  if(value.length()<=retainedLimit(name)/3)return;
+  if(value.getBytes(StandardCharsets.UTF_8).length>retainedLimit(name))throw new StorageFullException();
  }
  String slotHash(String name)throws Exception{return slots.slotHash(CloudDeployment.storageSlot(name));}
  AtomicFile slotFile(String hash)throws Exception{return slots.slotFile(hash);}

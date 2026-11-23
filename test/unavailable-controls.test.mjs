@@ -54,7 +54,7 @@ test('the walker marks controls that could only say they are unavailable', () =>
     inbox: {d: {ask: noop, forward: noop}},
     calendar: {open: {join: noop}},
   };
-  const views = Object.fromEntries(Object.entries(trees).map(([name, tree]) => [name, {render: () => tree}]));
+  const views = {...Object.fromEntries(Object.entries(trees).map(([name, tree]) => [name, {render: () => tree}])), settings: {render: () => ({})}};
   adapter.installPrototypeNativeAdapters(null, views);
   const toasts = [];
   const api = {toast: message => toasts.push(message), get: () => ({}), set() {}};
@@ -73,7 +73,7 @@ test('the walker marks controls that could only say they are unavailable', () =>
 
 test('a reference view\'s chat-card actions are marked, so their cards offer no control for them', () => {
   const sendDraft = () => 'sent';
-  const views = {messages: {render: () => ({}), actions: {sendDraft}}, notes: {render: () => ({}), actions: {save: sendDraft}}};
+  const views = {messages: {render: () => ({}), actions: {sendDraft}}, notes: {render: () => ({}), actions: {save: sendDraft}}, settings: {render: () => ({})}};
   adapter.installPrototypeNativeAdapters(null, views);
   assert.equal(views.messages.actions.sendDraft[MARK], true);
   // Notes is this phone's own view; its actions are untouched.
