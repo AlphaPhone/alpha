@@ -120,8 +120,10 @@ pure val warmGapMs = 5000
 pure val captureMaxAgeMs = 600000
 pure val cachedWaitMs = 250
 pure def captureWait(matchingCapture: bool): int = if (matchingCapture) cachedWaitMs else waitMs
-pure def lawAWarmTurnWaitsAtMost250Ms: bool = captureWait(true) <= 250
-pure def lawAColdTurnKeepsItsWait: bool = captureWait(false) == waitMs
+pure def lawAWarmTurnWaitsAtMost250Ms(matchingCapture: bool): bool =
+  matchingCapture implies captureWait(matchingCapture) <= 250
+pure def lawAColdTurnKeepsItsWait(matchingCapture: bool): bool =
+  not(matchingCapture) implies captureWait(matchingCapture) == waitMs
 pure def shouldWarmOnOpen(age: int, sinceWarm: int): bool = age >= warmAgeMs and sinceWarm >= warmGapMs
 pure def lawOpeningNeverRefreshesARecentCapture(age: int, sinceWarm: int): bool =
   age < warmAgeMs implies not(shouldWarmOnOpen(age, sinceWarm))
