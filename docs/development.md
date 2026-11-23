@@ -899,3 +899,13 @@ password approval ([eliza#40088](https://github.com/elizaOS/eliza/pull/40088)).
 No model turn, APK or Pixel run is proven by the pin.
 
 The pin after that, `a3a19afd17e5adce91499aa32e013fa64db7424b` (it contains `fe5c02faed`), sends no output cap on any agent call and drops the cap settings ([eliza#40174](https://github.com/elizaOS/eliza/pull/40174)): the planner's 8,192 default, `ELIZA_PLANNER_MAX_TOKENS`, `ELIZA_STAGE1_MAX_TOKENS`, `ELIZA_EVALUATOR_MAX_TOKENS`, the `<TYPE>_MAX_TOKENS` and `DEFAULT_MAX_TOKENS` settings and the SMS reply draft's 160. It keeps secret and contact references stable within a conversation by default, holds a refused model for at most 4 s on the direct Cerebras route, and drafts SMS replies with reasoning off. It also says in a rejected or expired proposal's record that it never ran, so "did that text go out?" is answered from the record ([eliza#40186](https://github.com/elizaOS/eliza/pull/40186)). The launcher therefore no longer sets `ELIZA_SECRET_SWAP_STABLE_REFERENCES` or `OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS`.
+
+The next pin, `6b98cd261a708a559fd39fda0697f1ca45f38b08`, is the develop merge of
+[eliza#40193](https://github.com/elizaOS/eliza/pull/40193): an agent
+`browser_navigate` may open an exact link of the Browser page the request
+carried, which the phone keeps on its review card (see
+[browser-page-context.md](browser-page-context.md)). It also brings the develop
+merges since `a3a19afd17`, among them coarse position areas
+([eliza#40190](https://github.com/elizaOS/eliza/pull/40190)) and the activity label
+from stage 1 ([eliza#40195](https://github.com/elizaOS/eliza/pull/40195)). No model
+turn, APK or Pixel run is proven by the pin.
