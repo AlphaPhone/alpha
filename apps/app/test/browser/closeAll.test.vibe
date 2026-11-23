@@ -104,15 +104,15 @@ it.live("closing every tab from Browser closes the showing tab only when present
       const homeClose = try agent.closeAll("home")
       try homeClose.present
       const home = try tabs.get()
-      // Only the private tab is open now: from outside it the notice says it stays open.
-      const onlyPrivate = closingCard(try agent.tabsClosing("only-private"))
+      // The normal replacement tab can be closed, and the private tab stays open.
+      const replacementCard = closingCard(try agent.tabsClosing("replacement"))
 
       try SubscriptionRef.set(fake.foreground, shownBrowser)
       try tabs.dispatch({ type: "showTabs" })
       try tabs.dispatch({ type: "pickTab", id: "bsecret" })
       const fromPrivate = try agent.tabsClosing("private")
       try Effect.try(() => assert.deepStrictEqual({
-        beforePresent, closedShowing, afterPresent, leftInBrowser, fromHome, homeClosed: homeClose.result, onlyPrivate,
+        beforePresent, closedShowing, afterPresent, leftInBrowser, fromHome, homeClosed: homeClose.result, replacementCard,
         bankClosed: !home.tabs.some((t) => t.id === "bbank"),
         secretKept: home.tabs.some((t) => t.id === "bsecret"),
         showsPrivate: home.tabs.find((t) => t.id === home.cur)?.profile,
@@ -124,7 +124,7 @@ it.live("closing every tab from Browser closes the showing tab only when present
         leftInBrowser: 1,
         fromHome: { tabs: [{ title: "New tab" }, { title: "bank.example", host: "bank.example" }], kept: 1 },
         homeClosed: { closed: 2, kept: 1 },
-        onlyPrivate: "Close all tabs: No other tabs are open to close. 1 private tab stays open. Ask from a private tab to close it. Nothing was closed.",
+        replacementCard: { lines: ["New tab"], unnamed: 0, unnamedLabel: "private tab", note: "1 private tab stays open. Ask from a private tab to close it." },
         bankClosed: true,
         secretKept: true,
         showsPrivate: "Normal",
@@ -179,14 +179,17 @@ it("a close-every-tab card names normal tabs with their host where it differs, c
     keeping: closingCard({ tabs: [{ title: "News", host: "news.example" }], kept: 2 }),
     unlisted: closingCard(null),
     empty: closingCard({ tabs: [], kept: 0 }),
-    onlyPrivate: closingCard({ tabs: [], kept: 2 }),
+    onlyPrivate: [closingCard({ tabs: [], kept: 1 }), closingCard({ tabs: [], kept: 2 })],
     receipts: [closedSummary({ closed: 1, kept: 0 }), closedSummary({ closed: 2, kept: 1 })],
   }, {
     listed: { lines: ["News (news.example)", "docs.example.org"], unnamed: 1, unnamedLabel: "private tab" },
     keeping: { lines: ["News (news.example)"], unnamed: 0, unnamedLabel: "private tab", note: "2 private tabs stay open. Ask from a private tab to close them." },
     unlisted: `Close all tabs: ${TABS_UNLISTED_NOTICE}`,
     empty: `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`,
-    onlyPrivate: "Close all tabs: No other tabs are open to close. 2 private tabs stay open. Ask from a private tab to close them. Nothing was closed.",
+    onlyPrivate: [
+      "Close all tabs: No other tabs are open to close. 1 private tab stays open. Ask from a private tab to close it. Nothing was closed.",
+      "Close all tabs: No other tabs are open to close. 2 private tabs stay open. Ask from a private tab to close them. Nothing was closed.",
+    ],
     receipts: ["Closed 1 tab.", "Closed 2 tabs. Private tabs were left open."],
   })
 })
