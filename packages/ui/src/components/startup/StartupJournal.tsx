@@ -41,8 +41,8 @@ export function StartupJournal({ entries, dropped = 0, onClear }: StartupJournal
         <EmptyState title="No failures" />
       ) : (
         <ListGroup heading="Failures">
-          {entries.map((entry) => (
-            <ListRow key={`${entry.when}-${entry.kind}`} title={kinds[entry.kind]} trailing={entry.when} />
+          {entries.map((entry, index) => (
+            <ListRow key={index} title={kinds[entry.kind]} trailing={entry.when} />
           ))}
         </ListGroup>
       )}
