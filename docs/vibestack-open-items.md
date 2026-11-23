@@ -76,6 +76,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - `src/web/runtime.ts` type-checking across all merged areas still needs to be verified once syntax errors in individual areas are resolved.
 - Hardware Back does not close an open Inbox search field that has no submitted query, because that state is UI-local in InboxScreen (Inbox). The on-screen Back does close it.
 - Preparing an app update does not write Inbox's waiting edit: `keepDrafts` in `src/shell/activity.vibe` only blurs the focused field. The shell needs a keeper port that Inbox fills with `MailComposer.flush` (answering false on a refusal), and the update must refuse while an Inbox review, selection or attachment is open (`spec/inbox/drafts.md`, `spec/settings/updates.md`).
+- The native channel's device headers (eliza #40310, `2f409d5d020`, after the current pin) need the next repin: until then the `headers` the resident bridge puts on `AgentRequest`/`AgentStreamRequest` are not a field of the pinned ElizaAgent route and the pinned `AgentPlugin.java` ignores them, so on the phone no device header reaches the agent and its proposal routes answer 401. After the repin, turns and view requests must also carry `x-elizaos-client-id` (the assistant views' `clientId`, which upstream's turn route uses to read `voiceUi`), and `spec/platform/index.md`'s header rule should match upstream's: printable ASCII values, `x-eliza-device-key` only as 64 lowercase hex digits, at most 16 headers and 8192 bytes of names and values. Today the phone admits any one-line value of up to 2048 characters, so a value upstream refuses is refused by native (`RouteRefused`) rather than by the phone (`InvalidHeader`).
 - The assistant's advertised capabilities are re-selected for each request from those advertised at registration (`EnrolledDevice.capabilities`), not from everything the agent offered: a capability that becomes available after registration is advertised only after the next enrollment. Keeping the offered list in `EnrolledDevice` (account) would close this.
 - Not yet ported from the shell/clock audit (`alpha-shell-clock.md`):
   - G5: no landscape arrangement and no fitted 412 px canvas; `swipe` takes raw client pixels, so the right-edge Back and the bottom-bar HOME zones assume a 412 x 872 window;
@@ -220,6 +221,15 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - The root `typecheck`, `test`, `build` and `dev` tasks build the pinned upstream through `pnpm build:upstream` (upstream's own turbo; `vendor/eliza/turbo.json` is a root configuration this repository's turbo cannot read as a package's). `pnpm verify` also runs `pnpm test:root`.
 - Third-party notices are regenerated from the pnpm layout (upstream's bundle `manifest.json`, the workflow worker's `dependencies.json`, the shipped packages under `apps/app/node_modules`; 262 entries) and `pnpm verify` runs `pnpm licenses:check`. A distribution still regenerates them with the packaged runtime (`licenses:packaged-runtime`), which has not been run. The licence, SBOM and runtime-licence tests still read `bun.lock` (held in `test/root-tests.json`). The root `package.json` lacks `@electric-sql/pglite`, which `eval-phone-actions.ts --database` needs.
 - `pnpm lint` stops before ESLint runs: `apps/app/tokens.json` gives `scrim` a translucent `oklch(0 0 0 / 0.18)` (`/ 0.55` dark), and the vibestack token check and the design-system ESLint rules (`apps/app/eslint.config.js`, the fullstack example's rule set) both require opaque colors. The token owner (shell/design) must make `scrim` opaque and apply the opacity where it is used.
+- `apps/app`'s Vitest cannot run any test yet. `vibestack/testing/vitest.ts` first generates tests for every schema module and stops when one does not load (12 in account, assistant, inbox, maps, settings and telephony); the vibelang plugin adds only the `vibelang-source` condition, so Node cannot resolve `@elizaos/agent/client` or `@elizaos/cloud/client` (their source export is `eliza-source`); with that condition added, compiling the vendor agent client still fails to find `@elizaos/core/task-events`; and every Shell and Clock test imports the composed layers, so it needs the other areas' modules to compile. Shell, Clock and Platform tests were therefore type-checked but not run.
+- `apps/app/tsconfig.json` targets `es2023`, so the vendor sources it checks through `eliza-source` fail on ES2024 APIs (`Promise.withResolvers`, `String.prototype.isWellFormed`, `Map.groupBy`; 22 errors) and so do Alpha's own `isWellFormed` calls in telephony; it needs `lib` `es2024`, once the minimum WebView is settled (see the OWNER item).
+- `scripts/generate-licenses.ts --check` crashes: `node_modules/@tesseract.js-data/eng` is not installed (see the OCR item below). The elizaOS entry of the committed notices was edited by hand to name the new pin.
+- The Tesseract OCR assets are not set up:
+  - the files are not served under `apps/app/public/ocr/`;
+  - `vite.config.ts` must add `localOcrAssets()`;
+  - `apps/app/package.json` must list `tesseract.js-core` and `@tesseract.js-data/eng`.
+
+  The root `package.json` also lacks `@electric-sql/pglite`, which `eval-phone-actions.ts --database` needs.
 - `scripts/resident` must:
   - register the `workflow-device` and `workflow-native-digests` runtime services;
   - call `registerMapsViews`/`registerMapsSavedPlaces` (`namesAlphaView` is a fixed word list).
@@ -232,6 +242,12 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - The browser lanes in `promotion.yml`: the storage (Firefox/WebKit) and production jobs still run the legacy Playwright specs in `test/browser`, which select the removed UI; `production-surface.spec.ts` must be rewritten for `src/web` before the flag-off production check means anything.
 - Model-checking depth: CI runs the seeded simulation only; no job runs `spec.ts check --nightly` or `quint verify` over the generated modules, and only one spec has a `leadsTo`.
 - Alpha's build and release tooling (licence policy, release blockers, APK admission, cloud deployment policy) has no spec under `apps/app/spec`.
+- `scripts/legacy-retirement.json` (around line 498) still marks `test/batch-voice-progress-ack.test.mjs` "mapped"; it is deleted, so mark it "removed", pointing to `spec/voice/acknowledgement.md`.
+- These tests still target removed code:
+  - owner-route-parity (including its JVM half), `test/android-host.test.mjs` and verify-apks import the removed `product/owner-route-table.ts` or the legacy generator;
+  - `specs/quint/refinement/native/credential-coordinator*.mjs`;
+  - `test/android-build-fast.test.mjs` imports `vendor/eliza/packages/app/scripts/mobile/android/build-consumer.mjs`, which vibestack removed, so the whole file fails to load;
+  - `scripts/test-cloud-delegation-return.ts`, `test/quint-conformance.test.mjs` and `specs/quint/refinement/application/portable.mjs` validate the old static delegation page, not the forwarder.
 
 ## Upstream (eliza)
 
