@@ -1,0 +1,52 @@
+import java.util.*;
+
+/** Compiles the production AlphaFilesPlugin.storageQuery body over closed ports, and prints whether
+ * each answer says it was cut short. */
+public class AlphaFileQueryTest {
+ static final class JSArray {
+  final List<Object> rows=new ArrayList<>();
+  JSArray put(Object row){rows.add(row);return this;}
+  int length(){return rows.size();}
+ }
+ static final class JSObject {
+  final Map<String,Object> values=new TreeMap<>();
+  void put(String key,Object value){values.put(key,value);}
+  @Override public String toString(){Object rows=values.get("entries");return "entries="+(rows instanceof JSArray?((JSArray)rows).length():"-")+";truncated="+values.getOrDefault("truncated","-")+";";}
+ }
+ static final class PluginCall {
+  final boolean folders;JSObject result;
+  PluginCall(boolean folders){this.folders=folders;}
+  Double getDouble(String key){return null;}
+  Boolean getBoolean(String key,Boolean fallback){return "folders".equals(key)?folders:fallback;}
+  String getString(String key){return null;}
+  String getString(String key,String fallback){return fallback;}
+ }
+ static final class ContentResolver {}
+ static final class StorageBrowser {
+  static final int WALK_MAX=10000;
+  static final class Row {}
+  final int found;
+  StorageBrowser(int found){this.found=found;}
+  List<Row> folders(String folder,String text,long since,long until,int max,int walk){List<Row> out=new ArrayList<>();for(int i=0;i<Math.min(found,max);i++)out.add(new Row());return out;}
+ }
+ static final class StorageCatalog {
+  static final int QUERY_MAX=500;
+  static int found;
+  static JSArray query(ContentResolver resolver,String text,String mimePrefix,boolean documents,String folder,long from,long to){JSArray out=new JSArray();for(int i=0;i<Math.min(found,QUERY_MAX);i++)out.put(i);return out;}
+ }
+ private @interface PluginMethod {}
+ private interface StorageWork {JSObject run(StorageBrowser browser)throws Exception;}
+ private final int found;
+ AlphaFileQueryTest(int found){this.found=found;StorageCatalog.found=found;}
+ private void storage(PluginCall call,StorageWork work){try{call.result=work.run(primaryBrowser());}catch(Exception error){throw new AssertionError(error);}}
+ private StorageBrowser primaryBrowser(){return new StorageBrowser(found);}
+ private ContentResolver resolver(){return new ContentResolver();}
+ private Object row(StorageBrowser.Row row){return row;}
+ /* production query */
+ public static void main(String[] args){
+  for(int found:new int[]{0,3,499,500,900})for(boolean folders:new boolean[]{false,true}){
+   PluginCall call=new PluginCall(folders);new AlphaFileQueryTest(found).storageQuery(call);
+   System.out.println((folders?"folders":"files")+" found="+found+": "+call.result);
+  }
+ }
+}
