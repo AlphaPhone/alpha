@@ -225,6 +225,12 @@ pure val offeredValues = Set(Set(), Set("maps.selected-read.v1"), Set("maps.sele
 pure val runsValues = Set(Set(), Set("maps.selected-read.v1"))
 ```
 
+### A turn can name an inspected Calendar event or source that is open on the observed screen
+
+The phone sends the selection's identity, calendar source and their
+revisions. Event details stay on the phone until the owner approves a
+request to share them.
+
 ### An observed turn on an enrolled phone can carry the owner's Notes folder names to its compared agent
 
 The turn sends the folder IDs and names so a request can name its destination.

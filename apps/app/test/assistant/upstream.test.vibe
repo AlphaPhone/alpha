@@ -1,8 +1,9 @@
 // spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
 import { assert, it } from "@effect/vitest"
-import { decodeVoiceUiContext } from "@elizaos/agent/client"
+import { decodeObservation, decodeVoiceUiContext } from "@elizaos/agent/client"
 import { readNoteFolders } from "@elizaos/plugin-notes/organize"
 import { Composer } from "../../src/assistant/composer.vibe"
+import type { ScreenFacts } from "../../src/assistant/host.vibe"
 import { spokenCue } from "../../src/assistant/cue.vibe"
 import { copy, failureKindOf, failureText, planCardTitle, retryDuration } from "../../src/assistant/presentation.vibe"
 import { DeviceExecutors, DeviceReview, type OperationPorts } from "../../src/assistant/review.vibe"
@@ -13,6 +14,7 @@ import {
 } from "./fakes.vibe"
 import { MapsViews, TurnSources, type PageObservation } from "../../src/assistant/ports.vibe"
 import { AgentViews } from "../../src/assistant/views.vibe"
+import type { SelectedObject as CalendarSelection } from "../../src/calendar/device.vibe"
 
 const page = {
   tabId: "t1", revision: "r1", url: "https://news.example.com/today#top", title: "Today\nin brief", capturedAt: 1,
@@ -188,10 +190,45 @@ it.effect("Maps handoffs keep distinct effect identities after the cache fills (
   try Effect.try(() => assert.deepStrictEqual([keys.length, new Set(keys.slice(0, 66)).size, keys[66]], [67, 66, keys[65]]))
 })
 
+it.effect("Send the open inspected Calendar record (spec/assistant/context.md, \"A turn can name an inspected Calendar event or source that is open on the observed screen\")", () => effect {
+  const shown: ScreenFacts = {
+    exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+    observation: { view: "calendar", revision: 2, sensitive: false },
+    onCalendar: true,
+    contextKey: "calendar:",
+  }
+  const event: CalendarSelection = { kind: "calendar-event", id: "e-1", revision: "r-3", accountId: "c-1", sourceRevision: "r-2" }
+  const source: CalendarSelection = { kind: "calendar-source", id: "c-1", revision: "r-2", accountId: "c-1", sourceRevision: "r-2" }
+  const reads = { count: 0 }
+  effect function sent(screen: ScreenFacts, selected: CalendarSelection) {
+    const seen: Seen = { calls: [] }
+    const sources = Layer.succeed(TurnSources, {
+      calendarDay: () => succeed(undefined),
+      calendarSelection: () => sync(() => { reads.count += 1; return selected }),
+      notesList: () => succeed(undefined),
+      noteFolders: () => succeed(undefined),
+      preferReview: () => succeed(undefined),
+    })
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Okay." }, proposals: [] }), Layer.merge(fakeHost([], screen), sources), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("Use the Calendar I have open")
+      try composer.send()
+      const observation = (turnBodies(seen)[0] as { metadata?: { observation?: unknown } } | undefined)?.metadata?.observation
+      return observation === undefined ? undefined : (try decodeObservation(observation)).selectedObject
+    }
+  }
+  const onEvent = try sent(shown, event)
+  const onSource = try sent(shown, source)
+  const hidden = try sent({ ...shown, exposure: { ...shown.exposure, hidden: true } }, event)
+  const elsewhere = try sent({ ...shown, observation: { ...shown.observation, view: "home" }, onCalendar: false }, source)
+  try Effect.try(() => assert.deepStrictEqual({ onEvent, onSource, hidden, elsewhere, reads: reads.count }, { onEvent: event, onSource: source, hidden: undefined, elsewhere: undefined, reads: 2 }))
+})
+
 it.effect("Tell a compared enrolled agent which Notes folder the owner can name (spec/assistant/context.md, \"An observed turn on an enrolled phone can carry the owner's Notes folder names to its compared agent\")", () => effect {
   const folders = [{ id: "f-work", name: "Work" }]
   const sources = Layer.succeed(TurnSources, {
     calendarDay: () => succeed(undefined),
+    calendarSelection: () => succeed(undefined),
     notesList: () => succeed(undefined),
     noteFolders: () => succeed(folders),
     preferReview: () => succeed(undefined),

@@ -4,6 +4,7 @@ import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
 import type { ChangeSummary } from "../workflows/changes.vibe"
 import type { BrowserPageObservation } from "../browser/page-context.ts"
+import type { SelectedObject as CalendarSelection } from "../calendar/device.vibe"
 import type { ResidentHeaders } from "../platform/resident.vibe"
 
 /** An email the owner reviewed in the chat, under the request id its version sends once. */
@@ -108,10 +109,12 @@ export interface TurnDay {
   readonly timeZone: string
 }
 
-/** What the screens before the assistant add to a turn: Calendar's shown day and Notes' list; unprovided, a turn names neither. */
+/** What the screens before the assistant add to a turn. */
 export service TurnSources {
   /** The day Calendar shows now, or undefined unless a plain day of the current owner is in front. */
   calendarDay(): (TurnDay | undefined)!!
+  /** The inspected event or source that the phone's Calendar still shows. */
+  calendarSelection(): (CalendarSelection | undefined)!!
   /** The Notes list the turn is sent from, or undefined off the list. */
   notesList(): (TurnRecord | undefined)!!
   noteFolders(): (ReadonlyArray<NoteFolder> | undefined)!!
@@ -119,6 +122,7 @@ export service TurnSources {
   preferReview(reviewFirst: boolean): void!!
   static readonly defaultValue = () => ({
     calendarDay: () => succeed(undefined),
+    calendarSelection: () => succeed(undefined),
     notesList: () => succeed(undefined),
     noteFolders: () => succeed(undefined),
     preferReview: () => succeed(undefined),
