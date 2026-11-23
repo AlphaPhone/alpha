@@ -43,23 +43,43 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **OWNER:** The assistant's Op set has no Photos read class, so Photos reads (search, inspect) use PhotosChange and always need review. Confirm this, or add `PhotosRead` to `spec/assistant/review.md`. The viewfinder deliberately keeps its own three-value Chat.
 - **OWNER:** Browser's `GoogleLink` (`src/browser/googleReturn.vibe`) and `CloudRequests` (`src/browser/cloudCustody.vibe`) have no consumer, and GoogleLink overlaps account's google.md readback. Absorb them or drop them?
 - **OWNER:** These developer-only test-mock pieces are not ported: Browser's simulated agent Clock handoff and its exact-byte bookmark backup/reset dialog.
+- **OWNER:** An upward swipe on Home opens the chat sheet (`spec/shell/gestures.md`, `RaiseAssistant`); legacy Home scrolled freely and only the dock opened chat. Keep the swipe, or drop `RaiseAssistant`? Gestures that start in the conversation or the composer, or end with text selected, are now ignored either way.
+- **OWNER:** Home grew a Notifications bell (launcher and standalone browser builds) and a Clock tile with timers, a stopwatch and world clocks; legacy removed Home's notifications control (#416/#417) and kept alarms inside Workflows. Keep them, gate the bell on test mocks off the phone, or remove them?
+- **OWNER:** Reminders has no way in from Home or the Add sheet (`reminders` has no `homeRank`), and Calendar no longer lists reminders. Give Reminders a Home rank, or restore the Calendar listing?
+- **OWNER:** Persistent notices are listed at the top of every screen, where legacy kept them in the chat. Keep the placement?
+- **OWNER:** The minimum supported WebView: legacy supported WebView 113 (no `AbortSignal.any`); state the floor or add the fallback.
+- **OWNER:** Legacy page-storage keys (theme, saved Maps places, conversation, voice and calendar choices, Gmail account choice, a pending photo copy) and the legacy slots `assistant-draft:v1:*`, `sms-draft:v1:*`, `workflow-draft:v1:*`, `reminder-creations:v1:device`, `reminder-deletions:v1:device`, `clock-handoff:v1:device`, `stage-session:v1` are not adopted. Adopt each, or accept losing it?
 - **OWNER:** Accept the legacy Trash import limits in Notes: imported rows get new IDs and a fresh deletedAt, and their recordings stay in the device audio trash.
 
 ## Shell (integration)
 
-- Fill the assistant's ports in `PortCells` (declared in `src/assistant/ports.vibe`):
-  - `BrowserPages` with `browserPagesFromBrowser`, `MapsViews` with `mapsViewsFromMaps`, `BrowserViews` with `browserViewsFromBrowser` (all in `src/assistant/fills.vibe`);
-  - `AdvertisedCapabilities.names()` with `DeviceCapabilities.advertise(offered)`. Until then no `x-eliza-device-capabilities` header is sent.
-- `AssistantHost.peer()` (`src/shell/assistantHost.vibe`) must set `browserPage` from the fresh status. Until it does, no Browser page is ever sent.
-- Requests to `/api/client-devices/proposals` (claim, decision, receipt) and turns must carry `DeviceEnrollment.headers()`. Device actions must be refused while `AgentSession.enrollmentId` is empty, and the ChatOnly phase should show legacy's "Chat only" reason; no UI shows it yet.
-- `AppServices` must contain the Machine services of `gen/clock__notifications` and `gen/clock__reminderTaps`, plus ApprovalReviews, AgentRequests, FilePicker, Notifications and ReminderTaps; their change streams must emit the current value first (assumed by `src/shell/surfaceSheets.vibe`).
+- `src/shell/assistantHost.vibe` keeps local copies of `learnPeer`/`comparePeer`/`statusRead`, because upstream `./client` does not re-export them at the pin. The eliza branch `vibestack-dp-alpha-peer-exports` (`3b83b114b84`, not built or merged) adds the re-exports; drop the copies after the next repin.
+- `src/web/runtime.ts` does not type-check yet: the composed runtime layer's error and requirement types read as `unknown` while other areas' layers still have type errors (seen with the other areas' syntax errors patched locally, not committed). Shell, Clock and Platform sources and tests type-check otherwise.
 - Browser has no always-mounted sheet; the "Browser shade sheet" was read as the browser build's notification shade in clock-notices. If another Browser sheet was meant, it needs its own surface and Back.
-- `src/shell/assistantHost.vibe` keeps local copies of `learnPeer`/`comparePeer`/`statusRead`, because upstream `./client` does not re-export them.
 - Hardware Back does not close an open Inbox search field that has no submitted query, because that state is UI-local in InboxScreen (Inbox). The on-screen Back does close it.
-- `index.html` carries no CSP for the delegation-return landing route.
+- The assistant's advertised capabilities are re-selected for each request from those advertised at registration (`EnrolledDevice.capabilities`), not from everything the agent offered: a capability that becomes available after registration is advertised only after the next enrollment. Keeping the offered list in `EnrolledDevice` (account) would close this.
+- Not yet ported from the shell/clock audit (`alpha-shell-clock.md`):
+  - G5: no landscape arrangement and no fitted 412 px canvas; `swipe` takes raw client pixels, so the right-edge Back and the bottom-bar HOME zones assume a 412 x 872 window;
+  - G6: Home's brief card is never fed: `Overview.reportBrief` has no caller, and Workflows' digest panel keeps the brief's text but not its outcome (Workflows);
+  - G7 (upcoming): an upcoming, not yet overdue, reminder never leads Home's agenda; `spec/calendar/home.md` `nextLead` has no caller (Calendar). Overdue reminders now reach Home;
+  - G8: the legacy `reminder-creations:v1:device`, `reminder-deletions:v1:device` and `clock-handoff:v1:device` slots are neither adopted nor listed below as accepted losses;
+  - G10: the held Back gesture previews nothing; Android still posts `alpha-back-preview` and no rule covers it;
+  - the toast in a dialog is drawn in the topmost open Radix dialog found in the DOM, not chosen by the spec's `toastHost(nav.layers)`;
+  - V1/V2: no Dafny proof and no conformance driver exists for any shell, clock or platform machine.
+- Not yet ported from the platform audits (`alpha-platform-a.md`, `alpha-platform-b.md`):
+  - legacy page-storage keys (`alpha.appearance.v1`, `alpha.maps.saved-places.v1`, `alpha.connection.conversations.v1`, voice and calendar preferences and others) are not adopted on update, so saved Maps places and the theme are lost at the cutover (see the OWNER item below);
+  - no fallback for a WebView without `AbortSignal.any` (WebView 113); either an upstream `anySignal` helper or a stated minimum WebView is needed;
+  - the device's locale and 12/24-hour setting (`System.getLocaleInfo`) are not read; every time uses the WebView's `Intl` default;
+  - an agent start refused with nothing held for review is a dead end (`resident-live.vibe` answers `needs-recovery` until the page restarts, and `control.recovered()` has no caller); legacy offered Try again and named each refusal;
+  - `DeviceStorage.reset()` and `resetOwner` have no caller, and about 30 stores use the literal `device` namespace instead of the bound owner;
+  - nothing holds Home until the sign-in page or the agent is ready (#1357), so Home flashes before the required sign-in page;
+  - `spec/platform/rendererRecovery.md` has no consumer and no native conformance driver over `RendererRecoveryBudget.java`;
+  - a cancelled connect no longer withdraws the native start (no `cancelStart` upstream);
+  - native voice turns carry no `X-Eliza-Trace-Id`, and the stream's 60 s idle and 600 s turn limits are shell constants with no Quint value or clocked test.
 
 ## Assistant
 
+- The composer sends the Browser page as `metadata.clientDevice.browserPage`, but upstream at the pin reads it only as `metadata.browserPage` (`readTurnContext`, `turns.vibe`), so the page never reaches the agent even now that the peer declares it.
 - `spokenCue`'s `replyReady()` does nothing when no cue was said, so a later `say()` would still play after the reply (`src/assistant/cue.vibe`). Voice guards against it with its own machine.
 - `metadata.clientDevice.calendarAgendaSource` is not sent, because Calendar exports no agenda source for the shown day.
 - `workflowStepDecisions` and the workflows layer each build their own WorkflowApi/WorkflowVersions. Composition may want to share one.
@@ -67,7 +87,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 ## Areas consuming assistant changes
 
 - **Telephony:** `useComms` and CallBar approve/decline should call `commsReviewFromAssistant().approve/decline` (`src/assistant/call-facts.vibe`) after CommsStage, so a bar approval runs through DeviceReview. `askAlpha` should call `Assistant.askComms(key, text)` so asking the same text twice is detected.
-- **Clock:** the workflow notice tap calls `flows.askAboutNotice(id, revision, …)` (`src/clock/notifications.vibe`); it should build its question with the assistant's `workflowStepSource(notice, workflow, step, excerpt)` (`src/assistant/draft.vibe`). The clock area has no listener yet for the new native `remindersChanged`, `notificationsChanged` and `mirrorChanged` events.
+- **Clock:** a tapped workflow approval notice now asks through `workflowStepSource`, but the tap names neither the workflow nor the step, so the review is titled "Workflow step"; naming them needs the run's workflow and pending step from Workflows.
 - **Workflows:** `src/workflows/notices.vibe` should call `DeviceReview.workflowStep(runId, stepId)` in its Executing phase, so an admitted phone step actually runs. `WorkflowCalendar` (`src/workflows/calendarRanges.vibe`) has no screen consumer; the simulator still uses the pure range helpers. The `post_notification` bindingHash omits the proposal digest, because `ExecutorCall` carries none.
 - **Notes:** `create_note` still treats "Workflows in front" as a workflow run. Notes sits before the assistant in the runtime order, so it needs a port, filled by the shell from `DeviceReview.callFacts(call).workflow`. `NotesListFilter.negotiate` and `filesCapabilities` can read the advertised names once the shell fills `AdvertisedCapabilities`.
 - **Maps:** `src/maps/failure.vibe` could use account's `limitOfRefusal` instead of reading `resetAt` itself.
@@ -101,6 +121,8 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - The Google App Link `appReturn` has no native source. The delegation-callback and workspace-return methods stay on AlphaConnection.
 - Java-side host models are missing: IdentitySession, NativeCredentialMutation, NativeGoogleAccessFile and GoogleBrowserReturnClaim. There is no native conformance driver for `voice__keyboard`.
 - `AlphaTelephonyBase` is still Alpha's fork of upstream TelephonyPlugin.
+- The agent's Gmail-changes and Calendar-edits switches are saved and published, but `android/agent/host.json` launches the agent with `gmailChanges: false, calendarEdits: false` and nothing reads `ALPHA_GOOGLE_AGENT_ACCESS_FILE` (upstream takes consent only from the launch document), so agent-side Google writes are always refused whatever Settings shows. The launch must carry the saved switches (and restart the agent on a change).
+- `android/agent/host.json` sets no `CEREBRAS_RATE_LIMIT_MAX_HOLD_SECONDS`, so one hosted-model 429 holds the account for the provider's whole retry time instead of legacy's under five seconds (#1417/#1428/#1448).
 
 ## Tooling / repository root
 
