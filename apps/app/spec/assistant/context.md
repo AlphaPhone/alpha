@@ -242,6 +242,12 @@ pure def lawAHiddenScreenSendsNoNoteFolders(compared: bool, enrolled: bool): boo
 pure def lawAChatOnlySessionSendsNoNoteFolders(observed: bool, compared: bool): bool = not(sendsNoteFolders(observed, compared, false))
 ```
 
+### A turn from Notes names the settled note or the visible list
+
+A settled canonical note sends its ID and revision. Without an open
+canonical note, the turn can name the visible Notes list. A turn carries
+neither while the screen is private.
+
 ## Story: Know when my words leave the phone
 
 > As the owner, I want to see when my assistant's answers come from a

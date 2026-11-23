@@ -333,6 +333,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const screen = try host.screen()
     const observed = observes(screen.exposure)
     const calendarSelection = observed && screen.onCalendar && screen.observation.selectedObject === undefined ? try sources.calendarSelection() : undefined
+    const noteSelection = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesSelection() : undefined
     const peer = try host.peer()
     const [noteFolders, place, asksFirst] = try.all [
       sendsNoteFolders(observed, peer.optionalFields, Boolean(identity.enrollmentId)) ? sources.noteFolders() : succeed(undefined),
@@ -341,7 +342,6 @@ export const composerLayer = Layer.effect(Composer, effect {
     ]
     try sources.preferReview(asksFirst)
     const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
-    const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
     const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
     const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
     const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
@@ -350,7 +350,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...screen.observation,
       ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
       ...(calendarSelection === undefined ? {} : { selectedObject: calendarSelection }),
-      ...(notesList === undefined ? {} : { selectedObject: notesList }),
+      ...(noteSelection === undefined ? {} : { selectedObject: noteSelection }),
       ...(browserTab === undefined ? {} : { selectedObject: browserTabObject(browserTab) }),
       ...(mapsNamed === undefined ? {} : { selectedObject: { kind: mapsNamed.kind, id: mapsNamed.id, revision: mapsNamed.revision } }),
       ...(day === undefined ? {} : { calendarDay: day }),

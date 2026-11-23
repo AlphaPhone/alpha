@@ -4,6 +4,7 @@ import { NOTE_FOLDERS_METADATA_KEY, readNoteFolders } from "@elizaos/plugin-note
 import { AgentCalendar } from "../calendar/agent.vibe"
 import { DeviceCalendar } from "../calendar/device.vibe"
 import { calendarDayObservation } from "../calendar/observation.vibe"
+import { NotesEditor } from "../notes/editor.vibe"
 import { NotesListFilter } from "../notes/listFilter.vibe"
 import { NotesFolders } from "../notes/folders.vibe"
 import { Foreground } from "../shell/foreground.vibe"
@@ -12,6 +13,7 @@ import { TurnSources } from "./ports.vibe"
 /** The turn sources over the Calendar and Notes services. */
 export const turnSourcesLive = Layer.effect(TurnSources, effect {
   const notes = try NotesListFilter
+  const editor = try NotesEditor
   const folders = try NotesFolders
   const foreground = try Foreground
   const presentation = try PresentationMachine
@@ -21,7 +23,10 @@ export const turnSourcesLive = Layer.effect(TurnSources, effect {
   return {
     calendarDay: () => day catch () => undefined,
     calendarSelection: () => device.selected(),
-    notesList: () => notes.context(),
+    effect notesSelection() {
+      const open = try editor.selection()
+      return open ?? (try notes.context())
+    },
     effect noteFolders() {
       const listed = folders.list() catch () => undefined
       return listed === undefined ? undefined : readNoteFolders({ [NOTE_FOLDERS_METADATA_KEY]: listed })

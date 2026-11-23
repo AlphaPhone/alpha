@@ -205,7 +205,7 @@ it.effect("Send the open inspected Calendar record (spec/assistant/context.md, \
     const sources = Layer.succeed(TurnSources, {
       calendarDay: () => succeed(undefined),
       calendarSelection: () => sync(() => { reads.count += 1; return selected }),
-      notesList: () => succeed(undefined),
+      notesSelection: () => succeed(undefined),
       noteFolders: () => succeed(undefined),
       preferReview: () => succeed(undefined),
     })
@@ -229,7 +229,7 @@ it.effect("Tell a compared enrolled agent which Notes folder the owner can name 
   const sources = Layer.succeed(TurnSources, {
     calendarDay: () => succeed(undefined),
     calendarSelection: () => succeed(undefined),
-    notesList: () => succeed(undefined),
+    notesSelection: () => succeed(undefined),
     noteFolders: () => succeed(folders),
     preferReview: () => succeed(undefined),
   })
@@ -245,6 +245,32 @@ it.effect("Tell a compared enrolled agent which Notes folder the owner can name 
   const matched = try sent(true)
   const unverified = try sent(false)
   try Effect.try(() => assert.deepStrictEqual([matched, unverified], [folders, undefined]))
+})
+
+it.effect("A canonical note stays the target when I ask from its editor (spec/assistant/context.md, \"A turn from Notes names the settled note or the visible list\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const selected = { kind: "canonical-note", id: "note-1", revision: "12" }
+  const screen: ScreenFacts = {
+    exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+    observation: { view: "notes", revision: 3, sensitive: false },
+    onCalendar: false,
+    contextKey: "notes:",
+  }
+  const sources = Layer.succeed(TurnSources, {
+    calendarDay: () => succeed(undefined),
+    calendarSelection: () => succeed(undefined),
+    notesSelection: () => succeed(selected),
+    noteFolders: () => succeed(undefined),
+    preferReview: () => succeed(undefined),
+  })
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Okay." }, proposals: [] }), Layer.merge(fakeHost([], screen), sources), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.edit("Help with the note in front of me")
+    try composer.send()
+    const observation = (turnBodies(seen)[0] as { metadata?: { observation?: unknown } } | undefined)?.metadata?.observation
+    const decoded = try decodeObservation(observation)
+    try Effect.try(() => assert.deepStrictEqual(decoded.selectedObject, selected))
+  }
 })
 
 it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
