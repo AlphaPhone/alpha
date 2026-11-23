@@ -9,7 +9,7 @@ import { renderSensePermissions } from "./pixel10a-product.ts";
 import { senseSystemuiPatch } from "./sense-systemui.mjs";
 
 const systemuiSource = fileURLToPath(
-  new URL("../../android/sense/systemui/chip/", import.meta.url),
+  new URL("../../../vendor/eliza/packages/os/aosp/sense/systemui/chip/", import.meta.url),
 );
 export const listenerPackage = (appId) => `${appId}.sense`;
 
@@ -383,7 +383,7 @@ export function stageSenseListener({
   );
   const envelope = senseSystemuiPatch();
   const overlayConfig = fs.readFileSync(
-    fileURLToPath(new URL("../../android/sense/config.xml", import.meta.url)),
+    fileURLToPath(new URL("../../../vendor/eliza/packages/os/aosp/sense/config.xml", import.meta.url)),
     "utf8",
   );
   checkListenerOverlay(overlayConfig, [config.hostPackage, config.packageName]);

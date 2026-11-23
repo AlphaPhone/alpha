@@ -107,7 +107,6 @@ function writeEnvFile(file: string, values: Record<string, string>) {
 }
 
 /** Fill every generated secret that is absent and return the entitlement public key the operator records in the inputs. */
-export const GENERATED_SECRETS = ['CLOUD_DIGEST_KEY', 'CLOUD_SEALING_KEY', 'EMAIL_CODE_SECRET', 'GOOGLE_CONNECT_TOKEN_KEY', 'CLOUD_ENTITLEMENT_KEY'] as const;
 /** With `frozen` (CI), nothing is generated: a sealing or entitlement key minted on a runner would rotate and be lost. */
 export function completeSecrets(values: Record<string, string>, {frozen = false} = {}): {values: Record<string, string>; entitlementPublicKey: crypto.JsonWebKey} {
   if (frozen) {

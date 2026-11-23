@@ -3,7 +3,7 @@ import {VOICE_HOST_MANIFEST, voiceHostProblems, type readVoiceHost} from './voic
 import {readNativeBuildReceipt, verifyNativeBuildFiles} from './native-build-inputs.ts';
 import {HOST_DESCRIPTOR, generateAlphaAndroidHost, readHostDescriptor} from './android-host.ts';
 import {HOST_TEMPLATES, referencePath} from './gradle-verification.ts';
-import {LOCKFILE, readPnpmLock as readLock, type PackageLock} from './pnpm-lock.ts';
+import {LOCKFILE, SHIPPING_IMPORTER, readPnpmLock as readLock, type PackageLock} from './pnpm-lock.ts';
 import {readUpstreamPin} from './upstream-pin.ts';
 export type {PackageLock};
 // Generates the third-party notices shipped in the web bundle and in every APK payload.
@@ -455,8 +455,14 @@ function lucideIconEntries(root: string, errors: string[]): NoticeDraft[] {
   return [{name: record.package, version: record.version, license: 'ISC AND MIT', source: record.repository, text: normalizeText(licence.toString('utf8'))}];
 }
 
+/** A package the renderer ships, as installed for the shipping importer (apps/app) by pnpm. */
+export function shippedPackageDir(root: string, name: string) {
+  const app = `${SHIPPING_IMPORTER}/node_modules/${name}`;
+  return exists(root, `${app}/package.json`) ? app : `node_modules/${name}`;
+}
+
 function pdfjsEntries(root: string, errors: string[]): NoticeDraft[] {
-  const dir = 'node_modules/pdfjs-dist';
+  const dir = shippedPackageDir(root, 'pdfjs-dist');
   if (!exists(root, `${dir}/package.json`)) return [];
   const version = readJson(root, `${dir}/package.json`).version;
   return PDFJS_COMPONENTS.map(component => {
@@ -469,7 +475,7 @@ function pdfjsEntries(root: string, errors: string[]): NoticeDraft[] {
 }
 
 function ocrDataEntries(root: string): NoticeDraft[] {
-  const eng = readJson(root, 'node_modules/@tesseract.js-data/eng/package.json');
+  const eng = readJson(root, `${shippedPackageDir(root, '@tesseract.js-data/eng')}/package.json`);
   return [{name: 'Tesseract English trained data (tessdata 4.0.0_best_int)', version: `bundled with @tesseract.js-data/eng ${eng.version}`, license: 'Apache-2.0',
     source: 'https://github.com/naptha/tessdata', text: normalizeText(read(root, 'licenses/tessdata-APACHE-2.0.txt'))}];
 }
@@ -488,7 +494,7 @@ function tesseractCoreEntries(root: string, errors: string[]): NoticeDraft[] {
     cores: Record<string, string>;
     components: {name: string; version: string; license: string; source: string; preface?: string; files: {path: string; sha256: string}[]}[];
   } = readJson(root, TESSERACT_CORE_SOURCES);
-  const dir = `node_modules/${pinned.package}`;
+  const dir = shippedPackageDir(root, pinned.package);
   if (!exists(root, `${dir}/package.json`)) { errors.push(`${pinned.package}: not installed; run pnpm install --frozen-lockfile`); return []; }
   const installed = readJson(root, `${dir}/package.json`).version;
   if (installed !== pinned.version)
@@ -568,10 +574,10 @@ function fontEntries(root: string, templates: Templates, errors: string[]) {
       ...(record && heldOutside && license === COMMERCIAL_FONT ? {_flags: ['proprietary-licence-held-outside-repo'], _reason: `${record.holder}: ${record.basis}.`} : {})});
   }
   for (const item of licensed) if (!usedRecords.has(item)) errors.push(`${FONT_LICENSES}: stale entry ${item.name}; no shipped font matches its name and sha256 list`);
-  const pkg = readJson(root, 'package.json');
+  const pkg = readJson(root, `${SHIPPING_IMPORTER}/package.json`);
   const fontsource = Object.keys({...pkg.dependencies, ...pkg.devDependencies}).filter(name => name.startsWith('@fontsource/')).sort();
   for (const name of fontsource) {
-    const dir = `node_modules/${name}`;
+    const dir = shippedPackageDir(root, name);
     if (!exists(root, `${dir}/package.json`)) { errors.push(`${name}: not installed; run pnpm install --frozen-lockfile`); continue; }
     const manifest = readManifest(path.join(root, dir), name, errors);
     if (!manifest) continue;

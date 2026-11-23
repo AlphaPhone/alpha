@@ -1,6 +1,6 @@
 package ai.eliza.plugins.reminders;
 
-// Ported unchanged from plugin-native-reminders src/test (elizaOS at 1803ea88, MIT): it now runs
+// Ported unchanged from the os reminders module src/test (vendor/eliza/packages/os/android/reminders at the upstream.lock.json pin, MIT): it now runs
 // against Alpha's ReminderStore copy (android/shared-ui/eliza-reminders), which compiles in place of
 // the shared store, so the due-reminder notification and its actions stay tested in Alpha's build.
 // test/shared-ui-overrides.test.mjs keeps it the pinned upstream test.
@@ -18,7 +18,7 @@ import static org.junit.Assert.*;
 
 /** Operation receipt retention on one synthetic no-alert reminder; no provider or model. */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk=28,manifest=Config.NONE)
+@Config(sdk=Config.OLDEST_SDK,manifest=Config.NONE)
 public class ReminderStoreRetentionTest {
  static final String HASH=new String(new char[64]).replace('\0','a');
  static final class Memory implements SecureStringStore {

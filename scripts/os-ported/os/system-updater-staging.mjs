@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const source = fs.realpathSync(
-  fileURLToPath(new URL("../../android/system-updater/", import.meta.url)),
+  fileURLToPath(new URL("../../../vendor/eliza/packages/os/aosp/system-updater/", import.meta.url)),
 );
 const inputs = [
   "Android.bp",

@@ -78,7 +78,7 @@ effect function repositoryJson(name: string) {
   return try readJson(path.join(try repositoryRoot(), name))
 }
 
-effect function inputsOf(file: string): Inputs {
+effect function inputsOf(file: string): Inputs!! {
   return try Schema.decodeUnknownEffect(OperatorInputs, { onExcessProperty: "error" })(try readJson(file))
 }
 

@@ -14,7 +14,7 @@ import { PIXEL10A_COMPOSITION, PIXEL10A_PRODUCT, PIXEL10A_RELEASE } from "../scr
 import { X509_KEYS, parseSigningArgs, signRelease } from "../scripts/sign-aosp-release.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
-const vendorPresent = fs.existsSync(path.join(root, "vendor/eliza/packages/os/scripts/android/aosp-release-signing.mjs"));
+const vendorPresent = fs.existsSync(path.join(root, "scripts/os-ported/os/aosp-release-signing.mjs"));
 const skip = !vendorPresent && "pinned checkout absent";
 const read = rel => JSON.parse(fs.readFileSync(path.join(root, rel), "utf8"));
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
@@ -27,7 +27,7 @@ const APEX = "com.android.alpha.test.apex";
 const APEX_ROW = `name="${APEX}" public_key="system/apex/test.avbpubkey" private_key="system/apex/test.pem" container_certificate="system/apex/test.x509.pem" container_private_key="system/apex/test.pk8" partition="system"`;
 const PRESIGNED_APEX_ROW = 'name="com.vendor.presigned.apex" public_key="PRESIGNED" private_key="PRESIGNED" container_certificate="PRESIGNED" container_private_key="PRESIGNED" partition="system"';
 
-const encodeAvbPublicKey = async key => (await import("../vendor/eliza/packages/os/scripts/android/generate-release-keys.ts")).encodeAvbPublicKey(key);
+const encodeAvbPublicKey = async key => (await import("../scripts/os-ported/os/generate-release-keys.ts")).encodeAvbPublicKey(key);
 
 function temporary(t, prefix) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));

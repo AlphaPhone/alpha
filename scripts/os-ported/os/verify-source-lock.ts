@@ -7,8 +7,8 @@ import { fileURLToPath } from "node:url";
 import { hashFile } from "./release-contract.ts";
 import { verifyDeviceSource } from "./verify-device-source.mjs";
 
-const repositoryRoot = fileURLToPath(new URL("../..", import.meta.url));
-export const defaultLockPath = join(repositoryRoot, "android/aosp.lock.json");
+const repositoryRoot = fileURLToPath(new URL("../../../vendor/eliza/packages/os/", import.meta.url));
+export const defaultLockPath = join(repositoryRoot, "aosp/aosp.lock.json");
 
 function fail(message) {
   throw new Error(`[aosp-lock] ${message}`);

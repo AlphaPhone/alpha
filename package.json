@@ -12,6 +12,7 @@
     "check": "turbo run check --filter=@alphacompute/alphaphone-app",
     "gen": "turbo run gen --filter=@alphacompute/alphaphone-app",
     "build": "turbo run build --filter=@alphacompute/alphaphone-app && node scripts/write-build-flags.ts web-dist",
+    "build:upstream": "node scripts/build-upstream.ts",
     "build:test-mocks": "ELIZA_DEV_ALLOW_TEST_MOCKS=1 turbo run build --filter=@alphacompute/alphaphone-app && ELIZA_DEV_ALLOW_TEST_MOCKS=1 node scripts/write-build-flags.ts web-dist",
     "test": "turbo run test --filter=@alphacompute/alphaphone-app --filter=@alphacompute/alpha-cloud",
     "typecheck": "turbo run typecheck --filter=@alphacompute/alphaphone-app --filter=@alphacompute/alpha-cloud",

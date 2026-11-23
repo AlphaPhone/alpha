@@ -21,8 +21,8 @@ import java.time.*;
 import java.util.UUID;
 
 /**
- * Alpha's copy of the shared reminder store (plugin-native-reminders ReminderStore, elizaOS at
- * 1803ea88, MIT), compiled in its place in the shared module (android/shared-ui-overrides.json) so
+ * Alpha's copy of the shared reminder store (the os reminders module's ReminderStore,
+ * vendor/eliza/packages/os/android/reminders at the upstream.lock.json pin, MIT), compiled in its place in the shared module (android/shared-ui-overrides.json) so
  * the due-reminder notification and its Done, Snooze and Ask Alpha actions are Alpha's code. It keeps
  * the shared name because the shared ReminderEngine, ReminderTaps and ReminderPlugin reach it
  * package-privately. Below this declaration it is the pinned upstream store apart from the changes

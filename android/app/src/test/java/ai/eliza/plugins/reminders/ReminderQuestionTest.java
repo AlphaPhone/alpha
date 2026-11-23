@@ -1,6 +1,6 @@
 package ai.eliza.plugins.reminders;
 
-// Ported unchanged from plugin-native-reminders src/test (elizaOS at 1803ea88, MIT): it now runs
+// Ported unchanged from the os reminders module src/test (vendor/eliza/packages/os/android/reminders at the upstream.lock.json pin, MIT): it now runs
 // against Alpha's ReminderStore copy (android/shared-ui/eliza-reminders), which compiles in place of
 // the shared store, so the due-reminder notification and its actions stay tested in Alpha's build.
 // test/shared-ui-overrides.test.mjs keeps it the pinned upstream test.
@@ -19,7 +19,7 @@ import static org.junit.Assert.*;
 
 /** Real engine/store/notification builders under Android shadows; no provider or model. */
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk=28,manifest=Config.NONE)
+@Config(sdk=Config.OLDEST_SDK,manifest=Config.NONE)
 public class ReminderQuestionTest {
  public static class Receiver extends BroadcastReceiver {public void onReceive(Context c,Intent i){}}
  static final class Memory implements SecureStringStore {
@@ -66,6 +66,34 @@ public class ReminderQuestionTest {
    assertEquals(1,questions);
    assertEquals("scheduled",engine.decide("daily",occurrence,"done").getString("status"));assertFalse(noticed(context,config,"daily"));
   }
+ }
+ @Test public void retainedForegroundAlarmPostsOnceOnBackgroundAndCancellationRemovesIt() throws Exception {
+  Context context = RuntimeEnvironment.getApplication();
+  String name = "foreground" + UUID.randomUUID().toString().replace("-", "");
+  Memory memory = new Memory(name);
+  ReminderConfiguration config = configuration(name, false);
+  ReminderEngine engine = ReminderEngine.get(context, config, c -> memory);
+  String id = "owned-reminder";
+  long later = System.currentTimeMillis() + java.time.Duration.ofDays(180).toMillis();
+  assertEquals("scheduled", engine.schedule(id, "Owned appointment", "", later, null, null).getString("status"));
+  assertEquals(later, engine.read(id).getLong("at"));
+  dueNow(context, engine, id);
+  assertFalse(noticed(context, config, id));
+  engine.deliverDue(id);
+  assertEquals("posted", engine.read(id).getString("status"));
+  assertTrue(noticed(context, config, id));
+  JSONObject first = new JSONObject(memory.read(config.tapSlot));
+  engine.deliverDue(id);
+  assertEquals(first.toString(), new JSONObject(memory.read(config.tapSlot)).toString());
+  String tap = first.keys().next();
+  engine.captureTap(tap);
+  assertTrue(engine.pendingTap().getBoolean("retained"));
+  assertEquals(id, engine.consumeTap(tap).getString("reminderId"));
+  assertFalse(noticed(context, config, id));
+  assertTrue(engine.cancel(id));
+  engine.deliverDue(id);
+  assertEquals("cancelled", engine.read(id).getString("status"));
+  assertFalse(noticed(context, config, id));
  }
  @Test public void olderPendingTapIsNotReclaimed()throws Exception{
   Context context=RuntimeEnvironment.getApplication();String name="pending"+UUID.randomUUID().toString().replace("-","");Memory memory=new Memory(name);ReminderConfiguration config=configuration(name,true);ReminderEngine engine=ReminderEngine.get(context,config,c->memory);

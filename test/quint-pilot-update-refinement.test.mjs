@@ -13,7 +13,7 @@ const sources = [
   'scripts/pilot-update.ts', 'scripts/android-instrumentation.ts', 'scripts/provision-unit.ts',
   'scripts/owner/pilot-install-lock.ts', 'scripts/apk.ts', 'scripts/build-android.ts',
   'scripts/toolchain.ts', 'scripts/release-blockers.ts',
-  'vendor/eliza/packages/os/scripts/android/apk-release-record.mjs',
+  'scripts/os-ported/os/apk-release-record.mjs',
 ];
 const action = (name, ...args) => ({name, args});
 

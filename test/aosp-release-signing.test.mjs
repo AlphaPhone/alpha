@@ -15,9 +15,9 @@ import { PIXEL10A_COMPOSITION, PIXEL10A_PRODUCT, PIXEL10A_RELEASE, pixel10aOptio
 import { channelDistributionProblems, channelSigningProblems, signRelease, X509_KEYS } from "../scripts/sign-aosp-release.ts";
 import { RECORD_KIND } from "../scripts/aosp-release-record.ts";
 import { releaseBlockers } from "../scripts/release-blockers.ts";
-import { cloudVoiceAdmission } from "../vendor/eliza/packages/os/scripts/android/apk-release-record.mjs";
+import { cloudVoiceAdmission } from "../scripts/os-ported/os/apk-release-record.mjs";
 import { clockActions, clockProductRequirement, verifyAospClockHandlers } from "../scripts/aosp-clock-contract.ts";
-import * as sharedClock from "../vendor/eliza/packages/os/scripts/android/aosp-clock-handlers.mjs";
+import * as sharedClock from "../scripts/os-ported/os/aosp-clock-handlers.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const read = rel => JSON.parse(fs.readFileSync(path.join(root, rel), "utf8"));

@@ -185,7 +185,7 @@ test('an owner development image gets the capability overlay and resolvable role
 test('owner role overrides resolve to this product even after a staged development listener include', {skip: !hasMake && 'GNU make is unavailable'}, () => {
   const output = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-owner-listener-'));
   try {
-    // stageListener (vendor/eliza/packages/os/scripts/android/sense-listener.mjs) runs before the
+    // stageListener (scripts/os-ported/os/sense-listener.mjs) runs before the
     // owner writer and appends this include; afterwards $(lastword $(MAKEFILE_LIST)) is listener.mk.
     fs.mkdirSync(path.join(output, 'listener'));
     fs.writeFileSync(path.join(output, 'listener/listener.mk'), 'sense_listener_dir := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))\n');
