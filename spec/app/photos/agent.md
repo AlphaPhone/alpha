@@ -270,7 +270,7 @@ pure def alwaysOneRequestAtATime(s: Helper): bool =
     and ((s.stage == Reading or s.result == Answered or s.result == Unread or s.result == Approved)
       implies (s.decidedBy == Owner and s.stage != Shown))
     and ((s.stage == Reading or s.result == Answered) implies (s.request.ask == Search or s.request.ask == Inspect))
-    and (s.request.ask == Search implies (s.request.number == 0 or fits(s.request)))
+    and ((s.request.ask == Search and s.stage != Idle) implies fits(s.request))
     and (s.request.ask == Inspect implies s.request.columns.subseteq(sharedFields))
     and s.rows >= 0 and s.rows <= s.request.limit and (s.result != Answered implies s.rows == 0)
     and (s.request.ask == Alter implies s.request.change != C::Restore)
@@ -278,15 +278,19 @@ pure def alwaysOneRequestAtATime(s: Helper): bool =
 
 ### Every request is answered once, when it ends, with how it ended
 
+A proposal from an older read ends as soon as it is made.
+
 ```quint
+pure def ends(before: Helper, after: Helper): bool =
+  after.stage == Over and (before.stage != Over or after.request.number != before.request.number)
+
 pure def stepAnsweredOnce(before: Helper, via: str, after: Helper, out: List[Effect]): bool =
   out.every(e => match e {
-    | Answer(a) => before.stage != Over and after.stage == Over and a.request == after.request.number
+    | Answer(a) => ends(before, after) and a.request == after.request.number
         and a.result == after.result and a.rows == after.rows and a.rows <= after.request.limit
     | _ => true
   })
-    and ((before.stage != Over and after.stage == Over)
-      implies out.some(e => match e { | Answer(a) => true | _ => false }))
+    and (ends(before, after) implies out.some(e => match e { | Answer(a) => true | _ => false }))
 ```
 
 ### A request shown or being read ends
