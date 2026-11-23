@@ -69,9 +69,6 @@ pure val minuteValues = Set(0, 60)
 pure val zoneValues = Set(0, 1)
 pure val sourceValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
-pure val weight_schedulesRead = 4
-pure val weight_changeAnswered = 2
-pure val weight_runNowAnswered = 2
 ```
 
 ### The panel opens and closes, and opening it reads the schedules for the owner signed in

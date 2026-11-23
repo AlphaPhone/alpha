@@ -76,16 +76,16 @@ pure val initial: Digests = {
 }
 
 pure val ticketValues = Set(1, 2, 3)
-pure val roundValues = Set(1, 2, 3, 4, 5)
+pure val roundValues = Set(1, 2, 3, 4)
 pure val idValues = Set(1, 2)
 pure val countValues = Set(-1, 0, 1, 2)
 pure val upToValues = Set(0, 1, 2, 3)
 pure val ranValues = Set(0, 1, 2)
 pure val resultValues = Set(0, 1, 3)
 pure val ownerValues = Set(0, 1, 2)
-pure val weight_fetched = 4
-pure val weight_pageKept = 2
-pure val weight_resultRead = 3
+pure val weight_fetched = 8
+pure val weight_pageKept = 3
+pure val weight_resultRead = 6
 ```
 
 ### Only the newest 100 results are listed, newest first
