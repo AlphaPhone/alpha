@@ -1,4 +1,4 @@
-// spec/notes/previous-device.md, "Story: Read Notes kept by an earlier installation of Alpha"
+// spec/notes/previousDevice.md, "Story: Read Notes kept by an earlier installation of Alpha"
 import { useEffect, useId, useState } from "react";
 import { readPreviousDeviceNotes, type PreviousDeviceNotes as PreviousNotesData } from "../../notes/previous-device-notes.ts";
 import { Native } from "../../platform/native.vibe";
