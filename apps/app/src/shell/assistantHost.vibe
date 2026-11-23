@@ -105,7 +105,9 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     }
   })
 
-  effect function open(app: AppId, route: string | undefined) {
+  effect function open(app: AppId | "", route: string | undefined) {
+    if (try navigation.switchForAgent(app, route ?? "")) return true
+    if (app === "") return false
     const before = (try navigation.get()).chat
     const opened = try navigation.open(app, route)
     if (opened && (before === "Sheet" || before === "Full")) try navigation.moveChat(before)
@@ -136,12 +138,12 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     },
     effect emergency() { return try calls.emergencyLive() },
     effect openView(app: string, route?: string) {
-      const known = appOfKey(`alpha:${app}`)
-      if (known === undefined) return false
-      if (!(try navigation.get()).voice) return try open(known as AppId, route)
+      const target: AppId | "" | undefined = app === "home" || app === "" ? "" : (appOfKey(`alpha:${app}`) as AppId | undefined)
+      if (target === undefined) return false
+      if (!(try navigation.get()).voice) return try open(target, route)
       let opened = false
       try voice.followScreen(() => effect {
-        opened = try open(known as AppId, route)
+        opened = try navigation.switchForAgent(target, route ?? "")
         return opened
       }, () => opened)
       return opened

@@ -194,13 +194,13 @@ export const nativePlugins = {
     methods: [
       "checkPermissions", "requestPermissions", "cancel", "startRecording", "stopRecording", "cancelRecording",
       "getRecordingMetrics", "warmSpeechOutput", "localSpeechStatus", "transcribeLocalRecording", "transcribeLocalAudio",
-      "synthesizeLocal", "setSpeechOutputMuted", "play", "stopPlayback", "nativeVoiceTiming", "markVoiceTurn",
+      "synthesizeLocal", "setSpeechOutputMuted", "play", "stopPlayback", "holdSpeechEngine", "releaseSpeechEngineHold", "nativeVoiceTiming", "markVoiceTurn",
       "liveCaptureStatus", "startLiveCapture", "stopLiveCapture", "transcribeRecording", "transcribeOwnRecording",
       "synthesize", "synthesizeOwn", "synthesizeLocalBrowserReading", "startNoteRecording", "consumeNoteRecordingOpen",
       "clearNoteRecordingOpen", "noteRecordingStatus", "pauseNoteRecording", "resumeNoteRecording", "stopNoteRecording",
       "discardNoteRecording", "setNoteSegmentText", "claimCanonicalNoteSave", "saveNoteRecording", "workflowPresentationCapabilities",
     ],
-    events: ["noteRecordingChanged", "recordingStopped", "playbackEnded", "playbackFailed", "playbackStopped", "liveCaptureEnded"],
+    events: ["noteRecordingChanged", "recordingStopped", "playbackSegmentStarted", "playbackEnded", "playbackFailed", "playbackStopped", "liveCaptureEnded"],
   },
   DailyApps: {
     reach: "AnyNative",

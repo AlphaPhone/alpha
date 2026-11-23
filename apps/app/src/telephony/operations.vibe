@@ -4,6 +4,7 @@ import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
 import type { Result } from "../../gen/assistant__receipts.effect.vibe"
 import type { Settled } from "../../gen/telephony__actions.effect.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
+import { AssistantHost } from "../assistant/host.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { AlreadyRan, composeTargetOf, contactNumbersGrounded, contactNumbersOf, grounded, NotATelephonyOperation, telephonyOperationOf, TelephonyActions, type Present, type Refusal, type TelephonyOperation } from "./actions.vibe"
 import { TelephonyBridges } from "./bridges.vibe"
@@ -191,6 +192,7 @@ export const operationPorts = effect {
   const bridges = try TelephonyBridges
   const calls = try TelephonyCalls
   const navigation = try Navigation
+  const host = Option.getOrUndefined(try Effect.serviceOption(AssistantHost))
   const settled = new Map<string, RunOutcome>()
   const shows = new Map<string, Present>()
 
@@ -209,7 +211,10 @@ export const operationPorts = effect {
 
   effect function showAfterReply(call: ExecutorCall, present: Present) {
     try calls.settled(call)
-    try (navigation.open(present.app, present.route) catch () => false)
+    const open = host !== undefined
+      ? host.openView(present.app, present.route)
+      : navigation.switchForAgent(present.app, present.route ?? "")
+    open catch () => false
   }
 
   effect function run(operation: unknown, call: ExecutorCall) {

@@ -23,7 +23,8 @@ back and any other activity finishes.
 
 Opening from Home, the library, a notification or the agent closes the library, the shade and
 Home's edit mode and puts the assistant on the app's resting detent: the comms apps rest on their
-bar, every other app on the pill, Home on the bar. Push keeps the app being left as the way back,
+bar, Browser on the assistant's input bar (its dock stays drawn, spec/assistant/dock.md), every
+other app on the pill, Home on the bar. Push keeps the app being left as the way back,
 at most six deep; any other open starts a new history. Opening a different app changes the
 revision, which retires an agent's claim made on the screen before.
 
@@ -56,7 +57,9 @@ pure val initial: Nav = {
 }
 pure val StackLimit = 6
 pure val BarApps = Set("phone", "messages", "contacts")
-pure val appValues = Set("calendar", "notes", "phone")
+pure val InputRestApps = Set("browser")
+pure val appValues = Set("", "calendar", "notes", "phone")
+pure val restAppValues = Set("", "browser", "notes", "phone")
 pure val routeValues = Set("", "event-1")
 pure val admittedValues = Set(Set("calendar", "notes"), Set("calendar", "notes", "phone"))
 pure val idValues = Set("sheet", "menu")
@@ -64,7 +67,9 @@ pure val entryValues = Set("org.fixture.clock", "alpha:notes")
 pure val entriesValues = Set(Set(), Set("org.fixture.clock"), Set("org.fixture.clock", "alpha:notes"))
 pure val queryValues = Set("", "cl")
 pure val weight_nativeBack = 6
-pure def restOf(app: str): Detent = restFor(not(app == "" or BarApps.contains(app)))
+pure def restOf(app: str): Detent = restFor(not(app == "" or BarApps.contains(app) or InputRestApps.contains(app)))
+pure def lawBrowserRestsOnTheInput(restApp: str): bool =
+  InputRestApps.contains(restApp) implies (restOf(restApp) == Input and not(BarApps.contains(restApp)))
 pure def placeOf(s: Nav, app: str): Place =
   s.places.select(p => p.app == app).nthOr(0, { app: app, route: "", inner: false })
 pure def withPlace(p: Place, places: List[Place]): List[Place] = places.select(q => q.app != p.app).append(p)
@@ -409,41 +414,52 @@ pure def appFailed(s: Nav, app: str): Nav = homed(s.revision + 1, s)
 ### A claim is captured on one screen, committed on it, and confirmed in the app it opened
 
 The agent's navigation (`POST /api/views/:id/navigate`, then claim and result) captures the
-revision in front, claims one admitted app on that same revision, and commits it by opening the
-app with history; an open conversation stays open. The switch is confirmed once the app it opened
-is in front; a lost confirmation leaves it unknown. Any navigation of the owner's, Back, HOME, a
-boot or hiding the page retires a claim not yet committed.
+revision in front, claims Home or one admitted app on that same revision, and commits it by
+opening the app with history, or by going Home. An open conversation stays open and a running voice
+conversation keeps running across the switch: the agent moving the screen is not the owner leaving
+it, so unlike the owner's HOME it never stops voice, and Home settles a lowered conversation on its
+bar. The switch is confirmed once the view it opened is in front; a lost confirmation leaves it
+unknown. Any navigation of the owner's, Back, HOME, a boot or hiding the page retires a claim not
+yet committed.
 
 ```quint
 pure def canCaptureClaim(s: Nav): bool =
   running(s) and not(s.hidden) and (s.claim == NoClaim or s.claim == ClaimDelivered or s.claim == ClaimUnknown)
 pure def captureClaim(s: Nav): Nav = { ...s, claim: ClaimCaptured, captured: s.revision, destination: "" }
+pure def claimable(s: Nav, app: str): bool = app == "" or s.admitted.contains(app)
 pure def canClaimView(s: Nav, app: str): bool =
-  s.claim == ClaimCaptured and s.captured == s.revision and not(s.hidden) and s.admitted.contains(app)
+  s.claim == ClaimCaptured and s.captured == s.revision and not(s.hidden) and claimable(s, app)
 pure def claimView(s: Nav, app: str): Nav = { ...s, claim: ClaimHeld, destination: app }
 pure def canCommitClaim(s: Nav, route: str): bool =
   s.claim == ClaimHeld and s.captured == s.revision and not(s.hidden) and s.holds.size() == 0 and
-  s.layers.length() == 0 and s.admitted.contains(s.destination)
+  s.layers.length() == 0 and claimable(s, s.destination)
 pure def commitClaim(s: Nav, route: str): Nav = {
-  val following = opened(s.destination, route, true, s)
-  { ...following, chat: if (talking(s)) s.chat else following.chat, claim: ClaimCommitted, destination: s.destination }
+  val following = if (s.destination == "") homed(if (s.app == "") s.revision else s.revision + 1, s)
+    else opened(s.destination, route, true, s)
+  val conversing = s.voice or talking(s)
+  { ...following, voice: s.voice, chat: if (conversing) settledOn(s.destination == "", s.chat) else following.chat,
+    claim: ClaimCommitted, destination: s.destination }
 }
 pure def canAcknowledge(s: Nav): bool = s.claim == ClaimCommitted and s.destination == s.app and not(s.hidden)
 pure def acknowledge(s: Nav): Nav = { ...s, claim: ClaimDelivered }
 pure def canLoseAcknowledgement(s: Nav): bool = s.claim == ClaimCommitted
 pure def loseAcknowledgement(s: Nav): Nav = { ...s, claim: ClaimUnknown }
 pure def alwaysClaimIsCurrent(s: Nav): bool =
-  (s.claim == ClaimHeld implies (s.captured == s.revision and s.admitted.contains(s.destination) and not(s.hidden))) and
+  (s.claim == ClaimHeld implies (s.captured == s.revision and claimable(s, s.destination) and not(s.hidden))) and
   ((s.claim == ClaimCommitted or s.claim == ClaimDelivered or s.claim == ClaimUnknown) implies
     (s.destination == s.app and not(s.hidden)))
+pure def stepAgentSwitchKeepsVoice(before: Nav, via: str, after: Nav): bool =
+  via == "commitClaim" implies (after.voice == before.voice and (isOpen(before.chat) implies after.chat == before.chat))
 pure def sometimesSwitchConfirmed(s: Nav): bool = s.claim == ClaimDelivered
 pure def sometimesSwitchUnknown(s: Nav): bool = s.claim == ClaimUnknown
+pure def sometimesAgentWentHome(s: Nav): bool = s.claim == ClaimDelivered and s.app == ""
 ```
 
 ### An approved open_view shows Home or an admitted app, and is applied only once it is in front
 
-The agent's `open_view` device operation, once the owner approved it, goes Home through HOME or to
-an app through the claim above; it changes nothing else and has no read-back. It reports applied
+The agent's `open_view` device operation, once the owner approved it, goes Home or to an app
+through the claim above, so a running voice conversation keeps running; it changes nothing else
+and has no read-back. It reports applied
 only when the asked view is in front afterwards: Home with no library over it, or the app itself.
 An app this build does not admit is refused without moving anything.
 

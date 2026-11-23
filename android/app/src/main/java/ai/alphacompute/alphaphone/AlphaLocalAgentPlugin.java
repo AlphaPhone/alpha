@@ -868,8 +868,8 @@ private static final class ResidentAttachDiagnostic {
    PluginWorkers.submit(workers,()->{
     long launched=android.os.SystemClock.elapsedRealtime(),deadline=launched+START_DEADLINE_MS;
     String readyRoot=null;
+    long pause=50;
     while(android.os.SystemClock.elapsedRealtime()<deadline){
-     long pause=1000;
      try{
       JSONObject boot=ElizaAgentService.getLocalAgentBootState(getContext());
       if(rejectStartupRefusal(call,epoch,boot))return;
@@ -879,13 +879,14 @@ private static final class ResidentAttachDiagnostic {
       requireCurrent(epoch);
       // A socket can still accept during the watchdog's replacement backoff.
       if(!"restarting".equals(boot.optString("state"))){
-       if(boot.optBoolean("socketListening"))pause=200;
+       if(boot.optBoolean("socketListening"))pause=50;
        String root=ElizaAgentService.localAgentToken();if(root==null||root.isEmpty())throw new IllegalStateException();authenticatedStatus(epoch,root);readyRoot=root;break;
       }
      }
      catch(Superseded stale){rejectSuperseded(call);return;}
      catch(Exception unavailable){ /* Wait for the resident to accept requests. */ }
      try{Thread.sleep(pause);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();break;}
+     pause=Math.min(200,pause*2);
     }
     if(readyRoot!=null){
      // Never repeat uncertain enrollment on this boot. A new boot has its own root.

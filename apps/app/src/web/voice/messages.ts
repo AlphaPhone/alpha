@@ -36,7 +36,6 @@ export function shownLabel(shown: Shown): string {
     case "Listening": return "Listening";
     case "Thinking": return "Thinking";
     case "Speaking": return "Speaking";
-    case "AwaitingReview": return "Waiting for your review";
     case "Retrying": return "Reconnecting";
     case "Retiring": return "Stopping";
     case "Failed": return "Voice stopped";

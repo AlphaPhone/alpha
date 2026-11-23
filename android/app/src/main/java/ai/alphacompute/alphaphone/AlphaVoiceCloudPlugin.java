@@ -38,8 +38,11 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  });}
  private static final Set<AlphaVoiceCloudPlugin> activeVoices=new java.util.concurrent.CopyOnWriteArraySet<>();
  private static final Set<Streaming> activeStreams=new java.util.concurrent.CopyOnWriteArraySet<>();
+ private static final java.util.concurrent.atomic.AtomicBoolean voicePrewarmRunning=new java.util.concurrent.atomic.AtomicBoolean();
+ private static volatile boolean voicePrewarmComplete;
+ private volatile boolean pluginDestroyed;
  private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
- @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+ @Override protected void handleOnDestroy(){pluginDestroyed=true;activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
  @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
  static void retireProviderAuthority(){
   for(AlphaVoiceCloudPlugin voice:activeVoices)voice.mainHandler().post(voice::retireSpeechAuthority);
@@ -82,9 +85,33 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private volatile boolean noteForeground=true;
  /** The shared bridge's refusal code for an active call, so the renderer shows its one call line. */
  private static final String CALL_ACTIVE_CODE="call-active";
- @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
- @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();}
+ @Override public void load(){super.load();pluginDestroyed=false;activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));scheduleVoicePrewarm();}
+ @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();scheduleVoicePrewarm();}
  @Override protected void handleOnPause(){noteForeground=false;super.handleOnPause();}
+ /** Low-priority background asset/inference/VAD warmup on startup/resume; never opens the microphone. */
+ private void scheduleVoicePrewarm(){
+  if(voicePrewarmComplete||pluginDestroyed||sensitiveSurfaceActive()||callActive())return;
+  android.content.Context context=getContext();
+  if(context==null)return;
+  if(!voicePrewarmRunning.compareAndSet(false,true))return;
+  android.content.Context app=context.getApplicationContext();
+  Thread worker=new Thread(()->{
+   try{
+    if(pluginDestroyed||sensitiveSurfaceActive()||callActive())return;
+    ai.eliza.voice.VoiceAssets.install(app);
+    if(pluginDestroyed||sensitiveSurfaceActive()||callActive())return;
+    ai.eliza.voice.LiveVoiceCapture.vadAvailable(ai.eliza.voice.VoiceAssets.sharedInference(app));
+    voicePrewarmComplete=true;
+   }catch(Throwable ignored){
+    // Advisory prewarm; normal on-demand voice startup handles errors and retries.
+   }finally{
+    voicePrewarmRunning.set(false);
+   }
+  },"alpha-voice-prewarm");
+  worker.setDaemon(true);
+  worker.setPriority(Thread.MIN_PRIORITY);
+  worker.start();
+ }
  private boolean callActive(){android.media.AudioManager audio=(android.media.AudioManager)getContext().getSystemService(android.content.Context.AUDIO_SERVICE);int mode=audio==null?android.media.AudioManager.MODE_NORMAL:audio.getMode();return mode==android.media.AudioManager.MODE_IN_CALL||mode==android.media.AudioManager.MODE_IN_COMMUNICATION||mode==android.media.AudioManager.MODE_RINGTONE;}
  /** The last state the notification showed, so it is rebuilt only when the state changes. */
  private volatile String lastNoteState;
