@@ -284,7 +284,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const composed = handed ?? textOf(shown(draftState))
     const files = try attachments.pending()
     if (composed.trim() === "" && files.length === 0) return false
-    const aimed = try SubscriptionRef.get(target)
+    const aimed = handed === undefined ? try SubscriptionRef.get(target) : undefined
     const taken = try camera.intercept({ text: composed, attachments: files.length, editing: aimed?.kind === "edit" })
     if (taken !== "none") {
       if (handed === undefined) try quiet(drafts.send({ type: "edit", text: [] }))
@@ -415,7 +415,12 @@ export const composerLayer = Layer.effect(Composer, effect {
       }),
     }
     const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
-      { text: composed, metadata: { ...context, ...(viewFields ?? {}), ...(noteFolders === undefined ? {} : { [NOTE_FOLDERS_METADATA_KEY]: noteFolders }) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
+      { text: composed, metadata: {
+        ...context,
+        ...(viewFields ?? {}),
+        ...(noteFolders === undefined ? {} : { [NOTE_FOLDERS_METADATA_KEY]: noteFolders }),
+        ...(quote === undefined ? {} : { replyToMessageId: quote.messageId }),
+      }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
       { stream: hooks },
     )))
     const outcome = try classify(result, attempt, streamed)

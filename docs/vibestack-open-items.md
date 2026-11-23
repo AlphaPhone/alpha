@@ -64,7 +64,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 ## Assistant
 
 - A typed turn can name a Browser tab, a shown Maps result or the Notes list. Calendar events and sources, reminders, individual notes, Files folders, notifications, Settings sections, SMS subscriptions and workflow runs still need their selected record context carried through the owning area.
-- The typed composer displays a quoted reply and sends the new text, while develop also sends the quoted message ID. The pinned resident needs to consume that binding for the reply to use it as context.
+- The typed composer sends the quoted message ID with the new text. The pinned resident still needs to resolve the quoted message in the current conversation and use it as reply context.
 - Verify the owner's folder IDs and names reach the pinned Notes action through `notesFolders` metadata on an enrolled typed turn. Voice still needs matching folder context.
 - The pinned conversation route drops action receipts when it records a failed turn and on its keyed replay. The renderer needs committed-effect evidence from both paths before it can reliably distinguish a cut-off reply that changed something from a turn that did not run its action.
 - `spokenCue`'s `replyReady()` does nothing when no cue was said, so a later `say()` would still play after the reply (`src/assistant/cue.vibe`). Voice guards against it with its own machine.
