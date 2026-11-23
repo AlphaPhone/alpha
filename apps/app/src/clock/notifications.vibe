@@ -6,7 +6,7 @@ import { type ConsumeAnswer, Machine as ShadeMachine, type NoticeKind, type Noti
 import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
 import { ClearOutcomes, NoticeListing, NoticeRecord, OwnNoticeConsumed } from "./native.schema.vibe"
 import { MalformedReply, NOTIFICATIONS, call, command } from "./plugins.vibe"
-import { NativeUnavailable } from "../platform/native.vibe"
+import { Native, NativeUnavailable } from "../platform/native.vibe"
 import { WorkflowNotices, asksAboutTap } from "./workflow-notices.vibe"
 import { opaqueId, pageVisible } from "./page.ts"
 
@@ -183,14 +183,23 @@ export const ownNotices = effect {
   return port
 }
 
-/** Reads the shade again every second while it is open and the page visible. Never returns. */
+/** Reads the shade again every second while it is open and the page visible, and at once when Android says one of Alpha's own rows was posted or removed. Never returns. */
 export effect function followShade() {
   const shade = try ShadeMachine
   const notifications = try Notifications
-  while (true) {
+  const native = try Native
+  effect function reread() {
     const state = try shade.get()
     if (state.open && !pageVisible()) try notifications.close()
     else if (state.open && !state.busy && !state.acting) try notifications.refresh()
-    try sleep("1 second")
   }
+  try.all [
+    effect {
+      while (true) {
+        try reread()
+        try sleep("1 second")
+      }
+    },
+    effect { if (try native.available(NOTIFICATIONS)) Stream.runForEach(native.listen(NOTIFICATIONS, "notificationsChanged"), () => reread()) catch () => undefined },
+  ]
 }
