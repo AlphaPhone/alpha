@@ -59,15 +59,15 @@ function ownBody(r: GmailReadResult, links: MailBody["links"]): MailBody {
 /** This phone's saved mail of the signed-in owner: upstream's bounded caches in memory and its owner-bound document on disk. */
 export service SavedMail {
   /** Reads the owner's saved document into the caches and returns its accounts and choice, or nothing. */
-  restore(scope: SavedMailScope, hint: string | null): RestoredAccounts | undefined!!
+  restore(scope: SavedMailScope, hint: string | null): (RestoredAccounts | undefined)!!
   /** Remembers a list of an account and query, read under the current session and credential. */
   rememberList(scope: SavedMailScope, account: MailAccount, query: string, rows: MailRow[], cursor: string, seen: string[], revision: string, at: number): void!!
   /** A fresh remembered list of an account and query. */
-  list(scope: SavedMailScope, account: MailAccount, query: string, now: number): SavedList | undefined!!
+  list(scope: SavedMailScope, account: MailAccount, query: string, now: number): (SavedList | undefined)!!
   /** Remembers a read body. */
   rememberBody(scope: SavedMailScope, account: MailAccount, body: MailBody, at: number): void!!
   /** A fresh remembered body, and whether it is new enough to skip reading it again. */
-  body(scope: SavedMailScope, account: MailAccount, id: string, now: number): { body: MailBody; skipRead: boolean } | undefined!!
+  body(scope: SavedMailScope, account: MailAccount, id: string, now: number): ({ body: MailBody; skipRead: boolean } | undefined)!!
   /** Writes the document for the selected account under the current cache epoch; a newer epoch retires the write. */
   persist(scope: SavedMailScope, accounts: MailAccount[], selected: string, failedRead: boolean): boolean!!
   /** Drops every list and body and the document, as a switch, revocation or sign-out does, and starts a new cache epoch. */
