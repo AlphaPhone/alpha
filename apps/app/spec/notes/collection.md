@@ -91,8 +91,8 @@ pure def sometimesReadFailureUnderReview(s: Collection): bool = s.review == Read
 ### Earlier notes are part of the collection once the agent imported them, and an unreadable earlier file needs review
 
 The agent imports the earlier Notes document once, into the canonical collection, with a receipt; from
-then on those notes are read, edited and deleted as any other. The phone keeps no copy of its own and
-never reads, migrates or cleans an earlier store. When the agent refuses a read because the earlier
+then on those notes are read, edited and deleted as any other. The canonical collection never reads,
+migrates or cleans the separate [earlier phone store](./previous-device.md). When the agent refuses a read because the earlier
 document cannot be read or validated, Notes says the earlier notes need review and shows no list; it
 never shows an empty collection in their place. A read after the import is settled clears it.
 

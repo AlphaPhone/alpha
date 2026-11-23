@@ -9,11 +9,13 @@ note. The agent filters, records and organises only through reviewed device acti
 this version arrive once, through the agent's own import, as part of the same collection.
 The folder list, the origin links and the earlier device Trash that the earlier Alpha kept in its
 encrypted connection slots move into the phone's secure store, as spec/platform/storage.md moves a
-legacy slot, before Notes first reads each of them; the earlier Alpha's unsaved-edit draft was a change
-set over its own device collection, which this version no longer keeps, and is not moved.
+legacy slot, before Notes first reads each of them. The earlier Alpha's device collection and its
+unsaved changes remain in their original encrypted slots and can be reviewed in
+[Previous notes](./previous-device.md).
 
 | Area | Specifications |
 | --- | --- |
+| Previous Notes | [Read earlier on-device notes and unsaved edits](./previous-device.md) |
 | Records | [Collection under the current owner](./collection.md), [editor drafts and saves](./editor.md), [list order, kinds and filters](./list.md), [folders](./folders.md) |
 | Trash | [Trash, restore and three-day erase](./trash.md), [recording cleanup after erase](./cleanup.md) |
 | Recording | [Recorder](./recorder.md), [pending recording journal](./recordingJournal.md), [saved audio and transcript windows](./audio.md), [device audio custody](./audioCustody.md), [opening Notes from the recording notification](./recordingOpen.md) |
