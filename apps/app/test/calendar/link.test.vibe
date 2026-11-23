@@ -1,0 +1,74 @@
+// spec/calendar/googleLink.md, "Story: Link a Google calendar I can write to, and be told it is synced only when it is"; spec/calendar/googleLink.md, "Story: Disconnect Google from Calendar without leaving sync running"
+import { describe, it } from "@effect/vitest"
+import { initial as googleInitial } from "../../gen/account__google.ts"
+import { machine as linkMachine } from "../../gen/calendar__googleLink.effect.vibe"
+import { GoogleAccounts, type GoogleAccount } from "../../src/account/google.vibe"
+import { bindCalendar, readCalendar } from "../../src/calendar/binding.vibe"
+import { CalendarLink, linkLayer } from "../../src/calendar/link.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { binding, calendarOver, same } from "./harness.vibe"
+import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+const google = { connectorAccountId: "conn-1", providerCalendarId: "owner@example.com" }
+
+function account(capabilities: readonly string[]): GoogleAccount {
+  return { connectionId: "conn-1", grantId: "grant-1", email: "owner@example.com", grantedCapabilities: [...capabilities] }
+}
+
+/** The account area's Google accounts and the shell's navigation, faked at their boundary. */
+function around(rows: readonly GoogleAccount[], log: { opened: string[]; panels: string[]; disconnects: number }) {
+  return Layer.mergeAll(
+    Layer.succeed(GoogleAccounts, {
+      changes: Stream.empty, accounts: Stream.make(rows), list: () => succeed(rows), current: () => succeed({ ...googleInitial, account: 1 }),
+      run: () => Effect.void, open: (panel: string) => sync(() => { log.panels.push(panel) }), close: () => Effect.void, reload: () => Effect.void,
+      connect: () => Effect.void, allowCalendar: () => Effect.void, cancel: () => Effect.void, disconnect: () => sync(() => { log.disconnects += 1 }),
+      showCache: () => Effect.void, prepareReview: () => Effect.void,
+    } as unknown as GoogleAccounts.Shape),
+    Layer.succeed(Navigation, { open: (app: string, route?: string) => sync(() => { log.opened.push(`${app}/${route ?? ""}`); return true }) } as unknown as Navigation.Shape),
+  )
+}
+
+function linkOver(agent: CalendarAgentFake, rows: readonly GoogleAccount[], log: { opened: string[]; panels: string[]; disconnects: number }) {
+  const services = calendarOver(agent, new DeviceCalendarFake())
+  return Layer.provideMerge(linkLayer, Layer.mergeAll(linkMachine(), services, around(rows, log)))
+}
+
+describe("Linking Google Calendar (spec/calendar/googleLink.md)", () => {
+  it.effect("a write grant selects the one approved primary calendar, resumes it and says Synced only after the links read back clean", () => effect {
+    const agent = new CalendarAgentFake()
+    agent.candidates = [{ ...google, side: "owner", accessRole: "owner", primary: true, accountEmail: "owner@example.com" }]
+    const log = { opened: [] as string[], panels: [] as string[], disconnects: 0 }
+    provide linkOver(agent, [account(["google.calendar.read", "google.calendar.write"])], log) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const link = try CalendarLink
+      try link.link()
+      const view = try link.view()
+      try same([view.row, view.link.outcome, view.link.message, view.link.dispatched, agent.controlWrites, agent.control.paused],
+        ["RowConnected", "LinkSynced", "Linked", 2, ["select", "resume"], false])
+    }
+  })
+
+  it.effect("a read-only grant sends nothing and opens Google's Calendar consent instead", () => effect {
+    const agent = new CalendarAgentFake()
+    const log = { opened: [] as string[], panels: [] as string[], disconnects: 0 }
+    provide linkOver(agent, [account(["google.calendar.read"])], log) {
+      try bindCalendar(binding)
+      const link = try CalendarLink
+      try link.link()
+      try same([(try link.view()).row, agent.controlWrites, log.panels, log.opened], ["RowFinishSetup", [], ["CalendarPanel"], ["account/google"]])
+    }
+  })
+
+  it.effect("a disconnect pauses a running sync at the reviewed revision before Google's access is revoked", () => effect {
+    const agent = new CalendarAgentFake()
+    agent.control = { ...agent.control, revision: 4, paused: false, destination: google }
+    const log = { opened: [] as string[], panels: [] as string[], disconnects: 0 }
+    provide linkOver(agent, [account(["google.calendar.read", "google.calendar.write"])], log) {
+      try bindCalendar(binding)
+      const link = try CalendarLink
+      try link.disconnect()
+      try same([agent.controlWrites, agent.control.paused, (try link.view()).pause, log.disconnects], [["pause"], true, "PauseConfirmed", 1])
+    }
+  })
+})

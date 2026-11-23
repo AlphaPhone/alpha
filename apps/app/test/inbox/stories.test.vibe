@@ -4,6 +4,7 @@ import { MailProtocolFailed, sha256Hex } from "@elizaos/plugin-inbox/mailbox"
 import { fakeNative } from "../../src/platform/layers.vibe"
 import { failureOf } from "../../src/inbox/gmail.vibe"
 import { suggestRecipients } from "../../src/inbox/composer.vibe"
+import { composerRef } from "../../src/inbox/operations.vibe"
 import { senderImageFacts } from "../../src/inbox/text.ts"
 import { emailShareTarget } from "../../src/inbox/shareTarget.vibe"
 import { InboxAccounts, Mailbox, MailComposer, MailOperations, MailSelection, MailNoticesShell, MailSuggestions, Reader, SavedMail, inboxBack } from "../../src/inbox/layer.vibe"
@@ -404,6 +405,24 @@ it.live("Clean up after a send and say Sent once: a recheck of the same receipt 
     try Effect.try(() => assert.deepStrictEqual(
       { sent, recheck, tapAgain, announced: (try operations.get()).announced, cleared: (try composer.mine()).open.id === "", dispatches: log.cloud.filter((c) => c === "dispatch").length },
       { sent: "Sent", recheck: "SentBefore", tapAgain: "SentBefore", announced: ["r-send"], cleared: true, dispatches: 1 }))
+  }
+})
+
+// spec/inbox/operations.md, "Confirming records the dispatch before Gmail is asked, and only for the email the composer still shows"
+it.live("An email edited while Gmail reviewed it is not sent: its review is discarded and nothing is dispatched", () => effect {
+  const log = calls()
+  const digest = try sha256Hex(JSON.stringify(sendReview))
+  provide inboxApp(log, mailCloud(log, sendRoutes(log, false), { review: sendReview, digest })) {
+    const mailbox = try Mailbox
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    const draft = try writeFriday()
+    const edited = composerRef({ ...draft, fields: { ...draft.fields, body: "Noon works. Bring the plans." } })
+    const outcome = try operations.sendDraft(draft, "r-send", succeed(edited))
+    try Effect.try(() => assert.deepStrictEqual(
+      { outcome, held: (try operations.current()) === undefined, notice: (try operations.get()).notice, dispatches: log.cloud.filter((c) => c === "dispatch").length },
+      { outcome: "Discarded", held: true, notice: "ReviewDiscarded", dispatches: 0 }))
   }
 })
 
