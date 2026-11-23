@@ -24,6 +24,8 @@ export interface DigestChange {
 
 /** The digest panel: its reads, its one kept change, and the brief on Home. */
 export service Digests {
+  /** The results of each read that reached the agent, as read, for the result notices and Home's brief. */
+  readonly synced: Stream.Stream<ReadonlyArray<DigestResult>>
   /** Follow the agent's current owner, restoring a change kept for it. */
   bind(): void!!
   open(): void!!
@@ -93,6 +95,7 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
   const scopes = try Ref.make<{ scope?: OwnerScope; hash: string; inbox?: DigestInbox }>({ hash: "" })
   const catalog = try Ref.make<{ loops: ReadonlyArray<DigestLoop>; sources: ReadonlyArray<DigestSource>; results: ReadonlyArray<DigestResult> }>({ loops: [], sources: [], results: [] })
   const syncs = try Ref.make(0)
+  const synced = try PubSub.unbounded<ReadonlyArray<DigestResult>>()
   const android = build.info.variant !== "browser"
   const pendingKey = (hash: string) => ownerKey("device", `workflows/digest-pending/${hash}`)
 
@@ -154,6 +157,7 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
       return { ok: true, results: try inboxResults() }
     } catch () => ({ ok: false }))
     const results = "results" in read ? read.results ?? [] : (try Ref.get(catalog)).results
+    if (read.ok) try PubSub.publish(synced, results)
     try Ref.update(catalog, (c) => ({ ...c, results }))
     const { loops, sources } = try Ref.get(catalog)
     const brief = briefOf(results.map((r) => ({ ran: digestRan(r), completedAt: instant(r.completedAt), cursor: r.cursor })))
@@ -185,6 +189,7 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
   }
 
   return {
+    synced: Stream.fromPubSub(synced),
     bind,
     effect open() {
       try bind()
