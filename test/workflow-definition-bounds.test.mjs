@@ -155,7 +155,7 @@ const checks=[...new Set([...source.matchAll(/(?:fail\\(|record\\([^,()]+,|messa
 const clientSource=(await import('node:fs')).readFileSync(${JSON.stringify(resolve(root,'.eliza/client-features/packages/contracts/src/workflow-client.ts'))},'utf8');
 const clientChecks=[...new Set([...clientSource.matchAll(/new Error\\(\\s*"([^"]+)"/g)].map(match=>match[1]))];
 const unknownPlain=M.workflowErrorText(new Error('A check a later client adds'),'');
-const refusals=['WorkflowAdmissionRejected','WorkflowTypedRejected','WorkflowMetadataRejected','WorkflowLifecycleRejected','WorkflowActivationRejected'];
+const refusals=['WorkflowAdmissionRejected','WorkflowTypedRejected','WorkflowMetadataRejected','WorkflowLifecycleRejected','WorkflowActivationRejected','WorkflowPauseRejected'];
 console.log(JSON.stringify({
  checks:checks.length,
  unworded:checks.filter(text=>M.workflowErrorText(new W.PhoneWorkflowSpecError(text),'')!==text),

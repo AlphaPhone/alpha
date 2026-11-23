@@ -60,3 +60,21 @@ test('an unanswered invitation offers Decline behind the same review, and the fo
  await expect(page.getByText('Alpha won’t alert you about this event.',{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET'))).toEqual([]);
 });
+test('an unanswered invitation is answered Going or Maybe behind the same review and sent once to the response route',async({page})=>{
+ await page.clock.setFixedTime(new Date('2027-06-10T12:00Z'));
+ await openCanonicalCalendar(page,{eventTitle:'Invited planning',begin:Date.parse('2027-06-10T13:00Z'),end:Date.parse('2027-06-10T14:00Z'),invitedSelf:true});
+ await page.getByRole('button',{name:/^Invited planning,/}).click();
+ const notice=page.getByRole('status').filter({hasText:'You haven’t answered this invitation.'});
+ await expect(notice.getByRole('button',{name:'Accept this invitation',exact:true})).toHaveText('Going');
+ await expect(notice.getByRole('button',{name:'Answer maybe to this invitation',exact:true})).toHaveText('Maybe');
+ const writes=()=>page.evaluate(()=>(window as any).canonicalCalendarAccessibility.requests.filter((r:any)=>r.method!=='GET'));
+ await notice.getByRole('button',{name:'Answer maybe to this invitation',exact:true}).click();
+ const maybe=page.getByRole('dialog',{name:'Answer maybe?',exact:true});await expect(maybe).toContainText('Invited planning');await expect(maybe).toContainText('Your answer: Maybe');
+ await maybe.getByRole('button',{name:'Cancel',exact:true}).click();await expect(maybe).toHaveCount(0);expect(await writes()).toEqual([]);
+ await notice.getByRole('button',{name:'Accept this invitation',exact:true}).click();
+ const review=page.getByRole('dialog',{name:'Accept invitation?',exact:true});await expect(review).toContainText('Your answer: Going');await expect(review).toContainText('No guest notification');
+ await review.getByRole('button',{name:'Accept invitation',exact:true}).click();
+ // The fixture refuses every write: the answer is sent once and the invitation stays unanswered.
+ await expect.poll(writes).toEqual([{path:'/api/lifeops/calendar/events/fixture-event/response',method:'POST'}]);
+ await expect(notice).toBeVisible();
+});

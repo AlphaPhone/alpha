@@ -190,6 +190,7 @@ public final class NotificationChannel {
  public void setDescription(String value){}
  public void setLockscreenVisibility(int value){visibility=value;}
  public int getLockscreenVisibility(){return visibility;}
+ public String getGroup(){return null;}
  public Object getSound(){return null;}
  public Object getAudioAttributes(){return null;}
  public void setSound(Object sound,Object attributes){}

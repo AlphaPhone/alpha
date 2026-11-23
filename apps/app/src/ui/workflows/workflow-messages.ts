@@ -21,6 +21,7 @@ import {
   WorkflowHttpError,
   WorkflowLifecycleRejected,
   WorkflowMetadataRejected,
+  WorkflowPauseRejected,
   WorkflowTypedRejected,
 } from "@elizaos/contracts/workflow-client";
 import { WORKFLOW_INTENT_REFUSALS } from "./workflow-intent-messages";
@@ -49,6 +50,10 @@ const REFUSALS: ReadonlyArray<readonly [ErrorClass, string]> = [
   [
     WorkflowActivationRejected,
     "This workflow changed before its schedule was turned on. Nothing was enabled. Review the current version first.",
+  ],
+  [
+    WorkflowPauseRejected,
+    "This workflow changed before it was paused. Nothing was changed. Review the current version, then pause it again.",
   ],
 ];
 

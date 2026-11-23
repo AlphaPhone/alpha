@@ -78,16 +78,22 @@ export type HostRequestPorts<T> = {
   busy(): boolean;
   /** Any review over the grid: the host's album or share review, or the library's own review or change. */
   reviewOpen(): boolean;
+  /** The library id of the item open in the Photos viewer, if any (photos.view-selected.v1). */
+  openId(): string | undefined;
   select(rows: T[]): void;
   openReview(operation: Exclude<HostItemsOperation, { type: 'photo_library_select' }>, rows: T[], missing: number): void;
 };
 /** Resolves the named items, then checks again that the same visible visit is free before it
  * selects them or opens the one review: the reads can outlast a hide, a departure, a busy start
- * or another review. */
+ * or another review. An album or share with `selected` names the item open in the viewer when the
+ * request arrives; it opens the review only if that item is still the open one after the read. */
 export async function runHostItemsRequest<T>(operation: HostItemsOperation, ports: HostRequestPorts<T>, signal: AbortSignal) {
-  const { rows, missing } = await resolveRequestedRows(ports.loaded(), operation.ids, ports.idOf, ports.read, signal);
+  const selected = 'selected' in operation && operation.selected === true, open = selected ? ports.openId() : undefined;
+  if (selected && !open) throw new LibraryAgentRefusal('Open the photo or video in Photos, then ask again.');
+  const { rows, missing } = await resolveRequestedRows(ports.loaded(), open ? [open] : operation.ids, ports.idOf, ports.read, signal);
   if (!ports.current()) throw new LibraryAgentRefusal('Open Photos, then ask again.');
   if (ports.busy()) throw new LibraryAgentRefusal('Photos is busy right now.');
+  if (open && ports.openId() !== open) throw new LibraryAgentRefusal('Ask again because a different item is open now.');
   if (operation.type === 'photo_library_select') {
     if (!rows.length) throw new LibraryAgentRefusal('None of those items are in Photos.');
     ports.select(rows);

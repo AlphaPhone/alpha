@@ -101,6 +101,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'clearSaid cycleTimer flip openLast pick shutter toggleFlash vfCancel vfClick vfDown',
     'vfMove vfUp',
     'toggleGrid',
+    'cycleAspect',
   ],
   photos: [
     'addFavorite addToAlbum albumFocus albumsRecover ask askDelete cancel captureSubviewFocus',
@@ -133,7 +134,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'replaceFormDraft response restoreEditDraft restoreFormDraft resumeEditDraft',
     'resumeFormDraft retryEditDraft retryFormDraft sMinus sPlus save separateCreation tlDown',
     'tlUp toggleAllDay toggleMonth toggleVideo',
-    'closeSearch inviteDecline onSearch openSearch',
+    'closeSearch inviteAccept inviteDecline inviteMaybe onSearch openSearch',
   ],
   contacts: [
     'addEmail addNew addPhone ask cancel cancelDelete cancelEdit change clear clearSearch',

@@ -2287,7 +2287,7 @@ registerView("camera", {
     // The simulated front lens has no ultra-wide or telephoto: 1× only, so no chips.
     var zooms = front ? [] : CAM_ZOOM.map(function (z, i) { return [z[0], i]; });
     return {
-      bg: bg, vfBg: "var(--alpha-gray-11)", vfOp: 1,
+      bg: bg, vfBg: "var(--alpha-gray-11)", vfOp: 1, frameAspect: "3 / 4",
       zoomCss: "transform: scale(" + zs + ")" + (front ? " scaleX(-1)" : ""),
       flOp: st.fl ? (st.flash ? 1 : 0.85) : 0, flTr: st.fl ? "none" : "opacity .45s",
       flashIcon: st.flash ? IC.camFlash : IC.camFlashOff, flashAvailable: !front, flashLabel: st.flash ? "Flash on" : "Flash off",

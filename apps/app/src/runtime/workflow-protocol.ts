@@ -6,7 +6,7 @@ import type {PhoneWorkflowCatalog,PhoneWorkflowSpec} from '../../../../.eliza/cl
 /** The receipt-checked workflow route client is the shared `@elizaos/contracts/workflow-client`.
  * The phone-step review read (`phoneReview`) is shared too; Alpha only adds its digest result routes and keeps the
  * development enrollment labels (test-mocks builds only) through its spec normalizer. */
-export {WorkflowHttpError,WorkflowAdmissionRejected,WorkflowTypedRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected,WorkflowActivationRejected} from '../../../../.eliza/client-features/packages/contracts/src/workflow-client.ts';
+export {WorkflowHttpError,WorkflowAdmissionRejected,WorkflowTypedRejected,WorkflowMetadataRejected,WorkflowLifecycleRejected,WorkflowActivationRejected,WorkflowPauseRejected} from '../../../../.eliza/client-features/packages/contracts/src/workflow-client.ts';
 export type {RemoteWorkflow,WorkflowRun,WorkflowRunReconciliation,WorkflowRunOccurrence,WorkflowApproval,WorkflowApprovalReceipt,WorkflowMetadataReceipt,WorkflowLifecycleReceipt} from '../../../../.eliza/client-features/packages/contracts/src/workflow-client.ts';
 /** The shared client reads a generic schedule's missed occurrence only from the engine-written
  * `missedOccurrenceAt` (elizaOS/eliza#38100), so Alpha adds no run filtering of its own. */

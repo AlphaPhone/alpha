@@ -12,7 +12,7 @@ async function setup(page:Page){
  await page.evaluate(async()=>{
   const {configureMapsProvider}=await import('/src/maps/runtime.ts');
   const now=Date.now(),attribution='Fixture';
-  const cafe={providerId:'controls-fixture',id:'cafe-1',name:'Harbour Cafe',coordinate:{latitude:43.7384,longitude:7.4246},phone:'+377 93 15 00 00',attribution,fetchedAt:now};
+  const cafe={providerId:'controls-fixture',id:'cafe-1',name:'Harbour Cafe',coordinate:{latitude:43.7384,longitude:7.4246},phone:'+377 93 15 00 00',categories:['Coffee shop','Restaurant'],attribution,fetchedAt:now};
   const f=(window as any).mapsControls={routes:[] as any[]};
   configureMapsProvider({status:'configured',providerId:'controls-fixture',connectionId:'conn_controls_fixture_123456',revision:'fixture1',capabilities:{map:false,search:true,placeDetails:true,modes:['drive','walk'],traffic:'none',transit:'none',offline:{map:false,search:false,routing:false}}},
    {providerId:'controls-fixture',connectionId:'conn_controls_fixture_123456',search:async()=>[cafe],detail:async()=>cafe,
@@ -44,6 +44,13 @@ test('a provider place shows its phone number in a full-height row with Copy',as
  expect((await copy.boundingBox())!.height).toBeGreaterThanOrEqual(48);
  await copy.click();
  await expect.poll(()=>page.evaluate(()=>(window as any).copied)).toBe('+377 93 15 00 00');
+});
+
+test('a provider place is subtitled with its most specific category',async({page})=>{
+ await setup(page);await openCafe(page);
+ const sheet=page.locator('[data-alpha-maps-sheet="place"]');
+ await expect(sheet.getByText('Coffee shop',{exact:true})).toBeVisible();
+ await expect(sheet.getByText('Place',{exact:true})).toHaveCount(0);
 });
 
 test('holding a finger still on the map drops a pin there; a moving finger does not',async({page})=>{

@@ -176,8 +176,18 @@ module WorkflowDeviceSteps {
   /// An effect needs the agent's admission of the proposal the owner confirmed.
   val EffectWasAdmitted = s.effects == 1 implies s.proposal.in(Set("executing", "done")) and s.admittedIssue == s.tappedIssue
   /// The agent admitted the effect under the spec digest the owner reviewed, and the phone's last
-  /// read before admission found the Calendar anchor the owner reviewed.
+  /// read before admission found the Calendar anchor the owner reviewed. The digest half spans
+  /// actions: the digest can change after the phone's read (DigestChangedBeforeAdmissionWitness),
+  /// and only the agent's superseding of the pending proposal keeps the effect off the new digest;
+  /// without admit's proposal-number check it fails. The anchor half is the phone's own read check
+  /// (readReview); without it the anchor can move before the read (AnchorMovedBeforeReadWitness)
+  /// and the property fails.
   val EffectMatchesReview = s.effects == 1 implies s.admittedDigest == s.tappedDigest and s.readAnchor == s.tappedAnchor
+  /// Witness: the spec digest changed after the phone's read at the second tap, while the agent's
+  /// decision is still to come.
+  val DigestChangedBeforeAdmissionWitness = s.inflight == "admit" and s.digest != s.tappedDigest
+  /// Witness: the phone's read at the second tap found the Calendar anchor moved since the review.
+  val AnchorMovedBeforeReadWitness = s.status == "anchor" and s.anchor != s.tappedAnchor
   /// The effect ran on the approved screen, in the foreground with the receipt view open.
   val EffectOnApprovedScreen = s.effects == 1 implies s.effectForeground and s.effectOpen
   /// The agent's receipt is the device's journaled outcome: applied only after an effect, and an

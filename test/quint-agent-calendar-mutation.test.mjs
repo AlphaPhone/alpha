@@ -15,6 +15,8 @@ const expected = new Map([
   ['Choose an authorized Calendar source', 'source'],
   ['Retain this draft operation key', 'id'],
   ['Retain this deletion operation key', 'id'],
+  ['Retain this response operation key', 'id'],
+  ['Only an invitee can answer this invitation', 'invitee'],
   ['Refresh this event before editing', 'event'],
   ['The provider version changed or is read only', 'version'],
   ['Choose occurrence or series scope before changing a repeating event', 'scope'],
@@ -68,14 +70,15 @@ async function fixture(compiled, status, profile) {
     const [id, job] = entry;
     assert.equal(job.kind, kind);
     assert.ok(body.idempotencyKey === '' || body.idempotencyKey === 'op-' + id);
-    if (kind !== 'delete') assert.equal(body.title, 'Fixture change');
+    if (kind === 'create' || kind === 'update') assert.equal(body.title, 'Fixture change');
+    if (kind === 'respond') assert.equal(body.responseStatus, 'accepted');
     job.phase = 'remote';
     job.remote = deferred();
     dispatched.push({id, owner: target.identity.ownerId.slice('owner-'.length),
       session: Number(target.sessionId.slice('session-'.length)), kind, side: body.side,
       grant: body.grantId, calendar: body.calendarId, external,
       version: body.expectedProviderVersion ?? '', scope: body.recurrenceScope ?? '',
-      cancellation: body.cancellationMode ?? '', retainedKey: !!body.idempotencyKey});
+      cancellation: body.cancellationMode ?? '', response: body.responseStatus ?? '', retainedKey: !!body.idempotencyKey});
     return job.remote.promise;
   }
   const preservation = {
@@ -102,6 +105,7 @@ async function fixture(compiled, status, profile) {
     createLifeOpsCalendarEvent: body => dispatch(target, signal, 'create', '', body),
     updateLifeOpsCalendarEvent: (external, body) => dispatch(target, signal, 'update', external, body),
     deleteLifeOpsCalendarEvent: (external, body) => dispatch(target, signal, 'delete', external, body),
+    respondToLifeOpsCalendarEvent: (external, body) => dispatch(target, signal, 'respond', external, body),
   }));
   const visibleProfile = () => profiles.get(calendar.state.feed?.events[0]) ?? 'none';
   const refresh = calendar.refresh.bind(calendar);
@@ -161,6 +165,7 @@ async function fixture(compiled, status, profile) {
           {idempotencyKey: key, title: 'Fixture change'});
         else if (kind === 'update') operation = calendar.update(target, version, {idempotencyKey: key, title: 'Fixture change',
           ...(issue === 'move' ? {calendarId: 'other'} : {}), ...(scope ? {recurrenceScope: scope} : {})});
+        else if (kind === 'respond') operation = calendar.respond(target, version, key, 'accepted', scope);
         else operation = calendar.delete(target, version, key, scope);
       } catch (error) {operation = Promise.reject(error);}
       finally {issuing = undefined;}
@@ -223,6 +228,12 @@ const cases = [
     start('delete'), capture(3), provider(3)]],
   ['email-identity-can-establish-organizer-disposition', 'ready', 'email', [start('delete'), capture(1), provider(1)]],
   ['unknown-organizer-disposition-never-dispatches', 'ready', 'unknown', [start('delete')]],
+  ['only-an-invitee-answers-and-the-answer-checks-its-source', 'ready', 'invitee', [
+    start('respond', 'blank'), start('respond', 'stale'), start('respond', 'missing'), start('respond'), capture(4),
+    provider(4, 'foreign-source'), start('respond'), capture(5), provider(5)]],
+  ['organizer-unknown-and-unscoped-recurring-cannot-answer', 'ready', 'organizer', [
+    start('respond'), request(1), read('ready', 'unknown'), start('respond'), request(1), read('partial', 'recurring'),
+    start('respond'), start('respond', 'instance')]],
   ['legacy-preservation-rejects-changed-pending-unreadable-and-transport', 'ready', 'organizer', [
     start('create'), capture(1, 'changed'), start('update'), capture(2, 'pending'),
     start('delete'), capture(3, 'unreadable'), start('create'), capture(4, 'transport')]],
@@ -272,6 +283,6 @@ test('Agent Calendar mutates only after current preservation and defers the late
   assert.equal(receipt.passed, true);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 24);
-  assert.equal(receipt.checkpoints, 134);
+  assert.equal(receipt.traces, 26);
+  assert.equal(receipt.checkpoints, 153);
 });

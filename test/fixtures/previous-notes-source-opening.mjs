@@ -72,6 +72,8 @@ export function previousNotesSourceOpeningFixture(device = false) {
     cancelReadReplyCompletions: () => cancellations.push('selected')};
   const ports = {...raw, AbortController, DOMException, clearTimeout, isAndroid: device, SecureNotesStore,
     secureConnectionStore: vault, browserNotesPort, localStorage, CanonicalNotesUi, document: {hidden: false},
+    // The recording-cleanup store handed to the canonical Notes view; this model never erases a recording.
+    registerPlugin: () => ({}),
     connectionController: {getSnapshot: () => ({session: {sessionId: owner}}), getAppRecordClient: appPort},
     originalSet(key, patch) {assert.equal(key, 'notes'); Object.assign(state, patch);},
     notesDraftBase(bytes) {assert.equal(JSON.parse(bytes).id, operations.getStore().document); return hold('fingerprint');},

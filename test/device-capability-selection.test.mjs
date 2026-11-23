@@ -89,3 +89,24 @@ test('canonical Notes negotiates only the exact foreground list filter', () => {
   assert.ok(!selectDeviceCapabilities(offer, {...apk,canonicalNotes:true,foregroundReview:false}).includes(capability));
   assert.ok(!selectDeviceCapabilities([], {...apk,canonicalNotes:true}).includes(capability));
 });
+
+// Voice recording has its own capability, so the agent can start a voice note in the agent's own Notes
+// without the folder, move and restore set (notes.organize.v1), which is never offered.
+test('canonical Notes negotiates voice recording alone, never the organise set', () => {
+  const offer = ['notes.record.v1', 'notes.organize.v1', 'notes.list-filter.v1'];
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, canonicalNotes: true}),
+    ['calendar.local-event.v1', 'notes.local-record.v1', 'notes.list-filter.v1', 'notes.record.v1']);
+  assert.ok(!selectDeviceCapabilities(offer, apk).includes('notes.record.v1'));
+  assert.ok(!selectDeviceCapabilities(offer, {...apk,canonicalNotes:true,foregroundReview:false}).includes('notes.record.v1'));
+  assert.ok(!selectDeviceCapabilities(['notes.organize.v1'], {...apk,canonicalNotes:true}).includes('notes.record.v1'));
+  for (const profile of [apk, {...apk, canonicalNotes: true}])
+    assert.ok(!selectDeviceCapabilities(offer, profile).includes('notes.organize.v1'));
+});
+
+test('Files shown targets are offered only beside Files itself (FILE-04)', () => {
+  const offer = ['files.browser.v1', 'files.shown-target.v1'];
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, files: true}).slice(2), offer);
+  assert.deepEqual(selectDeviceCapabilities(['files.browser.v1'], {...apk, files: true}).slice(2), ['files.browser.v1']);
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, files: false}).slice(2), []);
+  assert.deepEqual(selectDeviceCapabilities(['files.shown-target.v1'], {...apk, files: true}).slice(2), []);
+});

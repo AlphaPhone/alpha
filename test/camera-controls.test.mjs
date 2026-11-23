@@ -38,6 +38,16 @@ test('the recording timer shows the time left once the length or size limit is n
  assert.equal(c.recordingLabel(Number.NaN,0,limits),'0:00');
 });
 
+test('the aspect chip offers only the ratios the camera lists, and frames the grid to the ratio',()=>{
+ assert.deepEqual(c.supportedAspects({supportedCaptureAspectRatios:['16:9','4:3']}),['4:3','16:9'],'listed ratios, in the chip order');
+ assert.deepEqual(c.supportedAspects({supportedCaptureAspectRatios:['4:3','1:1']}),['4:3'],'a ratio Camera does not offer is left out');
+ for(const device of [undefined,{},{supportedCaptureAspectRatios:'16:9'}])assert.deepEqual(c.supportedAspects(device),[],'web and iOS list none');
+ assert.equal(c.nextAspect('4:3',['4:3','16:9']),'16:9');assert.equal(c.nextAspect('16:9',['4:3','16:9']),'4:3');
+ assert.equal(c.nextAspect('4:3',['4:3']),'4:3','one ratio: no other to pick');assert.equal(c.nextAspect('4:3',[]),'4:3');
+ assert.deepEqual(['4:3','16:9'].map(c.aspectLabel),['Aspect ratio 4:3','Aspect ratio 16:9']);
+ assert.deepEqual(['4:3','16:9'].map(c.frameAspect),['3 / 4','9 / 16'],'the portrait viewfinder frame');
+});
+
 test('Video mode names its light',()=>{
  assert.equal(c.videoLightLabel(false),'Light off');assert.equal(c.videoLightLabel(true),'Light on');
 });
