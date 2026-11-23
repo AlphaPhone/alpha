@@ -1,5 +1,6 @@
 // spec/shell/navigation.md, "The library, its entry menu and Home's edit mode exist only over Home"; spec/shell/appInfo.md, "Story: Check an app's details in Android"; spec/shell/inventory.md, "Story: See the apps installed now"
-import { Info, Phone, Plus, Search, X } from "lucide-react";
+import { Info, Phone, Plus, RotateCcw, Search, X } from "lucide-react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import { Button, EmptyState, Input, Spinner } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 import { launcherFocusRing, type TileFace } from "./AppTile.tsx";
@@ -35,6 +36,33 @@ export interface AppLibraryProps {
   onAppInfo: (key: string) => void;
   onCloseMenu: () => void;
   onDismissInfo: () => void;
+  /** Read the installed apps again after a failed read. */
+  onRetry: () => void;
+}
+
+/** The entry menu as a keyboard menu: focus moves into it when it opens, arrows, Home and End move between its items, and Escape closes it, giving focus back to the entry's tile. */
+function useEntryMenu(open: string, onClose: () => void) {
+  const menu = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (open === "") return;
+    menu.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')?.focus();
+  }, [open]);
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const items = Array.from(menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? []);
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const move = (to: number) => { event.preventDefault(); items[(to + items.length) % items.length]?.focus(); };
+    if (event.key === "ArrowDown") move(at + 1);
+    else if (event.key === "ArrowUp") move(at - 1);
+    else if (event.key === "Home") move(0);
+    else if (event.key === "End") move(items.length - 1);
+    else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      document.querySelector<HTMLElement>(`[data-alpha-focus="tile:${CSS.escape(open)}"]`)?.focus();
+    }
+  };
+  return { menu, onKeyDown };
 }
 
 /**
@@ -43,9 +71,10 @@ export interface AppLibraryProps {
  */
 export function AppLibrary({
   entries, query, status, menu, onHome, dial, launching = null, error = "", infoNotice = "", appInfo = false, covered = false,
-  controls, onSearch, onClose, onDial, onAddToHome, onAppInfo, onCloseMenu, onDismissInfo,
+  controls, onSearch, onClose, onDial, onAddToHome, onAppInfo, onCloseMenu, onDismissInfo, onRetry,
 }: AppLibraryProps) {
   const opened = entries.find((entry) => entry.key === menu);
+  const entryMenu = useEntryMenu(opened?.key ?? "", onCloseMenu);
   return (
     <section
       role="dialog"
@@ -84,7 +113,9 @@ export function AppLibrary({
         {status === "loading" && entries.length === 0 ? (
           <div className="flex justify-center p-8"><Spinner label="Loading apps" /></div>
         ) : status === "failed" && entries.length === 0 ? (
-          <EmptyState title="Couldn’t load your apps" />
+          <EmptyState title="Couldn’t load your apps">
+            <Button variant="outline" onClick={onRetry}><RotateCcw aria-hidden className="size-4" />Try again</Button>
+          </EmptyState>
         ) : entries.length === 0 ? (
           <EmptyState title={query ? "No apps match" : "No apps"} />
         ) : (
@@ -92,7 +123,7 @@ export function AppLibrary({
         )}
       </div>
       {opened && (
-        <div role="menu" aria-label={opened.label} className="absolute inset-x-3 bottom-[calc(var(--alpha-dock-clearance,7rem)+0.5rem)] z-40 flex flex-col rounded-xl bg-popover p-2 text-popover-foreground shadow-lg">
+        <div ref={entryMenu.menu} role="menu" aria-label={opened.label} onKeyDown={entryMenu.onKeyDown} className="absolute inset-x-3 bottom-[calc(var(--alpha-dock-clearance,7rem)+0.5rem)] z-40 flex flex-col rounded-xl bg-popover p-2 text-popover-foreground shadow-lg">
           <button role="menuitem" type="button" disabled={onHome.includes(opened.key)} onClick={() => onAddToHome(opened.key)}
             className={cn(focusRing, "flex min-h-12 items-center gap-3 rounded-md px-3 text-left disabled:opacity-50")}>
             <Plus aria-hidden className="size-4" />{onHome.includes(opened.key) ? "On Home" : "Add to Home"}

@@ -129,6 +129,8 @@ export service Launcher {
   /** Home is shown: follow the inventory, and read it when an installed favorite needs it. */
   showHome(): void!!
   openLibrary(): void!!
+  /** Try again after the library could not read the installed apps. */
+  retryLibrary(): void!!
   closeLibrary(): void!!
   search(query: string): void!!
   /** Opens a Home tile or library entry: an Alpha app in the shell, an installed app through Android. */
@@ -172,7 +174,7 @@ export const launcherLive = Layer.effect(Launcher, effect {
   let readApps: readonly InstalledApp[] = current.snapshot.apps
 
   effect function saveFavorites(event: FavoritesEvent) {
-    const result = try exit(favorites.send(event) catch () => undefined)
+    const result = try exit(favorites.send(event))
     if (Exit.isFailure(result)) try notices.show("Favorites could not be saved. Nothing changed.", { failure: true })
   }
 
@@ -307,6 +309,9 @@ export const launcherLive = Layer.effect(Launcher, effect {
       if (!(try navigation.send({ type: "openLibrary" }))) return
       if (installed !== undefined) try settle(() => installed.load())
       try syncGestures()
+    },
+    effect retryLibrary() {
+      if (installed !== undefined) try settle(() => installed.load())
     },
     effect closeLibrary() {
       try navigation.send({ type: "closeLibrary" })
