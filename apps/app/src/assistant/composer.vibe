@@ -363,6 +363,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const view = try holdReply()
     let streamed = false
     let shownText = ""
+    let acknowledgedByFrame = false
     const pushView = (text: string) => runFork(effect {
       shownText = text
       try settleView(replyId, try view.get(), text)
@@ -385,15 +386,16 @@ export const composerLayer = Layer.effect(Composer, effect {
         runFork(effect { try quiet(view.send({ type: "token", units: Math.max(1, text.length), provisional })) })
         pushView(text)
       },
-      onStatus: (activity) => runFork(labelled(activity)),
+      onStatus: (activity) => runFork(effect { if (!acknowledgedByFrame) try labelled(activity) }),
       onAcknowledgment: (text: string) => runFork(effect {
         if (!(try quiet(view.send({ type: "acknowledge", units: text.length })))) return
+        acknowledgedByFrame = true
         try labelled(text)
         pushView("")
       }),
       onTool: (_name: string, label?: string) => runFork(effect {
         try quiet(view.send({ type: "toolStarts" }))
-        if (label !== undefined) try labelled(label)
+        if (label !== undefined && !acknowledgedByFrame) try labelled(label)
         pushView("")
       }),
     }

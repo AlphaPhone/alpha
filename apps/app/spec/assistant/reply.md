@@ -71,8 +71,11 @@ pure val countValues = Set(-1, 0, 5, 6)
 
 ### The planning label shows until the first text, and provisional text is shown but never spoken
 
-The label is the newest of the stream's status, the agent's acknowledgment
-and the label of the tool it runs (`Using <App>` or `Working`).
+The label is the newest of the stream's status and the label of the tool it
+runs (`Using <App>` or `Working`), except that once the agent's
+acknowledgment frame is taken, it stays the label until text or the reply
+arrives: the agent writes the acknowledgment and its first tool together,
+and the owner should read what was said, not only "Working".
 
 ```quint
 type ReplyStatus = Planning | Streaming | Working | Settled | Interrupted | Ignored
