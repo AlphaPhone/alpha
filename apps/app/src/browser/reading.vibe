@@ -71,13 +71,13 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
 
   effect function perform(out: ReadingEffect) {
     match (out) {
-      when { tag: "QuerySupport" }: {
+      when { tag: "QuerySupport" }: try effect {
         if (host.onDevice) {
           const answer = effect { return try Schema.decodeUnknownEffect(Support)(try host.call("readingSupport")) } catch () => undefined
           try send({ type: "supportAnswered", available: answer?.available === true, definite: answer !== undefined })
         } else try send({ type: "supportAnswered", available: true, definite: true })
-      }
-      when { tag: "RequestReading", let tab, let url, let navigation }: {
+      };
+      when { tag: "RequestReading", let tab, let url, let navigation }: try effect {
         const binding = try voice.binding()
         const read = effect {
           return try Schema.decodeUnknownEffect(ReadingToken)(try host.call("reviewReading", { id: tab, url, navigation, ...binding }))
@@ -89,19 +89,19 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
           try Ref.set(token, read.readingToken)
           try send({ type: "readingReturned", ok: true, sensitive: false })
         }
-      }
-      when { tag: "SpendToken", let generation }: {
+      };
+      when { tag: "SpendToken", let generation }: try effect {
         const spent = try Ref.getAndSet(token, "")
         fork.detached effect {
           const ok = (voice.speakToken(spent) catch () => false) !== false
           try send({ type: "speechEnded", generation, ok })
         }
-      }
-      when { tag: "CancelReading" }: {
+      };
+      when { tag: "CancelReading" }: try effect {
         try Ref.set(token, "")
         host.call("cancelReading") catch () => undefined
-      }
-      when { tag: "RequestExcerpt", let tab, let url, let navigation }: {
+      };
+      when { tag: "RequestExcerpt", let tab, let url, let navigation }: try effect {
         if (host.onDevice) {
           const asked = effect {
             return try Schema.decodeUnknownEffect(Excerpt)(try host.call("reviewQuestion", { id: tab, url, navigation }))
@@ -115,28 +115,28 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
           const text = source !== undefined && "text" in source ? source.text : ""
           try send({ type: "excerptReturned", readable: text !== "", empty: text === "", sensitive: source !== undefined && "blocked" in source, page: try page(), body: text })
         }
-      }
-      when { tag: "ComposeQuestion", let url }: {
+      };
+      when { tag: "ComposeQuestion", let url }: try effect {
         const approved = try Ref.getAndSet(question, "")
         const title = curTab(try tabs.get()).page.title
         try assistant.openWith(questionDraft(title, url, approved))
-      }
-      when { tag: "FetchSource", let url }: {
+      };
+      when { tag: "FetchSource", let url }: try effect {
         const source = tryPromise((signal) => publicPageText(url, signal)) catch () => undefined
         const bound = (try reading.get()).bound
         const now = try page()
         const current = now.tab === bound.tab && now.navigation === bound.navigation && now.revision === bound.revision
         try send({ type: "sourceSettled", found: source !== undefined && "text" in source, blockedText: source !== undefined && "blocked" in source, present: current, body: source !== undefined && "text" in source ? source.text : "" })
-      }
-      when { tag: "SpeakLocally", let generation }: {
+      };
+      when { tag: "SpeakLocally", let generation }: try effect {
         const text = (try reading.get()).text
         fork.detached effect {
           const ok = (voice.speakText(text) catch () => false) !== false
           try send({ type: "localSpeechEnded", generation, ok })
         }
-      }
-      when { tag: "StopLocalSpeech" }: try voice.stop()
-      when { tag: "Note", let problem }: try toasts.show(READING_NOTICES[problem])
+      };
+      when { tag: "StopLocalSpeech" }: try voice.stop();
+      when { tag: "Note", let problem }: try toasts.show(READING_NOTICES[problem]);
     }
   }
 

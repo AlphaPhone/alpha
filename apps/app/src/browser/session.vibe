@@ -89,21 +89,21 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
 
   effect function perform(out: SessionEffect, done: { settled: AgentSettled[]; unhandledBack: boolean; failed: boolean }) {
     match (out) {
-      when { tag: "CreateNative", let id, let profile }: {
+      when { tag: "CreateNative", let id, let profile }: try effect {
         const created = host.call("create", { id, private: profile === "Private" }) catch (error) => error
         const failure = created instanceof BrowserCallFailed ? created : undefined
         const next = try dispatch({ type: "createSettled", id, ok: failure === undefined, unsupported: failure?.message === PROFILE_UNSUPPORTED_NATIVE })
         done.settled.push(...next.settled)
-      }
-      when { tag: "LoadNative", let id, let url }: {
+      };
+      when { tag: "LoadNative", let id, let url }: try effect {
         const loaded = host.call("navigate", { id, url }) catch (error) => error
         const failure = loaded instanceof BrowserCallFailed ? loaded : undefined
         if (failure !== undefined && (try tabs.get()).cur === id) try refused(failure)
         const next = try dispatch({ type: "loadSettled", id, ok: failure === undefined })
         done.settled.push(...next.settled)
-      }
-      when { tag: "CloseNative", let id }: host.call("close", { id }) catch () => undefined
-      when { tag: "CommandNative", let id, let command, let navigation }: {
+      };
+      when { tag: "CloseNative", let id }: host.call("close", { id }) catch () => undefined;
+      when { tag: "CommandNative", let id, let command, let navigation }: try effect {
         const sent = host.call("command", { id, command: commandName[command], navigation }) catch (error) => error
         if (sent instanceof BrowserCallFailed) {
           done.failed = true
@@ -112,14 +112,14 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
           const receipt = Schema.decodeUnknownOption(CommandReceipt)(sent)
           if (Option.isSome(receipt) && ((receipt.value.session ?? host.session) !== host.session || (receipt.value.id ?? id) !== id)) done.failed = true
         }
-      }
-      when { tag: "SearchFind", let id, let query }: host.call("find", { id, query }) catch effect (error) => { try refused(error) }
-      when { tag: "MoveFind", let id, let forward }: host.call("findNext", { id, forward }) catch effect (error) => { try refused(error) }
-      when { tag: "ClearFind", let id }: host.call("clearFind", { id }) catch () => undefined
-      when { tag: "Settle", let request, let tab, let outcome }: done.settled.push({ request, tab, outcome })
-      when { tag: "Say", let notice }: try toast(SESSION_NOTICES[notice])
-      when { tag: "ShowBrowser" }: try apps.open("browser")
-      when { tag: "BackUnhandled" }: done.unhandledBack = true
+      };
+      when { tag: "SearchFind", let id, let query }: host.call("find", { id, query }) catch effect (error) => { try refused(error) };
+      when { tag: "MoveFind", let id, let forward }: host.call("findNext", { id, forward }) catch effect (error) => { try refused(error) };
+      when { tag: "ClearFind", let id }: host.call("clearFind", { id }) catch () => undefined;
+      when { tag: "Settle", let request, let tab, let outcome }: done.settled.push({ request, tab, outcome });
+      when { tag: "Say", let notice }: try toast(SESSION_NOTICES[notice]);
+      when { tag: "ShowBrowser" }: try apps.open("browser");
+      when { tag: "BackUnhandled" }: done.unhandledBack = true;
     }
   }
 
@@ -134,13 +134,13 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
   effect function write(out: readonly WriterEffect[]) {
     for (const effectOut of out) {
       match (effectOut) {
-        when { tag: "Write", let snapshot }: {
+        when { tag: "Write", let snapshot }: try effect {
           const ok = (host.call("saveBrowsingState", snapshot) catch () => undefined) !== undefined
           const next = writer.send({ type: "writeSettled", ok, now: now() }) catch () => undefined
           if (!ok) try retryLater()
           if (next !== undefined) try write(next.out)
-        }
-        when { tag: "WarnSaveFailed" }: try toast("Tabs and history couldn’t be saved. Alpha will try again shortly.")
+        };
+        when { tag: "WarnSaveFailed" }: try toast("Tabs and history couldn’t be saved. Alpha will try again shortly.");
       }
     }
   }

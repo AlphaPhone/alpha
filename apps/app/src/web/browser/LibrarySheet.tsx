@@ -21,12 +21,26 @@ export interface LibrarySheetProps {
   today?: number;
 }
 
+/** Visits within this many local days of today sit under their day; older ones under their month. */
+const DAY_HEADER_WINDOW = 30;
+
+function startOfDay(at: number): number {
+  const d = new Date(at);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+/** The local day of a visit: Today, Yesterday, the day for the last month, then the month. */
 function dayOf(at: number, today: number): string {
   if (at <= 0) return "Earlier";
-  const days = Math.floor(today / 86_400_000) - Math.floor(at / 86_400_000);
+  const days = Math.round((startOfDay(today) - startOfDay(at)) / 86_400_000);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
-  return new Date(at).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  const d = new Date(at);
+  if (days < DAY_HEADER_WINDOW) {
+    const year = d.getFullYear() !== new Date(today).getFullYear();
+    return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric", ...(year ? { year: "numeric" } : {}) });
+  }
+  return d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
 }
 
 /**

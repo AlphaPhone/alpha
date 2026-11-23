@@ -1,11 +1,12 @@
-// spec/settings/appearance.md, "Story: Choose how Alpha looks"
+// spec/settings/appearance.md, "Story: Choose how Alpha looks"; spec/settings/appearance.md, "A phone updated from the previous Alpha keeps the theme it chose there"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type Appearance as State, type Choice, Machine, barsDark, initial, machine } from "../../gen/settings__appearance.effect.vibe"
+import { type Appearance as State, type Choice, Machine, barsDark, initial, machine, previousChoice } from "../../gen/settings__appearance.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { attempt } from "./call.vibe"
 import { savedElsewhere, schemeChanges, systemDark, themeQuery } from "./files.ts"
+import { previousTheme } from "./previous.ts"
 import { SavedAppearance } from "./stored.schema.vibe"
 
 export const APPEARANCE_KEY = ownerKey("device", "settings/appearance")
@@ -26,9 +27,21 @@ effect function readSaved() {
   return try (Schema.decodeUnknownEffect(SavedAppearance)(value) catch () => undefined)
 }
 
+/** The theme the previous Alpha chose, taken once and saved as this version's own when this version has saved none. */
+effect function adoptPreviousTheme() {
+  const store = try KeyValueStore.KeyValueStore
+  const raw = try (store.get(APPEARANCE_KEY) catch () => null)
+  if (raw !== undefined) return undefined
+  const theme = previousTheme()
+  if (theme === undefined) return undefined
+  const kept = { choice: previousChoice(theme === "dark" ? "PreviousDark" : theme === "system" ? "PreviousSystem" : "PreviousLight"), legible: false }
+  try (store.set(APPEARANCE_KEY, JSON.stringify(kept)) catch () => undefined)
+  return kept
+}
+
 /** The appearance Machine, started from what the phone saved, the system's scheme and a test build's preview, and the service that keeps it. */
 export const appearance = Layer.unwrap(effect {
-  const saved = try readSaved()
+  const saved = (try readSaved()) ?? (try adoptPreviousTheme())
   const mocks = (try Build).info.testMocks
   const query = mocks ? themeQuery() : undefined
   const preview = query === "dark" ? "PreviewDark" : query === "light" ? "PreviewLight" : "NoPreview"

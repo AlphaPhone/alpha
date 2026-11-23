@@ -79,9 +79,15 @@ pure def stepAnotherOwnerIsANewGeneration(before: Session, after: Session): bool
 ### Startup restores the saved sign-in without starting a new one
 
 At startup the native host reports the saved key and Cloud names its account; that account is
-adopted as signed in, or as waiting for Cloud's confirmation of the key.
+adopted as signed in, or as waiting for Cloud's confirmation of the key. When the key is there but
+Cloud could not be reached to name its account, the key is kept and Cloud is asked again after one
+minute, doubling to fifteen, until it names the account, the key is gone or the owner signed in.
 
 ```quint
+pure val restoreRetryMaxMs = 900000
+pure def restoreRetryMs(tries: int): int =
+  if (tries <= 1) 60000 else if (tries == 2) 120000 else if (tries == 3) 240000 else if (tries == 4) 480000 else restoreRetryMaxMs
+pure def lawARestoreRetryIsBounded(tries: int): bool = restoreRetryMs(tries) >= 60000 and restoreRetryMs(tries) <= restoreRetryMaxMs
 pure def canRestore(s: Session, account: Account, confirmed: bool): bool =
   s.loaded and s.phase == SignedOut and s.holder == Free and wellFormed(account)
 pure def restore(s: Session, account: Account, confirmed: bool): Session =

@@ -39,7 +39,7 @@ type FindBar = { tab: str, query: str, count: int, index: int, done: bool }
 type Hydration = Unread | Reading | Hydrated | ReadFailed
 type HostKind = UnknownHost | NativeHost | WebHost
 type ListedTab = { id: str, url: str, title: str, priv: bool }
-type Listing = { proposal: str, tabs: List[ListedTab] }
+type Listing = { proposal: str, tabs: List[ListedTab], kept: int }
 type Session = {
   host: HostKind, tabs: List[BrowserTab], cur: str, openings: List[Opening], agentTab: str,
   visits: List[Visit], hydration: Hydration, clearing: bool, layers: Layers, find: FindBar,
@@ -760,10 +760,15 @@ pure def alwaysTheSelectionNamesOnlyAnOpenTab(s: Session): bool = selectionOf(s)
 ### A close-every-tab card lists the tabs it would close once per proposal, and a listing that no longer matches Browser's tabs is withdrawn
 
 The tabs are every normal tab, and a private tab only for a request made from a private tab shown in
-Browser. The first listing binds the proposal; a later listing of the same proposal never redraws
-it. The shell names each line by its title, else its address, and counts a private tab without
-naming it. The agent never receives the list. At most sixteen proposals keep a listing; the oldest
-is forgotten first.
+Browser; the listing also counts the private tabs it leaves open. The first listing binds the
+proposal; a later listing of the same proposal never redraws it. A listing still matches while every
+tab keeps its identity, address and profile in the same order and the same private tabs stay open:
+a tab that only changes its title, such as an unread count or a page finishing its load, keeps it.
+The shell names each line by its title, else its address, and counts a private tab without naming
+it. The card says how many private tabs stay open and that they close from a private tab; with only
+private tabs open, the notice says so instead of saying no tabs are open. No private title or site
+reaches the agent or the card. The agent never receives the list. At most sixteen proposals keep a
+listing; the oldest is forgotten first.
 
 ```quint
 pure val maxListings = 16
@@ -771,28 +776,37 @@ pure def listedOf(t: BrowserTab): ListedTab =
   { id: t.id, url: if (t.page.url != "") t.page.url else t.restoreUrl,
     title: if (t.page.title != "") t.page.title else t.restoreTitle, priv: t.profile == Private }
 pure def closableTabs(s: Session, inBrowser: bool): List[ListedTab] = visibleTabs(s, inBrowser).listMap(t => listedOf(t))
+pure def keptPrivate(s: Session, inBrowser: bool): int =
+  if (fromPrivate(s, inBrowser)) 0 else s.tabs.select(t => t.profile == Private).length()
+type TabKey = { id: str, url: str, priv: bool }
+pure def keyOf(t: ListedTab): TabKey = { id: t.id, url: t.url, priv: t.priv }
 pure def isListed(s: Session, proposal: str): bool = proposal != "" and s.listings.some(l => l.proposal == proposal)
 pure def listingOf(s: Session, proposal: str): List[ListedTab] =
   s.listings.foldl(List(), (found, l) => if (l.proposal == proposal) l.tabs else found)
+pure def keptOf(s: Session, proposal: str): int =
+  s.listings.foldl(0, (found, l) => if (l.proposal == proposal) l.kept else found)
 pure def listingCurrent(s: Session, proposal: str, inBrowser: bool): bool =
-  isListed(s, proposal) and listingOf(s, proposal) == closableTabs(s, inBrowser)
+  isListed(s, proposal) and listingOf(s, proposal).listMap(t => keyOf(t)) == closableTabs(s, inBrowser).listMap(t => keyOf(t))
+    and keptOf(s, proposal) == keptPrivate(s, inBrowser)
 pure def canListClosing(s: Session, proposal: str, inBrowser: bool): bool = proposal != "" and s.host != UnknownHost
 pure def listClosing(s: Session, proposal: str, inBrowser: bool): Session = {
   val kept = if (s.listings.length() >= maxListings) s.listings.removeAt(0) else s.listings
-  if (isListed(s, proposal)) s else { ...s, listings: kept.append({ proposal: proposal, tabs: closableTabs(s, inBrowser) }) }
+  if (isListed(s, proposal)) s else { ...s, listings: kept.append({ proposal: proposal, tabs: closableTabs(s, inBrowser), kept: keptPrivate(s, inBrowser) }) }
 }
 pure def alwaysListingsAreFewAndOnePerProposal(s: Session): bool =
   s.listings.length() <= maxListings and s.listings.every(a => a.proposal != "" and s.listings.select(b => b.proposal == a.proposal).length() == 1)
 pure def stepAListingIsNeverRedrawn(before: Session, after: Session): bool =
   before.listings.every(l => not(isListed(after, l.proposal)) or listingOf(after, l.proposal) == l.tabs)
 pure def sometimesAListingNamesSeveralTabs(s: Session): bool = s.listings.some(l => l.tabs.length() > 1)
+pure def sometimesAListingKeepsAPrivateTab(s: Session): bool = s.listings.some(l => l.kept >= 1)
 ```
 
 ### Closing every tab closes exactly the tabs its proposal's card listed, or nothing once Browser's tabs changed, and one approval closes once
 
 A proposal without a listing, an empty listing, or tabs opened, closed or moved to another page since
 the listing refuse before any effect, and the owner is told to ask again. The listing is spent
-either way. Every listed tab closes in one state change. Outside Browser all of them close at once;
+either way. The receipt counts the tabs it closed, "Closed 2 tabs.", and adds "Private tabs were
+left open." when the listing kept any; it never says every tab closed while a private tab stays. Every listed tab closes in one state change. Outside Browser all of them close at once;
 in Browser the others close at once and the tab showing closes when the action is presented, after
 its receipt. A request made outside a private tab never leaves a private tab showing: Browser shows
 a new tab instead.

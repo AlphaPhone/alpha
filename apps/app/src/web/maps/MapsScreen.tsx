@@ -144,7 +144,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
       <div className="absolute inset-0 z-0">
         {plane?.built && (
           <MapPlane
-            basemap={basemap} generation={plane.generation} tileSize={coverage?.tiles?.tileSize} maxZoom={coverage?.tiles?.maxZoom}
+            basemap={basemap} generation={plane.generation} tileSize={coverage?.tiles?.tileSize} minZoom={coverage?.tiles?.minZoom} maxZoom={coverage?.tiles?.maxZoom}
             label={label} follow={guiding && guidance.follow && c.guidance?.fix !== undefined}
             onPin={(id) => act((s) => id.startsWith("r") ? s.screen.pickResult(Number(id.slice(1))) : id.startsWith("o") ? s.screen.chooseOrigin(Number(id.slice(1))) : s.screen.closePlace())}
             onLongPress={(coordinate) => { if (!guiding) act((s) => s.screen.dropPin(coordinate)); }}

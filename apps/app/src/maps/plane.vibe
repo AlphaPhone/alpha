@@ -10,6 +10,13 @@ import type { MapsFailure } from "./failure.vibe"
 import { viewportArea } from "./geometry.vibe"
 import type { Coordinate } from "./maps.schema.vibe"
 
+type Area = { readonly north: number; readonly south: number; readonly east: number; readonly west: number }
+
+/** Whether `outer` holds all of `inner`. */
+function contains(outer: Area, inner: Area): boolean {
+  return outer.north >= inner.north && outer.south <= inner.south && outer.east >= inner.east && outer.west <= inner.west
+}
+
 const LONG_PRESS_MS = 500
 const PRESS_SLOP_PX = 10
 
@@ -64,7 +71,7 @@ export service MapsPlane {
   report(owner: number, outcome: PlaneState): void!!
   retry(): number!!
   release(): void!!
-  /** The camera settled outside the area the shown copyright covers: ask for the new view's copyright. */
+  /** The camera settled: outside the area the copyright asked or shown covers, ask for the new view's copyright; inside it, nothing. */
   settled(center: Coordinate, zoom: number, width: number, height: number): void!!
   tile(z: number, x: number, y: number): MapsTile!MapsFailure
   openInfo(): void!!
@@ -91,6 +98,8 @@ export const planeLayer = Layer.effect(MapsPlane, effect {
   const screens = try ScreenMachine
   const guidance = try GuidanceMachine
   const pressing = try Ref.make<{ readonly x: number; readonly y: number; readonly fiber: Fiber.Fiber<void> } | undefined>(undefined)
+  /** The area, at its whole zoom, that the copyright asked or shown covers: a camera that settles inside it asks nothing. */
+  const covered = try Ref.make<{ readonly zoom: number; readonly area: Area } | undefined>(undefined)
 
   effect function cancelPress() {
     const held = try Ref.getAndSet(pressing, undefined)
@@ -103,26 +112,43 @@ export const planeLayer = Layer.effect(MapsPlane, effect {
 
   return {
     effect mount(element: number, basemap: Basemap) {
-      return (try send({ type: "mountPlane", element, basemap }))?.generation ?? (try plane.get()).generation
+      const before = (try plane.get()).generation
+      const generation = (try send({ type: "mountPlane", element, basemap }))?.generation ?? before
+      if (generation !== before) try Ref.set(covered, undefined)
+      return generation
     },
     effect report(owner: number, outcome: PlaneState) { try send({ type: "planeReports", owner, result: outcome }) },
-    effect retry() { return (try send({ type: "retryMap" }))?.generation ?? (try plane.get()).generation },
+    effect retry() {
+      try Ref.set(covered, undefined)
+      return (try send({ type: "retryMap" }))?.generation ?? (try plane.get()).generation
+    },
     effect release() {
       const old = try Ref.getAndSet(asking, undefined)
       if (old) try Fiber.interrupt(old)
+      try Ref.set(covered, undefined)
       try send({ type: "releasePlane" })
     },
     effect settled(center: Coordinate, zoom: number, width: number, height: number) {
+      const whole = Math.round(zoom)
+      const held = try Ref.get(covered)
+      if (held !== undefined && held.zoom === whole && contains(held.area, viewportArea(center, zoom, width, height))) return
       try send({ type: "moveView" })
       const asked = try send({ type: "requestCopyright" })
-      if (!asked) return
+      if (!asked) {
+        try Ref.set(covered, undefined)
+        return
+      }
       const token = asked.pending
+      // One view of margin on each side, so short pans and guidance following ask nothing.
       const area = viewportArea(center, zoom, width * 3, height * 3)
+      try Ref.set(covered, { zoom: whole, area })
       const old = try Ref.getAndSet(asking, undefined)
       if (old) try Fiber.interrupt(old)
       const fiber = fork.detached effect {
         const copyright = provider.viewport(area, zoom) catch () => undefined
         if (copyright !== undefined) try content.update((c) => ({ ...c, copyright }))
+        // A failed read keeps the standing attribution, and the next settled camera asks again.
+        else try Ref.update(covered, (c) => c?.area === area ? undefined : c)
         try send({ type: "copyrightReply", token, success: copyright !== undefined })
       }
       try Ref.set(asking, fiber)

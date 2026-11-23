@@ -35,6 +35,7 @@ export function SignInHost({ serviceName, onClose, onOwnKeys }: SignInHostProps)
     <SignInPanel
       signIn={signIn} serviceName={serviceName} terms={terms} android={signIn.host === "AndroidHost"}
       onRetry={() => screen((s) => s.open())} onChoose={(method) => screen((s) => s.choose(method))} onGoogle={() => screen((s) => s.google())}
+      onReopenGoogle={() => screen((s) => s.reopenGoogle())} onDraft={(drafted) => screen((s) => s.draft(drafted))}
       onSubmit={(address) => screen((s) => s.submit(address))} onVerify={(code) => screen((s) => s.verify(code))}
       onResend={(address) => screen((s) => s.resend(address))} onBack={leave}
       onOwnKeys={() => { screen((s) => s.ownKeys(true, false)); onOwnKeys?.(); }}

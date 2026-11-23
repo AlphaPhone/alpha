@@ -3,7 +3,7 @@ import { initial as connectionStart, type Resident as ResidentConnection } from 
 import { aiChip, chipAsksAttention, type Admission, type AiChip } from "../../gen/account__plan.ts"
 import type { Provider } from "../../gen/account__provider.ts"
 import { isSignedIn, powerLaunchClaimable, restorePending, type Session } from "../../gen/account__session.ts"
-import type { SignIn } from "../../gen/account__signIn.ts"
+import { type SignIn, untouched } from "../../gen/account__signIn.effect.vibe"
 import { MapsAccount, type AccountBinding } from "../maps/ports.vibe"
 import { Build } from "../platform/build.vibe"
 import { Cloud } from "../platform/cloud.vibe"
@@ -77,7 +77,7 @@ export service AccountBindings {
   readonly agent: Stream.Stream<AgentBinding>
   agentNow(): AgentBinding!!
   /** The verified agent session, or undefined before the resident verifies one. */
-  identity(): AgentSession | undefined!!
+  identity(): (AgentSession | undefined)!!
   /** Whether sign-in or sign-out work is in flight, and whether the sign-in card is open and untouched. */
   idle(): ConnectionIdle!!
   /** The Ready card's account chips, then each change of them. */
@@ -125,7 +125,7 @@ export function idleOf(s: Session, signIn: SignIn, provider: Provider): Connecti
   return {
     connectionBusy: connectionBusy(s, signIn, provider),
     signInOpen: signIn.screen !== "ScreenClosed",
-    signInUntouched: signIn.screen === "Choose" && signIn.work === "NoWork" && signIn.attempt === 0 && !signIn.address && !signIn.prefill,
+    signInUntouched: untouched(signIn),
   }
 }
 

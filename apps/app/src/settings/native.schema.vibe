@@ -67,7 +67,7 @@ export schema UpdateIndex { schema: "alpha-update/index-v1"; releases: ReadonlyA
 
 /** AlphaDevice.installUpdate. */
 export schema InstallReply {
-  status?: "started" | "offer-unavailable" | "offer-withdrawn" | "offer-response-changed" | "starting" | "permission-required" | "unsupported"
+  status?: "offer-unavailable" | "offer-withdrawn" | "offer-response-changed" | "starting" | "permission-required" | "unsupported"
   manifest?: string
 }
 
@@ -78,6 +78,8 @@ export schema UpdateState {
   activationId?: string
   bridgeId?: string
   canContinue?: boolean
+  /** Whether the activation is a hands-off install's. */
+  automatic?: boolean
   outcome?: "canceled" | "failed" | "installed"
   idle?: boolean
 }
