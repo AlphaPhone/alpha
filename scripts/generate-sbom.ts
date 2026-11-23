@@ -225,7 +225,7 @@ function walkFiles(directory: string, base = directory, out: string[] = []): str
  * Reads the payload that Gradle would package from this checkout; throws when none is staged.
  */
 function residentRuntimeComponents(root: string): Component[] {
-  if (!packagedRuntimePresent(root)) throw new Error('--packaged-runtime: no resident runtime is staged. Run: pnpm agent:build-workflow-worker && pnpm agent:stage-android');
+  if (!packagedRuntimePresent(root)) throw new Error('--packaged-runtime: no resident runtime is staged. Run: pnpm agent:build-workflow-worker && pnpm agent:bundle && pnpm agent:stage-android');
   const out: Component[] = [];
   const record: EmbeddingRecord | null = readNativeBuildReceipt(root)?.embedding as EmbeddingRecord ?? (exists(root, EMBEDDING_HOST) ? readJson(root, EMBEDDING_HOST) : null);
   // Only current source inputs make the recorded hashes authoritative. A superseded record

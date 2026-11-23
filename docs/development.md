@@ -13,16 +13,9 @@ changes upstream and consume a reviewed commit; never edit the vendor checkout.
 
 ## Setup
 
-Use Bun 1.4.2 (`packageManager` in `package.json`) and JDK 21. The pinned upstream
-source prepares and builds on Bun. Node.js 24+ is needed for LemmaScript and the
-Node-only host tests (`pnpm test:node`). The production browser test preview
-also uses genuine Node; its CI job pins Node 26.13.0. Bundle preparation and building
-continue to use Bun.
-Canonical host-test commands automatically cache a hash-pinned Bun 1.4.4 test process on
-Linux and macOS. This avoids the older test runner's synchronous-child/GC bug. It does not
-replace Bun 1.4.2 on `PATH`: `ALPHA_BUN` continues to identify the 1.4.2 SDK, bytecode and
-Android builder. `test-results/host-test-runtime.json` records both runtimes and the complete
-selected test inventory. The cache uses `XDG_CACHE_HOME`, or `~/.cache` by default.
+Use Node 26 and pnpm 10.24.0 (`packageManager` in `package.json`) and JDK 21. There is no Bun:
+the pinned upstream workspace installs with the same pnpm lockfile and builds with its own turbo
+(`pnpm build:upstream`, which the root `typecheck`, `test` and `build` tasks run first).
 Native builds need Python 3 for toolchain bootstrapping, Android SDK platform 36
 and build-tools 36.0.0. Set
 `JAVA_HOME` and `ANDROID_HOME`; standard macOS SDK/JDK locations are also detected.
@@ -35,23 +28,19 @@ pnpm verify
 pnpm dev
 ```
 
-`pnpm verify` runs deployment-output checks, source preparation, TypeScript, host tests,
-the production web build and its bundle audit.
-Host scripts use native TypeScript. `pnpm typecheck:scripts` checks their interfaces.
+`pnpm verify` runs the Cloud deployment-output check, the repository tooling tests (`pnpm test:root`,
+`test/root-tests.json`), the spec check, VibeLang typecheck, the app and Cloud tests, lint, the
+production web build and its bundle audit.
 Host contract tests need a JDK and the `sqlite3` command-line tool on `PATH`
 for native Calendar queries. Archive builds check SQLite before verification.
-Tests that load the real SDK require the pinned Bun and a prepared SDK; set
-`ALPHA_REQUIRE_PREPARED_SDK=1` to fail instead of skipping when preparation is missing.
 
-The Quint models and LemmaScript function proofs are not part of `pnpm verify`. Run
-`pnpm quint:check`, `pnpm quint:tests` and `pnpm lemma:check` before merging a PR;
-CI runs them only when `develop` is promoted to `main`. See [CONTRIBUTING.md](../CONTRIBUTING.md).
-Function proofs require Dafny 4.11.0 on `PATH`; `LEMMA_REQUIRE_BACKEND=1` makes a
-missing backend fail. A generation-only run records a skipped proof. Promotion CI installs the
-hash-pinned backend and requires proofs.
+The spec check (`pnpm check`, inside `pnpm verify`) owns the models and proofs; see
+[CONTRIBUTING.md](../CONTRIBUTING.md).
+The proof stage needs Dafny 4.11.0 on `PATH`; `verify.yml` and the promotion spec job install the
+hash-pinned release with `scripts/ci/prepare-dafny.sh`.
 
 A pull request runs one CI job, `pnpm verify` (`verify.yml`). The Android build
-(`android.yml`: `pnpm android:build:local -- --release`, then the digest restart check) also runs when a
+(`android.yml`: `pnpm android:build:local -- --release`, then the post-build checks) also runs when a
 pull request changes Android, renderer, script, lockfile or upstream-pin paths; documentation-only
 changes do not run it. The browser tests are not run by PR CI: run `pnpm test:browser` and
 `pnpm test:browser:production` before finalising a PR and say so in its description. CI runs
@@ -111,9 +100,8 @@ replace each other's optimized modules.
 ## Development
 
 ```sh
-pnpm dev                       # local agent and renderer
-pnpm dev:ui                    # renderer only
-pnpm dev:cloud                 # genuine account-bound Cloud development
+pnpm dev                       # renderer only (Vite); no resident agent is started
+pnpm dev:cloud                 # the renderer against an account-bound Cloud
 pnpm test:browser              # Chromium, development surfaces enabled
 pnpm test:browser:production   # production bundle
 ```

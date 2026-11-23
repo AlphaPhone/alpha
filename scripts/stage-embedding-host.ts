@@ -159,7 +159,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
    return {name,sha256:row.sha256,bytes:row.bytes,alignment16KiB:true,source:sourcePath,target};
   });
   // agent:stage-android stages the model with the runtime payload; this command only checks it.
-  if(!fs.existsSync(path.join(root,model.path)))throw Error('Pinned BGE model is not staged: run pnpm agent:prepare, pnpm agent:build-workflow-worker and pnpm agent:stage-android first');
+  if(!fs.existsSync(path.join(root,model.path)))throw Error('Pinned BGE model is not staged: run pnpm agent:build-workflow-worker, pnpm agent:bundle and pnpm agent:stage-android first');
   if(hash(path.join(root,model.path))!==model.sha256)throw Error('Pinned BGE model bytes changed');
   const manifest={pin:receipt.pin,forkPin:receipt.forkPin,identity,abi:receipt.abi,model,libraries:libraries.map(({source,target,...row})=>row),jniIdentityRelocated:true,inputs:receipt.inputs,producerInputs:receipt.producerInputs,...(receipt.jniBinding?{jniBinding:receipt.jniBinding}:{})};
   // Refuse before copying anything: the voice host stages the same arm64 engine file.
