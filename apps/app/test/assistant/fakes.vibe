@@ -162,14 +162,15 @@ export function locationNative(fix: { readonly latitude: number; readonly longit
   })
 }
 
-/** A phone where GPS never fixes and `AlphaNetworkLocation` answers every lookup with `fix`, counting them. */
-export function networkNative(fix: { readonly latitude: number; readonly longitude: number; readonly accuracy: number }, lookups: { count: number }) {
+/** A phone where GPS never fixes and `AlphaNetworkLocation` answers every lookup after the first `failures` with `fix`, counting them. */
+export function networkNative(fix: { readonly latitude: number; readonly longitude: number; readonly accuracy: number }, lookups: { count: number }, failures = 0) {
   return Layer.succeed(Native, {
     available: (plugin: string) => succeed(plugin === "ElizaLocation" || plugin === "AlphaNetworkLocation"),
     invoke: (plugin: string, method: string) => effect {
       if (plugin === "ElizaLocation" && method === "checkPermissions") return { location: "granted" }
       if (plugin === "AlphaNetworkLocation" && method === "locate") {
         lookups.count += 1
+        if (lookups.count <= failures) throw new NativeUnavailable({ plugin, method })
         return { ...fix, timestamp: try Clock.currentTimeMillis, fingerprint: "f1" }
       }
       throw new NativeUnavailable({ plugin, method })

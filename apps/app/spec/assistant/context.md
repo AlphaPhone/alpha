@@ -94,9 +94,12 @@ pure val lValues = Set(initial).union(Set({ ...initial, granted: true, gps: HasF
 
 ### The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again
 
-Only the resident connection's warm-up, a Maps action or a locate card
-looks up; a chat turn only reads the last answer. The warm-up first waits
-for its GPS read and looks up only when that read left no current fix. An
+The resident connection's warm-up, a Maps action or a locate card looks
+up. The warm-up first waits for its GPS read and looks up only when that
+read left no current fix. A chat turn reads the last answer and never waits
+for one; only when it has no position at all, because the warm-up's lookup
+failed or the phone has not been located since, does it start one lookup
+behind it after its GPS read, so the next turn carries the answer. An
 answer is reused for 15 minutes; after that the same visible networks keep
 it, confirmed without a request, for up to an hour from when it was
 resolved; a failed lookup is not retried for 2 minutes. An answer Maps
@@ -104,13 +107,13 @@ looked up is the same answer, and a turn carries it too. Only access point
 and cell identities and signal leave the phone, never network names.
 
 ```quint
-pure def canLookUp(l: Locator, warm: bool): bool = allowed(l) and warm and not(gpsCurrent(l)) and l.networkWaitS <= 0
+pure def canLookUp(l: Locator, warm: bool): bool = allowed(l) and (warm or not(networkCurrent(l))) and not(gpsCurrent(l)) and l.networkWaitS <= 0
 pure def lookUp(l: Locator, warm: bool): Locator = { ...l, lookups: l.lookups + 1, networkWaitS: networkRetryS }
 pure def canNetworkArrives(l: Locator, ageS: int): bool = allowed(l) and ageS >= 0 and ageS <= networkUnchangedS
 pure def networkArrives(l: Locator, ageS: int): Locator = { ...l, network: HasFix({ ageS: ageS }), networkWaitS: networkReuseS }
 pure def canNetworkConfirmed(l: Locator): bool = allowed(l) and l.lookups >= 1 and networkCurrent(l)
 pure def networkConfirmed(l: Locator): Locator = { ...l, networkWaitS: networkReuseS }
-pure def lawATurnNeverLooksUp(l: Locator): bool = not(canLookUp(l, false))
+pure def lawATurnLooksUpOnlyWithoutAPosition(l: Locator): bool = canLookUp(l, false) implies not(located(l))
 pure def lawAFreshGpsFixNeedsNoLookup(l: Locator): bool = gpsCurrent(l) implies not(canLookUp(l, true))
 pure def alwaysANetworkLookupBacksOff(l: Locator): bool = l.networkWaitS <= networkReuseS
 pure def sometimesLookedUp(l: Locator): bool = l.lookups >= 1 and usesNetwork(l)

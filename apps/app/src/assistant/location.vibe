@@ -11,7 +11,7 @@ export type TurnLocation = LocationObservation
 
 const plugin = "ElizaLocation"
 
-/** The phone's last known location for chat turns, read only with consent and never asked for; a turn never waits for it. */
+/** The phone's last known location for chat turns, read only with consent and never asked for; a turn never waits for it, and one with no position starts a lookup behind it. */
 export service PhoneLocation {
   /** Settings › Privacy › Location for Alpha changed; the next turn also reads it from Preferences. */
   setEnabled(on: boolean): void!!
@@ -97,10 +97,24 @@ export const locationLayer = Layer.effect(PhoneLocation, effect {
     try send({ type: "fixArrives", ageS })
   }
   const refresh = () => Semaphore.withPermit(reading, readGps())
+  /** Look the network position up when `warm`, or when a turn has no position at all, and adopt the answer. */
+  effect function lookUp(warm: boolean) {
+    try tick()
+    try adopt()
+    if (!canLookUp(try locator.get(), warm)) return
+    try send({ type: "lookUp", warm })
+    try network.locate()
+    try adopt()
+  }
+  /** A turn's read behind it: the GPS read, then one lookup only when that left the phone with no position. */
+  effect function behindTurn() {
+    try refresh()
+    try lookUp(false)
+  }
   effect function background() {
     if (refreshing) return
     refreshing = true
-    try ensuring(refresh(), sync(() => { refreshing = false }))
+    try ensuring(behindTurn(), sync(() => { refreshing = false }))
   }
   return {
     setEnabled: (on: boolean) => effect {
@@ -129,12 +143,7 @@ export const locationLayer = Layer.effect(PhoneLocation, effect {
     },
     warm: () => effect {
       try refresh()
-      try tick()
-      try adopt()
-      if (!canLookUp(try locator.get(), true)) return
-      try send({ type: "lookUp", warm: true })
-      try network.locate()
-      try adopt()
+      try lookUp(true)
     },
   }
 })
