@@ -97,9 +97,10 @@ pure def lawAnUnknownRedemptionIsNeverSentUnderANewNumber(code: str): bool =
 ### Only Cloud saying a code worked tells the owner it was redeemed or applied
 
 ```quint
-pure def stepOnlyCloudSaysACodeWorked(before: Codes, via: str, after: Codes): bool =
-  (after.notice == Redeemed and before.notice != Redeemed) implies (via == "redeemed" and after.redeem.outcome == A::Confirmed)
-    and ((after.notice == ReferralApplied and before.notice != ReferralApplied) implies (via == "referralApplied" and after.apply.outcome == A::Confirmed))
+pure def stepOnlyCloudSaysACodeWorked(before: Codes, via: str, after: Codes): bool = and {
+  (after.notice == Redeemed and before.notice != Redeemed) implies (via == "redeemed" and after.redeem.outcome == A::Confirmed),
+  (after.notice == ReferralApplied and before.notice != ReferralApplied) implies (via == "referralApplied" and after.apply.outcome == A::Confirmed),
+}
 ```
 
 ### Nothing waits for the plan's check once Cloud answered it
