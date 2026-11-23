@@ -1,6 +1,6 @@
 // spec/assistant/send.md, "A composer send holds its text and clears the composer; a handed-over prompt leaves the composer alone"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/context.md, "A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"
 import { ArrowUp, Mic, Paperclip, Square, X } from "lucide-react";
-import type { KeyboardEvent, ReactNode } from "react";
+import { useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import type { Target } from "../../assistant/composer.vibe";
 import type { ChatFile } from "../../assistant/transcript.vibe";
 import { copy } from "../../assistant/presentation.vibe";
@@ -53,6 +53,8 @@ export type ComposerBarProps = {
   onClearTarget: () => void;
   /** The owner settled a message that may already have been sent: put it back, or let it go. */
   onReviewUnsettled: (restore: boolean) => void;
+  /** Monotonic counter incremented when a tap-to-open gesture wants immediate composer focus. */
+  focusSeq?: number;
 };
 
 /**
@@ -60,6 +62,15 @@ export type ComposerBarProps = {
  * @model spec/assistant/send.md
  */
 export function ComposerBar(props: ComposerBarProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const focusedSeq = useRef(0);
+  useLayoutEffect(() => {
+    if (!props.focusSeq || props.focusSeq === focusedSeq.current) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    focusedSeq.current = props.focusSeq;
+    el.focus();
+  }, [props.focusSeq]);
   const { text, files, typing } = props;
   const sendShown = !typing && (text.trim() !== "" || files.length > 0);
   const onKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -104,6 +115,7 @@ export function ComposerBar(props: ComposerBarProps) {
       <div className="flex items-end gap-2">
         <Button size="icon" variant="ghost" aria-label="Attach media" onClick={props.onAttach} disabled={typing || files.length >= 4}><Paperclip className="size-5" /></Button>
         <Textarea
+          ref={textareaRef}
           data-alpha-composer=""
           aria-label="Message"
           rows={1}

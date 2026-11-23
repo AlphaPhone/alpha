@@ -76,7 +76,7 @@ pure def release(mode: Detent, direction: Direction, zone: Zone, flick: bool, ho
 }
 pure def forgetClosed(d: Dock): Dock = if (isOpen(d.chat)) d else { ...d, remembered: false }
 pure def activate(label: Control, d: Dock): Dock = forgetClosed(
-  if (label == OpenControl) { ...d, chat: Sheet }
+  if (label == OpenControl or label == FocusControl) { ...d, chat: Sheet }
   else if (label == TypeControl) { ...d, chat: Input }
   else if (label == TalkControl) { ...d, voice: true }
   else if (label == ResizeControl or label == ToolbarControl) { ...d, chat: if (d.chat == Full) Sheet else Full }
@@ -150,7 +150,7 @@ pure def navigate(d: Dock, view: Surface): Dock =
     remembered: d.remembered and isOpen(d.chat),
     drag: noDrag, swallowAge: if (d.drag.moved) 0 else d.swallowAge, dragAge: if (d.drag.moved) 0 else d.dragAge }
 pure def canOpenSheet(d: Dock): bool = not(d.drag.active) and not(swallowed(d)) and not(isOpen(d.chat))
-pure def openSheet(d: Dock): Dock = { ...d, chat: Sheet, remembered: false }
+pure def openSheet(d: Dock): Dock = { ...d, chat: Sheet, remembered: false, barKept: false }
 pure def canLowerBar(d: Dock): bool = not(d.drag.active) and d.chat == Input and d.view != HomeView
 pure def lowerBar(d: Dock): Dock = { ...d, chat: Hidden, barKept: false }
 pure def canTouchOutside(d: Dock): bool = not(d.drag.active) and not(d.ghost) and d.chat == Sheet
