@@ -20,7 +20,6 @@ import {
   assistNative, assistantOver, assistantWith, countingExecutors, fakeHost, fakePreferences, fakeResident, fakeResidentControl, itemizingExecutors, journalNative,
   locationNative, networkNative, noNative, privateScreen, wireProposal, type Seen,
 } from "./fakes.vibe"
-import { readerHearsAcknowledgments, unlessAcknowledgmentsHeard } from "./reply-reader.vibe"
 
 const futureExpiry = "2099-01-01T00:00:00.000Z"
 const quietResident = (proposals: readonly unknown[] = []) => fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals })
@@ -240,34 +239,50 @@ effect function acknowledgedTurn(before: readonly unknown[], answer: string) {
 const calendarAnswer = "You have two meetings today: standup at nine and a review at three."
 const cueText = (text: string) => ({ type: "token", text })
 const restart = { type: "token", fullText: "" }
-/** Whether the agent client's reader hears acknowledgment frames and tool labels; an older one fails the turn on them. */
-const acknowledgments = await readerHearsAcknowledgments()
+const R1 = "spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\""
+const R0 = "spec/assistant/reply.md, \"The planning label shows until the first text, and provisional text is shown but never spoken\""
 
-it.effect.skipIf(!acknowledgments)(`The agent's acknowledgment frame is the one acknowledgement, shown before its tool and never in the answer${unlessAcknowledgmentsHeard(acknowledgments)} (spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole")`, () => effect {
+it.effect(`The agent's acknowledgment frame is the one acknowledgement, kept out of the answer and shown as the working label through its tool and status (${R1}; ${R0})`, () => effect {
   const cue = "Let me check your calendar."
-  const { settled, working } = try acknowledgedTurn([cueText(cue), { type: "acknowledgment", text: cue }, restart, { type: "tool", name: "CALENDAR", label: "Using Calendar" }], calendarAnswer)
+  const { settled, working } = try acknowledgedTurn([cueText(cue), { type: "acknowledgment", text: cue }, restart, { type: "tool", name: "CALENDAR", label: "Using Calendar" }, { type: "status", activity: "Reading your calendar" }], calendarAnswer)
   try Effect.try(() => assert.deepStrictEqual(
-    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits, final: settled.reply.final, working: working.slice(0, 1), tool: working.at(-1) } : {},
-    { text: calendarAnswer, acks: 1, ackUnits: cue.length, final: calendarAnswer.length, working: [cue], tool: "Using Calendar" },
+    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits, final: settled.reply.final, labels: [...new Set(working)] } : {},
+    { text: calendarAnswer, acks: 1, ackUnits: cue.length, final: calendarAnswer.length, labels: [cue] },
   ))
 })
 
-it.effect("An agent with no acknowledgment frame is acknowledged once from the text before its first tool (spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\")", () => effect {
-  const { settled } = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR" }, restart, { type: "tool", name: "CALENDAR" }], calendarAnswer)
+it.effect(`An agent that sends no acknowledgment frame gives none: text before its first tool never acknowledges, and the tool's label is the working label (${R1})`, () => effect {
+  const { settled, working } = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR", label: "Using Calendar" }, restart, { type: "tool", name: "CALENDAR", label: "Using Calendar" }], calendarAnswer)
   try Effect.try(() => assert.deepStrictEqual(
-    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits } : {},
-    { text: calendarAnswer, acks: 1, ackUnits: "On it.".length },
+    settled?.kind === "agent" ? { text: settled.text, acks: settled.reply.acks, ackUnits: settled.reply.ackUnits, final: settled.reply.final, labels: [...new Set(working)] } : {},
+    { text: calendarAnswer, acks: 0, ackUnits: 0, final: calendarAnswer.length, labels: ["Using Calendar"] },
   ))
 })
 
-it.effect.skipIf(!acknowledgments)(`An acknowledgment frame after the tool fallback, or a tool after the frame, never acknowledges again${unlessAcknowledgmentsHeard(acknowledgments)} (spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole")`, () => effect {
-  const fallbackFirst = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR" }, { type: "acknowledgment", text: "Let me check your calendar." }, restart], calendarAnswer)
+it.effect(`A second acknowledgment frame, or one after a tool ran, never acknowledges again (${R1})`, () => effect {
+  const toolFirst = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR" }, { type: "acknowledgment", text: "Let me check your calendar." }, restart], calendarAnswer)
   const frameFirst = try acknowledgedTurn([cueText("Sure."), { type: "acknowledgment", text: "Sure." }, cueText(" One more."), { type: "tool", name: "ALARM", label: "Using Clock" }], calendarAnswer)
+  const twice = try acknowledgedTurn([{ type: "acknowledgment", text: "Sure." }, { type: "acknowledgment", text: "Let me check your calendar." }, { type: "tool", name: "CALENDAR" }], calendarAnswer)
   const units = (turn: { readonly settled?: Row }) => turn.settled?.kind === "agent" ? [turn.settled.reply.acks, turn.settled.reply.ackUnits, turn.settled.text] : []
   try Effect.try(() => assert.deepStrictEqual(
-    { fallbackFirst: units(fallbackFirst), frameFirst: units(frameFirst) },
-    { fallbackFirst: [1, "On it.".length, calendarAnswer], frameFirst: [1, "Sure.".length, calendarAnswer] },
+    { toolFirst: units(toolFirst), frameFirst: units(frameFirst), twice: units(twice), twiceLabels: [...new Set(twice.working)] },
+    { toolFirst: [0, 0, calendarAnswer], frameFirst: [1, "Sure.".length, calendarAnswer], twice: [1, "Sure.".length, calendarAnswer], twiceLabels: ["Sure."] },
   ))
+})
+
+it.effect(`A proposal the agent made for review, which names no message, joins the reply as a card at once (spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it")`, () => effect {
+  const proposal = wireProposal("p8", "c".repeat(64), { type: "create_note", title: "Milk" }, undefined, futureExpiry)
+  const runs = { count: 0 }
+  provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "I made a card for it." }, proposals: [proposal] }), fakeHost([]), countingExecutors(runs), journalNative(new Map())) {
+    const composer = try Composer
+    try composer.edit("Make a note: milk")
+    try composer.send()
+    const cards = (try transcriptNow()).rows.flatMap((row) => row.kind === "card" ? [row.card.proposalId] : [])
+    try composer.edit("And another")
+    try composer.send()
+    const again = (try transcriptNow()).rows.flatMap((row) => row.kind === "card" ? [row.card.proposalId] : [])
+    try Effect.try(() => assert.deepStrictEqual({ cards, again, runs: runs.count }, { cards: ["p8"], again: ["p8"], runs: 0 }))
+  }
 })
 
 it.effect("Approve an action card once, from wherever it is shown (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {

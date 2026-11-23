@@ -1,5 +1,5 @@
 // spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/browser/egress.md, "Story: Share or keep the page I am looking at"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/maps/cards.md, "Story: Answer my agent's Maps question with one tap"; spec/camera/scan.md, "Only a complete, bounded scan request starts a scan, and only over the visible Camera"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
-import { AssistantEmail, CameraComposer, MapsChatCards, MapsRelay, OwnNotices, ReplyChanges } from "../../assistant/ports.vibe"
+import { AdvertisedCapabilities, AssistantEmail, CameraComposer, MapsChatCards, MapsRelay, OwnNotices, ReplyChanges } from "../../assistant/ports.vibe"
 import { PageMail } from "../../browser/ports.vibe"
 import { CalendarMaps } from "../../calendar/ports.vibe"
 import { FileShareTargets } from "../../files/share.vibe"
@@ -26,6 +26,7 @@ export service PortCells {
   readonly mapsRelay: Cell<MapsRelay.Shape>
   readonly replyChanges: Cell<ReplyChanges.Shape>
   readonly deviceCapabilities: Cell<DeviceCapabilities.Shape>
+  readonly advertisedCapabilities: Cell<AdvertisedCapabilities.Shape>
 }
 
 /** Puts `next` in `cell`, unless `next` is a slot, which would delegate to itself. */
@@ -52,6 +53,7 @@ const cellsLive = Layer.effect(PortCells, effect {
     mapsRelay: { current: try MapsRelay },
     replyChanges: { current: try ReplyChanges },
     deviceCapabilities: { current: try DeviceCapabilities },
+    advertisedCapabilities: { current: try AdvertisedCapabilities },
   }
 })
 
@@ -153,8 +155,17 @@ const deviceCapabilities = Layer.effect(DeviceCapabilities, effect {
   } satisfies DeviceCapabilities.Shape)
 })
 
+// Voice is built before the assistant and reads the same advertised names for its turns, so the port is a slot here.
+const advertisedCapabilities = Layer.effect(AdvertisedCapabilities, effect {
+  const cells = try PortCells
+  const cell = cells.advertisedCapabilities
+  return slot(cells, {
+    names: () => suspend(() => cell.current.names()),
+  } satisfies AdvertisedCapabilities.Shape)
+})
+
 /** Every late-filled port as a slot over its cell, placed before the first area that reads one; each answers as its refusing default until filled. */
 export const slotsLive = Layer.provideMerge(
-  Layer.mergeAll(fileShare, pageMail, calendarMaps, workflowClock, assistantEmail, ownNotices, mapsChat, cameraComposer, mapsRelay, replyChanges, deviceCapabilities),
+  Layer.mergeAll(fileShare, pageMail, calendarMaps, workflowClock, assistantEmail, ownNotices, mapsChat, cameraComposer, mapsRelay, replyChanges, deviceCapabilities, advertisedCapabilities),
   cellsLive,
 )
