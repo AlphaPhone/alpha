@@ -154,9 +154,10 @@ export function createBrowserPageContext(host: BrowserPageHost) {
   /** The current tab's page as a block, read within the budget. A page still loading (a Visit
    * followed at once by a question) or a reader not ready yet is read again after each tab change
    * until it has text or the budget ends. */
-  async function readPage(signal: AbortSignal): Promise<BrowserPageBlock | undefined> {
+  async function readPage(signal: AbortSignal, onScreen: boolean): Promise<BrowserPageBlock | undefined> {
     const deadline = now() + PAGE_READ_BUDGET_MS;
     let page = host.current(), read: PageText | typeof late = late;
+    let retriedEmpty = false;
     while (page && !page.private && page.url) {
       if (!page.readable) { read = {textUnavailable: 'not readable'}; break; }
       if (passwordService(page.url)) { read = {textUnavailable: 'password manager page'}; break; }
@@ -164,6 +165,15 @@ export function createBrowserPageContext(host: BrowserPageHost) {
       else {
         const current = page;
         read = await within(deadline, signal, () => host.read(current)).catch((): PageText => ({textUnavailable: 'not readable'}));
+        if (!samePage(current, host.current())) return;
+        // A committed page may have a title before its visible body hydrates.
+        // Give that same foreground document one short retry within the turn's budget.
+        if (onScreen && read !== late && !read.text?.trim() && (!read.textUnavailable || read.textUnavailable === 'not readable') && !retriedEmpty && !signal.aborted) {
+          retriedEmpty = true;
+          await within(Math.min(deadline, now() + 250), signal, changed => host.changed(changed)).catch(() => late);
+          if (signal.aborted || !samePage(current, host.current())) return;
+          if (now() < deadline) continue;
+        }
         if (read === late || read.textUnavailable !== 'loading') break;
       }
       if (signal.aborted || await within(deadline, signal, changed => host.changed(changed)).catch(() => late) === late) break;
@@ -182,7 +192,7 @@ export function createBrowserPageContext(host: BrowserPageHost) {
         if (!away || elapsed > PAGE_GRACE_MS || !samePage(away.page, host.current())) { away = undefined; return; }
         leftSecondsAgo = Math.max(0, Math.floor(elapsed / 1000));
       }
-      const block = await readPage(signal);
+      const block = await readPage(signal, context.view === 'browser');
       if (!block || signal.aborted) return;
       return leftSecondsAgo === undefined ? block : {...block, onScreen: false, leftSecondsAgo};
     } catch { return; }

@@ -53,7 +53,7 @@ import {executeNotesQuery} from './notes-query-executor';
 import {executeNotesOrganize,notesOrganizeShellHost} from './notes-organize-executor';
 import {notesRecorderControl} from './notes-recorder-control';
 import {cachedDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
-import {namedNoteOpenRequest,openAfterNoteCreate,referencedNoteOpenRequest,sendsSavedEmail} from '../ui/device-actions/owner-request';
+import {homeOpenRequest,namedNoteOpenRequest,openAfterNoteCreate,referencedNoteOpenRequest,sendsSavedEmail} from '../ui/device-actions/owner-request';
 import {canonicalNotesListContextAllowed} from '../../../../.eliza/client-features/packages/contracts/src/device-reviews.ts';
 import {isNotesOrganizeOperation,notesOrganizeContextAllowed} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {readNotesFolders,editNotesFolders} from '../runtime/notes-folders';
@@ -769,10 +769,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }catch(error){reject(error);}
     }));
   }
-  async function openVoiceNote(shell:Shell,target:{notes:CanonicalNotesUi;id:string},navigation:import('../runtime/alpha-client').VoiceNavigationContinuation,current:()=>void,accept:(value:ContextEnvelope)=>void):Promise<boolean>{
+  async function openVoiceDestination(shell:Shell,target:'home'|{notes:CanonicalNotesUi;id:string},navigation:import('../runtime/alpha-client').VoiceNavigationContinuation,current:()=>void,accept:(value:ContextEnvelope)=>void):Promise<boolean>{
     let opened=false;
     try{
-      opened=await navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(shell,target,chat,onCommitted),{kind:'canonical-note',id:target.id});
+      opened=target==='home'
+        ?await navigation.apply('home',current,(chat,onCommitted)=>commitNavigation(shell,'home',()=>openInternalView(shell,'home',chat),onCommitted))
+        :await navigation.apply('notes',current,(chat,onCommitted)=>openNamedNote(shell,target,chat,onCommitted),{kind:'canonical-note',id:target.id});
       return opened;
     }finally{
       const next=navigation.finish(opened);
@@ -2202,20 +2204,27 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     }
     const noteTitle=input.navigation?namedNoteOpenRequest(text):undefined;
     const noteRequest=noteTitle?{title:noteTitle}:recentNote(this,text,binding.conversationId,binding.session);
-    if(noteRequest&&input.navigation){
+    const localRequest=homeOpenRequest(text)?'home':noteRequest;
+    if(localRequest&&input.navigation){
       this.voiceSendTurnId=turnId;
       try{
-        const target=await resolveNote(this,noteRequest,current);
-        current();
         let answer:string;
-        if('message' in target)answer=target.message;
-        else{
-          const opened=await openVoiceNote(this,target,input.navigation,current,next=>{acceptedContext=next;});
-          answer=opened?`Opened “${target.title}” in Notes.`:'I couldn’t open that note. Try again from Notes.';
-          if(opened)recentNotes.set(this,{conversationId:binding.conversationId,session:binding.session,messageId:turnId,id:target.id});
+        const open=(target:Parameters<typeof openVoiceDestination>[1])=>openVoiceDestination(this,target,input.navigation!,current,next=>{acceptedContext=next;});
+        if(localRequest==='home'){
+          const opened=input.context.view==='home'||await open('home');
+          answer=opened?'You’re on Home.':'I couldn’t open Home.';
+        }else{
+          const target=await resolveNote(this,localRequest,current);
+          current();
+          if('message' in target)answer=target.message;
+          else{
+            const opened=await open(target);
+            answer=opened?`Opened “${target.title}” in Notes.`:'I couldn’t open that note. Try again from Notes.';
+            if(opened)recentNotes.set(this,{conversationId:binding.conversationId,session:binding.session,messageId:turnId,id:target.id});
+          }
         }
         current();
-        const replyId=`voice-note-open:${turnId}`;
+        const replyId=`voice-view-open:${turnId}`;
         this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
         this.agentSay(answer,undefined,{id:replyId},belongs);
         return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
@@ -2307,7 +2316,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       let presentedReply=reply;
       if(created&&revealCreatedNote&&continuation&&!present&&!reply.proposals?.length){
         const target=await resolveNote(this,created,current);
-        if('id' in target)delivered=await openVoiceNote(this,target,continuation,current,next=>{acceptedContext=next;});
+        if('id' in target)delivered=await openVoiceDestination(this,target,continuation,current,next=>{acceptedContext=next;});
         const text=noteCreationReply(created.reused,delivered&&'title' in target?target.title:undefined);
         current();
         this.setState((previous:Shell)=>({msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,text}:m)}));
@@ -2402,7 +2411,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const noteTitle=plainComposer?namedNoteOpenRequest(text):undefined;
     const noteSession=connectionController.getSnapshot().session;
     const noteRequest=noteTitle?{title:noteTitle}:plainComposer?recentNote(this,text,selectedConversation,noteSession):undefined;
-    if(noteRequest){
+    const localRequest=plainComposer&&homeOpenRequest(text)?'home':noteRequest;
+    if(localRequest){
       const bound=sendBinding();
       context(this);
       if(alphaClient.getState().context.sensitive||connectionController.getSnapshot().open)return;
@@ -2418,15 +2428,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       };
       this.draftSendPending=true;
       try{
-        const target=await resolveNote(this,noteRequest,current);
+        const target=localRequest==='home'?'home':await resolveNote(this,localRequest,current);
         current();
         const chat=this.S().chat==='full'?'full':'sheet';
         const messageId=crypto.randomUUID();
         this.setState((previous:Shell)=>({draft:'',chat,msgs:[...previous.msgs,{id:messageId,from:'user',text}]}));
-        let answer='message' in target?target.message:'I couldn’t open that note. Try again from Notes.';
-        if('id' in target&&await openNamedNote(this,target,chat)){
-          answer=`Opened “${target.title}” in Notes.`;
-          if(selectedConversation&&noteSession)recentNotes.set(this,{conversationId:selectedConversation,session:noteSession,messageId,id:target.id});
+        let answer:string;
+        if(target==='home'){
+          const opened=view==='home'||await commitNavigation(this,'home',()=>openInternalView(this,'home',chat));
+          answer=opened?'You’re on Home.':'I couldn’t open Home.';
+        }else{
+          answer='message' in target?target.message:'I couldn’t open that note. Try again from Notes.';
+          if('id' in target&&await openNamedNote(this,target,chat)){
+            answer=`Opened “${target.title}” in Notes.`;
+            if(selectedConversation&&noteSession)recentNotes.set(this,{conversationId:selectedConversation,session:noteSession,messageId,id:target.id});
+          }
         }
         if(this.live&&!document.hidden&&sendBinding()===bound)this.agentSay(answer);
       }catch{

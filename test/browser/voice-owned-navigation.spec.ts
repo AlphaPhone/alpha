@@ -20,12 +20,31 @@ test.afterEach(async({page},info)=>{if(info.status!==info.expectedStatus)await i
 for(const detent of ['sheet','full'])test(`canonical own Notes Calendar Home navigation keeps ${detent} voice through matching speech and rearm`,async({page},info)=>{
  await setup(page,detent);const originalContexts:any[]=[];
  for(const [index,target] of ['notes','calendar','home'].entries()){
+  if(target==='home')await page.evaluate(()=>(window as any).ownedVoiceNavigation.prompt='Open Home and keep our conversation open.');
   await utterance(page,target);await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');await expect(voice(page).getByRole('button',{name:'Stop voice conversation',exact:true})).toBeVisible();await expect(page.locator('html')).toHaveAttribute('data-active-view',target);
   const observed=await page.evaluate(async()=>{const f=(window as any).ownedVoiceNavigation;return {chat:f.shell.S().chat,toast:f.shell.S().toast,claims:f.claims,acks:f.acks,draft:f.shell.S().draft,reply:f.shell.messageReplyTarget===f.reply,edit:f.shell.messageEditTarget===f.edit,notes:await(await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw()===f.notesRaw,inputs:f.inputs,requests:f.requests,starts:(window as any).cloudNotesVoice.starts};});
   expect(observed).toMatchObject({chat:detent,toast:'',claims:index+1,acks:index+1,draft:'Retained unsent draft',reply:true,edit:true,notes:true,starts:index+1});expect(observed.inputs[index].context.view).toBe(index===0?'home':['notes','calendar'][index-1]);expect(observed.inputs.every((input:any)=>input.conversationId===observed.inputs[0].conversationId)).toBe(true);const claim=observed.requests[index*2],ack=observed.requests[index*2+1];expect(claim.path).toBe('/api/views/interact-claim');expect(ack.path).toBe('/api/views/interact-result');expect(ack.body).toMatchObject({...claim.body,success:true,result:{switched:true}});originalContexts.push(observed.inputs[index].context);expect(observed.inputs.map((input:any)=>input.context)).toEqual(originalContexts);
   await page.screenshot({path:info.outputPath(target+'-'+detent+'.png'),animations:'disabled'});await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());await expect(voice(page)).toHaveAttribute('data-voice-state','listening');if(index<2)await page.waitForTimeout(1600);
  }
  await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await expect(voice(page)).toHaveCount(0);await noPhysicalOrLocalVoice(page);
+});
+test('a standalone spoken Home request switches the screen without an inference request',async({page})=>{
+ await setup(page);
+ await utterance(page,'notes');
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ await page.evaluate(()=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.finishPlayback();f.prompt='Okay, thank you. Can you go home now?';
+ });
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ await utterance(page);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+ await expect(page.getByText('You’re on Home.',{exact:true})).toBeVisible();
+ await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(1);
+ await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+ await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
 });
 for(const detent of ['sheet','full'])test(`a completed website request keeps Talk in the same ${detent} for a spoken page question`,async({page})=>{
  await setup(page,detent);

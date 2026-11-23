@@ -152,6 +152,23 @@ test('a reader that is not ready yet is asked again after each tab change until 
   assert.equal(host.reads, 3);
 });
 
+test('a visible title-only document can hydrate text without a tab event', async () => {
+  const answers = [{title: 'Alpha Compute', textUnavailable: 'not readable'}, {title: 'Alpha Compute', text: HERO}];
+  const {host, context} = fakeHost({read: async () => answers.shift()});
+  const result = await turn(context);
+  assert.equal(result.text, HERO);
+  assert.equal(host.reads, 2);
+});
+
+test('a page change while the read is pending cannot attach text from the stale page', async () => {
+  let release;
+  const {host, context} = fakeHost({read: () => new Promise(resolve => { release = resolve; })});
+  const result = turn(context);
+  host.change(page({tab:'private',private:true,navigation:'8'}));
+  release({text:HERO});
+  assert.equal(await result, undefined);
+});
+
 test('a page only another browser can show is not readable at once, even though it never commits', async () => {
   const {host, context} = fakeHost({current: page({loading: true, readable: false})});
   const started = Date.now();

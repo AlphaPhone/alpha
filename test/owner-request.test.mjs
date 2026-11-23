@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { directOwnerAction, emailOwnerRequest, namedNoteOpenRequest, openAfterNoteCreate, referencedNoteOpenRequest, smsOwnerRequest } from '../apps/app/src/ui/device-actions/owner-request.ts';
+import { directOwnerAction, emailOwnerRequest, homeOpenRequest, namedNoteOpenRequest, openAfterNoteCreate, referencedNoteOpenRequest, smsOwnerRequest } from '../apps/app/src/ui/device-actions/owner-request.ts';
 
 test('direct messages preserve the exact authored recipient and body and distinguish a draft',()=>{
   assert.deepEqual(smsOwnerRequest('Send a text to Carson saying On my way.'),{send:true,recipient:'carson',body:'On my way.'});
@@ -74,4 +74,11 @@ test('note follow-ups and create-and-open keep distinct navigation intent',()=>{
   assert.ok(openAfterNoteCreate('Could you write a note called Budget, then show me that note?'));
   assert.ok(!openAfterNoteCreate('Make a note called Budget and open Calendar.'));
   assert.ok(!openAfterNoteCreate('Write a note about how to open Calendar.'));
+});
+
+test('Home navigation recognizes a standalone request and leaves other requests to the agent',()=>{
+  for(const prompt of ['Go home.','Okay, thank you. Can you go home now?','Can you switch back to the home view?', 'Thank you. Can you go back home, please?'])
+    assert.equal(homeOpenRequest(prompt),true,prompt);
+  for(const prompt of ['Don’t go home.','Tell me when to go home.','Go home and call Carson.','Open my browser homepage.'])
+    assert.equal(homeOpenRequest(prompt),false,prompt);
 });

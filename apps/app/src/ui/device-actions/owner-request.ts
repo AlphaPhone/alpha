@@ -16,10 +16,19 @@ function word(value: string) {
 
 const conversationalLead = /^(?:(?:thanks|thank you|okay|ok|sure|hmm+|um+|uh)[,.!]\s+)*/i;
 
-function noteCommand(text: string) {
+function navigationCommand(text: string) {
   return ownerCommand(text.trim().replace(conversationalLead, "")).replace(/[.!?]+$/, "")
-    .replace(/(\b(?:note|notes app|in notes)|["”])\s+please$/i, "$1")
     .replace(/\s*,\s*please$/i, "").trim();
+}
+
+export function homeOpenRequest(text: string): boolean {
+  return /^(?:open (?:the )?home(?: (?:view|screen))?|go (?:back )?home|(?:go|switch|return) (?:back )?to (?:the )?home(?: (?:view|screen))?)(?: now)?$/i.test(navigationCommand(text));
+}
+
+function noteCommand(text: string) {
+  return navigationCommand(text)
+    .replace(/(\b(?:note|notes app|in notes)|["”])\s+please$/i, "$1")
+    .trim();
 }
 
 /** A local editor navigation request. An app name alone or an unspecified note stays in chat. */
