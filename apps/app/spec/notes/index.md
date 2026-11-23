@@ -11,11 +11,11 @@ The folder list, the origin links and the earlier device Trash that the earlier 
 encrypted connection slots move into the phone's secure store, as spec/platform/storage.md moves a
 legacy slot, before Notes first reads each of them. The earlier Alpha's device collection and its
 unsaved changes remain in their original encrypted slots and can be reviewed in
-[Previous notes](./previous-device.md).
+[Previous notes](./previousDevice.md).
 
 | Area | Specifications |
 | --- | --- |
-| Previous Notes | [Read earlier on-device notes and unsaved edits](./previous-device.md) |
+| Previous Notes | [Read earlier on-device notes and unsaved edits](./previousDevice.md) |
 | Records | [Collection under the current owner](./collection.md), [editor drafts and saves](./editor.md), [list order, kinds and filters](./list.md), [folders](./folders.md) |
 | Trash | [Trash, restore and three-day erase](./trash.md), [recording cleanup after erase](./cleanup.md) |
 | Recording | [Recorder](./recorder.md), [pending recording journal](./recordingJournal.md), [saved audio and transcript windows](./audio.md), [device audio custody](./audioCustody.md), [opening Notes from the recording notification](./recordingOpen.md) |
