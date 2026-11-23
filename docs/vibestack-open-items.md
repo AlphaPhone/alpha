@@ -68,8 +68,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 - **Telephony:** `useComms` and CallBar approve/decline should call `commsReviewFromAssistant().approve/decline` (`src/assistant/call-facts.vibe`) after CommsStage, so a bar approval runs through DeviceReview. `askAlpha` should call `Assistant.askComms(key, text)` so asking the same text twice is detected.
 - **Clock:** the workflow notice tap calls `flows.askAboutNotice(id, revision, …)` (`src/clock/notifications.vibe`); it should build its question with the assistant's `workflowStepSource(notice, workflow, step, excerpt)` (`src/assistant/draft.vibe`). The clock area has no listener yet for the new native `remindersChanged`, `notificationsChanged` and `mirrorChanged` events.
-- **Workflows:** `src/workflows/notices.vibe` should call `DeviceReview.workflowStep(runId, stepId)` in its Executing phase, so an admitted phone step actually runs. `WorkflowCalendar` (`src/workflows/calendarRanges.vibe`) has no screen consumer; the simulator still uses the pure range helpers. The `post_notification` bindingHash omits the proposal digest, because `ExecutorCall` carries none.
-- **Notes:** `create_note` still treats "Workflows in front" as a workflow run. Notes sits before the assistant in the runtime order, so it needs a port, filled by the shell from `DeviceReview.callFacts(call).workflow`. `NotesListFilter.negotiate` and `filesCapabilities` can read the advertised names once the shell fills `AdvertisedCapabilities`.
+- **Notes:** `notes_list_filter` is negotiated from `AdvertisedCapabilities.names()`, so it stays refused until the shell fills that port; the assistant's `filesCapabilities` waits for the same.
 - **Maps:** `src/maps/failure.vibe` could use account's `limitOfRefusal` instead of reading `resetAt` itself.
 - **Calendar:** `surfacesBack()` in `src/web/calendar/index.tsx` is no longer used and can be dropped. A device-calendar event saved from a note is not back-linked, because Calendar's new-event form always writes to the agent calendar. `linkedProviderEvents` mapped-copy suppression is not wired (legacy did not use it either).
 
@@ -138,10 +137,27 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - the strict DoneFrame refuses `awaitingReview`, and DoneFrame notices are never produced;
   - there is no shared-note read-reply lease (`readReply`/`completeReadReply`);
   - `./client` does not re-export `learnPeer`/`comparePeer`/`statusRead`.
-- **agent:** a workflow device-offer helper is missing, so `read_selected_notes`/`create_note` can answer DEVICE_STEP_UNSUPPORTED.
 - **agent/voice:** `VoiceReplyAction` has no failure flag, so the "email action failed" line is unreachable.
 - **cloud:** `@elizaos/cloud` has no `CloudServices.client.googleCalendarSync(request, { signal })` (assumed signature, used by `src/calendar/deviceSync.vibe`), and the device route table lacks `creditsCheckout`.
 - **plugin-inbox:** `inboxComposeActionName` is exported only from the package root, so voice keeps a local copy.
+
+## Notes, Files and Workflows (parity audit, still open)
+
+- **OWNER:** The legacy manual workflow step editor (palette, per-step settings, Manual/Time trigger with weekday chips, "From run day"/"Fixed dates") is not ported: a workflow is made only by describe → draft → save, and the screen always saves a new workflow. Retire the editor, or port it? Either way the draft review should show each step's scope (which notes, calendars, text or notification), not only its operation label, and a saved workflow needs a "Change" that calls `WorkflowDefinitions.save(workflowId)`.
+- **Workflows, upstream routes:** `ReminderSource` and `DefinitionSource` (`src/workflows/automations.vibe`) read `/api/lifeops/reminders` and `/api/lifeops/definitions`, and reminder snooze posts to `/api/lifeops/occurrences/{id}/snooze`; vibestack-dp serves none of them. Routines now live at `/api/personal-assistant/routines` (GET, POST, PATCH, DELETE, `/{id}/occurrence`), with another record shape and PATCH, which `WorkflowApi` does not send. Port the two sources and their changes (and `familyOf`, `spec/workflows/automations.md`), or add the routes upstream.
+- **Workflows, upstream routes:** `src/workflows/sources.vibe` calls `/api/workflow/hosted/cloud-delegation/{start,status,complete,cancel,revoke}`, which vibestack-dp does not serve, so a Google-through-Cloud digest grant cannot start. Add the routes upstream, or move the grant to Account's delegation service.
+- **Workflows, removed list:** there is no Removed filter, and `/api/workflow/removed-workflows` is not in `familyOf`, so Restore is reachable only while a removed workflow is still open.
+- **Workflows, screens not ported:** creating, retiming, rezoning or removing a digest schedule (the panel offers pause, resume, Run now, retry and discard; `zoneChoices` has no caller, and `DigestSourcesService.validGoogle`/`consent`/`revokeImpact`/`tick` have none either); the Background checks and Notifications switches of the digest panel (`HostedResults.setNotifications` has no caller; background delivery is now configured on Android when the account binds); the check that notifications are on when a workflow is turned on (legacy #1403); the run's output, steps and error in `RunPanel` (`WorkflowRun.output`/`events`/`error` are read nowhere); the open run as the chat's selected object (`workflow-run`); prompt presets and the delivery conversation in `PromptSheet` (`savePrompt` sends no `deliveryConversationId`, so `saveConfirmed`'s check is vacuous); Home's workflows card names and states (it shows a count); each pending approval of a run in its own review (one is shown at a time); and a screen for the browser simulator and request recovery (test mocks only).
+- **Workflows, refusal details:** `ResidentRefused` (`src/platform/resident-live.vibe` `refusalOf`) keeps only status, code and message, so a refusal's `workflowId`, `submissionId`, `mutationId` and `expectedVersionId` never reach `workflowHttpError`. Digests' `ExactStale` (409 `WORKFLOW_TYPED_NOT_APPLIED` for the kept workflow) can therefore never match. The platform area owns the fix.
+- **Notes:** "Review reminder" on a note toasts "Check time" and opens nothing: Calendar's handoff takes only `event` drafts, and nothing calls `NotesOrigins.remember("reminder", …)`. Clock must consume a `calendar-draft` of kind `reminder` and store the back-link after the save reads back.
+- **Notes:** a kept draft of a never-saved new note is kept under `noteId: ""`, so two new notes overwrite each other and neither is ever offered back (`spec/notes/editor.md` promises "closing Alpha loses nothing"). Key kept additions by `creationId` and offer them through the kept-review bar.
+- **Notes:** a denied microphone shows "Mic off" and a retry, but does not open the startup-permissions step for the microphone as legacy did; `ShellPermissions.reopen` takes a step index that Notes does not know.
+- **Notes:** the voice-note view has no Cancel transcription, no "Ask Alpha about this transcript", no action-item ticks and no seek from a transcript line, and `NotesAudio` keeps uploading windows after the owner leaves the note.
+- **Notes:** an earlier device Trash row this version cannot read is held in its slot, and nothing tells the owner that earlier deleted notes need review.
+- **Notes, models:** `recordingClock` (`src/notes/recorder.vibe`) has no rule (legacy proved it in `note-recorder.dfy`), and `priorNeedsReview` matches upstream's English sentence.
+- **Files:** the legacy Recent index (`alpha.files.recent.v1`, `alpha.files.open.v1`) is not read into Recent, and the Move/Copy destination picker in `FilesScreen.tsx` is React-local state with no rule in `spec/files/mutations.md`.
+- **Files/assistant:** a chat attachment picked from storage is read through `AlphaMailAttachments.readSelected` (PDF, PNG, JPEG, WebP and .txt, up to 5 MiB), while `src/assistant/files-bridge.vibe` still offers GIF, CSV, Markdown and JSON and legacy read 20 MiB; those picks fail with ReadFailed.
+- **No meta file:** `WorkflowsScreen`, `ResultNoticeSurface`, `NotesScreen`, `NotesRecordingIndicator` and `FilesScreen` have no `.meta.tsx`.
 
 ## Unverified in the code-only phase
 
@@ -155,11 +171,8 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - camera: `camera__agentCapture` `panelLimitMs`;
   - clock: `clock__agentReview`, `clock__notifications` ConsumeAnswer and consumeAccepted;
   - inbox: keepPrevious, inboxAdvertised, `decodeState`/`machine` of `inbox__drafts` and `inbox__operations`;
-  - notes: `noteSaveResult`;
   - settings: Elsewhere, calendarSettingsRoute and others;
-  - telephony: askLeavesField, `searching`;
-  - files: `shell__navigation` `initial`/`Nav`;
-  - workflows: Kept, PageWrite, PageEnd, historyLimit, `workflows__deviceSteps` noticePath, postedOutcome, PostedAnswer.
+  - telephony: askLeavesField, `searching`.
 - **Effect and VibeLang typing:**
   - `Layer.unwrap` in `storedOrHeld`;
   - `Effect.onInterrupt`;
