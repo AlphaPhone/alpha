@@ -1,16 +1,19 @@
-// spec/shell/overview.md, "Story: See my day on Home"
+// spec/shell/overview.md, "Story: See my day on Home"; spec/shell/overview.md, "Calendar's Home card stands in for the event card, after an overdue reminder"
 import { CalendarDays, Mail, Sparkles, Video, Workflow } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Overview } from "../../../gen/shell__overview.ts";
-import { agendaCard, attentionCard, briefCard, dateLine, setupLink, workflowsCard } from "../../../gen/shell__overview.ts";
+import { attentionCard, briefCard, dateShown, ownAgendaCard, setupLink, workflowsCard } from "../../../gen/shell__overview.ts";
 import type { AppId } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 import { agendaCopy, attentionCopy, briefCopy, dateLabel, workflowsCopy } from "./overviewCopy.ts";
 
+/** The daily overview cards and the agenda slot that replaces the event card. */
 export interface OverviewCardsProps {
   /** The overview machine's state. */
   overview: Overview;
+  /** Calendar's card of the next event: it takes the event card's place, and an overdue reminder still comes first. */
+  agenda?: ReactNode;
   /** Opens the app a card stands for. */
   onOpen: (app: AppId) => void;
 }
@@ -46,22 +49,27 @@ function CardShell({ label, description, icon, card, state, onOpen, children }: 
  * Home's daily overview: the cards that have something to show, or the date with a Gmail setup link.
  * @model spec/shell/overview.md
  */
-export function OverviewCards({ overview, onOpen }: OverviewCardsProps) {
-  if (dateLine(overview)) {
+export function OverviewCards({ overview, agenda, onOpen }: OverviewCardsProps) {
+  const agendaText = agendaCopy(overview);
+  const calendarCard = agenda !== undefined;
+  const ownAgenda = ownAgendaCard(overview, calendarCard);
+  if (dateShown(overview, calendarCard)) {
     return (
-      <div className="flex items-baseline justify-between gap-4 px-5" data-alpha-home-date>
-        <p className="font-serif text-3xl">{dateLabel(overview.now)}</p>
-        {setupLink(overview) && <Button variant="ghost" size="sm" onClick={() => onOpen("account")}>Set up Gmail</Button>}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-4 px-5" data-alpha-home-date>
+          <p className="font-serif text-3xl">{dateLabel(overview.now)}</p>
+          {setupLink(overview) && <Button variant="ghost" size="sm" onClick={() => onOpen("account")}>Set up Gmail</Button>}
+        </div>
+        {agenda !== undefined && <div className="flex px-5">{agenda}</div>}
       </div>
     );
   }
-  const agendaText = agendaCopy(overview);
   const mail = attentionCopy(overview);
   const brief = briefCopy(overview);
   const flows = workflowsCopy(overview);
   return (
     <div className="flex snap-x gap-3 overflow-x-auto px-5 pb-1" role="list" aria-label="Today">
-      {agendaCard(overview) && (
+      {ownAgenda && (
         <CardShell card="agenda" state={agendaText.overdue ? "overdue" : agendaText.stale ? "stale" : "item"} label={agendaText.label}
           description={agendaText.description} icon={<CalendarDays className="size-5" />} onOpen={() => onOpen(agendaText.overdue ? "reminders" : "calendar")}>
           <span className={cn("font-mono text-xs uppercase tracking-widest", agendaText.overdue ? "text-destructive" : "text-muted-foreground")}>{agendaText.heading}</span>
@@ -74,6 +82,7 @@ export function OverviewCards({ overview, onOpen }: OverviewCardsProps) {
           {agendaText.next && <span className="truncate text-sm text-muted-foreground">{agendaText.next}</span>}
         </CardShell>
       )}
+      {agenda}
       {attentionCard(overview) && (
         <CardShell card="attention" state={overview.attention === "AttentionStale" ? "stale" : "ready"} label={mail.label} description={mail.status}
           icon={<Mail className="size-5" />} onOpen={() => onOpen("inbox")}>

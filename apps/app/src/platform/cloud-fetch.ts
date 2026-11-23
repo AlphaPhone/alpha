@@ -1,5 +1,5 @@
 // spec/platform/index.md, "The phone's key stays with native, and a leaving screen cancels only its own call"; spec/platform/index.md, "Only a route the Cloud client lists is requested"
-import type { CloudClient as NativeCloud, CloudMethod, CloudPath } from "@elizaos/os/bridges/definitions/cloud";
+import type { CloudClient as NativeCloud, CloudMethod, CloudPath, EnvironmentName } from "@elizaos/os/bridges/definitions/cloud";
 
 const methods = new Set<string>(["GET", "POST", "PATCH", "DELETE"]);
 
@@ -10,10 +10,10 @@ export function textOf(bytes: Uint8Array): string {
 
 /**
  * A `fetch` for `@elizaos/cloud/client` over the native Cloud plugin: only requests to `base` go out, as
- * the plugin's own calls, so the key it holds is attached by native and never by the page.
+ * the plugin's own calls in `environment`, so the key it holds is attached by native and never by the page.
  * @throws {never}
  */
-export function nativeCloudFetch(cloud: NativeCloud, origin: string): typeof globalThis.fetch {
+export function nativeCloudFetch(cloud: NativeCloud, origin: string, environment?: EnvironmentName): typeof globalThis.fetch {
   return async (input, init) => {
     const request = new Request(input, init);
     const url = new URL(request.url);
@@ -30,6 +30,7 @@ export function nativeCloudFetch(cloud: NativeCloud, origin: string): typeof glo
       ...(url.search === "" ? {} : { query: Object.fromEntries(url.searchParams) }),
       ...(Object.keys(headers).length === 0 ? {} : { headers }),
       ...(body === undefined ? {} : { body }),
+      ...(environment === undefined ? {} : { environment }),
       signal: request.signal,
     });
     const answer = new Headers();

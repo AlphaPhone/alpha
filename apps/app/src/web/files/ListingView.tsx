@@ -15,6 +15,7 @@ const SORTS: readonly { mode: SortMode; label: string; order: [string, string] }
   { mode: "BySize", label: "Size", order: ["Largest first", "Smallest first"] },
 ];
 
+/** The folder or category shown, its rows, and what a tap, a press, a sort and the view switch do. */
 export type ListingViewProps = {
   browser: Browser;
   /** The name of the volume the folder is on. */

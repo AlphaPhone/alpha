@@ -1,13 +1,14 @@
-// spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"
+// spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"; spec/settings/native.md, "The problem log keeps fifty entries, newest last, with only the fields its source allows"
 import { sanitizeCrashEntries, type NativeCrashEntry } from "@elizaos/os/bridges/system"
-import { type Export, type Notice, type Problem, Machine } from "../../gen/settings__diagnostics.effect.vibe"
+import { type Export, type Notice, type Problem, Machine, mayRecordInference } from "../../gen/settings__diagnostics.effect.vibe"
 import type { DeviceRead } from "../../gen/settings__facts.ts"
 import { Build } from "../platform/build.vibe"
 import { CrashJournal } from "../platform/crash-journal.vibe"
 import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
 import { attempt, call } from "./call.vibe"
 import { saveFile, shippedNotices } from "./files.ts"
-import { LicenceNotice, ShareReply } from "./native.schema.vibe"
+import { DiagnosticsFacts, LicenceNotice, ResidentDiagnostics, ShareReply } from "./native.schema.vibe"
 
 export const DIAGNOSTICS_FORMAT = "alpha-diagnostics/v1"
 
@@ -32,6 +33,8 @@ export function describeProblem(entry: NativeCrashEntry): Problem {
 }
 
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/
+const JOURNAL_CAP = 50
+const STATUS_LIMIT = "10 seconds"
 
 /** The support report: allowlisted fields of strict shapes only; anything else is dropped, not scrubbed. */
 export function buildReport(input: { readonly at: number; readonly native: boolean; readonly testMocks: boolean; readonly read: DeviceRead; readonly entries: ReadonlyArray<NativeCrashEntry>; readonly facts: Record<string, unknown> }) {
@@ -57,9 +60,26 @@ export function buildReport(input: { readonly at: number; readonly native: boole
   }
 }
 
+/** The notices a shipped notice file holds: each complete one once by name and version, its flags and what they oblige. */
+export function noticesOf(value: unknown): Notice[] {
+  const list = Array.isArray(value) ? value : []
+  const seen = new Set<string>()
+  return list.flatMap((item) => {
+    const notice = Option.getOrUndefined(Schema.decodeUnknownOption(LicenceNotice)(item))
+    const key = notice === undefined ? "" : `${notice.name}@${notice.version}`
+    if (notice === undefined || seen.has(key)) return []
+    seen.add(key)
+    return [{
+      name: notice.name, version: notice.version, licence: notice.license, source: notice.source ?? "", text: notice.text ?? "",
+      flags: (notice.flags ?? []).filter((flag) => flag !== ""), obligations: (notice.obligations ?? []).flatMap((o) => o.note === "" ? [] : [o.note]),
+    }]
+  })
+}
+
 /** The problem log, the diagnostics export and the licence notices. */
 export service Diagnostics {
-  readLog(): void!!
+  /** Read the log; an explicit read also asks the on-device agent for a Cloud failure it recorded. */
+  readLog(explicit: boolean): void!!
   clearLog(): void!!
   exportReport(read: DeviceRead): void!!
   loadLicences(): void!!
@@ -68,21 +88,44 @@ export service Diagnostics {
 effect function entries() {
   const journal = try CrashJournal
   const now = try Clock.currentTimeMillis
-  return sanitizeCrashEntries((try journal.read()).entries, now)
+  const log = (try journal.read()).entries
+  const natives = sanitizeCrashEntries(log, now)
+  const inference: Problem[] = log.flatMap((entry) => entry.source === "inference" ? [{ at: entry.at, title: "Cloud AI request failed", detail: "Details unavailable" }] : [])
+  const problems = [...natives.map(describeProblem), ...inference].sort((a, b) => a.at - b.at).slice(-JOURNAL_CAP)
+  return { natives, problems }
 }
 
 /** Diagnostics over the diagnostics Machine it is given. */
 export const diagnostics = Layer.effect(Diagnostics, effect {
   const held = try Machine
   const native = try Native
+  const resident = try Resident
   const build = (try Build).info
   const journal = try CrashJournal
   const within = <A, E>(program: A!E!(Native | CrashJournal)) => Effect.provideService(Effect.provideService(program, Native, native), CrashJournal, journal)
+  const asks = { newest: 0 }
+
+  effect function askAgent() {
+    asks.newest += 1
+    const mine = asks.newest
+    const started = try Clock.currentTimeMillis
+    if ((try resident.status()) !== "running") return
+    const answer = try (timeout(resident.json("GET", "/api/status"), STATUS_LIMIT) catch () => undefined)
+    const elapsed = (try Clock.currentTimeMillis) - started
+    if (answer === undefined || !mayRecordInference(mine, asks.newest, elapsed)) return
+    const status = Option.getOrUndefined(Schema.decodeUnknownOption(ResidentDiagnostics)(answer.data))
+    if (status?.cloudInferenceFailure === undefined || status.cloudInferenceFailure === null) return
+    try journal.recordInference(status.cloudInferenceFailure)
+    const read = try attempt(entries())
+    if (read !== undefined && mine === asks.newest) try (held.send({ type: "logPublished", problems: read.problems }) catch () => undefined)
+  }
+
   return {
-    readLog: () => within(effect {
+    readLog: (explicit: boolean) => within(effect {
       const under = (try held.get()).version
       const read = try attempt(entries())
-      try (held.send({ type: "logRead", under, ok: read !== undefined, problems: (read ?? []).map(describeProblem) }) catch () => undefined)
+      try (held.send({ type: "logRead", under, ok: read !== undefined, problems: read?.problems ?? [] }) catch () => undefined)
+      if (explicit) try askAgent()
     }),
     clearLog: () => within(effect {
       const begun = try (held.send({ type: "confirmClearLog" }) catch () => undefined)
@@ -90,15 +133,15 @@ export const diagnostics = Layer.effect(Diagnostics, effect {
       const done = try attempt(journal.clear())
       try (held.send({ type: "cleared", ok: done !== undefined }) catch () => undefined)
       const read = try attempt(entries())
-      if (read !== undefined) try (held.send({ type: "logPublished", problems: read.map(describeProblem) }) catch () => undefined)
+      if (read !== undefined) try (held.send({ type: "logPublished", problems: read.problems }) catch () => undefined)
     }),
     exportReport: (read: DeviceRead) => within(effect {
       const begun = try (held.send({ type: "beginExport" }) catch () => undefined)
       if (begun === undefined) return
       const isNative = build.variant !== "browser"
-      const facts = isNative ? try attempt(native.invoke("AlphaDevice", "diagnosticsFacts")) : undefined
+      const facts = isNative ? try attempt(call("AlphaDevice", "diagnosticsFacts", DiagnosticsFacts)) : undefined
       const at = try Clock.currentTimeMillis
-      const report = buildReport({ at, native: isNative, testMocks: build.testMocks, read, entries: (try attempt(entries())) ?? [], facts: typeof facts === "object" && facts !== null ? facts as Record<string, unknown> : {} })
+      const report = buildReport({ at, native: isNative, testMocks: build.testMocks, read, entries: (try attempt(entries()))?.natives ?? [], facts: facts ?? {} })
       const text = JSON.stringify(report, null, 2) + "\n"
       let answer: Export = "ExportFailed"
       if (isNative) {
@@ -114,16 +157,7 @@ export const diagnostics = Layer.effect(Diagnostics, effect {
       const begun = try (held.send({ type: "loadLicences" }) catch () => undefined)
       if (begun === undefined) return
       const value = try attempt(tryPromise(() => shippedNotices()))
-      const list = Array.isArray(value) ? value : []
-      const seen = new Set<string>()
-      const notices: Notice[] = list.flatMap((item) => {
-        const notice = Option.getOrUndefined(Schema.decodeUnknownOption(LicenceNotice)(item))
-        const key = notice === undefined ? "" : `${notice.name}@${notice.version}`
-        if (notice === undefined || seen.has(key)) return []
-        seen.add(key)
-        return [{ name: notice.name, version: notice.version, licence: notice.license, source: notice.source ?? "", text: notice.text ?? "", flags: [...(notice.flags ?? [])] }]
-      })
-      try (held.send({ type: "licencesAnswered", notices }) catch () => undefined)
+      try (held.send({ type: "licencesAnswered", notices: noticesOf(value) }) catch () => undefined)
     },
   }
 })

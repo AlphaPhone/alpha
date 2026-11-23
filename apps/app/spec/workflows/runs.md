@@ -77,8 +77,9 @@ pure def alwaysAConfirmationIsOfTheCurrentVersion(r: Runs): bool = r.confirming 
 
 ### A notice opens exactly the run it names
 
-Opening a run from its notice (the clock area's workflow notice, #39954) shows that run of the open
-workflow and selects it in the history.
+Opening a run from its notice (the clock area's workflow notice, #39954) shows that run of its
+workflow at the version the notice names, and selects it in the history; a removed workflow, another
+version or another workflow's run opens nothing (upstream `notices.md`, `openWorkflowNotice`).
 
 ```quint
 pure def canShowRun(r: Runs, runId: str, finished: bool, cancelRequested: bool, status: str, reconciliation: str): bool = r.owner != "" and r.workflowId != "" and runId != ""

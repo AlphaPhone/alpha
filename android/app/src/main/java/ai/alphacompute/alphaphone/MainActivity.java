@@ -390,6 +390,8 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaMapsTransportPlugin.class);
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
+  // Settings › Network: nearby networks, a reviewed join and the system Internet panel.
+  registerPlugin(ai.eliza.plugins.wifi.WiFiPlugin.class);
   registerPlugin(AlphaBrowserPlugin.class);
   registerPlugin(AlphaCalendarPlugin.class);
   registerPlugin(AlphaDeletionsPlugin.class);
@@ -413,7 +415,6 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaNotificationsPlugin.class);
   registerPlugin(AlphaHostedResultsPlugin.class);
   registerPlugin(AlphaGmailPlugin.class);
-  registerPlugin(AlphaListenerPlugin.class);
   registerPlugin(ai.eliza.plugins.system.SensePlugin.class);
   registerPlugin(AlphaPasswordsPlugin.class);
   // The native image gate is checked again by every telephony operation.

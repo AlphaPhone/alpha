@@ -4,6 +4,7 @@ import { canDismissOutcome, canUndo, noticeOf, type DeletionNotices } from "../.
 import { Button } from "../components/ui/index.ts";
 import { deletionReport, deletionRow } from "./text.ts";
 
+/** The owner's pending deletions, and Undo, dismissal and a fresh read of them. */
 export type DeletionUndoProps = {
   /** The owner's pending deletions as the journal reported them. */
   notices: DeletionNotices;

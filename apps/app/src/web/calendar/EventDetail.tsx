@@ -1,11 +1,19 @@
-// spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/editor.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"; spec/calendar/editor.md, "A managed Google event is never deleted here, and its other repeating changes reach one occurrence"; spec/calendar/device.md, "A lost edit or an unknown delete holds only its own event"
+// spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"; spec/calendar/editor.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"; spec/calendar/editor.md, "A managed Google event is never deleted here, and its other repeating changes reach one occurrence"; spec/calendar/device.md, "A lost edit or an unknown delete holds only its own event"
 import { Trash2, Pencil, Video, MapPin, ExternalLink, RefreshCw } from "lucide-react";
 import { useState } from "react";
+import { type ReplyWord, replyWord } from "../../../gen/calendar__presentation.ts";
 import { cancellationMode, managedDeleteOffered, managedScopeAllowed, type CancellationMode, type RecurrenceScope } from "../../../gen/calendar__editor.ts";
 import type { EventRecord, CalendarRecord as CalendarSummary } from "../../calendar/feed.schema.vibe";
 import { type CalendarRow, managedGoogle, repeatText } from "../../calendar/model.vibe";
-import { Button, RadioGroup, RadioGroupItem, Sheet, SheetContent } from "../components/ui/index.ts";
+import { Avatar, Button, RadioGroup, RadioGroupItem, Sheet, SheetContent } from "../components/ui/index.ts";
 import { intervalDetail } from "./layout.ts";
+
+/** One guest of an event, as the people list shows them. */
+export interface EventPerson {
+  readonly key: string;
+  readonly name: string;
+  readonly reply: ReplyWord;
+}
 
 /** What the detail of an agent Calendar event knows about deleting and joining it. */
 export interface EventFacts {
@@ -15,7 +23,13 @@ export interface EventFacts {
   readonly provider: string | undefined;
   readonly repeat: string;
   readonly invitePending: boolean;
+  readonly people: readonly EventPerson[];
 }
+
+const REPLY_WORDS: Readonly<Record<ReplyWord, string>> = {
+  NoReplyWord: "", WordOrganizer: "Organizer", WordAwaiting: "Awaiting reply", WordGoing: "Going", WordMaybe: "Maybe",
+  WordDeclined: "Declined", WordDelegated: "Delegated", WordInvited: "Invited",
+};
 
 function https(value: string | null | undefined): string | undefined {
   if (!value) return undefined;
@@ -29,7 +43,7 @@ function https(value: string | null | undefined): string | undefined {
 
 /** The facts of an agent Calendar event: its cancellation mode, managed source, links, repeat line and unanswered invitation. */
 export function eventFacts(event: EventRecord | undefined, calendar: CalendarSummary | undefined): EventFacts {
-  if (event === undefined) return { mode: "OrganizerCancel", managed: false, join: undefined, provider: undefined, repeat: "", invitePending: false };
+  if (event === undefined) return { mode: "OrganizerCancel", managed: false, join: undefined, provider: undefined, repeat: "", invitePending: false, people: [] };
   const self = event.attendees.find((guest) => guest.self);
   const organizerEmail = typeof event.organizer?.email === "string" ? event.organizer.email.toLowerCase() : "";
   const mode = cancellationMode(event.organizer?.self === true, self !== undefined, self?.organizer === true,
@@ -38,9 +52,14 @@ export function eventFacts(event: EventRecord | undefined, calendar: CalendarSum
     mode, managed: calendar !== undefined && managedGoogle(calendar), join: https(event.conferenceLink),
     provider: event.provider === "google" ? https(event.htmlLink) : undefined, repeat: repeatText(event.recurrence, event.recurringEventId),
     invitePending: self !== undefined && !self.organizer && (self.responseStatus === "needsAction" || self.responseStatus === "needs-action"),
+    people: event.attendees.map((guest, index) => {
+      const name = guest.displayName?.trim() || guest.email?.trim() || "Guest";
+      return { key: `${index}:${guest.email ?? name}`, name, reply: replyWord(guest.organizer, guest.responseStatus?.trim() ?? "") };
+    }),
   };
 }
 
+/** What the event detail sheet shows and the changes it offers. */
 export type EventDetailProps = {
   row: CalendarRow | undefined;
   facts: EventFacts;
@@ -87,6 +106,19 @@ export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, on
           )}
           <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">{row.writable ? `${row.calendarName} · ${row.account}` : `${row.calendarName} · Read only`}</p>
           {row.notes && <p className="whitespace-pre-wrap text-sm">{row.notes}</p>}
+          {facts.people.length > 0 && (
+            <ul aria-label="People" className="flex flex-col">
+              {facts.people.map((person) => (
+                <li key={person.key} className="flex min-h-14 items-center gap-3">
+                  <Avatar name={person.name} size="sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm">{person.name}</span>
+                    {REPLY_WORDS[person.reply] && <span className="block text-sm text-muted-foreground">{REPLY_WORDS[person.reply]}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           {facts.invitePending && <p role="status" className="text-sm">You haven’t answered this invitation.</p>}
           {facts.managed && <p className="text-sm text-muted-foreground">{decline ? "Decline this invitation in Google Calendar." : "Delete this event in Google Calendar."}</p>}
           {held && (

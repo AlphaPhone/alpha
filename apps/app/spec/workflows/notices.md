@@ -5,7 +5,7 @@ whoever started the run: a schedule, the agent or the owner. A settled step's no
 When the account changes the notices of the other owner are suspended, and when that owner returns
 each is rechecked against the run before it is posted again, quietly. Tapping a notice opens the
 exact run it names; the clock area owns the tap (its workflow notices spec) and
-opens the run through Workflows' `WorkflowRuns.open` (legacy `WorkflowNoticeDelivery`,
+opens the run through Workflows' `WorkflowRuns.open` (upstream `notices.md`: `workflowApprovalNoticeIdentity`, `revalidateWorkflowApprovalNotice`; legacy `WorkflowNoticeDelivery`,
 `WorkflowNoticeTaps`; PRD P-75).
 
 ## Domain
@@ -20,8 +20,8 @@ type Notices = { owner: str, now: int, notices: List[Notice], waiting: List[str]
 pure val initial: Notices = { owner: "", now: 0, notices: List(), waiting: List() }
 pure val maximumApprovalMs = 604800000
 pure def sameStep(a: NoticeRoute, b: NoticeRoute): bool = a.runId == b.runId and a.step == b.step and a.owner == b.owner
-pure def noticeOf(n: Notices, runId: str, step: str): Notice =
-  n.notices.select(x => x.route.runId == runId and x.route.step == step).nthOr(0,
+pure def noticeOf(n: Notices, runId: str, stepId: str): Notice =
+  n.notices.select(x => x.route.runId == runId and x.route.step == stepId).nthOr(0,
     { route: { owner: "", workflowId: "", runId: "", versionId: "", step: "" }, state: NoticeSuspended, postedAt: 0, expiresAt: 0 })
 ```
 
@@ -33,7 +33,7 @@ pure val routeValues = Set({ owner: "ann", workflowId: "w1", runId: "r1", versio
 pure val expiresAtValues = Set(5, 100)
 pure val nowValues = Set(1, 6)
 pure val runIdValues = Set("r1", "r2")
-pure val stepValues = Set("s1", "s2")
+pure val stepIdValues = Set("s1", "s2")
 pure val workflowIdValues = Set("w1", "w2")
 ```
 
@@ -58,9 +58,9 @@ pure def alwaysANoticeLastsAtMostSevenDays(n: Notices): bool = n.notices.every(x
 ### A settled or expired step's notice is withdrawn
 
 ```quint
-pure def canStepSettled(n: Notices, runId: str, step: str): bool = noticeOf(n, runId, step).route.runId == runId and runId != ""
-pure def stepSettled(n: Notices, runId: str, step: str): Notices =
-  { ...n, notices: n.notices.select(x => not(x.route.runId == runId and x.route.step == step)) }
+pure def canStepSettled(n: Notices, runId: str, stepId: str): bool = noticeOf(n, runId, stepId).route.runId == runId and runId != ""
+pure def stepSettled(n: Notices, runId: str, stepId: str): Notices =
+  { ...n, notices: n.notices.select(x => not(x.route.runId == runId and x.route.step == stepId)) }
 pure def canTick(n: Notices, now: int): bool = now > n.now
 pure def tick(n: Notices, now: int): Notices = { ...n, now: now, notices: n.notices.select(x => x.expiresAt > now) }
 pure def alwaysNoNoticeOutlivesItsExpiry(n: Notices): bool = n.notices.every(x => x.expiresAt > n.now)
@@ -82,13 +82,13 @@ The recheck compares the workflow revision, the run, the pending proposal and it
 makes an approval that was not pending (#429).
 
 ```quint
-pure def canRechecked(n: Notices, runId: str, step: str, stillPending: bool): bool = {
-  val x = noticeOf(n, runId, step)
+pure def canRechecked(n: Notices, runId: str, stepId: str, stillPending: bool): bool = {
+  val x = noticeOf(n, runId, stepId)
   x.route.runId == runId and runId != "" and x.state == NoticeSuspended and x.route.owner == n.owner
 }
-pure def rechecked(n: Notices, runId: str, step: str, stillPending: bool): Notices =
-  if (stillPending) { ...n, notices: n.notices.listMap(x => if (x.route.runId == runId and x.route.step == step) { ...x, state: NoticeQuiet } else x) }
-  else stepSettled(n, runId, step)
+pure def rechecked(n: Notices, runId: str, stepId: str, stillPending: bool): Notices =
+  if (stillPending) { ...n, notices: n.notices.listMap(x => if (x.route.runId == runId and x.route.step == stepId) { ...x, state: NoticeQuiet } else x) }
+  else stepSettled(n, runId, stepId)
 pure def stepARecheckNeverAddsANotice(before: Notices, via: str, after: Notices): bool =
   via == "rechecked" implies after.notices.length() <= before.notices.length()
 pure def sometimesQuietRepost(n: Notices): bool = n.notices.some(x => x.state == NoticeQuiet)

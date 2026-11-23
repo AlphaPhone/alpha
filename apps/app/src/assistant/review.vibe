@@ -1,4 +1,4 @@
-// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"
+// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"
 import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type ExecutorCall, type JournalEntry } from "@elizaos/agent/client"
 import { Machine as RoutesMachine, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
 import { Machine as CustodyMachine, canDirect, contradicts, type Event as CustodyEvent, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
@@ -11,11 +11,10 @@ import { PendingListing, type PendingProposal } from "./payloads.schema.vibe"
 import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
 import type { ProposalCard } from "./transcript.vibe"
 import { ask } from "./transport.vibe"
-import { writtenNumbers } from "./grounding.vibe"
+import { browserCommand, writtenNumbers } from "./grounding.vibe"
 import { WithdrawableRequests } from "./withdrawable.vibe"
-import { withFiles } from "./files-bridge.vibe"
 
-/** How the phone describes and carries out one operation family; the shell composes every area's executors (assumed: `DeviceExecutors` from src/web/shell). */
+/** How the phone describes and carries out one operation family; each area exports its own as `operationPorts` from `src/<area>/operations.vibe`. */
 export interface OperationPorts {
   /** The operation as a typed value, or undefined when this phone cannot run it. */
   validate(operation: unknown): unknown | undefined
@@ -33,7 +32,7 @@ export interface OperationPorts {
   summarize(operation: unknown, result: Result): string
 }
 
-/** The executors of every area, provided by the shell. */
+/** The executors of every area, composed by the shell with `deviceExecutorsLive`. */
 export service DeviceExecutors {
   readonly ports: OperationPorts
 }
@@ -43,8 +42,12 @@ export interface Approval { readonly card: ProposalCard; readonly receipt?: { re
 
 /** Device action review: cards, their two approval routes, decline and the direct pass of one message. */
 export service DeviceReview {
-  /** The cards of what is pending for this device, under the current screen. */
-  pending(): readonly ProposalCard[]!!
+  /** The cards of what is pending for this device, under the current screen; `ok` is false when the listing could not be read. */
+  pending(): { readonly ok: boolean; readonly cards: readonly ProposalCard[] }!!
+  /** The screen context changed: every live card is replaced and the custody forgets its freshness; a private screen also stops it. */
+  contextChanged(sensitive: boolean): void!!
+  /** The agent session changed: a card listed under the earlier one is never approved. */
+  agentChanged(): void!!
   /** Approve a card the owner tapped. */
   approve(card: ProposalCard): Approval!!
   /** Decline a card; nothing runs. */
@@ -74,8 +77,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   const resident = try Resident
   const host = try AssistantHost
   const custody = try CustodyMachine
-  const { ports: shellPorts } = try DeviceExecutors
-  const ports = try withFiles(shellPorts)
+  const { ports } = try DeviceExecutors
   const preferences = try Preferences
   const requests = try WithdrawableRequests
   const run = <A, E>(work: Effect.Effect<A, E, Resident>) => Effect.provideService(work, Resident, resident)
@@ -114,15 +116,18 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const value: Preference = (try preferences.asksBeforeActions()) ? "PreferenceOn" : "PreferenceOff"
     return value
   }
-  effect function listing() {
+  effect function listed() {
     const data = requests.ask("GET", "/api/client-devices/proposals") catch () => undefined
     const decoded = Schema.decodeUnknownOption(PendingListing)(data)
-    return Option.isSome(decoded) ? decoded.value.proposals : []
+    return Option.isSome(decoded) ? decoded.value.proposals : undefined
+  }
+  effect function listing() {
+    return (try listed()) ?? []
   }
   effect function routesOf(card: ProposalCard) {
     const known = cards.get(card.proposalId)
     if (known !== undefined) return known
-    const made = try holdRoutes({ ...routesStart, card: card.recovered ? "RecoveredCard" : "LiveCard", consumed: consumed.has(card.proposalId), clientProposal: !consumed.has(card.proposalId) })
+    const made = try holdRoutes({ ...routesStart, card: card.state, consumed: consumed.has(card.proposalId), clientProposal: card.state === "LiveCard" && !consumed.has(card.proposalId) })
     cards.set(card.proposalId, made)
     return made
   }
@@ -211,7 +216,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function directOne(proposal: PendingProposal, text: string, messageId: string) {
     const op = ports.classOf(proposal.operation)
     const bound = proposal.requestMessageId === messageId
-    const grounded = op !== "BrowserNavigate" || ports.target(proposal.operation, text).tag !== "NoTarget"
+    const grounded = op !== "BrowserNavigate" || (ports.target(proposal.operation, text).tag !== "NoTarget" && browserCommand(text))
     try custodyStep({ type: "prefer", value: try preference() })
     try custodyStep({ type: "propose", op, workflow: proposal.workflow !== undefined, bound, grounded, listed: false })
     try custodyStep({ type: "review", visible: true })
@@ -236,13 +241,23 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   return {
     pending: () => effect {
       const identity = try host.identity()
-      if (identity === undefined) return []
-      const listed = try listing()
+      if (identity === undefined) return { ok: false, cards: [] }
+      const exposure = (try host.screen()).exposure
+      if (exposure.privateView || exposure.locked || exposure.connectionDialog || exposure.hidden) return { ok: true, cards: [] }
+      const found = try listed()
+      if (found === undefined) return { ok: false, cards: [] }
       const now = try Clock.currentTimeMillis
-      const open = listed.filter((proposal) => proposal.state === "pending" && expiryOf(proposal.expiresAt) > now && proposal.workflow === undefined && ports.validate(proposal.operation) !== undefined)
+      const open = found.filter((proposal) => proposal.state === "pending" && expiryOf(proposal.expiresAt) > now && proposal.workflow === undefined && ports.validate(proposal.operation) !== undefined)
       const made: ProposalCard[] = []
       for (const proposal of open) made.push(try cardOf(proposal, true, identity.session))
-      return made
+      return { ok: true, cards: made }
+    },
+    contextChanged: (sensitive: boolean) => effect {
+      for (const routes of cards.values()) try step(routes, { type: "contextChanged" })
+      try custodyStep(sensitive ? { type: "becomeSensitive" } : { type: "changeContext" })
+    },
+    agentChanged: () => effect {
+      try custodyStep({ type: "changeAgent" })
     },
     approve,
     decline,
@@ -265,9 +280,10 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
           continue
         }
         const target = ports.target(proposal.operation, text)
-        if (contradicts(writtenNumbers(text).length, target)) {
+        const ungrounded = ports.classOf(proposal.operation) === "BrowserNavigate" && target.tag === "NoTarget"
+        if (contradicts(writtenNumbers(text).length, target) || ungrounded) {
           requests.ask("POST", `/api/client-devices/proposals/${encodeURIComponent(proposal.id)}/decision`, { digest: proposal.digest, approved: false }) catch () => undefined
-          notices.push(target.tag === "ContactTarget" ? copy.wrongNumberContact : copy.wrongNumber)
+          notices.push(ungrounded ? copy.browserUngrounded : target.tag === "ContactTarget" ? copy.wrongNumberContact : copy.wrongNumber)
           continue
         }
         const card = try cardOf(proposal, false, identity.session)

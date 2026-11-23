@@ -16,7 +16,8 @@ The target and account are the ones the dictation opened for; the ticket names t
 type Stage = Closed | Ready | Starting | Recording | Transcribing | Recorded
 type Recognizer = OnPhone | OverNetwork
 type DictationFailure = NoFailure | MicrophoneDenied | NoMicrophone | CallActive | CaptureLost | NothingHeard
-  | TranscriptionFailed | MediaNotStopped
+  | TranscriptionFailed | MediaNotStopped | SpeechStillStopping
+type SpeechGate = SpeechClear | SpeechStopping | SpeechLatched
 type DictationEffect = Insert({ chars: int, voiceOriginated: bool }) | DiscloseUpload | DiscardClip | SayCallPaused
 type Dictation = { stage: Stage, target: int, account: int, ticket: int, captures: int, inserted: int, clipMs: int,
   recognizer: Recognizer, failure: DictationFailure, fellBack: bool }
@@ -48,15 +49,22 @@ pure def open(d: Dictation, target: int, account: int): DictationStep =
     { ...d, stage: Ready, target: target, account: account, ticket: d.ticket + 1, clipMs: 0, failure: NoFailure, fellBack: false })
 ```
 
-### Recording starts only on a free microphone, with the recognizer of the route in use now
+### Recording starts only on a free microphone, after Alpha's speech confirmed it stopped, with the recognizer of the route in use now
 
 A lost capture can be started again; a failed start says why and keeps the dictation ready. A call
-closes it with one line and opens nothing.
+closes it with one line and opens nothing. While a reply is still stopping, Record is refused and
+can be pressed again once the stop is confirmed; after a stop that was never confirmed it stays
+refused until Alpha restarts.
 
 ```quint
-pure def canStart(d: Dictation, recognizer: Recognizer, micFree: bool): bool = d.stage == Ready and micFree
-pure def start(d: Dictation, recognizer: Recognizer, micFree: bool): Dictation =
-  { ...d, stage: Starting, ticket: d.ticket + 1, recognizer: recognizer, failure: NoFailure, fellBack: false }
+pure def canStart(d: Dictation, recognizer: Recognizer, micFree: bool, speech: SpeechGate): bool = d.stage == Ready and micFree
+pure def start(d: Dictation, recognizer: Recognizer, micFree: bool, speech: SpeechGate): Dictation =
+  if (speech == SpeechLatched) { ...d, failure: MediaNotStopped }
+  else if (speech == SpeechStopping) { ...d, failure: SpeechStillStopping }
+  else { ...d, stage: Starting, ticket: d.ticket + 1, recognizer: recognizer, failure: NoFailure, fellBack: false }
+pure def stepRecordingNeverStartsOverSpeech(before: Dictation, via: str, after: Dictation): bool =
+  (before.stage == Ready and after.stage == Starting) implies (via == "start" and after.failure == NoFailure)
+pure def sometimesRefusedWhileSpeechStops(d: Dictation): bool = d.stage == Ready and d.failure == SpeechStillStopping
 pure def canOpened(d: Dictation, ticket: int): bool = d.stage == Starting and ticket == d.ticket
 pure def opened(d: Dictation, ticket: int): Dictation = { ...d, stage: Recording }
 pure def canOpenFailed(d: Dictation, ticket: int, failure: DictationFailure): bool =

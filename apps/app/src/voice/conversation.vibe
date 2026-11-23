@@ -1,18 +1,23 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"
-import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceSessionPorts } from "@elizaos/agent/voice"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"
+import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
-import { Machine, endpointerOf, openMicHangoverMs, profileOf, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
+import { ResidentFeeds } from "../platform/view-events.vibe"
+import { Machine, active, endpointerOf, openMicHangoverMs, profileOf, running, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
+import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
+import { readingMayStart } from "../../gen/voice__speech.effect.vibe"
 import { Microphone } from "./capture.vibe"
+import { Dictation } from "./dictation.vibe"
 import { refusalOf } from "./failure.vibe"
 import { newId } from "./ids.ts"
 import { Latency } from "./latency.vibe"
 import { Listener, type InvocationScreen } from "./listener.vibe"
-import { CloudSpeechEvent, CloudSpeechStarted, ClefTurnAnswer, EndOfTurnScore, LiveCaptureStarted, LiveCaptureStatus, RecordingClip, RecordingStarted, TranscriptReply, VoiceTurnReply } from "./native.schema.vibe"
+import { CloudSpeechEvent, CloudSpeechStarted, ClefTurnAnswer, EndOfTurnScore, LiveCaptureEnded, LiveCaptureStarted, LiveCaptureStatus, RecordingClip, RecordingStarted, TranscriptReply, VoiceTurnReply } from "./native.schema.vibe"
 import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
-import { Speech } from "./speech.vibe"
-import { planReply, spokenLineOf, type ReplyAction } from "./spoken-text.ts"
+import { Speech, SpeechNotStopped, type SpeechInterrupted, type SpeechRefused, type SpeechUnavailable } from "./speech.vibe"
+import { planReply, replyActionOf, spokenLineOf } from "./spoken-text.ts"
+import { transcription } from "./transcription.vibe"
 import { gateRecording } from "./vad.vibe"
 
 /** What the screen admits when voice starts, and the conversation the voice turns go to. */
@@ -49,19 +54,29 @@ export service VoiceConversation {
   mute(muted: boolean): void!!
   /** A call took the microphone: voice retires and says so once. */
   callStarted(): void!!
-  /** The page hid, a sensitive surface opened, the owner signed out or a reset began. */
+  /** A sensitive surface opened, the owner signed out or a reset began. */
   left(): void!!
+  /** The page hid: voice retires, and is told on return whether a call paused it. */
+  hidden(): void!!
+  /** The page shows again; `callSeen` when Telecom reported a call live as voice closed or since. */
+  returned(callSeen: boolean): void!!
   /** The reviewed request was settled in the chat. */
   reviewSettled(): void!!
   /** Send a typed message: voice retires first, and the message goes out once it has. */
   typedSend(send: () => void!!, chatCurrent: () => boolean): void!!
   /** Take an always-on listener or power invocation; true when it started voice. */
   startFromInvocation(screen: InvocationScreen, start: VoiceStart): boolean!!
+  /** Whether a screen change the agent claimed is under way; the shell's own change inside it is not a departure. */
+  claimed(): boolean!!
+  /** Run the agent's screen change `go` under a claim; voice stays on only when it switched, pinned its context and `contextCurrent` still holds. True when voice stayed on. */
+  followScreen(go: () => boolean!!, contextCurrent: () => boolean): boolean!!
+  /** Read a message aloud the owner asked to hear: a running conversation retires first, and the reading starts once replies have stopped. */
+  readAloud(text: string): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
 }
 
 const CLEF_PATH = "/api/v1/decisions"
 const END_OF_TURN_PATH = "/api/asr/local-inference/end-of-turn"
-const CLEANUP_WAIT = "2500 millis"
+const CLEANUP_DEADLINE = "2500 millis"
 const QUIET_RETRY_WAIT_MS = 2000
 const LONG_WAIT_SECONDS = 30
 const decode = <A>(schema: Schema.Decoder<A>, raw: unknown) => Option.getOrUndefined(Schema.decodeUnknownOption(schema)(raw))
@@ -84,12 +99,14 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   const held = try Machine
   const native = try Native
   const resident = try Resident
+  const feeds = try ResidentFeeds
   const cloud = try Cloud
   const routes = try VoiceRoute
   const speech = try Speech
   const microphone = try Microphone
   const latency = try Latency
   const listener = try Listener
+  const dictation = try Dictation
   let live: LiveVoiceSession | undefined
   let current: VoiceStart | undefined
   let lastCause: unknown
@@ -135,18 +152,25 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     run(follow())
   }
 
-  effect function captureLive(captureId: string, sessionId: string, start: VoiceStart, events: CaptureEvents) {
+  effect function captureLive(captureId: string, sessionId: string, start: VoiceStart, ticket: number, events: CaptureEvents) {
     const raw = native.invoke("AlphaVoiceCloud", "startLiveCapture", { captureId, sessionId, echoCancel: true, nativeAsr: true, roomId: start.roomId, endHangoverMs: openMicHangoverMs }) catch effect (error) => {
       lastCause = error
       return undefined
     }
     const opened = decode(LiveCaptureStarted, raw)
-    if (opened === undefined) return events.failed(lastCause)
+    if (opened === undefined || opened.captureId !== captureId) return events.failed(lastCause)
     capturing = true
+    try microphone.opened(ticket)
     events.opened({ echoCancelled: opened.echoCancelled })
+    const ends = Stream.filter(native.listen("AlphaVoiceCloud", "liveCaptureEnded"), (value) => decode(LiveCaptureEnded, value)?.captureId === captureId)
+    const ended = Option.getOrUndefined(Stream.runHead(ends) catch () => Option.none())
+    if (!capturing) return
+    capturing = false
+    lastCause = { code: decode(LiveCaptureEnded, ended)?.reason ?? "capture-ended" }
+    events.failed(lastCause)
   }
 
-  effect function captureStream(sessionId: string, account: VoiceAccount, events: CaptureEvents) {
+  effect function captureStream(sessionId: string, account: VoiceAccount, ticket: number, events: CaptureEvents) {
     if (account.kind !== "cloud") return events.failed({ code: "sign-in" })
     const raw = native.invoke("AlphaCloudSpeechStream", "startCloudSpeech", { sessionId, environment: account.environment, credentialId: account.credentialId }) catch effect (error) => {
       lastCause = error
@@ -155,13 +179,16 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     const started = decode(CloudSpeechStarted, raw)
     if (started === undefined) return events.failed(lastCause)
     capturing = true
+    try microphone.opened(ticket)
     events.opened({ echoCancelled: started.echoCancelled === true })
     let turn = newId()
     for try (const value of native.listen("AlphaCloudSpeechStream", "cloudSpeechEvent")) {
+      if (!capturing) break
       const event = decode(CloudSpeechEvent, value)
       if (event === undefined || event.sessionId !== sessionId) continue
       if (event.type === "error") {
         lastCause = { code: event.code ?? "cloud-stream" }
+        capturing = false
         emit(envelope(sessionId, turn, "error"))
         events.failed(lastCause)
         break
@@ -173,38 +200,49 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         emit(envelope(sessionId, turn, "final", event.text ?? ""))
       }
     }
+    if (capturing) {
+      capturing = false
+      events.failed(lastCause ?? { code: "cloud-stream-ended" })
+    }
   }
 
-  effect function captureBatch(sessionId: string, events: CaptureEvents) {
-    const started = decode(RecordingStarted, native.invoke("AlphaVoiceCloud", "startRecording", { maxDurationMs: 59000 }) catch (error) => { lastCause = error; return undefined })
-    if (started === undefined) return events.failed(lastCause)
-    capturing = true
-    events.opened({ echoCancelled: false })
-    const turn = newId()
-    const gated = try gateRecording(started.recordingId, speakingNow, () => !capturing)
-    const clip = decode(RecordingClip, native.invoke("AlphaVoiceCloud", "stopRecording", {}) catch () => undefined)
-    if (!capturing || clip === undefined || !gated.heard) {
-      native.invoke("AlphaVoiceCloud", "cancelRecording", {}) catch () => undefined
+  effect function captureBatch(sessionId: string, ticket: number, events: CaptureEvents) {
+    let first = true
+    while (true) {
+      const started = decode(RecordingStarted, native.invoke("AlphaVoiceCloud", "startRecording", { maxDurationMs: 59000 }) catch (error) => { lastCause = error; return undefined })
+      if (started === undefined) {
+        capturing = false
+        return events.failed(lastCause)
+      }
+      if (first) {
+        capturing = true
+        try microphone.opened(ticket)
+        events.opened({ echoCancelled: false })
+        first = false
+      }
+      const gated = try gateRecording(started.recordingId, speakingNow, () => !capturing)
+      const clip = decode(RecordingClip, native.invoke("AlphaVoiceCloud", "stopRecording", {}) catch () => undefined)
+      if (!capturing || clip === undefined || !gated.heard) {
+        native.invoke("AlphaVoiceCloud", "cancelRecording", {}) catch () => undefined
+        if (!capturing) return
+        continue
+      }
+      const turn = newId()
+      emit(envelope(sessionId, turn, "speech-start"))
+      emit(envelope(sessionId, turn, "speech-end"))
+      try latency.mark("LastUserAudio")
+      const text = routes.run((route, heard) => effect {
+        const account = try routes.account()
+        const call = transcription(route, account, clip.recordingId, newId())
+        const reply = decode(TranscriptReply, native.invoke("AlphaVoiceCloud", call.method, call.args) catch effect (error) => { throw attemptFailed(error) })
+        if (reply === undefined) throw attemptFailed({ code: "voice-stt-response" })
+        try heard()
+        return reply.text.trim()
+      }) catch (error) => { lastCause = error.cause; return "" }
+      try latency.mark("AsrFinal")
+      emit(envelope(sessionId, turn, "final", text))
       return
     }
-    emit(envelope(sessionId, turn, "speech-start"))
-    emit(envelope(sessionId, turn, "speech-end"))
-    try latency.mark("LastUserAudio")
-    const text = routes.run((route, heard) => effect {
-      const account = try routes.account()
-      const requestId = newId()
-      const call = route === "Cloud" && account.kind === "cloud"
-        ? { method: "transcribeRecording", args: { recordingId: clip.recordingId, requestId, environment: account.environment, credentialId: account.credentialId } }
-        : route === "Direct" && account.kind === "own"
-          ? { method: "transcribeOwnRecording", args: { recordingId: clip.recordingId, requestId, providerRevision: account.revision } }
-          : { method: "transcribeLocalRecording", args: { recordingId: clip.recordingId, requestId } }
-      const reply = decode(TranscriptReply, native.invoke("AlphaVoiceCloud", call.method, call.args) catch effect (error) => { throw attemptFailed(error) })
-      if (reply === undefined) throw attemptFailed({ code: "voice-stt-response" })
-      try heard()
-      return reply.text.trim()
-    }) catch (error) => { lastCause = error.cause; return "" }
-    try latency.mark("AsrFinal")
-    emit(envelope(sessionId, turn, "final", text))
   }
 
   function speakingNow(): boolean {
@@ -213,27 +251,31 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   function ports(start: VoiceStart, route: Route, sessionId: string): VoiceSessionPorts {
     let captureId = newId()
+    let opened: CaptureEvents | undefined
     const capture = {
       open(_request: unknown, events: CaptureEvents) {
         captureId = newId()
+        opened = events
         const ticket = runSync(microphone.acquire("AssistantCapture"))
         if (ticket === undefined) return events.failed({ code: "microphone-refused" })
         const opening = effect {
-          if (route === "Device") try captureLive(captureId, sessionId, start, events)
-          else if (route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))) try captureStream(sessionId, try routes.account(), events)
-          else try captureBatch(sessionId, events)
-          if (capturing) try microphone.opened(ticket)
+          if (route === "Device") try captureLive(captureId, sessionId, start, ticket, events)
+          else if (route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))) try captureStream(sessionId, try routes.account(), ticket, events)
+          else try captureBatch(sessionId, ticket, events)
         }
         run(effect { try opening; follows() })
       },
       close() {
         const wasCapturing = capturing
+        const events = opened
+        opened = undefined
         capturing = false
         run(effect {
           if (route === "Device") native.invoke("AlphaVoiceCloud", "stopLiveCapture", { captureId }) catch () => undefined
           else if (route === "Cloud") native.invoke("AlphaCloudSpeechStream", "stopCloudSpeech", { sessionId }) catch () => undefined
           const mic = try microphone.get()
           try microphone.release(mic.ticket)
+          events?.closed()
           if (wasCapturing || route !== "Device") follows()
         })
       },
@@ -282,14 +324,11 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         if (reply.awaitingReview === true) {
           try send({ type: "reviewNeeded" })
           live?.stop()
-          return { messageId: reply.messageId, text: "" }
+          const waiting: VoiceReply = { messageId: reply.messageId, text: "" }
+          return waiting
         }
-        const label = reply.action
-        const action: ReplyAction = label === undefined || label.kind === "none" ? { kind: "none" }
-          : label.kind === "email-draft" ? { kind: "email-draft", validatedCard: label.validatedCard === true }
-          : label.kind === "email-failed" ? { kind: "email-failed" }
-          : { kind: "other", verbatimAsked: label.verbatimAsked === true }
-        return { messageId: reply.messageId, text: spokenLineOf(reply.text, action) }
+        const answered: VoiceReply = { messageId: reply.messageId, text: spokenLineOf(reply.text, replyActionOf(reply.action)), ...(reply.action === undefined ? {} : { action: reply.action }) }
+        return answered
       }),
       abort: (roomId: string, reason: string) => runPromise(effect {
         resident.json("POST", `/api/turns/${encodeURIComponent(roomId)}/abort`, { reason }) catch () => undefined
@@ -320,9 +359,10 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   effect function open(start: VoiceStart, route: Route) {
     const sessionId = `live-${newId()}`
-    const agentEvents = fork.detached effect {
-      for try (const raw of native.listen("Agent", "alphaVoiceEvent")) emit(raw)
+    const transcripts = effect {
+      for try (const event of feeds.voice()) emit({ type: "event", event })
     }
+    const agentEvents = fork.detached effect { transcripts catch () => undefined }
     const liveRoute = route === "Device" ? decode(LiveCaptureStatus, native.invoke("AlphaVoiceCloud", "liveCaptureStatus", {}) catch () => undefined)?.available === true
       : route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))
     const session = createLiveVoiceSession({
@@ -335,8 +375,10 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     })
     live = session
     try latency.begin()
-    const timing = profileOf(route, liveRoute ? "Interruptible" : "TakesTurns")
-    const profile: VoiceProfile = { shortGapMs: timing.shortGapMs, longGapMs: timing.longGapMs, bargeInHoldMs: timing.bargeInHoldMs, stopReport: timing.heardOnStop ? "StopReportsHeard" : "StopReportsNone" }
+    const duplex = liveRoute ? "Interruptible" as const : "TakesTurns" as const
+    const timing = profileOf(route, duplex)
+    const gaps = duplex === "TakesTurns" ? defaultVoiceProfile : timing
+    const profile: VoiceProfile = { shortGapMs: gaps.shortGapMs, longGapMs: gaps.longGapMs, bargeInHoldMs: gaps.bargeInHoldMs, stopReport: timing.heardOnStop ? "StopReportsHeard" : "StopReportsNone" }
     session.start("ConversationMode", liveRoute ? "FullDuplex" : "HalfDuplex", profile)
   }
 
@@ -345,15 +387,23 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     return route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))
   }
 
+  effect function mediaStopped() {
+    const settled = timeout(effect {
+      try Stream.runHead(Stream.filter(speech.changes, (chains) => chains.replies.stage === "Idle" || chains.replies.stage === "Latched"))
+      try Stream.runHead(Stream.filter(microphone.changes, (mic) => !mic.open))
+      return true
+    }, CLEANUP_DEADLINE) catch () => false
+    const chains = try speech.get()
+    const mic = try microphone.get()
+    return settled && chains.replies.stage === "Idle" && !mic.open
+  }
+
   effect function retire(media: boolean) {
     const session = live
     live = undefined
     session?.stop()
     if (!media) return
-    try sleep(CLEANUP_WAIT)
-    const chains = try speech.get()
-    const mic = try microphone.get()
-    const confirmed = chains.replies.stage !== "Latched" && !mic.open
+    const confirmed = try mediaStopped()
     const chatCurrent = pendingChat?.() ?? false
     try send({ type: "cleanupSettled", confirmed, sendCurrent: chatCurrent })
     const typed = pendingTyped
@@ -362,9 +412,14 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     if (typed !== undefined && chatCurrent) try typed()
   }
 
+  effect function recorderOpen() {
+    const stage = (try dictation.get()).stage
+    return busy(stage) || holdsClip(stage)
+  }
+
   effect function start(next: VoiceStart) {
     const route = try routes.route()
-    const entry = try speech.entry(false)
+    const entry = try speech.entry(try recorderOpen())
     if (next.callActive) {
       try send({ type: "startRefusedForCall" })
       return
@@ -397,6 +452,10 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     effect left() {
       if (try send({ type: "left" })) try retire(true)
     },
+    effect hidden() {
+      if (try send({ type: "hidden" })) try retire(true)
+    },
+    effect returned(callSeen: boolean) { try send({ type: "returned", callSeen }) },
     effect reviewSettled() {
       if (try send({ type: "reviewSettled" })) try retire(true)
     },
@@ -412,6 +471,31 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       if (!(try listener.takeInvocation(screen))) return false
       try start(next)
       return (try held.get()).shown === "Starting"
+    },
+    effect claimed() { return (try held.get()).claim !== "NoClaim" },
+    effect followScreen(go: () => boolean!!, contextCurrent: () => boolean) {
+      if (!(try send({ type: "claimScreen", chatCurrent: current?.chatCurrent() ?? false }))) return false
+      if ((try held.get()).claim !== "ClaimCommitted") return false
+      const switched = try go()
+      if (switched && contextCurrent()) try send({ type: "screenPinned" })
+      const delivered = switched && contextCurrent()
+      try send({ type: "screenSettled", delivered, contextCurrent: contextCurrent() })
+      if ((try held.get()).shown === "Retiring") {
+        try retire(true)
+        return false
+      }
+      return running((try held.get()).shown)
+    },
+    effect readAloud(text: string) {
+      const before = try held.get()
+      if (active(before.shown) || before.shown === "Failed") {
+        const media = live !== undefined
+        if (try send({ type: "stop", media })) try retire(media)
+      }
+      const settled = timeout(Stream.runHead(Stream.filter(speech.changes, (chains) => chains.replies.stage === "Idle" || chains.replies.stage === "Latched")), CLEANUP_DEADLINE) catch () => Option.none()
+      const now = try held.get()
+      if (Option.isNone(settled) || !readingMayStart(active(now.shown), (try speech.get()).replies.stage)) throw new SpeechNotStopped()
+      try speech.speak(text, "Reading")
     },
   }
 })

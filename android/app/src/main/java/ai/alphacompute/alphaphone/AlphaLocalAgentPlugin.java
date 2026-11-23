@@ -441,15 +441,6 @@ private static final class ResidentAttachDiagnostic {
    call.resolve(clearProviderSlot(new AlphaCredentialStore(getContext(),()->{if(disposed)throw new IllegalStateException("Local agent bridge closed");if(requestId==null)requireCredentialIntent(configuration);else providerConfigurations.require(requestId,configuration);}),onlyIfPresent));
   }catch(Exception error){call.reject("The provider binding could not be cleared.");}finally{if(requestId!=null)providerConfigurations.finish(requestId,configuration);}},()->{if(requestId!=null)providerConfigurations.finish(requestId,configuration);call.reject("Local agent bridge is closed.");});
  }
- @PluginMethod public void clearProviderIfCurrent(PluginCall call){
-  String guard=call.getString("bindingGuard","");
-  if(!guard.matches("[a-f0-9]{64}")){call.reject("Invalid binding guard");return;}
-  PluginWorkers.submit(workers,()->{try{
-   AlphaCredentialStore store=new AlphaCredentialStore(getContext(),()->{if(disposed)throw new IllegalStateException("Local agent bridge closed");});
-   boolean cleared=store.removeProviderIfCurrent(guard);
-   call.resolve(new JSObject().put("outcome",cleared?"cleared":"changed"));
-  }catch(Exception error){call.reject("Conditional provider removal could not be confirmed.");}},()->call.reject("Local agent bridge is closed."));
- }
  static final String CLOUD_PROVIDER_MODEL=LocalAgentProviderAdmission.CLOUD_PROVIDER_MODEL;
  static final String CLOUD_PROVIDER_BASE=LocalAgentProviderAdmission.CLOUD_PROVIDER_BASE;
  /** Binds an existing account credential; no bearer value crosses this method's renderer API. */

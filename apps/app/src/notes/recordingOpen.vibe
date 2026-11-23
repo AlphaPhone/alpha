@@ -1,0 +1,81 @@
+// spec/notes/recordingOpen.md, "A read starts only while Notes can be shown and none is in flight, and opens Notes at most once per tap"; spec/notes/recordingOpen.md, "Going Home forgets a tap that was not taken yet"
+import { type Event as OpenEvent, Machine as OpenMachine, type RecordingOpen, machine as openMachine } from "../../gen/notes__recordingOpen.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { pageEvents } from "../shell/page.ts"
+import { decodeRecordingOpen } from "./notes.schema.vibe"
+import { NotesHandoff } from "./origins.vibe"
+import { pageAvailable } from "./platform.ts"
+
+const plugin = "AlphaVoiceCloud"
+
+/** Whether Notes can be shown over what is in front now: a visible, unlocked Home with nothing covering it. */
+export function notesShowable(state: ForegroundState): boolean {
+  return state.visible && !state.locked && state.screen === "home" && !state.shade && state.chat === "closed" && !state.modal
+}
+
+/** The recording notification's tap, taken once when Notes can be shown. */
+export service NotesRecordingOpen {
+  /** The notification was tapped, as the Android activity posts it to the page. */
+  tapped(): void!!
+  /** The launcher went Home, which forgets a tap not taken yet. */
+  goneHome(): void!!
+  /** What is in front changed. */
+  foreground(state: ForegroundState): void!!
+}
+
+const make = effect {
+  const native = try Native
+  const handoff = try NotesHandoff
+  const machine = try OpenMachine
+
+  effect function send(event: OpenEvent): RecordingOpen | undefined!! {
+    return try (machine.send(event) catch () => undefined)
+  }
+
+  effect function settle(started: RecordingOpen): void!! {
+    let answer: { readonly open: boolean } | undefined = { open: false }
+    if (try native.available(plugin)) {
+      answer = try (effect { return try decodeRecordingOpen(try native.invoke(plugin, "consumeNoteRecordingOpen")) } catch () => undefined)
+    }
+    const after = try send({ type: "readSettled", ok: answer !== undefined, found: answer?.open === true })
+    if (after === undefined) return
+    if (after.opened > started.opened) try handoff.request({ kind: "open-notes" })
+    if (after.reading && after.reads > started.reads) try settle(after)
+  }
+
+  effect function take(): void!! {
+    const state = try send({ type: "readRecordingOpen" })
+    if (state === undefined || !state.reading) return
+    try settle(state)
+  }
+
+  return {
+    effect tapped() {
+      const before = try machine.get()
+      const after = try send({ type: "tapRecording" })
+      if (after !== undefined && after.reading && after.reads > before.reads) try settle(after)
+    },
+    effect goneHome() {
+      try send({ type: "goneHome" })
+      try (native.invoke(plugin, "clearNoteRecordingOpen") catch () => undefined)
+    },
+    effect foreground(state: ForegroundState) {
+      const showable = notesShowable(state)
+      if ((try machine.get()).showable !== showable) try send({ type: "setShowable", on: showable })
+      if (showable) try take()
+    },
+  }
+}
+
+/** The notification open with its machine, following what is in front and the page's notification and HOME events. */
+export const recordingOpenLayer = Layer.provideMerge(Layer.effect(NotesRecordingOpen, effect {
+  const opens = try make
+  const foreground = try Foreground
+  try fork.scoped Stream.runForEach(foreground.changes, (state) => opens.foreground(state))
+  if (pageAvailable()) {
+    try fork.scoped (effect { for try (const _ of pageEvents("alpha:note-recording-open")) try opens.tapped() })
+    try fork.scoped (effect { for try (const _ of pageEvents("launcher-home")) try opens.goneHome() })
+  }
+  return opens
+}), openMachine())

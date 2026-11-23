@@ -4,6 +4,7 @@ import type { Route, Sends } from "../../../gen/voice__route.ts";
 import { Button, Sheet, SheetContent } from "../components/ui/index.ts";
 import { recipientName } from "./messages.ts";
 
+/** The network route about to listen, what it receives, and the owner's answer. */
 export interface SpeechDisclosureProps {
   /** The network route about to listen, or undefined when nothing waits. */
   route: Route | undefined;
@@ -15,7 +16,10 @@ export interface SpeechDisclosureProps {
   onDismiss: () => void;
 }
 
-/** Before network voice first listens: who receives the owner's speech, and what. */
+/**
+ * Before network voice first listens: who receives the owner's speech, and what.
+ * @model spec/voice/route.md
+ */
 export function SpeechDisclosure({ route, sends, onContinue, onDismiss }: SpeechDisclosureProps) {
   const name = route === undefined ? "" : recipientName(route);
   const rows = sends === undefined ? [] : [

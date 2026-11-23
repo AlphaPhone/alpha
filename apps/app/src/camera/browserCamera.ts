@@ -45,6 +45,17 @@ export function onPreviewEnded(listener: () => void): void {
   previewEnded = listener;
 }
 
+/**
+ * Hear the page turn between portrait and landscape, starting with how it is now.
+ * @throws {never}
+ */
+export function observeLandscape(listener: (landscape: boolean) => void): void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+  const query = window.matchMedia("(orientation: landscape)");
+  listener(query.matches);
+  query.addEventListener("change", (event) => listener(event.matches));
+}
+
 function track(): MediaStreamTrack | undefined {
   return stream?.getVideoTracks()[0];
 }

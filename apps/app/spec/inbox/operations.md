@@ -75,6 +75,23 @@ pure val proposalValues = Set(MessageProposal({ mail: mail1, draftId: "", expect
   .union(Set(DraftDeleteProposal({ draftId: "g1", expectedDigest: "x1" })))
 ```
 
+### Swiping a listed message left reviews its archive at its current revision, and swiping right changes nothing
+
+A swipe left on a row of the list starts the same reviewed archive as the message view, after the
+message's current revision is read; without that revision, or without archive access, nothing is
+proposed. A swipe right, or a short one, does nothing: there is no reply it could draft from the
+list.
+
+```quint
+type ListSwipe = SwipeLeft | SwipeRight | SwipeShort
+pure val swipeDistance: int = 80
+pure def swipeOf(dx: int): ListSwipe = if (dx <= 0 - swipeDistance) SwipeLeft else if (dx >= swipeDistance) SwipeRight else SwipeShort
+pure def swipeArchives(dx: int, caps: Capabilities, historyId: str): bool = swipeOf(dx) == SwipeLeft and kindAllowed(caps, ArchiveKind) and historyId != ""
+pure def lawASwipeRightChangesNothing(caps: Capabilities, historyId: str): bool = not(swipeArchives(swipeDistance, caps, historyId))
+pure def lawASwipeArchivesOnlyAtAKnownRevision(dx: int, caps: Capabilities): bool = not(swipeArchives(dx, caps, ""))
+pure val dxValues = Set(-120, -10, 120)
+```
+
 ### A proposal is recorded under its request id before Gmail reviews it
 
 The composer's draft id and the exact content it showed are recorded with a send or a Gmail draft
@@ -179,6 +196,65 @@ pure def stepADispatchFollowsAConfirmedReview(before: Journal, via: str, after: 
     (via == "confirm" and findRecord(r.owner, r.requestId, before).phase == Reviewing))
 pure val shownValues = composerValues
 pure def sometimesDispatching(s: Journal): bool = s.records.some(r => r.phase == Dispatching)
+```
+
+### Send of the email on screen continues its open operation, and an unresolved one blocks another
+
+Send is one tap: it records the proposal, takes Gmail's review and confirms it under one request id.
+A second tap on the same content continues that send (confirms the review, asks for the review
+again, or reads the receipt) and never prepares another, and a succeeded send of the same content
+is never sent again. Another email, or a Gmail draft save, replaces an unsent composer review or a
+settled receipt. An unsent review of a mailbox change blocks Send and is shown instead, and an
+operation whose outcome is not known yet blocks every send until its receipt says what happened.
+
+```quint
+type SendStep = PrepareNew | ConfirmOpen | ReviewOpen | ReadReceipt | AlreadySent | ReplaceUnsent | ShowReview | ReplaceSettled
+pure def sameSend(r: OperationRecord, shown: ComposerRef): bool = r.kind == SendKind and r.composer == shown
+pure def sendStep(held: bool, r: OperationRecord, shown: ComposerRef): SendStep =
+  if (not(held)) PrepareNew
+  else if (sameSend(r, shown) and r.receipt.receiptState == SucceededReceipt) AlreadySent
+  else if (sameSend(r, shown) and r.phase == Reviewing) ConfirmOpen
+  else if (sameSend(r, shown) and r.phase == Preparing) ReviewOpen
+  else if ((r.phase == Preparing or r.phase == Reviewing) and isComposerKind(r.kind)) ReplaceUnsent
+  else if (r.phase == Preparing or r.phase == Reviewing) ShowReview
+  else if (r.receipt.receiptState == SucceededReceipt or r.receipt.receiptState == RejectedReceipt) ReplaceSettled
+  else ReadReceipt
+pure def lawASecondTapNeverPreparesAnotherSend(r: OperationRecord, shown: ComposerRef): bool =
+  (sameSend(r, shown) and r.receipt.receiptState != RejectedReceipt) implies
+    (sendStep(true, r, shown) != PrepareNew and sendStep(true, r, shown) != ReplaceUnsent and sendStep(true, r, shown) != ReplaceSettled)
+pure def lawAnUnsentMailboxChangeBlocksSend(r: OperationRecord, shown: ComposerRef): bool =
+  ((r.phase == Preparing or r.phase == Reviewing) and not(isComposerKind(r.kind))) implies sendStep(true, r, shown) == ShowReview
+pure def lawAnUnresolvedOperationBlocksEverySend(r: OperationRecord, shown: ComposerRef): bool =
+  ((r.phase == Dispatching or r.phase == Observed) and r.receipt.receiptState != SucceededReceipt and r.receipt.receiptState != RejectedReceipt)
+    implies sendStep(true, r, shown) == ReadReceipt
+pure def lawNothingHeldMeansANewSend(r: OperationRecord, shown: ComposerRef): bool = sendStep(false, r, shown) == PrepareNew
+```
+
+### A chat-reviewed email is sent once per reviewed version, only as a new email of the selected, checked account
+
+The assistant hands over an email the owner reviewed in the chat with the request id of its
+version (`spec/assistant/emailCard.md`). Inbox derives the operation's request id from that id, the
+selected account and the exact content, so a retry of the same version continues the same operation
+and reads the same receipt, while an edited version is sent as its own. It needs at most twenty
+distinct literal recipients, a one-line subject and a body of at most 64,000 characters. Saved
+accounts, an account not checked for this session, or another operation not settled yet leave it
+unsent.
+
+```quint
+type ChatEmail = { recipients: List[str], literal: bool, subjectOneLine: bool, bodyChars: int }
+pure val chatRecipientLimit: int = 20
+pure val chatBodyLimit: int = 64000
+pure def chatEmailSendable(e: ChatEmail, checked: bool, busy: bool): bool =
+  checked and not(busy) and e.recipients != List() and e.recipients.length() <= chatRecipientLimit and e.literal and e.subjectOneLine
+  and e.bodyChars > 0 and e.bodyChars <= chatBodyLimit and e.recipients.every(x => e.recipients.select(o => o == x).length() == 1)
+pure def lawAnUncheckedOrBusyAccountSendsNoChatEmail(e: ChatEmail, busy: bool): bool =
+  not(chatEmailSendable(e, false, busy)) and not(chatEmailSendable(e, true, true))
+pure def lawAChatEmailNamesEachRecipientOnce(e: ChatEmail): bool =
+  chatEmailSendable(e, true, false) implies e.recipients.every(x => e.recipients.select(o => o == x).length() == 1)
+pure val eValues = Set(
+  { recipients: List("bo@example.com"), literal: true, subjectOneLine: true, bodyChars: 10 },
+  { recipients: List("bo@example.com", "bo@example.com"), literal: true, subjectOneLine: true, bodyChars: 10 },
+  { recipients: List(), literal: false, subjectOneLine: false, bodyChars: 0 })
 ```
 
 ### An answer is adopted only for the same request, kind and review, and an outcome never goes back
@@ -292,6 +368,25 @@ pure def alwaysAHeldCleanupFollowsAnObservedSend(s: Journal): bool = s.records.e
 pure def alwaysSentIsAnnouncedOnce(s: Journal): bool = s.announced.every(id => s.announced.select(o => o == id).length() == 1)
 pure def sometimesCleanupReady(s: Journal): bool = s.records.some(r => cleanupReady(r))
 pure def sometimesRestoredSendHeld(s: Journal): bool = s.records.some(r => r.sourceHeld)
+```
+
+### Sent is said once, by the step that first learns of the success, and an unresolved send opens its receipt
+
+A confirmed send closes the composer, or the receipt it was recovered from, with Sent. Reading the
+receipt of a send announced before, such as one restored after a restart, says nothing and leaves
+the receipt as it is. A send whose outcome is not known shows its receipt once instead of a notice,
+and nothing there offers to send it again.
+
+```quint
+type SendFeedback = SaySent | SayNothing | ShowReceipt | SayOutcome
+pure def sendFeedback(announcedBefore: bool, answer: ReceiptState, phase: OpPhase): SendFeedback =
+  if (answer == SucceededReceipt) (if (announcedBefore) SayNothing else SaySent)
+  else if (phase == Dispatching or answer == UnknownReceipt or answer == DispatchedReceipt) ShowReceipt
+  else SayOutcome
+pure def lawAnAnnouncedSendIsNotSaidAgain(answer: ReceiptState, phase: OpPhase): bool = sendFeedback(true, answer, phase) != SaySent
+pure def lawAnUnknownOutcomeShowsTheReceipt(announcedBefore: bool, phase: OpPhase): bool = sendFeedback(announcedBefore, UnknownReceipt, phase) == ShowReceipt
+pure def lawOnlyASuccessSaysSent(announcedBefore: bool, answer: ReceiptState, phase: OpPhase): bool =
+  sendFeedback(announcedBefore, answer, phase) == SaySent implies (answer == SucceededReceipt and not(announcedBefore))
 ```
 
 ### A confirmed result offers only its follow-ups: undo, continue the Gmail draft, delete it

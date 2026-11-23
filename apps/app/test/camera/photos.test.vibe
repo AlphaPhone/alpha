@@ -14,8 +14,8 @@ const rows = [item("m:1", 5 * day), item("m:2", 4 * day, { favorite: true }), it
 
 function library(extra: Record<string, (args: unknown) => unknown> = {}) {
   return phone({
-    "AlphaPhotos.libraryAccess": () => ({ scope: "full", images: "full", videos: "full" }),
-    "AlphaPhotos.watchLibrary": () => ({ active: true }),
+    "AlphaPhotoLibrary.scope": () => ({ scope: "full", imageAccess: "full", videoAccess: "full", images: true, videos: true, canSelectMore: false, canEditOthers: true, locked: false, version: "1" }),
+    "AlphaPhotoLibrary.watch": () => ({ active: true }),
     "AlphaPhotos.list": (args) => {
       const { before, trashed } = args as { before?: string; trashed?: boolean }
       if (trashed === true) return { items: [], next: "" }

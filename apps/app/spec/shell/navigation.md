@@ -313,6 +313,17 @@ pure def alwaysHomeKeepsItsBar(s: Nav): bool = s.app == "" implies s.chat != Cha
 pure def sometimesVoiceOverConversation(s: Nav): bool = s.voice and s.chat == ChatFull
 ```
 
+### On Phone, Messages and Contacts the app's own bar stands in for the dock until a conversation opens
+
+The comms apps draw their own bar where the assistant's input would rest (PRD AC-01), so the dock
+is not drawn over them at rest; a half or full conversation draws it again above the app.
+
+```quint
+pure def dockShown(s: Nav): bool = not(BarApps.contains(s.app)) or talking(s)
+pure def alwaysHomeShowsTheDock(s: Nav): bool = s.app == "" implies dockShown(s)
+pure def sometimesCommsBarOwnsInput(s: Nav): bool = BarApps.contains(s.app) and not(dockShown(s))
+```
+
 ## Story: Keep sheets and dialogs above the phone
 
 > As the owner, I want a sheet, menu or dialog to own the phone while it is open, the assistant to
@@ -410,6 +421,24 @@ pure def alwaysClaimIsCurrent(s: Nav): bool =
     (s.destination == s.app and not(s.hidden)))
 pure def sometimesSwitchConfirmed(s: Nav): bool = s.claim == ClaimDelivered
 pure def sometimesSwitchUnknown(s: Nav): bool = s.claim == ClaimUnknown
+```
+
+### An approved open_view shows Home or an admitted app, and is applied only once it is in front
+
+The agent's `open_view` device operation, once the owner approved it, goes Home through HOME or to
+an app through the claim above; it changes nothing else and has no read-back. It reports applied
+only when the asked view is in front afterwards: Home with no library over it, or the app itself.
+An app this build does not admit is refused without moving anything.
+
+```quint
+pure def viewShown(view: str, admitted: Set[str], front: str, library: bool): bool =
+  if (view == "home") front == "" and not(library) else admitted.contains(view) and front == view
+pure def lawAnUnadmittedViewIsNeverShown(view: str, front: str, library: bool): bool =
+  view != "home" implies not(viewShown(view, Set(), front, library))
+pure def lawHomeIsShownOnlyWithoutTheLibrary(admitted: Set[str]): bool = not(viewShown("home", admitted, "", true))
+pure val viewValues = Set("home", "notes", "phone")
+pure val frontValues = Set("", "notes")
+pure val libraryValues = Set(true, false)
 ```
 
 ## Story: Leave an app Alpha may no longer show

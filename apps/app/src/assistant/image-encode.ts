@@ -41,3 +41,17 @@ export async function base64Of(blob: Blob): Promise<string> {
   for (let at = 0; at < bytes.length; at += 32768) binary += String.fromCharCode(...bytes.subarray(at, at + 32768));
   return btoa(binary);
 }
+
+/** The picture a photo row names, as a blob: a `data:` URL is decoded in place, any other address is read once. */
+export async function blobOf(image: string): Promise<Blob> {
+  const inline = /^data:([^;,]+);base64,(.*)$/s.exec(image);
+  if (inline !== null) {
+    const binary = atob(inline[2] ?? "");
+    const bytes = new Uint8Array(binary.length);
+    for (let at = 0; at < binary.length; at += 1) bytes[at] = binary.charCodeAt(at);
+    return new Blob([bytes], { type: inline[1] });
+  }
+  const response = await fetch(image);
+  if (!response.ok) throw new Error("Photo unavailable");
+  return response.blob();
+}

@@ -14,6 +14,7 @@ const names: Record<Maneuver, string> = {
   "u-turn": "U-turn", roundabout: "Roundabout", arrive: "Arrive",
 };
 
+/** The maneuver to draw and its size. */
 export type ManeuverIconProps = {
   /** The provider's maneuver; a step without one continues. */
   maneuver?: Maneuver;

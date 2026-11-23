@@ -236,6 +236,24 @@ pure val recipientsValues = Set(List("bo@example.com"))
 pure val partBytesValues = Set(0, 5242881)
 ```
 
+### Replying again to a message reopens its unfinished reply from Drafts
+
+A reply set aside with Back stays the conversation's unfinished reply: Reply, or Reply all, to the
+same message again reopens the latest such draft of that mode from Drafts instead of starting a
+second one beside it. An earlier version of a sent reply is never reopened this way.
+
+```quint
+pure def threadReply(shelf: List[Draft], message: str, mode: Mode): str =
+  shelf.foldl("", (found, d) => if (d.fields.replyMessage == message and message != "" and d.fields.mode == mode and not(d.earlier)) d.id else found)
+pure def lawAThreadReplyIsOnTheShelf(shelf: List[Draft], message: str, mode: Mode): bool =
+  threadReply(shelf, message, mode) == "" or onShelf(shelf, threadReply(shelf, message, mode))
+pure def lawAnEarlierVersionAloneIsNeverTheThreadReply(message: str, mode: Mode): bool =
+  threadReply(List({ ...replyDraft, earlier: true }), message, mode) == ""
+pure val replyDraft: Draft = { ...draft1, id: "d3", fields: { ...pickedFields, mode: ReplyMode, replyMessage: "m1", replyThread: "t1", subject: "Re: Lunch" } }
+pure val shelfValues = Set(List()).union(Set(List(replyDraft))).union(Set(List(replyDraft, { ...replyDraft, id: "d4", earlier: true })))
+pure val messageValues = Set("m1", "m2")
+```
+
 ## Story: Pick recipients from the people I write to
 
 > As the owner, I want the To field to suggest addresses from my recent mail as I type, without

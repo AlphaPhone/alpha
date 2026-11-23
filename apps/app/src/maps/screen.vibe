@@ -1,11 +1,13 @@
-// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/screen.md, "Story: Keep my place while I step away"; spec/maps/screen.md, "A handed-over query is applied once, and any newer action discards it before it applies"; spec/maps/location.md, "A start is admitted one at a time and retires the session before it"
+// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "The quiet fix on open shows and centres the phone's position only while nothing is chosen, listed or being located, and its failure says nothing"; spec/maps/screen.md, "A place outside every region the provider covers keeps its coordinates and says so"; spec/maps/savedPlaces.md, "A saved provider place is used only with the open-data provider that served it"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/screen.md, "Story: Keep my place while I step away"; spec/maps/screen.md, "A handed-over query is applied once, and any newer action discards it before it applies"; spec/maps/location.md, "A start is admitted one at a time and retires the session before it"
 import { type Actor, type Event, type OriginKind, type Phase, type Screen, Machine as ScreenMachine, debounceMs, resumable } from "../../gen/maps__screen.effect.vibe"
+import { centersOnQuietFix, outsideCoverage } from "../../gen/maps__screen.ts"
+import { type SavedItem, savedLocal } from "../../gen/maps__savedPlaces.ts"
 import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
 import { offers, restricted, type Travel } from "../../gen/maps__vocabulary.effect.vibe"
 import { MapsProvider } from "./cloud.vibe"
 import { MapsContent, type MapsContentState, remembered, type Shown } from "./content.vibe"
 import type { MapsFailure } from "./failure.vibe"
-import { coordinateLabel, parseCoordinates } from "./geometry.vibe"
+import { coordinateLabel, micro, parseCoordinates } from "./geometry.vibe"
 import { MapsLocation } from "./location.vibe"
 import type { Coordinate, Place } from "./maps.schema.vibe"
 import { SavedPlacesStore } from "./saved.vibe"
@@ -44,12 +46,45 @@ export service MapsScreen {
   providerChanged(): void!!
   /** Forget the recent searches, which live only in memory. */
   clearRecent(): void!!
+  /** Save the shown place under `label`, or remove it when it is saved. */
+  toggleSaved(label: string): void!!
+  /** Rename the shown place: a saved one in storage, a pin on screen only. */
+  renamePlace(label: string): void!!
+  /** Ask for coordinates in Search instead of a location fix. */
+  enterCoordinates(): void!!
   readonly states: Stream.Stream<Screen>
 }
 
 /** Whether a travel mode is offered by the installed provider. */
 export function offered(content: MapsContentState, travel: Travel): boolean {
   return content.coverage !== undefined && offers(content.coverage.offer, travel)
+}
+
+/** The saved row for the shown place: the same provider identity, or for a place without one the same coordinates. */
+export function savedFor(shown: Shown | undefined, items: ReadonlyArray<SavedItem>): SavedItem | undefined {
+  if (!shown) return undefined
+  if (shown.savedId !== undefined) return items.find((i) => i.id === shown.savedId)
+  const point = micro(shown.coordinate)
+  return shown.providerPlaceId
+    ? items.find((i) => i.provider === (shown.providerId ?? "") && i.providerPlaceId === shown.providerPlaceId)
+    : items.find((i) => i.provider === "" && i.lat === point.lat && i.lng === point.lng)
+}
+
+/** How a saved row is shown now: its own, an open-data place of the serving provider, or restricted content. */
+export function savedKind(item: SavedItem, content: MapsContentState): Shown["kind"] {
+  if (item.provider === "") return "NoProvider"
+  return savedLocal(item.provider, content.coverage?.providerId ?? "", content.coverage?.kind ?? "NoProvider") ? "OpenProvider" : "GoogleProvider"
+}
+
+/** Whether the shown place lies outside every region the installed provider covers. */
+export function outsideShown(content: MapsContentState): boolean {
+  const shown = content.shown
+  const regions = content.coverage?.regions ?? []
+  if (!shown || regions.length === 0) return false
+  const point = micro(shown.coordinate)
+  return outsideCoverage(point.lat, point.lng, regions.map(({ bounds: [west, south, east, north] }) => ({
+    west: Math.round(west * 1e6), south: Math.round(south * 1e6), east: Math.round(east * 1e6), north: Math.round(north * 1e6),
+  })))
 }
 
 function phaseOf(found: number): Phase {
@@ -83,6 +118,7 @@ export const screenLayer = Layer.effect(MapsScreen, effect {
   }
 
   effect function send(event: Event, by: Actor = "Owner") {
+    if (by === "Owner") try content.update((c) => c.centerOn === undefined ? c : { ...c, centerOn: undefined })
     const before = try screen.get()
     const after = screen.send(event, by) catch () => undefined
     if (after === undefined) return undefined
@@ -205,10 +241,19 @@ export const screenLayer = Layer.effect(MapsScreen, effect {
   }
 
   effect function quietLocate() {
-    const s = try screen.get()
-    if (s.choice !== "NoChoice" || s.directions || !(try location.granted())) return
+    if (!centersOnQuietFix(try screen.get()) || !(try location.granted())) return
     const fix = location.once("QuietFix") catch () => undefined
-    if (fix) try content.update((c) => ({ ...c, position: fix }))
+    if (!fix) return
+    const now = try screen.get()
+    try content.update((c) => ({ ...c, position: c.position ?? fix, ...(centersOnQuietFix(now) ? { centerOn: fix.coordinate } : {}) }))
+  }
+
+  effect function told(work: void!MapsFailure, done: string) {
+    const ok = (work |> map(%, () => true)) catch effect (error) => {
+      try tell(error.message)
+      return false
+    }
+    if (ok) try tell(done)
   }
 
   return {
@@ -244,7 +289,8 @@ export const screenLayer = Layer.effect(MapsScreen, effect {
     effect pickSaved(id: number) {
       const item = (try saved.list()).find((i) => i.id === id)
       if (!item) return
-      try show({ label: item.label, coordinate: { latitude: item.lat / 1e6, longitude: item.lng / 1e6 }, kind: item.provider ? "OpenProvider" : "NoProvider", savedId: id,
+      const c = try content.get()
+      try show({ label: item.label, coordinate: { latitude: item.lat / 1e6, longitude: item.lng / 1e6 }, kind: savedKind(item, c), savedId: id,
         ...(item.provider ? { providerId: item.provider, providerPlaceId: item.providerPlaceId } : {}) }, "SavedChoice")
     },
     effect dropPin(coordinate: Coordinate, label?: string) {
@@ -289,6 +335,11 @@ export const screenLayer = Layer.effect(MapsScreen, effect {
     effect chooseSavedOrigin(id: number) {
       const item = (try saved.list()).find((i) => i.id === id)
       if (!item) return
+      if (savedKind(item, try content.get()) === "GoogleProvider") {
+        try content.update((x) => ({ ...x, origin: undefined }))
+        try send({ type: "editOrigin", text: "", coordinates: false })
+        return try tell("Enter a saved place or latitude, longitude as the starting point.")
+      }
       try content.update((x) => ({ ...x, origin: { label: item.label, coordinate: { latitude: item.lat / 1e6, longitude: item.lng / 1e6 } } }))
       try send({ type: "chooseOrigin", kind: "SavedOrigin" as OriginKind, label: item.label })
     },
@@ -358,6 +409,34 @@ export const screenLayer = Layer.effect(MapsScreen, effect {
       if (resumable(s)) try send({ type: "submitSearch", length: s.query.trim().length }, "Flow")
     },
     effect clearRecent() { try content.update((c) => ({ ...c, recent: [] })) },
+    effect toggleSaved(label: string) {
+      const shown = (try content.get()).shown
+      if (!shown) return
+      const row = savedFor(shown, try saved.list())
+      if (row) return try told(saved.remove(row.id), "Place removed from saved.")
+      const stored = saved.save(shown, label) catch effect (error) => {
+        try tell(error.message)
+        return undefined
+      }
+      if (!stored) return
+      try content.update((c) => c.shown?.id === shown.id ? { ...c, shown: { ...c.shown, savedId: stored.id, label: stored.label } } : c)
+      try tell("Place saved on this device.")
+    },
+    effect renamePlace(label: string) {
+      const name = label.trim().slice(0, 300)
+      const shown = (try content.get()).shown
+      if (!shown || restrictedShown(shown)) return
+      if (!name) return try tell("Name the place before saving it.")
+      const row = savedFor(shown, try saved.list())
+      const renamed = row === undefined ? true : (saved.rename(row.id, name) |> map(%, () => true)) catch () => false
+      if (!renamed) return try tell("The place name could not be saved.")
+      try content.update((c) => c.shown?.id === shown.id ? { ...c, shown: { ...c.shown, label: name } } : c)
+      try tell(row ? "Saved place renamed." : "Name updated. Tap Save to keep this place.")
+    },
+    effect enterCoordinates() {
+      try send({ type: "clearQuery" })
+      try tell("Type a latitude and longitude in Search, then press Enter.")
+    },
     states: screen.changes,
   }
 })

@@ -1,12 +1,15 @@
-// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"
+// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/dictation.md, "Recording starts only on a free microphone, after Alpha's speech confirmed it stopped, with the recognizer of the route in use now"
 import { Native } from "../platform/native.vibe"
-import { Machine, maxMsOf, onPhoneMaxMs, type Dictation as DictationState, type DictationEffect, type DictationFailure, type Event, type Recognizer } from "../../gen/voice__dictation.effect.vibe"
+import { Machine, maxMsOf, onPhoneMaxMs, type Dictation as DictationState, type DictationEffect, type DictationFailure, type Event, type Recognizer, type SpeechGate } from "../../gen/voice__dictation.effect.vibe"
+import type { Chain, SpeechChains } from "../../gen/voice__speech.ts"
 import type { Route } from "../../gen/voice__route.ts"
 import { Microphone } from "./capture.vibe"
 import { refusalOf } from "./failure.vibe"
 import { newId } from "./ids.ts"
 import { RecordingClip, RecordingStarted, RecordingStopped, TranscriptReply } from "./native.schema.vibe"
-import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
+import { VoiceRoute, attemptFailed } from "./route.vibe"
+import { Speech } from "./speech.vibe"
+import { transcription } from "./transcription.vibe"
 
 /** A draft another area owns, which dictation fills and never sends. */
 export interface DictationTarget {
@@ -51,21 +54,19 @@ const decodeClip = Schema.decodeUnknownOption(RecordingClip)
 const decodeStopped = Schema.decodeUnknownOption(RecordingStopped)
 const decodeTranscript = Schema.decodeUnknownOption(TranscriptReply)
 
-function transcription(route: Route, account: VoiceAccount, recordingId: string, requestId: string) {
-  if (route === "Cloud" && account.kind === "cloud") {
-    return { method: "transcribeRecording", args: { recordingId, requestId, environment: account.environment, credentialId: account.credentialId } }
-  }
-  if (route === "Direct" && account.kind === "own") {
-    return { method: "transcribeOwnRecording", args: { recordingId, requestId, providerRevision: account.revision } }
-  }
-  return { method: "transcribeLocalRecording", args: { recordingId, requestId } }
-}
-
 function failureOfStart(code: string): DictationFailure {
   if (code === "call-active" || code === "capture-call-active") return "CallActive"
   if (code === "speech-cleanup-unconfirmed") return "MediaNotStopped"
   if (code === "permission-denied") return "MicrophoneDenied"
   return "NoMicrophone"
+}
+
+/** Whether Alpha's speech lets a recording start: clear, still stopping on some channel, or latched after a stop never confirmed. */
+export function speechGateOf(chains: SpeechChains): SpeechGate {
+  const all: readonly Chain[] = [chains.replies, chains.reading, chains.app, chains.cloud]
+  if (chains.replies.stage === "Latched" || chains.reading.stage === "Latched") return "SpeechLatched"
+  if (all.some((chain) => chain.stage === "Retiring" || chain.stage === "Recovering")) return "SpeechStopping"
+  return "SpeechClear"
 }
 
 /** The dictation service over the dictation Machine it is given. */
@@ -74,6 +75,7 @@ export const dictationService = Layer.effect(Dictation, effect {
   const native = try Native
   const routes = try VoiceRoute
   const microphone = try Microphone
+  const speech = try Speech
   const ids = new Map<string, number>()
   let target: DictationTarget | undefined
   let recordingId: string | undefined
@@ -181,8 +183,10 @@ export const dictationService = Layer.effect(Dictation, effect {
     },
     effect start() {
       const recognizer = try recognizerNow()
+      const gate = speechGateOf(try speech.get())
       const ticket = try microphone.acquire("DictationCapture")
-      if (!(try send({ type: "start", recognizer, micFree: ticket !== undefined }))) {
+      const sent = try send({ type: "start", recognizer, micFree: ticket !== undefined, speech: gate })
+      if (!sent || (try held.get()).stage !== "Starting") {
         if (ticket !== undefined) try microphone.release(ticket)
         return
       }

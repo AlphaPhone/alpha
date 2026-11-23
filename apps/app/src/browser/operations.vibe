@@ -1,0 +1,95 @@
+// spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
+import { type BrowserControlOperation, browserControlRunsUnreviewed, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
+import { browserDestinationMatches, groundBrowserDestination, groundBrowserSearchQuery } from "@elizaos/plugin-browser/grounding"
+import { browserNavigationSummary, copy } from "../assistant/presentation.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { BrowserAgent, BrowserOpenRefused } from "./agent.vibe"
+
+const ASSISTANT_NAME = "Alpha"
+
+type BrowserOperation =
+  | { readonly kind: "navigate"; readonly url: string; readonly newTab: boolean }
+  | { readonly kind: "control"; readonly operation: BrowserControlOperation }
+
+function decoded(operation: unknown): BrowserOperation | undefined {
+  const navigate = parseBrowserNavigate(operation)
+  if (navigate.ok) return { kind: "navigate", url: navigate.operation.url, newTab: navigate.operation.newTab === true }
+  const control = parseBrowserControl(operation)
+  return control.ok ? { kind: "control", operation: control.operation } : undefined
+}
+
+function typed(text: string, words: string): boolean {
+  return groundBrowserSearchQuery(text, words) !== undefined
+}
+
+function wordsTyped(operation: BrowserControlOperation, text: string): boolean {
+  switch (operation.type) {
+    case "browser_search": return typed(text, operation.query)
+    case "browser_tab_switch": return typed(text, operation.target)
+    case "browser_find": return typed(text, operation.text)
+    default: return true
+  }
+}
+
+/** Whether the owner's own message asks for this Browser operation: the address or search words as typed, or a control that needs no typed words. */
+export function groundedIn(raw: unknown, text: string): boolean {
+  const op = decoded(raw)
+  if (op === undefined) return false
+  if (op.kind === "navigate") return browserDestinationMatches(raw, groundBrowserDestination(text, op.url, ASSISTANT_NAME))
+  return browserControlRunsUnreviewed(op.operation, { boundToMessage: true, wordsTyped: wordsTyped(op.operation, text) })
+}
+
+/** The receipt sentence of an applied Browser control. */
+export function controlSummary(operation: BrowserControlOperation): string {
+  switch (operation.type) {
+    case "browser_search": return `Searching the web for “${operation.query}”.`
+    case "browser_tab_new": return operation.private === true ? "Opened a private tab." : "Opened a new tab."
+    case "browser_tab_switch": return "Switched tabs in Browser."
+    case "browser_tab_close": return "Closed the tab."
+    case "browser_find": return `Finding “${operation.text}” in the page.`
+    case "browser_history": return { back: "Went back a page.", forward: "Went forward a page.", reload: "Reloading the page.", stop: "Stopped loading the page." }[operation.action]
+  }
+}
+
+/** The Browser family of agent device operations for `DeviceExecutors`: an approved HTTPS open or Browser control, run once by Browser's own agent service and refused before any effect when Browser changed. */
+export const operationPorts = effect {
+  const browser = try BrowserAgent
+
+  effect function presentation(op: BrowserOperation) {
+    if (op.kind === "navigate") return (try browser.openApproved(op.url, op.newTab)).present
+    const observed = op.operation.type === "browser_history" ? try browser.selection() : undefined
+    return try browser.control(op.operation, observed, () => succeed(null))
+  }
+
+  effect function run(op: BrowserOperation) {
+    const present = presentation(op) catch (error) => error
+    if (present instanceof BrowserOpenRefused) return { kind: "refused", code: "not_started", result: { message: present.message } }
+    runFork(present)
+    return { kind: "applied" }
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => decoded(operation) === undefined ? undefined : operation,
+    execute: async (operation) => {
+      const op = decoded(operation)
+      if (op === undefined) return { kind: "refused", code: "unsupported" }
+      return await runPromise(run(op))
+    },
+    readBack: async () => ({ kind: "refused", code: "no_readback" }),
+    describe: (operation) => {
+      const op = decoded(operation)
+      if (op === undefined) return { title: "Action", detail: "" }
+      if (op.kind === "navigate") return { title: op.newTab ? "Open in a new tab" : "Open in Browser", detail: op.url }
+      const described = describeBrowserControl(op.operation)
+      return { title: described.title, detail: described.description }
+    },
+    classOf: () => "BrowserNavigate",
+    target: (operation, text) => groundedIn(operation, text) ? { tag: "ContactTarget", nameWritten: true } : { tag: "NoTarget" },
+    summarize: (operation, result) => {
+      const op = decoded(operation)
+      if (op === undefined || result !== "Applied") return copy.unconfirmed
+      return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
+    },
+  }
+  return ports
+}

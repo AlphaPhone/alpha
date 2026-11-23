@@ -10,7 +10,7 @@ not declare it), Alpha's voice is in-chat only and Alpha stops a listener left o
 
 ## Domain
 
-### The renderer holds whether the image admits the listener, the startup stop, what the listener last said, any action in flight and each invocation taken
+### The renderer holds whether the image admits the listener, the startup stop, what the listener last said, any action in flight, the session bound and each invocation taken or discarded
 
 ```quint
 type ImageListener = NoListener | ListenerAdmitted
@@ -19,10 +19,10 @@ type ListenerMode = Unavailable | ListeningOn | ListeningPaused | ListeningOff |
 type Origin = NothingPending | AssistOnly | ListenerWake | SystemGesture | PowerPress
 type ListenerEffect = StartVoice | OpenAssistant
 type Listener = { booted: bool, image: ImageListener, wakeStop: WakeStop, mode: ListenerMode, microphoneOpen: bool,
-  issued: int, busy: bool, actions: int, takes: int, voiceStarts: int, lastOrigin: Origin }
+  issued: int, busy: bool, actions: int, takes: int, voiceStarts: int, lastOrigin: Origin, bound: bool, bindings: int, discards: int }
 type ListenerStep = { state: Listener, out: List[ListenerEffect] }
 pure val initial: Listener = { booted: false, image: NoListener, wakeStop: StopNotNeeded, mode: Unavailable, microphoneOpen: false,
-  issued: 0, busy: false, actions: 0, takes: 0, voiceStarts: 0, lastOrigin: NothingPending }
+  issued: 0, busy: false, actions: 0, takes: 0, voiceStarts: 0, lastOrigin: NothingPending, bound: false, bindings: 0, discards: 0 }
 pure def says(out: List[ListenerEffect], l: Listener): ListenerStep = { state: l, out: out }
 pure val tokenValues = Set(1, 2, 3)
 ```
@@ -45,7 +45,8 @@ pure def boot(l: Listener, aosp: bool, declared: bool, android: bool): Listener 
     wakeStop: if (admitted or not(android)) StopNotNeeded else StopPending }
 }
 pure def alwaysWithoutAdmissionNothingIsShownOrTaken(l: Listener): bool =
-  l.image == NoListener implies (l.mode == Unavailable and l.takes == 0 and l.voiceStarts == 0 and not(l.busy) and not(l.microphoneOpen))
+  l.image == NoListener implies (l.mode == Unavailable and l.takes == 0 and l.voiceStarts == 0 and not(l.busy) and not(l.microphoneOpen)
+    and not(l.bound) and l.bindings == 0 and l.discards == 0)
 pure def alwaysAnAdmittedListenerNeedsNoStartupStop(l: Listener): bool =
   l.image == ListenerAdmitted implies l.wakeStop == StopNotNeeded
 ```
@@ -123,7 +124,7 @@ and gives each arrival once (`spec/os/voice/invocation.md`).
 ```quint
 pure def startsVoice(origin: Origin): bool = origin == ListenerWake or origin == SystemGesture or origin == PowerPress
 pure def canInvocationTaken(l: Listener, origin: Origin, unlocked: bool, visible: bool, dialogOpen: bool, connectionPrompt: bool, voiceActive: bool): bool =
-  l.image == ListenerAdmitted and origin != NothingPending
+  l.image == ListenerAdmitted and l.bound and origin != NothingPending
 pure def invocationTaken(l: Listener, origin: Origin, unlocked: bool, visible: bool, dialogOpen: bool, connectionPrompt: bool, voiceActive: bool): ListenerStep = {
   val voice = startsVoice(origin) and unlocked and visible and not(dialogOpen) and not(connectionPrompt) and not(voiceActive)
   says(if (voice) List(StartVoice) else List(OpenAssistant),
@@ -136,4 +137,36 @@ pure def lawALockedPhoneNeverStartsVoice(origin: Origin, visible: bool): bool =
   not(invocationTaken({ ...initial, image: ListenerAdmitted, booted: true }, origin, false, visible, false, false, false).out.includes(StartVoice))
 pure def sometimesWakeStartedVoice(l: Listener): bool = l.voiceStarts >= 1 and l.lastOrigin == ListenerWake
 pure def sometimesPowerOnlyOpened(l: Listener): bool = l.lastOrigin == PowerPress and l.voiceStarts == 0
+```
+
+### Invocations are bound to the agent session the resident verified, and none is taken while no session is bound
+
+The binding is a digest of the verified session's owner, agent, generation and service launch,
+never a credential; a new session replaces it and sign-out binds none, so a cold start, a changed
+owner or an old answer cannot open the microphone.
+
+```quint
+pure def canSessionBound(l: Listener, bound: bool): bool = l.image == ListenerAdmitted
+pure def sessionBound(l: Listener, bound: bool): Listener = { ...l, bound: bound, bindings: l.bindings + 1 }
+pure def alwaysATakeFollowsABinding(l: Listener): bool = (l.bound implies l.bindings >= 1) and (l.takes >= 1 implies l.bindings >= 1)
+pure def sometimesUnboundAfterATake(l: Listener): bool = not(l.bound) and l.takes >= 1
+```
+
+### A pending power press is discarded, never kept, while the screen cannot start voice
+
+A hidden screen, an open dialog, a connection prompt or voice already running discards it before
+any invocation is taken, so it cannot start voice later.
+
+```quint
+pure def screenFree(visible: bool, dialogOpen: bool, connectionPrompt: bool, voiceActive: bool): bool =
+  visible and not(dialogOpen) and not(connectionPrompt) and not(voiceActive)
+pure def canPowerDiscarded(l: Listener, visible: bool, dialogOpen: bool, connectionPrompt: bool, voiceActive: bool): bool =
+  l.image == ListenerAdmitted and l.bound and not(screenFree(visible, dialogOpen, connectionPrompt, voiceActive))
+pure def powerDiscarded(l: Listener, visible: bool, dialogOpen: bool, connectionPrompt: bool, voiceActive: bool): Listener =
+  { ...l, discards: l.discards + 1 }
+pure def lawADiscardNeedsABlockedScreen(visible: bool, dialogOpen: bool, connectionPrompt: bool, voiceActive: bool): bool =
+  not(screenFree(visible, dialogOpen, connectionPrompt, voiceActive)) iff (not(visible) or dialogOpen or connectionPrompt or voiceActive)
+pure def stepADiscardStartsNothing(before: Listener, via: str, after: Listener): bool =
+  via == "powerDiscarded" implies (after.voiceStarts == before.voiceStarts and after.takes == before.takes)
+pure def sometimesPowerDiscarded(l: Listener): bool = l.discards >= 1 and l.voiceStarts == 0
 ```

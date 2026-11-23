@@ -4,6 +4,7 @@ import { canAsk, canClearAll, clearableKeys, reviewable, type NoticeRow, type Sh
 import { Button, EmptyState, ListRow, Sheet, SheetContent } from "../components/ui/index.ts";
 import { noticeReport } from "./text.ts";
 
+/** The shade's current visit and rows, and the owner's action on each row. */
 export type NotificationShadeProps = {
   /** The shade's visit and the rows listed for it. */
   shade: Shade;

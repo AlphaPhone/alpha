@@ -1,4 +1,4 @@
-// spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
+// spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/list.md, "Each checklist row keeps its own place and a name a screen reader can say"; spec/notes/editor.md, "Leaving saves an edited draft first, drops an untouched new note and otherwise just closes"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/origins.md, "The draft text is the note's open action items, then its open checklist items, then its body"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
 import { ArrowLeft, Calendar, Copy, Ellipsis, ExternalLink, Globe, Mail, Paperclip, Pause, Play, Plus, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { NoteFormat } from "@elizaos/plugin-notes/types";
@@ -7,6 +7,7 @@ import type { DraftContent, DraftPatch } from "../../notes/editor.vibe";
 import type { CheckItem, NoteRow } from "../../notes/list.vibe";
 import type { ShareChannel } from "../../notes/share.vibe";
 import { recordingClock } from "../../notes/recorder.vibe";
+import { type ChecklistRows, itemName, rowAdded, rowRemoved } from "../../../gen/notes__list.ts";
 
 export type NoteEditorProps = {
   /** The open draft's words. */
@@ -45,9 +46,17 @@ function items(format: NoteFormat | undefined): CheckItem[] {
  */
 export function NoteEditor({ draft, row, status, saved, playing, positionMs, transcribing, onEdit, onBack, onDelete, onShare, onSchedule, onPlay, onStopPlayback, onTranscribe, onWebSource, onAttachment }: NoteEditorProps) {
   const [newItem, setNewItem] = useState("");
+  const [rowKeys, setRowKeys] = useState<ChecklistRows>({ keys: [], nextKey: 0 });
   const kind = draft.format?.kind ?? "text";
   const list = items(draft.format);
+  let placed = rowKeys.keys.length > list.length ? { ...rowKeys, keys: rowKeys.keys.slice(0, list.length) } : rowKeys;
+  while (placed.keys.length < list.length) placed = rowAdded(placed);
+  if (placed !== rowKeys) setRowKeys(placed);
   const setItems = (next: CheckItem[]) => onEdit({ format: { kind: "list", data: { ...(draft.format?.data ?? {}), items: next.map((item) => ({ t: item.t, done: item.done })) } } });
+  const removeItem = (index: number) => {
+    setRowKeys(rowRemoved(placed, index));
+    setItems(list.filter((_, at) => at !== index));
+  };
   return (
     <section className="flex h-full flex-col" aria-label={draft.title || "Note"}>
       <header className="flex items-center gap-2 px-2 py-2">
@@ -75,10 +84,10 @@ export function NoteEditor({ draft, row, status, saved, playing, positionMs, tra
         {kind === "list" ? (
           <ul className="flex flex-col gap-1">
             {list.map((item, index) => (
-              <li key={index} className="flex items-center gap-2">
-                <Checkbox checked={item.done} aria-label={item.t.trim() === "" ? `Item ${index + 1}` : item.t} onCheckedChange={(checked) => setItems(list.map((other, at) => at === index ? { ...other, done: checked === true } : other))} />
+              <li key={placed.keys[index] ?? `item-${index}`} className="flex items-center gap-2">
+                <Checkbox checked={item.done} aria-label={itemName(item.t.trim() === "") === "NamedByPosition" ? `Item ${index + 1}` : item.t} onCheckedChange={(checked) => setItems(list.map((other, at) => at === index ? { ...other, done: checked === true } : other))} />
                 <Input aria-label={`Item ${index + 1}`} className="flex-1 border-0 px-0" value={item.t} onChange={(event) => setItems(list.map((other, at) => at === index ? { ...other, t: event.target.value } : other))} />
-                <Button variant="ghost" size="icon" aria-label={item.t.trim() === "" ? `Remove item ${index + 1}` : `Remove ${item.t}`} onClick={() => setItems(list.filter((_, at) => at !== index))}><X aria-hidden /></Button>
+                <Button variant="ghost" size="icon" aria-label={itemName(item.t.trim() === "") === "NamedByPosition" ? `Remove item ${index + 1}` : `Remove ${item.t}`} onClick={() => removeItem(index)}><X aria-hidden /></Button>
               </li>
             ))}
             <li>

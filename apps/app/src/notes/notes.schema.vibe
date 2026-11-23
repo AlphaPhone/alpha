@@ -65,8 +65,11 @@ export const AudioReceipt = Schema.Struct({
 /** The device's playback state. */
 export const PlaybackState = Schema.Struct({ playing: Schema.Boolean, audioId: Schema.optionalKey(Schema.String), positionMs: Schema.Number })
 
-/** A transcribed window or segment. */
-export const TranscribeAnswer = Schema.Struct({ text: Schema.String })
+/** A transcribed window or segment, and whether the phone itself heard it. */
+export const TranscribeAnswer = Schema.Struct({ text: Schema.String, local: Schema.optionalKey(Schema.Boolean) })
+
+/** The recording notification's one-use tap record, taken by the read. */
+export const RecordingOpenAnswer = Schema.Struct({ open: Schema.Boolean })
 
 /** The claim the native recorder records before a voice note is created. */
 export const ClaimAnswer = Schema.Struct({ claimed: Schema.Boolean })
@@ -121,6 +124,34 @@ export const KeptDraft = Schema.Struct({
   changes: Schema.Array(KeptChange).check(Schema.isMaxLength(10000)),
 })
 
+/** One deleted note of the earlier device Trash, as the phone's own collection stored it. */
+export const LegacyTrashNote = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  kind: Schema.Literals(["text", "list", "voice", "link"]),
+  title: Schema.String.check(Schema.isMaxLength(240)),
+  body: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20001))),
+  items: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, done: Schema.optionalKey(Schema.Boolean) })).check(Schema.isMaxLength(2000))),
+  lines: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, s: Schema.optionalKey(Schema.String), at: Schema.optionalKey(Schema.Number) })).check(Schema.isMaxLength(5000))),
+  summary: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(200))),
+  actions: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, done: Schema.optionalKey(Schema.Boolean) })).check(Schema.isMaxLength(200))),
+  clips: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(200))),
+  url: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
+  domain: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(255))),
+  folderId: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^f-[A-Za-z0-9_-]{1,64}$/))),
+  color: Schema.optionalKey(Schema.Literals(["yellow", "green", "rose", "slate"])),
+})
+
+/** One row of the earlier device Trash: its deletion operation, the note and when it was deleted. */
+export const LegacyTrashEntry = Schema.Struct({
+  id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  note: LegacyTrashNote,
+  index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  deletedAt: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: maxSafe })),
+})
+
+/** The earlier device Trash slot `notes-trash:v1:device`. */
+export const LegacyTrashDocument = Schema.Struct({ version: Schema.Literal(1), entries: Schema.Array(LegacyTrashEntry).check(Schema.isMaxLength(10000)) })
+
 /** One secure slot read of `AlphaConnection`. */
 export const SecureRead = Schema.Struct({ value: Schema.NullOr(Schema.String) })
 
@@ -132,6 +163,8 @@ export type OriginLink = typeof OriginLink.Type
 export type OriginIndex = typeof OriginIndex.Type
 export type KeptDraft = typeof KeptDraft.Type
 export type KeptChange = typeof KeptChange.Type
+export type LegacyTrashNote = typeof LegacyTrashNote.Type
+export type LegacyTrashDocument = typeof LegacyTrashDocument.Type
 
 /** Decoders for every untrusted payload Notes reads. */
 export const decodeRecordingStatus = Schema.decodeUnknownEffect(RecordingStatus)
@@ -141,8 +174,10 @@ export const decodeAudioReceipt = Schema.decodeUnknownEffect(AudioReceipt)
 export const decodePlayback = Schema.decodeUnknownEffect(PlaybackState)
 export const decodeTranscribe = Schema.decodeUnknownEffect(TranscribeAnswer)
 export const decodeClaim = Schema.decodeUnknownEffect(ClaimAnswer)
+export const decodeRecordingOpen = Schema.decodeUnknownEffect(RecordingOpenAnswer)
 export const decodeFolders = Schema.decodeUnknownEffect(Schema.fromJsonString(FoldersDocument))
 export const decodeOrigins = Schema.decodeUnknownEffect(Schema.fromJsonString(OriginIndex))
 export const decodeDocumentResult = Schema.decodeUnknownEffect(DocumentResult)
 export const decodeKeptDraft = Schema.decodeUnknownEffect(Schema.fromJsonString(KeptDraft))
 export const decodeSecureRead = Schema.decodeUnknownEffect(SecureRead)
+export const decodeLegacyTrash = Schema.decodeUnknownEffect(Schema.fromJsonString(LegacyTrashDocument))

@@ -107,6 +107,17 @@ pure def show(v: VideoEditor): VideoEditor = { ...v, hidden: false }
 pure def alwaysClosedAbortsSave(v: VideoEditor): bool = v.closed implies (v.aborted and not(v.playing))
 ```
 
+### The browser build edits a video only where it can decode and encode it, and refuses before any write otherwise
+
+The browser renders the copy on the device as WebM, keeping every track; a
+copy that would drop a track or pass 100 MB is refused and nothing is kept.
+
+```quint
+pure def browserCanEdit(codecs: bool, tracksKept: bool, bytes: int): bool = codecs and tracksKept and bytes > 0 and bytes <= 100000000
+pure def lawNoCodecsNoCopy(tracksKept: bool, bytes: int): bool = not(browserCanEdit(false, tracksKept, bytes))
+pure val bytesValues = Set(0, 1, 100000000, 100000001)
+```
+
 ### The trim clock shows minutes and tenths of a second, rounded first so the seconds never read 60
 
 ```quint

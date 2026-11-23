@@ -7,6 +7,7 @@ import { copy } from "../../assistant/presentation.vibe";
 import { Button, Textarea } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
+/** What the composer shows and the owner's actions on it. */
 export type ComposerBarProps = {
   /** The draft of the open conversation. */
   text: string;
@@ -28,13 +29,21 @@ export type ComposerBarProps = {
   locationShared?: boolean;
   /** Placeholder of the editor. */
   placeholder?: string;
+  /** The owner typed. */
   onText: (text: string) => void;
+  /** The owner pressed Send or Enter. */
   onSend: () => void;
+  /** The owner stopped the reply being written. */
   onStop: () => void;
+  /** The owner asked for a voice conversation. */
   onTalk: () => void;
+  /** The owner opened the attachment picker. */
   onAttach: () => void;
+  /** The owner removed a waiting file. */
   onRemoveFile: (id: string) => void;
+  /** The owner cancelled the quote or edit. */
   onClearTarget: () => void;
+  /** The owner settled a message that may already have been sent: put it back, or let it go. */
   onReviewUnsettled: (restore: boolean) => void;
 };
 

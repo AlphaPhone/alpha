@@ -1,7 +1,7 @@
-// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Stopping is confirmed only when the service reports its launch stopped and serving nothing"; spec/platform/resident.md, "The agent's status reads as running only while its launch serves"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"
+// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "An abandoned request is withdrawn by its id, and its outcome is unknown unless native withdrew it first"; spec/platform/resident.md, "Stopping is confirmed only when the service reports its launch stopped and serving nothing"; spec/platform/resident.md, "The agent's status reads as running only while its launch serves"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"
 import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@elizaos/agent/client"
 import type { AgentStatus, AgentStreamData, AgentStreamEnd, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
-import { runtimePhaseOf, stopConfirmed, type Boot } from "../../gen/platform__resident.effect.vibe"
+import { abortOutcome, runtimePhaseOf, stopConfirmed, type AbortOutcome, type Boot } from "../../gen/platform__resident.effect.vibe"
 import { Machine as Relay, machine as relayMachine, type Event as RelayEvent, type Failure, type Relay as RelayState } from "../../gen/platform__nativeStream.effect.vibe"
 import { bytesOfBase64, jsonBytes, newId } from "./native-capacitor.ts"
 
@@ -79,10 +79,16 @@ export effect function stopAgent(agent: ElizaAgentPlugin) {
   throw new AgentCallFailed({ method: "stop", message: "Not confirmed" })
 }
 
-/** One plain resident request through the agent service. */
-export effect function agentRequest(agent: ElizaAgentPlugin, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown) {
+/** One plain resident request through the agent service, sent under `id` so that it can be withdrawn. */
+export effect function agentRequest(agent: ElizaAgentPlugin, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, id: string = newId()) {
   const fields = typeof body === "object" && body !== null && !Array.isArray(body) ? { body: body as Record<string, unknown> } : {}
-  return try call("request", () => agent.request({ method, path, id: newId(), ...fields }))
+  return try call("request", () => agent.request({ method, path, id, ...fields }))
+}
+
+/** Withdraws the plain request sent under `id`: not sent where native withdrew it before dispatch, otherwise its outcome is unknown. */
+export effect function withdraw(agent: ElizaAgentPlugin, id: string): AbortOutcome!! {
+  const said = call("abort", () => agent.abort({ id })) catch () => undefined
+  return abortOutcome(said?.aborted === true)
 }
 
 const refusalOfFailure: Readonly<Record<Failure, { status: number; code: string; error: string } | undefined>> = {

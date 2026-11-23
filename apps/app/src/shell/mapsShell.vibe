@@ -1,0 +1,64 @@
+// spec/maps/agentSurface.md, "Story: Let my agent bring Maps forward only when I can see it"; spec/maps/agentSurface.md, "Maps opens at most once per request, only over an unblocked launcher, and the answer waits for the open to commit or two seconds"; spec/shell/navigation.md, "Story: Let the agent switch my screen only while I am still looking"
+import type { Nav } from "../../gen/shell__navigation.effect.vibe"
+import { Machine as CallBarMachine, type CallBar } from "../../gen/telephony__callBar.effect.vibe"
+import { MapsShell, type ShellState } from "../maps/ports.vibe"
+import { APP_IDS } from "./apps.vibe"
+import { Navigation } from "./navigation.vibe"
+
+/** What Maps sees of the launcher: the navigation in front and whether a call rings. */
+export function shellStateOf(nav: Nav, ringing: boolean): ShellState {
+  return {
+    live: !nav.ended && nav.outcome !== "Finished",
+    hidden: nav.hidden,
+    suspended: nav.ended,
+    assistantWindow: nav.host === "AssistantSurface",
+    connectionOpen: nav.layers.some((layer) => layer.id.startsWith("account")),
+    home: !nav.hidden,
+    secure: false,
+    shaded: nav.shade,
+    ringing,
+    native: nav.host !== "Standalone",
+    view: nav.app === "" ? "home" : nav.app,
+    stack: [...nav.stack],
+  }
+}
+
+function ringingIn(bar: CallBar): boolean {
+  return bar.calls.some((call) => call.phase === "Ringing")
+}
+
+function sameState(a: ShellState, b: ShellState): boolean {
+  return a.live === b.live && a.hidden === b.hidden && a.suspended === b.suspended && a.assistantWindow === b.assistantWindow &&
+    a.connectionOpen === b.connectionOpen && a.home === b.home && a.secure === b.secure && a.shaded === b.shaded &&
+    a.ringing === b.ringing && a.native === b.native && a.view === b.view && a.stack.join("\n") === b.stack.join("\n")
+}
+
+/** MapsShell over the shell's navigation and Telephony's call bar; built after Telephony and before Maps. */
+export const mapsShellLive = Layer.effect(MapsShell, effect {
+  const navigation = try Navigation
+  const calls = try CallBarMachine
+  const own = try Ref.make<string>("")
+
+  effect function current() {
+    const nav = try navigation.get()
+    const bar = try calls.get()
+    return shellStateOf(nav, ringingIn(bar))
+  }
+
+  return {
+    states: Stream.changesWith(
+      Stream.mapEffect(Stream.merge(Stream.map(navigation.changes, () => undefined), Stream.map(calls.changes, () => undefined)), () => current()),
+      sameState,
+    ),
+    current,
+    effect open(app: string, route?: string) {
+      const known = APP_IDS.find((id) => id === app)
+      if (known === undefined) return
+      const claimed = try Ref.getAndSet(own, "")
+      if (claimed === app) try navigation.switchForAgent(known, route ?? "")
+      else try navigation.open(known, route)
+    },
+    admitOwnViewOpen: (app: string) => Ref.set(own, app),
+    effect back() { try navigation.back() },
+  }
+})

@@ -4,6 +4,7 @@ import { canLap, canResetStopwatch, canStartStopwatch, canStopStopwatch, elapsed
 import { Button } from "../components/ui/index.ts";
 import { duration } from "./text.ts";
 
+/** The stopwatch as kept, the page's instant, and Start, Stop, Lap and Reset. */
 export type StopwatchPanelProps = {
   /** The stopwatch as kept. */
   watch: Stopwatch;

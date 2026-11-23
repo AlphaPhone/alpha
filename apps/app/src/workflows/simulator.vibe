@@ -1,9 +1,10 @@
-// spec/workflows/simulator.md, "Story: Walk a workflow end to end in the browser without touching anything real"
+// spec/workflows/simulator.md, "Story: Walk a workflow end to end in the browser without touching anything real"; spec/workflows/simulatedTriggers.md, "Story: Try a place or message workflow in the browser without a phone"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type Destination, type Where, expenseValid, focusFits, historyRemovable, noticeFits, receiptMatches, removableRun, resultAccepted,
   sendAllowed, simulatorLoads, urgencyDecisionValid, urgencyInputValid, whereFrom,
 } from "../../gen/workflows__simulator.effect.vibe"
+import { type Side, type Triggers, Machine as TriggersMachine, machine as triggersMachine } from "../../gen/workflows__simulatedTriggers.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 
@@ -123,3 +124,66 @@ export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
     },
   }
 })
+
+/** What one trigger check did: how many jobs it queued, or that checking stopped until a wake. */
+export type TriggerCheck = { readonly queued: number } | { readonly stopped: true }
+
+/** The browser build's place and message trigger checks, with test mocks only; refused everywhere else. */
+export service SimulatedTriggers {
+  /** The checker as it is now. */
+  get(): Triggers!SimulatedRefusal
+  /** A simulated fix: inside or outside the place, or on its edge. */
+  fix(side: Side): void!SimulatedRefusal
+  loseFix(): void!SimulatedRefusal
+  /** The page went to the background or came back. */
+  foreground(front: boolean): void!SimulatedRefusal
+  /** A wake event: the calendar, inbox or location changed, or the page took focus. */
+  wake(): void!SimulatedRefusal
+  editPlace(): void!SimulatedRefusal
+  arrive(message: number): void!SimulatedRefusal
+  remove(message: number): void!SimulatedRefusal
+  /** The message workflow's source cannot be read, or can again. */
+  sourceBroken(broken: boolean): void!SimulatedRefusal
+  /** Check every trigger once. */
+  check(): TriggerCheck!SimulatedRefusal
+  /** Hand the next queued job to the simulator; `done` is whether it left the queue. */
+  dispatch(done: boolean): boolean!SimulatedRefusal
+}
+
+/** SimulatedTriggers over its machine, loaded only in the browser build with test mocks. */
+export const simulatedTriggers = Layer.provideMerge(Layer.effect(SimulatedTriggers, effect {
+  const held = try TriggersMachine
+  const build = try Build
+  const loaded = simulatorLoads(build.info.testMocks, build.info.variant === "browser")
+
+  effect function guard() {
+    if (!loaded) throw new SimulatedRefusal({ reason: "not-loaded" })
+  }
+
+  effect function sent(event: Parameters<typeof held.send>[0]) {
+    try guard()
+    return (try (held.send(event) catch () => undefined)) !== undefined
+  }
+
+  return {
+    effect get() {
+      try guard()
+      return try held.get()
+    },
+    effect fix(side: Side) { try sent({ type: "fix", side }) },
+    effect loseFix() { try sent({ type: "loseFix" }) },
+    effect foreground(front: boolean) { try sent(front ? { type: "resume" } : { type: "background" }) },
+    effect wake() { try sent({ type: "wake" }) },
+    effect editPlace() { try sent({ type: "editPlace" }) },
+    effect arrive(message: number) { try sent({ type: "arrive", message }) },
+    effect remove(message: number) { try sent({ type: "remove", message }) },
+    effect sourceBroken(broken: boolean) { try sent({ type: "breakSource", broken }) },
+    effect check() {
+      const before = try held.get()
+      if (!(try sent({ type: "scan" }))) return { stopped: true } satisfies TriggerCheck
+      const after = try held.get()
+      return after.blocked ? { stopped: true } satisfies TriggerCheck : { queued: after.queue - before.queue } satisfies TriggerCheck
+    },
+    effect dispatch(done: boolean) { return try sent({ type: "dispatch", done }) },
+  }
+}), triggersMachine())

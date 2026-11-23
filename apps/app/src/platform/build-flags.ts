@@ -9,14 +9,24 @@ export const testMocksBuilt: boolean = typeof __ALPHA_TEST_MOCKS__ === "boolean"
 /** The app version every distributed build carries, from app.config.json. */
 export const appVersion: string = appConfig.version;
 
+/** The development server serves the page, as Vite reports it. */
+export const developmentServer: boolean = import.meta.env?.DEV === true;
+
 /** The app id, which is always Alpha's own. */
 export const appId: string = appConfig.appId;
 
-/** The Alpha Cloud cutover flag: off, the shipped default, every build keeps Eliza Cloud. */
-export const alphaCloudCutover: boolean = false;
+/** The Alpha Cloud cutover flag, `VITE_ALPHA_CLOUD_CUTOVER=1` at build time as account's deployment reads it: off, the shipped default, every build keeps Eliza Cloud. */
+export const alphaCloudCutover: boolean = import.meta.env?.VITE_ALPHA_CLOUD_CUTOVER === "1";
 
-/** The development server serves the page, as Vite reports it. */
-export const developmentServer: boolean = import.meta.env?.DEV === true;
+/** The Cloud environment the build asked for with `VITE_ALPHA_CLOUD_ENVIRONMENT`, which only a test-mocks build or a browser preview honours. */
+export const cloudEnvironmentAsked: "production" | "staging" | undefined =
+  import.meta.env?.VITE_ALPHA_CLOUD_ENVIRONMENT === "staging" ? "staging" : import.meta.env?.VITE_ALPHA_CLOUD_ENVIRONMENT === "production" ? "production" : undefined;
+
+/** The development browser preview of the Cloud resident: `VITE_ALPHA_CLOUD_RESIDENT=1` on the development server, off the phone. @throws {never} */
+export function cloudResidentPreview(onDevice: boolean): boolean {
+  return developmentServer && !onDevice && import.meta.env?.VITE_ALPHA_CLOUD_RESIDENT === "1";
+}
+
 
 /** The page's own query asked for the developer device controls. @throws {never} */
 export function toolsAsked(): boolean {
@@ -58,4 +68,13 @@ export function developmentAgentBase(onDevice: boolean): URL | undefined {
 /** Whether the page is in front, as the document reports it. @throws {never} */
 export function pageVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
+/** Marks the page root with what the build is, so the shell, its recovery screen and Bombadil read one answer. @throws {never} */
+export function markPage(info: { readonly version: string; readonly variant: string; readonly testMocks: boolean }): void {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement.dataset;
+  root.alphaVersion = info.version;
+  root.alphaVariant = info.variant;
+  root.testMocks = info.testMocks ? "true" : "false";
 }

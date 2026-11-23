@@ -1,4 +1,5 @@
 // spec/voice/speech.md, "A spoken reply refuses only a likely password, key or card; everything else it cannot say becomes a pause"; spec/voice/speech.md, "A reading also refuses a link or email address, characters it cannot say and more than 16,000 characters"; spec/voice/speech.md, "Each finished sentence is spoken while the rest is generated, in order, and streamed audio is never kept"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"
+import type { VoiceReplyAction } from "@elizaos/agent/voice";
 
 /** Why a passage was not spoken: a likely secret, a link or address, a character it cannot say, a length, or a word too long. */
 export type SpokenRefusal = "secret" | "link" | "characters" | "length" | "word";
@@ -134,6 +135,19 @@ export type ReplyAction =
   | { readonly kind: "email-draft"; readonly validatedCard: boolean }
   | { readonly kind: "email-failed" }
   | { readonly kind: "other"; readonly verbatimAsked: boolean };
+
+/** The resident's names of the actions that hand an email to the phone's composer. */
+export const EMAIL_DRAFT_ACTIONS: ReadonlySet<string> = new Set(["INBOX_COMPOSE_EMAIL"]);
+
+/**
+ * The kind of reply a voice turn's action label makes: none without a label, an email draft for an action that hands an email to the composer, another action otherwise.
+ * @throws {never}
+ */
+export function replyActionOf(label: VoiceReplyAction | undefined): ReplyAction {
+  if (label === undefined) return { kind: "none" };
+  if (EMAIL_DRAFT_ACTIONS.has(label.kind)) return { kind: "email-draft", validatedCard: label.validatedCard };
+  return { kind: "other", verbatimAsked: label.verbatimAsked };
+}
 
 /** Said for an email draft with a validated card. */
 export const EMAIL_DRAFT_READY = "Your email draft is ready to review.";

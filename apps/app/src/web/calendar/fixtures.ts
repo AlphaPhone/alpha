@@ -1,5 +1,8 @@
 // spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"
 // Fixture rows for the stories (`*.meta.tsx`); never loaded by the app.
+import { initial as draftInitial, type EditorDraft } from "../../../gen/calendar__drafts.ts";
+import type { DraftFieldsRecord } from "../../calendar/drafts.schema.vibe";
+import type { SyncDestination } from "../../calendar/sync.vibe";
 import type { CalendarRow } from "../../calendar/model.vibe";
 import type { EventFacts } from "./EventDetail.tsx";
 import type { ListGroup } from "./layout.ts";
@@ -28,7 +31,31 @@ export const groups: readonly ListGroup[] = [
 ];
 
 /** An organizer's event with a meeting link. */
-export const organizerFacts: EventFacts = { mode: "OrganizerCancel", managed: false, join: "https://meet.example.com/abc", provider: undefined, repeat: "", invitePending: false };
+export const organizerFacts: EventFacts = { mode: "OrganizerCancel", managed: false, join: "https://meet.example.com/abc", provider: undefined, repeat: "", invitePending: false,
+  people: [{ key: "0:owner@example.com", name: "Sam Rivera", reply: "WordOrganizer" }, { key: "1:ada@example.com", name: "Ada Park", reply: "WordGoing" }, { key: "2:lee@example.com", name: "lee@example.com", reply: "WordAwaiting" }] };
 
 /** An unanswered invitation in a managed Google calendar. */
-export const inviteFacts: EventFacts = { mode: "DeclineInvitation", managed: true, join: undefined, provider: "https://calendar.google.com/event", repeat: "Repeats weekly on Fri", invitePending: true };
+export const inviteFacts: EventFacts = { mode: "DeclineInvitation", managed: true, join: undefined, provider: "https://calendar.google.com/event", repeat: "Repeats weekly on Fri", invitePending: true,
+  people: [{ key: "0:host@example.com", name: "Host", reply: "WordOrganizer" }, { key: "1:owner@example.com", name: "You", reply: "WordAwaiting" }] };
+
+/** A new event's fields, today at ten for an hour. */
+export const newEventFields: DraftFieldsRecord = { title: "Lunch with Ada", body: "", location: "Cafe", start: "2026-11-20T10:00", end: "2026-11-20T11:00", zone: "UTC",
+  allDay: false, repeat: "none", alert: null, video: false, who: [], calendar: "local", creationId: "fixture-1", origin: "typed" };
+
+/** An editor open on a new event, nothing retained yet. */
+export const openDraft: EditorDraft = { ...draftInitial, owner: "owner", alive: true, opened: true };
+
+/** An editor offering edits retained from before Calendar was interrupted. */
+export const offeredDraft: EditorDraft = { ...openDraft, offered: true, form: "BaselineFields", text: JSON.stringify(newEventFields) };
+
+/** An editor whose slot another window changed. */
+export const conflictDraft: EditorDraft = { ...openDraft, conflict: true };
+
+/** An editor whose slot cannot be read, in a development build's recovery. */
+export const recoveryDraft: EditorDraft = { ...openDraft, storageError: true, recovery: "RecoveryReady", recoveryCurrent: true };
+
+/** The owner's writable Google calendars. */
+export const destinations: readonly SyncDestination[] = [
+  { connectorAccountId: "google-1", providerCalendarId: "primary", name: "Primary", account: "owner@example.com", version: 1 },
+  { connectorAccountId: "google-1", providerCalendarId: "team", name: "Team", account: "owner@example.com", version: 1 },
+];

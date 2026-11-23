@@ -1,5 +1,9 @@
-// spec/calendar/agent.md, "The port reports the current agent binding; a usable port always names an owner"; spec/calendar/presentation.md, "Agent rows belong to the owner they were read for, and a changed owner clears them"; spec/calendar/deletions.md, "Leaving the app sends a waiting deletion at once; another account or session drops it unsent"; spec/calendar/drafts.md, "Changing owner closes the editor; the old owner's slot keeps its edits"
-import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
+// spec/calendar/agent.md, "The port reports the current agent binding; a usable port always names an owner"; spec/calendar/presentation.md, "While Calendar is in front it reads again once a minute, never hidden, during a read or a write, or without a session"; spec/calendar/presentation.md, "Leaving Calendar ends its transient overlays and any pending save request"; spec/calendar/presentation.md, "Crossing midnight keeps the chosen dates"; spec/calendar/editor.md, "A form's day follows the calendar date when midnight passes"; spec/calendar/presentation.md, "Revoked access hides a source at once; hiding the agent calendar is a preference of that account"; spec/calendar/presentation.md, "Agent rows belong to the owner they were read for, and a changed owner clears them"; spec/calendar/deletions.md, "Leaving the app sends a waiting deletion at once; another account or session drops it unsent"; spec/calendar/drafts.md, "Changing owner closes the editor; the old owner's slot keeps its edits"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { Machine as PresentationMachine, rereadDue } from "../../gen/calendar__presentation.effect.vibe"
+import type { ResidentSession } from "../platform/resident-control.vibe"
+import { ownerKey } from "../platform/storage.vibe"
+import { Foreground } from "../shell/foreground.vibe"
 import { AgentCalendar, type AgentBinding, type CalendarWindow } from "./agent.vibe"
 import { ApprovalReviews } from "./approvals.vibe"
 import { HeldDeletions } from "./deletions.vibe"
@@ -8,9 +12,16 @@ import { CalendarDrafts } from "./drafts.vibe"
 import { readWindow } from "./model.vibe"
 import { LegacyCalendar } from "./preservation.vibe"
 import { CalendarSync } from "./sync.vibe"
-import { deviceZone } from "./time.ts"
+import { civilDay, deviceZone } from "./time.ts"
 
-/** Tell Calendar which account and agent session it serves; the account area calls this on every change. */
+/** The binding of the resident agent's verified session: its owner and agent, under the session's generation; no session is no usable binding. */
+export function residentBinding(session: ResidentSession | undefined): AgentBinding {
+  return session === undefined || session.owner === ""
+    ? { owner: "", session: 0, agentId: "", usable: false }
+    : { owner: JSON.stringify(["resident", session.owner, session.agent]), session: session.generation, agentId: session.agent, usable: true }
+}
+
+/** Tell Calendar which account and agent session it serves; Calendar's layer calls this on every change of the resident's session. */
 export effect function bindCalendar(binding: AgentBinding) {
   const presentation = try PresentationMachine
   const agent = try AgentCalendar
@@ -47,6 +58,10 @@ export effect function readCalendar(force: boolean, requestAccess: boolean) {
   const device = try DeviceCalendar
   const [, read] = try.all [agent.refresh(window), device.read(window.range, requestAccess, force)]
   const view = try agent.view()
+  if (read.status === "denied") presentation.send({ type: "revokeDevice" }) catch () => undefined
+  else if (read.status === "allowed" || read.status === "limited" || read.status === "no-calendars") presentation.send({ type: "grantDevice" }) catch () => undefined
+  if (view.state.error === "AccessRefused") presentation.send({ type: "revokeAgent" }) catch () => undefined
+  else if (view.state.status === "Ready" || view.state.status === "Partial") presentation.send({ type: "grantAgent" }) catch () => undefined
   presentation.send({ type: "reply", token: requested.readToken, replyOwner: requested.requestOwner,
     truncated: read.truncated || view.feed?.state === "partial" }) catch () => undefined
   try (try HeldDeletions).readBack(
@@ -55,19 +70,56 @@ export effect function readCalendar(force: boolean, requestAccess: boolean) {
   )
 }
 
-/** While Calendar is the visible view: read now, then once a minute, never while a write runs. */
+const ANCHOR = ownerKey("device", "calendar/presentation-day")
+
+/** Day offsets count from today: once the date changed since they were set, every offset rolls back by the days that passed. */
+export effect function rollToToday() {
+  const store = try KeyValueStore.KeyValueStore
+  const now = try Clock.currentTimeMillis
+  const today = civilDay(now, deviceZone())
+  const raw = store.get(ANCHOR) catch () => undefined
+  const anchor = raw === undefined ? today : Number(raw)
+  if (Number.isSafeInteger(anchor) && today > anchor) (try PresentationMachine).send({ type: "rollDays", days: today - anchor }) catch () => undefined
+  if (raw !== String(today)) store.set(ANCHOR, String(today)) catch () => undefined
+}
+
+/** While Calendar is in front: read once on showing it, then again once a minute; never hidden, during a read or a write, or without a session. */
 export effect function whileVisible() {
-  try readCalendar(false, false)
+  const foreground = try Foreground
+  const shown = try foreground.get()
+  if (shown.visible && !shown.locked && shown.view === "calendar") {
+    try enterCalendar()
+    try readCalendar(false, false)
+  }
   while (true) {
     try sleep("60 seconds")
+    try rollToToday()
+    const front = try foreground.get()
     const view = try (try AgentCalendar).view()
-    if (view.state.write.id === 0 && view.state.read.id === 0) try readCalendar(false, false)
+    if (rereadDue(front.visible && !front.locked, front.view === "calendar", view.state.write.id !== 0, view.state.read.id !== 0, view.state.portOwner !== "")) {
+      try enterCalendar()
+      try readCalendar(false, false)
+    }
   }
 }
 
-/** Calendar was left or hidden: its overlays close and a waiting deletion is sent at once. */
+/** Calendar is in front again. */
+export effect function enterCalendar() {
+  try rollToToday()
+  (try PresentationMachine).send({ type: "enter" }) catch () => undefined
+}
+
+/** Calendar is no longer in front: its transient overlays close and a pending save request ends; the form keeps what was typed. */
 export effect function leaveCalendar() {
   (try PresentationMachine).send({ type: "leave" }) catch () => undefined
+}
+
+/** The page was hidden or the screen locked: Calendar leaves, its editor closes with the slot keeping the edits, and a waiting deletion is sent at once. */
+export effect function hideCalendar() {
+  const presentation = try PresentationMachine
+  presentation.send({ type: "leave" }) catch () => undefined
+  presentation.send({ type: "closeForm" }) catch () => undefined
   try (try HeldDeletions).leave()
   try (try CalendarDrafts).close()
+  try (try DeviceCalendar).closeForm()
 }

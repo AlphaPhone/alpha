@@ -4,6 +4,7 @@ import { type BrowserTab, type Session, full } from "../../../gen/browser__sessi
 import { Button, SheetContent, Sheet } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 
+/** The tabs the switcher shows, and the owner's pick, close and new-tab actions. */
 export interface TabSwitcherProps {
   session: Session;
   onPick: (id: string) => void;

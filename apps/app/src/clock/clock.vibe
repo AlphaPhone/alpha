@@ -1,10 +1,11 @@
-// spec/clock/ringer.md, "Story: Hear an alarm once, from the page in front"; spec/clock/alarms.md, "Story: Set an alarm in the browser build"; spec/clock/alarms.md, "Story: Stop a ringing alarm"; spec/clock/timers.md, "Story: Time something"; spec/clock/timers.md, "Story: Hear a timer end"; spec/clock/stopwatch.md, "Story: Measure elapsed time"; spec/clock/worldClock.md, "Story: See the time where others are"
+// spec/clock/ringer.md, "Story: Hear an alarm once, from the page in front"; spec/clock/ringer.md, "Story: Hear an alarm as loud as my phone's alarm volume, and through Do Not Disturb only as Android lets alarms through"; spec/clock/alarms.md, "Story: Set an alarm in the browser build"; spec/clock/alarms.md, "Story: Stop a ringing alarm"; spec/clock/timers.md, "Story: Time something"; spec/clock/timers.md, "Story: Hear a timer end"; spec/clock/stopwatch.md, "Story: Measure elapsed time"; spec/clock/worldClock.md, "Story: See the time where others are"
 import { Build } from "../platform/build.vibe"
 import { Machine as FactsMachine } from "../../gen/settings__facts.effect.vibe"
 import type { AlarmFilter } from "../../gen/clock__ringer.ts"
 import { DeviceVolumes, InterruptionFacts } from "./native.schema.vibe"
 import { call, present } from "./plugins.vibe"
-import { Machine as RingerMachine, type Ringer } from "../../gen/clock__ringer.effect.vibe"
+import { Machine as RingerMachine, type Event as RingerEvent, type Ringer } from "../../gen/clock__ringer.effect.vibe"
+import type { Switch } from "../../gen/settings__vocabulary.ts"
 import { Machine as AlarmsMachine, type AlarmClock, type Event as AlarmEvent } from "../../gen/clock__alarms.effect.vibe"
 import { Machine as TimersMachine, type Timers, type Event as TimerEvent } from "../../gen/clock__timers.effect.vibe"
 import { Machine as StopwatchMachine, type Event as StopwatchEvent } from "../../gen/clock__stopwatch.effect.vibe"
@@ -13,6 +14,13 @@ import { freshId, knownTimeZone, nextAlarmAt, pageVisible, playTone, requestAlar
 
 const SYSTEM = "ElizaSystem"
 const FILTER: Readonly<Record<string, AlarmFilter>> = { all: "FilterAll", priority: "FilterPriority", alarms: "FilterAlarms", none: "FilterNone" }
+
+/** The ringer's sound facts from Settings' Do Not Disturb and what Android answered of its mode and the alarm stream; absent answers are unread. */
+export function soundEventOf(dnd: Switch, mode: typeof InterruptionFacts.Type | undefined, volumes: typeof DeviceVolumes.Type | undefined): RingerEvent {
+  const alarm = volumes?.volumes.find((v) => v.stream === "alarm")
+  const filter: AlarmFilter = mode?.interruptionFilter === undefined ? "FilterUnread" : FILTER[mode.interruptionFilter] ?? "FilterUnread"
+  return { type: "soundFacts", dnd, filter, reported: alarm !== undefined, volume: Math.round(alarm?.current ?? 0), max: Math.round(alarm?.max ?? 0) }
+}
 
 /** The alarms and timers that ring now, with their revisions: a changed set is a new key. */
 export function ringingKey(alarms: AlarmClock, timers: Timers, browser: boolean): string {
@@ -136,9 +144,7 @@ export effect function keepTime() {
     const dnd = (try facts.get()).read.dnd
     const mode = android ? (call(SYSTEM, "getSystemFacts", InterruptionFacts) catch () => undefined) : undefined
     const volumes = android ? (call(SYSTEM, "getDeviceSettings", DeviceVolumes) catch () => undefined) : undefined
-    const alarm = volumes?.volumes.find((v) => v.stream === "alarm")
-    const filter: AlarmFilter = mode?.interruptionFilter === undefined ? "FilterUnread" : FILTER[mode.interruptionFilter] ?? "FilterUnread"
-    ringer.send({ type: "soundFacts", dnd, filter, reported: alarm !== undefined, volume: Math.round(alarm?.current ?? 0), max: Math.round(alarm?.max ?? 0) }) catch () => undefined
+    ringer.send(soundEventOf(dnd, mode, volumes)) catch () => undefined
   }
 
   effect function releaseLock() {
@@ -191,7 +197,7 @@ export effect function keepTime() {
     const after = try ringer.get()
     if (!after.owns) try releaseLock()
     if (after.sounding && now - toneAt >= 1000) {
-      if (after.level > 0) playTone("alarm", after.level)
+      if (after.level > 0) playTone(after.level)
       toneAt = now
     } else if (!after.sounding && wasSounding) stopTones()
     wasSounding = after.sounding

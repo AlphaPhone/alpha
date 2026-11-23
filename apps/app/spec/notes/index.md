@@ -12,6 +12,6 @@ this version arrive once, through the agent's own import, as part of the same co
 | --- | --- |
 | Records | [Collection under the current owner](./collection.md), [editor drafts and saves](./editor.md), [list order, kinds and filters](./list.md), [folders](./folders.md) |
 | Trash | [Trash, restore and three-day erase](./trash.md), [recording cleanup after erase](./cleanup.md) |
-| Recording | [Recorder](./recorder.md), [pending recording journal](./recordingJournal.md), [saved audio and transcript windows](./audio.md), [device audio custody](./audioCustody.md) |
+| Recording | [Recorder](./recorder.md), [pending recording journal](./recordingJournal.md), [saved audio and transcript windows](./audio.md), [device audio custody](./audioCustody.md), [opening Notes from the recording notification](./recordingOpen.md) |
 | Agent | [Reviewed organisation and recording](./organize.md), [list filter proposals](./listFilter.md) |
 | Sharing and sources | [Share, copy and document transfer](./share.md), [web source dialog](./webSource.md), [linked attachment](./attachment.md), [origin links and schedule drafts](./origins.md) |

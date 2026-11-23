@@ -13,7 +13,8 @@ success. The shell keeps the abort handles and runs each request with `Cloud.jso
 
 ### A request takes a free slot and owns it until it settles; a request for an occupied slot is refused and never sent
 
-`generation` numbers each request.
+`generation` numbers each request; the shell never numbers two requests alike. The simulator tries
+the two Cloud slots and four generations.
 
 ```quint
 type RequestStatus = Unsettled | Succeeded | Duplicate | Aborted | Disconnected
@@ -31,8 +32,7 @@ pure def slotFor(c: Custody, generation: int): str = if (c.slotOf.keys().contain
 pure def statusOf(c: Custody, generation: int): RequestStatus = if (c.status.keys().contains(generation)) c.status.get(generation) else Unsettled
 pure val generationValues = Set(1, 2, 3, 4)
 pure val slotValues = Set("cloud:production", "cloud:staging")
-pure def canStartRequest(c: Custody, generation: int, slot: str): bool =
-  generations.contains(generation) and slots.contains(slot) and slotFor(c, generation) == ""
+pure def canStartRequest(c: Custody, generation: int, slot: str): bool = generation > 0 and slot != "" and slotFor(c, generation) == ""
 pure def startRequest(c: Custody, generation: int, slot: str): Custody =
   if (ownerOf(c, slot) == 0)
     { ...c, owners: c.owners.put(slot, generation), slotOf: c.slotOf.put(generation, slot),
@@ -49,7 +49,7 @@ pure def sometimesADuplicateWasRefused(c: Custody): bool = generations.exists(g 
 ### Cancelling a slot or closing a request's connection aborts it, and an aborted request never succeeds; its slot frees only when it settles
 
 ```quint
-pure def canCancelSlot(c: Custody, slot: str): bool = slots.contains(slot) and ownerOf(c, slot) != 0
+pure def canCancelSlot(c: Custody, slot: str): bool = ownerOf(c, slot) != 0
 pure def cancelSlot(c: Custody, slot: str): Custody = { ...c, aborted: c.aborted.union(Set(ownerOf(c, slot))) }
 pure def canCloseRequest(c: Custody, generation: int): bool = slotFor(c, generation) != "" and not(c.closed.contains(generation))
 pure def closeRequest(c: Custody, generation: int): Custody =

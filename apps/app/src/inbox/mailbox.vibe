@@ -1,5 +1,5 @@
 // spec/inbox/mailbox.md, "Story: Read my mailbox page by page"; spec/inbox/mailbox.md, "Story: See my saved mail at once"; spec/inbox/mailbox.md, "Story: Keep my Gmail drafts beside my local drafts"; spec/inbox/mailbox.md, "Story: Read ahead without spending my data"
-import { type Event as MailboxEvent, type Folder, type MailPage, type Mailbox as MailboxState, Machine as MailboxMachine, folderQuery, draftsView, readAheadAllowed, listIsStale } from "../../gen/inbox__mailbox.effect.vibe"
+import { type Event as MailboxEvent, type Folder, type MailPage, type Mailbox as MailboxState, type AttentionPhase, Machine as MailboxMachine, folderQuery, draftsView, readAheadAllowed, listIsStale, attentionOf } from "../../gen/inbox__mailbox.effect.vibe"
 import { Machine as DraftsMachine } from "../../gen/inbox__drafts.effect.vibe"
 import { Machine as JournalMachine } from "../../gen/inbox__operations.effect.vibe"
 import { InboxAccounts, savedScope } from "./accounts.vibe"
@@ -7,6 +7,8 @@ import { Gmail, GmailFailed, SignInExpired } from "./gmail.vibe"
 import { SavedMail } from "./saved.vibe"
 import { Reader } from "./reader.vibe"
 import { mailReadAhead } from "@elizaos/plugin-inbox/mailbox"
+import type { Attention } from "../../gen/shell__overview.ts"
+import { Overview } from "../shell/overview.vibe"
 import { pageVisible } from "./visibility.ts"
 
 /** The list of the selected account's folder or search. */
@@ -31,6 +33,10 @@ export service Mailbox {
   rowRemoved(id: string): void!!
 }
 
+const homeAttention: Record<AttentionPhase, Attention> = {
+  AttentionNotConnected: "AttentionNotConnected", AttentionLoading: "AttentionLoading", AttentionReady: "AttentionReady", AttentionError: "AttentionFailed"
+}
+
 /** The mailbox shell over the list machine, Gmail, the saved mail and the selected account. */
 export const layer = Layer.effect(Mailbox, effect {
   const machine = try MailboxMachine
@@ -40,6 +46,7 @@ export const layer = Layer.effect(Mailbox, effect {
   const gmail = try Gmail
   const saved = try SavedMail
   const reader = try Reader
+  const overview = try Overview
   const ahead = try mailReadAhead<MailPage, GmailFailed | SignInExpired>()
   const readAtRef = try Ref.make(0)
   const scope = try Effect.scope
@@ -163,6 +170,20 @@ export const layer = Layer.effect(Mailbox, effect {
       try ahead.invalidate()
       const s = try machine.get()
       try showSelection(s.account === a.selected ? s.folder : "InboxFolder", s.account === a.selected ? s.query : "")
+    }
+  })
+
+  fork.scoped (effect {
+    let reported = ""
+    for try (const s of machine.changes) {
+      const attention = attentionOf(s)
+      const readAt = try Ref.get(readAtRef)
+      const now = try Clock.currentTimeMillis
+      const phase = attention.phase === "AttentionReady" && readAt > 0 && listIsStale(readAt, now) ? "AttentionStale" as const : homeAttention[attention.phase]
+      const key = JSON.stringify([phase, attention.unread, attention.more, s.account !== ""])
+      if (key === reported) continue
+      reported = key
+      try overview.reportAttention(phase, attention.unread, attention.more, readAt > 0 ? readAt : now, s.account !== "")
     }
   })
 

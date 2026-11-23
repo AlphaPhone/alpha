@@ -1,0 +1,206 @@
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Sign-out revokes exactly the key it was asked for, and the agent keeps running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"
+import type { Resident as ResidentConnection } from "../../gen/platform__resident.ts"
+import type { Admission } from "../../gen/account__plan.ts"
+import type { Provider } from "../../gen/account__provider.ts"
+import type { Session } from "../../gen/account__session.ts"
+import type { SignIn } from "../../gen/account__signIn.ts"
+import { MapsAccount, type AccountBinding } from "../maps/ports.vibe"
+import { Build } from "../platform/build.vibe"
+import { ResidentControl } from "../platform/resident-control.vibe"
+import { Permissions, type ConnectionFacts } from "../shell/permissions.vibe"
+import { VoiceRoute, type VoiceAccount } from "../voice/route.vibe"
+import { environmentFor, hostEnvironment } from "./deployment.ts"
+import { Entitlement } from "./entitlement.vibe"
+import { AiProvider } from "./provider.vibe"
+import { CloudSession, ownerNameOf, ownerOf } from "./session.vibe"
+import { SignInScreen } from "./signIn.vibe"
+
+/** The agent connection an agent-backed area is bound to: owner namespace, resident generation, agent id and whether it is usable now. */
+export interface AgentBinding {
+  readonly owner: string
+  readonly session: number
+  readonly agentId: string
+  readonly usable: boolean
+}
+
+/** The verified agent session the assistant talks to: one origin, owner, agent and session. */
+export interface AgentSession {
+  readonly origin: string
+  readonly owner: string
+  readonly agent: string
+  readonly session: string
+  readonly installationId: string
+  readonly enrollmentId: string
+}
+
+/** The account's part of the idle decision before an update installs. */
+export interface ConnectionIdle {
+  readonly connectionBusy: boolean
+  readonly signInOpen: boolean
+  readonly signInUntouched: boolean
+}
+
+/** What the account area tells the areas above it: the agent binding, the verified agent session and its share of the idle decision. */
+export service AccountBindings {
+  /** The current agent binding, then each change of it; Calendar and Telephony rebind on every change. */
+  readonly agent: Stream.Stream<AgentBinding>
+  agentNow(): AgentBinding!!
+  /** The verified agent session, or undefined before the resident verifies one. */
+  identity(): AgentSession | undefined!!
+  /** Whether sign-in or sign-out work is in flight, and whether the sign-in card is open and untouched. */
+  idle(): ConnectionIdle!!
+}
+
+/** Whether the session's key may be used for Cloud requests now. */
+export function usableSession(s: Session): boolean {
+  return s.phase === "SignedIn" || s.phase === "ActivationPending"
+}
+
+/** The agent binding of a session over a resident connection. */
+export function agentBindingOf(s: Session, r: ResidentConnection): AgentBinding {
+  return { owner: ownerNameOf(s), session: r.generation, agentId: r.agent, usable: r.phase === "Connected" && r.owner !== "" }
+}
+
+/** The Maps account binding of a session: the signed-in key and its sign-in, or undefined while it cannot be used. */
+export function mapsBindingOf(s: Session): AccountBinding | undefined {
+  return usableSession(s) ? { sessionId: String(s.generation), credentialId: s.account.credentialId } : undefined
+}
+
+/** The sign-in or provider work that holds the connection. */
+export function connectionBusy(s: Session, signIn: SignIn, provider: Provider): boolean {
+  return s.holder !== "Free" || (signIn.work !== "NoWork" && signIn.work !== "Probing") || (provider.work !== "ProviderIdle" && provider.work !== "Reading")
+}
+
+/** The account's share of the idle decision. */
+export function idleOf(s: Session, signIn: SignIn, provider: Provider): ConnectionIdle {
+  return {
+    connectionBusy: connectionBusy(s, signIn, provider),
+    signInOpen: signIn.screen !== "ScreenClosed",
+    signInUntouched: signIn.screen === "Choose" && signIn.work === "NoWork" && signIn.attempt === 0 && !signIn.address && !signIn.prefill,
+  }
+}
+
+/** What the startup walkthrough decides on, from the session, the sign-in screen, the plan's visibility and the resident. */
+export function connectionFactsOf(s: Session, signIn: SignIn, admission: Admission, r: ResidentConnection, provider: Provider, ownKeys: boolean): ConnectionFacts {
+  return {
+    account: usableSession(s),
+    ownKeys: signIn.ownKeys || provider.route === "OwnRoute" || ownKeys,
+    signingIn: signIn.screen !== "ScreenClosed" || s.holder === "Attempt" || signIn.work === "SavingOwnKeys",
+    busy: connectionBusy(s, signIn, provider),
+    residentStarting: r.phase === "Starting" || r.phase === "Verifying",
+    background: !admission.recheck.visible,
+    created: usableSession(s) && s.created,
+  }
+}
+
+/** The speech account: the owner's own keys while they are the route in use, else the signed-in Cloud key, else none. */
+export function voiceAccountOf(s: Session, environment: string, provider: Provider): VoiceAccount {
+  if (provider.known && provider.route === "OwnRoute") return { kind: "own", revision: String(provider.revision), cartesia: provider.voiceKey }
+  if (usableSession(s)) return { kind: "cloud", environment, credentialId: s.account.credentialId }
+  return { kind: "none" }
+}
+
+/** The plan limit hosted speech is under: none while the plan admits, until cleared while a plan is needed. */
+export function planLimitOf(admission: Admission, now: number): { readonly kind: string; readonly observedAt: number } | undefined {
+  return admission.notice === "NeedsPlanNotice" || admission.notice === "PlanEndedNotice" ? { kind: "subscription-required", observedAt: now } : undefined
+}
+
+/** The bindings service over the session and the resident connection. */
+export const bindingsService = Layer.effect(AccountBindings, effect {
+  const session = try CloudSession
+  const signIn = try SignInScreen
+  const provider = try AiProvider
+  const resident = try ResidentControl
+  const latest = try SubscriptionRef.make<AgentBinding>({ owner: "device", session: 0, agentId: "", usable: false })
+  const connection = try SubscriptionRef.make<ResidentConnection | undefined>(undefined)
+
+  effect function refresh() {
+    const r = try SubscriptionRef.get(connection)
+    if (r === undefined) return
+    const next = agentBindingOf(try session.current(), r)
+    const before = try SubscriptionRef.get(latest)
+    if (before.owner !== next.owner || before.session !== next.session || before.agentId !== next.agentId || before.usable !== next.usable) try SubscriptionRef.set(latest, next)
+  }
+
+  fork.scoped Stream.runForEach(resident.changes, (r) => effect {
+    try SubscriptionRef.set(connection, r)
+    try refresh()
+  })
+  fork.scoped Stream.runForEach(session.changes, () => refresh())
+
+  return {
+    agent: SubscriptionRef.changes(latest),
+    agentNow: () => SubscriptionRef.get(latest),
+    effect identity() {
+      const s = try session.current()
+      const verified = try resident.session()
+      if (verified === undefined) return undefined
+      const signedIn = usableSession(s)
+      return {
+        origin: "resident", owner: verified.owner, agent: verified.agent, session: `${verified.generation}:${verified.epoch}`,
+        installationId: signedIn ? s.account.organizationId : "device", enrollmentId: signedIn ? s.account.credentialId : "device",
+      } satisfies AgentSession
+    },
+    effect idle() { return idleOf(try session.current(), try signIn.current(), try provider.current()) },
+  }
+})
+
+/** Maps' account port: the usable Cloud key as it changes, and whether the resident runs. */
+export const mapsAccountLive = Layer.effect(MapsAccount, effect {
+  const session = try CloudSession
+  const resident = try ResidentControl
+  const same = (a: AccountBinding | undefined, b: AccountBinding | undefined) => a?.sessionId === b?.sessionId && a?.credentialId === b?.credentialId
+  return {
+    changes: Stream.changesWith(Stream.map(session.changes, mapsBindingOf), same),
+    residentReady: Stream.changes(Stream.map(resident.changes, (r) => r.phase === "Connected")),
+  }
+})
+
+/** What the account area keeps the rest of the phone told of: the resident's account, speech's key and limit, and the startup walkthrough. */
+export const followersLive = Layer.effectDiscard(effect {
+  const session = try CloudSession
+  const signIn = try SignInScreen
+  const entitlement = try Entitlement
+  const provider = try AiProvider
+  const control = try ResidentControl
+  const voice = try VoiceRoute
+  const permissions = try Permissions
+  const build = try Build
+  const environment = hostEnvironment(environmentFor(build.info.testMocks))
+  const connection = try SubscriptionRef.make<ResidentConnection | undefined>(undefined)
+
+  effect function walkthrough() {
+    const r = try SubscriptionRef.get(connection)
+    if (r === undefined) return
+    const reported = try voice.account()
+    try permissions.connection(connectionFactsOf(try session.current(), try signIn.current(), try entitlement.current(), r, try provider.current(), reported.kind === "own"))
+  }
+
+  fork.scoped Stream.runForEach(Stream.drop(Stream.changes(Stream.map(session.changes, ownerOf)), 1), () => effect {
+    control.refreshAccount() catch () => undefined
+  })
+  effect function speech() {
+    const next = voiceAccountOf(try session.current(), environment, try provider.current())
+    const before = try voice.account()
+    if (JSON.stringify(before) !== JSON.stringify(next)) try voice.observeAccount(next)
+  }
+
+  fork.scoped Stream.runForEach(session.changes, () => effect {
+    try speech()
+    try walkthrough()
+  })
+  fork.scoped Stream.runForEach(entitlement.changes, (a) => effect {
+    const now = try Clock.currentTimeMillis
+    try voice.observeLimit(planLimitOf(a, now))
+    try walkthrough()
+  })
+  fork.scoped Stream.runForEach(signIn.changes, () => walkthrough())
+  fork.scoped Stream.runForEach(provider.changes, () => effect {
+    try speech()
+    try walkthrough()
+  })
+  fork.scoped Stream.runForEach(control.changes, (r) => effect {
+    try SubscriptionRef.set(connection, r)
+    try walkthrough()
+  })
+})

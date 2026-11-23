@@ -1,0 +1,271 @@
+// spec/maps/vocabulary.md, "Story: Guide me only from a location good enough to guide by"; spec/maps/vocabulary.md, "Story: Keep Google content on Google's terms"; spec/maps/screen.md, "Story: Keep my place while I step away"; spec/maps/screen.md, "Story: Open what another app or my agent handed to Maps"; spec/maps/location.md, "Story: Show me where I am without an old request getting in the way"; spec/maps/plane.md, "Story: See the map for what I am looking at"; spec/maps/plane.md, "Story: Show the right copyright for the map I am looking at"
+import { assert, it } from "@effect/vitest"
+import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
+import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
+import { Machine as PlaneMachine } from "../../gen/maps__plane.effect.vibe"
+import { Machine as SavedMachine } from "../../gen/maps__savedPlaces.effect.vibe"
+import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
+import { MapsContent } from "../../src/maps/content.vibe"
+import { MapsHandoff } from "../../src/maps/handoff.vibe"
+import { MapsSession } from "../../src/maps/layer.vibe"
+import { MapsNavigation } from "../../src/maps/navigation.vibe"
+import { MapsPlane } from "../../src/maps/plane.vibe"
+import { SavedPlacesStore } from "../../src/maps/saved.vibe"
+import { MapsScreen } from "../../src/maps/screen.vibe"
+import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
+
+const open = { id: "alpha-osm", data: "OpenStreetMap" }
+const google = { id: "eliza-cloud-google", data: "Google Maps" }
+
+/** A place picked from a search for "pier", with its details settled. */
+effect function pickedPier() {
+  const screen = try MapsScreen
+  const machine = try ScreenMachine
+  try (try MapsSession).open()
+  try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+  try screen.typeQuery("pier")
+  try screen.submitSearch()
+  try until(machine.changes, (s) => s.search === "Ready")
+  try screen.pickResult(0)
+  return try until(machine.changes, (s) => s.details === "Ready")
+}
+
+/** Guidance started on a planned route from the ferry to the pier. */
+effect function guiding() {
+  const screen = try MapsScreen
+  const machine = try ScreenMachine
+  try pickedPier()
+  try screen.openDirections()
+  try screen.editOrigin("37.79550, -122.39370")
+  try screen.submitOrigin()
+  try until(machine.changes, (s) => s.route === "Ready")
+  try (try MapsNavigation).start()
+  return try until((try GuidanceMachine).changes, (g) => g.phase === "Guiding")
+}
+
+it.live("A coarse or stale fix never moves guidance on (spec/maps/vocabulary.md, \"Story: Guide me only from a location good enough to guide by\"; spec/maps/vocabulary.md, \"A fix guides only when precise, at most 30 seconds old, at most 5 seconds ahead, and within 50 meters\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const guidance = try GuidanceMachine
+    const content = try MapsContent
+    try guiding()
+    try Queue.offer(h.fixes, fixAt(pier, 400))
+    const said = try until(content.changes, (c) => c.message === "Turn guidance needs a precise, up-to-date location.")
+    const coarse = try guidance.get()
+    try Queue.offer(h.fixes, fixAt(pier, 8, 31000))
+    try Queue.offer(h.fixes, fixAt(ferry))
+    const fresh = try until(guidance.changes, (g) => g.fixUsable)
+    try Queue.offer(h.fixes, fixAt(pier, 60))
+    const loose = try until(guidance.changes, (g) => !g.fixUsable)
+    try Effect.try(() => assert.deepStrictEqual(
+      { coarse: [coarse.phase, coarse.step, coarse.fixUsable], fresh: fresh.phase, loose: [loose.phase, loose.step === fresh.step], said: said.message !== "" },
+      { coarse: ["Guiding", 0, false], fresh: "Guiding", loose: ["Guiding", true], said: true },
+    ))
+  }
+})
+
+it.live("Google content is never shared, copied, saved or spoken (spec/maps/vocabulary.md, \"Story: Keep Google content on Google's terms\"; spec/maps/vocabulary.md, \"A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken\")", () => effect {
+  const h = try harness(google)
+  provide h.layer {
+    const handoff = try MapsHandoff
+    const content = try MapsContent
+    const guidance = try GuidanceMachine
+    try pickedPier()
+    const shown = (try content.get()).shown!
+    const share = handoff.sharePlace(shown) catch (e) => e.message
+    const copy = handoff.copyNumber("+1 415 555 0100") catch (e) => e.message
+    const save = (try SavedPlacesStore).save(shown, "Pier") catch (e) => e.message
+    try (try MapsScreen).back()
+    try guiding()
+    try Queue.offer(h.fixes, fixAt(ferry))
+    try Queue.offer(h.fixes, fixAt(pier))
+    try until(guidance.changes, (g) => g.phase === "Arrived")
+    try Effect.try(() => assert.deepStrictEqual(
+      { share, copy, save, spoken: h.spoken, native: h.nativeCalls.filter((c) => c === "AlphaDevice.shareText" || c === "AlphaDevice.copyText") },
+      {
+        share: "Google Maps results cannot be shared from this phone.", copy: "Google Maps results cannot be copied from this phone.",
+        save: "Google Maps results cannot be saved on this device.", spoken: [], native: [],
+      },
+    ))
+  }
+})
+
+it.live("Leaving or hiding Maps keeps the settled place and route (spec/maps/screen.md, \"Story: Keep my place while I step away\"; spec/maps/screen.md, \"Leaving or hiding the screen retires pending requests and keeps what settled\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    try guiding()
+    try (try MapsNavigation).end()
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, hidden: true }))
+    const hidden = try until(machine.changes, (s) => s.hidden)
+    try screen.typeQuery("coffee")
+    const typed = try machine.get()
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, hidden: false, view: "home" }))
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, view: "maps" }))
+    const back = try until(machine.changes, (s) => !s.hidden)
+    try Effect.try(() => assert.deepStrictEqual(
+      { hidden: hidden.hidden, typed: typed.query, back: [back.choice, back.directions, back.route] },
+      { hidden: true, typed: "pier", back: ["ResultChoice", true, "Ready"] },
+    ))
+  }
+})
+
+it.live("A handed-over query applies once and the agent's place never counts as the owner's (spec/maps/screen.md, \"Story: Open what another app or my agent handed to Maps\"; spec/maps/screen.md, \"The agent shows a place or prepares directions, never a route of its own\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    try (try MapsSession).open()
+    try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+    const before = (try machine.get()).intent
+    try screen.handoff("Pier 39", false)
+    const applied = try until(machine.changes, (s) => s.handoff === "Applied" && s.search === "Ready")
+    try screen.showAgentPlace({ providerId: "alpha-osm", id: "p1", name: "Pier 39", coordinate: pier, attribution: "© data", fetchedAt: 1 }, true, "Walk")
+    const prepared = try until(machine.changes, (s) => s.choice === "AgentChoice" && s.details === "Ready")
+    try Effect.try(() => assert.deepStrictEqual(
+      { applied: [applied.handoffs, applied.searched, applied.intent - before], prepared: [prepared.directions, prepared.origin, prepared.route, prepared.travel, prepared.intent - before] },
+      { applied: [1, "Pier 39", 0], prepared: [true, false, "NotAsked", "Walk", 0] },
+    ))
+  }
+})
+
+it.live("Only the owner's own locate prompts for location (spec/maps/location.md, \"Story: Show me where I am without an old request getting in the way\"; spec/maps/location.md, \"Only the owner's own request or the guidance they started may prompt for permission\")", () => effect {
+  const h = try harness(open, { permission: "denied" })
+  provide h.layer {
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    try (try MapsSession).open()
+    try screen.open()
+    const quiet = h.nativeCalls.filter((c) => c === "ElizaLocation.requestPermissions").length
+    try screen.locate()
+    const located = try until(machine.changes, (s) => !s.locating)
+    const said = (try (try MapsContent).get()).message
+    try Effect.try(() => assert.deepStrictEqual(
+      { quiet, asked: h.nativeCalls.filter((c) => c === "ElizaLocation.requestPermissions").length, located: located.choice, said },
+      { quiet: 0, asked: 1, located: "NoChoice", said: "Location permission was not granted. You can choose an origin manually." },
+    ))
+  }
+})
+
+it.live("A plane reports only for its own generation and Retry builds a new one (spec/maps/plane.md, \"Story: See the map for what I am looking at\"; spec/maps/plane.md, \"A plane is rebuilt only when its element or basemap changes, and reports only for its own generation\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const plane = try MapsPlane
+    const machine = try PlaneMachine
+    const first = try plane.mount(1, "OpenRaster")
+    const same = try plane.mount(1, "OpenRaster")
+    try plane.report(first, "PlaneFailed")
+    const failed = try machine.get()
+    const second = try plane.retry()
+    try plane.report(first, "PlaneReady")
+    const stale = try machine.get()
+    try plane.report(second, "PlaneReady")
+    const ready = try machine.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { same: same === first, failed: failed.state, rebuilt: second > first, stale: stale.state, ready: [ready.state, ready.retries] },
+      { same: true, failed: "PlaneFailed", rebuilt: true, stale: "PlaneLoading", ready: ["PlaneReady", 1] },
+    ))
+  }
+})
+
+it.live("The copyright shown is the latest reply for the view, and a failed one leaves the map drawn (spec/maps/plane.md, \"Story: Show the right copyright for the map I am looking at\"; spec/maps/plane.md, \"Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const plane = try MapsPlane
+    const machine = try PlaneMachine
+    try (try MapsSession).open()
+    try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+    const generation = try plane.mount(1, "OpenRaster")
+    try plane.report(generation, "PlaneReady")
+    try plane.settled(ferry, 14, 400, 800)
+    const shown = try until(machine.changes, (s) => s.copyrightShown)
+    try Ref.set(h.refuseNext, 1)
+    try plane.settled(pier, 14, 400, 800)
+    const failed = try until(machine.changes, (s) => s.copyrightFailed)
+    try Effect.try(() => assert.deepStrictEqual(
+      { shown: [shown.shownView, shown.view], copyright: (try (try MapsContent).get()).copyright, failed: [failed.state, failed.copyrightShown] },
+      { shown: [1, 1], copyright: "© data", failed: ["PlaneReady", false] },
+    ))
+  }
+})
+
+it.live("A named wait is shown and kept (spec/maps/connection.md, \"A wait Cloud names is shown and kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const screen = try MapsScreen
+    const connection = try ConnectionMachine
+    try (try MapsSession).open()
+    try until(connection.changes, (s) => s.phase === "Installed")
+    try Ref.set(h.retryAfter, 300)
+    try Ref.set(h.refuseNext, 1)
+    try screen.typeQuery("coffee")
+    try screen.submitSearch()
+    try until((try ScreenMachine).changes, (s) => s.search === "Failed")
+    const paused = try connection.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { said: (try (try MapsContent).get()).message, pause: paused.pausedUntil - paused.now },
+      { said: "Maps request limit reached. Try again in 5 minutes.", pause: 300000 },
+    ))
+  }
+})
+
+it.live("A saved place of another provider is restricted and never a starting point (spec/maps/savedPlaces.md, \"A saved provider place is used only with the open-data provider that served it\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    const saved = try SavedMachine
+    try saved.send({ type: "savePlace", place: { label: "Old cafe", lat: 37800000, lng: -122400000, provider: "retired-osm", providerPlaceId: "n9", kind: "OpenProvider" } })
+    const id = (try saved.get()).items[0]!.id
+    try pickedPier()
+    try screen.openDirections()
+    const routes = h.cloudCalls.filter((p) => p.endsWith("/routes")).length
+    try screen.chooseSavedOrigin(id)
+    const after = try machine.get()
+    try screen.back()
+    try screen.back()
+    try screen.pickSaved(id)
+    const shown = (try (try MapsContent).get()).shown
+    try Effect.try(() => assert.deepStrictEqual(
+      { origin: [after.origin, after.route], sent: h.cloudCalls.filter((p) => p.endsWith("/routes")).length - routes, kind: shown?.kind },
+      { origin: [false, "NotAsked"], sent: 0, kind: "GoogleProvider" },
+    ))
+  }
+})
+
+it.live("Call is offered only on the build with Phone, and a copied number says so (spec/maps/screen.md, \"Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's\")", () => effect {
+  const launcher = try harness(open)
+  const launcherOpened = try Effect.provide(effect {
+    try pickedPier()
+    try (try MapsHandoff).call("+1 415 555 0100")
+    try (try MapsHandoff).copyNumber("+1 415 555 0100")
+    return [[...launcher.opened], (try (try MapsContent).get()).message] as const
+  }, launcher.layer)
+  const aosp = try harness(open, { variant: "aosp" })
+  const aospOpened = try Effect.provide(effect {
+    try pickedPier()
+    try (try MapsHandoff).call("+1 415 555 0100")
+    return [...aosp.opened]
+  }, aosp.layer)
+  try Effect.try(() => assert.deepStrictEqual(
+    { launcher: launcherOpened, aosp: aospOpened.includes("phone") },
+    { launcher: [[], "Number copied"], aosp: true },
+  ))
+})
+
+it.live("The quiet fix on open centres the map without choosing a place (spec/maps/screen.md, \"The quiet fix on open shows and centres the phone's position only while nothing is chosen, listed or being located, and its failure says nothing\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const content = try MapsContent
+    try (try MapsSession).open()
+    try (try MapsScreen).open()
+    try Queue.offer(h.fixes, fixAt(ferry))
+    const centred = try until(content.changes, (c) => c.centerOn !== undefined)
+    const screen = try (try ScreenMachine).get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { centre: centred.centerOn, choice: screen.choice, said: centred.message, prompts: h.nativeCalls.filter((c) => c === "ElizaLocation.requestPermissions").length },
+      { centre: ferry, choice: "NoChoice", said: "", prompts: 0 },
+    ))
+  }
+})

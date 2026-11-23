@@ -1,12 +1,10 @@
-// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/review.md, "Story: Let my agent act only with my say-so"
-import { decodeFilesOperation, describeFilesOperation } from "@elizaos/plugin-files/contract"
+// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"
 import { FilePicker } from "../files/picker.vibe"
 import { FilesAgent } from "../files/agent.vibe"
 import type { FileShareTargets } from "../files/share.vibe"
 import { Assistant } from "./assistant.vibe"
 import { AssistantHost } from "./host.vibe"
 import { copy } from "./presentation.vibe"
-import type { OperationPorts } from "./review.vibe"
 import type { ChatFile } from "./transcript.vibe"
 import { maxAttachments } from "../../gen/assistant__attachments.effect.vibe"
 
@@ -48,45 +46,6 @@ export effect function pickForChat(waiting: number) {
   if (picked.length === 0) return
   const encoded = picked.map((file, at): ChatFile => ({ id: `picked-${file.name}-${file.size}-${at}`, name: file.name, mimeType: file.mimeType, data: file.dataBase64 }))
   assistant.attach({ kind: "encoded", files: encoded }) catch effect (error) => { try host.toast(error.message) }
-}
-
-/** Operation ports that hand every Files operation to Files' own agent runner, and every other one to the shell's ports. */
-export effect function withFiles(others: OperationPorts) {
-  const found = try Effect.serviceOption(FilesAgent)
-  if (Option.isNone(found)) return others
-  const files = found.value
-  const host = try AssistantHost
-  const decoded = (operation: unknown) => Effect.runSync(Effect.option(decodeFilesOperation(operation)))
-  const contextNow = () => Effect.runSync(effect {
-    const screen = try host.screen()
-    const view = screen.observation.view
-    return { view: view === "home" ? "home" as const : view === "files" ? "files" as const : "other" as const, sensitive: screen.exposure.privateView || screen.exposure.locked, foreground: !screen.exposure.hidden }
-  })
-  const ports: OperationPorts = {
-    validate: (operation) => Option.isSome(decoded(operation)) ? operation : others.validate(operation),
-    execute: async (operation, call) => {
-      const op = decoded(operation)
-      if (Option.isNone(op)) return others.execute(operation, call)
-      const prepared = await runPromise(files.prepare(op.value, contextNow()))
-      if (prepared.kind !== "ready") return { kind: "refused", code: prepared.kind === "notAvailable" ? "not_available" : "failed", result: prepared }
-      const done = await runPromise(files.run(prepared.op, contextNow(), false))
-      return done.status === "succeeded" ? { kind: "applied", result: done } : { kind: "refused", code: "files_failed", result: done }
-    },
-    readBack: async (operation, call) => Option.isSome(decoded(operation)) ? { kind: "refused", code: "no_readback" } : others.readBack(operation, call),
-    describe: (operation) => {
-      const op = decoded(operation)
-      if (Option.isNone(op)) return others.describe(operation)
-      const described = describeFilesOperation(op.value)
-      return { title: described.title, detail: described.description }
-    },
-    classOf: (operation) => {
-      const op = decoded(operation)
-      return Option.isSome(op) ? (op.value.type === "files_open" || op.value.type === "files_filter" ? "FilesOpen" : "NotesRead") : others.classOf(operation)
-    },
-    target: (operation, text) => Option.isSome(decoded(operation)) ? { tag: "NoTarget" } : others.target(operation, text),
-    summarize: (operation, result) => Option.isSome(decoded(operation)) ? (result === "Applied" ? "Done in Files." : copy.unconfirmed) : others.summarize(operation, result),
-  }
-  return ports
 }
 
 /** The capabilities the phone advertises for Files to an agent that offers `peer`. */

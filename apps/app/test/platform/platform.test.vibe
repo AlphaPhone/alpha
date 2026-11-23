@@ -1,23 +1,25 @@
-// spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"
+// spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"; spec/platform/index.md, "Story: Ship only what this build allows"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"; spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"; spec/platform/lifecycle.md, "Story: Come back to my phone where I left it"; spec/platform/lifecycle.md, "Story: Send while my phone has a network"; spec/platform/lifecycle.md, "Story: Find my phone as I left it after Android stops Alpha"; spec/platform/rendererRecovery.md, "Story: Never be stuck behind a crashing Home screen"; spec/platform/storage.md, "Story: Keep my phone's state as I left it"; spec/platform/storage.md, "Story: Reset Alpha's data"; spec/platform/crashJournal.md, "Story: Tell support what went wrong without telling them what I wrote"
 import { assert, it } from "@effect/vitest"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
 import { nativeOver } from "../../src/platform/native-live.vibe"
 import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
-import { ResidentControl } from "../../src/platform/resident-control.vibe"
+import { ResidentControl, ResidentRecovery } from "../../src/platform/resident-control.vibe"
 import { residentOver } from "../../src/platform/resident-live.vibe"
+import { subscription } from "../../src/platform/view-events.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { cloudOver } from "../../src/platform/cloud-live.vibe"
 import { CrashJournal, crashJournalLive } from "../../src/platform/crash-journal.vibe"
 import { DeviceStorage, deviceStorageLive } from "../../src/platform/device-storage.vibe"
-import { AppLifecycle, lifecycleLive } from "../../src/platform/lifecycle.vibe"
+import { AppLifecycle, lifecycleLive, lifecycleOver } from "../../src/platform/lifecycle.vibe"
 import { admitMockMode, buildInfoOf, cloudAuthorityOf } from "../../src/platform/build-live.vibe"
 import { buildInfo, fakeNative } from "../../src/platform/layers.vibe"
 import { memoryStore, ownerKey } from "../../src/platform/storage.vibe"
 
 module device {
   import type { CapacitorPort } from "../../src/platform/native-capacitor.ts"
-  import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+  import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamEnd, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+  import type { PageWatch } from "../../src/platform/page-events.ts"
   import type { CloudClient as NativeCloud, CloudRequest } from "@elizaos/os/bridges/definitions/cloud"
 
   /** A Capacitor bridge with the listed plugins and methods; `calls` records each call. @throws {never} */
@@ -34,41 +36,84 @@ module device {
     }
   }
 
+  /** One answer of the fake resident. */
+  export interface Reply {
+    readonly status: number
+    readonly data: unknown
+  }
+
+  /** What the fake agent service does beyond answering routes. */
+  export interface AgentPlan {
+    readonly chunks?: readonly string[]
+    readonly refuseStream?: Extract<AgentStreamEnd, { kind: "failed" }>["code"]
+    readonly hang?: readonly string[]
+    readonly feed?: readonly Record<string, unknown>[]
+    readonly review?: unknown
+    readonly archive?: unknown
+  }
+
   export interface Agent {
     readonly plugin: ElizaAgentPlugin
     readonly sent: AgentRequest[]
+    readonly aborted: string[]
+    readonly unsubscribed: string[]
+    readonly routes: Record<string, Reply | Reply[]>
     status: AgentStatus
   }
 
-  /** An agent service whose resident answers `routes` keyed `"METHOD /path"`, and streams `chunks` for any stream. @throws {never} */
-  export function agent(routes: Readonly<Record<string, { status: number; data: unknown }>>, chunks: readonly string[] = []): Agent {
+  /** An agent service whose resident answers `routes` keyed `"METHOD /path"`, a list answering in turn; `plan` says how it streams, hangs, feeds and holds. @throws {never} */
+  export function agent(routes: Readonly<Record<string, Reply | readonly Reply[]>>, plan: AgentPlan = {}): Agent {
     const listeners = new Map<string, Array<(event: unknown) => void>>()
     const emit = (name: keyof AgentEvents, event: unknown) => { for (const listener of listeners.get(name) ?? []) listener(event) }
+    const table: Record<string, Reply | Reply[]> = Object.fromEntries(Object.entries(routes).map(([key, reply]) => [key, Array.isArray(reply) ? [...reply] : reply]))
     const state: Agent = {
       sent: [],
+      aborted: [],
+      unsubscribed: [],
+      routes: table,
       status: { available: true, state: "running", epoch: 7, requestBodyLimit: 1048576 },
       plugin: {
         getStatus: async () => state.status,
         start: async () => state.status,
         stop: async () => ({ ...state.status, state: "stopped" }),
         restart: async () => state.status,
-        async request(options) {
+        request(options) {
           state.sent.push(options)
-          return routes[`${options.method} ${options.path}`] ?? { status: 404, data: { error: "not_found" } }
+          const key = `${options.method} ${options.path}`
+          if (plan.hang?.includes(key) === true) return new Promise(() => undefined)
+          const route = state.routes[key]
+          const reply = Array.isArray(route) ? (route.length > 1 ? route.shift() : route[0]) : route
+          return Promise.resolve(reply ?? { status: 404, data: { error: "not_found" } })
         },
         async requestStream(options: AgentStreamRequest) {
           queueMicrotask(() => {
+            if (plan.refuseStream !== undefined) {
+              emit("streamEnd", { id: options.id, kind: "failed", code: plan.refuseStream })
+              return
+            }
             emit("streamData", { id: options.id, index: 0, kind: "head", status: 200, headers: { "content-type": "text/event-stream" } })
-            chunks.forEach((chunk, index) => emit("streamData", { id: options.id, index: index + 1, kind: "chunk", dataBase64: btoa(chunk) }))
+            ;(plan.chunks ?? []).forEach((chunk, index) => emit("streamData", { id: options.id, index: index + 1, kind: "chunk", dataBase64: btoa(chunk) }))
             emit("streamEnd", { id: options.id, kind: "end" })
           })
           return { id: options.id }
         },
-        abort: async () => ({ aborted: true }),
-        subscribeEvents: async (options) => ({ id: options.id }),
-        unsubscribeEvents: async () => ({ aborted: true }),
-        reviewRecovery: async () => ({ kind: "unavailable" }),
-        archiveRecovery: async () => ({ kind: "unavailable" }),
+        async abort(options) {
+          state.aborted.push(options.id)
+          return { aborted: true }
+        },
+        async subscribeEvents(options) {
+          queueMicrotask(() => {
+            ;(plan.feed ?? []).forEach((event, index) => emit("agentEvent", { id: options.id, kind: "event", index, event }))
+            emit("agentEvent", { id: options.id, kind: "end" })
+          })
+          return { id: options.id }
+        },
+        async unsubscribeEvents(options) {
+          state.unsubscribed.push(options.id)
+          return { aborted: true }
+        },
+        reviewRecovery: async () => (plan.review ?? { kind: "unavailable" }) as Awaited<ReturnType<ElizaAgentPlugin["reviewRecovery"]>>,
+        archiveRecovery: async () => (plan.archive ?? { kind: "unavailable" }) as Awaited<ReturnType<ElizaAgentPlugin["archiveRecovery"]>>,
         async addListener(name, listener) {
           const list = listeners.get(name) ?? []
           list.push(listener as (event: unknown) => void)
@@ -80,13 +125,31 @@ module device {
     return state
   }
 
+  /** A page whose visibility and focus the test reports: `page.current` is the watch while it is not disposed. @throws {never} */
+  export function page(): { current: PageWatch | undefined; readonly watch: (watch: PageWatch) => () => void } {
+    const held: { current: PageWatch | undefined; watch: (watch: PageWatch) => () => void } = {
+      current: undefined,
+      watch: (watch) => {
+        held.current = watch
+        return () => { held.current = undefined }
+      },
+    }
+    return held
+  }
+
+  /** Lets promises and forked work run before the test looks again. @throws {never} */
+  export function settle(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 25))
+  }
+
   /** A native Cloud plugin answering `status` and `data` per path, or refusing as `failure`. @throws {never} */
-  export function cloud(answer: (request: CloudRequest) => { status: number; data: unknown } | { failure: string }): NativeCloud {
+  export function cloud(answer: (request: CloudRequest) => { status: number; data: unknown; retryAfter?: string } | { failure: string }, environments: string[] = []): NativeCloud {
     return {
       async request(request) {
+        environments.push(request.environment ?? "")
         const said = answer(request)
         if ("failure" in said) throw { _tag: "CloudRefused", method: "request", failure: said.failure }
-        return { status: said.status, body: new TextEncoder().encode(JSON.stringify(said.data)), contentType: "application/json" }
+        return { status: said.status, body: new TextEncoder().encode(JSON.stringify(said.data)), contentType: "application/json", ...(said.retryAfter === undefined ? {} : { retryAfter: said.retryAfter }) }
       },
       async openExternal() {},
     }
@@ -97,7 +160,7 @@ module device {
     return parts.map((part) => new TextDecoder().decode(part)).join("")
   }
 }
-import { agent, bridge, cloud, text } from device
+import { agent, bridge, cloud, page, settle, text } from device
 
 const owned = {
   "GET /api/auth/me": { status: 200, data: { identity: { kind: "owner", id: "ann" }, access: { role: "OWNER", mode: "local" } } },
@@ -146,8 +209,8 @@ it.live("talk to the resident agent under the verified owner, and hear why it re
     ...owned,
     "GET /api/conversations": { status: 200, data: { conversations: [] } },
     "POST /api/conversations": { status: 429, data: { error: "Slow down", code: "rate_limited", retryAfter: 30 } },
-    "DELETE /api/automations/a1": { status: 200, data: { deleted: true } },
-  }, ["data: hello\n\n", "data: done\n\n"])
+    "DELETE /api/triggers/t1": { status: 200, data: { deleted: true } },
+  }, { chunks: ["data: hello\n\n", "data: done\n\n"] })
   provide residentOver(phone.plugin, true, undefined) {
     const resident = try Resident
     const control = try ResidentControl
@@ -159,7 +222,7 @@ it.live("talk to the resident agent under the verified owner, and hear why it re
     const refused = try Effect.flip(resident.json("POST", "/api/conversations", { title: "x" }))
     // spec/platform/index.md, "Only a path that starts with one slash reaches the resident"
     const steered = try Effect.flip(resident.json("GET", "//evil.example/api"))
-    const deleted = try resident.json("DELETE", "/api/automations/a1")
+    const deleted = try resident.json("DELETE", "/api/triggers/t1")
     // spec/platform/nativeStream.md, "Body chunks follow the response and stay within the body limit"
     const streamed = try Stream.runCollect(resident.stream("/api/conversations/c1/messages/stream", { text: "hi" }))
     try Effect.try(() => assert.deepStrictEqual({
@@ -177,11 +240,6 @@ it.live("talk to the resident agent under the verified owner, and hear why it re
       deleted: { deleted: true },
       streamed: "data: hello\n\ndata: done\n\n",
     }))
-    // spec/platform/resident.md, "A changed Cloud account restarts a running agent under a new generation and never stops it"
-    const before = (try control.session())?.generation ?? 0
-    try control.refreshAccount()
-    const after = try control.session()
-    try Effect.try(() => assert.isTrue(after !== undefined && after.generation > before && after.owner === "ann"))
   }
   // spec/platform/resident.md, "A connection is one verified owner with exactly one running agent"
   const stranger = agent({ ...owned, "GET /api/auth/me": { status: 200, data: { identity: { kind: "agent", id: "x" }, access: { role: "USER", mode: "remote" } } } })
@@ -227,6 +285,25 @@ it.effect("use the Cloud's managed services through native, signed in or not", (
     const before = try Effect.flip(cloudService.json("GET", "/api/v1/user"))
     const expired = try Effect.flip(cloudService.json("GET", "/api/v1/billing/limits"))
     try Effect.try(() => assert.deepStrictEqual([before instanceof CloudSignedOut, expired instanceof CloudSignedOut], [true, true]))
+  }
+  // spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"
+  provide cloudOver(cloud((request) => request.path === "/api/v1/user"
+    ? { status: 429, data: { error: "rate_limited" }, retryAfter: "30" }
+    : { status: 503, data: { error: "service_unavailable" }, retryAfter: "30" }), authority) {
+    const cloudService = try Cloud
+    const limited = try Effect.flip(cloudService.json("GET", "/api/v1/user"))
+    const down = try Effect.flip(cloudService.json("GET", "/api/v1/billing/limits"))
+    try Effect.try(() => assert.deepStrictEqual(
+      [limited instanceof CloudUnavailable ? [limited.status, limited.retryAfter] : undefined, down instanceof CloudUnavailable ? [down.status, down.retryAfter] : undefined],
+      [[429, 30], [503, undefined]],
+    ))
+  }
+  // spec/platform/index.md, "Staging is reached only by a test-mocks build that chose it, or a browser preview of the Cloud resident"
+  const environments: string[] = []
+  provide cloudOver(cloud(() => ({ status: 200, data: { success: true } }), environments), cloudAuthorityOf("Staging"), "staging") {
+    const cloudService = try Cloud
+    try cloudService.json("GET", "/api/v1/user")
+    try Effect.try(() => assert.deepStrictEqual([cloudService.base, environments], ["https://api-staging.eliza.app", ["staging"]]))
   }
 })
 
@@ -307,5 +384,259 @@ it.effect("open mock mode only in a test-mocks build, after the live collectors 
   provide buildInfo({ testMocks: true, variant: "launcher" }), fakeNative({ AlphaConnection: { pauseNotificationCollection: () => ({}) }, AlphaHostedResults: { disableBackground: () => ({}) } }) {
     try admitMockMode()
     try Effect.try(() => assert.deepStrictEqual(buildInfoOf("Aosp").variant, "aosp"))
+  }
+})
+
+// spec/platform/index.md, "A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts"
+it.live("send the resident only what the owner route table allows", () => effect {
+  const phone = agent({ ...owned, "DELETE /api/triggers/t1": { status: 200, data: { ok: true } } })
+  provide residentOver(phone.plugin, true, undefined) {
+    const resident = try Resident
+    const claimedWrongVerb = try Effect.flip(resident.json("PUT", "/api/notes/state", { notes: [] }))
+    const unclaimedDelete = try Effect.flip(resident.json("DELETE", "/api/conversations/c1"))
+    const allowed = try resident.json("DELETE", "/api/triggers/t1")
+    try Effect.try(() => assert.deepStrictEqual({
+      refused: [claimedWrongVerb, unclaimedDelete].map((error) => error instanceof ResidentRefused ? error.code : undefined),
+      allowed: allowed.data,
+      sent: phone.sent.filter((request) => request.method !== "GET").map((request) => `${request.method} ${request.path}`),
+    }, { refused: ["InvalidRoute", "InvalidRoute"], allowed: { ok: true }, sent: ["DELETE /api/triggers/t1"] }))
+  }
+})
+
+// spec/platform/resident.md, "Story: Start my agent and keep it running"
+it.effect("start my agent and bring it back by itself when Android restarts it", () => effect {
+  const phone = agent(owned)
+  provide residentOver(phone.plugin, true, undefined) {
+    const control = try ResidentControl
+    try (try Resident).ensureRunning()
+    // spec/platform/resident.md, "The agent service's status decides whether a connection was lost, checked at most every two ticks"
+    phone.status = { available: true, state: "running", epoch: 8, requestBodyLimit: 1048576 }
+    try TestClock.adjust("5 seconds")
+    try promise(settle)
+    try TestClock.adjust("5 seconds")
+    try promise(settle)
+    const session = try control.session()
+    const now = try Stream.runHead(control.changes)
+    try Effect.try(() => assert.deepStrictEqual(
+      [session?.owner, session?.epoch, now._tag === "Some" ? [now.value.phase, now.value.restarts] : undefined],
+      ["ann", 8, ["Connected", 1]],
+    ))
+  }
+})
+
+// spec/platform/resident.md, "A held start runs again only after the owner reviewed what the service kept and the service archived it"
+it.live("restart my agent only after I reviewed what the service held", () => effect {
+  const token = "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b"
+  const phone = agent(
+    { ...owned, "GET /api/auth/me": { status: 200, data: { identity: { kind: "agent", id: "x" }, access: { role: "USER", mode: "remote" } } } },
+    { review: { kind: "reviewable", reviewToken: token, retainedCount: 2 }, archive: { kind: "archived", archivedCount: 2 } },
+  )
+  provide residentOver(phone.plugin, true, undefined) {
+    const recovery = try ResidentRecovery
+    try Effect.flip((try Resident).ensureRunning())
+    const malformed = try Effect.flip(recovery.restart("not-a-token"))
+    const held = try recovery.review()
+    phone.routes["GET /api/auth/me"] = owned["GET /api/auth/me"]
+    try recovery.restart(token)
+    const session = try (try ResidentControl).session()
+    try Effect.try(() => assert.deepStrictEqual(
+      [malformed.reason, held.reviewable ? held.retainedCount : 0, session?.owner],
+      ["Restart blocked", 2, "ann"],
+    ))
+  }
+})
+
+// spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"
+it.live("rebind my running agent when my Cloud account changes", () => effect {
+  const phone = agent(owned)
+  provide residentOver(phone.plugin, true, undefined) {
+    const control = try ResidentControl
+    try (try Resident).ensureRunning()
+    const before = (try control.session())?.generation ?? 0
+    // spec/platform/resident.md, "A changed Cloud account restarts a running agent under a new generation and never stops it"
+    try control.refreshAccount()
+    const after = try control.session()
+    try Effect.try(() => assert.isTrue(after !== undefined && after.generation > before && after.owner === "ann"))
+  }
+})
+
+// spec/platform/resident.md, "Story: Wait for a feature that is still starting"
+it.live("wait for a record read while its feature starts, and never repeat a change", () => effect {
+  const starting = { status: 503, data: { code: "feature_starting", error: "feature_starting", retryable: true, phase: "agent-deferred-boot", status: "pending", retryAfter: 0 } }
+  const phone = agent({
+    ...owned,
+    "GET /api/notes/state": [starting, { status: 200, data: { notes: [] } }],
+    "POST /api/views/notes/interact": [starting, { status: 200, data: { ok: true } }],
+  })
+  provide residentOver(phone.plugin, true, undefined) {
+    const resident = try Resident
+    // spec/platform/resident.md, "Only a record read the resident deferred is retried, and only before its deadline"
+    const read = try resident.json("GET", "/api/notes/state")
+    const write = try Effect.flip(resident.json("POST", "/api/views/notes/interact", { op: "rename" }))
+    const count = (key: string) => phone.sent.filter((request) => `${request.method} ${request.path}` === key).length
+    try Effect.try(() => assert.deepStrictEqual({
+      read: read.data,
+      write: write instanceof ResidentRefused ? [write.status, write.code] : undefined,
+      reads: count("GET /api/notes/state"),
+      writes: count("POST /api/views/notes/interact"),
+    }, { read: { notes: [] }, write: [503, "feature_starting"], reads: 2, writes: 1 }))
+  }
+})
+
+// spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"
+it.live("withdraw a request by its id when I stop waiting for it", () => effect {
+  const phone = agent(owned, { hang: ["DELETE /api/triggers/t1"] })
+  provide residentOver(phone.plugin, true, undefined) {
+    const resident = try Resident
+    try resident.ensureRunning()
+    const pending = fork resident.json("DELETE", "/api/triggers/t1")
+    try sleep("50 millis")
+    // spec/platform/resident.md, "An abandoned request is withdrawn by its id, and its outcome is unknown unless native withdrew it first"
+    try Fiber.interrupt(pending)
+    try sleep("25 millis")
+    const sent = phone.sent.find((request) => request.method === "DELETE")?.id
+    try Effect.try(() => assert.deepStrictEqual([sent !== undefined, phone.aborted], [true, sent === undefined ? [] : [sent]]))
+  }
+})
+
+// spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"
+it.live("hear that a busy agent never got my message", () => effect {
+  const phone = agent(owned, { refuseStream: "Busy" })
+  provide residentOver(phone.plugin, true, undefined) {
+    // spec/platform/nativeStream.md, "A message is reported not sent only when native refused it before any response"
+    const refused = try Effect.flip(Stream.runCollect((try Resident).stream("/api/conversations/c1/messages/stream", { text: "hi" })))
+    try Effect.try(() => assert.deepStrictEqual(refused instanceof ResidentRefused ? [refused.status, refused.code] : refused._tag, [429, "busy"]))
+  }
+})
+
+// spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"
+it.live("follow my agent's steps on my screen and nothing meant for another", () => effect {
+  const interact = (clientId: string, frame: unknown) => ({ type: "agent_event", stream: "view-interact", payload: { clientId, frame } })
+  const phone = agent(owned, { feed: [interact("c2", { step: 0 }), interact("c1", { step: 1 }), { type: "agent_event", stream: "other" }] })
+  provide residentOver(phone.plugin, true, undefined) {
+    try (try Resident).ensureRunning()
+    // spec/platform/viewEvents.md, "Only this subscription's frames for this client reach the screen, until it ends"
+    const control = try ResidentControl
+    const seen = try Stream.runCollect(subscription(phone.plugin, control, "view", "c1"))
+    // spec/platform/viewEvents.md, "Closing removes the listener and unsubscribes whatever was dispatched"
+    try Effect.try(() => assert.deepStrictEqual([[...seen], phone.unsubscribed.length], [[{ step: 1 }], 1]))
+  }
+})
+
+// spec/platform/lifecycle.md, "Story: Come back to my phone where I left it"
+it.live("count one return to Alpha once, and none after the screen that watched it is gone", () => effect {
+  const shown = page()
+  provide memoryStore, fakeNative({ ElizaSystem: { getNetworkStatus: () => ({ connected: true }) } }) {
+    provide lifecycleOver(shown.watch) {
+      const app = try AppLifecycle
+      try sleep("25 millis")
+      shown.current?.paused()
+      // spec/platform/lifecycle.md, "Leaving the app pauses it, and one return is counted once"
+      shown.current?.returned(1000)
+      shown.current?.returned(1100)
+      shown.current?.returned(1400)
+      try sleep("25 millis")
+      const now = try app.get()
+      try Effect.try(() => assert.deepStrictEqual([now.foreground, now.returns, now.lastReturnAt], [true, 2, 1400]))
+    }
+    // spec/platform/lifecycle.md, "A disposed watcher's queued callbacks change nothing"
+    try Effect.try(() => assert.strictEqual(shown.current, undefined))
+  }
+})
+
+// spec/platform/lifecycle.md, "Story: Find my phone as I left it after Android stops Alpha"
+it.live("report a turn in flight when Android ended Alpha as unknown, and never send it again", () => effect {
+  provide memoryStore, fakeNative({ ElizaSystem: { getNetworkStatus: () => ({}) } }) {
+    provide lifecycleOver(page().watch) {
+      try (try AppLifecycle).turnSent()
+    }
+    provide lifecycleOver(page().watch) {
+      // spec/platform/lifecycle.md, "A turn in flight when the process died is reported as unknown and never resent"
+      const now = try (try AppLifecycle).get()
+      try Effect.try(() => assert.deepStrictEqual([now.inFlight, now.unknownOutcomes, now.restored, now.network], [0, 1, true, "NetUnknown"]))
+    }
+  }
+})
+
+// spec/platform/rendererRecovery.md, "Story: Never be stuck behind a crashing Home screen"
+it.live("start a recreated page from what it stored, with nothing resent", () => effect {
+  provide memoryStore, fakeNative({ ElizaSystem: { getNetworkStatus: () => ({ connected: true }) } }) {
+    provide deviceStorageLive, lifecycleOver(page().watch) {
+      try (try DeviceStorage).admitStartup()
+      try (try DeviceStorage).bindOwner("ann")
+      try (try AppLifecycle).turnSent()
+    }
+    // spec/platform/rendererRecovery.md, "A recreated or reloaded page is created under every death counted so far"
+    provide deviceStorageLive, lifecycleOver(page().watch) {
+      const storage = try DeviceStorage
+      try storage.admitStartup()
+      const kept = try Stream.runHead(storage.changes)
+      const app = try (try AppLifecycle).get()
+      try Effect.try(() => assert.deepStrictEqual(
+        [kept._tag === "Some" ? kept.value.owner : undefined, app.inFlight, app.unknownOutcomes],
+        ["ann", 0, 1],
+      ))
+    }
+  }
+})
+
+// spec/platform/storage.md, "Story: Keep my phone's state as I left it"
+it.effect("keep what two pages saved at once, the newer never lost", () => effect {
+  provide memoryStore {
+    provide deviceStorageLive {
+      const first = try DeviceStorage
+      try first.admitStartup()
+      try first.bindOwner("ann")
+      provide deviceStorageLive {
+        // spec/platform/storage.md, "A save commits only over the version it read"
+        try (try DeviceStorage).hold("maps")
+      }
+      try first.hold("notes")
+      const kept = try Stream.runHead(first.changes)
+      try Effect.try(() => assert.deepStrictEqual(kept._tag === "Some" ? [...kept.value.review].sort() : undefined, ["maps", "notes"]))
+    }
+  }
+})
+
+// spec/platform/storage.md, "Story: Reset Alpha's data"
+it.effect("reset everything Alpha kept for me, and start again with no owner bound", () => effect {
+  provide memoryStore {
+    const store = try KeyValueStore.KeyValueStore
+    try store.set(ownerKey("ann", "maps"), "{}")
+    provide deviceStorageLive {
+      const storage = try DeviceStorage
+      try storage.admitStartup()
+      try storage.bindOwner("ann")
+      try storage.reset()
+      const after = try Stream.runHead(storage.changes)
+      // spec/platform/storage.md, "Startup is admitted once, and only with no reset pending"
+      try storage.admitStartup()
+      try storage.bindOwner("ben")
+      const rebound = try Stream.runHead(storage.changes)
+      const kept = try store.get(ownerKey("ann", "maps"))
+      try Effect.try(() => assert.deepStrictEqual({
+        after: after._tag === "Some" ? [after.value.owner, after.value.resets, after.value.resetPending] : undefined,
+        rebound: rebound._tag === "Some" ? rebound.value.owner : undefined,
+        kept: kept._tag,
+      }, { after: ["", 1, false], rebound: "ben", kept: "None" }))
+    }
+  }
+})
+
+// spec/platform/crashJournal.md, "A Cloud inference failure is taken once, and only while it is recent"
+it.effect("log which part of a Cloud AI request failed, once, and never what was asked", () => effect {
+  provide memoryStore, buildInfo({ variant: "browser" }), fakeNative({}) {
+    provide crashJournalLive {
+      const journal = try CrashJournal
+      const failure = { version: 1, at: 1000, stage: "action-planner", reason: "rate-limit", status: 429, prompt: "secret note text" }
+      try journal.recordInference(failure)
+      try journal.recordInference(failure)
+      try TestClock.adjust("2 seconds")
+      const logged = try journal.read()
+      try Effect.try(() => assert.deepStrictEqual(
+        logged.entries.map((entry) => [entry.source, entry.detail]),
+        [["inference", "action-planner · rate-limit · HTTP 429"]],
+      ))
+    }
   }
 })

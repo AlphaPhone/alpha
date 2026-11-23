@@ -12,14 +12,18 @@ straight to Android's dialog and never into what Settings keeps.
 
 ### A scan needs precise location and Location on, and offers one row per network name
 
+Each row carries the security Android parsed from the scan; a row without one is WPA2 when it is
+secured and open otherwise, which is what Android assumes for a join without a security type.
+
 ```quint
 type Scan = NotScanned | Scanning | Found | NeedsLocation | LocationOff | ScanUnavailable
-type Nearby = { name: str, secured: bool, joinable: bool, strength: int }
+type Security = OpenNet | EnhancedOpen | Wpa2 | Wpa3 | Enterprise | Wep
+type Nearby = { name: str, secured: bool, joinable: bool, strength: int, security: Security }
 type JoinPhase = JoinIdle | AwaitingAndroid | Joined | Portal | Declined | Unverified | NotConnected | WrongPassword | AlreadySaved | JoinInvalid | JoinUnsupported
 type Online = OnlineUnknown | Offline | Validated | BehindPortal | UnvalidatedOnline
 type Network = { scan: Scan, networks: List[Nearby], join: JoinPhase, network: str, secured: bool, online: Online, panel: bool }
 pure val initial: Network = { scan: NotScanned, networks: List(), join: JoinIdle, network: "", secured: false, online: OnlineUnknown, panel: false }
-pure val networksValues = Set(List()).union(Set(List({ name: "home", secured: true, joinable: true, strength: -50 })))
+pure val networksValues = Set(List()).union(Set(List({ name: "home", secured: true, joinable: true, strength: -50, security: Wpa3 })))
 pure def canBeginScan(n: Network): bool = n.scan != Scanning
 pure def beginScan(n: Network): Network = { ...n, scan: Scanning }
 pure def canScanAnswered(n: Network, scan: Scan, networks: List[Nearby]): bool =
@@ -35,7 +39,6 @@ Open and Enhanced Open take none, WPA2 8 to 63 printable characters and WPA3 1 t
 and WEP networks are joined in Android's settings.
 
 ```quint
-type Security = OpenNet | EnhancedOpen | Wpa2 | Wpa3 | Enterprise | Wep
 pure def passphraseFits(security: Security, characters: int, printable: bool): bool =
   if (security == OpenNet or security == EnhancedOpen) characters == 0
   else if (security == Wpa2) printable and characters >= 8 and characters <= 63

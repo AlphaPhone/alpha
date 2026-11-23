@@ -11,6 +11,9 @@ export const meta: ComponentMeta<CameraViewProps> = {
     Recording: { camera: recording },
     CameraDenied: { camera: denied },
     MicrophoneRefused: { camera: microphone },
+    BrowserNotice: { camera: denied, browser: true },
+    Grid: { camera: { ...readyPhoto, grid: true } },
+    Zoomed: { camera: { ...readyPhoto, zoom: 20 } },
     Notice: { said: "Saved · max length" },
   },
 };

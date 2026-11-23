@@ -81,17 +81,16 @@ export const SyncReply = Schema.Struct({
   phase: Schema.optionalKey(Text(64)),
 })
 
-/** An availability read: occupancy only, and how fresh it was. */
-export const AvailabilityReply = Schema.Struct({
-  status: Schema.Literals(["ready", "permission-required", "unavailable", "zone-changed", "source-changed", "too-many"]),
-  freshness: Schema.optionalKey(Schema.Literals(["local", "unknown"])),
-  rows: Schema.optionalKey(Schema.Array(Schema.Struct({ start: Schema.String, end: Schema.String, allDay: Schema.Boolean, availability: Schema.Literals(["busy", "free", "tentative"]) })).check(Schema.isMaxLength(200))),
-})
+/** An availability read as the phone answers it; upstream's review decodes each row and the freshness itself. */
+export const AvailabilityReply = Schema.Struct({ status: Text(64), events: Schema.optionalKey(Schema.Unknown), freshness: Schema.optionalKey(Schema.Unknown) })
 
-/** The calendars an availability check may offer. */
-export const AvailabilitySources = Schema.Struct({
-  status: Schema.Literals(["ready", "unavailable", "permission-required", "zone-changed"]),
-  sources: Schema.optionalKey(Schema.Array(Schema.Struct({ id: Text(128), revision: Revision, name: Schema.optionalKey(Schema.NullOr(Schema.String)), account: Schema.optionalKey(Schema.NullOr(Schema.String)), local: Schema.Boolean })).check(Schema.isMaxLength(64))),
+/** The calendars an availability check may offer, as the phone answers; upstream's review decodes each calendar and the zone. */
+export const AvailabilitySources = Schema.Struct({ status: Text(64), timeZone: Schema.optionalKey(Schema.Unknown), calendars: Schema.optionalKey(Schema.Unknown) })
+
+/** The phone's own review's answer to an agent operation; its result is the operation's own record. */
+export const AgentReply = Schema.Struct({
+  status: Schema.Literals(["applied", "saved", "shared", "queued", "cancelled", "conflict", "changed", "not_shared", "unknown", "unavailable", "failed"]),
+  result: Schema.optionalKey(Schema.Unknown),
 })
 
 export type DeviceEventRecord = typeof DeviceEvent.Type
@@ -114,3 +113,4 @@ export const decodeHandoff = Schema.decodeUnknownEffect(HandoffReply)
 export const decodeSync = Schema.decodeUnknownEffect(SyncReply)
 export const decodeAvailability = Schema.decodeUnknownEffect(AvailabilityReply)
 export const decodeAvailabilitySources = Schema.decodeUnknownEffect(AvailabilitySources)
+export const decodeAgentReply = Schema.decodeUnknownEffect(AgentReply)

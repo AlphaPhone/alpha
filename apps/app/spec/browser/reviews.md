@@ -1,8 +1,9 @@
 # Browser confirmations
 
 Browser asks the owner before an effect they might regret: clearing browsing data, clearing a
-site's data, leaving a private tab for another browser, opening another app from a link tapped in
-a private tab, and a reviewed Browser control the agent proposed. Each review has an identity; one
+site's data, leaving a private tab for another browser, and a reviewed Browser control the agent
+proposed. A link to another app tapped in a private tab is asked about by the native host's own
+dialog ([handoff](./handoff.md)). Each review has an identity; one
 of each is open at a time, it is approved only by a tap while Alpha is shown and the phone is
 unlocked, and every request is answered exactly once.
 
@@ -16,7 +17,7 @@ unlocked, and every request is answered exactly once.
 `detail` is what the dialog names: the site, the address, or the proposed control.
 
 ```quint
-type ReviewKind = ClearBrowsingData | ClearSiteData | LeavePrivate | OpenAppLink | BrowserControl
+type ReviewKind = ClearBrowsingData | ClearSiteData | LeavePrivate | BrowserControl
 type OpenReview = { id: str, kind: ReviewKind, detail: str }
 type Reviews = { foreground: bool, locked: bool, open: List[OpenReview] }
 pure val initial: Reviews = { foreground: true, locked: false, open: List() }

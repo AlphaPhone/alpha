@@ -35,7 +35,7 @@ pure def check(t: ReminderTaps, explicit: bool): ReminderTaps =
   if (t.stage != TapIdle) { ...t, requested: t.requested or (explicit and t.stage != TapQuestion) }
   else if (t.blocked) t
   else { ...t, stage: TapReading, interactionAt: t.interaction }
-pure def canInteract(t: ReminderTaps): bool = t.interaction < 6
+pure def canInteract(t: ReminderTaps): bool = true
 pure def interact(t: ReminderTaps): ReminderTaps = { ...t, interaction: t.interaction + 1 }
 pure def canSetBlocked(t: ReminderTaps, blocked: bool): bool = blocked != t.blocked
 pure def setBlocked(t: ReminderTaps, blocked: bool): ReminderTaps = { ...t, blocked: blocked }

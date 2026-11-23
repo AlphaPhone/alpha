@@ -2,17 +2,16 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Activation, type InstallAnswer, type Permission, Machine, checkDue, initial, machine, updateIdle } from "../../gen/settings__updates.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { Activity } from "../shell/activity.vibe"
 import { attempt, call } from "./call.vibe"
-import { DeviceSnapshot, InstallReply, SystemBuild, UpdateCheck, UpdateState } from "./native.schema.vibe"
+import { DeviceSnapshot, InstallReply, PermissionPage, SystemBuild, UpdateCheck, UpdateState } from "./native.schema.vibe"
 import { type Offer, completeFeed, isDigest, offerFor } from "./offer.vibe"
+import { SavedFeed } from "./stored.schema.vibe"
 
 export const UPDATE_KEY = ownerKey("device", "settings/app-update")
-
-/** The last feed answer kept on the phone: when it came, the feed, and Android's digest of it. */
-schema SavedFeed { checkedAt: number; feed: unknown; digest?: string }
 
 const PERMISSION: Record<string, Permission> = {
   starting: "AndroidStarting", "permission-required": "PermissionRequired", supported: "AutomaticAllowed", unsupported: "AutomaticUnsupported",
@@ -70,8 +69,8 @@ export const updates = Layer.unwrap(effect {
       if (begun === undefined) return
       const now = try Clock.currentTimeMillis
       if (!manual && !checkDue(feed.checkedAt, now) && (feed.feed === null || isDigest(feed.digest))) {
-        const mine = try installed()
-        try (held.send({ type: "checkAnswered", now: feed.checkedAt, offer: offerFor(feed.feed, mine)?.versionCode ?? 0, bound: isDigest(feed.digest) }) catch () => undefined)
+        const offered = offerFor(feed.feed, try installed())
+        try (held.send({ type: "checkAnswered", now: feed.checkedAt, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined)
         return
       }
       const reply = try attempt(call("AlphaDevice", "checkForUpdate", UpdateCheck))
@@ -82,8 +81,8 @@ export const updates = Layer.unwrap(effect {
         return
       }
       try keep({ checkedAt: now, feed: kept, ...(isDigest(reply?.manifestSha256) ? { digest: reply.manifestSha256 } : {}) })
-      const mine = try installed()
-      try (held.send({ type: "checkAnswered", now, offer: offerFor(kept, mine)?.versionCode ?? 0, bound: isDigest(feed.digest) }) catch () => undefined)
+      const offered = offerFor(kept, try installed())
+      try (held.send({ type: "checkAnswered", now, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined)
     }
 
     effect function install(automatic: boolean) {
@@ -108,8 +107,8 @@ export const updates = Layer.unwrap(effect {
         if (begun !== undefined) try install(false)
       }),
       allowAutomatic: () => within(effect {
-        const opened = try attempt(native.invoke("AlphaDevice", "openUpdatePermissionSettings"))
-        return typeof opened === "object" && opened !== null && "status" in opened && opened.status === "opened"
+        const opened = try attempt(call("AlphaDevice", "openUpdatePermissionSettings", PermissionPage))
+        return opened?.status === "opened"
       }),
       poll: () => within(effect {
         if (!native_ || (try Build).info.testMocks) return
@@ -149,6 +148,7 @@ export const updates = Layer.unwrap(effect {
 export const schedule = Layer.effectDiscard(effect {
   const service = try Updates
   const native = try Native
+  const lifecycle = try AppLifecycle
   const activity = try Activity
   try service.setActive(true)
   try fork.scoped (effect {
@@ -158,14 +158,18 @@ export const schedule = Layer.effectDiscard(effect {
     }
   })
   try fork.scoped (effect {
-    for try (const change of native.listen("App", "appStateChange")) {
-      const active = typeof change === "object" && change !== null && "isActive" in change && change.isActive === true
-      try service.setActive(active)
+    for try (const app of lifecycle.changes) {
+      try service.setActive(app.foreground)
+    }
+  })
+  try service.watchActivation(() => activity.keepDrafts())
+  try fork.scoped (effect {
+    for try (const _ready of native.listen("AlphaDevice", "alphaUpdateReady")) {
+      try service.watchActivation(() => activity.keepDrafts())
     }
   } catch () => undefined)
   try fork.scoped (effect {
-    try service.watchActivation(() => activity.keepDrafts())
-    for try (const _ready of native.listen("AlphaDevice", "alphaUpdateReady")) {
+    for try (const _settled of native.listen("AlphaDevice", "alphaUpdateSettled")) {
       try service.watchActivation(() => activity.keepDrafts())
     }
   } catch () => undefined)

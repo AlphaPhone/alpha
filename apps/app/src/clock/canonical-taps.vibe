@@ -29,6 +29,8 @@ export function destinationOf(view: string | undefined, conversationId: string |
 export service CanonicalTaps {
   /** A tap arrived, Alpha came to the front, or the session changed: read the pending tap when the owner is not composing. */
   wake(): void!!
+  /** The layer is going away: nothing is read or acknowledged after this. */
+  retire(): void!!
 }
 
 /** Canonical taps over `AlphaNotifications`, for the signed-in session only. */
@@ -77,14 +79,19 @@ export const canonicalTapsLayer = Layer.effect(CanonicalTaps, effect {
         if (after.captures === before && after.stage === "CanonIdle") return
       }
     },
+    retire: () => step({ type: "retireTaps" }),
   }
 })
 
-/** Wakes the canonical tap handler on Android's tap event. Never returns while the plugin is present. */
+/** Wakes the canonical tap handler on Android's tap event and on each change of the signed-in owner. Never returns while the plugin is present. */
 export effect function followCanonicalTaps() {
   const native = try Native
   const taps = try CanonicalTaps
+  const owners = try ownerPeer()
   if (!(try native.available(NOTIFICATIONS))) return
   try taps.wake()
-  Stream.runForEach(native.listen(NOTIFICATIONS, "canonicalNotificationTap"), () => taps.wake()) catch () => undefined
+  try.all [
+    effect { Stream.runForEach(native.listen(NOTIFICATIONS, "canonicalNotificationTap"), () => taps.wake()) catch () => undefined },
+    effect { Stream.runForEach(owners.changes(), () => taps.wake()) catch () => undefined },
+  ]
 }

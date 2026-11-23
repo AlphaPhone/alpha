@@ -5,6 +5,6 @@ import { delegationConnected, delegationDetails, delegationWaiting } from "./fix
 const none = () => undefined;
 
 export const meta: ComponentMeta<DelegationPanelProps> = {
-  args: { delegation: delegationWaiting, details: delegationDetails, onStart: none, onCheck: none, onCancel: none, onRevoke: none },
-  examples: { Connected: { delegation: delegationConnected } },
+  args: { delegation: delegationWaiting, details: delegationDetails, onStart: none, onCheck: none, onCancel: none, onReviewRemoval: none, onRetryDisconnect: none },
+  examples: { Connected: { delegation: delegationConnected }, DisconnectPending: { delegation: delegationConnected, details: { ...delegationDetails, pendingRevocations: ["grant-0"] } } },
 };

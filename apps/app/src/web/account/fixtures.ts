@@ -1,8 +1,12 @@
-// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/billing.md, "Story: Choose or change my plan in Alpha"; spec/account/google.md, "Story: Connect my Google account with the access I choose"
+// spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/billing.md, "Story: Choose or change my plan in Alpha"; spec/account/google.md, "Story: Connect my Google account with the access I choose"; spec/account/provider.md, "Story: Use my own keys instead of Cloud"; spec/account/devBridge.md, "Story: Sign in through the development bridge"
 import { initial as accessInitial, type AgentAccess } from "../../../gen/account__agentAccess.ts";
 import { initial as billingInitial, type Billing } from "../../../gen/account__billing.ts";
 import { initial as delegationInitial, type Delegation } from "../../../gen/account__delegation.ts";
 import { initial as googleInitial, type Google } from "../../../gen/account__google.ts";
+import { initial as planInitial, type Admission } from "../../../gen/account__plan.ts";
+import { initial as providerInitial, type Provider } from "../../../gen/account__provider.ts";
+import { initial as dedicatedInitial, type Dedicated } from "../../../gen/account__dedicated.ts";
+import { initial as bridgeInitial, type Bridge } from "../../../gen/account__devBridge.ts";
 import { initial as sessionInitial, type Session } from "../../../gen/account__session.ts";
 import { initial as sheetInitial, type Sheet } from "../../../gen/account__sheet.ts";
 import { initial as signInInitial, type SignIn } from "../../../gen/account__signIn.ts";
@@ -81,3 +85,34 @@ export const delegationWaiting: Delegation = { ...delegationInitial, owner: 1, r
 export const delegationConnected: Delegation = { ...delegationInitial, owner: 1, grant: true, cloud: "CloudComplete" };
 /** Its details. */
 export const delegationDetails: DelegationDetails = { grantId: "grant-1", pendingRevocations: [], email: true, calendar: true };
+
+/** A retained second verification after Alpha resumed it. */
+export const retainedFactor: SignIn = { ...chooser, screen: "FactorStep", factor: "SmsFactor", attempt: 1, attempts: 1 };
+
+/** A new account, just signed in. */
+export const newAccount: Session = { ...signedIn, created: true };
+/** A sign-in whose earlier key may still work elsewhere. */
+export const earlierUnconfirmed: Session = { ...signedIn, priorUnconfirmed: true };
+
+/** A plan that bound Cloud inference, confirmed by the host. */
+export const boundPlan: Admission = { ...planInitial, credential: 1, binding: "CloudBound", basis: "VerifiedBasis", host: "HostBound" };
+/** Cloud inference removed without the host confirming it. */
+export const unconfirmedRemoval: Admission = { ...planInitial, credential: 1, binding: "Unbound", notice: "NeedsPlanNotice", host: "HostRemovalUnconfirmed" };
+
+/** The provider on Cloud with no own keys. */
+export const providerCloud: Provider = { ...providerInitial, known: true, revision: 1, signedIn: true, reads: 1 };
+/** Own keys saved and in use. */
+export const ownKeysSaved: Provider = { ...providerCloud, route: "OwnRoute", textKey: true, voiceKey: true, revision: 2, saves: 1 };
+/** Own keys saved while Cloud is in use, with the voice key under review for removal. */
+export const reviewingVoiceRemoval: Provider = { ...ownKeysSaved, route: "CloudRoute", review: { tag: "Reviewing", reviewed: "VoiceKey" } };
+/** A provider read that failed, keeping the last known choice. */
+export const providerReadFailed: Provider = { ...ownKeysSaved, fault: "ReadFailed" };
+
+/** The development bridge allowed, idle. */
+export const bridgeAllowed: Bridge = { ...bridgeInitial, allowed: true };
+/** The bridge's attempt failed because the account changed. */
+export const bridgeAccountChanged: Bridge = { ...bridgeAllowed, phase: "BridgeFailed", failure: "BridgeAccountChanged", keyActivated: true, loggedOut: true };
+/** A dedicated review awaiting acceptance. */
+export const dedicatedReview: Dedicated = { ...dedicatedInitial, allowed: true, view: { tag: "Review", adoption: false, available: true } };
+/** A dedicated setup whose acceptance was not confirmed. */
+export const dedicatedBlocked: Dedicated = { ...dedicatedReview, blocked: true, accepted: 1 };

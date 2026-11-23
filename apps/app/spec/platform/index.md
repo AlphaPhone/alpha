@@ -97,6 +97,21 @@ pure def pathAdmitted(path: PathShape): bool = path == Rooted
 pure def lawOnlyRootedPathsAreSent(path: PathShape): bool = pathAdmitted(path) implies path == Rooted
 ```
 
+### A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts
+
+The owner route table ([routes](../shell/routes.md)) decides a path one of its groups claims: its
+method, path, query keys and id. A path no group claims is read with GET or sent with POST, never
+put, patched or deleted. A refused request is answered as an invalid request and nothing is sent.
+
+```quint
+pure def methodAdmitted(claimed: bool, tableAllows: bool, readOrPost: bool): bool =
+  if (claimed) tableAllows else readOrPost
+
+pure def lawAnUnclaimedPathOnlyReadsOrPosts(tableAllows: bool): bool = not(methodAdmitted(false, tableAllows, false))
+
+pure def lawAClaimedPathFollowsTheTable(readOrPost: bool): bool = not(methodAdmitted(true, false, readOrPost))
+```
+
 ### A refusal carries a wait only when the resident answered 429 with a whole number of seconds
 
 Every other refusal keeps the resident's status, code and message and no advice.
@@ -138,7 +153,8 @@ pure def lawRefusedIsNot2xx(httpStatus: int): bool = answerOf(httpStatus) == Ref
 
 ### Eliza Cloud stays the live host until the Alpha Cloud cutover flag is set
 
-The cutover flag (`ALPHA_CLOUD_CUTOVER`) is off by default; off, every build talks to Eliza Cloud.
+The cutover flag (`ALPHA_CLOUD_CUTOVER`, built as `VITE_ALPHA_CLOUD_CUTOVER=1`, the one flag the
+account and the Cloud transport both read) is off by default; off, every build talks to Eliza Cloud.
 
 ```quint
 type Host = ElizaCloud | AlphaCloud
@@ -151,6 +167,9 @@ pure def lawWithoutTheFlagTheHostIsElizaCloud(cutover: bool): bool = not(cutover
 ### Staging is reached only by a test-mocks build that chose it, or a browser preview of the Cloud resident
 
 A production or Android build always uses production; a choice of production is always honoured.
+The choice is the build's `VITE_ALPHA_CLOUD_ENVIRONMENT`, and every Cloud request and every page it
+opens names the chosen environment to native, so the native host and the renderer never address two
+Clouds.
 
 ```quint
 type Environment = Production | Staging
@@ -200,7 +219,8 @@ pure def lawAnUnlistedRouteIsNeverSent(pathAdmittedNow: bool): bool = not(routeA
 
 ### A 401 ends the session; every other refusal is Cloud unavailable with its status
 
-No answer at all is Cloud unavailable with status 0.
+No answer at all is Cloud unavailable with status 0. A 429 keeps the wait its `Retry-After` header gave,
+in whole seconds and by `adviceOf`, as a resident refusal does, so a caller pauses for as long as Cloud asked.
 
 ```quint
 type CloudOutcome = CloudAnswered | CloudSignedOutNow | CloudDown

@@ -10,6 +10,7 @@ export const SurfaceInfo = Schema.Struct({
   reminderTapVersion: Version,
   reminderTodoVersion: Version,
   reminderTimingVersion: Version,
+  reminderCreationVersion: Version,
 })
 
 /** What Clock answered a handoff (`DailyApps.clockHandoff`); `package` names the app that received it. */
@@ -87,6 +88,15 @@ export const ReminderReceipt = Schema.Struct({
   status: Schema.Literals(["succeeded", "unknown"]),
   result: Schema.optionalKey(ReminderResult),
 })
+
+/** The store's receipt of an agent's bound change, its result kept whole for the operation's own result check. */
+export const AgentReminderReceipt = Schema.Struct({
+  status: Schema.Literals(["succeeded", "unknown"]),
+  result: Schema.optionalKey(Schema.Unknown),
+})
+
+/** The proposal digest the action journal holds for an approved entry (`AlphaActionJournal.get`). */
+export const JournalDigest = Schema.Struct({ digest: Schema.String.check(Schema.makeFilter((s: string) => s.length > 0 && s.length <= 128)) })
 
 /** A to-do decision's answer (`todoDecision`). */
 export const TodoDecided = Schema.Struct({ id: Schema.String, status: Schema.Literals(["todo", "completed", "cancelled"]) })

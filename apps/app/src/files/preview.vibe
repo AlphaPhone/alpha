@@ -19,6 +19,16 @@ export type OpenResult =
   | { readonly kind: "refused"; readonly status: string; readonly message?: string }
   | { readonly kind: "stale" }
 
+/** How a hand-off of the shown file to another app ended, with the device's reviewed sentence for Files to word. */
+export interface Handoff { readonly status: N.DocumentHandoff["status"] | "unknown"; readonly message?: string }
+
+/** How a rename of the shown file ended, with the device's reviewed sentence for Files to word. */
+export interface Renaming { readonly answer: RenameAnswer; readonly message?: string }
+
+function handoff(answer: N.DocumentHandoff | undefined): Handoff {
+  return answer === undefined ? { status: "unknown" } : { status: answer.status, ...(answer.message ? { message: answer.message } : {}) }
+}
+
 function docOf(selected: N.SelectedDocument | N.SelectionAnswer, known: Partial<Doc>, source: Doc["source"]): Doc | undefined {
   if (selected.status !== "selected" || !("selectionId" in selected) || !selected.selectionId) return undefined
   const mimeType = (("mimeType" in selected ? selected.mimeType : undefined) ?? known.mimeType ?? "application/octet-stream") || "application/octet-stream"
@@ -49,10 +59,12 @@ export service FilesPreview {
   restoreOpen(): void!!
   page(page: number): void!!
   close(forget: boolean): void!!
-  rename(name: string): RenameAnswer!!
+  rename(name: string): Renaming!!
   /** Open the shown file in another app, or download it in the browser build. */
-  openElsewhere(): N.DocumentHandoff["status"] | "unknown"!!
-  shareSelected(): N.DocumentHandoff["status"] | "unknown"!!
+  openElsewhere(): Handoff!!
+  shareSelected(): Handoff!!
+  /** The picture or recording of opening `serial` could not be played here. */
+  mediaFailed(serial: number): void!!
   /** The shown file for another area: its bytes are read fresh, and only while it is still the file shown. */
   sharedFile(): SharedFile | undefined!!
   /** Whether the shown file is still the one with this opening number. */
@@ -96,7 +108,8 @@ export const layer = Layer.effect(FilesPreview, effect {
     const shown = text?.status === "read" && (text.text ?? "").trim() !== ""
     if (shown) return try send(preview, { type: "contentReply", serial, content: "ContentText", body: (text?.text ?? "").replace(/^\uFEFF/, "") })
     const described = documents.describe(doc.selection) catch () => undefined
-    try send(preview, { type: "contentReply", serial, content: "ContentUnavailable", body: described?.uri?.startsWith("blob:") ? described.uri : text?.status ?? "failed" })
+    const said = text?.message ? `${text.status}\n${text.message}` : text?.status ?? "failed"
+    try send(preview, { type: "contentReply", serial, content: "ContentUnavailable", body: described?.uri?.startsWith("blob:") ? described.uri : said })
   }
 
   effect function renderPage(doc: Doc, page: number) {
@@ -165,7 +178,7 @@ export const layer = Layer.effect(FilesPreview, effect {
     const doc = picked ? docOf(picked, {}, "Picked") : undefined
     if (doc === undefined || picked === undefined) {
       try send(preview, { type: "openReply", granted: false, doc: requested.doc })
-      return (picked?.status === "cancelled" ? { kind: "stale" } : { kind: "refused", status: picked?.status ?? "unavailable" }) satisfies OpenResult
+      return (picked?.status === "cancelled" ? { kind: "stale" } : { kind: "refused", status: picked?.status ?? "unavailable", ...(picked?.message ? { message: picked.message } : {}) }) satisfies OpenResult
     }
     return try show(doc, `picked:${doc.selection}`, true)
   }
@@ -180,13 +193,18 @@ export const layer = Layer.effect(FilesPreview, effect {
       try send(preview, { type: "openReply", granted: false, doc: requested.doc })
       if (described?.status === "unavailable") try ignore(recent.send({ type: "revokeRow", key: row.key }))
       try release()
-      return { kind: "refused", status: described?.status ?? "unavailable" } satisfies OpenResult
+      return { kind: "refused", status: described?.status ?? "unavailable", ...(described?.message ? { message: described.message } : {}) } satisfies OpenResult
     }
     const r = try recent.get()
-    if (r.opened === row.selection) return { kind: "shown" } satisfies OpenResult
+    const showing = try preview.get()
+    if (r.opened === row.selection && showing.shown && showing.doc.selection === row.selection) {
+      try send(preview, { type: "openReply", granted: false, doc })
+      return { kind: "shown" } satisfies OpenResult
+    }
     const after = preview.send({ type: "openReply", granted: true, doc }) catch () => undefined
     if (after === undefined || !after.shown) return { kind: "stale" } satisfies OpenResult
-    try send(recent, { type: "closeDocument", forget: false })
+    try send(recent, { type: "reopenRow", key: row.key })
+    if (row.kind === "PickedDoc") try send(recent, { type: "rememberOpen" })
     try release()
     try loadContent(doc, after.serial)
     return { kind: "shown" } satisfies OpenResult
@@ -206,7 +224,7 @@ export const layer = Layer.effect(FilesPreview, effect {
   effect function rename(name: string) {
     const s = try preview.get()
     const begun = preview.send({ type: "beginRename" }) catch () => undefined
-    if (begun === undefined) return "RenameRefused" as RenameAnswer
+    if (begun === undefined) return { answer: "RenameRefused" } satisfies Renaming
     const answer = documents.rename(s.doc.selection, name) catch () => undefined
     const outcome: RenameAnswer = answer?.status === "selected" ? "Renamed" : answer?.status === "renamed-reselect" ? "RenamedReselect" : "RenameRefused"
     const renamed = answer ? docOf(answer, { ...s.doc, name, path: s.doc.path ? `${parentOf(s.doc.path) ? parentOf(s.doc.path) + "/" : ""}${name}` : "" }, s.doc.source) : undefined
@@ -221,7 +239,7 @@ export const layer = Layer.effect(FilesPreview, effect {
       }
       try loadContent(after.doc, after.serial)
     }
-    return outcome
+    return { answer: outcome, ...(answer?.message ? { message: answer.message } : {}) } satisfies Renaming
   }
 
   return {
@@ -261,15 +279,17 @@ export const layer = Layer.effect(FilesPreview, effect {
     rename,
     effect openElsewhere() {
       const s = try preview.get()
-      if (!s.shown) return "unavailable"
-      const answer = documents.open(s.doc.selection) catch () => undefined
-      return answer?.status ?? "unknown"
+      if (!s.shown) return { status: "unavailable" } satisfies Handoff
+      return handoff(documents.open(s.doc.selection) catch () => undefined)
     },
     effect shareSelected() {
       const s = try preview.get()
-      if (!s.shown) return "unavailable"
-      const answer = documents.share(s.doc.selection) catch () => undefined
-      return answer?.status ?? "unknown"
+      if (!s.shown) return { status: "unavailable" } satisfies Handoff
+      return handoff(documents.share(s.doc.selection) catch () => undefined)
+    },
+    effect mediaFailed(serial: number) {
+      const s = try preview.get()
+      if (s.shown && s.serial === serial && s.content === "ContentMedia") try send(preview, { type: "contentReply", serial, content: "ContentUnavailable", body: "media" })
     },
     effect sharedFile() {
       const s = try preview.get()

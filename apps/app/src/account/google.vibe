@@ -44,6 +44,7 @@ export service GoogleAccounts {
   /** The connected accounts as last read for the account signed in now. */
   readonly accounts: Stream.Stream<ReadonlyArray<GoogleAccount>>
   list(): ReadonlyArray<GoogleAccount>!!
+  current(): Google!!
   run(): void!!
   open(panel: Panel): void!!
   close(): void!!
@@ -168,8 +169,9 @@ export const googleService = Layer.effect(GoogleAccounts, effect {
 
   return {
     changes: machine.changes,
-    accounts: rows.changes,
+    accounts: SubscriptionRef.changes(rows),
     list: () => SubscriptionRef.get(rows),
+    current: () => machine.get(),
     effect run() { try.all [ignore(followSession()), ignore(followForeground()), ignore(followWorkspace())] },
     effect open(panel: Panel) { try send({ type: "openPanel", panel }) },
     effect close() { try send({ type: "closePanel" }) },
@@ -178,7 +180,7 @@ export const googleService = Layer.effect(GoogleAccounts, effect {
       const g = try machine.get()
       if (g.panel === "PanelClosed") {
         try send({ type: "openPanel", panel: "SettingsPanel" })
-        try timeout(Stream.runHead(Stream.filter(machine.changes, (x) => !x.readPending)), "30 seconds") catch () => undefined
+        timeout(Stream.runHead(Stream.filter(machine.changes, (x) => !x.readPending)), "30 seconds") catch () => undefined
       }
       try send({ type: "connect", capabilities: [...capabilities] })
     },

@@ -1,11 +1,11 @@
-// spec/files/proposal.md, "Story: Offer the agent only what this phone can do"; spec/files/proposal.md, "Story: Review the actual files before anything changes"; spec/files/proposal.md, "Story: Let the agent show me files without changing them"; spec/files/proposal.md, "Story: Carry out the change I approved, exactly"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"; spec/files/filter.md, "A position names a row of the results on screen, counting from one"
+// spec/files/proposal.md, "Story: Offer the agent only what this phone can do"; spec/files/proposal.md, "A move or trash changes only files still as they were reviewed"; spec/files/proposal.md, "Story: Review the actual files before anything changes"; spec/files/proposal.md, "Story: Let the agent show me files without changing them"; spec/files/proposal.md, "Story: Carry out the change I approved, exactly"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"; spec/files/filter.md, "A position names a row of the results on screen, counting from one"
 import { type AgentOp, type AgentView, type Proposal, type Target, Machine as ProposalMachine } from "../../gen/files__proposal.effect.vibe"
 import { type Criteria, type FilterKind, Machine as FilterMachine, rowAt } from "../../gen/files__filter.effect.vibe"
 import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
 import { rowDone } from "../../gen/files__mutations.effect.vibe"
-import { baseName, criteriaMatch, filterTime, kindQuery, rowKey, toRow } from "./paths.vibe"
+import { baseName, rowKey, toRow } from "./paths.vibe"
 import { FilesStorage } from "./storage.vibe"
-import { FilesBrowser, accessOf } from "./browser.vibe"
+import { FilesBrowser, accessOf, queryFilter } from "./browser.vibe"
 import { FilesPreview } from "./preview.vibe"
 import { FILES_CAPABILITY, FILES_SHOWN_TARGET_CAPABILITY, FilesOperationRefused, filesOperationAdmitted, filesShownTarget, type FilesAgentOperation, type FilesAgentRunner, type FilesPathOperation } from "@elizaos/plugin-files/contract"
 
@@ -29,6 +29,7 @@ const OPS: Readonly<Record<FilesAgentOperation["type"], AgentOp>> = {
 }
 
 const count = (n: number) => (n === 1 ? "1 item" : `${n} items`)
+const FILES_FORWARD = "3 seconds"
 
 /** A filter operation's criteria in the spec's terms. */
 export function criteriaOf(op: Extract<FilesAgentOperation, { type: "files_filter" }>): Criteria {
@@ -115,13 +116,10 @@ export const layer = Layer.effect(FilesAgent, effect {
       return { status: "failed", summary: settled?.result === "FilterAccessNeeded" ? "Nothing was changed because Files needs storage access." : "Files could not read this filter." } satisfies AgentResult
     }
     try ignore(files.dispatch({ type: "endSelecting" }))
-    const answer = storage.query({ ...(op.text ? { text: op.text } : {}), ...(op.folder ? { folder: op.folder } : {}), ...kindQuery(criteria.kind),
-      ...(op.from ? { from: filterTime(op.from) } : {}), ...(op.to ? { to: filterTime(op.to, true) } : {}) }) catch () => undefined
-    const rows = (answer?.entries ?? []).map((entry) => toRow("", entry)).filter((row) => criteriaMatch(criteria, row))
-      .sort((a, b) => b.modified - a.modified)
-    const seen = new Set<string>()
-    const unique = rows.filter((row) => !seen.has(row.key) && (seen.add(row.key), true))
-    const after = filter.send({ type: "queryReply", id, ready: answer?.status === "ready", rows: unique, complete: answer?.truncated === false }) catch () => undefined
+    if ((try view.get()).place.tag !== "Browse") try files.navigate({ tag: "Browse" })
+    if ((try preview.get()).shown) try preview.close(false)
+    const answer = try queryFilter(storage, criteria)
+    const after = filter.send({ type: "queryReply", id, ready: answer.ready, rows: answer.rows, complete: answer.complete }) catch () => undefined
     const settled = after?.ops.find((o) => o.id === id)
     if (settled?.result === "FilterShown") return { status: "succeeded", summary: `Showing ${count(settled.count)} in Files.` } satisfies AgentResult
     if (settled?.result === "FilterIncomplete") return { status: "failed", summary: `Files could not finish this search and shows ${count(settled.count)} from the scanned folders.` } satisfies AgentResult
@@ -234,11 +232,18 @@ export const layer = Layer.effect(FilesAgent, effect {
         return { status: "failed", summary: refused.sensitive || !refused.foreground ? "Files is unavailable." : !refused.granted ? "Nothing was changed because Files needs storage access." : "Nothing changed because these files changed after review." } satisfies AgentResult
       }
       if (direct && (try proposal.get()).view !== "OnFiles") {
-        if (!(try bringForward)) return { status: "failed", summary: "Files is unavailable." } satisfies AgentResult
+        const forward = try bringForward
+        const shown = forward ? (timeout(Stream.runHead(Stream.filter(filter.changes, (f) => f.active)), FILES_FORWARD) catch () => undefined) : undefined
+        if (shown === undefined || Option.isNone(shown)) {
+          try send({ type: "giveUp" })
+          try send({ type: "settle" })
+          return { status: "failed", summary: "Files is unavailable." } satisfies AgentResult
+        }
         try ignore(proposal.send({ type: "openFiles" }))
       }
       const result = op.type === "files_filter" ? try filterNow(op) : op.type === "files_open" ? try openNow(op) : try changeNow(op)
-      if (op.type === "files_filter") try ignore(proposal.send(result.status === "succeeded" ? { type: "showFilter" } : { type: "refuse" }))
+      if (op.type === "files_filter" && result.status === "succeeded") try ignore(proposal.send({ type: "showFilter" }))
+      try send({ type: "giveUp" })
       try send({ type: "settle" })
       return result
   }

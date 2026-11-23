@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button, Dialog, DialogContent, DialogTitle, Input } from "../components/ui/index.ts";
 
+/** The name being chosen for a new folder or a rename, and why the last one was refused. */
 export type NameDialogProps = {
   /** A new folder, or a rename. */
   op: "create" | "rename";

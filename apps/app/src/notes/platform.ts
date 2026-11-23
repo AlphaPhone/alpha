@@ -1,4 +1,4 @@
-// spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"
+// spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"; spec/notes/recordingOpen.md, "A read starts only while Notes can be shown and none is in flight, and opens Notes at most once per tap"
 
 /** A fresh random UUID for a draft token, a creation identity or a folder. */
 export function randomId(): string {
@@ -37,4 +37,9 @@ export async function shareText(title: string, text: string): Promise<"shared" |
 /** Whether the page is in front, as the recorder and receipts check before acting. */
 export function pageVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
+/** Whether a page is there to post window events, which it is not in a unit test's runtime. */
+export function pageAvailable(): boolean {
+  return typeof window !== "undefined";
 }

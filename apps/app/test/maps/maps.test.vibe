@@ -4,111 +4,13 @@ import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.
 import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
-import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
-import { Native } from "../../src/platform/native.vibe"
-import { Resident, ResidentUnavailable } from "../../src/platform/resident.vibe"
-import { memoryStore } from "../../src/platform/storage.vibe"
-import { AgentCalendar } from "../../src/calendar/agent.vibe"
 import { MapsContent } from "../../src/maps/content.vibe"
 import { MapsHandoff } from "../../src/maps/handoff.vibe"
-import { layer, MapsSession } from "../../src/maps/layer.vibe"
-import { Navigation } from "../../src/maps/navigation.vibe"
-import { type AccountBinding, GuidanceSpeaker, MapsAccount, MapsPreferences, MapsShell, type ShellState } from "../../src/maps/ports.vibe"
+import { MapsSession } from "../../src/maps/layer.vibe"
+import { MapsNavigation } from "../../src/maps/navigation.vibe"
 import { SavedPlacesStore } from "../../src/maps/saved.vibe"
 import { MapsScreen } from "../../src/maps/screen.vibe"
-
-const ferry = { latitude: 37.7955, longitude: -122.3937 }
-const pier = { latitude: 37.8087, longitude: -122.4098 }
-const place = (id: string, providerId: string, name: string, coordinate = pier) => ({ providerId, id, name, coordinate, attribution: "© data", fetchedAt: 1 })
-const route = (id: string, from: typeof ferry, to: typeof ferry, mode: string, providerId: string) => ({
-  providerId, id, from, to, mode, geometry: [from, to], distanceMeters: 2100, durationSeconds: 1560, attribution: "© data", fetchedAt: 1, traffic: "none",
-  steps: [{ instruction: "Head north", coordinate: from, distanceMeters: 1200, maneuver: "depart" }, { instruction: "Arrive", coordinate: to, distanceMeters: 0, maneuver: "arrive" }],
-})
-const capabilities = (providerId: string, data: string) => ({
-  available: true, providerId, connectionId: "conn_0123456789abcdef", revision: "r1", attribution: "© data", sources: { data, search: data, routing: data },
-  regions: [{ id: "sf", name: "San Francisco", bounds: [-123, 37, -122, 38] }],
-  capabilities: { map: false, search: true, placeDetails: true, modes: ["drive", "walk"], alternatives: true, traffic: "none", transit: "none" },
-})
-
-const home: ShellState = { live: true, hidden: false, suspended: false, assistantWindow: false, connectionOpen: false, home: true, secure: false, shaded: false, ringing: false, native: true, view: "maps", stack: ["calendar"] }
-
-/** The Maps layer over a fake Cloud, phone and launcher: only Cloud and the phone's plugins are faked, at their boundary. */
-effect function harness(provider: { id: string; data: string }) {
-  const cloudCalls: string[] = []
-  const nativeCalls: string[] = []
-  const spoken: string[] = []
-  const fixes = try Queue.unbounded<unknown>()
-  const stops = try Queue.unbounded<unknown>()
-  const accounts = try SubscriptionRef.make<AccountBinding | undefined>({ sessionId: "s1", credentialId: "c1" })
-  const shell = try SubscriptionRef.make(home)
-  const refuseNext = try Ref.make(0)
-  const events = try Ref.make<ReadonlyArray<{ id: string; begin: number }>>([{ id: "ev1", begin: 1000 }])
-  const cloud = Layer.succeed(Cloud, {
-    base: "https://cloud.test",
-    json: (method: string, path: string, body?: unknown) => effect {
-      cloudCalls.push(path)
-      if ((try Ref.get(refuseNext)) > 0) {
-        try Ref.update(refuseNext, (n) => n - 1)
-        throw new CloudUnavailable({ status: 429, message: "slow down" })
-      }
-      if (path.endsWith("/capabilities")) return capabilities(provider.id, provider.data)
-      if (path.endsWith("/places/search")) return { providerId: provider.id, attribution: "© data", places: [place("p1", provider.id, "Pier 39"), place("p2", provider.id, "Pier 41")] }
-      if (path.endsWith("/places/details")) return { providerId: provider.id, attribution: "© data", place: { ...place((body as { id: string }).id, provider.id, "Pier 39"), phone: "+1 415 555 0100" } }
-      if (path.endsWith("/routes")) {
-        const b = body as { from: typeof ferry; to: typeof ferry; mode: string }
-        return { providerId: provider.id, attribution: "© data", routes: [route("r1", b.from, b.to, b.mode, provider.id), route("r2", b.from, b.to, b.mode, provider.id)] }
-      }
-      return { providerId: provider.id, copyright: "© data" }
-    },
-  })
-  const native = Layer.succeed(Native, {
-    available: () => succeed(true),
-    invoke: (plugin: string, method: string, args?: unknown) => effect {
-      nativeCalls.push(`${plugin}.${method}`)
-      if (method === "checkPermissions") return { location: "granted", accuracy: "precise" }
-      if (method === "watchPosition") return { watchId: "w1" }
-      if (method === "navigationAvailability") return { background: true }
-      if (method === "updateNavigation") return { active: true }
-      if (method === "consumeNavigationOpen") return { open: true }
-      if (method === "list") return { status: "ready", events: try Ref.get(events) }
-      return {}
-    },
-    listen: (plugin: string, event: string) =>
-      plugin === "ElizaLocation" && event === "locationChange" ? Stream.fromQueue(fixes)
-        : event === "navigationStopped" ? Stream.fromQueue(stops) : Stream.never,
-  })
-  const resident = Layer.succeed(Resident, {
-    status: () => succeed("running" as const),
-    ensureRunning: () => succeed(undefined),
-    json: () => fail(new ResidentUnavailable({ state: "stopped" })),
-    stream: () => Stream.fail(new ResidentUnavailable({ state: "stopped" })),
-  })
-  const ports = Layer.mergeAll(
-    Layer.succeed(MapsAccount, { changes: SubscriptionRef.changes(accounts), residentReady: Stream.make(true) }),
-    Layer.succeed(GuidanceSpeaker, { speak: (text: string) => sync(() => { spoken.push(text) }) }),
-    Layer.succeed(MapsShell, {
-      states: SubscriptionRef.changes(shell), current: () => SubscriptionRef.get(shell),
-      open: (app: string) => SubscriptionRef.update(shell, (s) => ({ ...s, view: app })), admitOwnViewOpen: () => succeed(undefined), back: () => succeed(undefined),
-    }),
-    Layer.succeed(MapsPreferences, { locationForAlpha: Stream.make(true) }),
-    Layer.succeed(AgentCalendar, {
-      view: () => succeed({ state: { portOwner: "owner", portSession: 1 } }),
-      verifyReturn: () => succeed("ReturnFound"),
-    } as unknown as AgentCalendar.Shape),
-  )
-  return {
-    layer: Layer.provide(layer, Layer.mergeAll(cloud, native, resident, ports, memoryStore)),
-    cloudCalls, nativeCalls, spoken, fixes, stops, accounts, shell, refuseNext, events,
-  }
-}
-
-effect function until<S>(changes: Stream.Stream<S>, ok: (s: S) => boolean) {
-  const found = try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
-  if (found._tag === "None") throw new Error("never reached")
-  return found.value
-}
-
-const fixAt = (coordinate: typeof ferry, accuracy = 8) => ({ coords: { ...coordinate, accuracy, timestamp: Date.now() }, cached: false })
+import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
 
 it.live("Find a place, plan directions, choose a route and follow it (spec/maps/screen.md, \"Story: Find a place\"; spec/maps/screen.md, \"Story: Plan directions and choose a route\"; spec/maps/guidance.md, \"Story: Guide me along the route I started\")", () => effect {
   const h = try harness({ id: "alpha-osm", data: "OpenStreetMap" })
@@ -117,7 +19,7 @@ it.live("Find a place, plan directions, choose a route and follow it (spec/maps/
     const machine = try ScreenMachine
     const content = try MapsContent
     const connection = try ConnectionMachine
-    const navigation = try Navigation
+    const navigation = try MapsNavigation
     const guidance = try GuidanceMachine
     try (try MapsSession).open()
     try until(connection.changes, (s) => s.phase === "Installed")

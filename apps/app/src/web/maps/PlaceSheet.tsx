@@ -1,11 +1,13 @@
-// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"
+// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"
 import { Bookmark, BookmarkCheck, Copy, Globe, Pencil, Phone, Share2, Navigation, X } from "lucide-react";
 import { useState } from "react";
 import type { Phase } from "../../../gen/maps__screen.ts";
+import { callOffered, copyOffered } from "../../../gen/maps__screen.ts";
 import type { Shown } from "../../maps/content.vibe";
 import { coordinateLabel } from "../../maps/geometry.vibe";
 import { Button, Input, Skeleton } from "../components/ui/index.ts";
 
+/** The shown place, its details' phase, what Google's terms and the build allow, and the place actions. */
 export type PlaceSheetProps = {
   shown: Shown;
   /** The provider details' phase; details are shown only once they belong to this place. */
@@ -16,7 +18,7 @@ export type PlaceSheetProps = {
   saved: boolean;
   /** Directions are offered: verified details and a provider mode. */
   canDirections: boolean;
-  /** Phone exists on this build, so Call is offered. */
+  /** Phone exists on this build (the AOSP image), so Call is offered for a dialable number. */
   canCall: boolean;
   onDirections: () => void;
   onToggleSaved: (label: string) => void;
@@ -60,8 +62,8 @@ export function PlaceSheet(p: PlaceSheetProps) {
       {place?.phone && (
         <div className="flex items-center gap-2">
           <span className="tabular-nums">{place.phone}</span>
-          {p.canCall && dialable && <Button variant="ghost" size="icon" aria-label="Call" onClick={() => p.onCall(dialable)}><Phone aria-hidden /></Button>}
-          {!p.restricted && <Button variant="ghost" size="icon" aria-label="Copy number" onClick={() => p.onCopy(place.phone!)}><Copy aria-hidden /></Button>}
+          {callOffered(dialable !== undefined, p.canCall) && dialable && <Button variant="ghost" size="icon" aria-label="Call" onClick={() => p.onCall(dialable)}><Phone aria-hidden /></Button>}
+          {copyOffered(true, p.shown.kind) && !p.restricted && <Button variant="ghost" size="icon" aria-label="Copy number" onClick={() => p.onCopy(place.phone!)}><Copy aria-hidden /></Button>}
         </div>
       )}
       <div className="flex flex-wrap gap-2">

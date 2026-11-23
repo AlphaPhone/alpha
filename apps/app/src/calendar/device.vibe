@@ -1,6 +1,6 @@
 // spec/calendar/device.md, "Story: Create an event on my phone without making it twice"; spec/calendar/device.md, "Story: Edit or delete exactly the event I reviewed"; spec/calendar/device.md, "Story: Read my device calendars over a range that makes sense"; spec/calendar/selection.md, "Story: Let the assistant act only on the event I have open"
 import { type DeviceWrites, type Event as DeviceEvent, type InspectReply, type EditReply, type DeleteReply, Machine as DeviceMachine, readLimited } from "../../gen/calendar__device.effect.vibe"
-import { type CalendarSelection, type Event as SelectionEvent, Machine as SelectionMachine } from "../../gen/calendar__selection.effect.vibe"
+import { type CalendarSelection, type Event as SelectionEvent, Machine as SelectionMachine, exposed } from "../../gen/calendar__selection.effect.vibe"
 import { readClearsHold, deleteScope } from "@elizaos/plugin-calendar/series"
 import { readRange } from "@elizaos/os/bridges/calendar"
 import { Native } from "../platform/native.vibe"
@@ -49,6 +49,11 @@ export interface DeviceForm {
 export type DeviceOutcome = "saved" | "checking" | "duplicate" | "changed" | "read-only" | "unconfirmed" | "no-access" | "deleted" | "queued"
   | "external" | "unavailable" | "cancelled" | "held" | "busy" | "found" | "cant-check" | "opened" | "no-calendar-app"
 
+/** What the assistant may act on now: the open event as the phone inspected it, or the phone's calendar a new form targets. */
+export type SelectedObject =
+  | { readonly kind: "calendar-event"; readonly id: string; readonly revision: string; readonly accountId: string; readonly sourceRevision: string }
+  | { readonly kind: "calendar-source"; readonly id: string; readonly revision: string; readonly accountId: string; readonly sourceRevision: string }
+
 /** The phone's own calendars: reads, guarded writes, inspected deletions and the assistant's selection. */
 export service DeviceCalendar {
   readonly reads: Stream.Stream<DeviceRead>
@@ -72,6 +77,8 @@ export service DeviceCalendar {
   /** Open an event in Android Calendar's editor. */
   openExternal(id: string, begin: number, end: number): DeviceOutcome!!
   remount(): void!!
+  /** The selection the assistant may act on now, only while its detail or form still shows it. */
+  selected(): SelectedObject | undefined!!
 }
 
 effect function call(native: Native.Shape, method: string, args?: unknown) {
@@ -87,6 +94,8 @@ export const deviceLayer = Layer.effect(DeviceCalendar, effect {
   const generation = try Ref.make(0)
   const openRow = try Ref.make<{ id: string; calendarId: string; expected: DeviceForm["expected"] } | undefined>(undefined)
   const heldBegin = try Ref.make(0)
+  const inspectedEvent = try Ref.make<{ open: string; revision: string; eventId: string; sourceId: string; sourceRevision: string } | undefined>(undefined)
+  const preparedSource = try Ref.make<{ sourceId: string; sourceRevision: string } | undefined>(undefined)
 
   effect function sendWrite(event: DeviceEvent) { return writes.send(event) catch () => undefined }
   effect function sendSelection(event: SelectionEvent) { return selection.send(event) catch () => undefined }
@@ -142,6 +151,7 @@ export const deviceLayer = Layer.effect(DeviceCalendar, effect {
     const ready = effect {
       if (!(try access())) return false
       const reply = try decodeSource(try call(native, "prepareAgentSource"))
+      try Ref.set(preparedSource, reply.status === "ready" ? { sourceId: reply.sourceId, sourceRevision: reply.sourceRevision } : undefined)
       return reply.status === "ready"
     } catch () => false
     try sendSelection({ type: "sourcePrepared", ready })
@@ -263,6 +273,8 @@ export const deviceLayer = Layer.effect(DeviceCalendar, effect {
       const rendered = try sendSelection({ type: "renderDetail" })
       if (rendered === undefined) return
       const reply = try inspected(id, calendarId, expected)
+      try Ref.set(inspectedEvent, reply?.status === "ready"
+        ? { open: id, revision: reply.revision, eventId: reply.eventId, sourceId: reply.sourceId ?? calendarId, sourceRevision: reply.sourceRevision } : undefined)
       try sendSelection({ type: "inspected", ready: reply?.status === "ready", revision: reply?.status === "ready" ? reply.revision : "" })
     },
     effect close() {
@@ -300,5 +312,19 @@ export const deviceLayer = Layer.effect(DeviceCalendar, effect {
       return (reply?.status === "opened" ? "opened" : "no-calendar-app") as DeviceOutcome
     },
     effect remount() { try sendWrite({ type: "remount" }) },
+    effect selected() {
+      const shown = exposed(try selection.get())
+      if (shown.kind === "EventSelected") {
+        const event = try Ref.get(inspectedEvent)
+        if (event === undefined || event.open !== shown.open || event.revision !== shown.revision) return undefined
+        return { kind: "calendar-event", id: event.eventId, revision: event.revision, accountId: event.sourceId, sourceRevision: event.sourceRevision } as SelectedObject
+      }
+      if (shown.kind === "SourceSelected") {
+        const source = try Ref.get(preparedSource)
+        if (source === undefined) return undefined
+        return { kind: "calendar-source", id: source.sourceId, revision: source.sourceRevision, accountId: source.sourceId, sourceRevision: source.sourceRevision } as SelectedObject
+      }
+      return undefined
+    },
   }
 })

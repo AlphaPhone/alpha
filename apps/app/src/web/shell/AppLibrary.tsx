@@ -2,9 +2,10 @@
 import { Info, Phone, Plus, Search, X } from "lucide-react";
 import { Button, EmptyState, Input, Spinner } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
-import type { TileFace } from "./AppTile.tsx";
+import { launcherFocusRing, type TileFace } from "./AppTile.tsx";
 import { TileGrid, type GestureControls } from "./TileGrid.tsx";
 
+/** The library over Home: its entries, search, entry menu, inventory status and App info notice. */
 export interface AppLibraryProps {
   /** The installed apps the search shows, in their shown order. */
   entries: readonly TileFace[];
@@ -74,7 +75,7 @@ export function AppLibrary({
         {dial && query === "" && (
           <div className="px-3 pb-2">
             <button type="button" onClick={onDial} aria-busy={launching === "dial" || undefined}
-              className={cn(focusRing, "flex min-h-24 w-24 flex-col items-center gap-2 rounded-lg p-2 text-sm")}>
+              className={cn(launcherFocusRing, "flex min-h-24 w-24 flex-col items-center gap-2 rounded-lg p-2 text-sm")}>
               <span className="flex size-14 items-center justify-center rounded-xl bg-secondary"><Phone aria-hidden className="size-7" /></span>
               {dial}
             </button>

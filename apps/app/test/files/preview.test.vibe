@@ -1,0 +1,118 @@
+// spec/files/preview.md, "Story: Open the file I tapped, and only in the visit I tapped it"; spec/files/preview.md, "Story: Do something with the file I am looking at"; spec/files/pdf.md, "Story: Read a PDF page by page on the phone"; spec/files/pdf.md, "Story: Keep the renderer's output to itself"
+import { assert, it } from "@effect/vitest"
+import { Machine as PdfMachine } from "../../gen/files__pdf.effect.vibe"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesPreview, previewActions } from "../../src/files/preview.vibe"
+import { rowKey, toRow } from "../../src/files/paths.vibe"
+import { type Call, device, files, granted, noNative, until } from "./harness.vibe"
+
+const lease = toRow("", { path: "Download/lease.pdf", name: "lease.pdf", directory: false, mimeType: "application/pdf", size: 182_044, modified: 2 })
+const photo = toRow("", { path: "DCIM/Camera/IMG_0001.jpg", name: "IMG_0001.jpg", directory: false, mimeType: "image/jpeg", size: 900_000, modified: 3 })
+
+/** A phone whose storage selects every file as `s1` and renders PDF pages from `image`. */
+function phone(image: (page: number) => string, calls: Call[]) {
+  return device((plugin, method, args) =>
+    plugin === "AlphaFiles" ? (method === "storageState" ? granted
+      : method === "storageSelect" ? { status: "selected", action: "files", selectionId: "s1", name: String(args.path).split("/").pop(), mimeType: String(args.path).endsWith(".pdf") ? "application/pdf" : "image/jpeg", canRename: true, size: 900_000 }
+      : method === "storageCategory" ? { status: "ready", count: 0 }
+      : method === "storageTrashList" ? { status: "ready", items: [] }
+      : { status: "ready", entries: [], truncated: false })
+    : plugin === "DailyApps" ? (method === "pdfSelected" ? { status: "rendered", page: args.page, pageCount: 3, imageUri: image(args.page) }
+      : method === "describeSelected" ? { status: "selected", selectionId: "s1", uri: "content://media/1" }
+      : method === "forgetSelected" ? {}
+      : { status: "unavailable" })
+    : undefined, calls)
+}
+
+it.live("a tap opens the file only in the visit it was made in, and leaving closes it once (spec/files/preview.md, \"Story: Open the file I tapped, and only in the visit I tapped it\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const beforeVisit = try preview.openRow(toRow("", { path: "Download/notes.txt", name: "notes.txt", directory: false, mimeType: "text/plain", size: 40, modified: 1 }))
+      try preview.enter()
+      const opened = try preview.openRow(toRow("", { path: "Download/notes.txt", name: "notes.txt", directory: false, mimeType: "text/plain", size: 40, modified: 1 }))
+      const shown = try preview.get()
+      try preview.leave()
+      const left = try preview.get()
+      // spec/files/preview.md, "One open is asked for at a time, and its selection is shown only in the visit that asked"
+      const missing = try preview.openRow(toRow("", { path: "Download/gone.txt", name: "gone.txt", directory: false, mimeType: "text/plain", size: 1, modified: 1 }))
+      try Effect.try(() => assert.deepStrictEqual(
+        { beforeVisit: beforeVisit.kind, opened: opened.kind, shown: [shown.shown, shown.content, shown.doc.path], left: [left.shown, left.opened, left.closes], missing: missing.kind },
+        { beforeVisit: "refused", opened: "shown", shown: [true, "ContentText", "Download/notes.txt"], left: [false, 1, 1], missing: "refused" },
+      ))
+    })
+  }
+})
+
+it.live("the file's menu offers Email for a document, Messages only for a small picture on the AOSP image, and Move only for a browsed file (spec/files/preview.md, \"Story: Do something with the file I am looking at\")", () => effect {
+  const calls: Call[] = []
+  provide files(phone(() => "file:///p.png", calls), false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try preview.enter()
+      try preview.openRow(photo)
+      const picture = try preview.get()
+      const targets = { messages: true, ask: true }
+      try Effect.try(() => assert.deepStrictEqual(
+        { content: picture.content, launcher: previewActions(picture, false, targets), aosp: previewActions(picture, true, targets).message,
+          large: previewActions({ ...picture, doc: { ...picture.doc, size: 2_000_000 } }, true, targets).message,
+          picked: previewActions({ ...picture, doc: { ...picture.doc, source: "Picked", path: "" } }, true, targets) },
+        { content: "ContentMedia",
+          launcher: { share: true, email: true, message: false, ask: true, move: true, rename: true, trash: true, elsewhere: true, reselect: false },
+          aosp: true, large: false,
+          picked: { share: true, email: true, message: true, ask: true, move: false, rename: true, trash: false, elsewhere: true, reselect: false } },
+      ))
+    })
+  }
+})
+
+it.live("a PDF opens at its first page, moves to the next one, and a page outside the document is never asked for (spec/files/pdf.md, \"Story: Read a PDF page by page on the phone\")", () => effect {
+  const calls: Call[] = []
+  provide files(phone((page) => `file:///page-${page}.png`, calls), false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      const pdf = try PdfMachine
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try preview.enter()
+      try preview.openRow(lease)
+      const first = try pdf.get()
+      try preview.page(1)
+      const second = try pdf.get()
+      try preview.page(3)
+      const outside = try pdf.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { content: (try preview.get()).content, first: [first.page, first.count, first.image], second: [second.page, second.image], outside: outside.page,
+          asked: calls.filter((c) => c.method === "pdfSelected").map((c) => (c.args as { page: number }).page) },
+        { content: "ContentPdf", first: [0, 3, "file:///page-0.png"], second: [1, "file:///page-1.png"], outside: 1, asked: [0, 1] },
+      ))
+    })
+  }
+})
+
+it.live("a rendered page handed back at an address the worker does not own is never shown (spec/files/pdf.md, \"Story: Keep the renderer's output to itself\")", () => effect {
+  const calls: Call[] = []
+  provide files(phone(() => "https://example.invalid/page.png", calls), false) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      const pdf = try PdfMachine
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try preview.enter()
+      try preview.openRow({ ...lease, key: rowKey("", lease.path) })
+      const pages = try pdf.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { content: (try preview.get()).content, shown: pages.shown, image: pages.image, outcome: pages.outcome },
+        { content: "ContentUnavailable", shown: false, image: "", outcome: "PageMalformed" },
+      ))
+    })
+  }
+})

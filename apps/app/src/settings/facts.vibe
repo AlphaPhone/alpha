@@ -1,19 +1,22 @@
-// spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"
+// spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/vocabulary.md, "A browser's permission answer is allowed, asks or denied, and no answer is unread"
 import { parseRoleStatuses, parseSystemFacts } from "@elizaos/os/bridges/system"
-import { type DeviceRead, type SettingsPage, type ShadeAnswer, Machine, unread } from "../../gen/settings__facts.effect.vibe"
-import { type Access, type RoleHold, accessOf, dndOf, roleOf, switchOf, wifiOf } from "../../gen/settings__vocabulary.effect.vibe"
+import { type DeviceRead, type SettingsPage, type ShadeAnswer, Machine, pickedOnly, unread } from "../../gen/settings__facts.effect.vibe"
+import { type Access, type BrowserAnswer, type RoleHold, accessOf, accessOfBrowser, dndOf, roleOf, switchOf, wifiOf } from "../../gen/settings__vocabulary.effect.vibe"
+import { StorageUsage } from "../files/usage.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { attempt, call } from "./call.vibe"
-import { DeviceSnapshot, NotificationGrant, PageOpened, PhotoAccess, ShadeReply, StorageAccess, SystemBuild, TextScale } from "./native.schema.vibe"
+import { browserGrants } from "./files.ts"
+import { BrowserGrants, DeviceSnapshot, NotificationGrant, PageOpened, PhotoAccess, RoleReply, ShadeReply, StorageAccess, SystemBuild, TextScale } from "./native.schema.vibe"
 
 export const APP_ID = "ai.alphacompute.alphaphone"
 
-const PAGE_NAMES: Record<SettingsPage, string> = {
+const PAGE_NAMES: Partial<Record<SettingsPage, string>> = {
   PageWifi: "wifi", PageBluetooth: "bluetooth", PageMobile: "mobile", PageAirplane: "airplane", PageLocation: "location",
   PageDisplay: "display", PageSound: "sound", PageBattery: "battery", PageAbout: "about", PageDeveloper: "developer",
-  PageNotifications: "notifications", PagePrivacy: "privacy", PageDefaultApps: "default-apps", PageDnd: "dnd", PageHome: "home",
+  PageNotifications: "notifications", PagePrivacy: "privacy", PageDefaultApps: "default-apps", PageDnd: "dnd",
 }
+const REREAD: ReadonlyArray<SettingsPage> = ["PageFilesAccess", "PagePhotoAccess"]
 
 const SHADE: Record<string, ShadeAnswer> = {
   opened: "ShadeOpened", standalone: "ShadeStandalone", "permission-missing": "ShadePermissionMissing",
@@ -32,12 +35,10 @@ export service DeviceFacts {
   requestScale(percent: number): void!!
   /** Ask Android to make Alpha the Home app, then read the role back. */
   askHome(): void!!
-  /** Open Android's page for `page`; the answer says whether the specific page opened. */
+  /** Open Android's page for `page`, Alpha's App info, or an access dialog; the answer says whether the specific page opened. */
   openPage(page: SettingsPage): void!!
   /** Open Android's notification shade, answering why it did not where it did not. */
   openShade(): ShadeAnswer!!
-  /** Android's App info page for Alpha. */
-  openAppInfo(): boolean!!
 }
 
 function grant(permissions: Record<string, boolean> | undefined, name: string): Access {
@@ -54,6 +55,10 @@ function role(rows: ReturnType<typeof parseRoleStatuses> | undefined, name: stri
   return roleOf(rows !== undefined, row?.available === true, row?.held === true, (row?.holders ?? []).some((h) => h !== "android" && h !== APP_ID))
 }
 
+function answer(value: string | undefined): BrowserAnswer {
+  return value === "granted" ? "Granted" : value === "prompt" ? "Prompt" : value === "denied" ? "Refused" : "NoAnswer"
+}
+
 function whole(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isSafeInteger(value) ? value : fallback
 }
@@ -61,6 +66,10 @@ function whole(value: number | undefined, fallback: number): number {
 /** Every fact Android answered now, each unknown where it did not answer. */
 export effect function readDevice() {
   const native = try Native
+  const browser = (try Build).info.variant === "browser"
+  const usage = try (try StorageUsage).usage()
+  const asked = browser ? try attempt(tryPromise(() => browserGrants())) : undefined
+  const grants = asked === undefined ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(BrowserGrants)(asked))
   const [snapshot, facts, status, build, notices, photo, storage] = try.all [
     attempt(call("AlphaDevice", "snapshot", DeviceSnapshot)),
     attempt(native.invoke("ElizaSystem", "getSystemFacts")),
@@ -81,13 +90,14 @@ export effect function readDevice() {
     location: switchOf(typeof f?.locationEnabled === "boolean", f?.locationEnabled === true),
     dnd: dndOf(filter === "all" ? "InterruptAll" : filter === "priority" ? "InterruptPriority" : filter === "alarms" ? "InterruptAlarms" : filter === "none" ? "InterruptNone" : "InterruptUnread"),
     brightnessAuto: switchOf(typeof f?.adaptiveBrightness === "boolean", f?.adaptiveBrightness === true),
-    camera: grant(snapshot?.permissions, "Camera"),
-    microphone: grant(snapshot?.permissions, "Microphone"),
-    locationAccess: grant(snapshot?.permissions, "Location"),
+    camera: browser ? accessOfBrowser(answer(grants?.camera)) : grant(snapshot?.permissions, "Camera"),
+    microphone: browser ? accessOfBrowser(answer(grants?.microphone)) : grant(snapshot?.permissions, "Microphone"),
+    locationAccess: browser ? accessOfBrowser(answer(grants?.geolocation)) : grant(snapshot?.permissions, "Location"),
     calendar: grant(snapshot?.permissions, "Calendar"),
-    photos: photos(photo?.scope),
-    files: storage?.access === "granted" ? "Allowed" : storage?.access === "denied" ? "Denied" : "Unread",
-    notifications: accessOf(typeof notices?.appEnabled === "boolean", notices?.appEnabled === true && notices.permissionGranted === true),
+    photos: pickedOnly(browser, photos(photo?.scope)),
+    files: pickedOnly(browser, storage?.access === "granted" ? "Allowed" : storage?.access === "denied" ? "Denied" : "Unread"),
+    notifications: browser ? accessOfBrowser(answer(grants?.notifications))
+      : accessOf(typeof notices?.appEnabled === "boolean", notices?.appEnabled === true && notices.permissionGranted === true),
     home: role(rows, "home"),
     assistant: role(rows, "assistant"),
     launcher: build?.launcher === true,
@@ -96,8 +106,8 @@ export effect function readDevice() {
     installedAt: Math.max(0, whole(snapshot?.appUpdatedAt, 0)),
     android: snapshot?.androidRelease ?? "",
     textScale: [75, 100, 115, 130, 150].includes(whole(snapshot?.textScalePercent, 100)) ? whole(snapshot?.textScalePercent, 100) : 100,
-    storageUsed: whole(snapshot?.storageUsedBytes, -1),
-    storageTotal: whole(snapshot?.storageTotalBytes, -1),
+    storageUsed: usage.kind === "volume" ? Math.max(0, usage.total - usage.free) : whole(snapshot?.storageUsedBytes, -1),
+    storageTotal: usage.kind === "volume" ? usage.total : whole(snapshot?.storageTotalBytes, -1),
   }
   return read
 }
@@ -107,7 +117,8 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
   const facts = try Machine
   const native = try Native
   const build = try Build
-  const within = <A, E>(program: A!E!(Native | Build)) => Effect.provideService(Effect.provideService(program, Native, native), Build, build)
+  const storage = try StorageUsage
+  const within = <A, E>(program: A!E!(Native | Build | StorageUsage)) => Effect.provideService(Effect.provideService(Effect.provideService(program, Native, native), Build, build), StorageUsage, storage)
 
   effect function refresh() {
     const begun = try facts.send({ type: "beginRead" })
@@ -141,32 +152,39 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
       const token = issued.scaleIssued
       const answer = try attempt(call("AlphaDevice", "setTextScale", TextScale, { percent }))
       if (answer === undefined) {
-        try (facts.send({ type: "scaleFailedNewest" }) catch () => undefined)
+        const failed = try (facts.send({ type: "scaleFailedNewest" }) catch () => undefined)
+        if (failed !== undefined) try refresh()
         return
       }
       try (facts.send({ type: "scaleApplied", token, percent: answer.textScalePercent }) catch () => undefined)
     }),
     askHome: () => within(effect {
-      try (facts.send({ type: "askHome" }) catch () => undefined)
-      try attempt(native.invoke("ElizaSystem", "requestRole", { role: "home" }))
-      const answered = try (facts.send({ type: "homeAnswered" }) catch () => undefined)
+      const asked = try (facts.send({ type: "askHome" }) catch () => undefined)
+      if (asked === undefined) return
+      const reply = try attempt(call("ElizaSystem", "requestRole", RoleReply, { role: "home" }))
+      const answered = try (facts.send({ type: "homeAnswered", refused: reply === undefined }) catch () => undefined)
       if (answered === undefined) return
       const read = try readDevice()
       try (facts.send({ type: "settleRead", token: answered.generation, read }) catch () => undefined)
     }),
     openPage: (page: SettingsPage) => within(effect {
-      const begun = try (facts.send({ type: "beginHandoff" }) catch () => undefined)
+      const begun = try (facts.send({ type: "beginHandoff", page }) catch () => undefined)
       if (begun === undefined) return
-      const opened = try attempt(call("ElizaSystem", "openSettingsPage", PageOpened, { page: PAGE_NAMES[page] }))
+      const opened = try (effect {
+        if (page === "PageHome") return try attempt(call("AlphaDevice", "openSettings", PageOpened, { page: "system" }))
+        if (page === "PageAppInfo") return (try attempt(native.invoke("ElizaSystem", "openAppInfo", { packageName: APP_ID }))) === undefined ? undefined : { specific: true }
+        if (page === "PageFilesAccess") return (try attempt(native.invoke("AlphaFiles", "storageRequestAccess", { settings: true }))) === undefined ? undefined : { specific: true }
+        if (page === "PagePhotoAccess") return (try attempt(call("AlphaPhotoLibrary", "requestAccess", PhotoAccess))) === undefined ? undefined : { specific: true }
+        return try attempt(call("ElizaSystem", "openSettingsPage", PageOpened, { page: PAGE_NAMES[page] ?? "system" }))
+      })
       try (facts.send({ type: "handoffAnswered", opened: opened !== undefined, specific: opened?.specific !== false }) catch () => undefined)
+      if (opened !== undefined && REREAD.includes(page)) try refresh()
     }),
     openShade: () => within(effect {
       const reply = try attempt(call("ElizaSystem", "openNotificationShade", ShadeReply))
-      return reply === undefined ? "ShadeUnsupported" : SHADE[reply.status]
-    }),
-    openAppInfo: () => within(effect {
-      const opened = try attempt(native.invoke("ElizaSystem", "openAppInfo", { packageName: APP_ID }))
-      return opened !== undefined
+      const answer: ShadeAnswer = reply === undefined ? "ShadeUnsupported" : SHADE[reply.status]
+      try (facts.send({ type: "shadeAnswered", answer }) catch () => undefined)
+      return answer
     }),
   }
 })

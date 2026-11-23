@@ -154,6 +154,7 @@ export const READING_NOTICES: Readonly<Record<ReadingProblem, string>> = {
   SensitivePage: SENSITIVE_READING,
   ReadingFailed: "Reading stopped, or the page is no longer available.",
   ReadingStopped: "The page changed. Ask again.",
+  SpeechFailed: "Alpha couldn’t read this page aloud. Try again.",
 };
 
 /** What a refused agent request tells the owner, in words they can act on. */

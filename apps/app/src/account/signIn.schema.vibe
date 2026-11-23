@@ -1,4 +1,4 @@
-// spec/account/signIn.md, "Email works while readiness is unknown; Google and text messages need their own readiness"; spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"; spec/account/signIn.md, "Terms are the service's published plain text, or nothing"
+// spec/account/signIn.md, "Email works while readiness is unknown; Google and text messages need their own readiness"; spec/account/signIn.md, "A second verification the host kept after its wait ended is offered once the host resumes it"; spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"; spec/account/signIn.md, "Terms are the service's published plain text, or nothing"
 
 /** The host's `status()` answer: which methods are ready, and whether a saved key awaits Cloud's confirmation. */
 export schema HostStatus {
@@ -24,8 +24,38 @@ export schema SignInAnswer {
   attemptId?: string
   credentialId?: string
   method?: "totp" | "sms" | "passkey"
-  accountCreated?: boolean
+  accountCreated?: unknown
   previousSignIn?: "revoked" | "unconfirmed"
+}
+
+/** The retained `signInCompleted` event: what the host said of a sign-in that finished while no call waited. */
+export schema Completed {
+  accountCreated?: unknown
+  previousSignIn?: "revoked" | "unconfirmed"
+}
+
+/** The retained `signInMfaRequired` event: a Google attempt that asked for a second verification after its wait ended. */
+export schema MfaRequired {
+  status: "mfa"
+  method: "totp" | "sms" | "passkey"
+  attemptId: string
+  expiresAt: number
+}
+
+/** `resumeMfa`: whether the retained attempt is still live in the host. */
+export schema MfaResumed {
+  active: boolean
+}
+
+/** The `signInReadinessChanged` event: the host's readiness after it changed, for one environment, every method an explicit boolean. */
+export schema ReadinessChanged {
+  environment: string
+  methodsKnown: boolean
+  inApp: boolean
+  email: boolean
+  phone: boolean
+  google: boolean
+  activationPending?: boolean
 }
 
 /** The installed key's local generation and expiry; never the key. */
@@ -55,12 +85,6 @@ export schema Incomplete {
   code: "app-link-unverified" | "storage" | "activation-expired"
 }
 
-/** The host's answer to sign-out: whether Cloud confirmed the revocation. */
-export schema SignedOutAnswer {
-  status: "signed-out"
-  revocation?: "revoked" | "unconfirmed"
-}
-
 /** The account Cloud names for the presented key (`GET /api/v1/user`). */
 export schema UserRow {
   id: string
@@ -72,11 +96,6 @@ export schema UserRow {
 export schema UserAnswer {
   success: boolean
   data: UserRow
-}
-
-/** A native rejection's code (`PluginCall.reject(message, code)`). */
-export schema NativeRejection {
-  code: string
 }
 
 /** Android's own network facts (`ElizaSystem.getNetworkStatus`). */

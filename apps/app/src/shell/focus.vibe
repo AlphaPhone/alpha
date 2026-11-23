@@ -1,8 +1,8 @@
-// spec/shell/focus.md, "Story: Keep my place when the screen changes under me"
+// spec/shell/focus.md, "Story: Keep my place when the screen changes under me"; spec/shell/focus.md, "Launcher controls show a focus ring only while the owner moves by keyboard"
 import { Machine as FocusMachine, type Event as FocusEvent, type Target } from "../../gen/shell__focus.effect.vibe"
 import type { Nav } from "../../gen/shell__navigation.effect.vibe"
 import { Navigation } from "./navigation.vibe"
-import { activeShown, focusKey, focusTarget, focusable, focusedKey, layoutChanges, nextFrame, pageEvents, resizes } from "./page.ts"
+import { activeShown, focusKey, focusTarget, focusable, focusedKey, layoutChanges, navigationKey, nextFrame, pageEvents, resizes, setRootData } from "./page.ts"
 
 /** Focus custody for lists that render their rows again. */
 export service Focus {
@@ -70,6 +70,20 @@ export const focusLive = Layer.effect(Focus, effect {
         try restoreIfMoved(machine, before)
       }
       layers = ids
+    }
+  })
+  fork.scoped (effect {
+    for try (const event of pageEvents("keydown", "document", true)) {
+      if (!navigationKey(event) || (try machine.get()).keyboard) continue
+      try sendTo(machine, { type: "keyed" })
+      try sync(() => setRootData("alphaKeyboardNavigation", "true"))
+    }
+  })
+  fork.scoped (effect {
+    for try (const _ of pageEvents("pointerdown", "document", true)) {
+      if (!(try machine.get()).keyboard) continue
+      try sendTo(machine, { type: "pointed" })
+      try sync(() => setRootData("alphaKeyboardNavigation", undefined))
     }
   })
   fork.scoped (effect { for try (const _ of pageEvents("focusin", "document")) { const key = focusedKey(); if (key !== "") try sendTo(machine, { type: "focused", key }) } })

@@ -4,6 +4,7 @@ import { appInert, placeOf } from "../../../gen/shell__navigation.ts";
 import type { AppScreen } from "../app-screen.ts";
 import { ViewBoundary } from "./ErrorBoundary.tsx";
 
+/** The open app and every kept app, each mounted once and hidden unless in front. */
 export interface AppFrameProps {
   nav: Nav;
   /** The screens this build offers. */

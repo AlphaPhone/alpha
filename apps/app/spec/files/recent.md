@@ -1,7 +1,9 @@
 # Recent files
 
-Recent lists the documents the owner opened, newest first, at most 24, on this phone only. A row holds
-names, types, times and an opaque selection; it never grants access itself. The device keeps the grant
+Recent is the index of the documents the owner opened, newest first, at most 24, on this phone only.
+Browse lists no Recents (owner decision F2): the index decides which grants the device keeps, which
+picked document Files reopens, and which row asks to be chosen again. A row holds names, types, times
+and an opaque selection; it never grants access itself. The device keeps the grant
 of each picked document while a row names it or it is open, and the shell gives back every grant the
 index stops naming. A folder file's access lasts one Android session: its row then asks to be chosen
 again and is never reopened silently. Only a picked document that Recent still remembers is reopened
@@ -54,8 +56,9 @@ pure val atValues = Set(1, 2)
 
 ## Story: Reopen what I opened recently
 
-> As the owner, I want the documents I opened to be listed newest first, two picked files of the same
-> name to stay two rows, and a folder file opened again to stay one row.
+> As the owner, I want Files to remember the documents I opened, newest first, with two picked files of
+> the same name kept apart and a folder file opened again kept once, and to give back each grant it no
+> longer needs.
 
 ### Recording a row puts it first, replaces only its own row, and keeps at most the limit
 
@@ -104,6 +107,22 @@ pure def closeDocument(s: Recent, forget: bool): Recent = {
 }
 pure def sometimesTwoPickedRowsShareAName(s: Recent): bool =
   s.rows.length() == 2 and s.rows.every(r => r.kind == PickedDoc) and s.rows.nthOr(0, pickedRow).name == s.rows.nthOr(1, pickedRow).name
+```
+
+### Reopening a row shows its own grant, and the document open before it is closed first
+
+```quint
+pure def selectionOf(rows: List[RecentRow], key: str): str = rows.foldl("", (found, r) => if (r.key == key) r.selection else found)
+pure def canReopenRow(s: Recent, key: str): bool =
+  s.rows.some(r => r.key == key and r.status == Ready and r.selection != "" and r.selection != s.opened)
+pure def reopenRow(s: Recent, key: str): Recent = {
+  val closing = if (s.opened != "" and not(names(s.rows, s.opened))) List(s.opened) else List()
+  { ...s, opened: selectionOf(s.rows, key), grants: without(s.grants, closing), toRelease: s.toRelease.concat(closing),
+    restoreOpen: if (remembered(s.rows, s.restoreOpen)) s.restoreOpen else "" }
+}
+pure def stepReopeningOpensTheRowsGrant(before: Recent, via: str, after: Recent): bool =
+  via == "reopenRow" implies (after.opened != "" and names(before.rows, after.opened))
+pure def sometimesReopened(s: Recent): bool = s.opened != "" and s.rows.length() == 2 and s.toRelease.length() == 0
 ```
 
 ### An exported scan is listed by name and holds no grant

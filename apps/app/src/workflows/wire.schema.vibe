@@ -1,4 +1,4 @@
-// spec/workflows/automations.md, "Each source is read on its own, and its failure is a note beside the other sources' rows"; spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/hostedResults.md, "Story: Be told when my digest is ready, and open exactly that result"
+// spec/workflows/automations.md, "Each source is read on its own, and its failure is a note beside the other sources' rows"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/hostedResults.md, "Story: Be told when my digest is ready, and open exactly that result"
 
 /** `GET /api/auth/me`: the resident's local owner. */
 export schema AuthMe { identity: { kind: string; id: string } }
@@ -101,26 +101,6 @@ export schema ExecuteReply { ok: boolean; result: { status: string; error?: stri
 /** `DELETE`: `{ ok: true }` or `{ deleted: true }`. */
 export schema Deleted { ok?: boolean; deleted?: boolean }
 
-/** A run, as `/api/workflow/executions…` answers it. */
-export schema RunRecord {
-  id: string
-  workflowId: string
-  status: string
-  startedAt: string
-  finished: boolean
-  versionId: string
-  stoppedAt?: string
-  error?: string
-  output?: unknown
-  missedOccurrenceAt?: string
-  reconciliation?: { state: "worker-running" | "outcome-unknown"; message?: string }
-  occurrence?: { scheduledAt: string; status: "ready" | "missed" | "overlap" | "unavailable" }
-  events?: ReadonlyArray<{ type: string; at: string; node?: string }>
-}
-
-/** `GET /api/workflow/executions/:id`, `POST …/cancel` and `POST …/run`. */
-export schema RunReply { execution: RunRecord; submissionId?: string }
-
 /** `AlphaHostedResults.publishResult`. */
 export schema PublishedPhase { phase: string }
 
@@ -147,8 +127,41 @@ export schema NoticePosted { status: string }
 /** `AlphaHostedResults.nativeSourceIdentity`. */
 export schema SourceIdentity { ownerId: string; agentId: string; installationId: string; enrollmentId: string }
 
-/** `AlphaHostedResults.nativeSourceConsent`. */
-export schema ConsentReply { revoked?: boolean; expiresAt?: string; sourceId?: string }
+/** `AlphaHostedResults.nativeSourceConsent`: the binding the phone granted, or a revocation. */
+export schema ConsentReply {
+  revoked?: boolean
+  expiresAt?: string
+  provider?: "native"
+  ownerId?: string
+  agentId?: string
+  installationId?: string
+  enrollmentId?: string
+  sourceId?: string
+  revision?: string
+}
+
+/** `AlphaCalendar.requestWorkflowReadAccess`. */
+export schema ReadAccess { status: string }
+
+/** `AlphaCalendar.availabilitySources`: the phone's calendars with their source revisions. */
+export schema PhoneCalendarList {
+  status: string
+  calendars?: ReadonlyArray<{ id: string; name: string; account: string; sourceRevision: string }>
+}
+
+/** `AlphaHostedResults.pendingSourceRenewal`: empty, or the renewal reminder the owner tapped. */
+export schema RenewalTapRecord {
+  token?: string
+  question?: boolean
+  expiresAt?: number
+  selection?: { provider: string; ownerId: string; agentId: string; installationId: string; enrollmentId: string; sourceId: string; revision: string }
+}
+
+/** A `POST /api/workflow/hosted/sources` receipt: the saved source and its revision. */
+export schema SourceSaved { source: { id: string; revision: string } }
 
 /** `POST /api/workflow/hosted/cloud-delegation/{start|status|complete|cancel}`. */
 export schema DelegationRequest { mutationId: string; state: string; kinds: ReadonlyArray<"email" | "calendar">; expiresAt: string; status: "waiting" | "complete" | "failed"; grantId?: string }
+
+/** `POST /api/workflow/hosted/cloud-delegation/revoke`: whether Cloud confirmed the revocation. */
+export schema RevokeReply { remoteRevocation?: string }

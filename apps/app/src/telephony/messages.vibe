@@ -1,13 +1,19 @@
-// spec/telephony/messages.md, "Story: Read my conversations while Messages is open"; spec/telephony/messages.md, "Only the latest read publishes, and a conversation shows only its own messages"; spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"; spec/telephony/messages.md, "The recipient picker reads contacts only while a new message is open, and answers only its latest query"; spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/messages.md, "A local bubble lasts until the provider lists its row, the send is refused, or the visit ends"
-import { isIncompleteSmsRow, normalizePhoneNumber, threadIdOf } from "@elizaos/os/bridges/definitions/messages"
+// spec/telephony/messages.md, "Story: Read my conversations while Messages is open"; spec/telephony/messages.md, "Only the latest read publishes, and a conversation shows only its own messages"; spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"; spec/telephony/messages.md, "The recipient picker reads contacts only while a new message is open, and answers only its latest query"; spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/messages.md, "A local bubble lasts until the provider lists its row, the send is refused, or the visit ends"; spec/telephony/messages.md, "A sent text reads Delivered only on the radio's confirmed delivery report, and a picture message never does"; spec/telephony/messages.md, "Call in a one-person conversation's header calls its one number and keeps the draft"
+import { isIncompleteSmsRow, parseMessageDeleteReference, threadIdOf } from "@elizaos/os/bridges/definitions/messages"
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import type { MessageCursor, MessageRow as BridgeMessage, SmsLatestSender, ThreadCursor, ThreadId, ThreadRow as BridgeThread } from "@elizaos/os/bridges/messages"
-import { Machine as DraftsMachine } from "../../gen/telephony__drafts.effect.vibe"
+import type { CallOutcome } from "../../gen/telephony__common.effect.vibe"
+import { Machine as DraftsMachine, slotOf, type Drafts } from "../../gen/telephony__drafts.effect.vibe"
 import {
-  Machine as MessagesMachine, readThrough, type Choice, type Event as MessagesEvent, type MessageRow, type PageAnswer, type ThreadRow,
+  Machine as MessagesMachine, conditionOf, readThrough, threadCallNumber, type Choice, type Event as MessagesEvent, type MessageRow, type Messages, type PageAnswer, type ThreadRow,
 } from "../../gen/telephony__messages.effect.vibe"
 import { Native } from "../platform/native.vibe"
-import { callerOf, displayNames, TELEPHONY_PLUGIN, TelephonyBridges } from "./bridges.vibe"
+import { callerOf, closeNames, displayNames, TELEPHONY_PLUGIN, TelephonyBridges } from "./bridges.vibe"
 import { DraftSends } from "./drafts.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+import { placeOwnerCall } from "./phone.vibe"
+import { messagesRouteOf } from "./routes.vibe"
+import { SmsNotice } from "./routes.schema.vibe"
 import { DeletionUndo } from "./undo.vibe"
 
 /** The visible tail of a conversation Alpha may read when asked (`messages_read_selected`). */
@@ -24,16 +30,18 @@ export interface OpenThreadRead {
 
 /** Messages' effects over the image's SMS and MMS providers. */
 export service MessagesView {
-  /** One visit of Messages: reads, the provider observer and the send receipts, all forgotten when it ends. */
-  visit(): void!!
+  /** One visit of Messages, opened at `route` (`compose:<number>`, `thread:<thread>`, `notice`): while it is in front on an unlocked phone, reads, the provider observer and the send receipts, all forgotten when it leaves; each return takes a pending new-message notice while the composer is idle. */
+  visit(route?: string): void!!
   /** Read again, or the next page with `more`. */
   refresh(more: boolean): void!!
   /** Open a listed conversation and read it. */
   openThread(threadId: string): void!!
   /** Back from a conversation: the menu first, then the list. */
   closeThread(): void!!
-  /** A new-message notice's tap, taken only while the composer is idle. */
-  openNotice(idle: boolean): void!!
+  /** A new-message notice's tap, taken only while the composer is idle: no text, picture, pick or send in flight. */
+  openNotice(): void!!
+  /** The owner's Call in a one-person conversation's header: Telecom places it, and the draft stays as it was. */
+  callThread(): CallOutcome | undefined!!
   /** Ask Android for SMS read access, then read again. */
   allow(access: "sms" | "sendSms" | "phoneState"): void!!
   /** Search the recipient picker's contacts. */
@@ -62,20 +70,30 @@ export function threadRowOf(row: BridgeThread): ThreadRow {
 /** A provider message as Messages shows it. */
 export function messageRowOf(row: BridgeMessage): MessageRow {
   if (isIncompleteSmsRow(row)) return { id: row.id, kind: row.kind === "mms" ? "MmsKind" : "SmsKind", threadId: row.threadId, outgoing: false, condition: "Received", date: row.date, body: "", pictures: 0, complete: false }
-  const condition = row.direction === "incoming" ? "Received"
-    : row.status === "failed" ? "FailedOut" : row.status === "pending" ? "PendingOut"
-    : row.kind === "sms" && row.deliveryReport === "complete" ? "DeliveredOut" : "SentOut"
+  const condition = conditionOf(row.kind === "mms" ? "MmsKind" : "SmsKind", row.direction === "outgoing",
+    row.status === "failed" ? "OutFailed" : row.status === "pending" ? "OutPending" : "OutSent", row.kind === "sms" && row.deliveryReport === "complete")
   return { id: row.id, kind: row.kind === "mms" ? "MmsKind" : "SmsKind", threadId: row.threadId, outgoing: row.direction === "outgoing", condition, date: row.date, body: row.body, pictures: row.attachments, complete: true }
+}
+
+/** Whether the composer is idle: nothing typed, attached, picked or sending in the slot on screen, so a notice may replace the view. */
+export function composerIdle(m: Messages, d: Drafts): boolean {
+  const thread = m.view.tag === "InThread" ? m.view.threadId : m.view.tag === "Composing" ? "new" : ""
+  if (thread === "") return true
+  const slot = slotOf(d.slots, thread)
+  return slot.text.trim() === "" && slot.pictures.length === 0 && slot.outcome !== "Sending" && m.picker.tag === "PickerClosed"
+    && (thread !== "new" || slot.recipients.length === 0)
 }
 
 /** Messages' view over its machine, the drafts and the image's messages bridge. */
 export const messagesViewLayer = Layer.effect(MessagesView, effect {
-  const bridgeCall = callerOf(try TelephonyBridges)
+  const bridges = try TelephonyBridges
+  const bridgeCall = callerOf(bridges)
   const messages = try MessagesMachine
   const drafts = try DraftsMachine
   const sends = try DraftSends
   const undo = try DeletionUndo
   const native = try Native
+  const front = try frontChanges()
   const cursor = try Ref.make<string | undefined>(undefined)
   const pickerOpen = try Ref.make(false)
   const tell = (event: MessagesEvent) => messages.send(event) catch () => undefined
@@ -104,7 +122,7 @@ export const messagesViewLayer = Layer.effect(MessagesView, effect {
     const page = try bridgeCall("threadPage", (c) => c.messages.threadPage(after as ThreadCursor | undefined))
     try Ref.set(cursor, page.next ?? undefined)
     const threads = page.rows.map(threadRowOf)
-    const names = try displayNames(bridgeCall, threads.flatMap((t) => t.addresses))
+    const names = try displayNames(bridgeCall, "messages", threads.flatMap((t) => t.addresses))
     const titled = threads.map((t) => t.addresses.some((a) => names[a] !== undefined) ? { ...t, title: t.addresses.map((a) => names[a] ?? a).join(", ") } : t)
     return { answer: { tag: "ThreadsPage", threads: titled, hasMore: page.next !== null, roleHeld } satisfies PageAnswer, roleHeld }
   }
@@ -147,24 +165,64 @@ export const messagesViewLayer = Layer.effect(MessagesView, effect {
     if (try Ref.getAndSet(pickerOpen, false)) try (bridgeCall("close", (c) => c.contacts.close()) catch () => undefined)
   }
 
+  effect function openListed(threadId: string) {
+    let after: ThreadCursor | undefined = undefined
+    for (let page = 0; page < NOTICE_PAGES; page++) {
+      const found = try (bridgeCall("threadPage", (c) => c.messages.threadPage(after)) catch () => undefined)
+      if (found === undefined) return false
+      const row = found.rows.find((r) => r.id === threadId)
+      if (row !== undefined) {
+        if (isIncompleteSmsRow(row)) return false
+        const { epoch } = (try tell({ type: "refreshAsked", more: false })) ?? (try messages.get())
+        try tell({ type: "pageAnswered", ticket: epoch, answer: { tag: "ThreadsPage", threads: found.rows.map(threadRowOf), hasMore: found.next !== null, roleHeld: true }, at: try Clock.currentTimeMillis })
+        const opened = try tell({ type: "threadOpened", threadId })
+        if (opened === undefined) return false
+        try Ref.set(cursor, undefined)
+        try answer(opened.epoch, false)
+        return true
+      }
+      if (found.next === null) return false
+      after = found.next
+    }
+    return false
+  }
+
+  effect function notice() {
+    if (!composerIdle(try messages.get(), try drafts.get())) return
+    const pending = try (native.invoke(TELEPHONY_PLUGIN, "smsNoticePending") catch () => undefined)
+    const named = Option.getOrUndefined(Schema.decodeUnknownOption(SmsNotice)(pending))
+    const threadId = named === undefined ? null : threadIdOf(named.threadId)
+    if (named === undefined || threadId === null) return
+    if (try openListed(threadId)) try (native.invoke(TELEPHONY_PLUGIN, "acknowledgeSmsNotice", { token: named.token }) catch () => undefined)
+  }
+
   return {
-    effect visit() {
-      if ((try tell({ type: "messagesShown" })) === undefined) return
-      try Ref.set(cursor, undefined)
-      const stop = try (bridgeCall("observeMessages", (c) => c.messages.observeMessages(
-        () => { runFork(read(false)) },
-        (operationId) => { runFork(sends.reconcile(operationId)) },
-        (operationId) => { runFork(sends.reconcile(operationId)) },
-      )) catch () => undefined)
-      try ensuring(effect {
-        const { epoch } = try messages.get()
-        try answer(epoch, false)
-        try sends.reconcileAll()
-        try Effect.never
-      }, effect {
-        try closePicker()
-        try tell({ type: "messagesHidden" })
-        if (stop !== undefined) try (promise(() => stop()) catch () => undefined)
+    effect visit(route?: string) {
+      const ask = messagesRouteOf(route)
+      try whileInFront(front, effect (first: boolean) => {
+        if ((try tell({ type: "messagesShown" })) === undefined) return
+        try Ref.set(cursor, undefined)
+        const stop = try (bridgeCall("observeMessages", (c) => c.messages.observeMessages(
+          () => { runFork(read(false)) },
+          (operationId) => { runFork(sends.reconcile(operationId)) },
+          (operationId) => { runFork(sends.reconcile(operationId)) },
+        )) catch () => undefined)
+        try ensuring(effect {
+          const { epoch } = try messages.get()
+          try answer(epoch, false)
+          if (first && ask.tag === "Compose") {
+            const number = normalizePhoneNumber(ask.number)
+            if ((try tell({ type: "composeOpened" })) !== undefined && number !== null) try sends.addRecipient(number)
+          } else if (first && ask.tag === "Thread") try openListed(ask.threadId)
+          else try notice()
+          try sends.reconcileAll()
+          try Effect.never
+        }, effect {
+          try closePicker()
+          try closeNames(bridgeCall, "messages")
+          try tell({ type: "messagesHidden" })
+          if (stop !== undefined) try (promise(() => stop()) catch () => undefined)
+        })
       })
     },
     refresh: read,
@@ -181,30 +239,11 @@ export const messagesViewLayer = Layer.effect(MessagesView, effect {
       try Ref.set(cursor, undefined)
       try answer(after.epoch, false)
     },
-    effect openNotice(idle: boolean) {
-      if (!idle) return
-      const pending = try (native.invoke(TELEPHONY_PLUGIN, "smsNoticePending") catch () => undefined)
-      const notice = pending as { threadId?: unknown; token?: unknown } | undefined
-      const threadId = threadIdOf(notice?.threadId)
-      if (threadId === null || typeof notice?.token !== "string" || !/^\d+$/.test(notice.token)) return
-      let after: ThreadCursor | undefined = undefined
-      for (let page = 0; page < NOTICE_PAGES; page++) {
-        const found = try (bridgeCall("threadPage", (c) => c.messages.threadPage(after)) catch () => undefined)
-        if (found === undefined) return
-        const row = found.rows.find((r) => r.id === threadId)
-        if (row !== undefined) {
-          if (isIncompleteSmsRow(row)) return
-          const { epoch } = (try tell({ type: "refreshAsked", more: false })) ?? (try messages.get())
-          try tell({ type: "pageAnswered", ticket: epoch, answer: { tag: "ThreadsPage", threads: found.rows.map(threadRowOf), hasMore: found.next !== null, roleHeld: true }, at: try Clock.currentTimeMillis })
-          const opened = try tell({ type: "threadOpened", threadId })
-          if (opened === undefined) return
-          try answer(opened.epoch, false)
-          try (native.invoke(TELEPHONY_PLUGIN, "acknowledgeSmsNotice", { token: notice.token }) catch () => undefined)
-          return
-        }
-        if (found.next === null) return
-        after = found.next
-      }
+    openNotice: notice,
+    effect callThread() {
+      const number = normalizePhoneNumber(threadCallNumber((try messages.get()).view))
+      if (number === null) return undefined
+      return try Effect.provideService(placeOwnerCall(number), TelephonyBridges, bridges)
     },
     effect allow(access: "sms" | "sendSms" | "phoneState") {
       try (bridgeCall("requestAccess", (c) => c.phone.requestAccess(access)) catch () => undefined)
@@ -233,7 +272,8 @@ export const messagesViewLayer = Layer.effect(MessagesView, effect {
       const rowId = m.menu.tag === "MenuOpen" ? m.menu.rowId : ""
       const row = m.rows.find((r) => r.id === rowId)
       if (row === undefined || (try tell({ type: "deleteStarted" })) === undefined) return
-      const deferred = try undo.defer("MessageDeletion", [row.id])
+      const reference = parseMessageDeleteReference({ id: row.id, kind: row.kind === "MmsKind" ? "mms" : "sms", threadId: row.threadId, date: row.date })
+      const deferred = reference === undefined ? { queued: false, refused: true } as const : try undo.defer({ kind: "message", reference })
       const after = try tell({ type: "deleteAnswered", outcome: deferred.queued ? "Removed" : deferred.refused ? "RowChanged" : "RemovalUnknown" })
       if (after !== undefined && !deferred.queued && deferred.refused) try read(false)
     },

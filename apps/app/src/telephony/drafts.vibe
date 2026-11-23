@@ -1,7 +1,9 @@
 // spec/telephony/drafts.md, "Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation"; spec/telephony/drafts.md, "An accepted send clears the slot, a definite refusal releases its operation, and an unknown outcome keeps it"; spec/telephony/drafts.md, "Alpha's draft goes only into an unoccupied slot addressed to exactly the same people, and keeps one Undo"; spec/telephony/drafts.md, "A slot holds at most five JPEG, PNG or GIF pictures within the MMS size, and only the owner attaches them"; spec/telephony/messages.md, "A local bubble lasts until the provider lists its row, the send is refused, or the visit ends"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { MMS_MAX_TOTAL_BYTES, normalizePhoneNumber, operationIdOf, reviewMms, reviewSms } from "@elizaos/os/bridges/definitions/messages"
-import type { DirectSmsReview, MmsReview, MmsReviewProblem, SmsHandoffReport, SmsReviewProblem, SmsSendStatus, TelephonyStatus } from "@elizaos/os/bridges/messages"
+import { MMS_MAX_TOTAL_BYTES, operationIdOf, reviewMms, reviewSms } from "@elizaos/os/bridges/definitions/messages"
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
+import type { DirectSmsReview, MmsReview, MmsReviewProblem, SmsHandoffReport, SmsReviewProblem, SmsSendStatus } from "@elizaos/os/bridges/messages"
+import type { TelephonyStatus } from "@elizaos/os/bridges/phone"
 import {
   Machine as DraftsMachine, maxPictures, occupied, slotOf, type Event as DraftsEvent, type Operation, type Receipt, type SendKind, type Slot,
 } from "../../gen/telephony__drafts.effect.vibe"

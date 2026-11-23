@@ -1,0 +1,446 @@
+// spec/camera/albums.md; spec/camera/browse.md; spec/camera/copyIntent.md; spec/camera/focus.md; spec/camera/library.md; spec/camera/media.md; spec/camera/notices.md; spec/camera/recorder.md; spec/camera/scan.md; spec/camera/scanDialogs.md; spec/camera/videoEdit.md
+import { assert, it } from "@effect/vitest"
+import { albumAnswer, mediaCurrent } from "../../gen/camera__albums.ts"
+import { Machine as Albums, machine as albumsMachine } from "../../gen/camera__albums.effect.vibe"
+import { Machine as Browse, machine as browseMachine } from "../../gen/camera__browse.effect.vibe"
+import { Machine as Intents, machine as intentsMachine } from "../../gen/camera__copyIntent.effect.vibe"
+import { Machine as Focus, machine as focusMachine } from "../../gen/camera__focus.effect.vibe"
+import { scopeOffer, type Row } from "../../gen/camera__library.ts"
+import { Machine as Catalog, machine as catalogMachine } from "../../gen/camera__library.effect.vibe"
+import { doubleTapped, emailable, messagesSendable, pans, zoomedTo } from "../../gen/camera__media.ts"
+import { Machine as Media, machine as mediaMachine } from "../../gen/camera__media.effect.vibe"
+import { Machine as Notices, machine as noticesMachine } from "../../gen/camera__notices.effect.vibe"
+import { Machine as Recorder, machine as recorderMachine } from "../../gen/camera__recorder.effect.vibe"
+import { Machine as Scan, machine as scanMachine } from "../../gen/camera__scan.effect.vibe"
+import { Machine as Dialogs, machine as dialogsMachine } from "../../gen/camera__scanDialogs.effect.vibe"
+import { settledByReview } from "../../gen/camera__videoEdit.ts"
+import { Machine as Video, machine as videoMachine } from "../../gen/camera__videoEdit.effect.vibe"
+
+const row = (id: string, rank: number): Row => ({ id, rank, revision: "1", video: false, favorite: false, image: "", width: 4, height: 3, duration: 0, size: 1, folder: "", expiresAt: 0 })
+const sorted = (ids: readonly string[]) => [...ids].sort()
+
+// spec/camera/albums.md, "Story: Keep my photos in albums"
+it.effect("an album change applies only to the dialog generation it was rendered for, at the listed revision (spec/camera/albums.md, \"Story: Keep my photos in albums\")", () => effect {
+  provide albumsMachine() {
+    const albums = try Albums
+    try albums.send({ type: "albumsLoaded", albums: [{ id: "a", name: "A", revision: "r1" }] })
+    try albums.send({ type: "openDialog", target: "a", media: "", mediaRevision: "" })
+    try albums.send({ type: "openDialog", target: "a", media: "", mediaRevision: "" })
+    const stale = albums.send({ type: "rename", gen: 1, name: "Old", nameOk: true }) catch () => "refused"
+    try albums.send({ type: "rename", gen: 2, name: "Trip", nameOk: true })
+    try albums.send({ type: "save", gen: 2 })
+    const busy = try albums.get()
+    try albums.send({ type: "finish", ok: true })
+    const done = try albums.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { stale, write: busy.writes[0], stage: done.stage, busy: done.busy },
+      { stale: "refused", write: { operation: "RenameOp", album: "a", revision: "r1", name: "Trip", media: "", mediaRevision: "" }, stage: "DialogClosed", busy: false },
+    ))
+  }
+})
+
+// spec/camera/albums.md, "Story: Keep album storage consistent with my photos"
+it.effect("album storage refuses a stale album and a changed or trashed item (spec/camera/albums.md, \"Story: Keep album storage consistent with my photos\")", () => effect {
+  const stored = [{ mediaId: "m:1", mediaRev: "rev-1", inTrash: false }, { mediaId: "m:2", mediaRev: "rev-1", inTrash: true }]
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      current: mediaCurrent(stored, "m:1", "rev-1"), changed: mediaCurrent(stored, "m:1", "rev-2"), trashed: mediaCurrent(stored, "m:2", "rev-1"),
+      add: albumAnswer("AddOp", "r1", "r1", false), rename: albumAnswer("RenameOp", "r2", "r1", true), create: albumAnswer("CreateOp", "", "", true), ok: albumAnswer("AddOp", "r1", "r1", true),
+    },
+    { current: true, changed: false, trashed: false, add: "MediaChanged", rename: "AlbumChanged", create: "AlbumUpdated", ok: "AlbumUpdated" },
+  ))
+})
+
+// spec/camera/browse.md, "Story: Select what I see"
+it.effect("a selection holds only what the list shows and keeps what still exists after a library change (spec/camera/browse.md, \"Story: Select what I see\")", () => effect {
+  provide browseMachine() {
+    const browse = try Browse
+    try browse.send({ type: "showPool", pool: ["a", "b", "c"], favorites: [], gone: false })
+    try browse.send({ type: "startSelection", id: "a" })
+    try browse.send({ type: "toggle", id: "b" })
+    const outside = browse.send({ type: "toggle", id: "z" }) catch () => "refused"
+    try browse.send({ type: "selectAll" })
+    const all = sorted((try browse.get()).selection)
+    try browse.send({ type: "showPool", pool: ["b", "c"], favorites: [], gone: false })
+    const patched = sorted((try browse.get()).selection)
+    try browse.send({ type: "cancelSelection" })
+    const after = try browse.get()
+    try Effect.try(() => assert.deepStrictEqual({ outside, all, patched, selecting: after.selecting, left: after.selection.length },
+      { outside: "refused", all: ["a", "b", "c"], patched: ["b", "c"], selecting: false, left: 0 }))
+  }
+})
+
+// spec/camera/browse.md, "Story: Look at one photo"
+it.effect("the viewer stays on its item until it is closed or gone, and plays only the open item's source (spec/camera/browse.md, \"Story: Look at one photo\")", () => effect {
+  provide browseMachine() {
+    const browse = try Browse
+    try browse.send({ type: "showPool", pool: ["a", "b"], favorites: [], gone: false })
+    try browse.send({ type: "openViewer", id: "a" })
+    try browse.send({ type: "swipe", id: "b" })
+    const late = browse.send({ type: "sourceReady", id: "a", url: "https://localhost/_media/k1.mp4" }) catch () => "refused"
+    try browse.send({ type: "sourceReady", id: "b", url: "https://localhost/_media/k1.mp4" })
+    try browse.send({ type: "showPool", pool: ["a", "b"], favorites: ["a"], gone: false })
+    const kept = try browse.get()
+    try browse.send({ type: "showPool", pool: ["a"], favorites: [], gone: true })
+    const gone = try browse.get()
+    try Effect.try(() => assert.deepStrictEqual({ late, kept: [kept.viewer, kept.playable], gone: [gone.viewer, gone.playable] },
+      { late: "refused", kept: ["b", "https://localhost/_media/k1.mp4"], gone: ["", ""] }))
+  }
+})
+
+// spec/camera/browse.md, "Story: Let the assistant narrow what Photos shows"
+it.effect("the assistant's filter narrows the grid, changes nothing, and clears (spec/camera/browse.md, \"Story: Let the assistant narrow what Photos shows\")", () => effect {
+  provide browseMachine() {
+    const browse = try Browse
+    try browse.send({ type: "showPool", pool: ["a", "b"], favorites: [], gone: false })
+    try browse.send({ type: "switchTab", tab: "AlbumsTab" })
+    try browse.send({ type: "setFilter", label: "Videos" })
+    const filtered = try browse.get()
+    try browse.send({ type: "clearFilter" })
+    const cleared = try browse.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { filtered: [filtered.filtered, filtered.filterLabel, filtered.tab, filtered.work], cleared: [cleared.filtered, cleared.filterLabel], purged: cleared.purged.length },
+      { filtered: [true, "Videos", "LibraryTab", "NoWork"], cleared: [false, ""], purged: 0 },
+    ))
+  }
+})
+
+// spec/camera/copyIntent.md, "Story: Never lose track of a copy that may have been saved"
+it.effect("one saved-copy request is held, a second is refused, and after a restart it is read back before it clears (spec/camera/copyIntent.md, \"Story: Never lose track of a copy that may have been saved\")", () => effect {
+  provide intentsMachine() {
+    const intents = try Intents
+    try intents.send({ type: "admit", caller: 1, token: "op-a" })
+    try intents.send({ type: "admit", caller: 2, token: "op-b" })
+    const refused = try intents.get()
+    try intents.send({ type: "restart" })
+    const unheld = intents.send({ type: "acknowledge", caller: 2 }) catch () => "refused"
+    try intents.send({ type: "recover", caller: 2 })
+    try intents.send({ type: "acknowledge", caller: 2 })
+    const cleared = try intents.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { slot: refused.slot.token, refusedAdmits: refused.refusedAdmits, unheld, cleared: [cleared.slot.token, cleared.acknowledged, cleared.clearedRevision] },
+      { slot: "op-a", refusedAdmits: 1, unheld: "refused", cleared: ["", 1, 1] },
+    ))
+  }
+})
+
+// spec/camera/focus.md, "Story: Focus where I tap"
+it.effect("rapid taps write one at a time, a retired waiting tap never writes, and only the last tap is confirmed (spec/camera/focus.md, \"Story: Focus where I tap\")", () => effect {
+  provide focusMachine() {
+    const focus = try Focus
+    try focus.send({ type: "tapFocus" })
+    try focus.send({ type: "tapFocus" })
+    try focus.send({ type: "tapFocus" })
+    const queued = try focus.get()
+    try focus.send({ type: "driverReplies", applied: true })
+    const second = try focus.get()
+    try focus.send({ type: "driverReplies", applied: true })
+    const done = try focus.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { writing: queued.writing, next: second.writing, skipped: second.skipped, confirmed: done.confirmed, hardware: done.hardware },
+      { writing: 1, next: 3, skipped: [2], confirmed: 3, hardware: 3 },
+    ))
+  }
+})
+
+// spec/camera/library.md, "Story: Find what I deleted"
+it.effect("Recently deleted waits for Retry after a failed read, and a retry loads it (spec/camera/library.md, \"Story: Find what I deleted\")", () => effect {
+  provide catalogMachine() {
+    const catalog = try Catalog
+    try catalog.send({ type: "requestTrash", paging: false })
+    try catalog.send({ type: "trashReply", rows: [], cursor: "", ok: false })
+    try catalog.send({ type: "leave" })
+    try catalog.send({ type: "enter" })
+    const returned = try catalog.get()
+    try catalog.send({ type: "requestTrash", paging: false })
+    try catalog.send({ type: "trashReply", rows: [row("t1", 3)], cursor: "", ok: true })
+    const loaded = try catalog.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { waits: [returned.trash.failed, returned.trash.loading], loaded: [loaded.trash.loaded, loaded.trash.failed, loaded.trash.rows.map((r) => r.id)] },
+      { waits: [true, false], loaded: [true, false, ["t1"]] },
+    ))
+  }
+})
+
+// spec/camera/library.md, "Story: Stop reading when Photos is not in front"
+it.effect("a hidden page drops the windows, a late answer publishes nothing, and showing reads afresh (spec/camera/library.md, \"Story: Stop reading when Photos is not in front\")", () => effect {
+  provide catalogMachine() {
+    const catalog = try Catalog
+    try catalog.send({ type: "refresh", paging: false })
+    try catalog.send({ type: "hide" })
+    try catalog.send({ type: "accessReply", scope: "ScopeFull", ok: true })
+    const late = try catalog.get()
+    try catalog.send({ type: "show" })
+    const shown = try catalog.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { late: [late.main.loaded, late.read, late.main.rows.length], shown: [shown.hidden, shown.read, shown.trash.loading] },
+      { late: [false, "ReadIdle", 0], shown: [false, "ReadAccess", true] },
+    ))
+  }
+})
+
+// spec/camera/library.md, "Story: Be told honestly what Android lets Alpha read"
+it.effect("each access offers its one honest action (spec/camera/library.md, \"Story: Be told honestly what Android lets Alpha read\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual(
+    [scopeOffer("ScopeDenied", false, false, false), scopeOffer("ScopeDenied", false, false, true), scopeOffer("ScopeSelected", false, true, false), scopeOffer("ScopeSelected", false, false, false), scopeOffer("ScopeFull", false, false, false), scopeOffer("ScopeFull", true, true, true), scopeOffer("ScopeUnknown", false, true, false)],
+    ["AskForAccess", "OpenAndroidSettings", "ChooseMoreItems", "OpenAndroidSettings", "OpenAndroidSettings", "NoScopeAction", "NoScopeAction"],
+  ))
+})
+
+// spec/camera/media.md, "Story: Use a photo only as I selected it"
+it.effect("only the reviewed bytes of the selected revision are published, and a revoked grant ends everything (spec/camera/media.md, \"Story: Use a photo only as I selected it\")", () => effect {
+  provide mediaMachine() {
+    const media = try Media
+    try media.send({ type: "grant", granted: "MediaSelected" })
+    try media.send({ type: "selectMedia" })
+    try media.send({ type: "beginRead" })
+    try media.send({ type: "readComplete", ticket: 0, revision: 0 })
+    const early = media.send({ type: "publish" }) catch () => "refused"
+    try media.send({ type: "review" })
+    try media.send({ type: "publish" })
+    const published = try media.get()
+    try media.send({ type: "invalidate", reason: "AccessRevoked" })
+    const again = media.send({ type: "selectMedia" }) catch () => "refused"
+    const revoked = try media.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { early, published: [published.published, published.publishedRevision, published.temporaryBytes], again, revoked: [revoked.scope, revoked.catalogRows, revoked.loaded] },
+      { early: "refused", published: [true, 0, false], again: "refused", revoked: ["MediaDenied", 0, false] },
+    ))
+  }
+})
+
+// spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"
+it.effect("a photo read that finishes after a conversation switch attaches nothing, and the next ask attaches to its own chat (spec/camera/media.md, \"Story: Ask Alpha about the photo I am looking at\")", () => effect {
+  provide mediaMachine() {
+    const media = try Media
+    try media.send({ type: "grant", granted: "MediaFull" })
+    try media.send({ type: "selectMedia" })
+    try media.send({ type: "askAboutPhoto" })
+    try media.send({ type: "switchConversation", chat: 2 })
+    try media.send({ type: "photoRead", unchanged: true })
+    const switched = try media.get()
+    try media.send({ type: "askAboutPhoto" })
+    try media.send({ type: "photoRead", unchanged: true })
+    const attached = try media.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { switched: [switched.attached, switched.refusedChanged], attached: [attached.attached, attached.attachedConversation] },
+      { switched: [0, 1], attached: [1, 2] },
+    ))
+  }
+})
+
+// spec/camera/media.md, "Story: Send a photo only as a reviewed copy"
+it.effect("email takes small JPEG, PNG or WebP files, and Messages only pictures within its limit (spec/camera/media.md, \"Story: Send a photo only as a reviewed copy\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual(
+    { email: [emailable("Jpeg", 2_000_000), emailable("Webp", 5_242_880), emailable("Heic", 1000), emailable("Png", 0), emailable("Jpeg", 5_242_881)], messages: [messagesSendable("Jpeg", 1_048_576), messagesSendable("Jpeg", 1_048_577), messagesSendable("Webp", 1000), messagesSendable("Png", 0)] },
+    { email: [true, true, false, false, false], messages: [true, false, false, false] },
+  ))
+})
+
+// spec/camera/media.md, "Story: Look closely without changing anything"
+it.effect("a preview zooms between 1x and 8x, double tap toggles 2x, and only a zoomed preview pans (spec/camera/media.md, \"Story: Look closely without changing anything\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual(
+    [zoomedTo(0), zoomedTo(35), zoomedTo(120), doubleTapped(10), doubleTapped(35), pans(10), pans(20)],
+    [10, 35, 80, 20, 10, false, true],
+  ))
+})
+
+// spec/camera/notices.md, "Story: Be told only what I need to act on"
+it.effect("a line expires only from its own timer and never while persistent (spec/camera/notices.md, \"Story: Be told only what I need to act on\")", () => effect {
+  provide noticesMachine() {
+    const notices = try Notices
+    try notices.send({ type: "say", text: "Busy", persistent: false })
+    try notices.send({ type: "say", text: "Not saved", persistent: false })
+    const oldTimer = notices.send({ type: "expire", generation: 1 }) catch () => "refused"
+    try notices.send({ type: "expire", generation: 2 })
+    const expired = try notices.get()
+    try notices.send({ type: "say", text: "Not saved", persistent: true })
+    const held = notices.send({ type: "expire", generation: 3 }) catch () => "refused"
+    try notices.send({ type: "dismiss" })
+    const dismissed = try notices.get()
+    try Effect.try(() => assert.deepStrictEqual({ oldTimer, expired: expired.said, held, dismissed: [dismissed.said, dismissed.persistent] },
+      { oldTimer: "refused", expired: "", held: "refused", dismissed: ["", false] }))
+  }
+})
+
+// spec/camera/recorder.md, "Story: Keep every recording I make, within its limit"
+it.effect("a recording cut by the byte limit keeps what it collected and is saved once its prefix decodes (spec/camera/recorder.md, \"Story: Keep every recording I make, within its limit\")", () => effect {
+  provide recorderMachine() {
+    const recorder = try Recorder
+    try recorder.send({ type: "shutter", limit: 2 })
+    try recorder.send({ type: "startResolved", ok: true })
+    try recorder.send({ type: "chunk", piece: 1 })
+    try recorder.send({ type: "chunk", piece: 2 })
+    const cut = try recorder.get()
+    try recorder.send({ type: "recorderStopped" })
+    const reading = try recorder.get()
+    try recorder.send({ type: "prefixRead", ok: true })
+    try recorder.send({ type: "finish" })
+    try recorder.send({ type: "finalized" })
+    const saved = try recorder.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { cut: [cut.bytes, cut.truncated, cut.session], reading: reading.session, saved: [saved.rows, saved.settles, saved.session] },
+      { cut: [1, true, "Stopping"], reading: "ReadingPrefix", saved: [1, 1, "NoSession"] },
+    ))
+  }
+})
+
+// spec/camera/scan.md, "Story: Assemble a document and keep a draft I can reload"
+it.effect("one page operation runs at a time, every change keeps the limits, and an explicit draft becomes the owner's (spec/camera/scan.md, \"Story: Assemble a document and keep a draft I can reload\")", () => effect {
+  provide scanMachine() {
+    const scan = try Scan
+    try scan.send({ type: "beginEdit" })
+    const second = scan.send({ type: "beginEdit" }) catch () => "refused"
+    const tooMany = scan.send({ type: "finishEdit", batch: { count: 21, bytes: 1024, validated: true }, autosave: false, ids: [] }) catch () => "refused"
+    try scan.send({ type: "finishEdit", batch: { count: 2, bytes: 2048, validated: true }, autosave: false, ids: ["p1", "p2"] })
+    try scan.send({ type: "beginDraftAction" })
+    try scan.send({ type: "saveExplicitDraft", stored: 0, revision: 1, committed: true })
+    const saved = try scan.get()
+    try Effect.try(() => assert.deepStrictEqual({ second, tooMany, pages: saved.pageIds, draft: [saved.draftOwner, saved.draftRevision, saved.flight] },
+      { second: "refused", tooMany: "refused", pages: ["p1", "p2"], draft: ["ExplicitDraft", 1, "Free"] }))
+  }
+})
+
+// spec/camera/scan.md, "Story: Save only the reviewed scan and know whether it saved"
+it.effect("a confirmed export freezes the pages, and Keep runs only for an unsaved frame and retries only after a failure (spec/camera/scan.md, \"Story: Save only the reviewed scan and know whether it saved\")", () => effect {
+  provide scanMachine() {
+    const scan = try Scan
+    try scan.send({ type: "beginEdit" })
+    try scan.send({ type: "finishEdit", batch: { count: 1, bytes: 1024, validated: true }, autosave: false, ids: ["p1"] })
+    try scan.send({ type: "beginExport" })
+    try scan.send({ type: "finishExport", result: "ExportConfirmed" })
+    const edit = scan.send({ type: "beginEdit" }) catch () => "refused"
+    try scan.send({ type: "openKeepReview", source: "PickedImage", hasPort: true, native: true })
+    const picked = scan.send({ type: "requestKeep" }) catch () => "refused"
+    try scan.send({ type: "closeKeepReview" })
+    try scan.send({ type: "openKeepReview", source: "UnsavedFrame", hasPort: true, native: true })
+    try scan.send({ type: "requestKeep" })
+    try scan.send({ type: "resolveKeep", outcome: "KeepFailed" })
+    try scan.send({ type: "requestKeep" })
+    try scan.send({ type: "resolveKeep", outcome: "KeepSaved" })
+    const kept = scan.send({ type: "requestKeep" }) catch () => "refused"
+    try Effect.try(() => assert.deepStrictEqual({ edit, picked, kept, status: (try scan.get()).keep.status }, { edit: "refused", picked: "refused", kept: "refused", status: "KeepSaved" }))
+  }
+})
+
+// spec/camera/scanDialogs.md, "Story: Review the text I scanned before anything is saved"
+it.effect("Save to Notes runs once, and an unconfirmed save stays latched (spec/camera/scanDialogs.md, \"Story: Review the text I scanned before anything is saved\")", () => effect {
+  provide dialogsMachine() {
+    const dialogs = try Dialogs
+    try dialogs.send({ type: "openText", image: "blob:page" })
+    const early = dialogs.send({ type: "saveToNotes" }) catch () => "refused"
+    try dialogs.send({ type: "ocrSettled", ok: true, body: "Receipt" })
+    try dialogs.send({ type: "editText", body: "Receipt total 12" })
+    try dialogs.send({ type: "saveToNotes" })
+    try dialogs.send({ type: "notesSettled", saved: false })
+    const again = dialogs.send({ type: "saveToNotes" }) catch () => "refused"
+    const text = (try dialogs.get()).text
+    try Effect.try(() => assert.deepStrictEqual({ early, again, note: text.note, calls: text.saveCalls, body: text.body },
+      { early: "refused", again: "refused", note: "NoteUnconfirmed", calls: 1, body: "Receipt total 12" }))
+  }
+})
+
+// spec/camera/scanDialogs.md, "Story: Make a searchable PDF of the pages I reviewed"
+it.effect("the searchable PDF waits for the reviewed text, and a request already sent is unconfirmed when the review closes (spec/camera/scanDialogs.md, \"Story: Make a searchable PDF of the pages I reviewed\")", () => effect {
+  provide dialogsMachine() {
+    const dialogs = try Dialogs
+    try dialogs.send({ type: "openDocument" })
+    try dialogs.send({ type: "openSearchable" })
+    const unread = dialogs.send({ type: "download" }) catch () => "refused"
+    try dialogs.send({ type: "recognised" })
+    try dialogs.send({ type: "download" })
+    try dialogs.send({ type: "providerAsked" })
+    try dialogs.send({ type: "searchableClose" })
+    const closed = (try dialogs.get()).searchable
+    try Effect.try(() => assert.deepStrictEqual({ unread, result: closed.result, shown: closed.shown }, { unread: "refused", result: "PdfUnconfirmed", shown: false }))
+  }
+})
+
+// spec/camera/scanDialogs.md, "Story: Correct a page's perspective before it replaces the page"
+it.effect("a corner change discards the preview, and only a current preview replaces the page (spec/camera/scanDialogs.md, \"Story: Correct a page's perspective before it replaces the page\")", () => effect {
+  provide dialogsMachine() {
+    const dialogs = try Dialogs
+    try dialogs.send({ type: "openDocument" })
+    try dialogs.send({ type: "openCorrection" })
+    try dialogs.send({ type: "beginWork", forPreview: true })
+    try dialogs.send({ type: "workSettled", ok: true })
+    try dialogs.send({ type: "moveCorner" })
+    const stale = dialogs.send({ type: "applyCorrection" }) catch () => "refused"
+    try dialogs.send({ type: "beginWork", forPreview: true })
+    try dialogs.send({ type: "workSettled", ok: true })
+    try dialogs.send({ type: "applyCorrection" })
+    const correction = (try dialogs.get()).correction
+    try Effect.try(() => assert.deepStrictEqual({ stale, applied: correction.applied, corners: correction.corners, shown: correction.shown }, { stale: "refused", applied: 1, corners: 1, shown: false }))
+  }
+})
+
+// spec/camera/scanDialogs.md, "Story: Capture a document page with Camera"
+it.effect("a captured page stays when the camera stops, and only a live camera retakes (spec/camera/scanDialogs.md, \"Story: Capture a document page with Camera\")", () => effect {
+  provide dialogsMachine() {
+    const dialogs = try Dialogs
+    try dialogs.send({ type: "openDocument" })
+    try dialogs.send({ type: "openCapture" })
+    try dialogs.send({ type: "cameraStarted", ok: true })
+    try dialogs.send({ type: "capturePage" })
+    try dialogs.send({ type: "frameEncoded", ok: true })
+    try dialogs.send({ type: "cameraEnded" })
+    const retake = dialogs.send({ type: "retake" }) catch () => "refused"
+    try dialogs.send({ type: "usePage" })
+    const capture = (try dialogs.get()).capture
+    try Effect.try(() => assert.deepStrictEqual({ retake, used: capture.used, kept: capture.frameWhenEnded }, { retake: "refused", used: true, kept: true }))
+  }
+})
+
+// spec/camera/scanDialogs.md, "Story: Keep my scan open while a system picker covers it"
+it.effect("a system picker keeps the review open while it hides the page, and a plain hide closes it (spec/camera/scanDialogs.md, \"Story: Keep my scan open while a system picker covers it\")", () => effect {
+  provide dialogsMachine() {
+    const dialogs = try Dialogs
+    try dialogs.send({ type: "openText", image: "blob:page" })
+    try dialogs.send({ type: "pickerStart" })
+    try dialogs.send({ type: "hideEvent" })
+    const covered = try dialogs.get()
+    try dialogs.send({ type: "pickerEnd" })
+    try dialogs.send({ type: "showEvent" })
+    try dialogs.send({ type: "hideEvent" })
+    const hidden = try dialogs.get()
+    try Effect.try(() => assert.deepStrictEqual({ covered: [covered.text.shown, covered.hiddenUnderPicker], hidden: [hidden.text.shown, hidden.hiddenUnderPicker] },
+      { covered: [true, true], hidden: [false, false] }))
+  }
+})
+
+// spec/camera/videoEdit.md, "Story: Trim a video into a copy"
+it.effect("a trim keeps a tenth of a second inside the source, and Save submits one frozen copy (spec/camera/videoEdit.md, \"Story: Trim a video into a copy\")", () => effect {
+  provide videoMachine() {
+    const video = try Video
+    try video.send({ type: "openEditor", source: "v:1", length: 50 })
+    try video.send({ type: "sourceLoaded" })
+    try video.send({ type: "trimTo", startHandle: true, position: 80 })
+    const clamped = (try video.get()).trim
+    try video.send({ type: "rotateVideo" })
+    try video.send({ type: "commit" })
+    const twice = video.send({ type: "commit" }) catch () => "refused"
+    try video.send({ type: "saveSettled", result: "VideoSaved" })
+    const saved = try video.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { clamped: [clamped.start, clamped.end], twice, saved: [saved.outcome, saved.closed, saved.saves, saved.submitted.rotation] },
+      { clamped: [49, 50], twice: "refused", saved: ["VideoSaved", true, 1, 90] },
+    ))
+  }
+})
+
+// spec/camera/videoEdit.md, "Story: Recover a video copy that may exist"
+it.effect("an unconfirmed copy is settled only by the owner's review, and a late answer to a closed editor is dropped (spec/camera/videoEdit.md, \"Story: Recover a video copy that may exist\")", () => effect {
+  provide videoMachine() {
+    const video = try Video
+    try video.send({ type: "openEditor", source: "v:1", length: 50 })
+    try video.send({ type: "sourceLoaded" })
+    try video.send({ type: "commit" })
+    try video.send({ type: "closeEditor" })
+    try video.send({ type: "saveSettled", result: "VideoSaved" })
+    const dropped = (try video.get()).outcome
+    try Effect.try(() => assert.deepStrictEqual(
+      { dropped, unreviewed: settledByReview("CopyPresent", false), present: settledByReview("CopyPresent", true), absent: settledByReview("CopyAbsent", true) },
+      { dropped: "VideoDropped", unreviewed: "VideoUnconfirmed", present: "VideoSaved", absent: "VideoNotSaved" },
+    ))
+  }
+})

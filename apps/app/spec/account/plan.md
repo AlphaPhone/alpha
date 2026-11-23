@@ -44,22 +44,26 @@ type EndsAt = NoEnd | FutureEnd | PastEnd
 type RecordAge = FreshRecord | OldRecord
 type PlanRecord = { present: bool, credential: int, age: RecordAge, endsAt: EndsAt }
 type Binding = NotBound | CloudBound | Unbound | KeptOffline
+type HostInference = HostIdle | HostBinding | HostBound | HostBindFailed | HostRemoving | HostRemoved | HostRemovalUnconfirmed
 type Basis = NoBasis | VerifiedBasis | GraceBasis
 type PlanNotice = NoPlanNotice | OfflineNotice | NeedsPlanNotice | PlanEndedNotice | SignInNotice
 type VerifiedKind = ActivePlan | CreditsPlan
 type Recheck = { online: bool, visible: bool, clock: int, last: int, reading: bool, startedOffline: bool, lostFor: int, paymentReturn: bool }
 type Admission = {
   credential: int, record: PlanRecord, memoryEndsAt: EndsAt, redeemed: bool, redeemedEnd: EndsAt,
-  binding: Binding, basis: Basis, notice: PlanNotice, lastWrittenEnd: EndsAt, writes: int, recheck: Recheck
+  binding: Binding, basis: Basis, notice: PlanNotice, lastWrittenEnd: EndsAt, writes: int, recheck: Recheck, host: HostInference
 }
 pure val noRecord: PlanRecord = { present: false, credential: 0, age: FreshRecord, endsAt: NoEnd }
 pure val idleRecheck: Recheck = { online: true, visible: true, clock: 0, last: -1, reading: false, startedOffline: false, lostFor: 0, paymentReturn: false }
 pure val initial: Admission = {
   credential: 0, record: noRecord, memoryEndsAt: NoEnd, redeemed: false, redeemedEnd: NoEnd,
-  binding: NotBound, basis: NoBasis, notice: NoPlanNotice, lastWrittenEnd: NoEnd, writes: 0, recheck: idleRecheck
+  binding: NotBound, basis: NoBasis, notice: NoPlanNotice, lastWrittenEnd: NoEnd, writes: 0, recheck: idleRecheck, host: HostIdle
 }
 type AdmissionEffect = ReadPlan | BindInference | UnbindInference
 type AdmissionStep = { state: Admission, out: List[AdmissionEffect] }
+pure def answersSignIn(a: Admission, credential: int): bool = a.credential != 0 and credential == a.credential
+pure def told(out: List[AdmissionEffect], a: Admission): AdmissionStep =
+  { state: { ...a, host: if (out.includes(BindInference)) HostBinding else if (out.includes(UnbindInference)) HostRemoving else a.host }, out: out }
 pure def recent(record: PlanRecord, credential: int): bool =
   record.present and credential != 0 and record.credential == credential and record.age == FreshRecord and record.endsAt != PastEnd
 pure def planWindowEnd(kind: VerifiedKind, reported: EndsAt, lastKnown: EndsAt): EndsAt =
@@ -74,14 +78,13 @@ pure def lastKnownEnd(a: Admission): EndsAt =
 pure def settledRecheck(r: Recheck, credential: int): Recheck =
   { ...r, reading: false, lostFor: if (r.startedOffline) credential else r.lostFor }
 pure val reportedValues = Set(NoEnd, FutureEnd)
-pure def canVerified(a: Admission, kind: VerifiedKind, reported: EndsAt): bool =
-  a.credential != 0 and reported != PastEnd and (kind == CreditsPlan implies reported == NoEnd)
-pure def verified(a: Admission, kind: VerifiedKind, reported: EndsAt): AdmissionStep = {
+pure def canVerified(a: Admission, credential: int, kind: VerifiedKind, reported: EndsAt): bool =
+  answersSignIn(a, credential) and reported != PastEnd and (kind == CreditsPlan implies reported == NoEnd)
+pure def verified(a: Admission, credential: int, kind: VerifiedKind, reported: EndsAt): AdmissionStep = {
   val end = planWindowEnd(kind, reported, lastKnownEnd(a))
-  { state: { ...a, record: { present: true, credential: a.credential, age: FreshRecord, endsAt: end }, memoryEndsAt: end,
+  told(List(BindInference), { ...a, record: { present: true, credential: a.credential, age: FreshRecord, endsAt: end }, memoryEndsAt: end,
       binding: CloudBound, basis: VerifiedBasis, notice: NoPlanNotice, lastWrittenEnd: end, writes: a.writes + 1,
-      recheck: settledRecheck(a.recheck, a.credential) },
-    out: List(BindInference) }
+      recheck: settledRecheck(a.recheck, a.credential) })
 }
 pure def stepARecordNeverStoresAPastEnd(before: Admission, after: Admission): bool = after.lastWrittenEnd != PastEnd
 pure def alwaysACloudBindingHasABasis(a: Admission): bool = a.binding == CloudBound implies (a.basis != NoBasis and a.credential != 0)
@@ -94,9 +97,9 @@ The refresh after a billing outage's admission knows only the end held in memory
 passed meanwhile is dropped.
 
 ```quint
-pure def canRefreshVerified(a: Admission, kind: VerifiedKind, reported: EndsAt): bool =
-  a.binding == CloudBound and reported != PastEnd and (kind == CreditsPlan implies reported == NoEnd)
-pure def refreshVerified(a: Admission, kind: VerifiedKind, reported: EndsAt): Admission = {
+pure def canRefreshVerified(a: Admission, credential: int, kind: VerifiedKind, reported: EndsAt): bool =
+  answersSignIn(a, credential) and a.binding == CloudBound and reported != PastEnd and (kind == CreditsPlan implies reported == NoEnd)
+pure def refreshVerified(a: Admission, credential: int, kind: VerifiedKind, reported: EndsAt): Admission = {
   val end = planWindowEnd(kind, reported, a.memoryEndsAt)
   { ...a, record: { present: true, credential: a.credential, age: FreshRecord, endsAt: end }, memoryEndsAt: end, lastWrittenEnd: end, writes: a.writes + 1 }
 }
@@ -110,28 +113,26 @@ no billing answer admits under one and writes nothing; anything else unbinds inf
 why. Plan ended removes the record.
 
 ```quint
-pure def canAdmitOffline(a: Admission): bool = a.credential != 0
-pure def admitOffline(a: Admission): AdmissionStep = {
+pure def canAdmitOffline(a: Admission, credential: int): bool = answersSignIn(a, credential)
+pure def admitOffline(a: Admission, credential: int): AdmissionStep = {
   val kept = recent(a.record, a.credential)
-  { state: { ...a, binding: if (kept) KeptOffline else Unbound, basis: if (kept) GraceBasis else NoBasis,
-      notice: OfflineNotice, memoryEndsAt: if (kept) a.record.endsAt else NoEnd, recheck: settledRecheck(a.recheck, a.credential) },
-    out: if (kept) List() else List(UnbindInference) }
+  told(if (kept) List() else List(UnbindInference), { ...a, binding: if (kept) KeptOffline else Unbound, basis: if (kept) GraceBasis else NoBasis,
+      notice: OfflineNotice, memoryEndsAt: if (kept) a.record.endsAt else NoEnd, recheck: settledRecheck(a.recheck, a.credential) })
 }
-pure def canAdmitBillingOutage(a: Admission): bool = a.credential != 0
-pure def admitBillingOutage(a: Admission): AdmissionStep = {
+pure def canAdmitBillingOutage(a: Admission, credential: int): bool = answersSignIn(a, credential)
+pure def admitBillingOutage(a: Admission, credential: int): AdmissionStep = {
   val admitted = recent(a.record, a.credential)
-  { state: { ...a, binding: if (admitted) CloudBound else Unbound, basis: if (admitted) GraceBasis else NoBasis,
+  told(if (admitted) List(BindInference) else List(UnbindInference), { ...a, binding: if (admitted) CloudBound else Unbound, basis: if (admitted) GraceBasis else NoBasis,
       notice: if (admitted) NoPlanNotice else NeedsPlanNotice,
-      memoryEndsAt: if (admitted) lastKnownEnd(a) else NoEnd, recheck: settledRecheck(a.recheck, a.credential) },
-    out: if (admitted) List(BindInference) else List(UnbindInference) }
+      memoryEndsAt: if (admitted) lastKnownEnd(a) else NoEnd, recheck: settledRecheck(a.recheck, a.credential) })
 }
-pure def canPlanEnded(a: Admission): bool = a.credential != 0
-pure def planEnded(a: Admission): AdmissionStep =
-  { state: { ...a, record: noRecord, memoryEndsAt: NoEnd, binding: Unbound, basis: NoBasis, notice: PlanEndedNotice,
-      recheck: settledRecheck(a.recheck, a.credential) }, out: List(UnbindInference) }
-pure def canNeedsPlan(a: Admission): bool = a.credential != 0
-pure def needsPlan(a: Admission): AdmissionStep =
-  { state: { ...a, binding: Unbound, basis: NoBasis, notice: NeedsPlanNotice, recheck: settledRecheck(a.recheck, a.credential) }, out: List(UnbindInference) }
+pure def canPlanEnded(a: Admission, credential: int): bool = answersSignIn(a, credential)
+pure def planEnded(a: Admission, credential: int): AdmissionStep =
+  told(List(UnbindInference), { ...a, record: noRecord, memoryEndsAt: NoEnd, binding: Unbound, basis: NoBasis, notice: PlanEndedNotice,
+      recheck: settledRecheck(a.recheck, a.credential) })
+pure def canNeedsPlan(a: Admission, credential: int): bool = answersSignIn(a, credential)
+pure def needsPlan(a: Admission, credential: int): AdmissionStep =
+  told(List(UnbindInference), { ...a, binding: Unbound, basis: NoBasis, notice: NeedsPlanNotice, recheck: settledRecheck(a.recheck, a.credential) })
 pure def canWindowPasses(a: Admission): bool = a.record.present and a.record.age == FreshRecord
 pure def windowPasses(a: Admission): Admission = { ...a, record: { ...a.record, age: OldRecord } }
 pure def passed(e: EndsAt): EndsAt = if (e == FutureEnd) PastEnd else e
@@ -161,14 +162,27 @@ pure def signIn(a: Admission, credential: int): AdmissionStep =
     out: List(ReadPlan) }
 pure def canSignOut(a: Admission): bool = a.credential != 0
 pure def signOut(a: Admission): AdmissionStep =
-  { state: { ...a, credential: 0, record: noRecord, memoryEndsAt: NoEnd, redeemed: false, redeemedEnd: NoEnd, binding: Unbound, basis: NoBasis,
-      notice: NoPlanNotice, recheck: { ...a.recheck, reading: false, lostFor: 0, paymentReturn: false } }, out: List(UnbindInference) }
-pure def canSignInRejected(a: Admission): bool = a.credential != 0
-pure def signInRejected(a: Admission): AdmissionStep =
-  { state: { ...a, record: noRecord, binding: Unbound, basis: NoBasis, notice: SignInNotice, memoryEndsAt: NoEnd, redeemed: false, redeemedEnd: NoEnd,
-      recheck: settledRecheck(a.recheck, a.credential) }, out: List(UnbindInference) }
+  told(List(UnbindInference), { ...a, credential: 0, record: noRecord, memoryEndsAt: NoEnd, redeemed: false, redeemedEnd: NoEnd, binding: Unbound, basis: NoBasis,
+      notice: NoPlanNotice, recheck: { ...a.recheck, reading: false, lostFor: 0, paymentReturn: false } })
+pure def canSignInRejected(a: Admission, credential: int): bool = answersSignIn(a, credential)
+pure def signInRejected(a: Admission, credential: int): AdmissionStep =
+  told(List(UnbindInference), { ...a, record: noRecord, binding: Unbound, basis: NoBasis, notice: SignInNotice, memoryEndsAt: NoEnd, redeemed: false, redeemedEnd: NoEnd,
+      recheck: settledRecheck(a.recheck, a.credential) })
 pure def alwaysSignedOutIsUnbound(a: Admission): bool = a.credential == 0 implies ((a.binding == NotBound or a.binding == Unbound) and a.basis == NoBasis and not(a.record.present))
 pure def sometimesSignOutRemovedTheRecord(a: Admission): bool = a.credential == 0 and a.writes >= 1 and not(a.record.present)
+```
+
+### An answer read for an earlier sign-in changes nothing
+
+Every plan answer names the sign-in it was read for. One that arrives after another sign-in
+replaced it is dropped, and is never taken as a refusal of the newer sign-in (P-43).
+
+```quint
+pure def stepOnlySignInAndSignOutChangeTheCredential(before: Admission, via: str, after: Admission): bool =
+  after.credential != before.credential implies (via == "signIn" or via == "signOut")
+pure def lawAnAnswerNeedsItsOwnSignIn(credential: int): bool =
+  answersSignIn({ ...initial, credential: 1 }, credential) iff credential == 1
+pure def sometimesReplacedBeforeItsAnswer(a: Admission): bool = a.credential == 2 and a.recheck.reading and a.writes == 0
 ```
 
 ### A redeemed code's end replaces the stored one for this sign-in
@@ -214,8 +228,8 @@ pure def requestCheck(a: Admission): AdmissionStep = {
 }
 pure def canPaymentPageOpened(a: Admission): bool = a.credential != 0
 pure def paymentPageOpened(a: Admission): Admission = { ...a, recheck: { ...a.recheck, paymentReturn: true } }
-pure def canCheckFailed(a: Admission): bool = a.recheck.reading
-pure def checkFailed(a: Admission): Admission = { ...a, recheck: settledRecheck(a.recheck, a.credential) }
+pure def canCheckFailed(a: Admission, credential: int): bool = a.recheck.reading and answersSignIn(a, credential)
+pure def checkFailed(a: Admission, credential: int): Admission = { ...a, recheck: settledRecheck(a.recheck, a.credential) }
 pure def stepThePlanIsReadOnlyByAdmissionAndRechecks(before: Admission, via: str, after: Admission, out: List[AdmissionEffect]): bool =
   out.includes(ReadPlan) implies (via == "requestCheck" or via == "signIn")
 pure def stepAnImmediateCheckIsEarned(before: Admission, via: str, after: Admission, out: List[AdmissionEffect]): bool =
@@ -232,4 +246,26 @@ pure def stepOnlyAnAdmittingPlanBindsInference(before: Admission, via: str, afte
   out.includes(BindInference) implies after.binding == CloudBound
 pure def stepUnbindingLeavesNoBinding(before: Admission, via: str, after: Admission, out: List[AdmissionEffect]): bool =
   out.includes(UnbindInference) implies after.binding == Unbound
+```
+
+### The phone's agent host alone confirms what its inference is
+
+A bind or a removal is reported only once the native host answers: removal is confirmed by
+reading the provider back as cleared. A removal the host cannot confirm is shown as unconfirmed,
+never as off, and the agent starts either way.
+
+```quint
+pure def canHostAnswered(a: Admission, removing: bool, ok: bool): bool =
+  (removing and a.host == HostRemoving) or (not(removing) and a.host == HostBinding)
+pure def hostAnswered(a: Admission, removing: bool, ok: bool): Admission =
+  { ...a, host: if (removing) (if (ok) HostRemoved else HostRemovalUnconfirmed) else (if (ok) HostBound else HostBindFailed) }
+pure def settledHost(h: HostInference): bool =
+  h == HostBound or h == HostBindFailed or h == HostRemoved or h == HostRemovalUnconfirmed
+pure def stepOnlyTheHostConfirms(before: Admission, via: str, after: Admission): bool =
+  (after.host != before.host and settledHost(after.host)) implies via == "hostAnswered"
+pure def stepAskingTheHostWaitsForItsAnswer(before: Admission, via: str, after: Admission, out: List[AdmissionEffect]): bool =
+  (out.includes(BindInference) implies after.host == HostBinding) and (out.includes(UnbindInference) implies after.host == HostRemoving)
+pure def alwaysAConfirmedRemovalLeavesNoBinding(a: Admission): bool = a.host == HostRemoved implies a.binding != CloudBound
+pure def sometimesRemovalUnconfirmed(a: Admission): bool = a.host == HostRemovalUnconfirmed and a.binding == Unbound
+pure def sometimesBindFailed(a: Admission): bool = a.host == HostBindFailed and a.binding == CloudBound
 ```

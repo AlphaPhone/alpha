@@ -1,6 +1,6 @@
 // spec/workflows/notices.md, "Story: Be told when a workflow waits for me, and only for my account"; spec/workflows/deviceSteps.md, "Story: Approve a phone step only as I reviewed it"
 import {
-  type WorkflowApproval, type WorkflowNoticeRoute, type WorkflowRun, revalidateWorkflowApprovalNotice, workflowApprovalNoticeIdentity,
+  type WorkflowApproval, type WorkflowNoticeRoute, type WorkflowPhoneReview, type WorkflowRun, revalidateWorkflowApprovalNotice, workflowApprovalNoticeIdentity,
   workflowApprovalProposalId, workflowNoticeReads,
 } from "@elizaos/plugin-workflow/client"
 import { type NoticeRoute, Machine as NoticesMachine, stored as noticesStored } from "../../gen/workflows__notices.effect.vibe"
@@ -22,6 +22,8 @@ const plugin = "AlphaHostedResults"
 export interface StepReview {
   readonly run: WorkflowRun
   readonly approval: WorkflowApproval
+  /** The run's reviewed phone specification and Calendar anchor, where the agent gives one. */
+  readonly phone?: WorkflowPhoneReview
 }
 
 /** One redacted notice per waiting phone step, for the current owner only. */
@@ -32,7 +34,7 @@ export service ApprovalNotices {
   bind(): void!!
 }
 
-/** The open run's phone step: reviewed, decided twice, and acted on at most once. */
+/** The open run's phone step: reviewed and decided twice; the agent performs an approved step once through its enrolled phone bridge. */
 export service PhoneSteps {
   /** Read the run's pending phone step and show it; undefined when none waits. */
   review(runId: string, workflowId: string): StepReview | undefined!!
@@ -98,11 +100,11 @@ export const approvalNotices = Layer.provideMerge(Layer.effect(ApprovalNotices, 
           if (posted.state === "NoticeSuspended") {
             const verdict = try (revalidateWorkflowApprovalNotice({ ...identity, expiresAt: posted.expiresAt, route }, reads, () => true) catch () => "withdraw")
             if (verdict === "stale") continue
-            held.send({ type: "rechecked", runId: posted.route.runId, step: posted.route.step, stillPending: verdict === "resume" }) catch () => undefined
+            held.send({ type: "rechecked", runId: posted.route.runId, stepId: posted.route.step, stillPending: verdict === "resume" }) catch () => undefined
             if (verdict === "resume") native.invoke(plugin, "resumeWorkflowApprovalNotice", { ...identity, expiresAt: posted.expiresAt, route }) catch () => undefined
             else native.invoke(plugin, "withdrawWorkflowApprovalNotice", { id: identity.id }) catch () => undefined
           } else if (!steps.some((s) => s.run.id === posted.route.runId && workflowApprovalProposalId(s.approval) === posted.route.step)) {
-            held.send({ type: "stepSettled", runId: posted.route.runId, step: posted.route.step }) catch () => undefined
+            held.send({ type: "stepSettled", runId: posted.route.runId, stepId: posted.route.step }) catch () => undefined
             native.invoke(plugin, "withdrawWorkflowApprovalNotice", { id: identity.id }) catch () => undefined
           }
         }
@@ -115,7 +117,7 @@ export const approvalNotices = Layer.provideMerge(Layer.effect(ApprovalNotices, 
           if (added === undefined) continue
           const identity = try workflowApprovalNoticeIdentity(route, step)
           const reply = try (effect { return try Schema.decodeUnknownEffect(NoticePosted)(try native.invoke(plugin, "postWorkflowApprovalNotice", { ...identity, expiresAt, route })) } catch () => undefined)
-          if (reply !== undefined && reply.status === "failed") held.send({ type: "stepSettled", runId: run.id, step }) catch () => undefined
+          if (reply !== undefined && reply.status === "failed") held.send({ type: "stepSettled", runId: run.id, stepId: step }) catch () => undefined
         }
       }
     },
@@ -125,13 +127,13 @@ export const approvalNotices = Layer.provideMerge(Layer.effect(ApprovalNotices, 
 export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
   const held = try StepsMachine
   const agent = try WorkflowApi
-  const native = try Native
   const client = agent.workflow
   const current = try Ref.make<StepReview | undefined>(undefined)
 
   effect function readStep(run: WorkflowRun) {
     const receipt = try client.approvals(run)
-    return { receipt, approval: receipt?.approvals.find((a) => a.status === "pending" && a.supported) }
+    const phone = try (client.phoneReview(run) catch () => undefined)
+    return { receipt, phone, approval: receipt?.approvals.find((a) => a.status === "pending" && a.supported) }
   }
 
   effect function advance() {
@@ -141,9 +143,11 @@ export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
     const id = workflowApprovalProposalId(review.approval)
     if (state.inflight === "ReadingReview") {
       const fresh = try (readStep(review.run) catch () => undefined)
-      if (fresh === undefined || fresh.receipt === null || fresh.receipt.finished || fresh.receipt.cancellationRequested) held.send({ type: "cancelRun" }) catch () => undefined
+      if (fresh === undefined || fresh.receipt === null || fresh.receipt.finished || fresh.receipt.cancellationRequested || fresh.phone?.finished === true
+        || (fresh.phone !== undefined && fresh.phone.cancellationRequestedAt !== null)) held.send({ type: "cancelRun" }) catch () => undefined
       else if (fresh.approval === undefined || workflowApprovalProposalId(fresh.approval) !== id) held.send({ type: "expire" }) catch () => undefined
-      else if (fresh.approval.requestDigest !== review.approval.requestDigest) held.send({ type: "changeDigest" }) catch () => undefined
+      else if (fresh.approval.requestDigest !== review.approval.requestDigest || fresh.phone?.specDigest !== review.phone?.specDigest) held.send({ type: "changeDigest" }) catch () => undefined
+      else if (fresh.phone?.calendarAnchorAt !== review.phone?.calendarAnchorAt) held.send({ type: "changeAnchor" }) catch () => undefined
       held.send({ type: "readReview" }) catch () => undefined
       return try advance()
     }
@@ -157,20 +161,13 @@ export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
       return try advance()
     }
     if (state.inflight === "Executing") {
-      const done = try (effect {
-        return try native.invoke("AlphaDeviceActions", "executeWorkflowStep", {
-          runId: review.run.id, workflowId: review.run.workflowId, versionId: review.run.versionId, proposalId: id,
-          requestDigest: review.approval.requestDigest, operation: review.approval.operation, target: review.approval.target,
-        })
-      } catch () => undefined)
       held.send({ type: "execute" }) catch () => undefined
-      const after = try held.get()
-      const reported = try (effect {
-        try native.invoke("AlphaDeviceActions", "reportWorkflowStep", { runId: review.run.id, proposalId: id, requestDigest: review.approval.requestDigest,
-          reported: after.journal === "JournalApplied" && done !== undefined ? "applied" : "unknown" })
-        return true
+      const settled = try (effect {
+        const run = try client.receipt(review.run.id, review.run.workflowId)
+        const receipt = run.finished ? undefined : try client.approvals(run)
+        return run.finished || receipt?.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === "approved") === true
       } catch () => false)
-      if (reported) held.send({ type: "receiptSent" }) catch () => undefined
+      if (settled) held.send({ type: "receiptSent" }) catch () => undefined
       else held.send({ type: "receiptLost" }) catch () => undefined
       return
     }
@@ -186,7 +183,7 @@ export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
         return undefined
       }
       const before = try Ref.get(current)
-      const next = { run, approval: read.approval }
+      const next: StepReview = read.phone === undefined ? { run, approval: read.approval } : { run, approval: read.approval, phone: read.phone }
       if (before === undefined || before.run.id !== runId || workflowApprovalProposalId(before.approval) !== workflowApprovalProposalId(read.approval)) {
         held.send({ type: "beginStep" }) catch () => undefined
       }

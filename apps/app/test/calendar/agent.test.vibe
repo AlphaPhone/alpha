@@ -1,0 +1,76 @@
+// spec/calendar/agent.md, "Story: Return to the event I left Calendar from"; spec/calendar/approvals.md, "Story: Read where a Calendar request stands"; spec/calendar/preservation.md, "Story: Keep my old app calendar, read only, for each account that chose to"; spec/calendar/preservation.md, "Story: Know whether my saved calendar is safe before the agent's Calendar starts"
+import { describe, it } from "@effect/vitest"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { AgentCalendar } from "../../src/calendar/agent.vibe"
+import { approvalPresentation } from "../../src/calendar/approvalFields.vibe"
+import { bindCalendar, readCalendar } from "../../src/calendar/binding.vibe"
+import type { ApprovalRecord } from "../../src/calendar/feed.schema.vibe"
+import { agentEventKey } from "../../src/calendar/model.vibe"
+import { LEGACY_KEY, LegacyCalendar, classify } from "../../src/calendar/preservation.vibe"
+import { binding, calendarOver, otherBinding, same } from "./harness.vibe"
+import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
+
+const schedule: ApprovalRecord = {
+  id: "0f0f0f0f-1111-4222-8333-444455556666", state: "pending", action: "schedule_event", reason: "Add lunch", expiresAt: null,
+  payload: { action: "schedule_event", side: "owner", calendarId: "primary", title: "Lunch", startsAtMs: 1_800_000_000_000, endsAtMs: 1_800_003_600_000,
+    attendees: [], location: "", description: "", notifyAttendees: false },
+}
+
+describe("The agent's Calendar (spec/calendar/agent.md, spec/calendar/approvals.md, spec/calendar/preservation.md)", () => {
+  it.effect("an event comes back only unchanged, for the same account (spec/calendar/agent.md, \"Story: Return to the event I left Calendar from\")", () => effect {
+    const agent = new CalendarAgentFake()
+    agent.add("event-a", "Dentist", 1, 10)
+    provide calendarOver(agent, new DeviceCalendarFake()) {
+      try bindCalendar(binding)
+      try readCalendar(false, false)
+      const calendar = try AgentCalendar
+      const event = (try calendar.view()).feed!.events[0]!
+      const begin = Date.parse(event.startAt)
+      const found = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin)
+      const moved = try calendar.verifyReturn(agentEventKey(event), "etag-2", begin)
+      try bindCalendar(otherBinding)
+      const foreign = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin)
+      try same([found, moved, foreign === "ReturnFound"], ["ReturnFound", "ReturnMissing", false])
+    }
+  })
+
+  it.effect("a change whose target is not verified is shown but never complete (spec/calendar/approvals.md, \"Story: Read where a Calendar request stands\")", () => effect {
+    // spec/calendar/approvals.md, "A request is complete only with its known fields, a verified current target and a valid time"
+    const created = approvalPresentation(schedule, { verified: false }, "UTC")
+    const modify: ApprovalRecord = { ...schedule, action: "modify_event", payload: { action: "modify_event", side: "owner", calendarId: "primary", eventId: "event-a",
+      expectedProviderVersion: "etag-1", patch: { title: "Lunch later" }, notifyAttendees: false } }
+    const unverified = approvalPresentation(modify, { verified: false }, "UTC")
+    const unknownField = approvalPresentation({ ...schedule, payload: { ...schedule.payload, secret: "x" } }, { verified: true }, "UTC")
+    try same([created.complete, created.fields.length > 0, unverified.complete, unknownField.complete], [true, true, false, false])
+  })
+
+  it.effect("each account keeps the old calendar read only only for itself (spec/calendar/preservation.md, \"Story: Keep my old app calendar, read only, for each account that chose to\")", () => effect {
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      try (try KeyValueStore.KeyValueStore).set(LEGACY_KEY, JSON.stringify({ events: [] }))
+      const legacy = try LegacyCalendar
+      try legacy.bind("owner-1", 1)
+      try legacy.capture()
+      try legacy.openReview()
+      try legacy.confirmReadOnly()
+      const kept = try legacy.retainedReadOnly()
+      try legacy.bind("owner-2", 2)
+      const other = try legacy.retainedReadOnly()
+      try same([kept, other], [true, false])
+    }
+  })
+
+  it.effect("an unreadable or unsettled saved calendar needs recovery; a readable one needs the keep review (spec/calendar/preservation.md, \"Story: Know whether my saved calendar is safe before the agent's Calendar starts\")", () => effect {
+    try same([classify("{").readable, classify(JSON.stringify({ events: [], creations: { a: { acknowledged: false } } })).pending, classify(undefined).present], [false, true, false])
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const store = try KeyValueStore.KeyValueStore
+      const legacy = try LegacyCalendar
+      try legacy.bind("owner-1", 1)
+      const nothing = try legacy.standing()
+      try store.set(LEGACY_KEY, JSON.stringify({ events: [] }))
+      const review = try legacy.standing()
+      try store.set(LEGACY_KEY, "{")
+      const broken = try legacy.standing()
+      try same([nothing, review, broken], ["NothingSaved", "SavedNeedsKeepReview", "SavedNeedsRecovery"])
+    }
+  })
+})

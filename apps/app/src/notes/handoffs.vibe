@@ -1,0 +1,15 @@
+// spec/notes/collection.md, "Story: Save a scanned page or a reviewed summary as one note"; spec/notes/collection.md, "Reviewed text becomes one note under its own creation identity"
+import type { CameraHandoffs } from "../camera/ports.vibe"
+import { NotesEditor } from "./editor.vibe"
+
+/** Notes' side of Camera's handoffs, for the shell to merge into `CameraHandoffs`: reviewed scanned text becomes one note, true only once it is committed. */
+export effect function scannedNoteHandoff() {
+  const editor = try NotesEditor
+  const handoff: Pick<CameraHandoffs.Shape, "saveScannedNote"> = {
+    effect saveScannedNote(text: string, id: string) {
+      const created = try (editor.createFromText(text, id) catch () => undefined)
+      return created !== undefined
+    },
+  }
+  return handoff
+}

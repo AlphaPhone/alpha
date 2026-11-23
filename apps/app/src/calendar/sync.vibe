@@ -3,12 +3,13 @@ import { type SyncControl, type Event as ControlEvent, type ControlKind, type Pr
 import { type GoogleLink, type Event as LinkEvent, type GoogleGrant, type LinksReply as LinkLinksReply, Machine as LinkMachine } from "../../gen/calendar__googleLink.effect.vibe"
 import { type NativeSync, type Event as NativeEvent, Machine as NativeMachine } from "../../gen/calendar__nativeSync.effect.vibe"
 import { type Disconnect, type Event as DisconnectEvent, type CleanupReview, Machine as DisconnectMachine } from "../../gen/calendar__disconnect.effect.vibe"
-import { calendarSyncReportMessage, controlOperationKey } from "@elizaos/plugin-calendar/linked-sync"
+import { type LinkedCalendarMapping, calendarSyncReportMessage, controlOperationKey } from "@elizaos/plugin-calendar/linked-sync"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { AgentCalendar, type AgentBinding } from "./agent.vibe"
-import type { LinkedCalendarControlView, LinkedCalendarMapping } from "@elizaos/plugin-calendar/client"
+import type { LinkedCalendarControlView } from "@elizaos/plugin-calendar/client"
 import { residentClients } from "./client.vibe"
+import { decodeSync } from "./device.schema.vibe"
 import { LegacyCalendar } from "./preservation.vibe"
 
 /** Everything the sync sheet shows. */
@@ -142,7 +143,8 @@ export const syncLayer = Layer.effect(CalendarSync, effect {
   }
 
   effect function syncCall(kind: string, args: Record<string, unknown> = {}) {
-    return effect { return try native.invoke("AlphaCalendar", "sync", { kind, ...args }) as { status?: string } } catch () => ({ status: "unavailable" })
+    const answer = effect { return try decodeSync(try native.invoke("AlphaCalendar", "sync", { kind, ...args })) } catch () => undefined
+    return { status: answer?.status ?? "unavailable" }
   }
 
   return {

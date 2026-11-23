@@ -2,6 +2,7 @@
 import { Toggle } from "../components/ui/index.ts";
 import { DAY_NAMES } from "./text.ts";
 
+/** The repeat days chosen, and what a change of them reports. */
 export type DayPickerProps = {
   /** The chosen days, Sunday as 1 to Saturday as 7; none is a one-time alarm. */
   days: readonly number[];

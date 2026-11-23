@@ -2,6 +2,7 @@
 import type { RecoveryPhase } from "../../../gen/clock__notices.ts";
 import { Button, Dialog, DialogContent, DialogTitle } from "../components/ui/index.ts";
 
+/** The store whose data was kept, the developer's recovery in a test-mocks build, and the owner's answers. */
 export type RetainedDataNoticeProps = {
   /** What could not be read, such as "Reminders". */
   heading: string;

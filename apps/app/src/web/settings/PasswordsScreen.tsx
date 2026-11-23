@@ -20,6 +20,7 @@ export interface VaultActs {
   readonly refresh: () => void;
 }
 
+/** The vault as the page holds it, what the owner can do, and leaving the page. */
 export interface PasswordsScreenProps { readonly vault: Vault; readonly acts: VaultActs; readonly onClose: () => void }
 
 /**

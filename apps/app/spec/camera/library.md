@@ -34,7 +34,7 @@ type Catalog = {
 }
 pure val emptyWindow: Listing = { rows: List(), loaded: false, loading: false, again: false, token: 0, paging: false, continueAt: "", failed: false }
 pure val initial: Catalog = {
-  hidden: false, active: true, disposed: false, epoch: 0, trashEpoch: 0, scope: AccessUnknown, read: ReadIdle,
+  hidden: false, active: true, disposed: false, epoch: 0, trashEpoch: 0, scope: ScopeUnknown, read: ReadIdle,
   pending: List(), cursor: "", want: 0, main: emptyWindow, trash: emptyWindow
 }
 pure val windowLimit = 600

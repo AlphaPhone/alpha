@@ -1,37 +1,46 @@
-// spec/telephony/undo.md, "A deletion is queued once for its window, and Undo is offered only until the window ends"
-import { useEffect } from "react";
-import { useMachine } from "../../../gen/telephony__undo.react.ts";
-import { initial, type Undo } from "../../../gen/telephony__undo.ts";
+// spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/contacts.md, "A removal needs the owner's confirmation of the contact read whole, at its version"
+import { Effect, Stream } from "effect";
+import { useCallback, useSyncExternalStore } from "react";
 import { ContactsView } from "../../telephony/contacts.vibe";
 import { MessagesView } from "../../telephony/messages.vibe";
-import { DeletionUndo } from "../../telephony/undo.vibe";
+import { DeletionUndo, type UndoView } from "../../telephony/undo.vibe";
 import { VoicemailView } from "../../telephony/voicemail.vibe";
-import { Button } from "../components/ui/index.ts";
+import { UndoNoticeView } from "./UndoNoticeView.tsx";
 import { runtime, type TelephonyRuntime } from "./runtime.ts";
 
-const WORDS = { MessageDeletion: "Message deleted", VoicemailDeletion: "Voicemail deleted", ContactDeletion: "Contact deleted" } as const;
+const empty: UndoView = { notices: [], said: "" };
 
-export interface UndoNoticeViewProps {
-  /** The deletions waiting in their window. */
-  undo: Undo;
-  /** Undo one while its window lasts. */
-  onUndo: (token: string) => void;
-}
+type Store = { get: () => UndoView; subscribe: (notify: () => void) => () => void };
+const stores = new WeakMap<object, Store>();
 
-/**
- * The newest deletion still in its window, with Undo; or that Undo came too late.
- * @model spec/telephony/undo.md
- * @design design.md
- */
-export function UndoNoticeView({ undo, onUndo }: UndoNoticeViewProps) {
-  const latest = undo.queued.at(-1);
-  if (!latest) return undo.tooLate ? <p role="status" className="rounded-md bg-card px-4 py-2 text-sm">Undo was too late. The deletion already went ahead.</p> : null;
-  return (
-    <div role="status" className="flex items-center gap-3 rounded-md bg-card px-4 py-2 text-card-foreground shadow-md">
-      <span className="flex-1 text-sm">{WORDS[latest.kind]}</span>
-      <Button variant="ghost" size="sm" onClick={() => onUndo(latest.token)}>Undo</Button>
-    </div>
-  );
+function storeOf(on: TelephonyRuntime): Store {
+  const known = stores.get(on);
+  if (known) return known;
+  let seen = empty;
+  const listeners = new Set<() => void>();
+  let stop: (() => void) | undefined;
+  const made: Store = {
+    get: () => seen,
+    subscribe: (notify) => {
+      listeners.add(notify);
+      if (stop === undefined) {
+        const fiber = on.runFork(DeletionUndo.use((u) => Stream.runForEach(u.changes, (next) => Effect.sync(() => {
+          seen = next;
+          for (const listener of listeners) listener();
+        }))));
+        stop = () => fiber.interruptUnsafe();
+      }
+      return () => {
+        listeners.delete(notify);
+        if (listeners.size === 0) {
+          stop?.();
+          stop = undefined;
+        }
+      };
+    },
+  };
+  stores.set(on, made);
+  return made;
 }
 
 export interface UndoNoticeProps {
@@ -40,25 +49,29 @@ export interface UndoNoticeProps {
 }
 
 /**
- * The notices surface for telephony deletions; an undone deletion reads its list again.
- * @model spec/telephony/undo.md
+ * The notices surface for telephony deletions; a kept deletion reads its list again.
  */
 export function UndoNotice({ runtime: on = runtime }: UndoNoticeProps) {
-  const { state = initial } = useMachine(on);
-  useEffect(() => {
-    const ticking = on.runFork(DeletionUndo.use((u) => u.run()));
-    return () => ticking.interruptUnsafe();
+  const store = storeOf(on);
+  const undo = useSyncExternalStore(store.subscribe, store.get, store.get);
+  const watch = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    const watching = on.runFork(DeletionUndo.use((u) => u.run()));
+    return () => watching.interruptUnsafe();
   }, [on]);
   return (
-    <UndoNoticeView
-      undo={state}
-      onUndo={async (token) => {
-        const kind = state.queued.find((q) => q.token === token)?.kind;
-        if (!(await on.runPromise(DeletionUndo.use((u) => u.undo(token))))) return;
-        if (kind === "MessageDeletion") on.runFork(MessagesView.use((v) => v.refresh(false)));
-        else if (kind === "VoicemailDeletion") on.runFork(VoicemailView.use((v) => v.refresh()));
-        else on.runFork(ContactsView.use((v) => v.read("", true)));
-      }}
-    />
+    <div ref={watch} className="contents">
+      <UndoNoticeView
+        undo={undo}
+        onUndo={async (key) => {
+          const answer = await on.runPromise(DeletionUndo.use((u) => u.undo(key)));
+          if (!answer.kept) return;
+          if (answer.kind === "message" || answer.kind === "thread") on.runFork(MessagesView.use((v) => v.refresh(false)));
+          else if (answer.kind === "voicemail") on.runFork(VoicemailView.use((v) => v.refresh()));
+          else on.runFork(ContactsView.use((v) => v.read("", true)));
+        }}
+        onDismiss={(key) => on.runFork(DeletionUndo.use((u) => u.dismiss(key)))}
+      />
+    </div>
   );
 }

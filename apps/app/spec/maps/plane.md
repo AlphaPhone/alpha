@@ -83,6 +83,20 @@ pure def stepOnlyTheCurrentPlaneReports(before: MapPlane, via: str, after: MapPl
 pure def sometimesRetriedAndReady(s: MapPlane): bool = s.retries >= 1 and s.state == PlaneReady
 ```
 
+### The compass shows only while the map is turned or tilted and guidance is not following, and puts north up
+
+Bearing and pitch are whole degrees, measured as the map turns. Tapping the
+compass turns the map north up and flat, and focus moves to the map.
+
+```quint
+pure def turned(bearing: int, pitch: int): bool = bearing >= 1 or bearing <= -1 or pitch >= 1
+pure def compassShown(bearing: int, pitch: int, following: bool): bool = turned(bearing, pitch) and not(following)
+pure val bearingValues = Set(-90, -1, 0, 1, 90)
+pure val pitchValues = Set(0, 1, 30)
+pure def lawANorthUpMapHasNoCompass(following: bool): bool = not(compassShown(0, 0, following))
+pure def lawFollowingHidesTheCompass(bearing: int, pitch: int): bool = not(compassShown(bearing, pitch, true))
+```
+
 ## Story: Show the right copyright for the map I am looking at
 
 > As the owner, I want the credits on the map to belong to the area I look

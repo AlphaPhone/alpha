@@ -253,9 +253,14 @@ pure val onValues = Set(true, false)
 
 The review shows the host and the full address, and warns when the text of the link names another
 host. A link with credentials, or not over HTTPS, is refused. A review left over from another
-opening, account or Cloud session cannot open anything.
+opening, account or Cloud session cannot open anything. A tapped link inside formatted mail opens
+the same review instead of navigating. The links a message names outside its text are listed under
+a plain message, and under one collapsed Other links row beside formatted mail, never repeating a
+link the formatted text already shows.
 
 ```quint
+pure def listedApart(formatted: bool, inline: bool): bool = not(formatted and inline)
+pure def lawAnInlineLinkIsNotListedTwice(inline: bool): bool = inline implies not(listedApart(true, inline))
 pure def linkOpens(https: bool, credentials: bool, confirmed: bool, sameOpening: bool): bool = https and not(credentials) and confirmed and sameOpening
 pure def lawAnUnreviewedLinkNeverOpens(https: bool, credentials: bool, sameOpening: bool): bool = not(linkOpens(https, credentials, false, sameOpening))
 pure def lawALinkFromAnotherOpeningNeverOpens(https: bool, credentials: bool, confirmed: bool): bool = not(linkOpens(https, credentials, confirmed, false))

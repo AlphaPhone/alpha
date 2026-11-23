@@ -1,0 +1,486 @@
+// spec/shell/navigation.md, "Story: Open an app and find it where I left it"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/navigation.md, "Story: Use the library and arrange Home"; spec/shell/navigation.md, "Story: Keep the assistant within reach"; spec/shell/navigation.md, "Story: Keep sheets and dialogs above the phone"; spec/shell/navigation.md, "Story: Let the agent switch my screen only while I am still looking"; spec/shell/navigation.md, "Story: Leave an app Alpha may no longer show"; spec/shell/gestures.md, "Story: Arrange Home with my fingers"; spec/shell/gestures.md, "Story: Swipe the way the phone expects"; spec/shell/shade.md, "Story: Pull down for my notifications"; spec/shell/haptics.md, "Story: Feel the changes I make"; spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/shell/recovery.md, "Story: Get my phone back when something breaks"; spec/shell/overview.md, "Story: See my day on Home"; spec/shell/focus.md, "Story: Keep my place when the screen changes under me"; spec/shell/geometry.md, "Story: Type without the page turning sideways"; spec/shell/geometry.md, "Story: Read everything at the text size I chose"; spec/shell/inventory.md, "Story: See the apps installed now"; spec/shell/appInfo.md, "Story: Check an app's details in Android"; spec/shell/handoffs.md, "Story: Carry what I asked for in Notes into the app that does it"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import type { InstalledApp } from "@elizaos/os/bridges/system"
+import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
+import { Machine as ShadeMachine } from "../../gen/shell__shade.effect.vibe"
+import { Machine as HapticsMachine } from "../../gen/shell__haptics.effect.vibe"
+import { Machine as PermissionsMachine, stepCount, skippable } from "../../gen/shell__permissions.effect.vibe"
+import { Machine as RecoveryMachine } from "../../gen/shell__recovery.effect.vibe"
+import { Machine as OverviewMachine, agenda, dateLine } from "../../gen/shell__overview.effect.vibe"
+import { Machine as FocusMachine } from "../../gen/shell__focus.effect.vibe"
+import { Machine as GeometryMachine, largeText } from "../../gen/shell__geometry.effect.vibe"
+import { Machine as InventoryMachine } from "../../gen/shell__inventory.effect.vibe"
+import { Machine as AppInfoMachine } from "../../gen/shell__appInfo.effect.vibe"
+import { Machine as ToastsMachine } from "../../gen/shell__toasts.effect.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { Composer } from "../../src/inbox/composer.vibe"
+import { NotesHandoff } from "../../src/notes/origins.vibe"
+import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { CrashJournal } from "../../src/platform/crash-journal.vibe"
+import { handoffsLive, layer as shell, operationPorts } from "../../src/shell/layer.vibe"
+import { Focus } from "../../src/shell/focus.vibe"
+import { Haptics } from "../../src/shell/haptics.vibe"
+import { Launcher, appInfoText, homeKeys, libraryKeys } from "../../src/shell/launcher.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { Overview } from "../../src/shell/overview.vibe"
+import { LEGACY_MEMORY_KEY, LEGACY_PROGRESS_KEY, Permissions, WALKTHROUGH_HOLD, legacyProgress } from "../../src/shell/permissions.vibe"
+import { Recovery } from "../../src/shell/recovery.vibe"
+import { Shade } from "../../src/shell/shade.vibe"
+
+let recorded: string[] = []
+const journal = Layer.succeed(CrashJournal, {
+  record: (kind: string) => sync(() => { recorded = [...recorded, kind] }),
+  recordInference: () => succeed(undefined),
+  read: () => succeed({ entries: [], exitHistory: false }),
+  clear: () => succeed(undefined),
+})
+const resident = fakeResident({ "GET /api/automations": { automations: [] } })
+
+let notificationsGranted = false
+let haptics: string[] = []
+let shadeAsks = 0
+const device = fakeNative({
+  AlphaDevice: {
+    haptic: (args: unknown) => { haptics = [...haptics, String((args as { kind?: unknown }).kind)]; return {} },
+    openNotificationShade: () => { shadeAsks = shadeAsks + 1; return { status: "opened" } },
+    openSettings: () => ({}),
+    recommendedTimeout: () => ({ timeoutMs: 10000 }),
+  },
+  AlphaNotifications: { status: () => ({ permissionGranted: notificationsGranted, appEnabled: true }) },
+  DailyApps: {
+    requestPermissions: () => { notificationsGranted = true; return {} },
+    checkPermissions: () => ({ camera: "prompt" }),
+  },
+  AlphaVoiceCloud: { checkPermissions: () => ({ microphone: "granted" }), requestPermissions: () => ({}) },
+  ElizaLocation: { checkPermissions: () => ({ location: "prompt" }), requestPermissions: () => ({}) },
+  AlphaCalendar: { checkPermissions: () => ({ calendar: "prompt" }), requestAccess: () => ({}) },
+  AlphaPhotoLibrary: { scope: () => ({ scope: "denied", locked: false }), requestAccess: () => ({}) },
+  AlphaFiles: { storageState: () => ({ access: "denied" }), storageRequestAccess: () => ({}) },
+  DeviceApps: { platformCapabilities: () => ({ startupPermissionDefaults: false }), openHomeChooser: () => ({}) },
+})
+const onDevice = Layer.mergeAll(device, buildInfo({ variant: "launcher" }), resident, journal)
+const inBrowser = Layer.mergeAll(fakeNative({}), buildInfo({ variant: "browser" }), resident, journal)
+
+const clockApp = { packageName: "org.fixture.clock", activityName: "org.fixture.clock.Main", label: "Clock" } as InstalledApp
+const mapsApp = { packageName: "org.fixture.maps", activityName: "org.fixture.maps.Main", label: "Maps Plus" } as InstalledApp
+
+describe("Navigation (spec/shell/navigation.md, \"Story: Go back one step at a time\")", () => {
+  it.effect("an app opened from elsewhere starts on its first page (spec/shell/navigation.md, \"Story: Open an app and find it where I left it\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        try navigation.open("notes", "note-1")
+        try navigation.send({ type: "openInner" })
+        try navigation.send({ type: "setRoute", route: "note-2" })
+        try navigation.home()
+        try navigation.open("notes", "note-3")
+        const reopened = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual(reopened.places.find((p) => p.app === "notes"), { app: "notes", route: "note-3", inner: false }))
+      }
+    }
+  })
+
+  it.effect("Back closes the topmost layer before the app under it (spec/shell/navigation.md, \"Story: Go back one step at a time\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        try navigation.open("calendar")
+        try navigation.openLayer("event-sheet", "SheetLayer", true)
+        try navigation.back()
+        const first = try machine.get()
+        try navigation.back()
+        const second = try machine.get()
+        try navigation.back()
+        const third = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual(
+          [first.closed, first.app, second.closed, second.app, third.outcome],
+          ["ClosedLayer", "calendar", "ClosedApp", "", "Finished"],
+        ))
+      }
+    }
+  })
+
+  it.effect("the library opens only over Home and closes with its search (spec/shell/navigation.md, \"Story: Use the library and arrange Home\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const launcher = try Launcher
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        try launcher.openLibrary()
+        try launcher.search("cl")
+        const searching = try machine.get()
+        try navigation.back()
+        const closed = try machine.get()
+        try navigation.open("notes")
+        try launcher.openLibrary()
+        const overApp = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual(
+          [searching.library, searching.query, closed.library, closed.query, overApp.library],
+          [true, "cl", false, "", false],
+        ))
+      }
+    }
+  })
+
+  it.effect("Home keeps its bar and Back lowers the conversation a step at a time (spec/shell/navigation.md, \"Story: Keep the assistant within reach\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        try navigation.moveChat("ChatHidden")
+        const hidden = (try machine.get()).chat
+        try navigation.moveChat("ChatFull")
+        try navigation.back()
+        const half = (try machine.get()).chat
+        try navigation.back()
+        const rest = (try machine.get()).chat
+        try Effect.try(() => assert.deepStrictEqual([hidden, half, rest], ["ChatInput", "ChatSheet", "ChatInput"]))
+      }
+    }
+  })
+
+  it.effect("a held phone takes Back and opens nothing until the last holder releases (spec/shell/navigation.md, \"Story: Keep sheets and dialogs above the phone\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        try navigation.send({ type: "hold", id: "update" })
+        try navigation.send({ type: "hold", id: "recovery" })
+        const opened = try navigation.open("notes")
+        try navigation.back()
+        const held = try machine.get()
+        try navigation.send({ type: "release", id: "update" })
+        const stillHeld = try navigation.open("notes")
+        try navigation.send({ type: "release", id: "recovery" })
+        const free = try navigation.open("notes")
+        try Effect.try(() => assert.deepStrictEqual([opened, held.outcome, held.closed, stillHeld, free], [false, "RendererBack", "ClosedNothing", false, true]))
+      }
+    }
+  })
+
+  it.effect("the agent's switch lands only on the screen it saw (spec/shell/navigation.md, \"Story: Let the agent switch my screen only while I am still looking\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        const switched = try navigation.switchForAgent("calendar", "event-1")
+        const after = try machine.get()
+        try navigation.send({ type: "captureClaim" })
+        try navigation.open("notes")
+        const stale = try navigation.send({ type: "claimView", app: "files" })
+        try Effect.try(() => assert.deepStrictEqual([switched, after.app, after.claim, after.stack, stale], [true, "calendar", "ClaimDelivered", [], false]))
+      }
+    }
+  })
+
+  it.effect("a withdrawn app goes Home and leaves the history (spec/shell/navigation.md, \"Story: Leave an app Alpha may no longer show\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const navigation = try Navigation
+        const machine = try NavigationMachine
+        try navigation.open("files")
+        try navigation.open("notes")
+        const admitted = (try machine.get()).admitted.filter((app) => app !== "notes" && app !== "files")
+        try navigation.send({ type: "refreshAdmission", admitted })
+        const left = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([left.app, left.stack], ["", []]))
+      }
+    }
+  })
+})
+
+describe("Launcher (spec/shell/gestures.md, \"Story: Arrange Home with my fingers\")", () => {
+  it.effect("a long press on Home starts editing and plays one long-press haptic (spec/shell/gestures.md, \"Story: Arrange Home with my fingers\")", () => effect {
+    haptics = []
+    provide memoryStore, onDevice {
+      provide shell {
+        const launcher = try Launcher
+        const machine = try NavigationMachine
+        try launcher.context("alpha:notes")
+        const editing = (try machine.get()).editing
+        try launcher.finishEditing()
+        try Effect.try(() => assert.deepStrictEqual([editing, (try machine.get()).editing, haptics], [true, false, ["long-press"]]))
+      }
+    }
+  })
+
+  it.effect("the pull reaches Android's shade only from Home (spec/shell/gestures.md, \"Story: Swipe the way the phone expects\")", () => effect {
+    shadeAsks = 0
+    provide memoryStore, onDevice {
+      provide shell {
+        const shade = try Shade
+        const navigation = try Navigation
+        try TestClock.adjust("1 millis")
+        try navigation.open("notes")
+        try TestClock.adjust("1 millis")
+        try shade.pull()
+        try TestClock.adjust("1 millis")
+        try Effect.try(() => assert.strictEqual(shadeAsks, 0))
+      }
+    }
+  })
+
+  it.effect("Android's shade answer settles its own request (spec/shell/shade.md, \"Story: Pull down for my notifications\")", () => effect {
+    shadeAsks = 0
+    provide memoryStore, onDevice {
+      provide shell {
+        const shade = try Shade
+        const machine = try ShadeMachine
+        try TestClock.adjust("1 millis")
+        try shade.pull()
+        try TestClock.adjust("10 millis")
+        const answered = try machine.get()
+        try TestClock.adjust("6 seconds")
+        const later = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([shadeAsks, answered.opened, answered.asking, later.late, later.fallback], [1, 1, false, 0, "NoFallback"]))
+      }
+    }
+  })
+
+  it.effect("one gesture plays once even when two paths report it (spec/shell/haptics.md, \"Story: Feel the changes I make\")", () => effect {
+    haptics = []
+    provide memoryStore, onDevice {
+      provide shell {
+        const feedback = try Haptics
+        const machine = try HapticsMachine
+        try feedback.longPress()
+        try feedback.longPress()
+        try TestClock.adjust("1 second")
+        try feedback.longPress()
+        try Effect.try(() => assert.deepStrictEqual([haptics, (try machine.get()).played], [["long-press", "long-press"], 2]))
+      }
+    }
+  })
+
+  it.effect("the browser build plays no haptic (spec/shell/haptics.md, \"One gesture plays once, even when it reaches two paths\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const feedback = try Haptics
+        const machine = try HapticsMachine
+        try feedback.longPress()
+        try Effect.try(() => assert.deepStrictEqual([(try machine.get()).available, (try machine.get()).played], [false, 0]))
+      }
+    }
+  })
+
+  it.effect("the library follows the installed apps and Home drops a removed one (spec/shell/inventory.md, \"Story: See the apps installed now\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const observer = try InventoryMachine
+        try observer.send({ type: "start" })
+        try observer.send({ type: "listen", listening: true })
+        try observer.send({ type: "notice", signal: "Resumed" })
+        try observer.send({ type: "notice", signal: "PackagesChanged" })
+        const refreshed = try observer.send({ type: "timer" })
+        const keys = libraryKeys([clockApp, mapsApp], "cl")
+        const home = homeKeys(["alpha:notes", "org.fixture.clock/org.fixture.clock.Main", "org.fixture.gone/org.fixture.gone.Main"], ["notes"], [clockApp, mapsApp])
+        try Effect.try(() => assert.deepStrictEqual(
+          [refreshed.last, refreshed.scheduled, keys, home],
+          ["FullRefresh", false, ["org.fixture.clock/org.fixture.clock.Main"], ["alpha:notes", "org.fixture.clock/org.fixture.clock.Main"]],
+        ))
+      }
+    }
+  })
+
+  it.effect("App info settles only its own ticket and names a refusal once (spec/shell/appInfo.md, \"Story: Check an app's details in Android\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const info = try AppInfoMachine
+        const asked = try info.send({ type: "request", key: "org.fixture.clock/org.fixture.clock.Main" })
+        const stale = info.send({ type: "answer", ticket: asked.ticket - 1, reply: "InfoOpened" }) catch () => undefined
+        const refused = try info.send({ type: "answer", ticket: asked.ticket, reply: "InfoNotInstalled" })
+        try Effect.try(() => assert.deepStrictEqual(
+          [stale, refused.phase, refused.notice, appInfoText("Clock", "InfoNotInstalled").includes("Clock")],
+          [undefined, "InfoIdle", "org.fixture.clock/org.fixture.clock.Main", true],
+        ))
+      }
+    }
+  })
+})
+
+describe("Startup access (spec/shell/permissions.md, \"Story: Grant Alpha what it needs, when I choose\")", () => {
+  it.effect("Android is asked once from the owner's tap and the step count follows (spec/shell/permissions.md, \"Story: Grant Alpha what it needs, when I choose\")", () => effect {
+    notificationsGranted = false
+    provide memoryStore, onDevice {
+      provide shell {
+        const permissions = try Permissions
+        const machine = try PermissionsMachine
+        try permissions.connection({ account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false })
+        const opened = try machine.get()
+        try permissions.allow()
+        const allowed = try machine.get()
+        try permissions.next(false)
+        const second = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual(
+          [opened.phase, stepCount(opened), allowed.attempted, allowed.states.$PermNotifications, second.progress, stepCount(second)],
+          ["PhaseWalkthrough", 1, ["PermNotifications"], "AccessReady", 1, 2],
+        ))
+      }
+    }
+  })
+
+  it.effect("a step still asking offers Skip after twenty seconds (spec/shell/permissions.md, \"A step still checking or asking after twenty seconds can be skipped\")", () => effect {
+    provide memoryStore, onDevice {
+      provide shell {
+        const permissions = try Permissions
+        const machine = try PermissionsMachine
+        try permissions.connection({ account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false })
+        try machine.send({ type: "platformStatus", key: "PermNotifications", access: "AccessChecking" })
+        const early = skippable(try machine.get())
+        try TestClock.adjust("21 seconds")
+        const late = skippable(try machine.get())
+        try permissions.next(true)
+        try Effect.try(() => assert.deepStrictEqual([early, late, (try machine.get()).progress], [false, true, 1]))
+      }
+    }
+  })
+
+  it.effect("an earlier Alpha's completed walkthrough stays completed (spec/shell/permissions.md, \"An earlier Alpha's walkthrough record is read once, when this one has none\")", () => effect {
+    try sync(() => {
+      globalThis.localStorage.setItem(LEGACY_PROGRESS_KEY, JSON.stringify({ version: 3, status: "completed", step: 6 }))
+      globalThis.localStorage.setItem(LEGACY_MEMORY_KEY, JSON.stringify({ dismissed: false, attempted: { camera: true } }))
+    })
+    const read = legacyProgress({ version: 2, status: "pending", step: 9 }, { attempted: { browsercamera: true, nope: true } }, true)
+    provide memoryStore, onDevice {
+      provide shell {
+        const machine = try PermissionsMachine
+        const restored = try machine.get()
+        try sync(() => {
+          globalThis.localStorage.removeItem(LEGACY_PROGRESS_KEY)
+          globalThis.localStorage.removeItem(LEGACY_MEMORY_KEY)
+        })
+        try Effect.try(() => assert.deepStrictEqual(
+          [restored.completed, restored.progress, restored.attempted, read?.saved, read?.attempted],
+          [true, -1, ["PermCamera"], 0, ["PermCamera"]],
+        ))
+      }
+    }
+  })
+
+  it.effect("the open walkthrough holds the phone (spec/shell/permissions.md, \"On the Alpha image, steps Android already granted pass by themselves, and an untouched walkthrough ends on Home\")", () => effect {
+    provide memoryStore, onDevice {
+      provide shell {
+        const permissions = try Permissions
+        const navigation = try NavigationMachine
+        try TestClock.adjust("1 millis")
+        try permissions.connection({ account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false })
+        try TestClock.adjust("1 millis")
+        try Effect.try(() => assert.isTrue((try navigation.get()).holds.includes(WALKTHROUGH_HOLD)))
+      }
+    }
+  })
+})
+
+describe("Recovery and Home (spec/shell/recovery.md, \"Story: Get my phone back when something breaks\")", () => {
+  it.effect("a failed app closes, is recorded and Home stays usable (spec/shell/recovery.md, \"Story: Get my phone back when something breaks\")", () => effect {
+    recorded = []
+    provide memoryStore, inBrowser {
+      provide shell {
+        const recovery = try Recovery
+        const navigation = try Navigation
+        const machine = try RecoveryMachine
+        try recovery.mounted()
+        try navigation.open("notes")
+        try recovery.viewFailed("notes", "Notes", new Error("boom"))
+        const state = try machine.get()
+        const reopened = try navigation.open("calendar")
+        try Effect.try(() => assert.deepStrictEqual([state.phase, state.failedApp, recorded, reopened], ["Running", "notes", ["render"], true]))
+      }
+    }
+  })
+
+  it.effect("an overdue reminder leads the agenda, else the date stands in (spec/shell/overview.md, \"Story: See my day on Home\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const overview = try Overview
+        const machine = try OverviewMachine
+        const quiet = dateLine(try machine.get())
+        try overview.reportOverdue([{ id: "rent", title: "Pay rent", at: -86_400_000 }])
+        const due = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([quiet, agenda(due).id, dateLine(due)], [true, "rent", false]))
+      }
+    }
+  })
+
+  it.effect("a re-rendered list gives focus back to the row it held (spec/shell/focus.md, \"Story: Keep my place when the screen changes under me\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const focus = try Focus
+        const machine = try FocusMachine
+        try machine.send({ type: "focused", key: "row-2" })
+        try focus.captureRow("inbox", "row-2")
+        try machine.send({ type: "blurred" })
+        try focus.rowRendered("inbox", true, false)
+        try Effect.try(() => assert.strictEqual((try machine.get()).lastRow, "row-2"))
+      }
+    }
+  })
+
+  it.effect("the keyboard releases the composer only after covering it (spec/shell/geometry.md, \"Story: Type without the page turning sideways\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const machine = try GeometryMachine
+        try machine.send({ type: "focusField", field: "ComposerField" })
+        try machine.send({ type: "keyboardShown", visible: false, handoff: false })
+        const uncovered = (try machine.get()).releases
+        try machine.send({ type: "keyboardShown", visible: true, handoff: false })
+        try machine.send({ type: "keyboardShown", visible: false, handoff: false })
+        const after = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([uncovered, after.releases, after.field], [0, 1, "NoField"]))
+      }
+    }
+  })
+
+  it.effect("large text gives the day one agenda pane (spec/shell/geometry.md, \"Story: Read everything at the text size I chose\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const machine = try GeometryMachine
+        try machine.send({ type: "measureText", scale: 200 })
+        const large = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([largeText(large), large.agenda, large.split, large.calendarDays], [true, true, false, 1]))
+      }
+    }
+  })
+})
+
+describe("Handoffs (spec/shell/handoffs.md, \"Story: Carry what I asked for in Notes into the app that does it\")", () => {
+  it.effect("an email draft opens Inbox and a page that does not parse opens nothing and says so (spec/shell/handoffs.md, \"Story: Carry what I asked for in Notes into the app that does it\")", () => effect {
+    let drafts = 0
+    const fakes = Layer.mergeAll(
+      Layer.succeed(NotesHandoff, { requests: Stream.make({ kind: "email-draft", subject: "Lunch", body: "Bring the notes" }, { kind: "open-web-source", url: "" }) } as never),
+      Layer.succeed(Composer, { compose: () => sync(() => { drafts = drafts + 1; return undefined }) } as never),
+      Layer.succeed(BrowserTabs, { get: () => succeed({ host: "BrowserHost" }), dispatch: () => succeed({ accepted: true, failed: false }) } as never),
+    )
+    provide memoryStore, inBrowser {
+      provide shell {
+        const navigation = try NavigationMachine
+        const toasts = try ToastsMachine
+        provide Layer.provide(handoffsLive, fakes) {
+          try TestClock.adjust("1 millis")
+          const nav = try navigation.get()
+          const shown = (try toasts.get()).shown
+          try Effect.try(() => assert.deepStrictEqual([drafts, nav.app, shown.failure], [1, "inbox", true]))
+        }
+      }
+    }
+  })
+
+  it.effect("an approved open_view is applied only once its view is in front (spec/shell/navigation.md, \"An approved open_view shows Home or an admitted app, and is applied only once it is in front\")", () => effect {
+    provide memoryStore, inBrowser {
+      provide shell {
+        const ports = try operationPorts
+        const machine = try NavigationMachine
+        const call = { proposalId: "proposal-1", operationId: "operation-1", attemptId: 1 }
+        const notes = try promise(() => ports.execute({ type: "open_view", view: "notes" }, call))
+        const front = (try machine.get()).app
+        const home = try promise(() => ports.execute({ type: "open_view", view: "home" }, call))
+        const unknown = try promise(() => ports.execute({ type: "open_view", view: "nowhere" }, call))
+        try Effect.try(() => assert.deepStrictEqual([notes, front, home, (unknown as { kind: string }).kind], [{ kind: "applied" }, "notes", { kind: "applied" }, "refused"]))
+      }
+    }
+  })
+})

@@ -4,7 +4,7 @@ import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
-import { layer } from "../../src/calendar/layer.vibe"
+import { services } from "../../src/calendar/layer.vibe"
 import { AgentCalendar } from "../../src/calendar/agent.vibe"
 import { ApprovalReviews } from "../../src/calendar/approvals.vibe"
 import { bindCalendar, currentWindow, readCalendar } from "../../src/calendar/binding.vibe"
@@ -25,7 +25,7 @@ function fakes(agent: CalendarAgentFake, device: DeviceCalendarFake) {
     Layer.succeed(Resident, {
       status: () => succeed("running" as const),
       ensureRunning: () => Effect.void,
-      json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => Effect.try({
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => Effect.try({
         try: () => agent.json(method, path, body),
         catch: (error) => new ResidentRefused({ status: (error as { status?: number }).status ?? 500, message: String(error) }),
       }),
@@ -44,7 +44,7 @@ function fakes(agent: CalendarAgentFake, device: DeviceCalendarFake) {
   )
 }
 
-const calendarOver = (agent: CalendarAgentFake, device: DeviceCalendarFake) => Layer.provide(layer, fakes(agent, device))
+const calendarOver = (agent: CalendarAgentFake, device: DeviceCalendarFake) => Layer.provide(services, fakes(agent, device))
 const binding = { owner: JSON.stringify(["https://agent.test", "owner-1", "agent-1"]), session: 1, agentId: "agent-1", usable: true }
 
 describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Calendar for the account I am signed in to\")", () => {

@@ -1,0 +1,117 @@
+// spec/browser/handoff.md, "Story: Open the page I see in another browser"; spec/browser/handoff.md, "Story: Leave a private page for another app only when I say so"; spec/browser/egress.md, "Story: Share or keep the page I am looking at"; spec/browser/downloads.md, "Story: Save a file only when I chose Save"; spec/browser/downloads.md, "Story: Find my downloads in Files"
+import { assert, it } from "@effect/vitest"
+import { BrowserEgress } from "../../src/browser/egress.vibe"
+import { BrowserHandoff } from "../../src/browser/handoff.vibe"
+import { BrowserReviews } from "../../src/browser/reviews.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { callsTo, emit, fakeHost, loadPage, sessionOf, settledTabs } from "./fakes.vibe"
+
+// spec/browser/handoff.md, "Story: Open the page I see in another browser"
+it.live("a normal HTTPS page goes to another browser at once, a private one only after the owner confirms it, and a declined one never leaves", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const handoff = try BrowserHandoff
+      const reviews = try BrowserReviews
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      const normal = try loadPage(tabs, fake.events, session, "https://example.test/", "1", 1)
+      try handoff.openExternal()
+      try tabs.dispatch({ type: "openTab", id: "bpriv", profile: "Private" })
+      try loadPage(tabs, fake.events, session, "https://private.test/", "4", 1)
+      for (const approve of [false, true]) {
+        const leaving = fork handoff.openExternal()
+        try timeout(Stream.runHead(Stream.filter(reviews.changes, (r) => r.open.some((o) => o.kind === "LeavePrivate"))), "2 seconds")
+        if (approve) try reviews.approve("external-browser")
+        else try reviews.dismiss("external-browser")
+        try join leaving
+      }
+      try Effect.try(() => assert.deepStrictEqual((try callsTo(fake.calls, "openExternalBrowser")).map((c) => [c.args.id, c.args.url, c.args.navigation, c.args.privateConfirmed]), [
+        [normal, "https://example.test/", "1", false],
+        ["bpriv", "https://private.test/", "4", true],
+      ]))
+    }
+  })
+})
+
+// spec/browser/handoff.md, "A tapped link opens another app at once only from a normal tab; a private tab asks first, and a link nobody tapped opens nothing"
+it.live("the host's notices about app links reach the owner in Alpha's words, and the renderer opens no app itself", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const started = try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try emit(fake.events, "notice", { session, id: started.cur, message: "Blocked a link to another app that opened without a tap." })
+      try emit(fake.events, "notice", { session, id: started.cur, message: "This link type is not supported." })
+      try emit(fake.events, "notice", { session: "another-session", id: started.cur, message: "No app on this device can open this link." })
+      try Effect.try(() => assert.deepStrictEqual(
+        { said: try Ref.get(fake.toasts), opened: try Ref.get(fake.opened) },
+        { said: ["Blocked a link to another app that opened without a tap.", "Browser can’t open this kind of link."], opened: [] },
+      ))
+    }
+  })
+})
+
+// spec/browser/egress.md, "Share by email opens a draft with the page's address and name, and Copy link copies its address, each only from a shown settled page"
+it.live("Share by email drafts the shown page's name and address, says why when Inbox cannot, and a page still loading is never sent", () => effect {
+  for (const mail of [true, false]) {
+    const fake = try fakeHost({ mail })
+    try scoped(effect {
+      provide fake.live {
+        const tabs = try BrowserTabs
+        const egress = try BrowserEgress
+        try settledTabs(tabs)
+        const session = try sessionOf(fake.calls)
+        const id = try loadPage(tabs, fake.events, session, "https://example.test/article", "1", 1)
+        try egress.shareByEmail()
+        try emit(fake.events, "stateChanged", { session, id, sequence: 2, navigation: "2", url: "https://example.test/next", loading: true })
+        try egress.shareByEmail()
+        try Effect.try(() => assert.deepStrictEqual(
+          { mails: try Ref.get(fake.mails), refused: (try Ref.get(fake.toasts)).includes("Email isn’t available on this phone.") },
+          { mails: [{ subject: "example.test", body: "https://example.test/article" }], refused: !mail },
+        ))
+      }
+    })
+  }
+})
+
+// spec/browser/egress.md, "Share waits for the menu to close, then hands Android only the same document, one share at a time"
+it.live("Share hands Android the page that was shown when the menu closed", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const egress = try BrowserEgress
+      try settledTabs(tabs)
+      const id = try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/article", "5", 1)
+      try tabs.dispatch({ type: "openShare" })
+      try egress.share()
+      try Effect.try(() => assert.deepStrictEqual(
+        { shared: (try callsTo(fake.calls, "share")).map((c) => [c.args.id, c.args.url, c.args.navigation]), shareOpen: (try tabs.get()).layers.share },
+        { shared: [[id, "https://example.test/article", "5"]], shareOpen: false },
+      ))
+    }
+  })
+})
+
+// spec/browser/downloads.md, "Story: Save a file only when I chose Save"; spec/browser/downloads.md, "Story: Find my downloads in Files"
+it.live("the menu's Downloads opens the host's list, and Show in Files opens Files at Downloads only for this Browser's list", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try tabs.dispatch({ type: "toggleMenu" })
+      try tabs.openDownloads()
+      try emit(fake.events, "showDownloads", { session: "another-session" })
+      try emit(fake.events, "showDownloads", { session })
+      try Effect.try(() => assert.deepStrictEqual(
+        { listed: (try callsTo(fake.calls, "downloads")).length, menu: (try tabs.get()).layers.menu, opened: try Ref.get(fake.opened) },
+        { listed: 1, menu: false, opened: ["files:downloads"] },
+      ))
+    }
+  })
+})

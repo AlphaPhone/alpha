@@ -179,3 +179,22 @@ pure def stepStaleRefusalKeepsPause(before: MapsConnection, via: str, after: Map
 pure def sometimesPaused(s: MapsConnection): bool = s.phase == Installed and s.pausedUntil > s.now
 pure def sometimesResumedAfterPause(s: MapsConnection): bool = s.phase == Installed and s.pausedUntil > 0 and s.now >= s.pausedUntil
 ```
+
+### A wait Cloud names is shown and kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute
+
+The owner reads "Maps request limit reached. Try again in 5 minutes." or "You
+have used your Maps allowance for this period. It resets in 3 days."; with no
+usable wait the text says "Try again later." and names no reset. The wait is
+data; the sentence around it is Alpha's, never the provider's.
+
+```quint
+pure val defaultPauseSeconds = 60
+pure val maxWaitSeconds = 86400
+pure val maxResetSeconds = 34560000
+pure def waitNamed(seconds: int): bool = seconds > 0 and seconds <= maxWaitSeconds
+pure def resetNamed(seconds: int): bool = seconds > 0 and seconds <= maxResetSeconds
+pure def pauseSeconds(seconds: int): int = if (waitNamed(seconds)) seconds else defaultPauseSeconds
+pure val secondsValues = Set(-1, 0, 1, 60, 86400, 86401)
+pure def lawEveryRefusalPausesAtMostADay(seconds: int): bool = pauseSeconds(seconds) >= 1 and pauseSeconds(seconds) <= maxWaitSeconds
+pure def lawAnUnnamedWaitIsAMinute(seconds: int): bool = not(waitNamed(seconds)) implies pauseSeconds(seconds) == defaultPauseSeconds
+```

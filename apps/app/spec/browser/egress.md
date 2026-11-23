@@ -44,7 +44,6 @@ type EgressChange = { state: Egress, out: List[EgressEffect] }
 pure def said(problem: EgressProblem): EgressEffect = Say({ problem: problem })
 pure def shared(v: Viewed): SharedPage = { tab: v.tab, url: v.url, navigation: v.navigation, title: v.title }
 pure def seen(viewed: Viewed, e: Egress): Egress = { ...e, sawSettled: e.sawSettled or viewed.settled, sawSecure: e.sawSecure or (viewed.settled and viewed.secure) }
-pure def canStartShare(e: Egress, viewed: Viewed): bool = e.shares < 3
 pure def startShare(e: Egress, viewed: Viewed): EgressChange =
   if (e.share != ShareIdle) { state: e, out: List() }
   else if (not(mayLeave(viewed))) { state: seen(viewed, e), out: List(said(LoadPageToShare)) }
@@ -66,11 +65,9 @@ pure def sometimesShared(e: Egress): bool = e.shares > 0 and e.share == ShareIdl
 ### Share by email opens a draft with the page's address and name, and Copy link copies its address, each only from a shown settled page
 
 ```quint
-pure def canShareByEmail(e: Egress, viewed: Viewed): bool = e.emails < 3
 pure def shareByEmail(e: Egress, viewed: Viewed): EgressChange =
   if (mayLeave(viewed)) { state: { ...seen(viewed, e), emails: e.emails + 1 }, out: List(ComposeEmail(shared(viewed))) }
   else { state: seen(viewed, e), out: List(said(LoadPageToShare)) }
-pure def canCopyLink(e: Egress, viewed: Viewed): bool = e.copies < 3
 pure def copyLink(e: Egress, viewed: Viewed): EgressChange =
   if (mayLeave(viewed)) { state: { ...seen(viewed, e), copies: e.copies + 1 }, out: List(CopyLink(shared(viewed))) }
   else { state: seen(viewed, e), out: List(said(LoadPageToCopy)) }
@@ -81,7 +78,6 @@ pure def alwaysEgressFollowsASettledPage(e: Egress): bool = (e.shares > 0 or e.e
 ### Bookmark toggles the mark of a settled HTTPS page, and otherwise says only HTTPS pages can be bookmarked
 
 ```quint
-pure def canToggleBookmark(e: Egress, viewed: Viewed, marked: bool): bool = e.marks < 3
 pure def toggleBookmark(e: Egress, viewed: Viewed, marked: bool): EgressChange =
   if (mayBookmark(viewed)) { state: { ...seen(viewed, e), marks: e.marks + 1 }, out: List(ToggleMark({ url: viewed.url, title: viewed.title, saved: not(marked) })) }
   else { state: seen(viewed, e), out: List(said(HttpsOnly)) }

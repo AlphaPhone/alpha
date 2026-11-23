@@ -19,7 +19,9 @@ final class RendererCredentialSlots {
   // Physical deployment slots are native-owned. Renderer calls must use logical names.
   "cloud-deployment",
   // SMS send ledger and per-operation records are native-owned.
-  "sms-send-ledger", "alpha-sms-operation"
+  "sms-send-ledger", "alpha-sms-operation",
+  // The agent device-execution journal and Clock's review marks are reached only through AlphaActionJournal.
+  "device-execution", "clock-agent-review"
  };
  /** Full-match patterns of the draft and pending-action slots that admit compare-and-exchange. */
  private static final String[] COMPARE_EXCHANGE = {

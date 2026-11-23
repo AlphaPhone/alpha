@@ -2,12 +2,13 @@
 import { Archive, Bot, ChevronLeft, ChevronRight, Forward, Image, Mail, MailOpen, Paperclip, Reply, ReplyAll, Star, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { MailLink, MailPart, Reader } from "../../../gen/inbox__reader.ts";
-import { canShowImages, formattedShown, imagesLoad, senderImageShown } from "../../../gen/inbox__reader.ts";
-import { fitMailFrame, prepareMailHtml } from "../../inbox/html.ts";
+import { canShowImages, formattedShown, imagesLoad, listedApart, senderImageShown } from "../../../gen/inbox__reader.ts";
+import { bindMailLinks, fitMailFrame, inlineMailLink, prepareMailHtml } from "../../inbox/html.ts";
 import { senderImageFacts, senderImagePath } from "../../inbox/text.ts";
 import { Avatar, Button, Dialog, DialogContent, DialogTitle, Sheet, SheetContent, Spinner } from "../components/ui/index.ts";
 import { imagePlaceholder, readFailure } from "./messages.ts";
 
+/** What the reader shows of the open message, which changes the account allows, and what each control asks for. */
 export type MessageViewProps = {
   /** The reader as its machine holds it. */
   reader: Reader;
@@ -30,15 +31,37 @@ export type MessageViewProps = {
   onAsk: () => void;
 };
 
-/** The formatted part of a message in a sandboxed frame, scaled to fit. */
-function FormattedMail({ html, images }: { readonly html: string; readonly images: boolean }) {
+/** The formatted part of a message in a sandboxed frame, scaled to fit; a tap on one of its links asks for the link review. */
+function FormattedMail({ html, images, links, onLink }: { readonly html: string; readonly images: boolean; readonly links: readonly MailLink[]; readonly onLink: (link: MailLink) => void }) {
   const prepared = useMemo(() => prepareMailHtml(html, images, imagePlaceholder), [html, images]);
   if (prepared === null) return null;
   return (
-    <iframe
-      title="Formatted email" sandbox="allow-same-origin" referrerPolicy="no-referrer" srcDoc={prepared.document}
-      className="w-full border-0 bg-card" onLoad={(event) => { fitMailFrame(event.currentTarget); }}
-    />
+    <>
+      <iframe
+        title="Formatted email" sandbox="allow-same-origin" referrerPolicy="no-referrer" srcDoc={prepared.document}
+        className="w-full border-0 bg-card"
+        onLoad={(event) => { fitMailFrame(event.currentTarget); bindMailLinks(event.currentTarget, (href, text) => onLink(inlineMailLink(href, text, links))); }}
+      />
+      <OtherLinks links={links.filter((link) => listedApart(true, prepared.inlineLinks.includes(link.href)))} collapsed onLink={onLink} />
+    </>
+  );
+}
+
+/** The links a message names outside its formatted text: listed for a plain message, under one collapsed row beside formatted mail. */
+function OtherLinks({ links, collapsed, onLink }: { readonly links: readonly MailLink[]; readonly collapsed: boolean; readonly onLink: (link: MailLink) => void }) {
+  const [open, setOpen] = useState(!collapsed);
+  if (links.length === 0) return null;
+  return (
+    <div className="px-4">
+      {collapsed && <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>Other links</Button>}
+      {open && (
+        <ul aria-label="Links" className="flex flex-col">
+          {links.map((link) => (
+            <li key={link.href}><button type="button" className="text-left text-sm text-primary underline" onClick={() => onLink(link)}>{link.text}</button></li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -47,7 +70,6 @@ function FormattedMail({ html, images }: { readonly html: string; readonly image
  * @model spec/inbox/reader.md
  */
 export function MessageView({ reader, canMarkRead, canChange, onBack, onReply, onChange, onSetRead, onShowImages, onPage, onAttachment, onOpenAttachment, onSaveAttachment, onCloseAttachment, onLink, onAsk }: MessageViewProps) {
-  const [linksOpen, setLinksOpen] = useState(false);
   const body = reader.body;
   const images = imagesLoad(reader);
   const facts = senderImageFacts(body.senderAddress);
@@ -89,10 +111,13 @@ export function MessageView({ reader, canMarkRead, canChange, onBack, onReply, o
             {canShowImages(reader) && !images && (
               <Button size="sm" variant="outline" className="mx-4 self-start" onClick={onShowImages}><Image aria-hidden />Show images</Button>
             )}
-            <FormattedMail html={body.html} images={images} />
+            <FormattedMail html={body.html} images={images} links={body.links} onLink={onLink} />
           </div>
         ) : (
-          <p className="whitespace-pre-wrap px-4 font-legible">{body.text}</p>
+          <>
+            <p className="whitespace-pre-wrap px-4 font-legible">{body.text}</p>
+            <OtherLinks links={body.links} collapsed={false} onLink={onLink} />
+          </>
         )
       )}
       {shown && body.parts.length > 0 && (
@@ -105,18 +130,6 @@ export function MessageView({ reader, canMarkRead, canChange, onBack, onReply, o
             </li>
           ))}
         </ul>
-      )}
-      {shown && body.links.length > 0 && (
-        <div className="px-4">
-          <Button variant="ghost" size="sm" aria-expanded={linksOpen} onClick={() => setLinksOpen(!linksOpen)}>Other links</Button>
-          {linksOpen && (
-            <ul className="flex flex-col">
-              {body.links.map((link) => (
-                <li key={link.href}><button type="button" className="text-left text-sm text-primary underline" onClick={() => onLink(link)}>{link.text}</button></li>
-              ))}
-            </ul>
-          )}
-        </div>
       )}
       {reader.thread.threadId !== "" && reader.thread.total > 1 && (
         <nav aria-label="Conversation" className="flex items-center justify-between px-4">
@@ -147,6 +160,7 @@ export function MessageView({ reader, canMarkRead, canChange, onBack, onReply, o
   );
 }
 
+/** The link under review and what opening or cancelling it asks for. */
 export type LinkReviewDialogProps = {
   /** The link under review, or none. */
   review: { readonly href: string; readonly host: string; readonly mismatch: boolean; readonly text: string } | undefined;

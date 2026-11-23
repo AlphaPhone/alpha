@@ -1,35 +1,51 @@
 // spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"
-import { Camera as CameraIcon, ChevronLeft, CameraOff, Flashlight, FlashlightOff, Grid3x3, MicOff, MoreVertical, RefreshCcw, Timer, Zap, ZapOff } from "lucide-react";
+import { Camera as CameraIcon, ChevronLeft, CameraOff, Flashlight, FlashlightOff, Grid3x3, MicOff, RefreshCcw, Timer, Zap, ZapOff } from "lucide-react";
+import { useRef } from "react";
 import type { Camera, Event } from "../../../gen/camera__viewfinder.ts";
 import { cn, focusRing } from "../lib/cn.ts";
-import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "../components/ui/index.ts";
+import { Button } from "../components/ui/index.ts";
 import { accessDetail, recordingLabel } from "../../camera/messages.vibe";
 import { RECORDING } from "../../camera/bridge.vibe";
 
 /** What the Camera screen does with the owner's controls. */
 export interface CameraActions {
+  /** Back to the apps. */
   back(): void;
+  /** The shutter: a photo, the self-timer, or start and stop a recording. */
   shutter(): void;
+  /** Video or Photo. */
   pickMode(mode: Camera["mode"]): void;
+  /** Switch between the back and front cameras. */
   flip(): void;
+  /** Zoom to a ratio in tenths, from a chip or a pinch. */
   zoomTo(tenths: number): void;
+  /** Flash Off, Auto, On. */
   cycleFlash(): void;
+  /** Self-timer Off, 3 s, 10 s. */
   cycleTimer(): void;
+  /** The framing grid on or off. */
   toggleGrid(): void;
+  /** Video's light on or off. */
   toggleLight(): void;
+  /** Focus at a point of the viewfinder, each coordinate from 0 to 1. */
   focusAt(x: number, y: number): void;
+  /** Restart a denied or stopped camera. */
   retry(): void;
+  /** Open Alpha's app info in Android Settings. */
   allow(): void;
+  /** Record without sound after the microphone was refused. */
   noSound(): void;
+  /** Ask for the microphone again and record with sound. */
   micRetry(): void;
+  /** Open the last capture in Photos. */
   openLast(): void;
-  chooseImage(): void;
-  scan(): void;
-  askAlpha(): void;
+  /** Dismiss the short line over Camera. */
   dismissNotice(): void;
+  /** Mount the live preview into the viewfinder; the returned function unmounts it. */
   viewfinder(element: HTMLElement | null): void | (() => void);
 }
 
+/** Camera's whole screen: the visit's state, what may be done now, and the owner's controls. */
 export interface CameraViewProps {
   /** The visit as the viewfinder Machine keeps it. */
   camera: Camera;
@@ -39,6 +55,7 @@ export interface CameraViewProps {
   can: (event: Event) => boolean;
   /** The browser build words its access notice for the browser. */
   browser: boolean;
+  /** The owner's controls. */
   actions: CameraActions;
 }
 
@@ -54,19 +71,44 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
   const photo = camera.mode === "PhotoMode";
   const stops = ZOOM_STOPS.filter(([tenths]) => tenths >= camera.widest && tenths <= camera.longest);
   const notice = camera.notice;
+  const pinch = useRef<{ pointers: Map<number, { x: number; y: number }>; start: number; from: number; used: boolean }>({ pointers: new Map(), start: 0, from: 10, used: false });
+  const spread = () => {
+    const [a, b] = [...pinch.current.pointers.values()];
+    return a === undefined || b === undefined ? 0 : Math.hypot(a.x - b.x, a.y - b.y);
+  };
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-foreground text-background">
       <button
         type="button"
         ref={actions.viewfinder}
-        aria-label="Viewfinder. Tap to focus"
-        className={cn("absolute inset-0 overflow-hidden", focusRing)}
+        aria-label="Viewfinder. Tap to focus or pinch to zoom"
+        className={cn("absolute inset-0 touch-none overflow-hidden", focusRing)}
+        onPointerDown={(event) => {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          pinch.current.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          if (pinch.current.pointers.size === 2) pinch.current = { ...pinch.current, start: spread(), from: camera.zoom, used: true };
+        }}
+        onPointerMove={(event) => {
+          if (!pinch.current.pointers.has(event.pointerId)) return;
+          pinch.current.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          if (pinch.current.pointers.size === 2 && pinch.current.start > 0) actions.zoomTo(pinch.current.from * spread() / pinch.current.start);
+        }}
+        onPointerCancel={() => { pinch.current = { pointers: new Map(), start: 0, from: camera.zoom, used: false }; }}
+        onPointerUp={(event) => {
+          pinch.current.pointers.delete(event.pointerId);
+          if (pinch.current.pointers.size < 2) pinch.current.start = 0;
+        }}
         onClick={(event) => {
+          if (pinch.current.used) {
+            if (pinch.current.pointers.size === 0) pinch.current.used = false;
+            return;
+          }
+          if (event.detail === 0) return actions.focusAt(0.5, 0.5);
           const box = event.currentTarget.getBoundingClientRect();
           actions.focusAt((event.clientX - box.left) / box.width, (event.clientY - box.top) / box.height);
         }}
       >
-        {camera.grid && (
+        {camera.grid && camera.phase === "PreviewReady" && (
           <span aria-hidden className="pointer-events-none absolute inset-0 grid grid-cols-3 grid-rows-3">
             {Array.from({ length: 9 }, (_, at) => <span key={at} className="border border-background/40" />)}
           </span>
@@ -90,7 +132,7 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
             {camera.timer > 0 && <span className="font-mono text-xs">{camera.timer}</span>}
           </Button>
         )}
-        <Button variant="ghost" size="icon" aria-label="Framing grid" aria-pressed={camera.grid} onClick={actions.toggleGrid}><Grid3x3 /></Button>
+        {can({ type: "toggleGrid" }) && <Button variant="ghost" size="icon" aria-label="Framing grid" aria-pressed={camera.grid} onClick={actions.toggleGrid}><Grid3x3 /></Button>}
         {photo && can({ type: "cycleFlash" }) && (
           <Button variant="ghost" size="icon" aria-label={camera.flash === "FlashAuto" ? "Flash auto" : camera.flash === "FlashOn" ? "Flash on" : "Flash off"} onClick={actions.cycleFlash}>
             {camera.flash === "FlashOff" ? <ZapOff /> : <Zap />}
@@ -102,14 +144,6 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
             {camera.light ? <Flashlight /> : <FlashlightOff />}
           </Button>
         )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Camera tools"><MoreVertical /></Button></DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={actions.chooseImage}>Choose image</DropdownMenuItem>
-            <DropdownMenuItem onSelect={actions.scan} disabled={!can({ type: "reserveShutter" })}>Scan document</DropdownMenuItem>
-            <DropdownMenuItem onSelect={actions.askAlpha} disabled={!can({ type: "reserveShutter" })}>Ask Alpha</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </header>
 
       {camera.countdown > 0 && (
@@ -161,7 +195,7 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
         )}
         <div className="flex items-center justify-between px-10">
           {camera.lastImage !== "" ? (
-            <button type="button" aria-label="Open last capture" onClick={actions.openLast} className={cn("size-12 overflow-hidden rounded-md", focusRing)}>
+            <button type="button" aria-label="Open last capture in Photos" onClick={actions.openLast} className={cn("size-12 overflow-hidden rounded-md", focusRing)}>
               <img src={camera.lastImage} alt="" className="size-full object-cover" />
             </button>
           ) : <span className="size-12" />}

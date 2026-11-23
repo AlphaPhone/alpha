@@ -1,4 +1,4 @@
-// spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/updates.md, "An offer is for this launcher and signer, newer than the installed version, complete and HTTPS"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"
+// spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/diagnostics.md, "The report copies only allowlisted fields, so no text, address, key or identifier can reach it"; spec/settings/updates.md, "An offer is for this launcher and signer, newer than the installed version, complete and HTTPS"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"
 
 /** AlphaDevice.snapshot: what the launcher reports of itself; every field may be missing. */
 export schema DeviceSnapshot {
@@ -17,8 +17,19 @@ export schema DeviceSnapshot {
 /** AlphaNotifications.status, as far as Settings reads it. */
 export schema NotificationGrant { appEnabled?: boolean; permissionGranted?: boolean }
 
-/** AlphaPhotos.libraryAccess. */
+/** AlphaPhotos.libraryAccess, and AlphaPhotoLibrary.requestAccess after Android's library dialog. */
 export schema PhotoAccess { scope: "full" | "partial" | "selected" | "denied" }
+
+/** The browser's permission answers (`navigator.permissions` and `Notification.permission`). */
+export schema BrowserGrants {
+  camera?: "granted" | "prompt" | "denied"
+  microphone?: "granted" | "prompt" | "denied"
+  geolocation?: "granted" | "prompt" | "denied"
+  notifications?: "granted" | "prompt" | "denied"
+}
+
+/** ElizaSystem.requestRole: Android's role dialog closed; whether the role is held is read back. */
+export schema RoleReply { role?: string; held?: boolean; resultCode?: number }
 
 /** AlphaFiles.storageState. */
 export schema StorageAccess { access?: "granted" | "denied" }
@@ -26,7 +37,7 @@ export schema StorageAccess { access?: "granted" | "denied" }
 /** AlphaDevice.setTextScale. */
 export schema TextScale { textScalePercent: number }
 
-/** ElizaSystem.openSettingsPage and the fixed page openers. */
+/** ElizaSystem.openSettingsPage, and AlphaDevice.openSettings for Android's Settings home. */
 export schema PageOpened { status: "opened"; specific?: boolean }
 
 /** ElizaSystem.openNotificationShade. */
@@ -77,6 +88,22 @@ export schema ResetAnswer { status?: string; message?: string }
 /** AlphaDevice.shareDiagnostics. */
 export schema ShareReply { status?: string }
 
+/** AlphaDevice.openUpdatePermissionSettings. */
+export schema PermissionPage { status: "opened" | "unsupported" }
+
+/** AlphaDevice.diagnosticsFacts: build facts the report copies only through its allowlist. */
+export schema DiagnosticsFacts {
+  variant?: string
+  buildType?: string
+  securityPatch?: string
+  sdkInt?: number
+  upstreamPin?: string
+  runtimeHashes?: Record<string, string>
+}
+
+/** The on-device agent's GET /api/status, as far as the Problem log reads it. */
+export schema ResidentDiagnostics { cloudInferenceFailure?: unknown }
+
 /** One shipped third-party notice. */
 export schema LicenceNotice {
   name: string
@@ -85,6 +112,7 @@ export schema LicenceNotice {
   source?: string
   text?: string
   flags?: ReadonlyArray<string>
+  obligations?: ReadonlyArray<{ readonly flag: string; readonly note: string }>
 }
 
 /** ElizaWiFi.listAvailableNetworks. */

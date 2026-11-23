@@ -5,6 +5,7 @@ import type { AccountDrafts, Draft, DraftPick } from "../../../gen/inbox__drafts
 import type { DraftRow } from "../../../gen/inbox__mailbox.ts";
 import { Button, Dialog, DialogContent, DialogTitle, EmptyState, ListRow } from "../components/ui/index.ts";
 
+/** What the Drafts list shows: the account's local drafts, its Gmail drafts, and what opening or deleting them does. */
 export type DraftsListProps = {
   /** The selected account's open draft and shelf. */
   drafts: AccountDrafts;

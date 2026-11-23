@@ -1,11 +1,12 @@
 // spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "A turn carries the location only with the setting on, the permission granted, a screen that is not private and a peer that takes it"
+import type { LocationObservation } from "@elizaos/agent/client"
 import { Machine as LocatorMachine, type Event as LocatorEvent, ageOf, needsRead, sendsLocation, platformMaxAgeMs, platformTimeoutMs, precision, waitMs } from "../../gen/assistant__context.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { Preferences } from "../settings/preferences.vibe"
 import { LocationPermission, PositionFix } from "./payloads.schema.vibe"
 
-/** The location a turn carries, as the observation's `location` field (assumed in @elizaos/agent/client, #1418). */
-export interface TurnLocation { readonly latitude: number; readonly longitude: number; readonly accuracyMeters: number; readonly capturedAt: string }
+/** The location a turn carries, as the `location` of the upstream `Observation` (`LocationObservation`). */
+export type TurnLocation = LocationObservation
 
 const plugin = "ElizaLocation"
 
@@ -17,6 +18,7 @@ export service PhoneLocation {
   refresh(): void!!
   /** The location for a turn from a screen that is or is not observed, to a peer that does or does not take it. */
   forTurn(observed: boolean, peerTakesIt: boolean): (TurnLocation | undefined)!!
+  static readonly key = "alpha/assistant/PhoneLocation"
 }
 
 function rounded(value: number): number {

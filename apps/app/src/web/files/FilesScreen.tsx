@@ -7,14 +7,12 @@ import { useMachine as useTrash } from "../../../gen/files__trash.react.ts";
 import { useMachine as useFilter } from "../../../gen/files__filter.react.ts";
 import { useMachine as usePreview } from "../../../gen/files__preview.react.ts";
 import { useMachine as usePages } from "../../../gen/files__pdf.react.ts";
-import { useMachine as useRecent } from "../../../gen/files__recent.react.ts";
 import { useMachine as usePanel } from "../../../gen/files__share.react.ts";
 import { initial as browserInitial } from "../../../gen/files__browser.ts";
 import { initial as trashInitial } from "../../../gen/files__trash.ts";
 import { initial as filterInitial } from "../../../gen/files__filter.ts";
 import { initial as previewInitial } from "../../../gen/files__preview.ts";
 import { initial as pagesInitial } from "../../../gen/files__pdf.ts";
-import { initial as recentInitial } from "../../../gen/files__recent.ts";
 import { initial as panelInitial } from "../../../gen/files__share.ts";
 import type { Destination } from "../../../gen/files__share.ts";
 import type { Place, Row } from "../../../gen/files__storage.ts";
@@ -38,30 +36,33 @@ import { NameDialog } from "./NameDialog.tsx";
 import { PreviewSheet } from "./PreviewSheet.tsx";
 import { SelectionBar } from "./SelectionBar.tsx";
 import { SharePanelSheet } from "./SharePanelSheet.tsx";
+import { StorageAccess } from "./StorageAccess.tsx";
 import { TrashItemSheet } from "./TrashItemSheet.tsx";
 import { TrashView } from "./TrashView.tsx";
-import { batchSummary, CATEGORY_LABELS, locationLabel, storageResultText } from "./format.ts";
-import { filesRuntime, run, start } from "./runtime.ts";
+import { batchSummary, CATEGORY_LABELS, locationLabel, selectedDocumentText, storageResultText } from "./format.ts";
+import { run, start } from "./act.ts";
+import { runtime } from "./runtime.ts";
 
-type Dest = { op: "move" | "copy"; keys: readonly string[]; paths: readonly string[]; at: string; folders: readonly Row[] | undefined };
+type Dest = { op: "move" | "copy"; keys: readonly string[]; paths: readonly string[]; at: string; folders: readonly Row[] | undefined; fromPreview: boolean };
 type Naming = { op: "create" | "rename"; initial: string; key?: string; parent: string; volume: string; error?: string; returnTo?: Dest };
 type Notice = { text: string; undo?: boolean };
 
-const info = filesRuntime.runSync(Build.use((b) => Effect.succeed(b.info)));
-const targets = filesRuntime.runSync(FileShareTargets.use((t) => Effect.succeed({ messages: t.messages, ask: t.ask })));
+/** The route Files opens at, such as `downloads`, and how it closes. */
+export type FilesScreenProps = ScreenProps;
 
 /**
  * Files: Browse, folders and categories, Trash, the agent's filter and the file preview.
  * @model spec/files/browser.md
  */
-export function FilesScreen({ route, onClose }: ScreenProps) {
-  const { state: browser = browserInitial, can, send } = useBrowser(filesRuntime);
-  const { state: trash = trashInitial, send: sendTrash } = useTrash(filesRuntime);
-  const { state: filter = filterInitial, send: sendFilter } = useFilter(filesRuntime);
-  const { state: preview = previewInitial } = usePreview(filesRuntime);
-  const { state: pages = pagesInitial } = usePages(filesRuntime);
-  const { state: recent = recentInitial } = useRecent(filesRuntime);
-  const { state: panel = panelInitial } = usePanel(filesRuntime);
+export function FilesScreen({ route, onClose }: FilesScreenProps) {
+  const { state: browser = browserInitial, can, send } = useBrowser(runtime);
+  const { state: trash = trashInitial, send: sendTrash } = useTrash(runtime);
+  const { state: filter = filterInitial, send: sendFilter } = useFilter(runtime);
+  const { state: preview = previewInitial } = usePreview(runtime);
+  const { state: pages = pagesInitial } = usePages(runtime);
+  const { state: panel = panelInitial } = usePanel(runtime);
+  const [info] = useState(() => runtime.runSync(Build.use((b) => Effect.succeed(b.info))));
+  const [targets] = useState(() => runtime.runSync(FileShareTargets.use((t) => Effect.succeed({ messages: t.messages, ask: t.ask }))));
   const [dest, setDest] = useState<Dest>();
   const [naming, setNaming] = useState<Naming>();
   const [details, setDetails] = useState<Row>();
@@ -112,8 +113,9 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
       const deliver = Effect.gen(function* () {
         if (destination === "SystemSheet") {
           if (keys.length === 0) {
-            const status = yield* previews.shareSelected();
-            return status === "opened" ? "Delivered" as const : "DeliveryFailed" as const;
+            const handed = yield* previews.shareSelected();
+            if (handed.status !== "opened" && handed.status !== "cancelled") say(selectedDocumentText(handed.message, "Android could not open sharing for this item."));
+            return handed.status === "opened" ? "Delivered" as const : "DeliveryFailed" as const;
           }
           const result = yield* changes.share(keys);
           shared(result);
@@ -142,41 +144,53 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
     }));
   };
 
-  const beginDest = (op: "move" | "copy", keys: readonly string[]) => {
+  const beginDest = (op: "move" | "copy", keys: readonly string[], fromPreview = false) => {
     const paths = keys.map((k) => keyPath(k).path);
     const volume = keys.length ? keyPath(keys[0]!).volume : "";
     const here = browser.place.tag === "InFolder" && paths.every((p) => parentOf(p) === (browser.place.tag === "InFolder" ? browser.place.path : "")) ? browser.place.path : "";
-    const next: Dest = { op, keys, paths, at: here, folders: undefined };
+    const next: Dest = { op, keys, paths, at: here, folders: undefined, fromPreview };
     setDest(next);
-    void run(FilesChanges.use((c) => c.folders(here, volume))).then((folders) => setDest({ ...next, folders: folders ?? [] }));
+    void run(FilesChanges.use((c) => c.folders(here, volume))).then((folders) => {
+      if (folders !== undefined || here === "") return setDest({ ...next, folders: folders ?? [] });
+      setDest({ ...next, at: "" });
+      void run(FilesChanges.use((c) => c.folders("", volume))).then((root) => setDest({ ...next, at: "", folders: root ?? [] }));
+    });
   };
-  const openDest = (at: string) => {
-    if (!dest) return;
-    const volume = dest.keys.length ? keyPath(dest.keys[0]!).volume : "";
-    setDest({ ...dest, at, folders: undefined });
-    void run(FilesChanges.use((c) => c.folders(at, volume))).then((folders) => setDest({ ...dest, at, folders: folders ?? [] }));
+  const openDest = (from: Dest, at: string) => {
+    const volume = from.keys.length ? keyPath(from.keys[0]!).volume : "";
+    setDest({ ...from, at, folders: undefined });
+    void run(FilesChanges.use((c) => c.folders(at, volume))).then((folders) => {
+      if (folders === undefined) say("This folder could not be read.");
+      setDest({ ...from, at: folders === undefined ? from.at : at, folders: folders ?? from.folders ?? [] });
+    });
   };
   const confirmDest = () => {
     if (!dest) return;
-    const { keys, at, op } = dest;
+    const { keys, at, op, fromPreview } = dest;
     setDest(undefined);
-    void run(FilesChanges.use((c) => c.transfer(keys, at, op === "copy"))).then(settled);
+    void run(Effect.gen(function* () {
+      yield* FilesChanges.use((c) => c.transfer(keys, at, op === "copy"));
+      const batch = yield* FilesChanges.use((c) => c.batch());
+      if (fromPreview && op === "move" && batch.done > 0) yield* FilesPreview.use((p) => p.close(false));
+    })).then(settled);
   };
   const confirmName = (name: string) => {
     if (!naming) return;
+    if (naming.op === "rename" && preview.shown && !naming.key) {
+      void run(FilesPreview.use((p) => p.rename(name))).then((renamed) => renamed.answer === "RenameRefused"
+        ? setNaming({ ...naming, error: selectedDocumentText(renamed.message, "The app that stores this document did not rename it.") })
+        : setNaming(undefined));
+      return;
+    }
     const work = naming.op === "create"
       ? FilesChanges.use((c) => c.createFolder(naming.parent, naming.volume, name))
-      : preview.shown && !naming.key ? Effect.map(FilesPreview.use((p) => p.rename(name)), (answer): ChangeResult => answer === "RenameRefused" ? { kind: "refused", status: "failed" } : { kind: "done" })
       : FilesChanges.use((c) => c.rename(naming.key ?? "", name));
     void run(work).then((result) => {
       const error = changed(result, "Choose another name.");
       if (error) return setNaming({ ...naming, error });
       const back = naming.returnTo;
       setNaming(undefined);
-      if (back && result.kind === "done" && result.path !== undefined) {
-        setDest(back);
-        openDest(result.path);
-      }
+      if (back && result.kind === "done" && result.path !== undefined) openDest(back, result.path);
     });
   };
   const trashKeys = (keys: readonly string[]) => void run(FilesChanges.use((c) => c.trash(keys))).then(settled);
@@ -185,6 +199,7 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
   const creatable = browser.access === "AccessGranted" && (browser.place.tag === "InFolder" || browser.place.tag === "Browse" || (browser.place.tag === "InCategory" && browser.place.category === "Downloads"));
   const newFolder = () => {
     const parent = browser.place.tag === "InFolder" ? browser.place.path : browser.place.tag === "InCategory" ? "Download" : "";
+    if (browser.place.tag === "Browse") navigate({ tag: "InFolder", path: "", volume: "" });
     setNaming({ op: "create", initial: "", parent, volume: browser.place.tag === "InFolder" ? browser.place.volume : "" });
   };
   const visit = (node: HTMLElement | null) => {
@@ -192,7 +207,7 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
     const stop = start(Effect.gen(function* () {
       yield* FilesPreview.use((p) => p.enter());
       yield* FilesPreview.use((p) => p.restoreOpen());
-      yield* FilesBrowser.use((b) => b.visit(route));
+      yield* Effect.all([FilesBrowser.use((b) => b.visit(route)), FilesShare.use((s) => s.followVisibility())], { concurrency: "unbounded", discard: true });
     }));
     return () => {
       stop();
@@ -207,6 +222,8 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
     onClose();
   };
   const clearFilter = () => void sendFilter({ type: "clearFilter" });
+  const allow = () => void run(FilesBrowser.use((b) => b.requestAccess()));
+  const retry = () => void run(FilesBrowser.use((b) => b.refresh()));
 
   return (
     <ToastProvider>
@@ -226,14 +243,14 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
           {filter.shown !== 0 && browser.place.tag === "Browse" ? (
             <FilterResults filter={filter} busy={busy} onOpen={openRow} onClear={clearFilter} />
           ) : browser.place.tag === "Browse" ? (
-            <BrowseView browser={browser} recent={recent}
+            <BrowseView browser={browser}
+              onAllFiles={() => navigate({ tag: "InFolder", path: "", volume: "" })}
               onCategory={(category) => navigate({ tag: "InCategory", category })}
               onVolume={(volume) => navigate({ tag: "InFolder", path: "", volume: volume.primary ? "" : volume.id })}
               onTrash={() => navigate({ tag: "InTrash" })}
-              onAllow={() => void run(FilesBrowser.use((b) => b.requestAccess()))}
-              onRetry={() => void run(FilesBrowser.use((b) => b.refresh()))}
-              onRecent={(row) => void run(FilesPreview.use((p) => p.openRecent(row))).then((r) => r.kind === "refused" && say("Access to this file ended. Select it again."))}
-              onPick={() => void run(FilesPreview.use((p) => p.openPicked())).then((r) => r.kind === "refused" && say("Couldn’t open the picker."))} />
+              onAllow={allow} onRetry={retry} />
+          ) : browser.access !== "AccessGranted" ? (
+            <StorageAccess access={browser.access} legacy={browser.legacyAccess} loading={browser.loading} onAllow={allow} onRetry={retry} />
           ) : browser.place.tag === "InTrash" ? (
             <TrashView trash={trash} now={Date.now()} volumeName={volumeName} busy={busy}
               onShow={(key) => void sendTrash({ type: "showItem", key })}
@@ -261,7 +278,7 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
             onRename={() => { const key = browser.selected[0]!; const row = browser.rows.find((r) => r.key === key); setNaming({ op: "rename", initial: row?.name ?? "", key, parent: "", volume: keyPath(key).volume }); }}
             onDetails={() => setDetails(browser.rows.find((r) => r.key === browser.selected[0]))}
             onTrash={() => trashKeys(browser.selected)}
-            {...(browserBuild ? { onDownload: () => void run(FilesDownloads.use((d) => d.download(browser.selected))) } : {})} />
+            {...(browserBuild ? { onDownload: () => void run(FilesDownloads.use((d) => d.download(browser.selected))).then((result) => result !== "handed" && say(result === "changed" ? "A selected item changed. Refresh and select it again." : result === "busy" ? "Files is still finishing the last download." : "The download could not start.")) } : {})} />
         )}
         <PreviewSheet preview={preview} pages={pages} actions={actions} busy={busy}
           elsewhereLabel={browserBuild ? "Download file" : "Open in Android"}
@@ -275,12 +292,13 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
             const file = yield* FilesPreview.use((p) => p.sharedFile());
             return file ? yield* FileShareTargets.use((t) => t.attachToChat(file, "Explain this file")) : false;
           })).then((ok) => !ok && say("The file changed. Reopen it before attaching."))}
-          onMove={() => beginDest("move", [`${preview.doc.volume || "primary"}\n${preview.doc.path}`])}
+          onMove={() => beginDest("move", [`${preview.doc.volume || "primary"}\n${preview.doc.path}`], true)}
           onRename={() => setNaming({ op: "rename", initial: preview.doc.name, parent: "", volume: preview.doc.volume })}
-          onDetails={() => setDetails({ key: "", path: preview.doc.path, folder: parentOf(preview.doc.path), name: preview.doc.name, kind: preview.doc.kind, mimeType: preview.doc.mimeType, size: preview.doc.size, modified: preview.doc.modified, children: -1 })}
+          onDetails={() => setDetails({ key: `${preview.doc.volume || "primary"}\n${preview.doc.path}`, path: preview.doc.path, folder: parentOf(preview.doc.path), name: preview.doc.name, kind: preview.doc.kind, mimeType: preview.doc.mimeType, size: preview.doc.size, modified: preview.doc.modified, children: -1 })}
           onTrash={() => { void run(FilesPreview.use((p) => p.close(false))); trashKeys([`${preview.doc.volume || "primary"}\n${preview.doc.path}`]); }}
-          onElsewhere={() => void run(FilesPreview.use((p) => p.openElsewhere())).then((status) => status !== "opened" && status !== "cancelled" && say(status === "unsupported" ? "No installed app can open this document." : "Android could not open the selected document."))}
-          onReselect={() => void run(FilesPreview.use((p) => p.openPicked()))}
+          onElsewhere={() => void run(FilesPreview.use((p) => p.openElsewhere())).then((handed) => handed.status !== "opened" && handed.status !== "cancelled" && say(selectedDocumentText(handed.message, handed.status === "unsupported" ? "No installed app can open this document." : "Android could not open the selected document.")))}
+          onReselect={() => void run(FilesPreview.use((p) => p.openPicked())).then((r) => r.kind === "refused" && say(selectedDocumentText(r.message, "Access to this file ended. Select it again.")))}
+          onMediaError={() => { const serial = preview.serial; void run(FilesPreview.use((p) => p.mediaFailed(serial))); }}
           onForget={() => void run(FilesPreview.use((p) => p.close(true)))}
           onViewer={(open) => void run(FilesPreview.use((p) => (open ? p.openViewer() : p.closeViewer())))} />
         <SharePanelSheet panel={panel} title={shareTitle} canSave={browserBuild} onChoose={choose} />
@@ -295,7 +313,7 @@ export function FilesScreen({ route, onClose }: ScreenProps) {
         {dest && (
           <DestinationDialog op={dest.op} paths={dest.paths} at={dest.at} folders={dest.folders} busy={busy}
             volumeName={volumeName(dest.keys.length ? keyPath(dest.keys[0]!).volume : "")}
-            onOpenFolder={openDest} onConfirm={confirmDest} onCancel={() => setDest(undefined)}
+            onOpenFolder={(at) => openDest(dest, at)} onConfirm={confirmDest} onCancel={() => setDest(undefined)}
             onNewFolder={() => { setNaming({ op: "create", initial: "", parent: dest.at, volume: keyPath(dest.keys[0] ?? "").volume, returnTo: dest }); setDest(undefined); }} />
         )}
         {naming && (

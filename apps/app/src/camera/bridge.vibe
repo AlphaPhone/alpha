@@ -45,15 +45,20 @@ export service CameraBridge {
   /** Write one focus point; true only when the driver confirmed it. */
   setFocusPoint(x: number, y: number): boolean!CameraFailed
   checkAccess(): AccessReply!CameraFailed
+  /** Alpha's app info in Android Settings, where camera and microphone access are allowed. */
   openPrivacySettings(): void!CameraFailed
-  setVolumeShutter(enabled: boolean): void!CameraFailed
   /** One image from the system picker; undefined when the owner cancelled. */
   pickImage(): Blob | undefined!CameraFailed
   exportPdf(title: string, dataBase64: string): ExportReply!CameraFailed
   readPhotoSelected(id: string, revision: string): SourceBytes!CameraFailed
+  /** Android takes the volume keys as Camera's shutter only while this is on; the press arrives as the page event `alpha:volume-shutter`. */
+  setVolumeShutter(enabled: boolean): void!CameraFailed
 }
 
 const CAMERA = "ElizaCamera"
+
+/** Alpha's Android application id. */
+export const APP_ID = "ai.alphacompute.alphaphone"
 
 effect function call<A, I>(native: Native.Shape, plugin: string, method: string, shape: Schema.Codec<A, I>, args?: unknown) {
   const raw = try mapError(native.invoke(plugin, method, args), (failure) =>
@@ -73,7 +78,7 @@ function lifted<A>(method: string, task: () => Promise<A>): A!CameraFailed {
   })
 }
 
-/** Android's `ElizaCamera`, `AlphaDevice`, `DailyApps`, `AlphaNoteDocuments` and `AlphaMailAttachments` plugins. */
+/** Android's `ElizaCamera`, `ElizaSystem`, `AlphaDevice`, `DailyApps`, `AlphaNoteDocuments` and `AlphaMailAttachments` plugins. */
 export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
   const native = try Native
   return {
@@ -93,8 +98,7 @@ export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
       return true
     },
     checkAccess: () => call(native, CAMERA, "checkPermissions", AccessReply),
-    openPrivacySettings: () => run(native, "AlphaDevice", "openSettings", { page: "privacy" }),
-    setVolumeShutter: (enabled: boolean) => run(native, "AlphaDevice", "setVolumeShutter", { enabled }),
+    openPrivacySettings: () => run(native, "ElizaSystem", "openAppInfo", { packageName: APP_ID }),
     effect pickImage() {
       const picked = try call(native, "DailyApps", "perform", PickedImage, { action: "photos" })
       return try ensuring(effect {
@@ -107,6 +111,7 @@ export const nativeCameraBridge = Layer.effect(CameraBridge, effect {
     },
     exportPdf: (title: string, dataBase64: string) => call(native, "AlphaNoteDocuments", "exportPdf", ExportReply, { title, dataBase64 }),
     readPhotoSelected: (id: string, revision: string) => call(native, "AlphaMailAttachments", "readPhotoSelected", SourceBytes, { id, revision }),
+    setVolumeShutter: (enabled: boolean) => run(native, "AlphaDevice", "setVolumeShutter", { enabled }),
   }
 })
 
@@ -126,10 +131,10 @@ export const browserCameraBridge = Layer.succeed(CameraBridge, {
   setFocusPoint: (x: number, y: number) => lifted("setFocusPoint", () => browserCamera.setFocusPoint(x, y)),
   checkAccess: () => lifted("checkPermissions", () => browserCamera.checkAccess()),
   openPrivacySettings: () => Effect.void,
-  setVolumeShutter: () => Effect.void,
   pickImage: () => lifted("pickImage", () => pickBrowserImage()),
   exportPdf: (title: string, dataBase64: string) => lifted("exportPdf", () => browserCamera.downloadPdf(title, dataBase64)),
   readPhotoSelected: () => fail(new CameraFailed({ method: "readPhotoSelected", code: "UNAVAILABLE", message: "" })),
+  setVolumeShutter: () => Effect.void,
 })
 
 /** The camera bridge the build needs: the browser's for the browser build, Android's otherwise. */

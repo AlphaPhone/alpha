@@ -1,16 +1,28 @@
-// spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"
+// spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/shell/permissions.md, "A step still checking or asking after twenty seconds can be skipped"; spec/shell/permissions.md, "On the Alpha image, steps Android already granted pass by themselves, and an untouched walkthrough ends on Home"; spec/shell/permissions.md, "An earlier Alpha's walkthrough record is read once, when this one has none"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { Machine as PermissionsMachine, accessOf as stepAccess, keyAt, walkthroughOpens, type Access, type Event as PermissionsEvent, type Perm, type Permissions as Walkthrough } from "../../gen/shell__permissions.effect.vibe"
+import {
+  Machine as PermissionsMachine, StallSeconds, accessOf as stepAccess, keyAt, legacySaved, panelShown, passesItself, walkthroughOpens,
+  type Access, type Event as PermissionsEvent, type Perm, type Permissions as Walkthrough,
+} from "../../gen/shell__permissions.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import {
-  CalendarAccess, CameraAccess, FilesAccess, LocationAccess, MicrophoneAccess, NotificationAccess, PhotoAccess, SavedProgress,
+  CalendarAccess, CameraAccess, FilesAccess, LegacyWalkthroughMemory, LegacyWalkthroughProgress, LocationAccess, MicrophoneAccess,
+  NotificationAccess, PhotoAccess, PlatformCapabilities, SavedProgress,
 } from "./native.schema.vibe"
-import { browserPermissionRequest, browserPermissionStatus, pageEvents, pageHidden } from "./page.ts"
+import { Navigation } from "./navigation.vibe"
+import { browserPermissionRequest, browserPermissionStatus, pageEvents, pageHidden, storedValue } from "./page.ts"
 
 /** Where the walkthrough's progress is kept on this device. */
 export const PROGRESS_KEY = ownerKey("device", "shell/permission-progress")
+
+/** Where an earlier Alpha kept the walkthrough's position and the prompts it already showed. */
+export const LEGACY_PROGRESS_KEY = "alpha:startup-permission-walkthrough:v1"
+export const LEGACY_MEMORY_KEY = "alpha.startup-permissions.v1"
+
+/** The navigation hold the walkthrough takes while its panel is shown. */
+export const WALKTHROUGH_HOLD = "permissions"
 
 /** What decides whether the walkthrough may open now, from the account area. */
 export interface ConnectionFacts {
@@ -22,6 +34,27 @@ export interface ConnectionFacts {
   readonly background: boolean
   /** A new account was made by this sign-in. */
   readonly created: boolean
+  /** The account has something the Ready card must show: a connection error, a missing plan, an unavailable agent or an unconfirmed revocation. */
+  readonly attention?: boolean
+}
+
+const LEGACY_NAMES: Readonly<Record<string, Perm>> = {
+  notifications: "PermNotifications", microphone: "PermMicrophone", camera: "PermCamera", location: "PermLocation",
+  calendar: "PermCalendar", photos: "PermPhotos", files: "PermFiles",
+  browsernotifications: "PermNotifications", browsermicrophone: "PermMicrophone", browsercamera: "PermCamera", browserlocation: "PermLocation",
+}
+
+/** The kept progress an earlier Alpha's records stand for, or undefined when there are none. */
+export function legacyProgress(progress: LegacyWalkthroughProgress | undefined, memory: LegacyWalkthroughMemory | undefined, native: boolean) {
+  if (progress === undefined && memory === undefined) return undefined
+  const attempted = Object.entries(memory?.attempted ?? {}).flatMap(([name, shown]) => shown === true && Object.hasOwn(LEGACY_NAMES, name) ? [LEGACY_NAMES[name]] : [])
+  const completed = progress?.status === "completed"
+  return {
+    attempted: [...new Set(attempted)],
+    saved: progress === undefined ? 0 : legacySaved(progress.version, completed, progress.step, native),
+    done: completed,
+    touched: progress?.choices?.includes("skipped") === true,
+  }
 }
 
 /** The startup access walkthrough, for the account area and Settings. */
@@ -36,6 +69,7 @@ export service Permissions {
   finish(): void!!
   /** Settings → "Set up Alpha access" at one step. */
   reopen(index: number): void!!
+  /** Leaves a review opened from Settings. */
   close(): void!!
 }
 
@@ -64,7 +98,12 @@ export const permissionsLive = Layer.effect(Permissions, effect {
   const build = try Build
   const store = try KeyValueStore.KeyValueStore
   const machine = try PermissionsMachine
+  const navigation = try Navigation
+  const scope = try Scope.Scope
   const onDevice = build.info.variant !== "browser"
+  let stallTimer: Fiber.Fiber<void> | undefined
+  let stallStep = ""
+  let held = false
 
   effect function sendTo(event: PermissionsEvent) {
     const sent = machine.send(event) catch () => undefined
@@ -144,16 +183,67 @@ export const permissionsLive = Layer.effect(Permissions, effect {
   }
 
   effect function save(state: Walkthrough) {
-    const saved = { attempted: [...state.attempted], saved: state.completed ? state.keys.length : Math.max(0, state.progress), done: state.completed }
+    const saved = {
+      attempted: [...state.attempted], saved: state.completed ? state.keys.length : Math.max(0, state.progress), done: state.completed,
+      touched: !state.untouched,
+    }
     const kept = store.set(PROGRESS_KEY, JSON.stringify(saved)) catch () => false
     if (kept === false) try sendTo({ type: "progressWriteFailed" })
   }
 
+  effect function decodeStored<A>(text: string | null | undefined, decode: (input: unknown) => A!unknown) {
+    if (typeof text !== "string") return undefined
+    const value = effect { return try decode(try Effect.try(() => JSON.parse(text))) } catch () => undefined
+    return value
+  }
+
+  effect function stallLater(step: string) {
+    try sleep(Duration.seconds(StallSeconds))
+    if (stallStep === step) try sendTo({ type: "stall" })
+  }
+
+  effect function readImageDefaults() {
+    const answer = timeout(native.invoke("DeviceApps", "platformCapabilities"), "1500 millis") catch () => undefined
+    const facts = answer === undefined ? undefined : (Schema.decodeUnknownEffect(PlatformCapabilities)(answer) catch () => undefined)
+    try sendTo({ type: "imageDefaults", granted: facts?.startupPermissionDefaults === true })
+  }
+
+  effect function follow(state: Walkthrough) {
+    const step = state.phase === "PhaseWalkthrough" && !state.stalled ? `${state.generation}:${state.target}:${state.progress}` : ""
+    if (step !== stallStep) {
+      stallStep = step
+      if (stallTimer !== undefined) try Fiber.interrupt(stallTimer)
+      stallTimer = undefined
+      if (step !== "") stallTimer = fork.in(scope) stallLater(step)
+    }
+    const shown = panelShown(state)
+    if (shown !== held) {
+      held = shown
+      try navigation.send(shown ? { type: "hold", id: WALKTHROUGH_HOLD } : { type: "release", id: WALKTHROUGH_HOLD })
+    }
+    if (passesItself(state) && state.pending === -1 && stepAccess(state, state.progress) === "AccessReady") {
+      const after = try sendTo({ type: "advance", skip: false })
+      if (after !== undefined) try save(after)
+    }
+  }
+
   const raw = store.get(PROGRESS_KEY) catch () => undefined
   const text = Option.isOption(raw) ? Option.getOrUndefined(raw) : raw
-  const restored = typeof text !== "string" ? undefined : (effect { return try Schema.decodeUnknownEffect(SavedProgress)(try Effect.try(() => JSON.parse(text))) } catch () => undefined)
-  try sendTo({ type: "restore", native: onDevice, attempted: restored === undefined ? [] : [...restored.attempted], saved: restored?.saved ?? 0, done: restored?.done ?? false })
+  const kept = try decodeStored(text, Schema.decodeUnknownEffect(SavedProgress))
+  const earlier = kept !== undefined || typeof text === "string" ? undefined : legacyProgress(
+    try decodeStored(storedValue(LEGACY_PROGRESS_KEY), Schema.decodeUnknownEffect(LegacyWalkthroughProgress)),
+    try decodeStored(storedValue(LEGACY_MEMORY_KEY), Schema.decodeUnknownEffect(LegacyWalkthroughMemory)),
+    onDevice,
+  )
+  const restored = kept ?? earlier
+  try sendTo({
+    type: "restore", native: onDevice, attempted: restored === undefined ? [] : [...restored.attempted], saved: restored?.saved ?? 0,
+    done: restored?.done ?? false, touched: restored?.touched === true,
+  })
+  if (earlier !== undefined) try save(try machine.get())
+  if (onDevice) fork.scoped readImageDefaults()
   try readAll()
+  fork.scoped (effect { for try (const state of machine.changes) try follow(state) })
   fork.scoped (effect {
     for try (const _ of pageEvents("visibilitychange", "document")) {
       if (pageHidden()) try sendTo({ type: "suspend" })
@@ -170,16 +260,19 @@ export const permissionsLive = Layer.effect(Permissions, effect {
       const opens = walkthroughOpens(facts.account, facts.ownKeys, facts.signingIn, facts.busy, facts.residentStarting, facts.background)
       if (opens && !state.signedIn) try sendTo({ type: "signIn", created: facts.created })
       else if (!facts.account && !facts.ownKeys && state.signedIn) try sendTo({ type: "signOut" })
+      const attention = facts.attention === true
+      if ((try machine.get()).attention !== attention) try sendTo({ type: "accountAttention", attention })
     },
     effect allow() {
       const begun = try sendTo({ type: "begin" })
       if (begun === undefined) return
       const key = keyAt(begun, begun.pending)
       const bridge = bridgeFor(key)
+      const access = stepAccess(begun, begun.pending)
       if ((try sendTo({ type: "ask" })) !== undefined) {
         try save(try machine.get())
         try bridge.request()
-      } else if (stepAccess(begun, begun.pending) === "AccessSettings") {
+      } else if (access === "AccessSettings" || (begun.target >= 0 && begun.native && access === "AccessReady")) {
         try bridge.settings()
       }
       try sendTo({ type: "settle", access: try bridge.status() })

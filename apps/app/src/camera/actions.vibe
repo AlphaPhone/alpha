@@ -12,6 +12,8 @@ export interface ActionCall {
   readonly ownerWords: boolean
   /** The `x-eliza-device-capabilities` the assistant named. */
   readonly capabilities?: string
+  /** The screen under the assistant is a protected one. */
+  readonly sensitive?: boolean
 }
 
 /** A camera or Photos operation the phone refused before it changed anything. */
@@ -42,7 +44,7 @@ export const cameraActions = Layer.effect(CameraActions, effect {
       if (Option.isSome(photo)) {
         const attempt = try camera.capture({
           operationId: call.operationId, reviewed: call.reviewed, ownerWords: call.ownerWords,
-          offersLibraryId: offers(call.capabilities, "camera.capture-library-id.v1"), ...(photo.value.lens === undefined ? {} : { lens: photo.value.lens }),
+          offersLibraryId: offers(call.capabilities, "camera.capture-library-id.v1"), sensitive: call.sensitive === true, ...(photo.value.lens === undefined ? {} : { lens: photo.value.lens }),
         })
         if (attempt.status === "failed") throw new ActionRefused({ message: attempt.summary })
         return attempt

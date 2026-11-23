@@ -111,6 +111,12 @@ export const layer = Layer.effect(FilesChanges, effect {
     return rows
   }
 
+  function located(keys: readonly string[]) {
+    const seen = new Set<string>()
+    const paths = keys.map((key) => keyPath(key).path).filter((path) => path !== "" && !seen.has(path) && (seen.add(path), true))
+    return { paths, volume: keys.length ? keyPath(keys[0]!).volume : "" }
+  }
+
   effect function pathsOf(keys: readonly string[]) {
     const s = try view.get()
     const rows = keys.map((key) => s.rows.find((row) => row.key === key))
@@ -136,19 +142,19 @@ export const layer = Layer.effect(FilesChanges, effect {
   }
 
   effect function transfer(keys: readonly string[], dest: string, copy: boolean) {
-    const { rows, volume } = try pathsOf(keys)
+    const { paths, volume } = located(keys)
     try counted(effect {
       const op = copy ? "CopyFiles" : "MoveFiles"
-      try run(op, rows.map((row) => row.path), effect (part) => fromOutcomes(op, (storage.transfer(part, dest, copy, volume) catch () => undefined), part))
+      try run(op, paths, effect (part) => fromOutcomes(op, (storage.transfer(part, dest, copy, volume) catch () => undefined), part))
     })
     try browser.dispatch({ type: "endSelecting" })
     try browser.refresh()
   }
 
   effect function trash(keys: readonly string[]) {
-    const { rows, volume } = try pathsOf(keys)
+    const { paths, volume } = located(keys)
     try counted(effect {
-      const answered = try run("TrashFiles", rows.map((row) => row.path), effect (part) => fromOutcomes("TrashFiles", (storage.trash(part, volume) catch () => undefined), part))
+      const answered = try run("TrashFiles", paths, effect (part) => fromOutcomes("TrashFiles", (storage.trash(part, volume) catch () => undefined), part))
       const ids = answered.filter((row) => receipt("TrashFiles", row).done).map((row) => row.to ?? "")
       try Ref.set(undoIds, { volume, ids })
     })

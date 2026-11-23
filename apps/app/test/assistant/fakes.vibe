@@ -5,7 +5,11 @@ import { memoryStore } from "../../src/platform/storage.vibe"
 import { AssistantHost, type ScreenFacts } from "../../src/assistant/host.vibe"
 import { DeviceExecutors, type OperationPorts } from "../../src/assistant/review.vibe"
 import { layer } from "../../src/assistant/layer.vibe"
+import { AssistantEmail, type ReviewedEmail } from "../../src/assistant/ports.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import type { AppId } from "../../src/web/app-screen.ts"
+import { initial as navStart, moveChat as navMoveChat, type Detent as ShellDetent, type Nav } from "../../gen/shell__navigation.ts"
 
 /** What the fake resident was asked, in order. */
 export interface Seen { readonly calls: { readonly method: string; readonly path: string; readonly body: unknown }[] }
@@ -16,21 +20,31 @@ export type TurnScript = { readonly kind: "reply"; readonly text: string } | { r
 const encoder = new TextEncoder()
 const frame = (value: unknown) => encoder.encode(`data: ${JSON.stringify(value)}\n\n`)
 
+/** What the fake resident answers besides the chat turn: the stored history of c1, search hits, and a refused proposal listing. */
+export interface ResidentScript {
+  readonly turn: TurnScript
+  readonly proposals: readonly unknown[]
+  readonly history?: readonly unknown[]
+  readonly hits?: readonly unknown[]
+  readonly listingStatus?: number
+}
+
 /** The resident's local API as a scripted fake at its network boundary. */
-export function fakeResident(seen: Seen, script: { turn: TurnScript; proposals: readonly unknown[] }) {
+export function fakeResident(seen: Seen, script: ResidentScript) {
   return Layer.succeed(Resident, {
     status: () => succeed("running" as const),
     ensureRunning: () => succeed(undefined),
-    json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => effect {
+    json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => effect {
       seen.calls.push({ method, path, body })
       if (path === "/api/conversations" && method === "POST") return { status: 200, data: { conversation: { id: "c1", roomId: "r1" } } }
       if (path === "/api/conversations") return { status: 200, data: { conversations: [{ id: "c1", roomId: "r1" }] } }
-      if (path === "/api/client-devices/proposals") return { status: 200, data: { proposals: script.proposals } }
+      if (path === "/api/client-devices/proposals") return script.listingStatus === undefined ? { status: 200, data: { proposals: script.proposals } } : { status: script.listingStatus, data: {} }
+      if (path.startsWith("/api/conversations/messages/search")) return { status: 200, data: { messages: script.hits ?? [] } }
       if (path.endsWith("/messages") && method === "POST") {
         if (script.turn.kind === "refuse") throw new ResidentRefused({ status: script.turn.status, message: "busy", code: "room_busy" })
         return { status: 200, data: { text: script.turn.text, agentName: "Alpha", messageId: "m1", userMessageId: "u1", actionResults: [] } }
       }
-      if (path.startsWith("/api/conversations/c1/messages")) return { status: 200, data: { messages: [], hasMore: false } }
+      if (path.startsWith("/api/conversations/c1/messages")) return { status: 200, data: { messages: script.history ?? [], hasMore: false } }
       return { status: 200, data: {} }
     },
     stream: (path: string, body: unknown) => {
@@ -87,6 +101,61 @@ export function silentAgentNative(aborts: string[]) {
   })
 }
 
+/** A phone whose only plugin is `ElizaLocation`, granted, with one fix taken at time zero. */
+export function locationNative(fix: { readonly latitude: number; readonly longitude: number; readonly accuracy: number }, reads: { count: number }) {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "ElizaLocation"),
+    invoke: (plugin: string, method: string) => effect {
+      if (plugin === "ElizaLocation" && method === "checkPermissions") return { location: "granted" }
+      if (plugin === "ElizaLocation" && method === "getCurrentPosition") {
+        reads.count += 1
+        return { coords: fix, timestamp: 0 }
+      }
+      throw new NativeUnavailable({ plugin, method })
+    },
+    listen: (plugin: string, event: string) => Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** A phone whose Android hands the renderer one assist invocation of `origin`. */
+export function assistNative(origin: "assist" | "listener" | "system" | "power") {
+  return Layer.succeed(Native, {
+    available: (plugin: string) => succeed(plugin === "DailyApps"),
+    invoke: (plugin: string, method: string) => fail(new NativeUnavailable({ plugin, method })),
+    listen: (plugin: string, event: string) => plugin === "DailyApps" && event === "assistantInvoked"
+      ? Stream.make<unknown>({ origin })
+      : Stream.fail(new NativeUnavailable({ plugin, method: event })),
+  })
+}
+
+/** The shell's navigation as a value the test moves: opening an app, Home and moving the assistant change it as the shell does. */
+export function fakeNavigation(start: Nav = navStart) {
+  return Layer.effect(Navigation, effect {
+    const nav = try SubscriptionRef.make<Nav>(start)
+    const change = (next: (current: Nav) => Nav) => map(SubscriptionRef.update(nav, next), () => true)
+    return {
+      changes: SubscriptionRef.changes(nav),
+      get: () => SubscriptionRef.get(nav),
+      send: () => succeed(false),
+      open: (app: AppId) => change((current) => ({ ...current, app, revision: current.revision + 1 })),
+      back: () => succeed(false),
+      home: () => change((current) => ({ ...current, app: "", chat: "ChatInput", revision: current.revision + 1 })),
+      openLayer: () => succeed(false),
+      closeLayer: () => succeed(false),
+      moveChat: (detent: ShellDetent) => change((current) => navMoveChat(current, detent)),
+      switchForAgent: () => succeed(false),
+    }
+  })
+}
+
+/** A private screen: the passwords view. */
+export const privateScreen: ScreenFacts = {
+  exposure: { privateView: true, locked: false, hidden: false, connectionDialog: false },
+  observation: { view: "passwords", revision: 1, sensitive: true },
+  onCalendar: false,
+  contextKey: "passwords",
+}
+
 /** A plain, unlocked Home screen. */
 export const homeScreen: ScreenFacts = {
   exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
@@ -95,18 +164,21 @@ export const homeScreen: ScreenFacts = {
   contextKey: "home",
 }
 
-/** The shell's side of the assistant, signed in on Home; toasts are collected. */
+/** The shell's side of the assistant, signed in on Home, and Inbox delivering email cards; toasts and emails are collected. */
 export function fakeHost(toasts: string[], screen: ScreenFacts = homeScreen, emails: unknown[] = []) {
-  return Layer.succeed(AssistantHost, {
+  const inbox = Layer.succeed(AssistantEmail, {
+    send: (email: ReviewedEmail) => sync(() => { emails.push(email); return "Delivered" as const }),
+    address: () => succeed("owner@example.com"),
+  })
+  return Layer.mergeAll(inbox, Layer.succeed(AssistantHost, {
     identity: () => succeed({ origin: "https://agent.local", owner: "o1", agent: "a1", session: "s1", installationId: "i1", enrollmentId: "e1" }),
     screen: () => succeed(screen),
     peer: () => succeed({ optionalFields: false, takesLocation: false }),
     inference: () => succeed({ where: "OnDevice" as const, provider: "this phone" }),
     emergency: () => succeed(false),
     openView: () => succeed(true),
-    sendEmail: (draft: unknown) => sync(() => { emails.push(draft); return "Delivered" as const }),
     toast: (text: string) => sync(() => { toasts.push(text) }),
-  })
+  }))
 }
 
 /** Executors that run every operation once and count it. */
@@ -138,7 +210,12 @@ export function fakePreferences(said: { asks: boolean; shares: boolean }) {
   })
 }
 
-/** The assistant over the fakes, with its stores in memory. */
-export function assistantOver(resident: Layer.Layer<Resident>, host: Layer.Layer<AssistantHost>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false })) {
-  return Layer.provideMerge(layer, Layer.mergeAll(resident, host, executors, native, memoryStore, preferences))
+/** The assistant signed in on Home over a quiet resident, with the cross-area ports `ports` fills. */
+export function assistantWith<P>(ports: Layer.Layer<P>, resident: Layer.Layer<Resident> = fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals: [] })) {
+  return Layer.provideMerge(layer, Layer.mergeAll(resident, fakeHost([]), countingExecutors({ count: 0 }), noNative, memoryStore, fakePreferences({ asks: false, shares: false }), fakeNavigation(), ports))
+}
+
+/** The assistant over the fakes, with its stores in memory and the shell's navigation on Home. */
+export function assistantOver(resident: Layer.Layer<Resident>, host: Layer.Layer<AssistantHost | AssistantEmail>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false })) {
+  return Layer.provideMerge(layer, Layer.mergeAll(resident, host, executors, native, memoryStore, preferences, fakeNavigation()))
 }

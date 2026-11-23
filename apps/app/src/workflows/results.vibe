@@ -33,8 +33,8 @@ export service HostedResults {
   askReview(sensitive: boolean): boolean!!
   askSubmit(valid: boolean): void!!
   askDismiss(explicit: boolean): void!!
-  /** Recheck the tap and consume it; whether a draft may be composed. */
-  askContinue(canCompose: boolean, current: boolean): boolean!!
+  /** Recheck the tap and consume it; whether a draft may be composed, which needs the owner who tapped to still be the current one. */
+  askContinue(canCompose: boolean): boolean!!
   /** Configure background delivery for the current owner, or pause it. */
   background(on: boolean): void!!
   setNotifications(on: boolean): void!!
@@ -146,14 +146,16 @@ export const hostedResults = Layer.unwrap(effect {
         const captured = try Ref.get(tap)
         if (native && !explicit && captured.token !== "") bridge.invoke(plugin, "releaseResultQuestion", { token: captured.token }) catch () => undefined
       },
-      effect askContinue(canCompose: boolean, current: boolean) {
+      effect askContinue(canCompose: boolean) {
+        const tappedBy = (try Ref.get(scopeRef)).owner
         const captured = try Ref.get(tap)
         const fresh = try readPending()
         const exact = !native || (fresh.token === captured.token && fresh.runId === captured.runId && fresh.retained === true && fresh.question === true)
         held.send({ type: "recheckAnswered", exact, canCompose }) catch () => undefined
         if ((try held.get()).question !== "QuestionConsume") return false
         const ok = native ? try (effect { try bridge.invoke(plugin, "consumeResult", { token: captured.token }); return true } catch () => false) : true
-        held.send({ type: "questionConsumed", ok, current }) catch () => undefined
+        const current = tappedBy !== "" && (try bind()).owner === tappedBy
+        held.send({ type: "questionConsumed", ok, live: current }) catch () => undefined
         return ok && current
       },
       effect background(on: boolean) {

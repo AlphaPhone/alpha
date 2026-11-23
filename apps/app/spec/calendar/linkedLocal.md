@@ -16,14 +16,14 @@ type PortResult = NoPortResult | PortApplied | PortStaged | PortAbsent
 type PortOutcome = PortNone | PortSnapshot | PortMissing | PortDone | PortHeld | PortAborted | PortPending | PortChanged | PortInvalid | PortStagedDone | PortAbsentDone
 type StagedScope = NoStagedScope | StagedEvent | StagedSeries
 type LinkedLocal = {
-  bound: bool, sourceSame: bool, exists: bool, revision: int, pending: bool, series: bool, guests: bool,
+  bound: bool, sourceSame: bool, present: bool, revision: int, pending: bool, series: bool, guests: bool,
   richUpdate: bool, stagedScope: StagedScope, known: int,
   op: PortOp, phase: PortPhase, expected: int, ownerCurrent: bool, result: PortResult, wrote: int, outcome: PortOutcome,
   documentNotices: int, deletionNotices: int, finished: int, writes: int,
   staleWrite: bool, unboundWrite: bool, heldWrite: bool, lateAbort: bool
 }
 pure val initial: LinkedLocal = {
-  bound: true, sourceSame: true, exists: true, revision: 0, pending: false, series: false, guests: false,
+  bound: true, sourceSame: true, present: true, revision: 0, pending: false, series: false, guests: false,
   richUpdate: false, stagedScope: NoStagedScope, known: -1,
   op: NoPortOp, phase: PortIdle, expected: -1, ownerCurrent: true, result: NoPortResult, wrote: -1, outcome: PortNone,
   documentNotices: 0, deletionNotices: 0, finished: 0, writes: 0,
@@ -33,7 +33,7 @@ pure def ended(outcome: PortOutcome, s: LinkedLocal): LinkedLocal =
   { ...s, op: NoPortOp, phase: PortIdle, expected: -1, result: NoPortResult, wrote: -1, richUpdate: false, outcome: outcome }
 pure def written(result: PortResult, s: LinkedLocal): LinkedLocal =
   { ...s, phase: PortWritten, result: result, writes: s.writes + 1,
-    staleWrite: s.staleWrite or s.revision != s.expected or not(s.exists),
+    staleWrite: s.staleWrite or s.revision != s.expected or not(s.present),
     unboundWrite: s.unboundWrite or not(s.bound) or not(s.sourceSame), heldWrite: s.heldWrite or s.pending }
 pure def outcomeOf(result: PortResult): PortOutcome =
   match result { | PortApplied => PortDone | PortStaged => PortStagedDone | PortAbsent => PortAbsentDone | NoPortResult => PortNone }
@@ -72,19 +72,19 @@ A deletion is staged with the owner's Undo window and keeps the event and its se
 pure def canTransact(s: LinkedLocal): bool = s.phase == PortAdmitted
 pure def transact(s: LinkedLocal): LinkedLocal =
   if (not(s.bound) or not(s.sourceSame)) ended(PortAborted, s)
-  else if (s.exists and s.pending) ended(PortPending, s)
+  else if (s.present and s.pending) ended(PortPending, s)
   else if (s.op == GetEvent)
-    { ...ended(if (s.exists) PortSnapshot else PortMissing, s), known: if (s.exists) s.revision else -1, finished: s.finished + 1 }
+    { ...ended(if (s.present) PortSnapshot else PortMissing, s), known: if (s.present) s.revision else -1, finished: s.finished + 1 }
   else if (s.op == ApplyEvent)
-    (if (not(s.exists) or s.revision != s.expected) ended(PortChanged, s)
+    (if (not(s.present) or s.revision != s.expected) ended(PortChanged, s)
      else { ...written(PortApplied, s), revision: s.revision + 1, wrote: s.revision + 1, series: s.richUpdate, guests: s.richUpdate })
-  else if (not(s.exists)) { ...s, phase: PortWritten, result: PortAbsent }
+  else if (not(s.present)) { ...s, phase: PortWritten, result: PortAbsent }
   else if (s.revision != s.expected or not(s.ownerCurrent)) ended(PortChanged, s)
   else { ...written(PortStaged, s), pending: true, stagedScope: if (s.series) StagedSeries else StagedEvent }
 pure def alwaysNoStaleWrite(s: LinkedLocal): bool = not(s.staleWrite)
 pure def alwaysWritesAreFenced(s: LinkedLocal): bool = not(s.unboundWrite)
 pure def alwaysPendingDeletionHolds(s: LinkedLocal): bool = not(s.heldWrite)
-pure def sometimesStaged(s: LinkedLocal): bool = s.outcome == PortStagedDone and s.pending and s.exists
+pure def sometimesStaged(s: LinkedLocal): bool = s.outcome == PortStagedDone and s.pending and s.present
 ```
 
 ### The closing check gives a controller unbound meanwhile no result and the page no notice; a write made stays
@@ -105,14 +105,14 @@ pure def sometimesWrittenThenAborted(s: LinkedLocal): bool = s.lateAbort and s.o
 ### The owner keeps editing, deleting and undoing; a replaced source or an ended binding cannot be taken back
 
 ```quint
-pure def canLocalEdit(s: LinkedLocal): bool = s.exists and not(s.pending)
+pure def canLocalEdit(s: LinkedLocal): bool = s.present and not(s.pending)
 pure def localEdit(s: LinkedLocal): LinkedLocal = { ...s, revision: s.revision + 1 }
-pure def canOwnerStagesDeletion(s: LinkedLocal): bool = s.exists and not(s.pending)
+pure def canOwnerStagesDeletion(s: LinkedLocal): bool = s.present and not(s.pending)
 pure def ownerStagesDeletion(s: LinkedLocal): LinkedLocal = { ...s, pending: true }
 pure def canUndoDeletion(s: LinkedLocal): bool = s.pending
 pure def undoDeletion(s: LinkedLocal): LinkedLocal = { ...s, pending: false }
 pure def canFinalizeDeletion(s: LinkedLocal): bool = s.pending
-pure def finalizeDeletion(s: LinkedLocal): LinkedLocal = { ...s, pending: false, exists: false, series: false, guests: false }
+pure def finalizeDeletion(s: LinkedLocal): LinkedLocal = { ...s, pending: false, present: false, series: false, guests: false }
 pure def canSourceReplaced(s: LinkedLocal): bool = s.sourceSame
 pure def sourceReplaced(s: LinkedLocal): LinkedLocal = { ...s, sourceSame: false }
 pure def canUnbind(s: LinkedLocal): bool = s.bound

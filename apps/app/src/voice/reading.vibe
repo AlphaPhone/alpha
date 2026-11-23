@@ -1,0 +1,59 @@
+// spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"; spec/voice/speech.md, "A reviewed page, a local reading and voicemail audio use only the phone; replies and turn guidance use the route in use"
+import { ReadingSpeechFailed, ReadingVoice } from "../browser/ports.vibe"
+import { Native } from "../platform/native.vibe"
+import { ResidentControl } from "../platform/resident-control.vibe"
+import { newId } from "./ids.ts"
+import { LocalSpeechStatus } from "./native.schema.vibe"
+import { Speech, type ReadingBinding } from "./speech.vibe"
+
+const BINDING_LIFETIME_MS = 120_000
+const decodeStatus = Schema.decodeUnknownOption(LocalSpeechStatus)
+
+function failureOf(error: { readonly _tag: string; readonly reason?: unknown }): ReadingSpeechFailed {
+  if (error._tag === "SpeechRefused" || error._tag === "SpeechInterrupted") return new ReadingSpeechFailed({ reason: String(error.reason) })
+  if (error._tag === "SpeechNotStopped") return new ReadingSpeechFailed({ reason: "speech-cleanup-unconfirmed" })
+  return new ReadingSpeechFailed({ reason: "unavailable" })
+}
+
+/** Browser's ReadingVoice: the resident session a reading is bound to, the phone's own voice and the reading channel; page text never leaves the phone. */
+export const readingVoice = Layer.effect(ReadingVoice, effect {
+  const speech = try Speech
+  const native = try Native
+  const control = try ResidentControl
+  let held: { readonly key: string; readonly binding: ReadingBinding } | undefined
+
+  effect function binding() {
+    const session = try control.session()
+    if (session === undefined) {
+      held = undefined
+      return undefined
+    }
+    const key = `${session.owner}:${session.agent}:${session.generation}:${session.epoch}`
+    const now = try Clock.currentTimeMillis
+    if (held !== undefined && held.key === key && held.binding.expiresAt > now) return held.binding
+    const next: ReadingBinding = { execution: "device", ownerId: session.owner, sessionId: `${session.agent}:${session.generation}`, expiresAt: now + BINDING_LIFETIME_MS }
+    held = { key, binding: next }
+    return next
+  }
+
+  return {
+    effect binding() {
+      const bound = try binding()
+      return bound === undefined ? undefined : { ...bound }
+    },
+    effect ready() {
+      const raw = native.invoke("AlphaVoiceCloud", "localSpeechStatus", { requestId: newId() }) catch () => undefined
+      const status = raw === undefined ? undefined : Option.getOrUndefined(decodeStatus(raw))
+      return status !== undefined && (status.ready || status.playback === true) && status.execution === "device"
+    },
+    effect speakToken(readingToken: string) {
+      const bound = try binding()
+      if (bound === undefined) throw new ReadingSpeechFailed({ reason: "no-session" })
+      speech.speakReviewed(readingToken, bound) catch effect (error) => { throw failureOf(error) }
+    },
+    effect speakText(text: string) {
+      speech.speakOnPhone(text, "Reading") catch effect (error) => { throw failureOf(error) }
+    },
+    effect stop() { try speech.stop("Reading") },
+  }
+})

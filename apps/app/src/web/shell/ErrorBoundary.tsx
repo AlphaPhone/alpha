@@ -5,6 +5,7 @@ import type { AppId } from "../app-screen.ts";
 import { Recovery } from "../../shell/recovery.vibe";
 import { perform } from "./useLayer.ts";
 
+/** The app whose render is caught, by id and title. */
 export interface ViewBoundaryProps {
   app: AppId;
   title: string;
@@ -22,6 +23,7 @@ export class ViewBoundary extends Component<ViewBoundaryProps, { failed: boolean
   override render() { return this.state.failed ? null : this.props.children; }
 }
 
+/** The shell under the boundary and the recovery screen that stands in for it. */
 export interface ShellBoundaryProps {
   /** What stands in once the shell itself failed: the recovery screen. */
   fallback: ReactNode;

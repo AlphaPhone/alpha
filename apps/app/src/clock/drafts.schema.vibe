@@ -1,0 +1,14 @@
+// spec/clock/reminderDrafts.md, "Each slot keeps one form under its identity, and a newer keep replaces only the same form"
+// A kept reminder form as Alpha's private storage gives it back, decoded before the form resumes it.
+
+const Bounded = (max: number) => Schema.String.check(Schema.makeFilter((s: string) => s.length <= max && !s.includes("\0")))
+
+/** One kept reminder form: its fields, with the civil day it names rather than an offset from a day that has passed. */
+export const KeptReminderForm = Schema.Struct({
+  title: Bounded(200),
+  body: Bounded(4000),
+  date: Schema.String.check(Schema.isPattern(/^\d{4}-\d{2}-\d{2}$/)),
+  minuteOfDay: Schema.Int.check(Schema.makeFilter((n: number) => n >= 0 && n <= 1439)),
+  repeat: Schema.Literals(["none", "daily", "weekdays", "weekly"]),
+  alertMinutes: Schema.NullOr(Schema.Int.check(Schema.makeFilter((n: number) => n >= 0 && n <= 1440))),
+})

@@ -1,4 +1,4 @@
-// spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"
+// spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/withdrawal.md, "Story: Give up on a request without it happening later"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"
 
 /** A conversation as the resident lists it. */
 export schema ConversationRow {
@@ -81,3 +81,15 @@ export schema OpenSuggestion { readonly text: string; readonly title: string; re
 
 /** The comms suggestion kept on the phone across a restart. */
 export schema StoredSuggestion { readonly v: 1; readonly briefed: string | null; readonly open: OpenSuggestion | null }
+
+/** A workflow run a reply announced in its `[WORKFLOW]` block. */
+export schema WorkflowBlock { readonly workflowId: Schema.NonEmptyString; readonly runId: Schema.NonEmptyString; readonly title?: string }
+
+/** The body of a reply's `[FORM]` block, which the transcript hides. */
+export schema FormBlockBody { readonly id: string; readonly fields: readonly Schema.Unknown[] }
+
+/** The email an agent action staged in its result data. */
+export schema StagedEmail { readonly to?: string | readonly string[]; readonly subject?: string; readonly body: string }
+
+/** The native agent bridge's answer to a plain request. */
+export schema BridgeAnswer { readonly status: Schema.Int; readonly data?: Schema.Unknown }

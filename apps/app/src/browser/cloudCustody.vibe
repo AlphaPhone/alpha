@@ -11,7 +11,7 @@ export error RequestAborted { slot: string }
 export service CloudRequests {
   readonly changes: Stream.Stream<Custody>
   /** One JSON request in `slot`; refused when the slot is taken, aborted when cancelled. */
-  request(slot: string, method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): unknown!SlotBusy | RequestAborted | CloudUnavailable | CloudSignedOut
+  request(slot: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): unknown!SlotBusy | RequestAborted | CloudUnavailable | CloudSignedOut
   /** Aborts the request that owns `slot`. */
   cancel(slot: string): void!!
 }
@@ -25,8 +25,8 @@ export const cloudRequestsLayer = Layer.provide(Layer.effect(CloudRequests, effe
 
   return {
     changes: custody.changes,
-    effect request(slot: string, method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) {
-      const generation = try Ref.updateAndGet(counter, (n) => (n % 4) + 1)
+    effect request(slot: string, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) {
+      const generation = try Ref.updateAndGet(counter, (n) => n + 1)
       const started = custody.send({ type: "startRequest", generation, slot }) catch () => undefined
       if (started === undefined || !started.pending.includes(generation)) throw new SlotBusy({ slot })
       const stop = try Deferred.make<void>()

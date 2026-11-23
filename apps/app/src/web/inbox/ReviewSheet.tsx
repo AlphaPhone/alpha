@@ -4,6 +4,7 @@ import { canContinueDraft, canDeleteGmailDraft, canUndo, clearable, notStarted }
 import { Button, Sheet, SheetContent } from "../components/ui/index.ts";
 import { reviewTitle } from "./messages.ts";
 
+/** What the review sheet shows of the account's one operation, and the follow-ups it offers. */
 export type ReviewSheetProps = {
   /** The selected account's operation, or none. */
   record: OperationRecord | undefined;

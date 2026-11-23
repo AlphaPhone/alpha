@@ -1,0 +1,65 @@
+// spec/shell/handoffs.md, "Story: Carry what I asked for in Notes into the app that does it"; spec/notes/share.md, "Story: Share the note I have open"; spec/notes/webSource.md, "Story: Visit or remove the web page a note came from"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
+import { opensApp, refusalShown, sourceOpens, type Request } from "../../gen/shell__handoffs.effect.vibe"
+import { secureTypedAddress, typedAddress, newTabId } from "../browser/address.ts"
+import { BrowserTabs } from "../browser/session.vibe"
+import { Composer } from "../inbox/composer.vibe"
+import { NotesHandoff, type NotesRequest } from "../notes/origins.vibe"
+import { Navigation } from "./navigation.vibe"
+import { Notices } from "./notices.vibe"
+
+const REQUESTS: Readonly<Record<NotesRequest["kind"], Request>> = {
+  "open-notes": "OpenNotes", "email-draft": "EmailDraft", "open-web-source": "OpenWebSource", "calendar-draft": "CalendarDraft",
+}
+
+const EMAIL_REFUSED = "Inbox couldn’t start the email. Nothing was sent."
+const SOURCE_REFUSED = "Browser couldn’t open the page this note came from."
+
+/** The shell's side of what Notes hands over: Notes at a note, an Inbox draft, and the note's web page in Browser; Calendar follows its own drafts. Built after Inbox. */
+export const handoffsLive = Layer.effectDiscard(effect {
+  const notes = try NotesHandoff
+  const navigation = try Navigation
+  const notices = try Notices
+  const composer = try Composer
+  const tabs = try BrowserTabs
+
+  effect function openNotes(noteId: string | undefined) {
+    try navigation.open("notes", noteId)
+  }
+
+  effect function emailDraft(subject: string, body: string) {
+    const accepted = (try composer.compose({ toList: [], subject, body, files: [] })) === undefined
+    if (refusalShown("EmailDraft", accepted)) try notices.show(EMAIL_REFUSED, { failure: true })
+    if (opensApp("EmailDraft", accepted)) try navigation.open("inbox")
+  }
+
+  effect function webSource(url: string) {
+    const typed = typedAddress(secureTypedAddress(url, (try tabs.get()).host === "NativeHost"))
+    const parsed = typed.facts.kind === "ParsedUrl"
+    const empty = typed.href === ""
+    let tabOpened = false
+    let submitted = false
+    if (parsed && !empty) {
+      const opened = try tabs.dispatch({ type: "openTab", id: newTabId(), profile: "Normal" })
+      tabOpened = opened.accepted && !opened.failed
+      if (tabOpened) {
+        const sent = try tabs.dispatch({ type: "submitAddress", facts: typed.facts, url: typed.href })
+        submitted = sent.accepted && !sent.failed
+      }
+    }
+    const accepted = sourceOpens(parsed, empty, tabOpened, submitted)
+    if (refusalShown("OpenWebSource", accepted)) try notices.show(SOURCE_REFUSED, { failure: true })
+    if (opensApp("OpenWebSource", accepted)) try navigation.open("browser")
+  }
+
+  effect function follow(request: NotesRequest) {
+    if (!opensApp(REQUESTS[request.kind], true)) return
+    switch (request.kind) {
+      case "open-notes": return try openNotes(request.noteId)
+      case "email-draft": return try emailDraft(request.subject, request.body)
+      case "open-web-source": return try webSource(request.url)
+      case "calendar-draft": return
+    }
+  }
+
+  fork.scoped Stream.runForEach(notes.requests, follow)
+})

@@ -151,6 +151,22 @@ pure def sometimesDateWithSetupLink(o: Overview): bool = setupLink(o) and o.moun
 pure def sometimesAllCards(o: Overview): bool = agendaCard(o) and attentionCard(o) and briefCard(o) and workflowsCard(o)
 ```
 
+### Calendar's Home card stands in for the event card, after an overdue reminder
+
+Where Calendar mounts its own next-event card on Home (owner decision, November 2026), the overview
+draws no event card of its own: an overdue reminder from the overview still comes first, and with
+no other card the date line stays, with Calendar's card under it.
+
+```quint
+pure def ownAgendaCard(o: Overview, calendarCard: bool): bool = agendaCard(o) and (not(calendarCard) or agenda(o).overdue)
+pure def dateShown(o: Overview, calendarCard: bool): bool =
+  dateLine(o) or (calendarCard and not(ownAgendaCard(o, calendarCard)) and not(attentionCard(o) or briefCard(o) or workflowsCard(o)))
+pure def alwaysAnOverdueReminderKeepsItsCard(o: Overview): bool =
+  (agendaCard(o) and agenda(o).overdue) implies ownAgendaCard(o, true)
+pure def alwaysTheDateStandsInForNoCard(o: Overview): bool = dateLine(o) implies dateShown(o, true)
+pure def sometimesCalendarStandsIn(o: Overview): bool = agendaCard(o) and not(ownAgendaCard(o, true))
+```
+
 ### Reminders that are overdue are reported by the reminder store and stay until handled
 
 ```quint

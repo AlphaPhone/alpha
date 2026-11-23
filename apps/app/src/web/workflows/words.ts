@@ -65,6 +65,37 @@ export const reportWords: Record<ReportWord, string> = {
   "needs-event": "Add an event name.",
   "needs-instructions": "Enter instructions for this schedule.",
   "snooze-past": "Choose a future snooze time.",
+  "not-editable": "This prompt can’t be changed here. Its saved trigger couldn’t be read.",
+};
+
+/** What a renewal reminder tap said when it could not open a review. */
+export const renewalChanged = "This renewal changed. Open the digest sources to review them again.";
+
+/** Why a phone source could not be reviewed, or what saving it did. */
+export const phoneSourceWords: Record<string, string> = {
+  NeedsSourceName: "Name this source selection before reviewing it.",
+  CalendarsGone: "Some selected calendars are no longer available. Choose again.",
+  TooManyCalendars: "Choose at most 16 calendars for this source.",
+  NeedsAKind: "Select a calendar or reminders first.",
+  NeedsHours: "Choose an expiry from 1 to 168 hours (7 days).",
+  saved: "Saved. Your digest reads these sources until they expire.",
+  refused: "This phone didn’t allow the read. Nothing was sent.",
+  unconfirmed: "Your agent didn’t confirm this source. Retry from the saved change.",
+  busy: "Another digest change is still being saved.",
+};
+
+/** What the phone's calendar list said when it could not be read. */
+export const phoneCalendarWords: Record<"permission-denied" | "unavailable" | "not-on-phone", string> = {
+  "permission-denied": "Allow Calendar access to choose calendars for this source.",
+  unavailable: "This phone’s calendars couldn’t be read. Try again with Alpha in front.",
+  "not-on-phone": "Phone sources are chosen on the phone.",
+};
+
+/** What removing Google access did. */
+export const revokeWords: Record<"revoked" | "changed" | "unconfirmed", string> = {
+  revoked: "Google access was removed. These sources and digests no longer read Google.",
+  changed: "What reads through Google changed. Review the updated list.",
+  unconfirmed: "Cloud didn’t confirm the removal. Check it before trying again.",
 };
 
 /** An answer that was lost: the change stays held. */

@@ -1,0 +1,452 @@
+// spec/inbox/accounts.md, "Story: Grant Gmail access a step at a time"; spec/inbox/failures.md, "Story: Understand why Gmail did not answer"; spec/inbox/mailbox.md, "Story: See my saved mail at once"; spec/inbox/reader.md, "Story: Read a message and its conversation"; spec/inbox/drafts.md, "Story: Write replies and forwards that go where I mean"; spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"
+import { assert, it } from "@effect/vitest"
+import { MailProtocolFailed, sha256Hex } from "@elizaos/plugin-inbox/mailbox"
+import { fakeNative } from "../../src/platform/layers.vibe"
+import { failureOf } from "../../src/inbox/gmail.vibe"
+import { suggestRecipients } from "../../src/inbox/composer.vibe"
+import { senderImageFacts } from "../../src/inbox/text.ts"
+import { emailShareTarget } from "../../src/inbox/shareTarget.vibe"
+import { InboxAccounts, Mailbox, MailComposer, MailOperations, MailSelection, MailNoticesShell, MailSuggestions, Reader, SavedMail } from "../../src/inbox/layer.vibe"
+import { base64, calls, grantA, grantB, inboxApp, mailCloud, readMessage, settle, zeroDigest } from "./support.vibe"
+
+const row1 = { id: "m1", threadId: "t-m1", sender: "Bo <bo@example.com>", senderAddress: "bo@example.com", subject: "Subject m1", snippet: "About m1", receivedAt: "2026-11-21T09:30:00Z", unread: true, starred: false, attached: false }
+
+/** A send ledger for request `r-send` whose dispatch either answers or is lost after it landed. */
+function sendRoutes(log: ReturnType<typeof calls>, lose: boolean) {
+  let state = "prepared"
+  return {
+    "POST /api/v1/eliza/google/gmail/inbox-v1/operations/r-send/dispatch": () => {
+      log.cloud.push("dispatch")
+      state = "succeeded"
+      if (lose) throw new Error("connection reset")
+      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: zeroDigest, state, providerResult: { messageId: "sent-1" }, rejectionCode: null } }
+    },
+    "GET /api/v1/eliza/google/gmail/inbox-v1/operations/r-send": () => {
+      log.cloud.push("receipt")
+      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: zeroDigest, state, providerResult: state === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null } }
+    },
+  }
+}
+
+/** The review Cloud answers for the email the send tests write. */
+const sendReview = { kind: "send", from: "ann@example.com", to: ["bo@example.com"], cc: [], bcc: [], subject: "Friday", mode: "compose", bodyText: "Noon works.", attachments: [], forwardedAttachments: [] }
+
+effect function writeFriday() {
+  const composer = try MailComposer
+  try composer.compose()
+  const open = (try composer.mine()).open
+  try composer.edit({ ...open.fields, toList: ["bo@example.com"], subject: "Friday", body: "Noon works." }, "")
+  try composer.flush()
+  return (try composer.mine()).open
+}
+
+// spec/inbox/accounts.md, "Each consent asks for identity and reading, keeps what was granted and adds only what was asked"
+it.live("Grant Gmail access a step at a time, asking only for what the step needs", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const accounts = try InboxAccounts
+    try settle(accounts.changes, (a) => a.phase === "Checked" && a.selected === grantA)
+    try accounts.choose(grantB)
+    try accounts.requestAccess("ReadMail")
+    try accounts.requestAccess("ChangeMail")
+    const asked = log.connected.map((c) => [...(c as string[])].sort())
+    try Effect.try(() => assert.deepStrictEqual(asked, [["GmailRead"], ["GmailModify", "GmailRead", "GmailSend"]]))
+  }
+})
+
+// spec/inbox/failures.md, "A failure is classified by its cause, in a fixed order"
+it.effect("Understand why Gmail did not answer: a conflict is a revocation for a read and stale for a change", () => effect {
+  const conflict = new MailProtocolFailed({ code: "http", status: 409, reason: "" })
+  const read = failureOf(conflict, "read")
+  const change = failureOf(conflict, "operation")
+  const signedOut = failureOf(new MailProtocolFailed({ code: "http", status: 401, reason: "alpha_signed_out" }), "read")
+  try Effect.try(() => assert.deepStrictEqual(
+    { read: read._tag === "GmailFailed" ? read.kind : read._tag, change: change._tag === "GmailFailed" ? change.kind : change._tag, signedOut: signedOut._tag },
+    { read: "Revoked", change: "Stale", signedOut: "SignInExpired" }))
+})
+
+// spec/inbox/mailbox.md, "A saved list shows only before the first read, and the next read replaces it"
+it.live("See my saved mail at once: a remembered list comes back fresh, and forgetting drops it", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const saved = try SavedMail
+    const scope = { owner: "u1", organization: "org1", credential: "key-1", session: "1" }
+    const account = { id: grantA, label: "ann@example.com", address: "ann@example.com", connected: true, capabilities: ["CapIdentity" as const, "CapTriage" as const] }
+    try saved.rememberList(scope, account, "in:inbox", [row1], "", [], "41", 1000)
+    const fresh = try saved.list(scope, account, "in:inbox", 2000)
+    try saved.forget(scope)
+    const after = try saved.list(scope, account, "in:inbox", 3000)
+    try Effect.try(() => assert.deepStrictEqual({ fresh: fresh?.rows.map((r) => r.id), after }, { fresh: ["m1"], after: undefined }))
+  }
+})
+
+// spec/inbox/mailbox.md, "Drafts are listed by draft id, and an account without draft listing shows local drafts only"
+it.live("Keep my Gmail drafts beside my local drafts in the Drafts folder", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const operations = try MailOperations
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try mailbox.setFolder("DraftsFolder")
+    try settle(mailbox.changes, (m) => m.folder === "DraftsFolder" && m.phase === "ListReady")
+    const s = try mailbox.get()
+    try Effect.try(() => assert.deepStrictEqual({ drafts: s.drafts.map((d) => d.draftId), rows: s.rows.length }, { drafts: ["g1"], rows: 0 }))
+  }
+})
+
+// spec/inbox/mailbox.md, "A confirmed change updates or removes its row, and nothing else"
+it.live("See my changes reflected in the list once Gmail confirmed them", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady" && m.rows.length === 2)
+    try mailbox.rowChanged("m1", false, true)
+    try mailbox.rowRemoved("m2")
+    const s = try mailbox.get()
+    try Effect.try(() => assert.deepStrictEqual(s.rows.map((r) => [r.id, r.unread, r.starred]), [["m1", false, true]]))
+  }
+})
+
+// spec/inbox/mailbox.md, "Home learns only the unread count of the loaded inbox and whether more mail is beyond it"
+it.live("See on Home that mail is waiting: only the unread count reaches the overview", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    try settle(mailbox.changes, (m) => m.phase === "ListReady" && m.rows.length === 2)
+    try settle(Stream.repeatEffect(sync(() => log.attention.length)), (n) => n > 0)
+    try Effect.try(() => assert.deepStrictEqual(log.attention.at(-1), { unread: 1, more: false, connected: true }))
+  }
+})
+
+// spec/inbox/mailbox.md, "Read-ahead is one memory-only request, bounded, only while the Inbox is in front"
+it.live("Read ahead without spending my data: at most two bodies are read ahead", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    const before = log.cloud.filter((c) => c === "read").length
+    try reader.prefetch([row1, { ...row1, id: "m2" }, { ...row1, id: "m3" }])
+    const reads = log.cloud.filter((c) => c === "read").length - before
+    try Effect.try(() => assert.isAtMost(reads, 2))
+  }
+})
+
+// spec/inbox/reader.md, "Story: Read a message and its conversation"; spec/inbox/reader.md, "An automatic change whose outcome is unknown is never sent again"
+it.live("Read a message and its conversation, and never mark it read again after an unconfirmed change", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try reader.open(row1)
+    const first = try reader.get()
+    try reader.close()
+    try reader.open(row1)
+    const again = try reader.get()
+    try Effect.try(() => assert.deepStrictEqual({
+      phase: first.phase, text: first.body.text.startsWith("Body of m1"), thread: first.thread.threadId,
+      unconfirmed: again.unconfirmed, markReads: log.cloud.filter((c) => c === "prepare mark-read").length,
+    }, {
+      phase: "BodyShown", text: true, thread: "t-m1", unconfirmed: [{ account: grantA, message: "m1" }], markReads: 1,
+    }))
+  }
+})
+
+// spec/inbox/reader.md, "Story: Open an attachment as the exact file that was sent"; spec/inbox/attachments.md, "Opening or saving hands over only the reviewed bytes, and only a confirmed result is reported as done"
+it.live("Open an attachment as the exact bytes, and never offer a save again after an unconfirmed one", () => effect {
+  const log = calls()
+  const digest = try sha256Hex("hello")
+  const attachments = [{ partId: "1", name: "notes.txt", mimeType: "text/plain", size: 5, supported: true }]
+  const cloud = mailCloud(log, {
+    "GET /api/v1/eliza/google/gmail/read": () => readMessage("m1", false, { attachments }),
+    "GET /api/v1/eliza/google/gmail/inbox-v1/attachment": () => ({ version: 1, messageId: "m1", partId: "1", historyId: "41", name: "notes.txt", mimeType: "text/plain", size: 5, dataBase64: base64("hello"), sha256: digest, supported: true }),
+  })
+  const native = fakeNative({ AlphaMailAttachments: { saveReviewed: () => { log.native.push("save"); return { status: "unconfirmed" } }, cancel: () => ({}) } })
+  provide inboxApp(log, cloud, native) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try reader.open({ ...row1, unread: false })
+    const part = (try reader.get()).body.parts[0]!
+    const refusal = try reader.openAttachment(part)
+    const shown = (try reader.get()).attachment
+    try reader.saveAttachment()
+    try reader.saveAttachment()
+    const after = (try reader.get()).attachment
+    try Effect.try(() => assert.deepStrictEqual(
+      { refusal, preview: shown.preview, sha256: shown.sha256, save: after.save, saves: log.native.length },
+      { refusal: undefined, preview: "hello", sha256: digest, save: "SaveUnconfirmed", saves: 1 }))
+  }
+})
+
+// spec/inbox/reader.md, "Story: Trust what a formatted email shows me"; spec/inbox/reader.md, "A mail link opens only over HTTPS, only in Alpha's Browser, after the owner reviews it"; spec/inbox/reader.md, "A sender image is a bundled brand icon, decorative and never a proof of identity"
+it.live("Trust what an email shows me: only a reviewed HTTPS link of this opening opens, and shared providers show no sender image", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try reader.open({ ...row1, unread: false })
+    const plain = try reader.reviewLink({ href: "http://example.com/x", text: "x", host: "example.com", mismatch: false })
+    const review = try reader.reviewLink({ href: "https://example.com/plan", text: "bank.com", host: "example.com", mismatch: true })
+    try reader.close()
+    try reader.open({ ...row1, unread: false })
+    const stale = review === undefined ? false : try reader.openLink(review)
+    const current = try reader.reviewLink({ href: "https://example.com/plan", text: "plan", host: "example.com", mismatch: false })
+    const opened = current === undefined ? false : try reader.openLink(current)
+    try Effect.try(() => assert.deepStrictEqual(
+      { plain, mismatch: review?.mismatch, stale, opened, browser: log.opened, gmail: senderImageFacts("bo@gmail.com").sharedProvider },
+      { plain: undefined, mismatch: true, stale: false, opened: true, browser: ["https://example.com/plan"], gmail: true }))
+  }
+})
+
+// spec/inbox/reader.md, "Only a message read whole at a known revision, for the current agent, is handed over, and only into the assistant's composer"
+it.live("Ask my agent about the email I am reading, only into the assistant's composer", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    const closed = try reader.askAgent()
+    try reader.open({ ...row1, unread: false })
+    const asked = try reader.askAgent()
+    try Effect.try(() => assert.deepStrictEqual({ closed, asked, handed: log.assistant.length }, { closed: "not-ready", asked: undefined, handed: 1 }))
+  }
+})
+
+// spec/inbox/drafts.md, "Story: Write replies and forwards that go where I mean"; spec/inbox/drafts.md, "Replying again to a message reopens its unfinished reply from Drafts"
+it.live("Reply all goes to the sender and the others, never to me, and replying again reopens the saved reply", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try reader.open({ ...row1, unread: false })
+    try composer.reply("ReplyAllMode")
+    const reply = (try composer.mine()).open
+    try composer.edit({ ...reply.fields, body: "Tuesday?" }, "")
+    try composer.back()
+    try composer.reply("ReplyAllMode")
+    const reopened = try composer.mine()
+    try Effect.try(() => assert.deepStrictEqual(
+      { to: reply.fields.toList, cc: reply.fields.ccList, subject: reply.fields.subject, sameDraft: reopened.open.id === reply.id, body: reopened.open.fields.body, shelf: reopened.shelf.length },
+      { to: ["bo@example.com"], cc: ["cy@example.com"], subject: "Re: Subject m1", sameDraft: true, body: "Tuesday?", shelf: 0 }))
+  }
+})
+
+// spec/inbox/drafts.md, "Suggestions are recent addresses of the same account that match what is typed, each once, never one already added"
+it.effect("Pick recipients from the people I write to, never myself or someone already added", () => effect {
+  const candidates = ["bo@example.com", "ann@example.com", "bo@example.com", "cy@example.com"]
+  try Effect.try(() => assert.deepStrictEqual(
+    { typed: suggestRecipients(candidates, "e", ["cy@example.com"], "Ann@example.com"), nothing: suggestRecipients(candidates, "", [], "ann@example.com") },
+    { typed: ["bo@example.com"], nothing: [] }))
+})
+
+// spec/inbox/drafts.md, "Only a new email moves, to an account that has no open draft, and the selection follows it"
+it.live("Send from another of my accounts: a new email moves and the selection follows, a reply stays", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const accounts = try InboxAccounts
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try composer.compose({ toList: ["bo@example.com"], subject: "Plan", body: "Hi", files: [] })
+    const moved = try composer.transfer(grantB)
+    try settle(composer.changes, (d) => d.owner.includes(grantB))
+    const onB = (try composer.mine()).open
+    try Effect.try(() => assert.deepStrictEqual({ moved, selected: (try accounts.get()).selected, subject: onB.fields.subject }, { moved: undefined, selected: grantB, subject: "Plan" }))
+  }
+})
+
+// spec/inbox/drafts.md, "Opening a Gmail draft opens its local copy when there is one, and otherwise sets the open draft aside first"
+it.live("Continue a Gmail draft here as a local draft bound to it", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    const refusal = try composer.openGmailDraft({ draftId: "g1", messageId: "gm1", subject: "Plan", recipients: ["bo@example.com"], snippet: "Draft", updatedAt: "" }, false)
+    const open = (try composer.mine()).open
+    try Effect.try(() => assert.deepStrictEqual({ refusal, gmail: open.provider.draftId, body: open.fields.body, to: open.fields.toList }, { refusal: undefined, gmail: "g1", body: "Draft text", to: ["bo@example.com"] }))
+  }
+})
+
+// spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
+it.live("Keep the copies a sent email leaves behind honest: a draft edited after Send stays", () => effect {
+  const log = calls()
+  const digest = try sha256Hex(JSON.stringify(sendReview))
+  provide inboxApp(log, mailCloud(log, sendRoutes(log, true), { review: sendReview, digest })) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    const draft = try writeFriday()
+    const lost = try operations.sendDraft(draft, "r-send")
+    try composer.edit({ ...draft.fields, body: "Noon works. See you." }, "")
+    try composer.flush()
+    const recovered = try operations.refresh()
+    const kept = (try composer.mine()).open
+    try Effect.try(() => assert.deepStrictEqual({ lost, recovered, kept: kept.id === draft.id, body: kept.fields.body }, { lost: "Uncertain", recovered: "Sent", kept: true, body: "Noon works. See you." }))
+  }
+})
+
+// spec/inbox/drafts.md, "Edits are coalesced into one write per pause, never later than the longest wait after the first"
+it.live("Type without waiting for storage: a burst of edits is written once, as the latest", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try composer.compose()
+    const open = (try composer.mine()).open
+    try composer.edit({ ...open.fields, body: "N" }, "")
+    try composer.edit({ ...open.fields, body: "No" }, "")
+    try composer.edit({ ...open.fields, body: "Noon" }, "")
+    try composer.flush()
+    const after = (try composer.mine()).open
+    try Effect.try(() => assert.deepStrictEqual({ revision: after.revision, body: after.fields.body }, { revision: open.revision + 1, body: "Noon" }))
+  }
+})
+
+// spec/inbox/attachments.md, "Story: Attach files to an email I write"; spec/inbox/attachments.md, "A file is attached only as the bytes that were reviewed"
+it.live("Attach files within the account's policy, and refuse a file that is not what it says or changed", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try composer.compose()
+    const notPdf = try composer.attach({ name: "plan.pdf", mimeType: "application/pdf", dataBase64: base64("hello") })
+    const changed = try composer.attach({ name: "notes.txt", mimeType: "text/plain", dataBase64: base64("hello"), sha256: "f".repeat(64) })
+    const added = try composer.attach({ name: "notes.txt", mimeType: "text/plain", dataBase64: base64("hello") })
+    const twice = try composer.attach({ name: "Notes.TXT", mimeType: "text/plain", dataBase64: base64("hello") })
+    const files = (try composer.mine()).open.fields.files.map((f) => f.name)
+    try Effect.try(() => assert.deepStrictEqual({ notPdf, changed, added, refusedTwice: twice !== undefined, files }, { notPdf: "unsupported-type", changed: "file-changed", added: undefined, refusedTwice: true, files: ["notes.txt"] }))
+  }
+})
+
+// spec/inbox/attachments.md, "A shared file always starts a new local draft for the account it was reviewed for"
+it.live("Email a file from Files: it starts a new draft that opens in Inbox, and never for another account", () => effect {
+  const log = calls()
+  const sha256 = try sha256Hex("hello")
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try composer.compose({ toList: ["bo@example.com"], subject: "Unfinished", body: "Keep me", files: [] })
+    const target = try emailShareTarget
+    const account = try target.emailAccount()
+    const file = { name: "notes.txt", mimeType: "text/plain", dataBase64: base64("hello"), sha256, size: 5 }
+    const elsewhere = try target.email(file, "another-account")
+    const inserted = account.ready ? try target.email(file, account.token) : { kind: "refused" as const, reason: "" }
+    const mine = try composer.mine()
+    try Effect.try(() => assert.deepStrictEqual(
+      { elsewhere: elsewhere.kind, inserted: inserted.kind, files: mine.open.fields.files.map((f) => f.name), unfinished: mine.shelf.map((d) => d.fields.subject), opened: log.opened },
+      { elsewhere: "refused", inserted: "inserted", files: ["notes.txt"], unfinished: ["Unfinished"], opened: ["inbox"] }))
+  }
+})
+
+// spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"; spec/inbox/operations.md, "Sent is said once, by the step that first learns of the success, and an unresolved send opens its receipt"
+it.live("Clean up after a send and say Sent once: a recheck of the same receipt stays quiet", () => effect {
+  const log = calls()
+  const digest = try sha256Hex(JSON.stringify(sendReview))
+  provide inboxApp(log, mailCloud(log, sendRoutes(log, false), { review: sendReview, digest })) {
+    const mailbox = try Mailbox
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    const draft = try writeFriday()
+    const sent = try operations.sendDraft(draft, "r-send")
+    const recheck = try operations.refresh()
+    const tapAgain = try operations.sendDraft(draft, "r-send")
+    try Effect.try(() => assert.deepStrictEqual(
+      { sent, recheck, tapAgain, announced: (try operations.get()).announced, cleared: (try composer.mine()).open.id === "", dispatches: log.cloud.filter((c) => c === "dispatch").length },
+      { sent: "Sent", recheck: "SentBefore", tapAgain: "SentBefore", announced: ["r-send"], cleared: true, dispatches: 1 }))
+  }
+})
+
+// spec/inbox/selection.md, "After approval each message is changed once, in order, and a refused or uncertain one stops the rest"
+it.live("Change several messages at once, and stop at the first change Gmail did not review as asked", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const operations = try MailOperations
+    const selection = try MailSelection
+    try settle(mailbox.changes, (m) => m.phase === "ListReady" && m.rows.length === 2)
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try selection.start()
+    try selection.pickAll([{ id: "m1", version: "" }, { id: "m2", version: "" }])
+    try selection.review("SelArchive")
+    const applied = try selection.apply()
+    const s = try selection.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { applied, phase: s.phase, prepares: log.cloud.filter((c) => c === "prepare archive").length, dispatches: log.cloud.filter((c) => c.startsWith("dispatch")).length },
+      { applied: 0, phase: "SelectionStopped", prepares: 1, dispatches: 0 }))
+  }
+})
+
+// spec/inbox/suggestions.md, "Confirming adds the text once, and only to the destination that was reviewed"
+it.live("Put an agent's suggestion into my email once, where the review said it goes", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const suggestions = try MailSuggestions
+    const composer = try MailComposer
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    const where = try suggestions.destination()
+    try suggestions.open("Sounds good, see you at noon.", true)
+    const id = (try suggestions.get()).review.id
+    const first = try suggestions.confirm(id, "Sounds good, see you at noon.", true)
+    const second = try suggestions.confirm(id, "Sounds good, see you at noon.", true)
+    try Effect.try(() => assert.deepStrictEqual({ where, first, second, body: (try composer.mine()).open.fields.body }, { where: "new-email", first: true, second: false, body: "Sounds good, see you at noon." }))
+  }
+})
+
+// spec/inbox/notices.md, "The watch follows the selected account for its Cloud owner, and stops when there is none"
+it.live("Be told about new mail in the background: the watch follows the selected account", () => effect {
+  const log = calls()
+  const configured: unknown[] = []
+  const native = fakeNative({
+    AlphaGmail: {
+      status: () => ({ status: "watching-new-mail", lastSyncAt: 1, notificationsAllowed: true, uncertainNotices: 0 }),
+      configure: (args: unknown) => { configured.push((args as { grantId: string }).grantId); return { status: "waiting" } },
+      withdraw: () => ({}),
+      pending: () => ({}),
+    }
+  })
+  provide inboxApp(log, mailCloud(log), native) {
+    const accounts = try InboxAccounts
+    const notices = try MailNoticesShell
+    try settle(notices.changes, (n) => n.watched.grant === grantA)
+    try accounts.choose(grantB)
+    try settle(notices.changes, (n) => n.watched.grant === grantB)
+    try Effect.try(() => assert.deepStrictEqual(configured, [grantA, grantB]))
+  }
+})
+
+// spec/inbox/operations.md, "Swiping a listed message left reviews its archive at its current revision, and swiping right changes nothing"
+it.live("A swipe left on a listed message reviews its archive at the revision read now", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    const reads = log.cloud.filter((c) => c === "read").length
+    try operations.archiveListed("m1")
+    const r = try operations.current()
+    try Effect.try(() => assert.deepStrictEqual(
+      { kind: r?.kind, revision: r?.proposal.tag === "LabelProposal" ? r.proposal.expectedHistoryId : "", read: log.cloud.filter((c) => c === "read").length - reads, prepares: log.cloud.filter((c) => c === "prepare archive").length },
+      { kind: "ArchiveKind", revision: "41", read: 1, prepares: 1 }))
+  }
+})

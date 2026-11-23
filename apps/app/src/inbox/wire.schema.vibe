@@ -1,4 +1,4 @@
-// spec/inbox/operations.md, "Gmail's review must match the proposal exactly and come with a prepared receipt"; spec/inbox/notices.md, "The watch's status says what it can promise, from the native side's own report"; spec/inbox/digest.md, "A page is kept only whole and in order, and acknowledged only after it is kept"; spec/inbox/agentDrafts.md, "A turn offers at most one email card, staged once for its conversation"
+// spec/inbox/operations.md, "Gmail's review must match the proposal exactly and come with a prepared receipt"; spec/inbox/notices.md, "The watch's status says what it can promise, from the native side's own report"
 
 /** What a provider result of a succeeded receipt may name. */
 export schema WireProviderResult {
@@ -65,36 +65,6 @@ export schema WireNoticeTap {
   question?: boolean
   messageId?: string
   threadId?: string
-}
-
-/** One digest result as the resident's result inbox pages it. */
-export schema WireDigestResult {
-  cursor: number
-  runId: string
-  workflowId: string
-  workflowVersionId: string
-  templateVersion: string
-  scheduledAt: string
-  source: unknown
-  status: string
-  startedAt: string
-  completedAt: string
-  output: unknown
-  error: string | null
-}
-
-/** `GET /api/workflow/hosted/results`. */
-export schema WireDigestPage {
-  entries: WireDigestResult[]
-}
-
-/** An agent email offer: the draft a local-compose message action carries for the Inbox. */
-export schema WireEmailOffer {
-  version: 1
-  requestMessageId: string
-  to: string[]
-  subject: string
-  body: string
 }
 
 /** `AlphaMailAttachments.openReviewed` and `saveReviewed`: what Android or the browser confirms. */

@@ -1,14 +1,22 @@
 // spec/camera/library.md, "Story: See my whole permitted library, newest first"; spec/camera/library.md, "Story: Be told honestly what Android lets Alpha read"; spec/camera/browse.md, "Story: Look at one photo"; spec/camera/browse.md, "Story: Change my photos in batches I confirm"; spec/camera/albums.md, "Story: Keep my photos in albums"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"
 import { Effect } from "effect";
-import { ChevronLeft, Heart, Images, Mail, MessageSquare, Pencil, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
-import { useState } from "react";
+import { ChevronLeft, Heart, Images, Mail, MessageSquare, Pencil, ScanText, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
+import { useCallback, useState } from "react";
 import { useMachine as useCatalog } from "../../../gen/camera__library.react.ts";
 import { useMachine as useBrowse } from "../../../gen/camera__browse.react.ts";
 import { useMachine as useAlbums } from "../../../gen/camera__albums.react.ts";
 import { useMachine as useReviews } from "../../../gen/camera__libraryReview.react.ts";
 import { useMachine as useHost } from "../../../gen/camera__agentLibrary.react.ts";
 import { useMachine as useNotices } from "../../../gen/camera__notices.react.ts";
+import { useMachine as useEdit } from "../../../gen/camera__edit.react.ts";
+import { useMachine as useDialogs } from "../../../gen/camera__scanDialogs.react.ts";
+import { useMachine as useScan } from "../../../gen/camera__scan.react.ts";
+import { Scanner } from "../../camera/scanner.vibe";
+import { ScanReview } from "./ScanReview.tsx";
+import { useMachine as useVideo } from "../../../gen/camera__videoEdit.react.ts";
 import { scopeOffer, type Catalog, type Row } from "../../../gen/camera__library.ts";
+import { messagesPictureLimit } from "../../../gen/camera__media.ts";
+import { Build } from "../../platform/build.vibe";
 import type { Browse, Tab } from "../../../gen/camera__browse.ts";
 import { AgentPhotos, reviewText } from "../../camera/agentPhotos.vibe";
 import { MediaEditor } from "../../camera/editor.vibe";
@@ -19,14 +27,16 @@ import { formatBytes } from "../../camera/messages.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Alert, Button, Dialog, DialogContent, DialogTitle, EmptyState, Input, Sheet, SheetContent, Tabs, TabsList, TabsTrigger } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
-import { PhotoEditor, VideoEditor } from "./Editors.tsx";
+import { PhotoEditor } from "./PhotoEditor.tsx";
+import { VideoEditor } from "./VideoEditor.tsx";
 import { PhotoGrid } from "./PhotoGrid.tsx";
-import { cameraRuntime, run } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
 
-const library = (use: (l: PhotoLibrary.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(PhotoLibrary), use));
-const agent = (use: (a: AgentPhotos.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(AgentPhotos), use));
-const media = (use: (m: MediaReview.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(MediaReview), use));
-const edit = (use: (e: MediaEditor.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(MediaEditor), use));
+const library = (use: (l: PhotoLibrary.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(PhotoLibrary), use));
+const agent = (use: (a: AgentPhotos.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(AgentPhotos), use));
+const media = (use: (m: MediaReview.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(MediaReview), use));
+const scanner = (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(Scanner), use));
+const edit = (use: (e: MediaEditor.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(MediaEditor), use));
 
 /** Follow the Photos visit and the page's visibility while the grid is mounted. */
 function mountPhotos(element: HTMLElement | null): void | (() => void) {
@@ -53,14 +63,25 @@ const ALBUMS: readonly { key: AlbumKey; label: string; match: (row: Row) => bool
   { key: "screenshots", label: "Screenshots", match: (row) => /Screenshots\//i.test(row.folder) },
 ];
 
+/** Photos' whole screen: the catalog, the grid's state, the rows it shows and the one short line. */
 export interface PhotosViewProps {
+  /** The route Photos was opened on: `album:<key>`, `item:<id>` or `select:<id>,<id>`. */
+  route?: string;
+  /** The permitted library and Recently deleted, as the catalog Machine keeps them. */
   catalog: Catalog;
+  /** The open tab, selection, viewer and change in flight. */
   browse: Browse;
   /** The rows the open list shows, in grid order. */
   rows: readonly Row[];
   /** The one short line over Photos. */
   said: string;
+  /** The clock time the grid's day headings and Recently deleted's days left count from. */
   now: number;
+  /** Messages is on this image (the AOSP build), so a small enough picture may be offered to it. */
+  messages: boolean;
+  /** The browser build: an image is chosen from files rather than Android's picker. */
+  browser: boolean;
+  /** Close Photos. */
   onClose: () => void;
 }
 
@@ -69,13 +90,20 @@ export interface PhotosViewProps {
  * @model spec/camera/browse.md
  * @design design.md
  */
-export function PhotosView({ catalog, browse, rows, said, now, onClose }: PhotosViewProps) {
-  const { can } = useBrowse(cameraRuntime);
-  const { state: albums, can: canAlbum } = useAlbums(cameraRuntime);
-  const { state: reviews } = useReviews(cameraRuntime);
-  const { state: host } = useHost(cameraRuntime);
+export function PhotosView({ route, catalog, browse, rows, said, now, messages, browser, onClose }: PhotosViewProps) {
+  const followRoute = useCallback((element: HTMLElement | null) => {
+    if (element !== null && route !== undefined && route !== "") library((l) => l.openRoute(route));
+  }, [route]);
+  const { can } = useBrowse(runtime);
+  const { state: albums, can: canAlbum } = useAlbums(runtime);
+  const { state: reviews } = useReviews(runtime);
+  const { state: host } = useHost(runtime);
+  const { state: photoEdit, can: canEdit } = useEdit(runtime);
+  const { state: videoEdit, can: canVideo } = useVideo(runtime);
+  const { state: dialogs, can: canDialog } = useDialogs(runtime);
+  const { state: scan, can: canScan } = useScan(runtime);
+  const searchLines = dialogs?.searchable.ready === true ? runtime.runSync(Effect.flatMap(Effect.service(Scanner), (s) => s.searchablePages())) : [];
   const [name, setName] = useState("");
-  const [openedAlbum, setOpenedAlbum] = useState<AlbumKey | undefined>(undefined);
   const offer = scopeOffer(catalog.scope, false, true, false);
   const viewer = rows.find((row) => row.id === browse.viewer);
   const editing = viewer !== undefined && viewer.video;
@@ -86,9 +114,13 @@ export function PhotosView({ catalog, browse, rows, said, now, onClose }: Photos
     : undefined;
   return (
     <div ref={mountPhotos} className="flex h-full flex-col bg-background text-foreground">
+      <span ref={followRoute} hidden />
       <header className="flex items-center gap-2 px-2 py-2">
-        <Button variant="ghost" size="icon" aria-label="Back to apps" onClick={onClose}><ChevronLeft /></Button>
+        <Button variant="ghost" size="icon" aria-label={browse.album !== "" ? "Back to albums" : "Back to apps"} onClick={() => (browse.album !== "" ? library((l) => l.openAlbum(undefined)) : onClose())}><ChevronLeft /></Button>
         <h1 className="flex-1 font-serif text-2xl">Photos</h1>
+        {!browse.selecting && browse.tab === "LibraryTab" && (
+          <Button variant="ghost" size="icon" aria-label={browser ? "Choose image" : "Scan image text"} onClick={() => scanner((s) => s.chooseImage())}><ScanText /></Button>
+        )}
         {browse.selecting ? (
           <Button variant="ghost" onClick={() => library((l) => l.cancelSelection())}>Done</Button>
         ) : (
@@ -96,7 +128,7 @@ export function PhotosView({ catalog, browse, rows, said, now, onClose }: Photos
         )}
       </header>
 
-      <Tabs value={browse.tab} onValueChange={(tab) => { setOpenedAlbum(undefined); library((l) => l.switchTab(tab as Tab)); }}>
+      <Tabs value={browse.tab} onValueChange={(tab) => library((l) => l.switchTab(tab as Tab))}>
         <TabsList className="mx-4">
           <TabsTrigger value="LibraryTab">Library</TabsTrigger>
           <TabsTrigger value="AlbumsTab">Albums</TabsTrigger>
@@ -122,12 +154,12 @@ export function PhotosView({ catalog, browse, rows, said, now, onClose }: Photos
 
       {said !== "" && <p role="status" className="mx-4 mt-2 rounded-md bg-muted px-3 py-2 text-sm">{said}</p>}
 
-      {browse.tab === "AlbumsTab" && openedAlbum === undefined ? (
+      {browse.tab === "AlbumsTab" && browse.album === "" ? (
         <ul className="grid grid-cols-2 gap-3 p-4" aria-label="Albums">
           {[...ALBUMS.map((album) => ({ key: album.key, label: album.label, count: catalog.main.rows.filter(album.match).length })),
             ...(albums?.albums ?? []).map((album) => ({ key: `custom:${album.id}` as AlbumKey, label: album.name, count: -1 }))].map((album) => (
             <li key={album.key}>
-              <button type="button" onClick={() => { setOpenedAlbum(album.key); library((l) => l.openAlbum(album.key)); }}
+              <button type="button" onClick={() => library((l) => l.openAlbum(album.key))}
                 className={cn("flex w-full flex-col items-start gap-1 rounded-xl bg-card p-4 text-left", focusRing)}>
                 <Images aria-hidden />
                 <span className="font-serif">{album.label}</span>
@@ -182,7 +214,7 @@ export function PhotosView({ catalog, browse, rows, said, now, onClose }: Photos
           {viewer !== undefined && (
             <>
               <div className="flex flex-1 items-center justify-center bg-foreground">
-                {viewer.video ? <video src={viewer.image} controls className="max-h-full max-w-full" /> : <img src={viewer.image} alt="" className="max-h-full max-w-full object-contain" />}
+                {viewer.video ? (browse.playable === "" ? <img src={viewer.image} alt="" className="max-h-full max-w-full object-contain" /> : <video src={browse.playable} poster={viewer.image === "" ? undefined : viewer.image} controls playsInline className="max-h-full max-w-full" />) : <img src={viewer.image} alt="" className="max-h-full max-w-full object-contain" />}
               </div>
               <p className="px-4 font-mono text-xs uppercase text-muted-foreground">
                 {[viewer.width > 0 ? `${viewer.width} × ${viewer.height}` : "", formatBytes(viewer.size), viewer.expiresAt > 0 ? `${daysLeft(viewer.expiresAt, now)} days left` : ""].filter((part) => part !== "").join(" · ")}
@@ -191,7 +223,7 @@ export function PhotosView({ catalog, browse, rows, said, now, onClose }: Photos
                 <Button variant="ghost" size="icon" aria-label="Share" onClick={() => library((l) => l.shareOne(viewer.id))}><Share2 /></Button>
                 {!viewer.video && <Button variant="ghost" size="icon" aria-label="Ask Alpha" onClick={() => media((m) => m.askAboutPhoto(viewer.id))}><Sparkles /></Button>}
                 {!viewer.video && <Button variant="ghost" size="icon" aria-label="Email" onClick={() => media((m) => m.emailPhoto(viewer.id))}><Mail /></Button>}
-                {!viewer.video && <Button variant="ghost" size="icon" aria-label="Send in Messages" onClick={() => media((m) => m.messagePhoto(viewer.id))}><MessageSquare /></Button>}
+                {!viewer.video && messages && viewer.size > 0 && viewer.size <= messagesPictureLimit && <Button variant="ghost" size="icon" aria-label="Send in Messages" onClick={() => media((m) => m.messagePhoto(viewer.id))}><MessageSquare /></Button>}
                 <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => edit((e) => (viewer.video ? e.beginVideo(viewer.id) : e.begin(viewer.id)))}><Pencil /></Button>
                 <Button variant="ghost" size="icon" aria-label="Info" onClick={() => { setName(""); library((l) => l.openAlbumDialog("", false)); }}><Images /></Button>
               </footer>
@@ -248,23 +280,28 @@ export function PhotosView({ catalog, browse, rows, said, now, onClose }: Photos
         </DialogContent>
       </Dialog>
 
-      <PhotoEditor />
-      {editing && <VideoEditor source={viewer.image} />}
+      {photoEdit !== undefined && <PhotoEditor state={photoEdit} can={canEdit} editor={edit} />}
+      {editing && videoEdit !== undefined && <VideoEditor state={videoEdit} can={canVideo} source={browse.playable} editor={edit} />}
+      {dialogs !== undefined && scan !== undefined && <ScanReview dialogs={dialogs} scan={scan} can={canDialog} canScan={canScan} searchLines={searchLines} scanner={scanner} />}
     </div>
   );
 }
+
+/** The Photos app's screen props: the shell's route and close. */
+export type PhotosScreenProps = ScreenProps;
 
 /**
  * The Photos app.
  * @model spec/camera/library.md
  */
-export function PhotosScreen({ onClose }: ScreenProps) {
-  const { state: catalog } = useCatalog(cameraRuntime);
-  const { state: browse } = useBrowse(cameraRuntime);
-  const { state: notices } = useNotices(cameraRuntime);
+export function PhotosScreen({ onClose, route }: PhotosScreenProps) {
+  const { state: catalog } = useCatalog(runtime);
+  const { state: browse } = useBrowse(runtime);
+  const { state: notices } = useNotices(runtime);
+  const [variant] = useState(() => runtime.runSync(Build.use((b) => Effect.succeed(b.info.variant))));
   if (catalog === undefined || browse === undefined) return null;
   const now = Date.now();
   const pool = new Set(browse.pool);
   const rows = (browse.tab === "TrashTab" ? catalog.trash.rows : catalog.main.rows).filter((row) => pool.has(row.id));
-  return <PhotosView catalog={catalog} browse={browse} rows={rows} said={notices?.said ?? ""} now={now} onClose={onClose} />;
+  return <PhotosView route={route} catalog={catalog} browse={browse} rows={rows} said={notices?.said ?? ""} now={now} messages={variant === "aosp"} browser={variant === "browser"} onClose={onClose} />;
 }

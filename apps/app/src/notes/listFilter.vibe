@@ -1,5 +1,6 @@
 // spec/notes/listFilter.md, "Story: Let the agent narrow my Notes list only on the list I am looking at"; spec/notes/listFilter.md, "A turn names the list only while the plain list is in front, owned and settled"; spec/notes/listFilter.md, "Only a negotiated agent naming the list is admitted, and only the owner's own message skips the card"; spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"
 import { type Event as FilterEvent, type ListFilter, Machine as ListFilterMachine, machine as listFilterMachine, stillCurrent } from "../../gen/notes__listFilter.effect.vibe"
+import { NotesCollection } from "./collection.vibe"
 import type { NotesFilter } from "./list.vibe"
 
 /** What the phone shows now, as the list filter needs it. */
@@ -30,9 +31,9 @@ export service NotesListFilter {
 
 const make = effect {
   const machine = try ListFilterMachine
+  const collection = try NotesCollection
   const filters = try Ref.make<ReadonlyMap<number, NotesFilter>>(new Map())
   const shown = try SubscriptionRef.make<NotesFilter | undefined>(undefined)
-  const revisions = try Ref.make(0)
 
   effect function send(event: FilterEvent): ListFilter | undefined!! {
     return try (machine.send(event) catch () => undefined)
@@ -52,7 +53,6 @@ const make = effect {
     shown: SubscriptionRef.changes(shown),
     effect scene(scene: ListScene) { try send({ type: "scene", ...scene }) },
     effect collectionChanged() {
-      try Ref.update(revisions, (count) => count + 1)
       try send({ type: "notesChange" })
     },
     effect newVisit() { try send({ type: "newVisit" }) },
@@ -65,7 +65,9 @@ const make = effect {
     effect context() {
       const state = try send({ type: "observe" })
       if (state === undefined || !state.named) return undefined
-      return { kind: "canonical-note-source" as const, id: "notes" as const, revision: String(try Ref.get(revisions)) }
+      const revision = (try collection.current())?.snapshot.revision
+      if (revision === undefined) return undefined
+      return { kind: "canonical-note-source" as const, id: "notes" as const, revision: String(revision) }
     },
     effect propose(filter: NotesFilter, own: boolean, workflow: boolean) {
       const known = try Ref.get(filters)

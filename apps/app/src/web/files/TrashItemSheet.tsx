@@ -4,6 +4,7 @@ import type { TrashView } from "../../../gen/files__trash.ts";
 import { Button, Sheet, SheetContent } from "../components/ui/index.ts";
 import { locationLabel } from "./format.ts";
 
+/** The Trash item shown and how the owner restores or deletes it. */
 export type TrashItemSheetProps = {
   trash: TrashView;
   volumeName: (volume: string) => string;

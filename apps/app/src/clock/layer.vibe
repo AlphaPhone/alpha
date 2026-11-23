@@ -1,4 +1,4 @@
-// spec/clock/index.md; spec/clock/notices.md, "One retained-data notice at a time, shown only on a visible page, and hiding closes it"
+// spec/clock/index.md; spec/clock/notices.md, "One retained-data notice at a time, shown only on a visible page, and hiding closes it"; spec/clock/workflowNotices.md, "One check at a time; a read under a view generation that moved on is checked again"
 // Everything Clock provides: its machines, its services and the fibers that keep time, follow taps and read deletions.
 import { ownerKey } from "../platform/storage.vibe"
 import { machine as ringerMachine } from "../../gen/clock__ringer.effect.vibe"
@@ -10,6 +10,7 @@ import { machine as handoffMachine } from "../../gen/clock__handoff.effect.vibe"
 import { machine as historyMemory, stored as historyStored } from "../../gen/clock__handoffHistory.effect.vibe"
 import { machine as remindersMachine } from "../../gen/clock__reminders.effect.vibe"
 import { machine as journalMemory, stored as journalStored } from "../../gen/clock__reminderJournal.effect.vibe"
+import { machine as draftsMemory, stored as draftsStored } from "../../gen/clock__reminderDrafts.effect.vibe"
 import { machine as tapsMachine } from "../../gen/clock__reminderTaps.effect.vibe"
 import { machine as shadeMachine } from "../../gen/clock__notifications.effect.vibe"
 import { machine as canonicalMachine } from "../../gen/clock__canonicalTaps.effect.vibe"
@@ -18,8 +19,8 @@ import { machine as deletionsMachine } from "../../gen/clock__deletions.effect.v
 import { machine as mirrorMachine } from "../../gen/clock__mirror.effect.vibe"
 import { Machine as NoticesMachine, machine as noticesMachine } from "../../gen/clock__notices.effect.vibe"
 import { actionsLayer, keepTime } from "./clock.vibe"
-import { ClockHandoff, handoffLayer } from "./handoff.vibe"
-import { agentReviewLayer } from "./agent-review.vibe"
+import { ClockHandoff, followHandoff, handoffLayer } from "./handoff.vibe"
+import { agentReviewLayer, followOwner } from "./agent-review.vibe"
 import { followReminderScreen, remindersLayer } from "./reminders.vibe"
 import { ReminderTaps, followReminderEvents, reminderTapsLayer } from "./reminder-taps.vibe"
 import { followShade, notificationsLayer } from "./notifications.vibe"
@@ -27,7 +28,10 @@ import { CanonicalTaps, canonicalTapsLayer, followCanonicalTaps } from "./canoni
 import { WorkflowNotices, followWorkflowNotices, workflowNoticesLayer } from "./workflow-notices.vibe"
 import { deletionsLayer, followDeletions } from "./deletions.vibe"
 import { mirrorLayer } from "./mirror.vibe"
-import { pageVisible, primeOnGesture } from "./page.ts"
+import { primeOnGesture } from "./page.ts"
+import { navigationPeer } from "./peers.vibe"
+import { draftsLayer } from "./drafts.vibe"
+import { workflowClockPort } from "./workflow-port.vibe"
 import { ClockRecovery, keepUnreadable, recoveryLayer } from "./recovery.vibe"
 
 const key = (name: string) => ownerKey("device", `clock/${name}`)
@@ -47,6 +51,7 @@ const machines = Layer.mergeAll(
   kept(historyStored, historyMemory(), "clock-handoff", "Clock history"),
   remindersMachine(),
   kept(journalStored, journalMemory(), "reminder-journal", "Reminder history"),
+  kept(draftsStored, draftsMemory(), "reminder-drafts", "Reminder drafts"),
   tapsMachine(),
   shadeMachine(),
   canonicalMachine(),
@@ -58,9 +63,10 @@ const machines = Layer.mergeAll(
 
 const services = Layer.mergeAll(
   actionsLayer,
-  handoffLayer,
+  Layer.provideMerge(workflowClockPort, handoffLayer),
   agentReviewLayer,
   Layer.provideMerge(reminderTapsLayer, remindersLayer),
+  draftsLayer,
   notificationsLayer,
   canonicalTapsLayer,
   workflowNoticesLayer,
@@ -69,30 +75,42 @@ const services = Layer.mergeAll(
   recoveryLayer,
 )
 
+/** Follows the page and the shell's navigation: hiding retires notices and holds taps back; coming back reads them again; a moved Workflows view rechecks its notice. Never returns. */
 effect function followAttention() {
   const notices = try NoticesMachine
   const taps = try ReminderTaps
   const canonical = try CanonicalTaps
   const workflow = try WorkflowNotices
-  while (true) {
-    const visible = pageVisible()
+  const recovery = try ClockRecovery
+  const navigator = try navigationPeer()
+  let blocked: boolean | undefined = undefined
+  let workflowsAt: string | undefined = undefined
+  for try (const view of navigator.changes()) {
+    const visible = !view.hidden
+    const hold = !visible || view.chooser
+    if (hold !== blocked) try taps.setBlocked(hold)
+    blocked = hold
+    const place = view.app === "workflows" ? view.route ?? "" : undefined
+    if (place !== workflowsAt && workflowsAt !== undefined) try workflow.viewMoved()
+    workflowsAt = place
     if (visible !== (try notices.get()).visible) {
       notices.send({ type: "setVisible", visible }) catch () => undefined
-      try taps.setBlocked(!visible)
       if (visible) {
+        try recovery.announce()
         try canonical.wake()
         try taps.check(false)
         try workflow.check()
       }
     }
-    try sleep("1 second")
   }
 }
 
 const background = Layer.effectDiscard(effect {
+  const canonical = try CanonicalTaps
   try (try ClockRecovery).announce()
   try (try ClockHandoff).restore()
   try acquireRelease(sync(() => primeOnGesture()), (stop) => sync(() => stop()))
+  try acquireRelease(succeed(undefined), () => canonical.retire())
   fork.scoped keepTime()
   fork.scoped followReminderEvents()
   fork.scoped followShade()
@@ -101,12 +119,15 @@ const background = Layer.effectDiscard(effect {
   fork.scoped followDeletions()
   fork.scoped followAttention()
   fork.scoped followReminderScreen()
+  fork.scoped followOwner()
+  fork.scoped followHandoff()
 })
 
 /**
- * Clock's machines and services: ClockActions, ClockHandoff, ClockReview, Reminders, ReminderTaps, Notifications,
- * CanonicalTaps, WorkflowNotices, Deletions, Mirror and ClockRecovery. It needs Native, Build and KeyValueStore from the
- * platform, Navigation (shell), CloudSession (account), Composer and Assistant (assistant), WorkflowRuns (workflows),
- * NotesOrigins (notes) and the settings facts Machine (settings).
+ * Clock's machines and services: ClockActions, ClockHandoff, ClockReview, Reminders, ReminderTaps, ReminderDrafts,
+ * Notifications, CanonicalTaps, WorkflowNotices, Deletions, Mirror, ClockRecovery and Workflows' WorkflowClockPort. It
+ * needs Native, Build and KeyValueStore from the platform, Navigation (shell), CloudSession (account), Composer and
+ * Assistant (assistant), WorkflowRuns (workflows), NotesOrigins (notes) and the settings facts Machine (settings). Its
+ * agent device operations are `operationPorts` of ./operations.vibe, which the shell integration composes into DeviceExecutors.
  */
 export const layer = Layer.provideMerge(background, Layer.provideMerge(services, machines))

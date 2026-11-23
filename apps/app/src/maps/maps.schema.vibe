@@ -1,4 +1,4 @@
-// spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/vocabulary.md, "A fix guides only when precise, at most 30 seconds old, at most 5 seconds ahead, and within 50 meters"; spec/maps/eventReturn.md, "One check per tap, and only its reply for the current origin returns, once"
+// spec/maps/connection.md, "Only the newest read for the bound account installs the provider"; spec/maps/delivery.md, "A navigation effect runs only under a returned claim, and a redelivery never runs it twice"; spec/maps/vocabulary.md, "A fix guides only when precise, at most 30 seconds old, at most 5 seconds ahead, and within 50 meters"; spec/maps/eventReturn.md, "One check per tap, and only its reply for the current origin returns, once"
 
 import { Route, TravelMode } from "@elizaos/plugin-maps/client/contracts"
 
@@ -62,12 +62,8 @@ export const Capabilities = Schema.Union([
 ])
 export type Capabilities = typeof Capabilities.Type
 
-/** A 429 refusal's wait: `retryAfterSeconds`, or `resetAt` for an exhausted allowance. */
-export const RateRefusal = Schema.Struct({
-  code: Schema.optionalKey(Schema.String),
-  retryAfterSeconds: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.NumberFromString])),
-  resetAt: Schema.optionalKey(Schema.Union([Schema.String, Schema.Finite])),
-})
+/** The host's answer to a view-navigation claim: the claim the renderer must name in its one result. */
+export const InteractClaim = Schema.Struct({ claimId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256), Schema.isPattern(controls)) })
 
 export const Permission = Schema.Struct({
   location: Schema.Literals(["granted", "denied", "prompt", "prompt-with-rationale"]),

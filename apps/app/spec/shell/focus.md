@@ -13,12 +13,12 @@ type Opener = { modal: str, opener: str }
 type Focus = {
   cause: Cause, frames: int, target: Target, active: str, held: str, moves: int, lastMove: Target,
   openers: List[Opener], waiting: str, restores: int, lastRestore: str,
-  rowList: str, rowKey: str, rowMoved: bool, lastRow: str
+  rowList: str, rowKey: str, rowMoved: bool, lastRow: str, keyboard: bool
 }
 pure val initial: Focus = {
   cause: Idle, frames: 0, target: TargetNone, active: "", held: "", moves: 0, lastMove: TargetNone,
   openers: List(), waiting: "", restores: 0, lastRestore: "",
-  rowList: "", rowKey: "", rowMoved: false, lastRow: ""
+  rowList: "", rowKey: "", rowMoved: false, lastRow: "", keyboard: false
 }
 pure val WaitFrames = 12
 pure val keyValues = Set("", "opener", "field", "row-2")
@@ -122,4 +122,22 @@ pure def rowRendered(f: Focus, listId: str, found: bool, dialog: bool): Focus = 
 pure def stepARowIsTheOneCaptured(before: Focus, via: str, after: Focus): bool =
   (via == "rowRendered" and after.lastRow != "") implies (after.lastRow == before.rowKey and before.active == "")
 pure def sometimesRowRestored(f: Focus): bool = f.lastRow != ""
+```
+
+### Launcher controls show a focus ring only while the owner moves by keyboard
+
+A Tab or arrow key starts keyboard navigation and a pointer press ends it; the page carries it as
+`data-alpha-keyboard-navigation`. Home's tiles, the library's entries and the map's controls draw
+their ring only then, so a tap leaves no ring behind. Every other control, a text field above all,
+keeps its ring whenever it has focus, including when a form moves focus to its first field.
+
+```quint
+pure def keyed(f: Focus): Focus = { ...f, keyboard: true }
+pure def pointed(f: Focus): Focus = { ...f, keyboard: false }
+pure def launcherRing(keyboard: bool, focused: bool): bool = focused and keyboard
+pure def fieldRing(keyboard: bool, focused: bool): bool = focused
+pure def lawAFieldKeepsItsRing(keyboard: bool): bool = fieldRing(keyboard, true)
+pure def lawATapLeavesNoLauncherRing(focused: bool): bool = not(launcherRing(false, focused))
+pure def stepAPressEndsKeyboardNavigation(before: Focus, via: str, after: Focus): bool = via == "pointed" implies not(after.keyboard)
+pure def sometimesKeyboardRing(f: Focus): bool = launcherRing(f.keyboard, true) and f.moves > 0
 ```

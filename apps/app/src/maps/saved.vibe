@@ -27,10 +27,10 @@ export const savedLayer = Layer.effect(SavedPlacesStore, effect {
     effect save(shown: Shown, label: string) {
       const name = label.trim().slice(0, 300)
       if (!mayKeep(shown.kind)) throw failure("unsupported", "Google Maps results cannot be saved on this device.")
-      if (!labelFits(name.length)) throw failure("invalid-response", "A name and valid place identity are required.")
+      if (!labelFits(name.length)) throw failure("invalid-response", "Name the place before saving it.")
       const before = try machine.get()
       const point = micro(shown.coordinate)
-      if (before.items.length >= 200 && !before.items.some((i) => i.id === shown.savedId)) throw failure("storage", "Remove a saved place before adding another.")
+      if (before.items.length >= 200 && !before.items.some((i) => i.id === shown.savedId)) throw failure("storage", "Saved places are full. Remove one before adding another.")
       machine.send({ type: "savePlace", place: {
         label: name, lat: point.lat, lng: point.lng, provider: shown.providerId ?? "", providerPlaceId: shown.providerPlaceId ?? "", kind: shown.kind,
       } }) catch effect () => { throw failure("storage", "The place could not be saved.") }
@@ -41,7 +41,7 @@ export const savedLayer = Layer.effect(SavedPlacesStore, effect {
     },
     effect rename(id: number, label: string) {
       const name = label.trim().slice(0, 300)
-      if (!name) throw failure("invalid-response", "A saved-place name is required.")
+      if (!name) throw failure("invalid-response", "Name the place before saving it.")
       machine.send({ type: "renamePlace", id, label: name }) catch effect () => { throw failure("unavailable", "This saved place no longer exists.") }
       if (!(try machine.get()).items.some((i) => i.id === id && i.label === name)) throw failure("storage", "Saved places could not be confirmed on this device.")
     },

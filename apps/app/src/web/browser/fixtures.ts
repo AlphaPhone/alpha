@@ -46,6 +46,12 @@ export const findingSession: Session = { ...loadedSession, find: { tab: "b1", qu
 /** The tab switcher is open. */
 export const switcherSession: Session = { ...loadedSession, layers: { ...loadedSession.layers, tabsOpen: true } };
 
+/** Eight tabs, the limit, in the open switcher. */
+export const fullSwitcherSession: Session = {
+  ...switcherSession,
+  tabs: [...loadedSession.tabs, ...[4, 5, 6, 7, 8].map((n) => live(`b${n}`, `https://site${n}.test/`, `Site ${n}`))],
+};
+
 /** The menu is open. */
 export const menuSession: Session = { ...loadedSession, layers: { ...loadedSession.layers, menu: true } };
 

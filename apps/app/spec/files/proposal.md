@@ -177,6 +177,9 @@ pure def createFolder(s: Proposal, ok: bool): Proposal = { ...s, changes: s.chan
 
 ### A move or trash changes only files still as they were reviewed
 
+An operation the phone could not carry out to its end, such as a filter whose query failed or a card
+that names files Files no longer shows, fails and changes nothing; only then is it settled.
+
 ```quint
 pure def canTransfer(s: Proposal): bool =
   running(s) and contextAllowed(s) and inFiles(s) and s.granted and s.primary and s.bound and needsIdentity(s.op) and s.authority == OwnerReview
@@ -184,8 +187,12 @@ pure def transfer(s: Proposal): Proposal =
   { ...s, changes: s.changes + (if (s.identityCurrent) 1 else 0), outcome: if (s.identityCurrent) Succeeded else Failed }
 pure def alwaysAMoveOrTrashWasReviewedByIdentity(s: Proposal): bool =
   (needsIdentity(s.op) and s.outcome == Succeeded) implies (s.authority != DirectRequest and s.bound)
+pure def canGiveUp(s: Proposal): bool = running(s)
+pure def giveUp(s: Proposal): Proposal = { ...s, outcome: Failed }
 pure def canSettle(s: Proposal): bool = s.authority != NoAuthority and s.outcome != Unsettled
 pure def settle(s: Proposal): Proposal = { ...s, authority: NoAuthority }
 pure def sometimesMovedByPosition(s: Proposal): bool = s.op == OpMove and s.target == ResolvedShown and s.outcome == Succeeded and s.changes >= 1
 pure def sometimesAChangedFileIsLeftAlone(s: Proposal): bool = s.op == OpTrash and s.outcome == Failed and s.bound and not(s.identityCurrent)
+pure def stepGivingUpChangesNothing(before: Proposal, via: str, after: Proposal): bool =
+  via == "giveUp" implies (after.changes == before.changes and after.shareSheet == before.shareSheet and after.outcome == Failed)
 ```

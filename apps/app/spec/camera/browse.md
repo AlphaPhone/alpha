@@ -20,12 +20,12 @@ type Tab = LibraryTab | AlbumsTab | TrashTab
 type Work = NoWork | Sharing | Changing | Deleting
 type Change = FavoriteChange | UnfavoriteChange | TrashChange | RestoreChange
 type Browse = {
-  tab: Tab, pool: Set[str], favorites: Set[str], selecting: bool, selection: Set[str], viewer: str,
+  tab: Tab, pool: Set[str], favorites: Set[str], selecting: bool, selection: Set[str], viewer: str, playable: str, album: str,
   work: Work, change: Change, batches: int, sent: int, declined: bool, undo: Set[str],
   deleting: Set[str], purged: Set[str], filtered: bool, filterLabel: str, columns: int, shares: int
 }
 pure val initial: Browse = {
-  tab: LibraryTab, pool: Set(), favorites: Set(), selecting: false, selection: Set(), viewer: "",
+  tab: LibraryTab, pool: Set(), favorites: Set(), selecting: false, selection: Set(), viewer: "", playable: "", album: "",
   work: NoWork, change: FavoriteChange, batches: 0, sent: 0, declined: false, undo: Set(),
   deleting: Set(), purged: Set(), filtered: false, filterLabel: "", columns: 4, shares: 0
 }
@@ -59,7 +59,7 @@ pure def canShowPool(b: Browse, pool: Set[str], favorites: Set[str], gone: bool)
 pure def showPool(b: Browse, pool: Set[str], favorites: Set[str], gone: bool): Browse =
   { ...b, pool: pool, favorites: favorites,
     selection: if (b.work == NoWork) patched(b.selection, pool) else b.selection,
-    viewer: if (gone) "" else b.viewer }
+    viewer: if (gone) "" else b.viewer, playable: if (gone) "" else b.playable }
 pure def alwaysSelectionSubsetOfVisible(b: Browse): bool = b.work == NoWork implies b.selection.subseteq(b.pool)
 pure def alwaysSelectionOnlyWhileSelecting(b: Browse): bool = not(b.selecting) implies b.selection.size() == 0
 ```
@@ -87,7 +87,20 @@ pure def sometimesWholeListSelected(b: Browse): bool = b.selecting and b.pool.si
 
 ```quint
 pure def canSwitchTab(b: Browse, tab: Tab): bool = tab != b.tab and b.viewer == "" and b.work == NoWork
-pure def switchTab(b: Browse, tab: Tab): Browse = { ...b, tab: tab, selecting: false, selection: Set(), undo: Set() }
+pure def switchTab(b: Browse, tab: Tab): Browse = { ...b, tab: tab, album: "", selecting: false, selection: Set(), undo: Set() }
+```
+
+### An album opens from the Albums tab, and the album list comes back when it closes
+
+Photos opens on a route too: `album:<key>` opens that album, `item:<id>`
+opens the item in the viewer, `select:<id>,<id>` starts a selection of the
+items the list shows.
+
+```quint
+pure def canOpenAlbum(b: Browse, album: str): bool = b.tab == AlbumsTab and b.viewer == "" and b.work == NoWork
+pure def openAlbum(b: Browse, album: str): Browse = { ...b, album: album, selecting: false, selection: Set() }
+pure def alwaysAlbumOnlyInTheAlbumsTab(b: Browse): bool = b.album != "" implies b.tab == AlbumsTab
+pure val albumValues = Set("", "favorites", "custom:a")
 ```
 
 ### The grid shows four columns, and a pinch shows three or five
@@ -110,13 +123,28 @@ closes the viewer.
 
 ```quint
 pure def canOpenViewer(b: Browse, id: str): bool = not(b.selecting) and b.viewer == "" and b.pool.contains(id)
-pure def openViewer(b: Browse, id: str): Browse = { ...b, viewer: id }
+pure def openViewer(b: Browse, id: str): Browse = { ...b, viewer: id, playable: "" }
 pure def canSwipe(b: Browse, id: str): bool = b.viewer != "" and id != b.viewer and b.pool.contains(id) and b.work == NoWork
-pure def swipe(b: Browse, id: str): Browse = { ...b, viewer: id }
+pure def swipe(b: Browse, id: str): Browse = { ...b, viewer: id, playable: "" }
 pure def canCloseViewer(b: Browse): bool = b.viewer != ""
-pure def closeViewer(b: Browse): Browse = { ...b, viewer: "" }
+pure def closeViewer(b: Browse): Browse = { ...b, viewer: "", playable: "" }
 pure def alwaysViewerExcludesSelection(b: Browse): bool = b.viewer != "" implies not(b.selecting)
 pure def sometimesViewerOpen(b: Browse): bool = b.viewer != "" and b.pool.size() >= 2
+```
+
+### A video plays only from the capability the media bridge issued for the open item, and the source goes when the viewer closes or moves
+
+A catalog row carries no playable path; opening a video asks the bridge's
+read of that one item for its playback capability, an opaque same-origin
+URL, never a content URI or a file path. An answer for an item the viewer
+has left is dropped.
+
+```quint
+pure def canSourceReady(b: Browse, id: str, url: str): bool = b.viewer == id and id != "" and url != ""
+pure def sourceReady(b: Browse, id: str, url: str): Browse = { ...b, playable: url }
+pure def alwaysPlaybackOnlyForTheOpenItem(b: Browse): bool = b.playable != "" implies b.viewer != ""
+pure val urlValues = Set("", "https://localhost/_media/k1.mp4")
+pure def sometimesPlaying(b: Browse): bool = b.playable != ""
 ```
 
 ## Story: Change my photos in batches I confirm
@@ -178,6 +206,16 @@ pure def canShareSettled(b: Browse): bool = b.work == Sharing
 pure def shareSettled(b: Browse): Browse = { ...b, work: NoWork, shares: b.shares + 1, selection: patched(b.selection, b.pool) }
 ```
 
+### Sharing in the browser build hands the exact stored files to the browser's share sheet, or refuses before anything is sent
+
+Where the browser cannot share files, Share says so and sends nothing.
+
+```quint
+type ShareSheet = AndroidSheet | WebShareSheet | NoShareSheet
+pure def shareSheet(browser: bool, webShareFiles: bool): ShareSheet = if (not(browser)) AndroidSheet else if (webShareFiles) WebShareSheet else NoShareSheet
+pure def lawNoSheetSendsNothing(webShareFiles: bool): bool = not(webShareFiles) implies shareSheet(true, webShareFiles) == NoShareSheet
+```
+
 ### Delete forever runs only from Recently deleted, on the items its confirmation prepared
 
 ```quint
@@ -201,7 +239,7 @@ pure def sometimesPurged(b: Browse): bool = b.purged.size() > 0
 
 ```quint
 pure def canSetFilter(b: Browse, label: str): bool = b.viewer == "" and b.work == NoWork and label != ""
-pure def setFilter(b: Browse, label: str): Browse = { ...b, filtered: true, filterLabel: label, tab: LibraryTab, selecting: false, selection: Set() }
+pure def setFilter(b: Browse, label: str): Browse = { ...b, filtered: true, filterLabel: label, tab: LibraryTab, album: "", selecting: false, selection: Set() }
 pure def canClearFilter(b: Browse): bool = b.filtered
 pure def clearFilter(b: Browse): Browse = { ...b, filtered: false, filterLabel: "" }
 pure def alwaysLabelOnlyWhileFiltered(b: Browse): bool = b.filtered == (b.filterLabel != "")

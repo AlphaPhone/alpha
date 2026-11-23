@@ -96,6 +96,21 @@ pure def canRevokeGrant(s: Sources, confirmed: bool): bool = s.authorization == 
 pure def revokeGrant(s: Sources, confirmed: bool): Sources = if (confirmed) { ...s, authorization: NoAuthorization, grantExpiresAt: 0 } else s
 ```
 
+### Removing Google access first shows every saved source and digest that reads through it, and a changed list asks again
+
+The review lists the Google sources and the digests bound to them; confirming reads them again, and
+when what would stop reading differs from what was shown, nothing is revoked and the new list is
+reviewed (#983).
+
+```quint
+type Impact = { sources: int, digests: int }
+pure def revokeConfirmable(reviewed: Impact, latest: Impact): bool = reviewed == latest
+pure val reviewedValues = Set({ sources: 1, digests: 1 }, { sources: 1, digests: 2 })
+pure val latestValues = Set({ sources: 1, digests: 1 }, { sources: 2, digests: 1 })
+pure def lawAChangedImpactIsReviewedAgain(reviewed: Impact, latest: Impact): bool =
+  reviewed != latest implies not(revokeConfirmable(reviewed, latest))
+```
+
 ## Story: Let my digest read my phone's Calendar and reminders only with my consent
 
 > As the owner, I consent for a week at most to my digest reading the calendars and reminders I
@@ -132,6 +147,68 @@ pure def canSelectSession(s: Sources, session: int): bool = session != s.session
 pure def selectSession(s: Sources, session: int): Sources = { ...initial, session: session, now: s.now, foreground: s.foreground }
 pure def stepConsentIsGrantedOnlyInFront(before: Sources, via: str, after: Sources): bool =
   (before.consent != ConsentApproved and after.consent == ConsentApproved) implies before.foreground
+```
+
+### A phone source is named, reads 1 to 16 of the phone's own calendars or its reminders, and lasts 1 to 168 hours
+
+The calendars offered are the ones the phone lists now, with their revisions; a chosen calendar the
+phone no longer lists is chosen again before review. The agent is told of the source only after
+the phone consented to exactly that scope, and a source that renews another rebinds each digest of
+the old one to the new source's revision under its own version.
+
+```quint
+type PhoneSourceProblem = PhoneSourceReady | NeedsSourceName | CalendarsGone | TooManyCalendars | NeedsAKind | NeedsHours
+pure val maximumPhoneCalendars = 16
+pure def phoneSourceProblem(nameLength: int, chosen: int, missing: int, reminders: bool, hours: int): PhoneSourceProblem =
+  if (nameLength < 1 or nameLength > 200) NeedsSourceName
+  else if (missing > 0) CalendarsGone
+  else if (chosen > maximumPhoneCalendars) TooManyCalendars
+  else if (chosen == 0 and not(reminders)) NeedsAKind
+  else if (hours < 1 or hours > 168) NeedsHours
+  else PhoneSourceReady
+pure def sourceRegistered(consented: bool, sameScope: bool): bool = consented and sameScope
+pure val chosenValues = Set(0, 1, 16, 17)
+pure val missingValues = Set(0, 1)
+pure val hoursValues = Set(0, 1, 168, 169)
+pure val nameLengthValues = Set(0, 1, 200, 201)
+pure def lawAReadySourceReadsSomething(nameLength: int, chosen: int, missing: int, reminders: bool, hours: int): bool =
+  phoneSourceProblem(nameLength, chosen, missing, reminders, hours) == PhoneSourceReady implies
+    ((chosen >= 1 or reminders) and chosen <= 16 and hours >= 1 and hours <= 168 and missing == 0)
+pure def lawNoSourceWithoutConsent(sameScope: bool): bool = not(sourceRegistered(false, sameScope))
+```
+
+## Story: Renew my phone source before its week ends
+
+> As the owner, I am reminded before a phone source my digest still reads runs out, and tapping the
+> reminder opens a review of a new source for exactly that one.
+
+### A renewal reminder is armed only for a phone source that keeps an enabled digest running
+
+A removed, paused or revoked binding clears it.
+
+```quint
+pure def renewalArmed(phone: bool, boundEnabled: bool, revoked: bool): bool = phone and boundEnabled and not(revoked)
+pure def lawARevokedSourceIsNeverRenewed(phone: bool, boundEnabled: bool): bool = not(renewalArmed(phone, boundEnabled, true))
+```
+
+### A renewal tap acts only on Android and only on the current source it names, and a check with no tap changes nothing
+
+The tap must carry the exact owner, agent, installation, enrollment, source, revision and expiry of
+a source that is not revoked; otherwise it says the renewal changed. Off Android, or with no tap,
+the panel's status is left as it was (#498).
+
+```quint
+type RenewalTap = NoRenewalTap | TapMatches | TapStale
+type RenewalAction = RenewalIgnored | RenewalReview | RenewalQuestion | RenewalChanged
+pure def renewalAction(android: bool, tap: RenewalTap, question: bool, live: bool): RenewalAction =
+  if (not(android) or tap == NoRenewalTap) RenewalIgnored
+  else if (tap == TapStale or not(live)) RenewalChanged
+  else if (question) RenewalQuestion
+  else RenewalReview
+pure def lawNoTapChangesNothing(android: bool, question: bool, live: bool): bool = renewalAction(android, NoRenewalTap, question, live) == RenewalIgnored
+pure def lawOnlyAndroidRenews(tap: RenewalTap, question: bool, live: bool): bool = renewalAction(false, tap, question, live) == RenewalIgnored
+pure def lawAStaleTapNeverOpensAReview(android: bool, question: bool, live: bool): bool =
+  renewalAction(android, TapStale, question, live) != RenewalReview
 ```
 
 ## Story: Choose exactly what a Google source reads

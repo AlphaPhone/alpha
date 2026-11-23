@@ -1,4 +1,4 @@
-// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/canonicalTaps.md, "Story: Open the view a notification names"; spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"
+// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/canonicalTaps.md, "Story: Open the view a notification names"; spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/mirror.md, "Story: Choose which apps Alpha may mirror"; spec/clock/mirror.md, "Story: Know whether Alpha's own notices can reach me"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/clock/notices.md, "Story: Be told my data was kept"; spec/clock/notices.md, "Story: Recover unreadable data while developing"
 // @vitest-environment happy-dom
 import { assert, describe, it } from "@effect/vitest"
 import { Machine as ShadeMachine } from "../../gen/clock__notifications.effect.vibe"
@@ -7,7 +7,15 @@ import { Notifications, notificationsLayer } from "../../src/clock/notifications
 import { CanonicalTaps, canonicalTapsLayer } from "../../src/clock/canonical-taps.vibe"
 import { WorkflowNotices, workflowNoticesLayer } from "../../src/clock/workflow-notices.vibe"
 import { Deletions, deletionsLayer } from "../../src/clock/deletions.vibe"
-import { fakeAssistant, fakeNavigation, fakeOrigins, fakePhone, fakeRuns, machines, session } from "./phone.vibe"
+import { Machine as MirrorMachine } from "../../gen/clock__mirror.effect.vibe"
+import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
+import { Mirror, mirrorLayer } from "../../src/clock/mirror.vibe"
+import { ClockRecovery, keepUnreadable, recoveryLayer } from "../../src/clock/recovery.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { build, fakeAssistant, fakeNavigation, fakeOrigins, fakePhone, fakeRuns, machines, refuse, session } from "./phone.vibe"
+
+const headingOf = (retained: { readonly tag: string; readonly heading?: string }) => retained.heading ?? ""
 
 const row = (id: string, revision: string, clearable = true) =>
   ({ id, revision, source: "own", kind: "reminder", appLabel: "Alpha Phone", title: "Call", text: "", at: 1, clearable, canOpen: true })
@@ -65,6 +73,22 @@ describe("Notification taps (spec/clock/canonicalTaps.md, \"Story: Open the view
     }
   })
 
+  it.effect("hold a tap while the owner keeps an unsent draft in the assistant (spec/clock/canonicalTaps.md, \"Story: Open the view a notification names\")", () => effect {
+    const phone = fakePhone({
+      "AlphaNotifications.canonicalPending": () => ({ token: "t1", ownerId: "org:owner-1", agentId: "agent-1", view: "reminders" }),
+      "AlphaNotifications.acknowledgeCanonical": () => ({ ok: true }),
+    })
+    const navigator = fakeNavigation()
+    provide Layer.provideMerge(canonicalTapsLayer, machines), phone.layer, navigator.layer, fakeAssistant(false, true).layer, session("org:owner-1") {
+      const taps = try CanonicalTaps
+      try taps.wake()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: navigator.opened, acknowledged: phone.calls.filter((c) => c.method === "acknowledgeCanonical").length },
+        { opened: [], acknowledged: 0 },
+      ))
+    }
+  })
+
   // spec/clock/workflowNotices.md, "A pending tap opens its run only for the signed-in account, and a run opened once is never opened again for the same tap"
   it.effect("open the exact run a workflow notice names, once (spec/clock/workflowNotices.md, \"Story: Return to the run a notice names\")", () => effect {
     let consumeOk = false
@@ -110,6 +134,129 @@ describe("Deletion Undo (spec/clock/deletions.md, \"Story: Undo a reviewed delet
       try Effect.try(() => assert.deepStrictEqual(
         { shown, report: kept.report, rows: kept.rows.length, undone: phone.calls.filter((c) => c.method === "undo").map((c) => c.args), forgotten: origins.forgotten },
         { shown: ["reminder:op1"], report: "Kept", rows: 0, undone: [{ kind: "reminder", id: "op1" }], forgotten: [{ kind: "reminder", id: "r9" }] },
+      ))
+    }
+  })
+})
+
+describe("Notification mirror (spec/clock/mirror.md, \"Story: Choose which apps Alpha may mirror\")", () => {
+  it.effect("save a change only on the revision shown, and report history cleared only when none remains (spec/clock/mirror.md, \"Story: Choose which apps Alpha may mirror\")", () => effect {
+    let revision = "r1"
+    let history = [{ id: "h1", appLabel: "Mail", at: 1, state: "posted" }]
+    const status = () => ({ revision, enabled: false, history: true, paused: false, accessGranted: true, apps: [{ packageName: "com.mail", preview: false }] })
+    const phone = fakePhone({
+      "AlphaNotifications.crossAppStatus": status,
+      "AlphaNotifications.status": () => ({ appEnabled: true, permissionGranted: true, channels: [] }),
+      "AlphaNotifications.setNotificationPolicy": (args) => ((args as { expectedRevision: string }).expectedRevision === revision ? (revision = "r2", status()) : refuse("Settings changed")),
+      "AlphaNotifications.clearNotificationHistory": () => ({}),
+      "AlphaNotifications.notificationHistory": () => ({ items: history }),
+    })
+    provide Layer.provideMerge(mirrorLayer, machines), phone.layer {
+      const mirror = try Mirror
+      const shown = try MirrorMachine
+      try mirror.refresh()
+      revision = "r9"
+      try mirror.save({ enabled: true })
+      const stale = (try shown.get()).report
+      try mirror.refresh()
+      try mirror.save({ enabled: true })
+      const saved = try shown.get()
+      try mirror.clearHistory()
+      const kept = (try shown.get()).report
+      history = []
+      try mirror.clearHistory()
+      const cleared = (try shown.get()).report
+      try Effect.try(() => assert.deepStrictEqual(
+        { stale, saved: [saved.report, saved.revision], kept, cleared },
+        { stale: "SettingsChanged", saved: ["MirrorSaved", "r2"], kept: "HistoryNotCleared", cleared: "HistoryCleared" },
+      ))
+    }
+  })
+
+  it.effect("call reminder alerts blocked when their channel's group is blocked (spec/clock/mirror.md, \"Story: Know whether Alpha's own notices can reach me\")", () => effect {
+    const phone = fakePhone({
+      "AlphaNotifications.crossAppStatus": () => refuse("unavailable"),
+      "AlphaNotifications.status": () => ({ appEnabled: true, permissionGranted: true, channels: [{ id: "reminders", blocked: false, groupBlocked: true }] }),
+    })
+    provide Layer.provideMerge(mirrorLayer, machines), phone.layer {
+      const mirror = try Mirror
+      const shown = try MirrorMachine
+      try mirror.refresh()
+      const after = try shown.get()
+      try Effect.try(() => assert.deepStrictEqual({ blocked: after.remindersBlocked, report: after.report }, { blocked: true, report: "MirrorUnavailable" }))
+    }
+  })
+})
+
+describe("Notice leases (spec/clock/notices.md, \"Story: Stay where I am when I leave a notice\")", () => {
+  it.effect("navigate after Open only while the notice's lease is live, never from a hidden page (spec/clock/notices.md, \"Story: Stay where I am when I leave a notice\")", () => effect {
+    const phone = fakePhone({
+      "AlphaNotifications.list": () => ({ items: [row("reminder-1", "v1")], scope: "device" }),
+      "AlphaNotifications.open": () => ({}),
+    })
+    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, fakeAssistant().layer {
+      const notifications = try Notifications
+      const notices = try NoticesMachine
+      try notifications.open()
+      try notifications.press("reminder-1", "v1")
+      const first = (try notices.get()).navigations
+      try notices.send({ type: "setVisible", visible: false })
+      try notifications.press("reminder-1", "v1")
+      const hidden = try notices.get()
+      try Effect.try(() => assert.deepStrictEqual({ first, hidden: [hidden.navigations, hidden.leaseLive] }, { first: 1, hidden: [1, false] }))
+    }
+  })
+})
+
+describe("Retained data (spec/clock/notices.md, \"Story: Be told my data was kept\")", () => {
+  it.effect("say plainly that unreadable data was kept, one notice at a time, with no recovery outside test mocks (spec/clock/notices.md, \"Story: Be told my data was kept\")", () => effect {
+    keepUnreadable("Timers", "device/clock/timers")
+    keepUnreadable("Alarms", "device/clock/alarms")
+    provide Layer.provideMerge(recoveryLayer, machines), memoryStore, build("launcher") {
+      const recovery = try ClockRecovery
+      const notices = try NoticesMachine
+      try recovery.announce()
+      const first = (try notices.get()).retained
+      const download = try recovery.download()
+      try recovery.close()
+      const next = (try notices.get()).retained
+      try recovery.reset()
+      const after = try notices.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { first, download, next, recovery: after.recovery, resets: after.resets },
+        { first: { tag: "Retained", heading: "Timers" }, download: undefined, next: { tag: "Retained", heading: "Alarms" }, recovery: "NoRecovery", resets: 0 },
+      ))
+    }
+  })
+})
+
+describe("Developer recovery (spec/clock/notices.md, \"Story: Recover unreadable data while developing\")", () => {
+  it.effect("download the kept bytes and reset that one store only after a confirmation (spec/clock/notices.md, \"Story: Recover unreadable data while developing\")", () => effect {
+    keepUnreadable("Stopwatch", "device/clock/stopwatch")
+    provide Layer.provideMerge(recoveryLayer, machines), memoryStore, build("browser", true) {
+      const store = try KeyValueStore.KeyValueStore
+      const recovery = try ClockRecovery
+      const notices = try NoticesMachine
+      try store.set("device/clock/stopwatch", "{broken")
+      try store.set("device/clock/world-clock", "{\"zones\":[]}")
+      try recovery.announce()
+      let guard = 0
+      while (headingOf((try notices.get()).retained) !== "Stopwatch" && guard < 4) {
+        try recovery.close()
+        guard += 1
+      }
+      const shown = (try notices.get()).retained
+      const download = try recovery.download()
+      try recovery.reset()
+      const unconfirmed = try store.get("device/clock/stopwatch")
+      try notices.send({ type: "askReset" })
+      try recovery.reset()
+      const after = try notices.get()
+      const removed = try store.get("device/clock/stopwatch")
+      const other = try store.get("device/clock/world-clock")
+      try Effect.try(() => assert.deepStrictEqual(
+        { shown, download, unconfirmed, recovery: after.recovery, resets: after.resets, removed, other },
+        { shown: { tag: "Retained", heading: "Stopwatch" }, download: "{broken", unconfirmed: "{broken", recovery: "ResetDone", resets: 1, removed: undefined, other: "{\"zones\":[]}" },
       ))
     }
   })

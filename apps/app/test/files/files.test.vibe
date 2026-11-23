@@ -23,8 +23,8 @@ const noNative = Layer.succeed(Native, {
 
 /** A files bridge that answers each call with `answer`. */
 const bridge = (answer: (method: string) => unknown) => Layer.succeed(Native, {
-  available: (plugin) => succeed(plugin === "ElizaFiles"),
-  invoke: (plugin, method) => plugin === "ElizaFiles" ? succeed(answer(method)) : fail(new NativeUnavailable({ plugin, method })),
+  available: (plugin) => succeed(plugin === "AlphaFiles"),
+  invoke: (plugin, method) => plugin === "AlphaFiles" ? succeed(answer(method)) : fail(new NativeUnavailable({ plugin, method })),
   listen: () => Stream.empty,
 })
 

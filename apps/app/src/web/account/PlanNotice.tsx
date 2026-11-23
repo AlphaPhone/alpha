@@ -3,6 +3,7 @@ import { CreditCard, X } from "lucide-react";
 import { type Sheet, canDismissPlan, planNoticeShown } from "../../../gen/account__sheet.ts";
 import { Alert, Button } from "../components/ui/index.ts";
 
+/** The sheet state that decides the Home plan notice, and its two actions. */
 export interface PlanNoticeProps {
   sheet: Sheet;
   onOpen: () => void;

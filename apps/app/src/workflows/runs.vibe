@@ -2,14 +2,13 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type WorkflowNoticeRoute, type WorkflowRun, WorkflowAdmissionRejected, WorkflowResponseInvalid, isRecordedMissedExecution, openWorkflowNotice,
-  parseWorkflowRunDeepLink, workflowRunDeepLink,
+  parseWorkflowRun, parseWorkflowRunDeepLink, workflowRunDeepLink,
 } from "@elizaos/plugin-workflow/client"
 import { type Entry, Machine, autoRefreshes, refreshAfter, stored } from "../../gen/workflows__runs.effect.vibe"
 import { occurred } from "../../gen/workflows__vocabulary.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type OwnerScope, WorkflowApi } from "./api.vibe"
 import { sha256Hex } from "./ids.ts"
-import { RunReply } from "./wire.schema.vibe"
 
 /** The key the open workflow and its kept run request are stored under. */
 export const RUNS_KEY = ownerKey("device", "workflows/runs")
@@ -85,7 +84,8 @@ export const versions = Layer.effect(WorkflowVersions, effect {
 })
 
 function entryOf(run: WorkflowRun): Entry {
-  return { runId: run.id, occurred: occurred(isRecordedMissedExecution(run), run.occurrence?.status ?? "ready"), finished: run.finished, status: run.status, at: run.startedAt }
+  const marked = isRecordedMissedExecution(run) || run.occurrence?.status === "missed"
+  return { runId: run.id, occurred: occurred(marked, run.occurrence?.status ?? "ready"), finished: run.finished, status: run.status, at: run.startedAt }
 }
 
 function ownerOf(scope: OwnerScope): string {
@@ -174,7 +174,8 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   return {
     effect open(runId: string) {
       const answer = try (agent.request("GET", `/api/workflow/executions/${runId}`) catch effect () => { throw new RunNotFound({ runId }) })
-      const { execution } = try (Schema.decodeUnknownEffect(RunReply)(answer) catch effect () => { throw new RunNotFound({ runId }) })
+      const raw = typeof answer === "object" && answer !== null ? (answer as { execution?: unknown }).execution : undefined
+      const execution = try (parseWorkflowRun(raw) catch effect () => { throw new RunNotFound({ runId }) })
       if (execution.id !== runId) throw new RunNotFound({ runId })
       return try openExact({ workflowId: execution.workflowId, runId, versionId: execution.versionId })
     },

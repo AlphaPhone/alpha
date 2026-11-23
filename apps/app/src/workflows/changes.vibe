@@ -1,0 +1,76 @@
+// spec/workflows/vocabulary.md, "Story: See what my agent changed"
+import {
+  type ChangeWord, type Receipt, automationsCommitted, changeWord, changesCalendar, changesNotes, changesWorkflow, notesRevision, viewRefusal,
+} from "../../gen/workflows__vocabulary.effect.vibe"
+import { Automations } from "./automations.vibe"
+import { ActionResultRecord, type EffectReceiptRecord } from "./changes.schema.vibe"
+
+/** One workflow a reply changed, with its last change in Alpha's word, for a card that opens it. */
+export interface WorkflowChange { readonly workflowId: string; readonly word: ChangeWord }
+
+/** What a reply's action results prove changed, and what to refresh once. */
+export interface ChangeSummary {
+  readonly workflows: ReadonlyArray<WorkflowChange>
+  /** The Workflows list shows a record that changed. */
+  readonly automations: boolean
+  /** Notes changed: the newest revision every note receipt names, or -1 when one names none; undefined when no note changed. */
+  readonly notesRevision?: number
+  /** Calendar changed. */
+  readonly calendar: boolean
+  /** A chat edit or switch-on was refused in favour of the Workflows view. */
+  readonly openWorkflows: boolean
+}
+
+/** A receipt as the vocabulary rules read it. */
+function receiptOf(success: boolean, r: EffectReceiptRecord): Receipt {
+  const version = r.resource.version === undefined ? Number.NaN : Number(r.resource.version)
+  return {
+    success, applied: r.outcome === "applied", durable: r.commit?.kind === "durable", kind: r.resource.kind, operation: r.operation,
+    providerAccepted: r.commit?.kind === "provider_accepted", calendarArtifact: (r.artifacts ?? []).some((a) => a.kind === "calendar.event"),
+    version: Number.isSafeInteger(version) && version >= 0 ? version : -1,
+  }
+}
+
+/** Reads what an agent reply changed, and refreshes the Workflows list once when a record it shows changed. */
+export service AgentChanges {
+  /** What `results`, the reply's untrusted action results, prove changed. */
+  read(results: ReadonlyArray<unknown>): ChangeSummary!!
+  /** Read `results` and refresh the Workflows list once when it shows a changed record. */
+  settle(results: ReadonlyArray<unknown>): ChangeSummary!!
+}
+
+export const agentChanges = Layer.effect(AgentChanges, effect {
+  const list = try Automations
+
+  effect function read(results: ReadonlyArray<unknown>) {
+    const receipts: Array<{ receipt: Receipt; id: string }> = []
+    let refused = false
+    for (const raw of results) {
+      const result = try (Schema.decodeUnknownEffect(ActionResultRecord)(raw) catch () => undefined)
+      if (result === undefined) continue
+      if (!result.success && result.error !== undefined && viewRefusal(result.error)) refused = true
+      for (const r of result.effectReceipts ?? []) receipts.push({ receipt: receiptOf(result.success, r), id: r.resource.id })
+    }
+    const last = new Map<string, ChangeWord>()
+    for (const { receipt, id } of receipts) {
+      if (!changesWorkflow(receipt)) continue
+      last.delete(id)
+      last.set(id, changeWord(receipt.operation))
+    }
+    const all = receipts.map((r) => r.receipt)
+    const notes = all.some((r) => changesNotes(r))
+    return {
+      workflows: [...last].map(([workflowId, word]) => ({ workflowId, word })), automations: automationsCommitted(all),
+      ...(notes ? { notesRevision: notesRevision(all) } : {}), calendar: all.some((r) => changesCalendar(r)), openWorkflows: refused,
+    } satisfies ChangeSummary
+  }
+
+  return {
+    read,
+    effect settle(results: ReadonlyArray<unknown>) {
+      const summary = try read(results)
+      if (summary.automations) try list.refresh()
+      return summary
+    },
+  }
+})

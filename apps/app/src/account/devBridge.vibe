@@ -1,29 +1,14 @@
 // spec/account/devBridge.md, "Story: Sign in through the development bridge"; spec/account/dedicated.md, "Story: Review a dedicated agent in a development build"
-import { type AckResult, type Bridge, Machine as BridgeMachine, machine as bridgeMachine } from "../../gen/account__devBridge.effect.vibe"
-import { type Dedicated, type DedicatedEffect, type PollOutcome, Machine as DedicatedMachine, machine as dedicatedMachine } from "../../gen/account__dedicated.effect.vibe"
+import { type AckResult, type Bridge, Machine as BridgeMachine, enabled, machine as bridgeMachine } from "../../gen/account__devBridge.effect.vibe"
+import {
+  type Dedicated, type DedicatedEffect, type PollOutcome, Machine as DedicatedMachine, enabled as dedicatedEnabled, machine as dedicatedMachine
+} from "../../gen/account__dedicated.effect.vibe"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { Build } from "../platform/build.vibe"
-import { CloudSession } from "./session.vibe"
+import { BridgeAnswer, DedicatedReview, DedicatedStatus } from "./devBridge.schema.vibe"
+import { CloudSession, noNews } from "./session.vibe"
 
 const bridge = "/__alpha-dev-cloud"
-
-/** The bridge's answer to one step. */
-schema BridgeAnswer {
-  ok: boolean
-  reached?: boolean
-  result?: "confirmed" | "transient" | "refused"
-  store?: "before" | "mine" | "other"
-}
-
-/** The bridge's dedicated review. */
-schema DedicatedReview {
-  adoption: boolean
-  available: boolean
-}
-
-/** The bridge's dedicated status. */
-schema DedicatedStatus {
-  phase: "provisioning" | "cutover" | "ready" | "unconfirmed"
-}
 
 /** The test-mocks development bridge's own Cloud sign-in. */
 export service DevBridgeSignIn {
@@ -43,8 +28,7 @@ export service DedicatedSetup {
   finalize(): void!!
 }
 
-effect function ask(path: string) {
-  const client = try HttpClient.HttpClient
+effect function ask(client: HttpClient.HttpClient, path: string) {
   const response = try client.execute(HttpClientRequest.post(`${bridge}/${path}`))
   return try Schema.decodeUnknownEffect(BridgeAnswer)(try response.json)
 }
@@ -54,6 +38,7 @@ export const devBridgeService = Layer.effect(DevBridgeSignIn, effect {
   const machine = try BridgeMachine
   const build = try Build
   const session = try CloudSession
+  const client = try HttpClient.HttpClient
   machine.send({ type: "allowBridge", testMocks: build.info.testMocks }) catch () => undefined
 
   effect function step(event: Parameters<typeof machine.send>[0]) {
@@ -64,28 +49,29 @@ export const devBridgeService = Layer.effect(DevBridgeSignIn, effect {
     changes: machine.changes,
     effect signIn() {
       if (!(try step({ type: "begin" }))) return
-      const minted = ask("mint") catch () => ({ ok: false })
+      const minted = ask(client, "mint") catch () => ({ ok: false })
       try step({ type: "mint", ok: minted.ok })
       while ((try machine.get()).phase === "Acking") {
-        const ack = ask("ack") catch () => ({ ok: false, result: "transient" as const, reached: false })
+        const ack = ask(client, "ack") catch () => ({ ok: false, result: "transient" as const, reached: false })
         const result: AckResult = ack.result === "confirmed" ? "AckConfirmed" : ack.result === "refused" ? "AckRefused" : "AckTransient"
         try step({ type: "acknowledge", result, reached: ack.reached === true })
       }
-      const owner = ask("identity") catch () => ({ ok: false })
+      const owner = ask(client, "identity") catch () => ({ ok: false })
       try step({ type: "identity", ok: owner.ok })
-      const store = ask("store") catch () => ({ ok: false, store: "before" as const })
+      const store = ask(client, "store") catch () => ({ ok: false, store: "before" as const })
       if (store.store === "other") try step({ type: "storeChangesElsewhere" })
       try step({ type: "commitChecks" })
       if ((try machine.get()).phase === "Writing") {
         try step({ type: "dispatchRename" })
-        const renamed = ask("commit") catch () => ({ ok: false })
+        const renamed = ask(client, "commit") catch () => ({ ok: false })
         try step({ type: "renameSettles", ok: renamed.ok })
-        if (renamed.ok) try session.adopt()
+        if (renamed.ok) try session.adopt(noNews)
       }
       try step({ type: "reset" })
     },
     effect cancel() {
-      ask("cancel") catch () => undefined
+      if (!enabled(try machine.get(), { type: "cancel" })) return
+      ask(client, "cancel") catch () => undefined
       try step({ type: "cancel" })
     }
   }
@@ -95,10 +81,10 @@ export const devBridgeService = Layer.effect(DevBridgeSignIn, effect {
 export const dedicatedService = Layer.effect(DedicatedSetup, effect {
   const machine = try DedicatedMachine
   const build = try Build
+  const client = try HttpClient.HttpClient
   machine.send({ type: "allowSetup", testMocks: build.info.testMocks }) catch () => undefined
 
   effect function call(path: string) {
-    const client = try HttpClient.HttpClient
     const response = try client.execute(HttpClientRequest.post(`${bridge}/dedicated/${path}`))
     return try response.json
   }
@@ -125,6 +111,7 @@ export const dedicatedService = Layer.effect(DedicatedSetup, effect {
   return {
     changes: machine.changes,
     effect review() {
+      if (!dedicatedEnabled(try machine.get(), { type: "reviewRead", adoption: false, available: false })) return
       const raw = call("review") catch () => undefined
       const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(DedicatedReview)(raw) catch () => undefined)
       if (read !== undefined) try send({ type: "reviewRead", adoption: read.adoption, available: read.available })

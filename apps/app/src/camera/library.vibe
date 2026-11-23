@@ -41,6 +41,11 @@ function accessOf(scope: string): Access {
   return scope === "full" ? "ScopeFull" : scope === "partial" ? "ScopePartial" : scope === "selected" ? "ScopeSelected" : "ScopeDenied"
 }
 
+/** A playback source the viewer may load: the bridge's opaque same-origin `.mp4` capability, or the browser store's own data; never a content URI or a file path. */
+export function playbackSource(url: string): boolean {
+  return /^https?:\/\/[^/]+\/_[a-z0-9-]+\/[A-Za-z0-9_-]+\.mp4$/.test(url) || /^data:video\/(?:webm|mp4);base64,/.test(url)
+}
+
 /** Built-in album keys the grid filters on. */
 export type AlbumKey = "favorites" | "videos" | "camera" | "screenshots" | `custom:${string}`
 
@@ -58,6 +63,8 @@ export service PhotoLibrary {
   requestAccess(): void!!
   openSettings(): void!!
   openAlbum(album: AlbumKey | undefined): void!!
+  /** Open Photos on a route: `album:<key>`, `item:<id>` or `select:<id>,<id>`. */
+  openRoute(route: string): void!!
   switchTab(tab: Tab): void!!
   startSelection(id: string): void!!
   toggle(id: string): void!!
@@ -236,6 +243,27 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
     try sendBrowse({ type: "shareSettled" })
   }
 
+  effect function loadedIdle() {
+    try Stream.runHead(Stream.filter(catalog.changes, (c) => c.disposed || (c.main.loaded && c.read === "ReadIdle")))
+  }
+
+  effect function playable(id: string) {
+    const row = try find(id)
+    if (row === undefined || !row.video) return
+    const item = store.read(id, true) catch () => undefined
+    const url = item?.path
+    if (url === undefined || !playbackSource(url)) return try say("Can’t play")
+    try sendBrowse({ type: "sourceReady", id, url })
+  }
+
+  effect function find(id: string) {
+    const c = try catalog.get()
+    const row = [...c.main.rows, ...c.trash.rows].find((item) => item.id === id)
+    if (row !== undefined) return row
+    const read = store.read(id, false) catch () => undefined
+    return read === undefined ? undefined : rowOf(read)
+  }
+
   try forkDetach(Stream.runForEach(store.changed, () => effect {
     const c = try catalog.get()
     if (!c.hidden && c.active && !c.disposed) try reload()
@@ -292,12 +320,49 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
       store.openLibrarySettings() catch effect () => { try say("Couldn’t open settings") }
     },
     effect openAlbum(key: AlbumKey | undefined) {
+      const opened = try sendBrowse({ type: "openAlbum", album: key ?? "" })
+      if (opened === undefined) return
       album = key
       try publishPool()
     },
+    effect openRoute(route: string) {
+      try timeout(loadedIdle(), "5 seconds") catch () => undefined
+      const [kind, value = ""] = route.split(/:(.*)/s)
+      if (kind === "album" && /^(?:favorites|videos|camera|screenshots|custom:[A-Za-z0-9_-]{1,80})$/.test(value)) {
+        try sendBrowse({ type: "switchTab", tab: "AlbumsTab" })
+        if ((try sendBrowse({ type: "openAlbum", album: value })) !== undefined) {
+          album = value as AlbumKey
+          try publishPool()
+        }
+        return
+      }
+      if ((try browse.get()).tab !== "LibraryTab") {
+        try sendBrowse({ type: "switchTab", tab: "LibraryTab" })
+        album = undefined
+        try publishPool()
+      }
+      const ids = kind === "item" ? [value] : kind === "select" ? value.split(",").filter((id) => id !== "").slice(0, 500) : []
+      if (ids.length === 0) return
+      for (let page = 0; page < 10; page++) {
+        const pool = (try browse.get()).pool
+        if (ids.every((id) => pool.includes(id)) || (try catalog.get()).main.continueAt === "") break
+        try sendCatalog({ type: "refresh", paging: true })
+        try readMain()
+      }
+      if (kind === "item") {
+        if ((try sendBrowse({ type: "openViewer", id: value })) !== undefined) try forkDetach(playable(value))
+        else try say("Gone")
+        return
+      }
+      const pool = (try browse.get()).pool
+      const shown = ids.filter((id) => pool.includes(id))
+      if (shown.length === 0) return try say("Gone")
+      try sendBrowse({ type: "startSelection", id: shown[0]! })
+      try sendBrowse({ type: "selectRange", ids: shown })
+    },
     effect switchTab(tab: Tab) {
       try sendBrowse({ type: "switchTab", tab })
-      if (tab !== "AlbumsTab") album = undefined
+      album = undefined
       if (tab === "TrashTab") {
         try sendCatalog({ type: "requestTrash", paging: false })
         try forkDetach(readTrash())
@@ -312,8 +377,12 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
     },
     selectAll: () => effect { try sendBrowse({ type: "selectAll" }) },
     cancelSelection: () => effect { try sendBrowse({ type: "cancelSelection" }) },
-    openViewer: (id: string) => effect { try sendBrowse({ type: "openViewer", id }) },
-    swipe: (id: string) => effect { try sendBrowse({ type: "swipe", id }) },
+    effect openViewer(id: string) {
+      if ((try sendBrowse({ type: "openViewer", id })) !== undefined) try forkDetach(playable(id))
+    },
+    effect swipe(id: string) {
+      if ((try sendBrowse({ type: "swipe", id })) !== undefined) try forkDetach(playable(id))
+    },
     closeViewer: () => effect { try sendBrowse({ type: "closeViewer" }) },
     pinch: (wider: boolean) => effect { try sendBrowse({ type: "pinch", wider }) },
     effect favorite() {
@@ -431,12 +500,6 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
       const row = b.viewer === "" ? undefined : pool(try catalog.get(), b).find((item) => item.id === b.viewer)
       return shownPhotoFor(row === undefined ? undefined : { id: row.id, revision: row.revision, video: row.video }, revision, false, header)
     },
-    effect find(id: string) {
-      const c = try catalog.get()
-      const row = [...c.main.rows, ...c.trash.rows].find((item) => item.id === id)
-      if (row !== undefined) return row
-      const read = store.read(id, false) catch () => undefined
-      return read === undefined ? undefined : rowOf(read)
-    },
+    find,
   }
 })

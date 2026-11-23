@@ -11,6 +11,7 @@ import { machine as custodyMachine } from "../../gen/assistant__attachments.effe
 import { machine as reviewMachine } from "../../gen/assistant__review.effect.vibe"
 import { machine as bridgeMachine } from "../../gen/assistant__withdrawal.effect.vibe"
 import { machine as suggestionMachine } from "../../gen/assistant__suggestion.effect.vibe"
+import { machine as recoveryMachine } from "../../gen/assistant__recovery.effect.vibe"
 import { assistantLayer } from "./assistant.vibe"
 import { attachmentsLayer } from "./attachments.vibe"
 import { composerLayer } from "./composer.vibe"
@@ -18,9 +19,22 @@ import { conversationsLayer } from "./conversations.vibe"
 import { locationLayer } from "./location.vibe"
 import { reviewLayer } from "./review.vibe"
 import { searchLayer } from "./search.vibe"
+import { draftLayer } from "./draft.vibe"
 import { flowsLayer } from "./flows.vibe"
 import { suggestionsLayer } from "./suggestion.vibe"
 import { withdrawableLayer } from "./withdrawable.vibe"
+
+export { Assistant } from "./assistant.vibe"
+export { AssistantDraft, cameraHandoffsFromAssistant } from "./draft.vibe"
+export { askAlphaTarget, filesCapabilities } from "./files-bridge.vibe"
+export { AssistantHost } from "./host.vibe"
+export { operationPorts } from "./operations.vibe"
+export { AssistantEmail, MapsChatCards, OwnNotices, WorkflowStepDecisions } from "./ports.vibe"
+export { Composer } from "./composer.vibe"
+export { Suggestions } from "./suggestion.vibe"
+export { AssistantFlows } from "./flows.vibe"
+export { ChatSearch } from "./search.vibe"
+export { DeviceExecutors } from "./review.vibe"
 
 /** The key the composer's drafts are kept under; each binding inside names its origin, owner, agent and conversation. */
 export const draftsKey = "alpha/assistant/drafts"
@@ -28,11 +42,18 @@ export const draftsKey = "alpha/assistant/drafts"
 /** Every machine the assistant keeps; the drafts survive a restart, the rest live with the page. */
 export const machines = Layer.mergeAll(
   dockMachine(), draftsStored(draftsKey), sendsMachine(), stoppedMachine(), clientMachine(), locatorMachine(),
-  searchMachine(), summonsMachine(), custodyMachine(), reviewMachine(), bridgeMachine(), suggestionMachine(),
+  searchMachine(), summonsMachine(), custodyMachine(), reviewMachine(), bridgeMachine(), suggestionMachine(), recoveryMachine(),
 )
 
-/** The assistant's services and machines, needing Native, Resident, KeyValueStore, Preferences, AssistantHost and DeviceExecutors. */
+const services = Layer.provideMerge(
+  Layer.mergeAll(conversationsLayer, locationLayer, attachmentsLayer, reviewLayer, suggestionsLayer),
+  Layer.provideMerge(withdrawableLayer, machines),
+)
+
+const conversation = Layer.provideMerge(searchLayer, Layer.provideMerge(composerLayer, services))
+
+/** The assistant's services and machines, needing Native, Resident, KeyValueStore, Preferences (settings), Navigation (shell core), AssistantHost and DeviceExecutors (shell); the ports in ports.vibe refuse until Inbox, Clock, Workflows and Maps fill them. */
 export const layer = Layer.provideMerge(
-  Layer.provideMerge(flowsLayer, Layer.mergeAll(searchLayer, assistantLayer)),
-  Layer.provideMerge(composerLayer, Layer.provideMerge(Layer.mergeAll(conversationsLayer, locationLayer, attachmentsLayer, reviewLayer, suggestionsLayer), Layer.provideMerge(withdrawableLayer, machines))),
+  Layer.mergeAll(flowsLayer, draftLayer),
+  Layer.provideMerge(assistantLayer, conversation),
 )

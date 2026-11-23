@@ -1,4 +1,5 @@
 // spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"
+import type { MapsCard } from "@elizaos/plugin-maps/cards";
 import { CircleAlert, CircleCheck, CircleHelp, Paperclip, Quote as QuoteIcon, SquarePen } from "lucide-react";
 import { editable, quotable } from "../../../gen/assistant__conversation.ts";
 import { copy, cutOffText, planCardTitle } from "../../assistant/presentation.vibe";
@@ -9,7 +10,9 @@ import { ActionCardView } from "./ActionCardView.tsx";
 import { ReplyText } from "./ReplyText.tsx";
 import { EmailCardView } from "./EmailCardView.tsx";
 
+/** The rows of the open conversation, what governs their controls, and the owner's answers to them. */
 export type TranscriptProps = {
+  /** The rows, oldest first. */
   rows: readonly Row[];
   /** A reply is being written. */
   typing: boolean;
@@ -19,19 +22,34 @@ export type TranscriptProps = {
   canFork: boolean;
   /** The Cloud's display name, for plan cards. */
   cloud: string;
+  /** An emergency call is live, which holds every Approve. */
   emergency: boolean;
+  /** The card whose approval or decline is in flight. */
   busyCard?: string;
+  /** The time expiries are shown against. */
   now: number;
   /** Shown when nothing was said yet. */
   emptyText: string;
+  /** Quote a message in the next reply. */
   onQuote: (quote: Quote) => void;
+  /** Correct one of my messages. */
   onEdit: (row: Extract<Row, { kind: "user" }>) => void;
+  /** Approve an action card. */
   onApprove: (card: ProposalCard) => void;
+  /** Decline an action card. */
   onDecline: (card: ProposalCard) => void;
+  /** Open the view a navigation card names. */
   onOpenCard: (card: ProposalCard) => void;
+  /** Answer a reply's choice with its value. */
   onChoose: (value: string) => void;
+  /** Act on a reply's plan card. */
   onPlan: (row: Extract<Row, { kind: "agent" }>) => void;
+  /** Open a workflow run a reply announced. */
   onOpenRun: (workflowId: string, runId: string) => void;
+  /** Open the map of a Maps card in the agent message counted `ordinal`. */
+  onOpenMap?: (card: MapsCard, ordinal: number) => void;
+  /** The selected Inbox account's address, shown for an email card's "me". */
+  ownAddress?: string;
   /** An email card's fields changed, was sent or was declined. */
   onEmail: (row: Extract<Row, { kind: "email" }>, act: "edit" | "send" | "decline", fields: { readonly to: string; readonly subject: string; readonly body: string }) => void;
 };
@@ -45,6 +63,7 @@ const receiptIcon = { Completed: CircleCheck, "Not confirmed": CircleHelp, "Not 
 export function Transcript(props: TranscriptProps) {
   const { rows, typing } = props;
   if (rows.length === 0) return <EmptyState title={props.emptyText} className="py-12" />;
+  const newestAgent = rows.findLast((row) => row.kind === "agent")?.id;
   return (
     <ol className="flex flex-col gap-3" aria-live="polite">
       {rows.map((row) => {
@@ -71,7 +90,9 @@ export function Transcript(props: TranscriptProps) {
               <li key={row.id} data-alpha-message-id={row.id} className="flex flex-col items-start gap-2">
                 {row.reply.status === "Planning" || (row.reply.status === "Working" && row.text === "")
                   ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" aria-hidden />{row.label ?? "Thinking"}</p>
-                  : <ReplyText segments={row.segments} onChoose={props.onChoose} onOpenRun={props.onOpenRun} />}
+                  : <ReplyText segments={row.segments} onChoose={props.onChoose} onOpenRun={props.onOpenRun}
+                      live={row.id === newestAgent && row.ordinal !== undefined && !typing}
+                      onOpenMap={props.onOpenMap === undefined || row.ordinal === undefined ? undefined : (card) => props.onOpenMap?.(card, row.ordinal ?? 0)} />}
                 {row.notices.map((notice) => <p key={notice} className="text-sm text-muted-foreground">{notice}</p>)}
                 {row.cutOff !== "NotCutOff" && <p className="font-mono text-xs uppercase text-muted-foreground">{cutOffText(row.cutOff)}</p>}
                 {row.plan !== undefined && <Button variant="outline" onClick={() => props.onPlan(row)}>{planCardTitle(row.plan, props.cloud)}</Button>}
@@ -86,7 +107,7 @@ export function Transcript(props: TranscriptProps) {
           case "notice":
             return <li key={row.id} role="status" className="text-sm text-muted-foreground">{row.text}</li>;
           case "email":
-            return <li key={row.id}><EmailCardView card={row.card} to={row.to} subject={row.subject} body={row.body}
+            return <li key={row.id}><EmailCardView card={row.card} to={row.to} subject={row.subject} body={row.body} ownAddress={props.ownAddress}
               onEdit={(fields) => props.onEmail(row, "edit", fields)} onSend={(fields) => props.onEmail(row, "send", fields)}
               onDecline={() => props.onEmail(row, "decline", { to: row.to, subject: row.subject, body: row.body })} /></li>;
           case "card":

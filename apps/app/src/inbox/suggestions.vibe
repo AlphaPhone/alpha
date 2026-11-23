@@ -2,14 +2,14 @@
 import { type Event as SuggestionsEvent, type Suggestions as SuggestionsState, type SuggestionTarget, Machine as SuggestionsMachine, bodyLimit } from "../../gen/inbox__suggestions.effect.vibe"
 import { hasDraft } from "../../gen/inbox__drafts.effect.vibe"
 import { Machine as ReaderMachine } from "../../gen/inbox__reader.effect.vibe"
-import { Composer } from "./composer.vibe"
+import { MailComposer } from "./composer.vibe"
 import { pageVisible } from "./visibility.ts"
 
 /** Where a suggestion would go, as the review shows it. */
 export type SuggestionDestination = "open-draft" | "shelved-reply" | "new-reply" | "new-email"
 
 /** Reviews and inserts agent suggestions into the email being written. */
-export service Suggestions {
+export service MailSuggestions {
   readonly changes: Stream.Stream<SuggestionsState>
   get(): SuggestionsState!!
   /** The destination the text would go to now. */
@@ -23,10 +23,10 @@ export service Suggestions {
 }
 
 /** The suggestion shell over its machine and the composer. */
-export const layer = Layer.effect(Suggestions, effect {
+export const layer = Layer.effect(MailSuggestions, effect {
   const machine = try SuggestionsMachine
   const reader = try ReaderMachine
-  const composer = try Composer
+  const composer = try MailComposer
 
   effect function send(event: SuggestionsEvent) {
     return machine.send(event) catch () => undefined

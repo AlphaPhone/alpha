@@ -95,12 +95,22 @@ pure def sometimesWorkflowTextAfterNavigation(c: Client): bool = c.outcome == Wo
 
 ### A changed screen context bumps the revision and drops every proposal; a private screen stops everything
 
-An unchanged context envelope is ignored by the shell and is no event.
+An unchanged context envelope is ignored by the shell and is no event. A
+view that the request's own direct action opens (the keypad a message asked
+for, the note it created) is the request's own page change: the reply in
+flight adopts the new context and is delivered whole, with no "Stopped." and
+no "may still finish" notice (#1433).
 
 ```quint
 pure def changeView(c: Client, sensitive: bool): Client =
   { ...c, revision: c.revision + 1, sensitive: sensitive, proposal: false,
     busy: if (c.busy == Generating and not(sensitive)) Generating else NotBusy }
+pure def canOwnView(c: Client): bool = c.connected and not(c.sensitive) and (c.busy == Sending or c.busy == Executing)
+pure def ownView(c: Client): Client =
+  { ...c, revision: c.revision + 1, capturedRevision: if (c.busy == Sending) c.revision + 1 else c.capturedRevision }
+pure def stepTheRequestsOwnViewKeepsItsReply(before: Client, via: str, after: Client): bool =
+  via == "ownView" implies (after.busy == before.busy and after.proposal == before.proposal)
+pure def sometimesAReplyOutlivedItsOwnView(c: Client): bool = c.outcome == ReplyArrived and c.revision >= 1 and c.capturedRevision == c.revision
 pure def sometimesALateReplyWasDropped(c: Client): bool = c.busy == NotBusy and c.revision >= 1 and c.capturedRevision < c.revision and c.outcome == NoOutcome
 ```
 

@@ -1,4 +1,4 @@
-// spec/browser/page.md, "Typed text opens an address, opens the local development host, searches, or is refused"; spec/browser/session.md, "The agent switches to or closes a private tab only for a request made from a private tab, never switches to the tab already showing, and closes the showing tab only when it is shown"
+// spec/browser/page.md, "Typed text opens an address, opens the local development host, searches, or is refused"; spec/browser/session.md, "A link the owner taps outside Browser opens in a new tab and is never searched"; spec/browser/session.md, "The agent switches to or closes a private tab only for a request made from a private tab, never switches to the tab already showing, and closes the showing tab only when it is shown"
 import { isSecureWebAddress, isWebAddress, parseBrowserAddressInput } from "@elizaos/os/browser/address";
 import type { AddressFacts, AddressOutcome, RefusalReason, TabPage } from "../../gen/browser__page.ts";
 
@@ -73,6 +73,15 @@ export function secureTypedAddress(raw: string, onDevice: boolean): string {
   const typed = /^\s*http:\/\/([^/?#\s@]+)(?=[/?#]|\s*$)/i.exec(raw);
   if (!typed || /:\d*$/.test(typed[1] ?? "") || loopbackHost(typed[1] ?? "")) return raw;
   return raw.replace(/^(\s*)http:/i, "$1https:");
+}
+
+/** A link tapped outside Browser as the address it opens, or undefined when it is not a web address with a host and no credentials; a link is never searched. */
+export function linkAddress(raw: string, onDevice: boolean): string | undefined {
+  const typed = raw.trim();
+  if (typed === "" || typed.length > MAX_TYPED) return undefined;
+  const url = URL.parse(secureTypedAddress(typed, onDevice));
+  if (url === null || url.hostname === "" || url.username !== "" || url.password !== "" || !isWebAddress(url.href)) return undefined;
+  return url.href;
 }
 
 /** A page's name as one line of plain text, empty when it only repeats the address. */

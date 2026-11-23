@@ -57,7 +57,7 @@ pure val keyValues = Set("reminder:op1", "calendar:op2")
 ### A new owner starts a new generation with nothing known
 
 ```quint
-pure def canOwnerChanged(d: DeletionNotices, owner: str): bool = owner != d.owner and d.generation < 3
+pure def canOwnerChanged(d: DeletionNotices, owner: str): bool = owner != d.owner
 pure def ownerChanged(d: DeletionNotices, owner: str): DeletionNotices =
   { ...d, owner: owner, generation: d.generation + 1, rows: List(), busyKey: "", report: NoDeletionReport }
 pure def alwaysKnownRowsAreCurrent(d: DeletionNotices): bool = d.rows.length() > 0 implies (d.knownGeneration == d.generation and d.owner != "")

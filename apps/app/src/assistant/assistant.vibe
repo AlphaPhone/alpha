@@ -1,9 +1,14 @@
-// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"
-import { Machine as DockMachine, swallowWindow, type Detent } from "../../gen/assistant__dock.effect.vibe"
+// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"
+import { Machine as DockMachine, swallowWindow, type Detent, type Dock, type Surface } from "../../gen/assistant__dock.effect.vibe"
+import { chatOf, restOf, type Detent as ShellDetent, type Nav } from "../../gen/shell__navigation.effect.vibe"
+import { observes } from "../../gen/assistant.effect.vibe"
 import { Machine as DraftsMachine, shown, slotOf, type Drafts } from "../../gen/assistant__draft.effect.vibe"
 import { Machine as SummonsMachine, startsVoice, type Origin } from "../../gen/assistant__entry.effect.vibe"
 import { Native } from "../platform/native.vibe"
+import { Navigation } from "../shell/navigation.vibe"
 import { AttachmentRefused, ChatAttachments, type Picked } from "./attachments.vibe"
+import { Composer } from "./composer.vibe"
+import { ChatSearch } from "./search.vibe"
 import { AssistantHost } from "./host.vibe"
 import { AssistInvocation } from "./payloads.schema.vibe"
 import { unitsOf } from "./units.vibe"
@@ -28,7 +33,7 @@ export service Assistant {
   show(detent: Detent): void!!
   /** The owner pressed Talk: ask the voice area for a conversation. */
   requestVoice(): void!!
-  /** Follow Android's assist invocations for as long as it runs. */
+  /** Follow Android's assist invocations, and keep the dock, the conversation and search in step with the shell, for as long as it runs. */
   follow(): void!!
 }
 
@@ -37,6 +42,25 @@ const tickMs = 200
 function holds(state: Drafts): boolean {
   const slot = slotOf(state, state.active)
   return shown(state).length > 0 || slot.sending || slot.unsettled
+}
+
+/** The surface the dock rests on for the shell's navigation: Home, an app on the bar, or an app on the pill. */
+export function surfaceOf(nav: Nav): Surface {
+  return nav.app === "" ? "HomeView" : restOf(nav.app) === "ChatInput" ? "BarView" : "PillView"
+}
+
+/** The dock's detent for the shell's. */
+export function dockDetentOf(detent: ShellDetent): Detent {
+  return detent === "ChatHidden" ? "Hidden" : detent === "ChatInput" ? "Input" : detent === "ChatSheet" ? "Sheet" : "Full"
+}
+
+/** The shell's detent for the dock's. */
+export function shellDetentOf(detent: Detent): ShellDetent {
+  return detent === "Hidden" ? "ChatHidden" : detent === "Input" ? "ChatInput" : detent === "Sheet" ? "ChatSheet" : "ChatFull"
+}
+
+function settledDock(state: Dock): boolean {
+  return !state.drag.active && !state.ghost
 }
 
 function originOf(raw: string): Origin {
@@ -51,6 +75,9 @@ export const assistantLayer = Layer.effect(Assistant, effect {
   const native = try Native
   const host = try AssistantHost
   const files = try ChatAttachments
+  const navigation = try Navigation
+  const composer = try Composer
+  const search = try ChatSearch
   const voice = try PubSub.unbounded<void>()
   const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
   effect function show(detent: Detent) {
@@ -59,6 +86,57 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     if (detent === "Sheet" || (detent === "Full" && state.chat !== "Sheet")) try quiet(dock.send({ type: "openSheet" }))
     if (detent === "Full" && (try dock.get()).chat === "Sheet") try quiet(dock.send({ type: "sizeButton" }))
     if ((detent === "Input" || detent === "Hidden") && (state.chat === "Sheet" || state.chat === "Full")) try quiet(dock.send({ type: "closeChat" }))
+    if (detent === "Hidden" && (try dock.get()).chat === "Input") try quiet(dock.send({ type: "lowerBar" }))
+  }
+  effect function followShell() {
+    let context: string | undefined
+    let owner: string | undefined
+    let voiced = false
+    let locked = false
+    let placed: ShellDetent | undefined
+    for try (const nav of navigation.changes) {
+      const view = surfaceOf(nav)
+      const before = try dock.get()
+      if (before.view !== view && !before.drag.active) try quiet(dock.send({ type: "navigate", view }))
+      if (voiced && !nav.voice && (try dock.get()).voice) try quiet(dock.send({ type: "voiceEnds" }))
+      voiced = nav.voice
+      const shellChat = chatOf(nav)
+      const now = try dock.get()
+      if (placed !== undefined && shellChat !== placed && settledDock(now) && now.chat !== dockDetentOf(shellChat)) try show(dockDetentOf(shellChat))
+      placed = shellChat
+      const screen = try host.screen()
+      if (screen.exposure.locked !== locked) {
+        locked = screen.exposure.locked
+        try quiet(summons.send({ type: "lockChanges", locked }))
+      }
+      const observed = observes(screen.exposure)
+      const key = `${screen.contextKey}|${observed ? "observed" : "private"}`
+      if (context !== undefined && key !== context) try composer.screenChanged(screen.contextKey, !observed)
+      context = key
+      const identity = try host.identity()
+      const who = identity === undefined ? "" : JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+      if (owner !== undefined && who !== owner) {
+        try quiet(summons.send({ type: "accountChanges" }))
+        try search.retire()
+        try files.retire("owner")
+        if (who !== "") try composer.open(null, true)
+      }
+      owner = who
+    }
+  }
+  effect function pushDock() {
+    let pushed: Detent | undefined
+    for try (const state of dock.changes) {
+      if (!settledDock(state) || state.chat === pushed) continue
+      pushed = state.chat
+      const nav = try navigation.get()
+      const target = shellDetentOf(state.chat)
+      if (nav.chat === target || chatOf(nav) === target) continue
+      if (!(try navigation.moveChat(target))) {
+        const back = dockDetentOf(chatOf(try navigation.get()))
+        if (back !== state.chat) try show(back)
+      }
+    }
   }
   effect function ticks() {
     while (true) {
@@ -99,6 +177,8 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     requestVoice: () => map(PubSub.publish(voice, undefined), () => undefined),
     follow: () => effect {
       fork.detached ticks()
+      fork.detached followShell()
+      fork.detached pushDock()
       if (!(try native.available("DailyApps"))) return
       for try (const raw of Stream.ignore(native.listen("DailyApps", "assistantInvoked"))) {
         try invoked(raw)

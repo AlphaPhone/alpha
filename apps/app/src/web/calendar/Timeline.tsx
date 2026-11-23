@@ -4,6 +4,7 @@ import { formatHour } from "../../calendar/time.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 import { HOUR_PX, dayLabel, timeline } from "./layout.ts";
 
+/** The rows, the day columns and the time a timeline lays out. */
 export type TimelineProps = {
   /** Every row read for the window. */
   rows: readonly CalendarRow[];

@@ -4,6 +4,7 @@ import { ListRow } from "../components/ui/index.ts";
 import type { TileFace } from "./AppTile.tsx";
 import { InlineSheet } from "./InlineSheet.tsx";
 
+/** The Add sheet: the admitted Alpha apps Home does not show yet. */
 export interface AddToHomeSheetProps {
   /** Alpha's apps that are not on Home now. */
   hidden: readonly TileFace[];

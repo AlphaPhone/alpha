@@ -6,11 +6,13 @@ import {
 } from "../../gen/notes__recorder.effect.vibe"
 import { type Event as JournalEvent, Machine as JournalMachine, machine as journalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
 import { Native } from "../platform/native.vibe"
+import { VoiceRoute } from "../voice/route.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { NotesEditor } from "./editor.vibe"
 import { contentOf, nextDefaultTitle, type NoteRow, voiceAudio } from "./list.vibe"
-import { decodeAudioDescription, decodeClaim, decodePlayback, decodeRecordingStatus, decodeSavedAudio, decodeTranscribe, type RecordingStatus } from "./notes.schema.vibe"
-import { randomId, sha256Hex } from "./platform.ts"
+import { decodeAudioDescription, decodeClaim, decodePlayback, decodeRecordingStatus, decodeSavedAudio, type RecordingStatus } from "./notes.schema.vibe"
+import { sha256Hex } from "./platform.ts"
+import { transcribeOnRoute } from "./speech.vibe"
 
 const voicePlugin = "AlphaVoiceCloud"
 const audioPlugin = "AlphaNoteAudio"
@@ -75,6 +77,7 @@ const idle: RecorderDisplay = { durationMs: 0, levels: [], transcript: "", posit
 
 const make = effect {
   const native = try Native
+  const routes = try VoiceRoute
   const collection = try NotesCollection
   const editor = try NotesEditor
   const machine = try RecorderMachine
@@ -132,11 +135,9 @@ const make = effect {
       const state = try machine.get()
       if (state.transcriptionFailed || state.savePending) return
       if ((try Ref.get(texts)).has(segment.segmentId)) continue
-      const answer = try (effect {
-        return (try decodeTranscribe(try voice("transcribeRecording", { recordingId: segment.segmentId, requestId: randomId() }))).text
-      } catch (error) => error)
+      const answer = try transcribeOnRoute(routes, native, segment.segmentId)
       if (typeof answer !== "string") {
-        const code = typeof answer === "object" && answer !== null && "code" in answer ? answer.code : undefined
+        const code = answer.code
         if (code === "no-speech") {
           try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, ""]]))
         } else {
@@ -152,6 +153,15 @@ const make = effect {
     }
   }
 
+  effect function learn(status: RecordingStatus): void!! {
+    const segments = status.segments ?? []
+    const before = (try journal.get()).segments
+    for (let index = before; index < segments.length; index += 1) try record({ type: "segmentFinished", journaled: true })
+    for (const segment of segments) if (segment.text !== undefined && !(try Ref.get(texts)).has(segment.segmentId)) {
+      try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, segment.text ?? ""]]))
+    }
+  }
+
   effect function absorb(status: RecordingStatus): void!! {
     const state = try machine.get()
     const recordingId = status.recordingId
@@ -161,11 +171,7 @@ const make = effect {
     }
     if (!matches(status, try Ref.get(digest), try Ref.get(folder))) return
     const segments = status.segments ?? []
-    const before = (try journal.get()).segments
-    for (let index = before; index < segments.length; index += 1) try record({ type: "segmentFinished", journaled: true })
-    for (const segment of segments) if (segment.text !== undefined && !(try Ref.get(texts)).has(segment.segmentId)) {
-      try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, segment.text ?? ""]]))
-    }
+    try learn(status)
     try send({ type: "progress", segments: segments.length, longEnough: (status.durationMs ?? 0) >= 1000 })
     if (status.state === "stopped" && status.stopReason !== undefined && status.stopReason !== "user") {
       try send({ type: "nativeStopped", storage: status.stopReason === "storage" })
@@ -279,6 +285,7 @@ const make = effect {
     const stopped = try (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
     if (stopped === undefined || stopped.recordingId !== id || stopped.state !== "stopped") { try send({ type: "voiceSaveFailed" }); return false }
     if (stopped.canonicalSavePending === true && !(try machine.get()).savePending) try send({ type: "claim" })
+    try learn(stopped)
     try record({ type: "stopPending" })
     const words = try transcript(stopped.segments ?? [])
     const durationMs = Math.round(stopped.durationMs ?? (try SubscriptionRef.get(display)).durationMs)
@@ -360,6 +367,7 @@ const make = effect {
       const stopped = try (effect { return try decodeRecordingStatus(try voice("stopNoteRecording", { recordingId: id })) } catch () => undefined)
       if (stopped === undefined || stopped.state !== "stopped" || stopped.recordingId !== id) return false
       try send({ type: "stopRecording" })
+      try learn(stopped)
       try record({ type: "stopPending" })
       try absorb(stopped)
       return true

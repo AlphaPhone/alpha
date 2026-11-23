@@ -1,4 +1,4 @@
-// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/trash.md, "Story: Let deleted notes expire after three days when I choose that"
+// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/trash.md, "Story: Let deleted notes expire after three days when I choose that"; spec/notes/recordingOpen.md, "Story: Return to my recording from its notification"
 // The resident agent's Notes routes in memory, faked once at the network boundary: the agent cannot run in a unit test.
 import type { NoteFormat, NotesSnapshot, NotesTrashRecordingCleanup, StickyNote } from "@elizaos/plugin-notes/types";
 
@@ -35,7 +35,7 @@ export class NotesAgentFake {
   }
 
   /** One JSON request, answered as the resident would. */
-  json(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): Answer {
+  json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): Answer {
     if (method === "GET" && path === "/api/notes/state") return { status: 200, data: { success: true, data: this.snapshot() } };
     if (path.startsWith("/api/notes/trash/") && !this.threeDayTrash) return this.refuse(404, "Not found");
     if (method === "GET" && path === "/api/notes/trash/recordings") return { status: 200, data: { success: true, data: structuredClone(this.cleanup) } };
@@ -123,9 +123,18 @@ export class DeviceFake {
   status: Record<string, unknown> = { state: "idle" };
   saved = new Map<string, { noteId: string; durationMs: number; transcript: string; deletedAt?: number; purged?: boolean }>();
   claims = 0;
+  recordingOpen = false;
+  segmentText: string | undefined = "Buy stamps";
+  refuseStart: string | undefined;
+  speech: (args: Record<string, unknown>) => unknown = () => ({ text: "Buy stamps", local: false });
+  playing: string | undefined;
+  picked: Record<string, unknown> | undefined;
+  opened: string[] = [];
+  exported: { title: string; text: string }[] = [];
+  released: string[][] = [];
 
   available(plugin: string): boolean {
-    return plugin === "AlphaNoteAudio" ? this.host : ["AlphaVoiceCloud", "AlphaConnection"].includes(plugin);
+    return plugin === "AlphaNoteAudio" ? this.host : ["AlphaVoiceCloud", "AlphaConnection", "DailyApps", "AlphaMailAttachments", "AlphaNoteDocuments"].includes(plugin);
   }
 
   invoke(plugin: string, method: string, args: Record<string, unknown> = {}): unknown {
@@ -139,18 +148,30 @@ export class DeviceFake {
     }
     if (plugin === "AlphaVoiceCloud") return this.voice(method, args);
     if (plugin === "AlphaNoteAudio") return this.audio(method, args);
+    if (plugin === "DailyApps" && method === "perform") return this.picked === undefined ? { cancelled: true } : { selectionId: "selection-1" };
+    if (plugin === "DailyApps" && method === "forgetSelected") return {};
+    if (plugin === "AlphaMailAttachments") return this.attachments(method, args);
+    if (plugin === "AlphaNoteDocuments" && method === "exportText") {
+      this.exported.push({ title: String(args.title), text: String(args.text) });
+      return { status: "exported", message: "Saved." };
+    }
     throw Object.assign(new Error(`${plugin}.${method} is not installed`), { code: "unavailable" });
   }
 
   private voice(method: string, args: Record<string, unknown>): unknown {
     const binding = { ownerDigest: String(args.ownerDigest ?? ""), folderId: (args.folderId as string | null | undefined) ?? null };
     if (method === "noteRecordingStatus") return this.status;
+    if (method === "consumeNoteRecordingOpen") { const open = this.recordingOpen; this.recordingOpen = false; return { open }; }
+    if (method === "clearNoteRecordingOpen") { this.recordingOpen = false; return {}; }
+    if (method === "startNoteRecording" && this.refuseStart !== undefined) throw Object.assign(new Error("The recorder refused"), { code: this.refuseStart });
+    if (method === "pauseNoteRecording") { this.status = { ...this.status, state: "paused" }; return this.status; }
+    if (method === "resumeNoteRecording") { this.status = { ...this.status, state: "recording" }; return this.status; }
     if (method === "startNoteRecording") {
       this.status = { state: "recording", recordingId: "rec_9", binding, durationMs: 0, segments: [] };
       return this.status;
     }
     if (method === "stopNoteRecording") {
-      this.status = { ...this.status, state: "stopped", stopReason: "user", durationMs: 3000, segments: [{ segmentId: "s1", durationMs: 3000, text: "Buy stamps" }] };
+      this.status = { ...this.status, state: "stopped", stopReason: "user", durationMs: 3000, segments: [{ segmentId: "s1", durationMs: 3000, ...(this.segmentText === undefined ? {} : { text: this.segmentText }) }] };
       return this.status;
     }
     if (method === "claimCanonicalNoteSave") {
@@ -164,8 +185,17 @@ export class DeviceFake {
       return { audioId: args.recordingId, noteId: args.noteId, durationMs, transcript: args.transcript };
     }
     if (method === "discardNoteRecording") { this.status = { state: "idle" }; return this.status; }
-    if (method === "transcribeRecording") return { text: "Buy stamps" };
+    if (method === "transcribeRecording" || method === "transcribeOwnRecording") return this.speech(args);
+    if (method === "transcribeLocalRecording") return { text: "Buy stamps", local: true };
     return this.status;
+  }
+
+  private attachments(method: string, args: Record<string, unknown>): unknown {
+    if (method === "readSelected") return this.picked ?? {};
+    if (method === "openReviewed") { this.opened.push(String(args.sha256)); return {}; }
+    if (method === "openSourceReference") { this.opened.push(String(args.reference)); return {}; }
+    if (method === "releaseSourceReferences") { this.released.push([...(args.keep as string[])]); return { removed: 0, released: 0, remaining: (args.keep as string[]).length }; }
+    return undefined;
   }
 
   private audio(method: string, args: Record<string, unknown>): unknown {
@@ -175,6 +205,9 @@ export class DeviceFake {
       if (row === undefined || row.purged) throw Object.assign(new Error("Recording unavailable"), { code: "not-found" });
       return { audioId, noteId: row.noteId, durationMs: row.durationMs, ...(row.deletedAt === undefined ? {} : { deletedAt: row.deletedAt }) };
     }
+    if (method === "play") { if (row === undefined || row.purged || row.deletedAt !== undefined) throw Object.assign(new Error("Recording unavailable"), { code: "not-found" }); this.playing = audioId; return {}; }
+    if (method === "stop") { this.playing = undefined; return {}; }
+    if (method === "state") return this.playing === undefined ? { playing: false, positionMs: 0 } : { playing: true, audioId: this.playing, positionMs: 1000 };
     if (method === "deletionStatus") return { audioId, noteId: row?.noteId ?? "", operationId: args.operationId, status: row?.purged ? "purged" : row?.deletedAt !== undefined ? "removed" : "unknown" };
     if (method === "remove" && row !== undefined) { row.deletedAt = 1; return { audioId, noteId: row.noteId, operationId: args.operationId, status: "removed" }; }
     if (method === "purge" && row !== undefined) { row.purged = true; return { audioId, noteId: row.noteId, operationId: args.operationId, status: "purged" }; }

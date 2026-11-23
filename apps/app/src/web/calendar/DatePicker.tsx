@@ -4,6 +4,7 @@ import { formatMonthName, midnightAfter } from "../../calendar/time.ts";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Sheet, SheetContent } from "../components/ui/index.ts";
 import { MonthGrid } from "./MonthGrid.tsx";
 
+/** The month and year a date picker shows over the view, and the day it picks. */
 export type DatePickerProps = {
   open: boolean;
   rows: readonly CalendarRow[];

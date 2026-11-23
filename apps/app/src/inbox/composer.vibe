@@ -2,7 +2,7 @@
 import {
   type Event as DraftsEvent, type Drafts, type Draft, type DraftFields, type AccountDrafts, type DraftPick, type ForwardSource,
   Machine as DraftsMachine, accountOf, emptyFields, noDraft, noForward, noProvider, hasDraft, meaningful, shelfRoom, replyRecipients, replyCopies,
-  forwardKeepsOriginals, editableHere, coalesceDelay, editDelay, editMaximumWait, draftBytesLimit, recipientSuggestions
+  forwardKeepsOriginals, editableHere, threadReply, coalesceDelay, editDelay, editMaximumWait, draftBytesLimit, recipientSuggestions
 } from "../../gen/inbox__drafts.effect.vibe"
 import { type OutgoingFile, type Admission, admit, handoffOutcome, type HandoffOutcome, fileAccepted } from "../../gen/inbox__attachments.effect.vibe"
 import { Machine as JournalMachine } from "../../gen/inbox__operations.effect.vibe"
@@ -28,7 +28,7 @@ export interface PickedFile { readonly name: string; readonly mimeType: string; 
 export interface Prefill { readonly toList: string[]; readonly subject: string; readonly body: string; readonly files: OutgoingFile[] }
 
 /** The composer of the selected account and its Drafts. */
-export service Composer {
+export service MailComposer {
   readonly changes: Stream.Stream<Drafts>
   get(): Drafts!!
   /** The selected account's drafts. */
@@ -90,7 +90,7 @@ export function suggestRecipients(candidates: readonly string[], typed: string, 
 }
 
 /** The composer shell over the drafts machine, the account, the open message and the reviewed operations. */
-export const layer = Layer.effect(Composer, effect {
+export const layer = Layer.effect(MailComposer, effect {
   const machine = try DraftsMachine
   const journal = try JournalMachine
   const reader = try ReaderMachine
@@ -195,6 +195,11 @@ export const layer = Layer.effect(Composer, effect {
       if (hasDraft(a.open) && a.open.fields.replyMessage === r.body.id && a.open.fields.mode === modeNames[mode]) {
         try send({ type: "resume" })
         return undefined
+      }
+      const unfinished = mode === "ForwardMode" ? "" : threadReply(a.shelf, r.body.id, modeNames[mode])
+      if (unfinished !== "") {
+        try flush()
+        return (try send({ type: "openShelved", id: unfinished, confirmed: false })) === undefined ? "drafts-full" : undefined
       }
       const caps = (try journal.get()).capabilities
       const me = addressKey(caps.sender)

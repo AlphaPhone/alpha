@@ -48,7 +48,8 @@ pure val positionValues = Set(0, 1, 2)
 ### A filter begins only while Files is showing, and checks access before it reads
 
 A filter asked for while Files is not showing fails at once: only the agent's host may bring Files
-forward, and it does so before asking.
+forward, and it waits for Files to be on screen before asking. An admitted filter is shown on Browse:
+Files leaves the folder, category or Trash it showed, ends the selection and closes the preview.
 
 ```quint
 pure def beginFilter(s: Filtering, criteria: Criteria): Filtering = {
@@ -110,6 +111,23 @@ pure def alwaysOperationsAreNumberedOnce(s: Filtering): bool = s.ops.every(o => 
 pure def sometimesShown(s: Filtering): bool = s.shown != 0 and s.rows.length() > 0 and s.complete
 pure def sometimesIncomplete(s: Filtering): bool = s.ops.some(o => o.result == FilterIncomplete)
 pure def sometimesSupersededFails(s: Filtering): bool = s.shown != 0 and s.ops.some(o => o.result == FilterFailed and o.id < s.shown)
+```
+
+### A refresh of Files runs the filter on screen again under a new query
+
+A change on the device, a refresh or a return to the phone reads the shown filter's results again; its
+rows are shown again only from that query's own reply.
+
+```quint
+pure def canRequery(s: Filtering): bool = s.active and s.shown != 0 and s.pending == 0 and hasOp(s, s.shown)
+pure def requery(s: Filtering): Filtering = {
+  val o = opOf(s, s.shown)
+  { ...s, pending: s.shown, rows: List(), complete: false, unavailable: false, generation: s.generation + 1,
+    ops: withOp(s.ops, { ...o, phase: FilterQuery, ticket: s.generation + 1, result: NoResult, count: 0 }) }
+}
+pure def stepARequeryKeepsTheShownCriteria(before: Filtering, via: str, after: Filtering): bool =
+  via == "requery" implies (after.shown == before.shown and after.criteria == before.criteria and after.pending == before.shown)
+pure def sometimesRequeried(s: Filtering): bool = s.shown != 0 and s.pending == s.shown and s.generation >= 2
 ```
 
 ### A filter says it found nothing only after a complete query

@@ -7,6 +7,7 @@ import { Alert, Button, Card, CardFooter, Input, Label, Switch, Tabs, TabsList, 
 import { DayPicker } from "./DayPicker.tsx";
 import { describeHandoff, handoffMessage, lastHandoff, wall } from "./text.ts";
 
+/** The Clock handoff draft, its review and dispatch, the phone's time zone and Clock's last answer. */
 export type HandoffPanelProps = {
   /** The draft, its review and its dispatch. */
   handoff: Handoff;

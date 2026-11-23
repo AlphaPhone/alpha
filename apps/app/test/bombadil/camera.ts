@@ -1,4 +1,4 @@
-// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/browse.md, "Story: Select what I see"; spec/camera/scanDialogs.md, "Save to Notes runs once per review; an unconfirmed save stays latched because the text may already be saved"
+// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/browse.md, "Story: Select what I see"; spec/camera/browse.md, "Delete forever runs only from Recently deleted, on the items its confirmation prepared"; spec/camera/scanDialogs.md, "Save to Notes runs once per review; an unconfirmed save stays latched because the text may already be saved"; spec/camera/scanDialogs.md, "Keep text needs the recognised text; a PDF request already sent is unconfirmed if the dialog closes"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -45,3 +45,56 @@ const notesSave = extract(({ document }) => {
 
 /** A scan saved to Notes never offers its save again. */
 export const cameraScanSavesToNotesOnce = always(() => notesSave.current);
+
+const light = extract(({ document }) => {
+  const toggle = document.querySelector('button[aria-label="Light on"], button[aria-label="Light off"]') !== null;
+  const recording = document.querySelector('[role="timer"][aria-label="Recording"]') !== null;
+  return !toggle || (document.querySelector('button[aria-label="Video mode"][aria-pressed="true"]') !== null && !recording);
+});
+
+/** Video's light is offered only in Video mode, before a recording starts. */
+export const cameraLightOnlyBeforeVideoRecording = always(() => light.current);
+
+const timer = extract(({ document }) => {
+  const toggle = document.querySelector('button[aria-label^="Timer"]') !== null;
+  return !toggle || !document.querySelector('button[aria-label="Video mode"][aria-pressed="true"]') !== null;
+});
+
+/** The self-timer control belongs to Photo mode. */
+export const cameraTimerOnlyInPhoto = always(() => timer.current);
+
+const zoom = extract(({ document }) => {
+  const recording = document.querySelector('[role="timer"][aria-label="Recording"]') !== null;
+  const chips = document.querySelector('[role="group"][aria-label="Zoom"]') !== null;
+  return !(recording && chips);
+});
+
+/** Zoom never changes during a recording: its chips are hidden while one runs. */
+export const cameraZoomHiddenWhileRecording = always(() => zoom.current);
+
+const microphoneNotice = extract(({ document }) => {
+  const notice = document.querySelector('[role="alert"][aria-label="Mic off"]') !== null;
+  return !notice || document.querySelector('button[aria-label="Video mode"][aria-pressed="true"]') !== null;
+});
+
+/** The microphone notice belongs to Video mode. */
+export const cameraMicrophoneNoticeOnlyInVideo = always(() => microphoneNotice.current);
+
+const deleteForever = extract(({ document }) => {
+  const bar = document.querySelector('footer[aria-label="Selection"]');
+  const remove = bar === null ? undefined : [...bar.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Delete");
+  const inTrash = [...document.querySelectorAll('[role="tab"][aria-selected="true"]')].some((tab) => tab.textContent?.trim() === "Recently deleted");
+  return remove === undefined || inTrash;
+});
+
+/** Delete forever is offered only in Recently deleted. */
+export const cameraDeleteForeverOnlyInRecentlyDeleted = always(() => deleteForever.current);
+
+const searchable = extract(({ document }) => {
+  const save = document.querySelector<HTMLButtonElement>('button[aria-label="Save reviewed searchable PDF"]');
+  const reading = [...document.querySelectorAll('[role="status"]')].some((status) => status.textContent === "Reading text…");
+  return save === null || !reading || save.disabled;
+});
+
+/** The searchable PDF cannot be made before its text has been read for review. */
+export const cameraSearchablePdfWaitsForReviewedText = always(() => searchable.current);

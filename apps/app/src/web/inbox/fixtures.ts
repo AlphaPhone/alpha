@@ -6,7 +6,6 @@ import { emptyFields, noDraft, type AccountDrafts, type Draft } from "../../../g
 import { noRecord, noReview, noReceipt, type OperationRecord } from "../../../gen/inbox__operations.ts";
 import type { MailAccount } from "../../../gen/inbox__accounts.ts";
 import { initial as noticesInitial, type MailNotices } from "../../../gen/inbox__notices.ts";
-import type { EmailCard } from "../../../gen/inbox__agentDrafts.ts";
 
 const row = (id: string, sender: string, subject: string, snippet: string, unread: boolean): MailRow => ({
   id, threadId: `t-${id}`, sender, senderAddress: `${sender.toLowerCase()}@example.com`, subject, snippet, receivedAt: "2026-11-21T09:30:00Z", unread, starred: false, attached: false,
@@ -79,10 +78,4 @@ export const unknownArchive: OperationRecord = {
 export const askReview: MailNotices = {
   ...noticesInitial, available: true, tap: "ReviewingAsk", token: "t1", tapGrant: "grant-work", asks: true,
   excerpt: { message: "m1", thread: "t-m1", revision: "h7", subject: "Lunch Friday", snippet: "Noon works for me" },
-};
-
-/** An agent's email waiting in chat. */
-export const agentCard: EmailCard = {
-  messageId: "6f1f2a51-0d7a-4c3e-9e2b-6a7c2d1e9f00", conversation: "c1", grant: "grant-work", sender: "ann@example.com", recipients: ["bo@example.com"],
-  literalTo: true, subject: "Friday", body: "Noon works for me.", phase: "CardDraft", revision: 1, version: 1,
 };

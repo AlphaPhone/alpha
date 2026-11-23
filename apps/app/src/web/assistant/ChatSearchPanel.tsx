@@ -6,9 +6,11 @@ import { initial as searchStart, canLoadMore } from "../../../gen/assistant__sea
 import { useMachine as useSearch } from "../../../gen/assistant__search.react.ts";
 import { ChatSearch } from "../../assistant/search.vibe";
 import { Button, EmptyState, Input, ListRow, ScrollArea } from "../components/ui/index.ts";
-import { hitsStream, run, runtime } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
+import { hitsStream, run } from "./services.ts";
 import { useServiceStream } from "./use-stream.ts";
 
+/** How search returns to the conversation. */
 export type ChatSearchPanelProps = {
   /** Leave search and return to the conversation. */
   onClose: () => void;

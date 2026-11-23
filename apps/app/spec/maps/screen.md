@@ -183,6 +183,40 @@ pure def located(s: Screen, ok: bool, id: int): Screen =
 pure def sometimesLocatedOrigin(s: Screen): bool = s.originKind == LocatedOrigin and s.route == Ready
 ```
 
+### The quiet fix on open shows and centres the phone's position only while nothing is chosen, listed or being located, and its failure says nothing
+
+The owner's own locate replaces the quiet one, and its outcome is shown. A
+quiet fix that lands after the owner chose a place or listed results moves
+nothing.
+
+```quint
+pure def centersOnQuietFix(s: Screen): bool = s.choice == NoChoice and not(s.directions) and not(s.searching) and not(s.locating)
+```
+
+### Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's
+
+Call opens Phone with the number filled in; nothing dials until the owner does
+it there. Copy says "Number copied", or "Couldn’t copy".
+
+```quint
+pure def callOffered(dialable: bool, aosp: bool): bool = dialable and aosp
+pure def copyOffered(hasPhone: bool, source: ProviderKind): bool = hasPhone and not(restricted(source))
+pure def lawNoCallWithoutPhone(dialable: bool): bool = not(callOffered(dialable, false))
+pure def lawAGoogleNumberIsNeverCopied(hasPhone: bool): bool = not(copyOffered(hasPhone, GoogleProvider))
+```
+
+### A place outside every region the provider covers keeps its coordinates and says so
+
+Coordinates are whole millionths of a degree. "This location is outside
+Cloud Maps coverage. Its coordinates are retained."
+
+```quint
+type Region = { west: int, south: int, east: int, north: int }
+pure def insideRegion(lat: int, lng: int, r: Region): bool = lng >= r.west and lng <= r.east and lat >= r.south and lat <= r.north
+pure def outsideCoverage(lat: int, lng: int, regions: List[Region]): bool =
+  regions.length() > 0 and not(regions.some(r => insideRegion(lat, lng, r)))
+```
+
 ## Story: Plan directions and choose a route
 
 > As the owner, I want to choose where I start from, a travel mode the

@@ -6,6 +6,7 @@ import { Button } from "../components/ui/index.ts";
 
 const MODE: Record<string, string> = { drive: "Drive", walk: "Walk", bicycle: "Bike", transit: "Transit" };
 
+/** A chat card, whether its message is still the newest, and its Map button. */
 export type MapsCardProps = {
   card: Card;
   /** The message is still the newest of its session and conversation, so its Map button is live. */

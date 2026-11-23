@@ -1,25 +1,39 @@
 // spec/workflows/index.md
 import { api } from "./api.vibe"
+import { agentChanges } from "./changes.vibe"
 import { automations } from "./automations.vibe"
 import { clockDraft } from "./clock-draft.vibe"
+import { stepDecisions } from "./decisions.vibe"
 import { definitions } from "./definitions.vibe"
+import { followForeground } from "./foreground.vibe"
 import { digests } from "./digests.vibe"
 import { approvalNotices, phoneSteps } from "./notices.vibe"
 import { requestRecovery } from "./recovery.vibe"
 import { hostedResults } from "./results.vibe"
 import { runs, versions } from "./runs.vibe"
-import { simulatedWorkflows } from "./simulator.vibe"
-import { digestSources } from "./sources.vibe"
+import { simulatedTriggers, simulatedWorkflows } from "./simulator.vibe"
+import { digestSources, followRenewals } from "./sources.vibe"
 
 const agent = Layer.provideMerge(versions, api)
 
+const panel = Layer.provideMerge(digestSources, digests)
+
 const services = Layer.mergeAll(
-  runs, automations, definitions, approvalNotices, phoneSteps, digests, digestSources, hostedResults, clockDraft, requestRecovery, simulatedWorkflows,
+  runs, automations, definitions, approvalNotices, phoneSteps, panel, hostedResults, clockDraft, requestRecovery, simulatedWorkflows, simulatedTriggers, stepDecisions,
 )
+
+const background = Layer.effectDiscard(effect {
+  fork.scoped followRenewals()
+  fork.scoped followForeground()
+})
 
 /**
  * Workflows' services: WorkflowApi, WorkflowVersions, WorkflowRuns, Automations, WorkflowDefinitions, ApprovalNotices, PhoneSteps,
- * Digests, DigestSourcesService, HostedResults, WorkflowClockDraft, RequestRecovery and SimulatedWorkflows. It needs Resident,
- * Native, Build and KeyValueStore from the platform.
+ * Digests, DigestSourcesService, HostedResults, WorkflowClockDraft, RequestRecovery, SimulatedWorkflows, SimulatedTriggers, AgentChanges and the
+ * assistant's WorkflowStepDecisions port, with the renewal reminder and foreground followers running. It needs Resident, Native,
+ * Build and KeyValueStore from the platform and Navigation and Foreground from the shell; WorkflowClockPort refuses until Clock's provider reaches it.
  */
-export const layer = Layer.provideMerge(services, agent)
+export const layer = Layer.provideMerge(background, Layer.provideMerge(Layer.provideMerge(agentChanges, services), agent))
+
+/** The assistant's WorkflowStepDecisions port over Workflows' agent routes, for the shell to provide where the assistant reads it. */
+export const workflowStepDecisions = Layer.provideMerge(stepDecisions, agent)

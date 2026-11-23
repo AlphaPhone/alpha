@@ -11,7 +11,7 @@ export const PLUGIN = "AlphaBrowser"
 export error BrowserCallFailed { method: string; message: string; unavailable: boolean }
 
 /** The events the tab host sends. */
-export type HostEvent = "stateChanged" | "tabOpened" | "tabClosed" | "notice" | "findResult" | "fullscreen" | "showDownloads" | "appLinkRequested"
+export type HostEvent = "stateChanged" | "tabOpened" | "tabClosed" | "notice" | "findResult" | "fullscreen" | "showDownloads"
 
 /** The tab host of this document: the native `AlphaBrowser` plugin, or the browser build's frame surface. */
 export service TabHost {

@@ -3,6 +3,7 @@ import { type FormEvent, useState } from "react";
 import { type Billing, canStartFunds, fundsAmountAccepted } from "../../../gen/account__billing.ts";
 import { Button, Input, Label } from "../components/ui/index.ts";
 
+/** The funds form's state and its two actions. */
 export interface FundsFormProps {
   billing: Billing;
   /** The amount in cents, $5 to $1,000; payment continues on Stripe's page. */

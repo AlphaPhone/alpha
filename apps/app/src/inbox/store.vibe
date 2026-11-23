@@ -7,39 +7,50 @@ import { ownerKey } from "../platform/storage.vibe"
 export const keys = {
   drafts: ownerKey("device", "inbox/drafts"),
   operations: ownerKey("device", "inbox/operations"),
-  agentEmails: ownerKey("device", "inbox/agent-emails"),
-  digest: ownerKey("device", "inbox/digest"),
   savedMail: (owner: string) => ownerKey(owner, "inbox/saved-mail"),
-  digestResult: (scope: string, runId: string) => ownerKey("device", `inbox/digest/${scope}/${runId}`),
 }
 
-schema SlotValue { value: string | null }
+schema SlotValue { value?: string | null }
 
 function failure(method: string, key: string, cause: unknown) {
   return new KeyValueStore.KeyValueStoreError({ message: "Secure mail storage refused the request", method, key, cause })
 }
 
-/** Drafts, operation records and agent emails: Android's encrypted secure slots where the app has them, the platform's store otherwise. */
+const SECURE_STORE = "ElizaSecureStore"
+const mailKeys: readonly string[] = [keys.drafts, keys.operations]
+
+/** Drafts and operation records: Android's hardware-backed secure slots where the app has them, the platform's store otherwise. */
 export const mailStore = Layer.effect(KeyValueStore.KeyValueStore, effect {
   const native = try Native
-  if (!(try native.available("AlphaConnection"))) {
+  if (!(try native.available(SECURE_STORE))) {
     return try KeyValueStore.KeyValueStore
   }
   const slot = (key: string) => `device:${key}`
+  effect function get(key: string) {
+    const raw = native.invoke(SECURE_STORE, "get", { key: slot(key) }) catch effect (cause) => { throw failure("get", key, cause) }
+    const answer = Schema.decodeUnknownEffect(SlotValue)(raw) catch effect (cause) => { throw failure("get", key, cause) }
+    return answer.value ?? undefined
+  }
+  effect function remove(key: string) {
+    native.invoke(SECURE_STORE, "remove", { key: slot(key) }) catch effect (cause) => { throw failure("remove", key, cause) }
+  }
+  effect function held() {
+    const present: string[] = []
+    for (const key of mailKeys) {
+      if ((try get(key)) !== undefined) present.push(key)
+    }
+    return present
+  }
   return KeyValueStore.makeStringOnly({
-    effect get(key: string) {
-      const raw = native.invoke("AlphaConnection", "secureRead", { slot: slot(key) }) catch effect (cause) => { throw failure("get", key, cause) }
-      const answer = Schema.decodeUnknownEffect(SlotValue)(raw) catch effect (cause) => { throw failure("get", key, cause) }
-      return answer.value ?? undefined
-    },
+    get,
     effect set(key: string, value: string) {
-      native.invoke("AlphaConnection", "secureWrite", { slot: slot(key), value }) catch effect (cause) => { throw failure("set", key, cause) }
+      native.invoke(SECURE_STORE, "set", { key: slot(key), value }) catch effect (cause) => { throw failure("set", key, cause) }
     },
-    effect remove(key: string) {
-      native.invoke("AlphaConnection", "secureRemove", { slot: slot(key) }) catch effect (cause) => { throw failure("remove", key, cause) }
+    remove,
+    clear: effect {
+      for (const key of mailKeys) try remove(key)
     },
-    clear: effect { throw failure("clear", "", "Secure slots are removed one at a time") },
-    size: succeed(0),
-    keys: succeed([] as string[]),
+    size: effect { return (try held()).length },
+    keys: held(),
   })
 })

@@ -5,6 +5,7 @@ import { attempt, call } from "./call.vibe"
 import { WifiConnectivity, WifiJoin, WifiScan } from "./native.schema.vibe"
 
 const WIRE: Record<Security, string> = { OpenNet: "open", EnhancedOpen: "owe", Wpa2: "wpa2", Wpa3: "wpa3", Enterprise: "eap", Wep: "wep" }
+const PARSED: Record<string, Security> = { open: "OpenNet", owe: "EnhancedOpen", wpa2: "Wpa2", wpa3: "Wpa3", eap: "Enterprise", wep: "Wep" }
 const ANSWER: Record<string, JoinPhase> = {
   connected: "Joined", captivePortal: "Portal", declined: "Declined", unverified: "Unverified",
   notConnected: "NotConnected", wrongPassword: "WrongPassword", savedNetwork: "AlreadySaved",
@@ -37,9 +38,10 @@ export const wifi = Layer.effect(Wifi, effect {
         return undefined
       })
       if (found === undefined) return
-      const networks: Nearby[] = found.networks.filter((n) => n.ssid.trim() !== "").map((n) => ({
-        name: n.ssid, secured: n.secured, joinable: n.security !== "eap" && n.security !== "wep", strength: Math.round(n.rssi),
-      }))
+      const networks: Nearby[] = found.networks.filter((n) => n.ssid.trim() !== "").map((n) => {
+        const security = n.security === undefined ? (n.secured ? "Wpa2" : "OpenNet") : PARSED[n.security]
+        return { name: n.ssid, secured: n.secured, joinable: security !== "Enterprise" && security !== "Wep", strength: Math.round(n.rssi), security }
+      })
       try (held.send({ type: "scanAnswered", scan: "Found", networks }) catch () => undefined)
     }),
     join: (name: string, security: Security, passphrase: string) => within(effect {

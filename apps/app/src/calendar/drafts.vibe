@@ -1,6 +1,6 @@
 // spec/calendar/drafts.md, "Story: Keep what I typed when Calendar is interrupted"; spec/calendar/drafts.md, "Story: Save an event from its draft exactly once"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"; spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"; spec/calendar/drafts.md, "Story: Recover a draft whose storage cannot be read"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type EditorDraft, type Event as DraftEvent, type DraftReview, type DraftOrigin, type SlotOutcome, Machine as DraftMachine } from "../../gen/calendar__drafts.effect.vibe"
+import { type EditorDraft, type Event as DraftEvent, type DraftReview, type DraftOrigin, type HandoffNotice, type SlotOutcome, Machine as DraftMachine } from "../../gen/calendar__drafts.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type DraftFieldsRecord, type DraftSlotRecord, MAX_DRAFT_BYTES, decodeDraftFields, decodeDraftSlot } from "./drafts.schema.vibe"
@@ -27,12 +27,15 @@ export service CalendarDrafts {
   /** The event save ended; a saved event clears the slot next. */
   saved(ok: boolean): void!!
   close(): void!!
-  /** A note or scan asks for a draft. */
-  handoff(origin: DraftOrigin, fields: DraftFieldsRecord): void!!
+  /** A note or scan asks for a draft; HandoffAdmitted when the new event form now holds it. */
+  handoff(origin: DraftOrigin, fields: DraftFieldsRecord): HandoffNotice!!
   /** What the owner's slot for a target holds now, if anything. */
   retained(target: string): DraftFieldsRecord | undefined!!
   openRecovery(): void!!
   captureRecovery(): string | undefined!!
+  /** Ask to reset the captured snapshot; nothing is reset until the owner confirms. */
+  requestReset(): void!!
+  /** Reset only the snapshot captured, and only while nothing wrote the slot since. */
   confirmReset(): void!!
   closeRecovery(): void!!
 }
@@ -81,6 +84,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     return effect {
       try store.set(try key(state.target), JSON.stringify(next))
       try Ref.set(sequence, known + 1)
+      if ((try machine.get()).recoveryCurrent) try send({ type: "recoverySuperseded" })
       return "saved" as const
     } catch () => "error" as const
   }
@@ -185,6 +189,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
         const result = try writeSlot(fields, "")
         if (result !== "saved") try send({ type: "reportStorageError" })
       }
+      return (after?.notice ?? "HandoffRefused") as HandoffNotice
     },
     effect retained(target: string) {
       const slot = try readSlot(target)
@@ -200,7 +205,6 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     },
     effect confirmReset() {
       const state = try machine.get()
-      if (state.recovery === "RecoveryReady") try send({ type: "requestReset" })
       const confirmed = try send({ type: "confirmReset" })
       if (confirmed === undefined) return
       const expected = try Ref.get(captured)
@@ -209,6 +213,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
       const ok = now === expected && (effect { try store.remove(try key(state.target)); return true } catch () => false)
       try send({ type: "recoverySettled", ok })
     },
+    effect requestReset() { try send({ type: "requestReset" }) },
     effect closeRecovery() { try send({ type: "closeRecovery" }) },
   }
 })

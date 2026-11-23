@@ -8,6 +8,7 @@ import { Button, EmptyState, ListRow, ScrollArea, Skeleton } from "../components
 
 const CATEGORIES = [["Coffee", "coffee"], ["Food", "food"], ["Gas", "gas station"], ["Pharmacy", "pharmacy"], ["Groceries", "groceries"], ["Gym", "gym"]] as const;
 
+/** The results of the run the screen holds, or with no query the saved places and recent searches. */
 export type ResultsSheetProps = {
   /** The search phase of the run the results belong to. */
   phase: Phase;

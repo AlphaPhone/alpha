@@ -58,22 +58,22 @@ export service Reminders {
   refresh(): void!!
   /** A tapped notification asked to open this reminder occurrence. */
   openRequested(id: string, occurrence: string): void!!
-  /** Creates a reminder from the reviewed draft. */
-  create(draft: ReminderDraft): void!!
+  /** Creates a reminder from the reviewed draft under the creation id its kept form holds, or a fresh one when `kept` is "". */
+  create(draft: ReminderDraft, kept: string): void!!
   /** Answers the "Create another?" question a creation asks while earlier ones are unconfirmed. */
   continueCreate(approved: boolean): void!!
-  /** Edits a reminder's text, and its schedule when `draft` moves it. */
-  edit(id: string, draft: ReminderDraft, reschedule: boolean): void!!
-  /** Done or Snooze on the occurrence the detail shows. */
-  decide(id: string, decision: "done" | "snooze"): void!!
-  /** Reopens a completed one-off reminder, without an alert or tomorrow at its time. */
-  reopen(id: string, mode: "open" | "tomorrow"): void!!
-  /** Deletes a reminder through the phone's deletion review and its ten seconds of Undo. */
-  remove(id: string): void!!
+  /** Edits a reminder's text, and its schedule when `draft` moves it, as shown at `revision`. */
+  edit(id: string, revision: string, draft: ReminderDraft, reschedule: boolean): void!!
+  /** Done or Snooze on the occurrence the detail shows at `revision`. */
+  decide(id: string, revision: string, decision: "done" | "snooze"): void!!
+  /** Reopens a completed one-off reminder shown at `revision`, without an alert or tomorrow at its time. */
+  reopen(id: string, revision: string, mode: "open" | "tomorrow"): void!!
+  /** Deletes a reminder shown at `revision` through the phone's deletion review and its ten seconds of Undo. */
+  remove(id: string, revision: string): void!!
   /** Saves an undated to-do; the same text again reuses the attempt's id. */
   saveTodo(title: string, body: string): void!!
-  /** Completes, reopens or deletes a listed to-do. */
-  todo(id: string, decision: "done" | "reopen" | "cancel"): void!!
+  /** Completes, reopens or deletes a to-do listed at `revision`. */
+  todo(id: string, revision: string, decision: "done" | "reopen" | "cancel"): void!!
 }
 
 /** Reminders over the store (`DailyApps`), the deletion review (`AlphaDeletions`) and the stored journal. */
@@ -153,14 +153,14 @@ export const remindersLayer = Layer.effect(Reminders, effect {
     if (settled !== undefined) try refresh()
   }
 
-  effect function change(kind: WriteKind, opKind: OpKind, id: string, operation: (target: Target) => Record<string, unknown>, check: (r: StoreRecord | undefined) => Readback) {
+  effect function change(kind: WriteKind, opKind: OpKind, id: string, revision: string, operation: (target: Target) => Record<string, unknown>, check: (r: StoreRecord | undefined) => Readback) {
     const row = try recordOf(id)
-    if (row === undefined) {
+    if (row === undefined || row.target.revision !== revision) {
       step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
       try refresh()
       return
     }
-    if (step({ type: "beginWrite", kind, id, revision: row.target.revision }) === undefined) {
+    if (step({ type: "beginWrite", kind, id, revision }) === undefined) {
       step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
       return
     }
@@ -257,11 +257,11 @@ export const remindersLayer = Layer.effect(Reminders, effect {
       step({ type: "requestOpen", id, occurrence, visit: try Ref.get(visit), at: try now() })
       try refresh()
     },
-    effect create(draft: ReminderDraft) {
+    effect create(draft: ReminderDraft, kept: string) {
       const at = try now()
       const schedule = try prechecked(scheduleOf(draft, at))
       if (schedule === undefined) return
-      const id = freshId()
+      const id = kept === "" ? freshId() : kept
       const request = { id, title: draft.title.trim(), body: draft.body, at: schedule.at, dueAt: schedule.dueAt, alertMinutes: schedule.alertMinutes, ...(schedule.recurrence ? { recurrence: schedule.recurrence } : {}) }
       if (step({ type: "beginWrite", kind: "CreateWrite", id, revision: "" }) === undefined) {
         if ((try screen.get()).timingVersion !== 2) step({ type: "precheckFailed", precheck: "PrecheckUpdateRequired" })
@@ -278,28 +278,31 @@ export const remindersLayer = Layer.effect(Reminders, effect {
       if (reviewed?.stage === "WRetain" && pending !== undefined) try saveCreation(pending.id, pending.request)
       else try Ref.set(creating, undefined)
     },
-    effect edit(id: string, draft: ReminderDraft, reschedule: boolean) {
+    effect edit(id: string, revision: string, draft: ReminderDraft, reschedule: boolean) {
       const at = try now()
       const schedule = reschedule ? try prechecked(scheduleOf(draft, at)) : undefined
       if (reschedule && schedule === undefined) return
       const fields = { title: draft.title.trim(), body: draft.body, ...(schedule ? { schedule } : {}) }
-      try change(reschedule ? "RescheduleWrite" : "EditWrite", "OpUpdate", id, (target) => ({ type: "reminder_update", target, fields }), (r) =>
+      try change(reschedule ? "RescheduleWrite" : "EditWrite", "OpUpdate", id, revision, (target) => ({ type: "reminder_update", target, fields }), (r) =>
         r !== undefined && r.title === fields.title && (schedule === undefined || r.dueAt === schedule.dueAt) ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadMismatch" })
     },
-    effect decide(id: string, decision: "done" | "snooze") {
+    effect decide(id: string, revision: string, decision: "done" | "snooze") {
       const row = try recordOf(id)
       if (decision === "snooze" && row !== undefined && (row.alertMinutes === null || row.undated === true)) {
         step({ type: "precheckFailed", precheck: "PrecheckNoAlert" })
         return
       }
       const occurrence = row?.occurrenceId
-      try change(decision === "done" ? "DoneWrite" : "SnoozeWrite", decision === "done" ? "OpComplete" : "OpSnooze", id,
+      try change(decision === "done" ? "DoneWrite" : "SnoozeWrite", decision === "done" ? "OpComplete" : "OpSnooze", id, revision,
         (target) => ({ type: decision === "done" ? "reminder_complete" : "reminder_snooze", target }),
         (r) => r !== undefined && (r.occurrenceId !== occurrence || r.status === "completed") ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadMismatch" })
     },
-    effect reopen(id: string, mode: "open" | "tomorrow") {
+    effect reopen(id: string, revision: string, mode: "open" | "tomorrow") {
       const row = try recordOf(id)
-      if (row === undefined) return
+      if (row === undefined || row.target.revision !== revision) {
+        step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
+        return
+      }
       const schedule = try prechecked(reopenScheduleOf(rowOf(row), mode, try now()))
       if (schedule === undefined) return
       if (schedule.at <= (try now())) {
@@ -307,12 +310,12 @@ export const remindersLayer = Layer.effect(Reminders, effect {
         return
       }
       const previous = row.occurrenceId
-      try change("ReopenWrite", "OpUpdate", id, (target) => ({ type: "reminder_update", target, fields: { title: row.title, body: row.body, schedule } }), (r) =>
+      try change("ReopenWrite", "OpUpdate", id, revision, (target) => ({ type: "reminder_update", target, fields: { title: row.title, body: row.body, schedule } }), (r) =>
         r !== undefined && r.status !== "completed" && r.occurrenceId !== previous && r.dueAt === schedule.dueAt ? { tag: "ReadMatch", delivery: deliveryOf(r.status) } : { tag: "ReadMismatch" })
     },
-    effect remove(id: string) {
+    effect remove(id: string, revision: string) {
       const row = try recordOf(id)
-      if (row === undefined || step({ type: "beginWrite", kind: "DeleteWrite", id, revision: row.target.revision }) === undefined) {
+      if (row === undefined || row.target.revision !== revision || step({ type: "beginWrite", kind: "DeleteWrite", id, revision }) === undefined) {
         step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
         return
       }
@@ -345,10 +348,13 @@ export const remindersLayer = Layer.effect(Reminders, effect {
       if ((try screen.get()).stage === "WReceipt") step({ type: "receiptRead", succeeded: listedAfter?.reminders.some((r) => r.id === attempt) === true })
       if ((try screen.get()).stage === "WReadback") try readBack((r) => r !== undefined && r.undated === true ? { tag: "ReadMatch", delivery: "NoAlert" } : { tag: "ReadMismatch" })
     },
-    effect todo(id: string, decision: "done" | "reopen" | "cancel") {
+    effect todo(id: string, revision: string, decision: "done" | "reopen" | "cancel") {
       const row = try recordOf(id)
       const kind: WriteKind = decision === "done" ? "TodoDoneWrite" : decision === "reopen" ? "TodoReopenWrite" : "TodoDeleteWrite"
-      if (row === undefined || step({ type: "beginWrite", kind, id, revision: row.target.revision }) === undefined) return
+      if (row === undefined || row.target.revision !== revision || step({ type: "beginWrite", kind, id, revision }) === undefined) {
+        step({ type: "precheckFailed", precheck: "PrecheckRefreshFirst" })
+        return
+      }
       step({ type: "lookedUp", found: "NothingJournaled" })
       const answer = call(DAILY, "todoDecision", TodoDecided, { target: row.target, action: decision }) catch () => undefined
       step({ type: "sent", answer: answer === undefined ? { tag: "SendLost" } : { tag: "SendAnswered" } })
@@ -359,16 +365,18 @@ export const remindersLayer = Layer.effect(Reminders, effect {
   }
 })
 
-/** Starts a new visit and a refresh whenever the owner opens Reminders. Never returns. */
+/** Starts a new visit and a refresh whenever the owner opens Reminders, and refreshes when the page comes back to the front. Never returns. */
 export effect function followReminderScreen() {
   const navigator = try navigationPeer()
   const reminders = try Reminders
   let showing = false
-  while (true) {
-    const now = (try navigator.shown()).app === "reminders"
+  let hidden = false
+  for try (const view of navigator.changes()) {
+    const now = view.app === "reminders"
     if (now && !showing) try reminders.enter()
+    else if (now && hidden && !view.hidden) try reminders.refresh()
     if (!now && showing) try reminders.show(undefined)
     showing = now
-    try sleep("1 second")
+    hidden = view.hidden
   }
 }

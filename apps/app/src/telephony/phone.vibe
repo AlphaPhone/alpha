@@ -3,16 +3,17 @@ import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import type { TelephonyCallLogEntry } from "@elizaos/os/bridges/phone"
 import { callOutcome, type CallOutcome, type HandoffAnswer, type PlaceAnswer } from "../../gen/telephony__common.effect.vibe"
 import { Machine as PhoneMachine, type Event as PhoneEvent, type Recent, type RecentsAnswer } from "../../gen/telephony__phone.effect.vibe"
-import { bridgeCall, callerOf, displayNames, refusalTag, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+import { KEYPAD_MAX, phoneRouteOf } from "./routes.vibe"
+import { bridgeCall, callerOf, closeNames, displayNames, refusalTag, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
 
-/** The longest number the keypad holds. */
-export const KEYPAD_MAX = 40
+export { KEYPAD_MAX } from "./routes.vibe"
 /** The largest recent-calls page Phone reads. */
 export const RECENTS_LIMIT = 50
 
 /** Phone's effects: the showing's reads and the owner's own dial. */
 export service PhoneView {
-  /** One showing of Phone, opened at `route` (`keypad:<number>`, `recents`, `voicemail`): it starts a read, and leaving (the effect's end) forgets what it read. */
+  /** One visit of Phone, opened at `route` (`keypad:<number>`, `recents`, `voicemail`): each stretch in front on an unlocked phone is a showing that reads, and leaving it forgets what it read. */
   visit(route?: string): void!!
   /** Read again; `request` is the owner's Allow, the only read that may ask for call-log access. */
   refresh(request: boolean): void!!
@@ -67,6 +68,7 @@ export const phoneViewLayer = Layer.effect(PhoneView, effect {
   const bridges = try TelephonyBridges
   const bridgeCall = callerOf(bridges)
   const phone = try PhoneMachine
+  const front = try frontChanges()
   const tell = (event: PhoneEvent) => phone.send(event) catch () => undefined
 
   effect function readRecents(request: boolean) {
@@ -75,7 +77,7 @@ export const phoneViewLayer = Layer.effect(PhoneView, effect {
     if (request && status.permissions.callLog !== "granted") status = try bridgeCall("requestAccess", (c) => c.phone.requestAccess("callLog"))
     if (status.permissions.callLog !== "granted") return { tag: "RecentsNotGranted" } satisfies RecentsAnswer
     const page = try bridgeCall("recentCalls", (c) => c.phone.recentCalls({ limit: RECENTS_LIMIT }))
-    const names = try displayNames(bridgeCall, page.calls.filter((call) => !call.cachedName).map((call) => call.number))
+    const names = try displayNames(bridgeCall, "phone", page.calls.filter((call) => !call.cachedName).map((call) => call.number))
     return { tag: "RecentsRead", calls: page.calls.map((call) => ({ ...recentOf(call), title: call.cachedName || names[call.number] || "" })) } satisfies RecentsAnswer
   }
 
@@ -87,14 +89,20 @@ export const phoneViewLayer = Layer.effect(PhoneView, effect {
 
   return {
     effect visit(route?: string) {
-      try ensuring(effect {
-        if ((try tell({ type: "phoneShown" })) === undefined) return
-        if (route?.startsWith("keypad:") === true) try tell({ type: "keypadAsked", number: route.slice("keypad:".length).slice(0, KEYPAD_MAX) })
-        else if (route === "recents") try tell({ type: "tabChosen", tab: "RecentsTab" })
-        try read()
-        if (route === "voicemail") try tell({ type: "tabChosen", tab: "VoicemailTab" })
-        try Effect.never
-      }, tell({ type: "phoneHidden" }))
+      const ask = phoneRouteOf(route)
+      try whileInFront(front, effect (first: boolean) => {
+        try ensuring(effect {
+          if ((try tell({ type: "phoneShown" })) === undefined) return
+          if (first && ask.tag === "Keypad") try tell({ type: "keypadAsked", number: ask.number })
+          else if (first && ask.tag === "Recents") try tell({ type: "tabChosen", tab: "RecentsTab" })
+          try read()
+          if (first && ask.tag === "Voicemail") try tell({ type: "tabChosen", tab: "VoicemailTab" })
+          try Effect.never
+        }, effect {
+          try tell({ type: "phoneHidden" })
+          try closeNames(bridgeCall, "phone")
+        })
+      })
     },
     effect refresh(request: boolean) {
       if ((try tell({ type: "refreshed", request })) !== undefined) try read()

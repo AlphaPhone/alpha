@@ -1,8 +1,9 @@
-// spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/files/emailDraft.md, "Story: Email a file from Files without touching the draft I was writing"; spec/files/preview.md, "Each preview action is offered exactly when the file allows it"
+// spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/files/share.md, "A new panel retires the one before it, and one opened while Files is hidden is settled unseen"; spec/files/emailDraft.md, "A changed account, leaving the screen or losing the grant cancels the attempt and holds no bytes"; spec/files/emailDraft.md, "Story: Email a file from Files without touching the draft I was writing"; spec/files/preview.md, "Each preview action is offered exactly when the file allows it"
 import { type Destination, type DeliveryOutcome, type SharePanel, Machine as PanelMachine } from "../../gen/files__share.effect.vibe"
 import { type EmailShare, Machine as EmailMachine } from "../../gen/files__emailDraft.effect.vibe"
 import type { AttachmentBytes } from "./native.schema.vibe"
 import { FilesUnavailable } from "./storage.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
 
 /** A file another area may take: what Files knows of it, and a fresh read of its bytes. */
 export interface SharedFile {
@@ -51,6 +52,8 @@ export service FilesShare {
   choose(id: number, destination: Destination, deliver: DeliveryOutcome!!): boolean!!
   retire(): void!!
   hidden(hidden: boolean): void!!
+  /** Follow the app in front or not while Files is on screen: hiding it closes the panel shown and cancels an Email attempt. */
+  followVisibility(): void!!
   /** Stage `file` in a new email draft after reading it twice. */
   email(file: SharedFile, current: boolean!!): EmailResult!!
 }
@@ -88,6 +91,11 @@ export const layer = Layer.effect(FilesShare, effect {
       : { kind: "failed", reason: "account", ...(answer.kind === "refused" && answer.reason ? { detail: answer.reason } : {}) }) satisfies EmailResult
   }
 
+  effect function hidden(hide: boolean) {
+    panels.send({ type: "visibility", hidden: hide }) catch () => undefined
+    if (hide) emails.send({ type: "background" }) catch () => undefined
+  }
+
   return {
     panels: panels.changes,
     emails: emails.changes,
@@ -113,9 +121,14 @@ export const layer = Layer.effect(FilesShare, effect {
     effect retire() {
       panels.send({ type: "retirePanel" }) catch () => undefined
     },
-    effect hidden(hidden: boolean) {
-      panels.send({ type: "visibility", hidden }) catch () => undefined
-      if (hidden) emails.send({ type: "background" }) catch () => undefined
+    hidden,
+    effect followVisibility() {
+      const found = try Effect.serviceOption(AppLifecycle)
+      if (Option.isNone(found)) return
+      for try (const app of found.value.changes) {
+        if ((try panels.get()).hidden === !app.foreground) continue
+        try hidden(!app.foreground)
+      }
     },
     email,
   }

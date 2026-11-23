@@ -2,8 +2,10 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { MediaItem as MediaItemShape, MediaPage as MediaPageShape } from "@elizaos/os/bridges/media.schema"
 import { albumAnswer } from "../../gen/camera__albums.effect.vibe"
-import { PhotosFailed, PhotoStore, type AlbumChange, type PhotoEditRequest, type Reviewed } from "./photos.vibe"
+import { PhotosFailed, PhotoStore, type AlbumChange, type PhotoEditRequest, type Reviewed, type VideoEditRequest } from "./photos.vibe"
 import { renderPhotoEdit } from "./imageEdit.ts"
+import { renderVideoEdit, shareFiles, videoEditingAvailable } from "./browserMedia.ts"
+import { PreparedDeletion, StoredLibrary } from "./storage.schema.vibe"
 
 const KEY = "alpha/browser/photos/v1"
 const PAGE = 24
@@ -44,6 +46,11 @@ function itemOf(item: Stored) {
   }
 }
 
+function fileOf(item: Stored): { readonly name: string; readonly type: string; readonly dataUrl: string } {
+  const type = /^data:([^;]+);/.exec(item.data)?.[1] ?? (item.kind === "video" ? "video/webm" : "image/jpeg")
+  return { name: `Alpha ${item.id}.${type.split("/")[1] ?? "bin"}`, type, dataUrl: item.data }
+}
+
 function failed(method: string, message: string): PhotosFailed {
   return new PhotosFailed({ method, code: "FAILED", message })
 }
@@ -52,12 +59,31 @@ effect function load(): Library!PhotosFailed {
   const store = try KeyValueStore.KeyValueStore
   const raw = try mapError(store.get(KEY), () => failed("read", "Saved media could not be loaded"))
   if (raw === undefined) return empty
-  return try Effect.try({ try: () => ({ ...empty, ...(JSON.parse(raw) as Partial<Library>) }), catch: () => failed("read", "Saved media could not be loaded") })
+  const parsed = try Effect.try({ try: (): unknown => JSON.parse(raw), catch: () => failed("read", "Saved media could not be loaded") })
+  const stored = try mapError(Schema.decodeUnknownEffect(StoredLibrary)(parsed), () => failed("read", "Saved media could not be loaded"))
+  return {
+    serial: stored.serial, items: stored.items.map((item) => ({ ...item })), albums: stored.albums.map((album) => ({ ...album, members: [...album.members] })),
+    receipts: stored.receipts.map((receipt) => ({ ...receipt })), keeps: stored.keeps.map((kept) => ({ ...kept })),
+  }
 }
 
 effect function keep(next: Library) {
   const store = try KeyValueStore.KeyValueStore
   try mapError(store.set(KEY, JSON.stringify(next)), () => failed("write", "Photo could not be created"))
+}
+
+const decodePrepared = Schema.decodeUnknownOption(PreparedDeletion)
+
+/** The items a Delete forever confirmation names; a confirmation that does not decode names none. */
+function preparedItems(confirmation: string): readonly Reviewed[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(confirmation)
+  } catch {
+    return []
+  }
+  const decoded = decodePrepared(parsed)
+  return Option.isSome(decoded) ? decoded.value.items : []
 }
 
 function current(library: Library, item: Reviewed): Stored | undefined {
@@ -155,8 +181,21 @@ export const browserPhotoStore = Layer.effect(PhotoStore, effect {
       const albums = members.size === 0 ? library.albums : library.albums.map((album) => album.members.some((id) => members.has(id)) ? { ...album, members: album.members.filter((id) => !members.has(id)), revision: album.revision + 1 } : album)
       return { next: { ...library, items: rows, albums }, answer: { status: outcomes.every((row) => row.status !== "stale") ? "complete" : "partial", outcomes } as never }
     }),
-    share: () => unavailable("share"),
-    shareMany: () => unavailable("shareMany"),
+    effect share(item: Reviewed) {
+      const library = try provide(load())
+      const row = current(library, item)
+      if (row === undefined) throw failed("share", "A selected item changed or is unavailable. Reselect the media before sharing.")
+      const status = try tryPromise({ try: () => shareFiles([fileOf(row)]), catch: () => failed("share", "Android sharing could not open") })
+      return (status === "opened" ? { status: "opened" } : { status: status === "cancelled" ? "failed" : "unavailable", message: status === "cancelled" ? "" : "Sharing isn’t available in this browser." }) as never
+    },
+    effect shareMany(items: readonly Reviewed[]) {
+      const library = try provide(load())
+      const rows = items.map((item) => current(library, item))
+      if (items.length === 0 || items.length > 100 || rows.some((row) => row === undefined)) throw failed("shareMany", "A selected item changed or is unavailable. Reselect the media before sharing.")
+      const status = try tryPromise({ try: () => shareFiles(rows.map((row) => fileOf(row!))), catch: () => failed("shareMany", "Android sharing could not open") })
+      if (status !== "opened") throw failed("shareMany", status === "cancelled" ? "Return to Photos and share the selection again" : "Android sharing could not open")
+      return { status: "opened", count: rows.length } as never
+    },
     effect summary() {
       const library = try provide(load())
       const live = library.items.filter((row) => row.trashedAt === undefined)
@@ -166,11 +205,11 @@ export const browserPhotoStore = Layer.effect(PhotoStore, effect {
       const library = try provide(load())
       if (!items.every((item) => library.items.some((row) => row.id === item.id && revisionOf(row) === item.revision && row.trashedAt !== undefined)))
         throw failed("prepareDeleteTrash", "Select deleted items again")
-      return { confirmation: JSON.stringify(items), count: items.length } as never
+      return { confirmation: JSON.stringify({ items: items.map((item) => ({ id: item.id, revision: item.revision })) }), count: items.length } as never
     },
     cancelDeleteTrash: () => Effect.void,
     deletePreparedTrash: (confirmation: string) => edit("deletePreparedTrash", (library) => {
-      const items = JSON.parse(confirmation) as Reviewed[]
+      const items = preparedItems(confirmation)
       const deleted = items.filter((item) => library.items.some((row) => row.id === item.id && revisionOf(row) === item.revision && row.trashedAt !== undefined)).map((item) => item.id)
       const skipped = items.map((item) => item.id).filter((id) => !deleted.includes(id))
       return { next: { ...library, items: library.items.filter((row) => !deleted.includes(row.id)) }, answer: { status: skipped.length === 0 ? "deleted" : "partial", deletedIds: deleted, skippedIds: skipped, failedIds: [] } as never }
@@ -265,9 +304,44 @@ export const browserPhotoStore = Layer.effect(PhotoStore, effect {
     cancelEdit: (sessionId: string) => edit("cancelEdit", (library) => ({
       next: { ...library, receipts: library.receipts.map((row) => row.operationId === sessionId && (row.status === "prepared" || row.status === "saving") ? { ...row, status: "cancelled" as const } : row) }, answer: undefined,
     })),
-    beginVideoEdit: () => unavailable("beginVideoEdit"),
-    saveVideoEdit: () => unavailable("saveVideoEdit"),
-    cancelVideoEdit: () => Effect.void,
+    effect beginVideoEdit(item: Reviewed) {
+      if (!videoEditingAvailable()) throw failed("beginVideoEdit", "Video editor is unavailable. Original unchanged.")
+      const operationId = globalThis.crypto.randomUUID()
+      const row = try edit("beginVideoEdit", (library) => {
+        const source = current(library, item)
+        if (source === undefined || source.kind !== "video" || source.trashedAt !== undefined) return { next: library, answer: undefined }
+        const receipt: Receipt = { operationId, status: "prepared", source: source.id, revision: source.revision, parameters: "", replace: false }
+        return { next: { ...library, receipts: [...library.receipts.slice(-19), receipt] }, answer: source }
+      })
+      if (row === undefined) throw failed("beginVideoEdit", "Video is unavailable")
+      if ((row.duration ?? 0) > 300) throw failed("beginVideoEdit", "Choose a video range of at least 0.1 seconds, within a five-minute video.")
+      return { sessionId: operationId, operationId, duration: row.duration ?? 0, width: row.width, height: row.height } as never
+    },
+    effect saveVideoEdit(request: VideoEditRequest) {
+      const parameters = JSON.stringify([request.start, request.end, request.rotation, request.crop])
+      const library = try provide(load())
+      const receipt = library.receipts.find((row) => row.operationId === request.sessionId)
+      if (receipt === undefined || (receipt.parameters !== "" && receipt.parameters !== parameters)) throw failed("saveVideoEdit", "This copy request already has different edits")
+      if (receipt.status !== "prepared") return { status: receipt.status === "saving" ? "unknown" : receipt.status, operationId: receipt.operationId, ...(receipt.id === undefined ? {} : { id: receipt.id }) } as never
+      try edit("saveVideoEdit", (lib) => ({ next: { ...lib, receipts: lib.receipts.map((row) => row.operationId === receipt.operationId ? { ...row, status: "saving" as const, parameters } : row) }, answer: undefined }))
+      const source = library.items.find((row) => row.id === receipt.source)
+      if (source === undefined) throw failed("saveVideoEdit", "Video is unavailable")
+      const rendered = try tryPromise({ try: () => renderVideoEdit(source.data, request, { width: source.width, height: source.height }), catch: () => failed("saveVideoEdit", "Video copy could not be created") })
+      return try edit("saveVideoEdit", (lib) => {
+        const owned = lib.receipts.find((row) => row.operationId === receipt.operationId)
+        const live = lib.items.find((row) => row.id === receipt.source)
+        if (owned?.status !== "saving") return { next: lib, answer: { status: owned?.status ?? "failed", operationId: receipt.operationId } as never }
+        if (live === undefined || live.revision !== receipt.revision || live.trashedAt !== undefined)
+          return { next: { ...lib, receipts: lib.receipts.map((row) => row.operationId === receipt.operationId ? { ...row, status: "failed" as const } : row) }, answer: { status: "stale", operationId: receipt.operationId } as never }
+        const id = String(lib.serial + 1)
+        const copy: Stored = { id, kind: "video", data: `data:${rendered.mimeType};base64,${rendered.dataBase64}`, image: live.image, width: rendered.width, height: rendered.height, date: Date.now(), size: Math.floor(rendered.dataBase64.length * 0.75), duration: rendered.duration, revision: 1, favorite: false }
+        return { next: { ...lib, serial: lib.serial + 1, items: [copy, ...lib.items], receipts: lib.receipts.map((row) => row.operationId === receipt.operationId ? { ...row, status: "saved" as const, id } : row) },
+          answer: { status: "saved", operationId: receipt.operationId, id, replaced: false, revision: revisionOf(copy) } as never }
+      })
+    },
+    cancelVideoEdit: (sessionId: string) => edit("cancelVideoEdit", (library) => ({
+      next: { ...library, receipts: library.receipts.map((row) => row.operationId === sessionId && (row.status === "prepared" || row.status === "saving") ? { ...row, status: "cancelled" as const } : row) }, answer: undefined,
+    })),
     reviewRemovedVideoCopy: () => unavailable("reviewRemovedVideoCopy"),
     deviceScope: () => unavailable("scope"),
     devicePage: () => unavailable("page"),

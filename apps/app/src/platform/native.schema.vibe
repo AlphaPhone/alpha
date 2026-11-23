@@ -22,7 +22,7 @@ export schema PlatformCapabilities {
   readonly startupPermissionDefaults?: boolean
 }
 
-/** `AlphaDevice.crashLog`: the native entries, untrusted until each is sanitized, and whether exit history is readable. */
+/** `ElizaSystem.crashLog`: the native entries, untrusted until each is sanitized, and whether exit history is readable. */
 export schema CrashLogReply { readonly entries?: Schema.Unknown; readonly exitHistory?: boolean }
 
 /** One entry of the problem log as native or the page kept it. */
@@ -35,6 +35,7 @@ export schema CrashEntry {
   readonly reason?: "crash" | "native-crash" | "anr" | "low-memory" | "signaled" | "initialization-failure" | "excessive-resource-usage" | "dependency-died" | "freezer" | "other" | "unknown" | "exit-self"
   readonly process?: string
   readonly thread?: "main" | "background"
+  readonly detail?: string
 }
 
 /** Who `/api/auth/me` says the session is. */
@@ -72,6 +73,8 @@ export schema InferenceFailure {
   readonly stage: "response-handler" | "action-planner" | "text" | "other"
   readonly reason: "unsupported-schema-keyword" | "invalid-parameter" | "context-window" | "unavailable-model" | "rate-limit" | "credits" | "transport" | "unknown" | "schema-limit"
   readonly status?: Schema.Int
+  readonly parameter?: "tools" | "response_format" | "tool_choice" | "messages" | "model" | "max_tokens" | "temperature" | "reasoning_effort"
+  readonly keyword?: "pattern" | "minLength" | "maxLength" | "format" | "minItems" | "maxItems" | "oneOf" | "allOf" | "not" | "if" | "then" | "else" | "dependentRequired" | "dependentSchemas" | "patternProperties" | "unevaluatedProperties" | "$anchor"
 }
 
 /** `ElizaNetworkPolicy.getMeteredHint`: Android's metered flag, null where it could not tell. */
@@ -79,3 +82,18 @@ export schema MeteredHint { readonly metered: Schema.NullOr(Schema.Boolean) }
 
 /** An `ElizaAgent` `agentEvent`: one event of a subscription, its end, or its failure. */
 export schema FeedEvent { readonly id: string; readonly kind: "event" | "end" | "failed"; readonly event?: Schema.Unknown; readonly code?: string }
+
+/** `ElizaAgent.reviewRecovery`: a reviewable hold with its one-use token and how many interrupted requests it kept, or none. */
+export schema RecoveryReview { readonly kind: "reviewable" | "unavailable"; readonly reviewToken?: string; readonly retainedCount?: Schema.Int }
+
+/** `ElizaAgent.archiveRecovery`: whether the reviewed hold was archived, and how much of it. */
+export schema RecoveryArchive { readonly kind: "archived" | "unavailable"; readonly archivedCount?: Schema.Int }
+
+/** `AlphaActionJournal.get` without a scope: the device-execution entry for one proposal, null when the journal holds none. */
+export schema DeviceJournalRead { readonly entry: Schema.NullOr(Schema.Unknown) }
+
+/** `AlphaActionJournal.edit`: whether the compare-and-set at the expected revision replaced the entry. */
+export schema DeviceJournalEdit { readonly kept: boolean }
+
+/** `AlphaActionJournal.list` without a scope: every device-execution entry, oldest first. */
+export schema DeviceJournalList { readonly entries: readonly Schema.Unknown[] }

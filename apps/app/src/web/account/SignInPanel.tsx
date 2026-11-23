@@ -9,6 +9,7 @@ import type { ServiceInfo } from "../../account/signIn.vibe";
 import { Alert, Button, Input, Label, Spinner } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
+/** The sign-in screen's state, the deployment's name and terms, and the owner's actions on it. */
 export interface SignInPanelProps {
   signIn: SignIn;
   /** The deployment's display name, such as "Eliza Cloud". */
@@ -34,6 +35,7 @@ const faults: Record<Exclude<Fault, "NoFault">, string> = {
   ResendFailed: "Code not sent",
   WrongCode: "Wrong code",
   CodeSpent: "Code expired",
+  KeysBusy: "Sign-in is busy · try own keys again when it ends",
 };
 
 /** Six boxes show the digits; one real field keeps paste, autofill and screen readers working. */

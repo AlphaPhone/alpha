@@ -3,6 +3,7 @@ import { type Reading, canLocalRead, canQuestionApproved } from "../../../gen/br
 import { MAX_EXCERPT } from "../../browser/page-text.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Textarea } from "../components/ui/index.ts";
 
+/** The reading under review, and the owner's edits and answer. */
 export interface ReadingReviewProps {
   reading: Reading;
   /** The owner edits the excerpt. */

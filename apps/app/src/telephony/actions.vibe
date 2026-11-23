@@ -1,7 +1,8 @@
 // spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "The owner's Not now, leaving the app or a changed context ends a run that has not dispatched"; spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"
 import { operationOf, readLatestSender, type DeviceOperationType } from "@elizaos/agent/operations"
 import { contactWriteAdvertised, type ContactDetail, type ContactDraft, type ContactId, type ContactVersion } from "@elizaos/os/bridges/contacts"
-import { normalizePhoneNumber, operationIdOf } from "@elizaos/os/bridges/definitions/messages"
+import { operationIdOf } from "@elizaos/os/bridges/definitions/messages"
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import {
   Machine as ActionsMachine, isChoosing, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type Settled, type TargetForm,
 } from "../../gen/telephony__actions.effect.vibe"
@@ -73,21 +74,30 @@ const KINDS: Record<string, ActionKind> = {
   sms_latest_sender: "LatestSender", phone_keypad: "KeypadOpen", contact_show: "ContactsShow", contact_read_selected: "ReadContact",
 }
 
-type Wire = { readonly type: string } & Record<string, any>
+/** A telephony operation as the wire carries it, after its decoder admitted it. */
+export type TelephonyOperation = { readonly type: string } & Record<string, any>
+type Wire = TelephonyOperation
 
 const AGENT_TYPES: readonly string[] = [
   "phone_dial", "phone_call", "sms_send", "mms_send", "sms_compose", "sms_reply_selected", "contact_create", "contact_update", "contact_delete",
   "messages_read_selected", "voicemail_read_selected", "voicemail_delete_selected", "sms_latest_sender",
 ]
 
-/** Decodes a wire operation by the agent's own decoder for its type (`operationOf`), or Alpha's own three. */
-export effect function decodeOperation(input: unknown) {
+/** A wire operation by the agent's own decoder for its type (`operationOf`), or Alpha's own three; undefined for any other. */
+export function telephonyOperationOf(input: unknown): TelephonyOperation | undefined {
   const type = typeof input === "object" && input !== null && "type" in input ? String(input.type) : ""
+  if (KINDS[type] === undefined) return undefined
   const decoded = AGENT_TYPES.includes(type)
     ? operationOf(input, type as DeviceOperationType)
-    : try (Schema.decodeUnknownEffect(AlphaOperation)(input) catch () => undefined)
-  if (decoded === undefined || KINDS[type] === undefined) throw new NotATelephonyOperation({ input })
-  return decoded as Wire
+    : Option.getOrUndefined(Schema.decodeUnknownOption(AlphaOperation)(input))
+  return decoded as TelephonyOperation | undefined
+}
+
+/** `telephonyOperationOf`, failing where it returns undefined. */
+export effect function decodeOperation(input: unknown) {
+  const decoded = telephonyOperationOf(input)
+  if (decoded === undefined) throw new NotATelephonyOperation({ input })
+  return decoded
 }
 
 /** A contact's fields after a whole-field `set`: a number already on the contact keeps its type. */

@@ -4,7 +4,9 @@ A workflow step that reads or writes on the phone (read reminders, read notes, r
 range, save a note, post a notification, read aloud) waits for the owner's approval on the run's
 receipt. The owner decides it on the open run, in front, and the phone acts only on the exact step,
 spec digest and Calendar anchor reviewed, at most once, and reports truthfully what it did
-(upstream `approvals.md`, `runScope.md`; legacy `WorkflowDeviceSteps`; PRD AP-04).
+(upstream `approvals.md`, `runScope.md`; legacy `WorkflowDeviceSteps`; PRD AP-04). The approval is
+the phone's say-so: the resident agent then performs the step once through the phone's registered
+`workflow-device` bridge, and the open run reads the agent's receipt back.
 
 ## Domain
 
@@ -47,13 +49,12 @@ carries over to it.
 pure def canBeginStep(x: Steps): bool = x.inflight == NoFlight and x.proposal != StepExecuting
 pure def beginStep(x: Steps): Steps = { ...initial, foreground: x.foreground, open: x.open }
 pure def canReview(x: Steps): bool = x.open and x.inflight == NoFlight
-pure def review(x: Steps): Steps =
+pure def review(x: Steps): Steps = {
+  val offered = not(x.closed) and x.proposal == StepPending and not(x.expired)
   if (not(x.foreground)) { ...x, shown: false, choice: NoChoice }
-  else {
-    val offered = not(x.closed) and x.proposal == StepPending and not(x.expired)
-    { ...x, reviewedDigest: x.digest, reviewedAnchor: x.anchor, shown: offered, shownIssue: if (offered) x.issued else 0,
-      status: if (offered) StepWaiting else StepNone }
-  }
+  else { ...x, reviewedDigest: x.digest, reviewedAnchor: x.anchor, shown: offered, shownIssue: if (offered) x.issued else 0,
+    status: if (offered) StepWaiting else StepNone }
+}
 pure def alwaysAShownStepIsUndecided(x: Steps): bool =
   x.shown implies (x.reviewedDigest != 0 and x.open and ((x.inflight == NoFlight or x.inflight == ReadingReview or x.inflight == Admitting) implies
     not(x.shownIssue == x.issued and (x.proposal == StepExecuting or x.proposal == StepDone or x.proposal == StepDenied))))

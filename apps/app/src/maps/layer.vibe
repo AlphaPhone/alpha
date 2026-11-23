@@ -1,4 +1,4 @@
-// spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"
+// spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"
 import { machine as agentSurfaceMachine } from "../../gen/maps__agentSurface.effect.vibe"
 import { machine as cardsMachine } from "../../gen/maps__cards.effect.vibe"
 import { type ConnectionStep, Machine as ConnectionMachine, machine as connectionMachine } from "../../gen/maps__connection.effect.vibe"
@@ -10,19 +10,19 @@ import { machine as notificationOpenMachine } from "../../gen/maps__notification
 import { machine as planeMachine } from "../../gen/maps__plane.effect.vibe"
 import { machine as screenMachine } from "../../gen/maps__screen.effect.vibe"
 import { machine as selectedReadMachine } from "../../gen/maps__selectedRead.effect.vibe"
+import { portsLive, pageLinksLive } from "./adapters.vibe"
 import { agentLayer } from "./agent.vibe"
 import { MapsProvider, providerLayer } from "./cloud.vibe"
 import { MapsContent, contentLayer } from "./content.vibe"
 import { handoffLayer } from "./handoff.vibe"
 import { locationLayer } from "./location.vibe"
-import { Navigation, navigationLayer } from "./navigation.vibe"
-import { phoneLocationLayer } from "./phone-location.vibe"
+import { MapsNavigation, navigationLayer } from "./navigation.vibe"
 import { planeLayer } from "./plane.vibe"
 import { MapsAccount, MapsShell } from "./ports.vibe"
 import { MapsHandoff } from "./handoff.vibe"
 import { savedLayer, savedMachine } from "./saved.vibe"
 import { MapsScreen, screenLayer } from "./screen.vibe"
-import { voiceLayer } from "./voice.vibe"
+import { NavigationVoice, voiceLayer } from "./voice.vibe"
 
 /** The Cloud Maps session: account binding, coverage reads and what an account change retires. */
 export service MapsSession {
@@ -37,10 +37,11 @@ const sessionLayer = Layer.effect(MapsSession, effect {
   const account = try MapsAccount
   const provider = try MapsProvider
   const screen = try MapsScreen
-  const navigation = try Navigation
+  const navigation = try MapsNavigation
   const content = try MapsContent
   const shell = try MapsShell
   const handoff = try MapsHandoff
+  const voice = try NavigationVoice
   const accounts = new Map<string, number>()
   let client = 0
 
@@ -61,14 +62,16 @@ const sessionLayer = Layer.effect(MapsSession, effect {
     if (binding) accounts.set(key, id)
     client += 1
     try settle(connection.send({ type: "bindAccount", account: id, client }) catch () => undefined)
+    try voice.setAuthority(`${id}:${client}`)
   })
   fork.detached Stream.runForEach(Stream.filter(account.residentReady, (ready) => ready), () => effect {
     try settle(connection.send({ type: "residentStarts" }) catch () => undefined)
   })
 
-  let shown = { inMaps: false, hidden: false, home: false }
+  let shown = { inMaps: false, hidden: false, home: false, sheet: false }
   fork.detached Stream.runForEach(shell.states, (state) => effect {
-    const now = { inMaps: state.view === "maps", hidden: state.hidden, home: state.view === "home" }
+    const now = { inMaps: state.view === "maps", hidden: state.hidden, home: state.view === "home", sheet: state.connectionOpen }
+    if (now.sheet !== shown.sheet) try voice.setSheet(now.sheet)
     if (now.hidden !== shown.hidden) {
       try screen.setHidden(now.hidden)
       try navigation.setHidden(now.hidden)
@@ -91,15 +94,22 @@ const machines = Layer.mergeAll(
 )
 
 /**
- * Every Maps service: the session, provider, location, screen, guidance, voice, plane, saved places, agent glue, hand-offs and the
- * chat's phone position, over their machines. Requires the platform's Native, Resident, Cloud and KeyValueStore, and from other areas
- * MapsAccount (account), GuidanceSpeaker (voice), MapsShell (shell), MapsPreferences (settings) and AgentCalendar (calendar).
+ * Every Maps service over the ports of src/maps/ports.vibe: the session, provider, location, screen, guidance, voice, plane, saved
+ * places, agent glue and hand-offs, over their machines. Requires Native, Resident, Cloud, KeyValueStore,
+ * AgentCalendar and the four ports.
  */
-export const layer = sessionLayer.pipe(
+export const mapsCore = sessionLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(agentLayer, handoffLayer, planeLayer)),
   Layer.provideMerge(screenLayer),
   Layer.provideMerge(navigationLayer),
-  Layer.provideMerge(Layer.mergeAll(voiceLayer, savedLayer, phoneLocationLayer)),
+  Layer.provideMerge(Layer.mergeAll(voiceLayer, savedLayer)),
   Layer.provideMerge(Layer.mergeAll(providerLayer, locationLayer)),
   Layer.provideMerge(machines),
 )
+
+/**
+ * Every Maps service with its ports filled from the areas before it and the page's links: requires the platform's Native, Resident,
+ * ResidentControl, Cloud, Build and KeyValueStore, account's CloudSession, voice's Speech, telephony's call bar,
+ * the shell's Navigation and calendar's AgentCalendar.
+ */
+export const layer = Layer.provideMerge(pageLinksLive, Layer.provideMerge(mapsCore, portsLive))

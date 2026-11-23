@@ -1,0 +1,389 @@
+// spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/route.md, "Story: Stay within my plan's voice limits"; spec/voice/route.md, "Story: Know what leaves my phone when I talk"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/capture.md, "Story: One voice surface at a time hears me"; spec/voice/capture.md, "Story: Recover from a refused microphone"; spec/voice/capture.md, "Story: See my voice as I speak"; spec/voice/vad.md, "Story: End my spoken turn when I stop speaking"; spec/voice/vad.md, "Story: Segment live speech on the phone"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"; spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice"; spec/voice/keyboard.md, "Story: Dictate into any text field"
+import { assert, it } from "@effect/vitest"
+import { Build } from "../../src/platform/build.vibe"
+import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
+import { Resident } from "../../src/platform/resident.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { ResidentFeeds } from "../../src/platform/view-events.vibe"
+import { Microphone } from "../../src/voice/capture.vibe"
+import { VoiceConversation } from "../../src/voice/conversation.vibe"
+import { Dictation, speechGateOf } from "../../src/voice/dictation.vibe"
+import { failureMessage, refusalOf } from "../../src/voice/failure.vibe"
+import { Latency, VOICE_TIMING_FORMAT } from "../../src/voice/latency.vibe"
+import { layer } from "../../src/voice/layer.vibe"
+import { Listener } from "../../src/voice/listener.vibe"
+import { VoiceRoute } from "../../src/voice/route.vibe"
+import { Speech } from "../../src/voice/speech.vibe"
+import { initial as micInitial, barHeight, deniedSettingsOffered, levelBars } from "../../gen/voice__capture.ts"
+import {
+  claimScreen, cleanupSettled, endpointerOf, hidden as hideConversation, initial as conversationInitial, muteSpeaker, profileOf, returned as returnConversation, reviewNeeded, reviewSettled,
+  screenPinned, screenSettled, sessionFailed, start as startConversation, stop as stopConversation, typedSend,
+} from "../../gen/voice__conversation.ts"
+import { initial as dictationInitial, start as startDictation } from "../../gen/voice__dictation.ts"
+import { cancel as cancelIme, finish as finishIme, initial as imeInitial, openPanel, startCapture, stopCapture, timedOut } from "../../gen/voice__keyboard.ts"
+import { boundedWaitSeconds, keyOf, privacyOf, sendsOf } from "../../gen/voice__route.ts"
+import { cleanupSettled as chainSettled, finished, initial as speechInitial, readingMayStart, speak, voiceEntry } from "../../gen/voice__speech.ts"
+import { gateWindow, initial as vadInitial, restart as restartVad, sample } from "../../gen/voice__vad.ts"
+
+/** What the fakes were asked, in order, as `plugin.method`. */
+type Calls = Array<{ readonly name: string; readonly args: unknown }>
+/** A native answer from its arguments, or a refusal with its code. */
+type Answer = unknown | { readonly refuse: string } | ((args: Record<string, unknown>) => unknown)
+
+const onPhone: Record<string, Answer> = {
+  "AlphaVoiceCloud.localSpeechStatus": { ready: true, execution: "device" },
+  "AlphaVoiceCloud.markVoiceTurn": (args) => ({ turnId: args.turnId, monotonicMs: 1000 }),
+  "AlphaVoiceCloud.nativeVoiceTiming": (args) => ({ turnId: args.turnId, lastUserAudioMs: 1000, firstPcmMs: 1350, audibleMs: 1400 }),
+  "AlphaDevice.openSettings": { opened: true },
+  "ElizaSense.turnOff": { available: false, reason: "not-installed" },
+}
+
+function refused(answer: Answer): answer is { readonly refuse: string } {
+  return typeof answer === "object" && answer !== null && "refuse" in answer
+}
+
+/** The platform at its boundary, recording what the native host and the resident were asked; nothing leaves the test. */
+function platform(calls: Calls, native: Record<string, Answer>, variant: "launcher" | "aosp" | "browser" = "launcher") {
+  return Layer.mergeAll(
+    Layer.succeed(Native, {
+      available: (plugin: string) => Effect.succeed(plugin !== "AlphaCloudSpeechStream"),
+      invoke: (plugin: string, method: string, args?: unknown) => {
+        calls.push({ name: `${plugin}.${method}`, args })
+        const answer = native[`${plugin}.${method}`]
+        if (answer === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
+        if (refused(answer)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: answer.refuse }))
+        if (typeof answer === "function") return Effect.succeed(answer((args ?? {}) as Record<string, unknown>))
+        return Effect.succeed(answer)
+      },
+      listen: () => Stream.never,
+    }),
+    Layer.succeed(Cloud, {
+      base: "https://api.eliza.app",
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.fail(new CloudUnavailable({ status: 404, message: `${method} ${path}` })),
+    }),
+    Layer.succeed(Resident, {
+      status: () => Effect.succeed("running" as const),
+      ensureRunning: () => Effect.void,
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.sync(() => {
+        calls.push({ name: `resident ${method} ${path}`, args: undefined })
+        return { status: 200, data: {} }
+      }),
+      stream: () => Stream.empty,
+    }),
+    Layer.succeed(ResidentControl, {
+      changes: Stream.never,
+      session: () => Effect.succeed({ owner: "owner-1", agent: "agent-1", generation: 1, epoch: 1 }),
+      refreshAccount: () => Effect.void,
+      stop: () => Effect.void,
+      recovered: () => Effect.void,
+    }),
+    Layer.succeed(ResidentFeeds, { view: () => Stream.never, voice: () => Stream.never }),
+    Layer.succeed(Build, { info: { version: "test", variant, testMocks: false } }),
+    memoryStore,
+  )
+}
+
+function voice(calls: Calls, native: Record<string, Answer>, variant: "launcher" | "aosp" | "browser" = "launcher") {
+  return Layer.provide(layer, platform(calls, native, variant))
+}
+
+const names = (calls: Calls) => calls.map((c) => c.name)
+
+it.live(`Use Cloud speech when I have it, and my phone otherwise (spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise")`, () => effect {
+  // spec/voice/route.md, "A Cloud account speaks under its credential, own keys under their revision only with a Cartesia key, and no account has no network key"
+  provide voice([], onPhone) {
+    const routes = try VoiceRoute
+    const signedOut = try routes.route()
+    try routes.observeAccount({ kind: "own", revision: "r1", cartesia: false })
+    const ownKeysOnly = try routes.route()
+    try routes.observeAccount({ kind: "cloud", environment: "production", credentialId: "key-1" })
+    const cloud = try routes.route()
+    try Effect.try(() => assert.deepStrictEqual({ signedOut, ownKeysOnly, cloud, ownKey: keyOf({ tag: "OwnKeys", revision: 3, cartesia: false }) },
+      { signedOut: "Device", ownKeysOnly: "Device", cloud: "Cloud", ownKey: { tag: "NoNetworkKey" } }))
+  }
+})
+
+it.effect(`Stay within my plan's voice limits (spec/voice/route.md, "Story: Stay within my plan's voice limits")`, () => effect {
+  // spec/voice/route.md, "A Cloud refusal's limit is a rate limit, a used allowance, a missing plan or a billing refusal, with a wait of one second to a day"
+  const now = 1_000_000
+  const rate = refusalOf({ code: "voice-http-429", data: { retryAfterSeconds: 12, limitCode: "voice_rate" } }, now)
+  const allowance = refusalOf({ code: "voice-http-429", data: { limitCode: "voice_allowance", resetAt: now + 1000 } }, now)
+  const unbounded = refusalOf({ code: "voice-http-429", data: { retryAfterSeconds: 86401, limitCode: "NOT A CODE" } }, now)
+  try Effect.try(() => assert.deepStrictEqual({
+    rate: failureMessage(rate, "Cloud", { recording: true, conversation: false }),
+    allowance: failureMessage(allowance, "Cloud", { recording: false, conversation: true }),
+    unboundedWait: unbounded.retryAfterSeconds, unreadCode: unbounded.limitCode, bounded: boundedWaitSeconds(-1),
+  }, {
+    rate: "Eliza Cloud voice reached your plan's request limit. Try again in 12 seconds. Your recording is kept.",
+    allowance: "Your Eliza Cloud plan's voice allowance is used up.",
+    unboundedWait: undefined, unreadCode: undefined, bounded: 0,
+  }))
+})
+
+it.live(`Know what leaves my phone when I talk (spec/voice/route.md, "Story: Know what leaves my phone when I talk")`, () => effect {
+  // spec/voice/route.md, "Network speech receives my audio, the words used to decide my turn has ended, and the reply text; the phone sends nothing"
+  provide voice([], onPhone) {
+    const routes = try VoiceRoute
+    const phonePrivacy = try routes.privacy()
+    const phoneSends = try routes.sends()
+    // spec/voice/route.md, "The privacy row names the route in use now, and says no speech is available when the phone's own is not and nothing else is"
+    try Effect.try(() => assert.deepStrictEqual({ phonePrivacy, phoneSends, cartesia: sendsOf("Direct"), unavailable: privacyOf("Device", false) }, {
+      phonePrivacy: "OnPhone", phoneSends: { audio: false, endOfTurnWords: false, replyText: false, recipient: "Device" },
+      cartesia: { audio: true, endOfTurnWords: false, replyText: true, recipient: "Direct" }, unavailable: "RouteUnavailable",
+    }))
+  }
+})
+
+it.effect(`Hear my turn end at the right moment (spec/voice/conversation.md, "Story: Hear my turn end at the right moment")`, () => effect {
+  // spec/voice/conversation.md, "Clef in Cloud judges the end of a turn on the Cloud route; the phone's scorer does elsewhere; a long pause always ends it"
+  // spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"
+  try Effect.try(() => assert.deepStrictEqual({
+    cloud: endpointerOf("Cloud"), cartesia: endpointerOf("Direct"),
+    openMic: profileOf("Device", "Interruptible"), stream: profileOf("Cloud", "Interruptible").longGapMs, turns: profileOf("Cloud", "TakesTurns").longGapMs,
+  }, {
+    cloud: "ClefInCloud", cartesia: "PhoneScorer",
+    openMic: { shortGapMs: 0, longGapMs: 0, bargeInHoldMs: 400, heardOnStop: false }, stream: 400, turns: 1200,
+  }))
+})
+
+const talking = startConversation({ ...conversationInitial, cloudDisclosed: true }, "Cloud", true, true, true, true, false)
+
+it.effect(`Keep voice going through a passing failure (spec/voice/conversation.md, "Story: Keep voice going through a passing failure")`, () => effect {
+  // spec/voice/conversation.md, "A busy Cloud is retried quietly at most twice in a row; a long wait pauses voice; own keys and other failures are shown"
+  const once = sessionFailed(talking, true, false)
+  const twice = sessionFailed({ ...once, shown: "Listening" }, true, false)
+  const paused = sessionFailed({ ...twice, shown: "Listening" }, true, false)
+  const longWait = sessionFailed(talking, true, true)
+  const ownKey = sessionFailed({ ...talking, route: "Direct" }, true, false)
+  try Effect.try(() => assert.deepStrictEqual({ once: once.shown, twice: twice.retries, paused: [paused.shown, paused.notice], longWait: longWait.notice, ownKey: ownKey.shown },
+    { once: "Retrying", twice: 2, paused: ["Off", "VoicePaused"], longWait: "VoicePaused", ownKey: "Failed" }))
+})
+
+it.effect(`Review what voice is about to do (spec/voice/conversation.md, "Story: Review what voice is about to do")`, () => effect {
+  // spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat"
+  const waiting = reviewNeeded({ ...talking, shown: "Thinking" })
+  const settled = reviewSettled(waiting)
+  try Effect.try(() => assert.deepStrictEqual({ waiting: [waiting.shown, waiting.notice], settled: settled.shown }, { waiting: ["AwaitingReview", "ReviewInChat"], settled: "Retiring" }))
+})
+
+it.effect(`Mute the speaker without ending voice (spec/voice/conversation.md, "Story: Mute the speaker without ending voice")`, () => effect {
+  // spec/voice/conversation.md, "Mute changes only the output, is offered only where the phone can mute speech, and ends with the conversation"
+  const muted = muteSpeaker({ ...talking, shown: "Speaking" }, true)
+  const ended = stopConversation(muted, true)
+  try Effect.try(() => assert.deepStrictEqual({ muted: [muted.muted, muted.shown], ended: ended.muted }, { muted: [true, "Speaking"], ended: false }))
+})
+
+it.live(`End voice cleanly, and never lose what I type (spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type")`, () => effect {
+  // spec/voice/conversation.md, "A message typed while voice retires waits for the stop and goes out once, unless its chat changed"
+  const waiting = typedSend({ ...talking, shown: "Listening" })
+  const sent = cleanupSettled(waiting, true, true)
+  const dropped = cleanupSettled(waiting, true, false)
+  const unconfirmed = cleanupSettled(waiting, false, true)
+  try Effect.try(() => assert.deepStrictEqual({ waiting: [waiting.shown, waiting.typedWaiting], sent: sent.typedSent, dropped: dropped.typedDropped, unconfirmed: [unconfirmed.mediaUnconfirmed, unconfirmed.notice] },
+    { waiting: ["Retiring", true], sent: 1, dropped: 1, unconfirmed: [true, "StopUnconfirmed"] }))
+  // spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"
+  const closed = cleanupSettled(hideConversation({ ...talking, shown: "Listening" }), true, false)
+  const afterCall = returnConversation(closed, true)
+  const afterSwitch = returnConversation(closed, false)
+  try Effect.try(() => assert.deepStrictEqual({ closed: [closed.shown, closed.closedByHide], afterCall: [afterCall.notice, afterCall.closedByHide], afterSwitch: afterSwitch.notice },
+    { closed: ["Off", true], afterCall: ["PausedForCall", false], afterSwitch: "NoNotice" }))
+  provide voice([], onPhone) {
+    const conversation = try VoiceConversation
+    let delivered = 0
+    try conversation.typedSend(() => Effect.sync(() => { delivered += 1 }), () => true)
+    try Effect.try(() => assert.strictEqual(delivered, 1))
+  }
+})
+
+it.effect(`Keep talking on a screen the agent opens for me (spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me")`, () => effect {
+  // spec/voice/conversation.md, "Voice stays on through a screen change only when the agent claimed it, the screen pinned its context and the change was delivered with exactly that context"
+  const listening = { ...talking, shown: "Listening" as const }
+  const claimed = claimScreen(listening, true)
+  const kept = screenSettled(screenPinned(claimed), true, true)
+  const changed = screenSettled(screenPinned(claimed), true, false)
+  const unpinned = screenSettled(claimed, true, true)
+  const second = claimScreen(screenPinned(claimed), true)
+  const stale = claimScreen(listening, false)
+  try Effect.try(() => assert.deepStrictEqual({
+    kept: [kept.shown, kept.kept, kept.claim], changed: changed.shown, unpinned: unpinned.shown, second: [second.claimsRefused, second.claim], stale: stale.claim,
+  }, {
+    kept: ["Listening", 1, "NoClaim"], changed: "Retiring", unpinned: "Retiring", second: [1, "ClaimPinned"], stale: "NoClaim",
+  }))
+})
+
+it.effect(`Never hear two things at once, or anything after I stopped it (spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it")`, () => effect {
+  // spec/voice/speech.md, "A new passage waits behind the cleanup of the one before it"
+  const playing = speak(speechInitial, "Reading")
+  const queued = speak(playing, "Reading")
+  const next = chainSettled(queued, "Reading", true)
+  // spec/voice/speech.md, "An unconfirmed stop latches the channel; app speech and Cloud reading get one native stop to reopen it"
+  const latched = chainSettled(finished(speak(speechInitial, "Replies"), "Replies"), "Replies", false)
+  const refusedAgain = speak(latched, "Replies")
+  // spec/voice/dictation.md, "Recording starts only on a free microphone, after Alpha's speech confirmed it stopped, with the recognizer of the route in use now"
+  const stopping = finished(speak(speechInitial, "Replies"), "Replies")
+  const ready = { ...dictationInitial, stage: "Ready" as const, target: 1, account: 1, ticket: 1 }
+  // spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"
+  try Effect.try(() => assert.deepStrictEqual({
+    queued: queued.reading, next: [next.reading.stage, next.successions], latched: [latched.replies.stage, latched.restartShown], refusedAgain: refusedAgain.refusals,
+    entry: voiceEntry(latched, false), gate: speechGateOf(stopping), refusedRecording: startDictation(ready, "OnPhone", true, speechGateOf(stopping)).failure,
+    readingOverReply: readingMayStart(false, "Playing"), readingAfterStop: readingMayStart(false, "Idle"),
+  }, {
+    queued: { stage: "Retiring", waiting: true }, next: ["Playing", 1], latched: ["Latched", true], refusedAgain: 1,
+    entry: "MediaNotStopped", gate: "SpeechStopping", refusedRecording: "SpeechStillStopping",
+    readingOverReply: false, readingAfterStop: true,
+  }))
+})
+
+it.live(`Hear the reply start at once (spec/voice/speech.md, "Story: Hear the reply start at once")`, () => effect {
+  // spec/voice/speech.md, "A sent turn warms the phone's output, and Cloud is warmed at most once a minute for each connection"
+  const calls: Calls = []
+  provide voice(calls, onPhone) {
+    const speech = try Speech
+    try speech.warmCloud(1)
+    try speech.warmCloud(1)
+    try speech.warmCloud(2)
+    try Effect.try(() => assert.strictEqual(names(calls).filter((n) => n === "resident POST /api/cloud/warm").length, 2))
+  }
+})
+
+it.live(`One voice surface at a time hears me (spec/voice/capture.md, "Story: One voice surface at a time hears me")`, () => effect {
+  // spec/voice/capture.md, "A capture starts only in front, outside a call and with permission not refused, and a new one replaces the last"
+  provide voice([], onPhone) {
+    const microphone = try Microphone
+    const first = try microphone.acquire("AssistantCapture")
+    const second = try microphone.acquire("DictationCapture")
+    if (first !== undefined) try microphone.release(first)
+    const afterStale = try microphone.get()
+    // spec/voice/capture.md, "A call, leaving the screen or a revoked permission ends the capture at once"
+    try microphone.foregroundChanged(false)
+    const hidden = try microphone.get()
+    const refusedHidden = try microphone.acquire("AssistantCapture")
+    try Effect.try(() => assert.deepStrictEqual({
+      replaced: [second !== undefined && second !== first, afterStale.owner, afterStale.replaced], hidden: [hidden.owner, hidden.open], refusedHidden, refusal: (try microphone.get()).refusal,
+    }, {
+      replaced: [true, "DictationCapture", 1], hidden: ["NoOwner", false], refusedHidden: undefined, refusal: "RefusedBackground",
+    }))
+  }
+})
+
+it.live(`Recover from a refused microphone (spec/voice/capture.md, "Story: Recover from a refused microphone")`, () => effect {
+  // spec/voice/capture.md, "Open app settings is offered only on the phone, for a refused permission, while nothing records"
+  const calls: Calls = []
+  provide voice(calls, onPhone) {
+    const microphone = try Microphone
+    try microphone.permissionAnswered(false)
+    const ticket = try microphone.acquire("DictationCapture")
+    const mic = try microphone.get()
+    const native = try microphone.native()
+    try microphone.openAppSettings()
+    try Effect.try(() => assert.deepStrictEqual({ ticket, refusal: mic.refusal, offered: deniedSettingsOffered(native, mic), browser: deniedSettingsOffered(false, mic), opened: names(calls).includes("AlphaDevice.openSettings") },
+      { ticket: undefined, refusal: "RefusedDenied", offered: true, browser: false, opened: true }))
+  }
+})
+
+it.effect(`See my voice as I speak (spec/voice/capture.md, "Story: See my voice as I speak")`, () => effect {
+  // spec/voice/capture.md, "Levels are drawn only from the open capture, as 44 bars between 4 and 48 units high"
+  try Effect.try(() => assert.deepStrictEqual({ bars: levelBars, silent: barHeight(0), loud: barHeight(1000), negative: barHeight(-1), mid: barHeight(100), closed: micInitial.open },
+    { bars: 44, silent: 4, loud: 48, negative: 4, mid: 21, closed: false }))
+})
+
+it.effect(`End my spoken turn when I stop speaking (spec/voice/vad.md, "Story: End my spoken turn when I stop speaking")`, () => effect {
+  // spec/voice/vad.md, "Nothing counts in the first 250 ms; a turn ends after 180 ms of speech and 650 ms of silence, or at 12 s of speech"
+  const early = sample(vadInitial, 100, 12000, 0, false)
+  const spoke = sample(sample(vadInitial, 300, 12000, 0, false), 500, 12000, 0, false)
+  const ended = sample(spoke, 1300, 0, 0, false)
+  // spec/voice/vad.md, "Speech is louder than 0.003 RMS or a 0.012 peak, four times that while the reply's voice may echo"
+  const echo = sample(vadInitial, 300, 3000, 0, true)
+  // spec/voice/vad.md, "A new capture starts the gate afresh"
+  const again = restartVad(ended, 2000)
+  try Effect.try(() => assert.deepStrictEqual({ early: early.firstSpeech, ended: ended.stopped, echo: echo.firstSpeech, again: [again.stopped, again.ends, again.startedAt] },
+    { early: -1, ended: true, echo: -1, again: [false, 1, 2000] }))
+})
+
+it.effect(`Segment live speech on the phone (spec/voice/vad.md, "Story: Segment live speech on the phone")`, () => effect {
+  // spec/voice/vad.md, "A segment opens after 2 windows at 0.5 or more and closes after 16 windows below 0.35"
+  const closed = { speaking: false, above: 0, below: 0 }
+  const one = gateWindow(closed, 500)
+  const open = gateWindow(one, 500)
+  const held = gateWindow({ speaking: true, above: 0, below: 15 }, 350)
+  const shut = gateWindow({ speaking: true, above: 0, below: 15 }, 349)
+  try Effect.try(() => assert.deepStrictEqual({ one: one.speaking, open: open.speaking, held: held.speaking, shut: shut.speaking }, { one: false, open: true, held: true, shut: false }))
+})
+
+const listenerOnImage: Record<string, Answer> = {
+  ...onPhone,
+  "ElizaSense.status": { available: true, state: "LISTENING", consented: true, listening: true, microphoneOpen: true },
+  "ElizaSense.pause": { available: true, state: "PAUSED_USER", consented: true, listening: false, microphoneOpen: false, saved: true },
+  "ElizaSense.bindInvocationSession": { bound: true },
+  "ElizaSense.discardProtectedPowerInvocation": { discarded: true },
+  "ElizaSense.takeInvocation": { assistant: true, invocation: "power", locked: false },
+}
+
+it.live(`See and stop what the listener is doing (spec/voice/listener.md, "Story: See and stop what the listener is doing")`, () => effect {
+  // spec/voice/listener.md, "Alpha may pause or turn off listening, one action at a time, and never turns it on or resumes it"
+  const calls: Calls = []
+  provide voice(calls, listenerOnImage, "aosp") {
+    const listener = try Listener
+    try listener.boot()
+    // spec/voice/listener.md, "A status read is shown only when no action runs and nothing newer was issued"
+    const status = try listener.status()
+    const answer = try listener.pause()
+    try Effect.try(() => assert.deepStrictEqual({ status: [status.mode, status.microphoneOpen], answer: [answer.confirmed, answer.status.mode, answer.microphoneOpen], askedOn: names(calls).some((n) => n.includes("resume") || n.includes("turnOn")) },
+      { status: ["ListeningOn", true], answer: [true, "ListeningPaused", false], askedOn: false }))
+  }
+})
+
+it.live(`Start voice from my listener or the power button, once (spec/voice/listener.md, "Story: Start voice from my listener or the power button, once")`, () => effect {
+  // spec/voice/listener.md, "Invocations are bound to the agent session the resident verified, and none is taken while no session is bound"
+  const calls: Calls = []
+  provide voice(calls, listenerOnImage, "aosp") {
+    const listener = try Listener
+    try listener.boot()
+    try timeout(Stream.runHead(Stream.filter(listener.changes, (state) => state.bound)), "5 seconds")
+    // spec/voice/listener.md, "A pending power press is discarded, never kept, while the screen cannot start voice"
+    const blocked = try listener.takeInvocation({ unlocked: true, visible: true, dialogOpen: true, connectionPrompt: false, voiceActive: false })
+    // spec/voice/listener.md, "An invocation starts voice only from a wake, a system gesture or a protected power press, on an unlocked, visible screen with no dialog, no connection prompt and no voice running"
+    const free = try listener.takeInvocation({ unlocked: true, visible: true, dialogOpen: false, connectionPrompt: false, voiceActive: false })
+    const state = try listener.get()
+    const sense = names(calls).filter((n) => n.startsWith("ElizaSense.") && n !== "ElizaSense.status")
+    try Effect.try(() => assert.deepStrictEqual({ blocked, free, discards: state.discards, takes: state.takes, voiceStarts: state.voiceStarts, sense },
+      { blocked: false, free: true, discards: 1, takes: 1, voiceStarts: 1, sense: ["ElizaSense.bindInvocationSession", "ElizaSense.discardProtectedPowerInvocation", "ElizaSense.takeInvocation"] }))
+  }
+})
+
+it.live(`Know how long I wait for Alpha's voice (spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice")`, () => effect {
+  // spec/voice/latency.md, "A trial starts for a new turn before its reply is synthesized, and every started turn is recorded once"
+  // spec/voice/latency.md, "The wait is from the last input to the first audible sound, on one clock or across them by the bound offset, never negative"
+  provide voice([], onPhone) {
+    const latency = try Latency
+    const first = try latency.begin()
+    try latency.mark("Request")
+    try latency.finish("Answered")
+    const second = try latency.begin()
+    try latency.finish("Answered")
+    const entries = try latency.entries()
+    try Effect.try(() => assert.deepStrictEqual({
+      count: entries.length, format: entries[0]?.format, ids: [entries[0]?.turnId === first, entries[1]?.turnId === second],
+      wait: entries[0]?.lastInputToAudibleMs, outcome: entries[0]?.outcome, text: entries.some((entry) => "text" in entry),
+    }, { count: 2, format: VOICE_TIMING_FORMAT, ids: [true, true], wait: 400, outcome: "Answered", text: false }))
+  }
+})
+
+it.effect(`Dictate into any text field (spec/voice/keyboard.md, "Story: Dictate into any text field")`, () => effect {
+  // spec/voice/keyboard.md, "The words are inserted once, into the unchanged field, under the unchanged account and provider"
+  const recording = startCapture(openPanel(imeInitial, "ImeCloud"), 1, 1, 1, false)
+  const sending = stopCapture(recording, recording.ticket)
+  const inserted = finishIme(sending, sending.ticket, 1, 1, 1, true, true, true)
+  const movedField = finishIme(sending, sending.ticket, 2, 1, 1, true, true, true)
+  const unmarked = finishIme(sending, sending.ticket, 1, 1, 1, true, true, false)
+  // spec/voice/keyboard.md, "A dictation that has not answered in 90 seconds times out, and Cancel ends it at once"
+  const late = timedOut(sending, sending.ticket)
+  const cancelled = cancelIme(recording)
+  try Effect.try(() => assert.deepStrictEqual({
+    inserted: [inserted.last, inserted.inserted], movedField: movedField.last, unmarked: unmarked.last, late: late.last, cancelled: cancelled.last,
+  }, {
+    inserted: ["ImeInserted", 1], movedField: "ImeRefused", unmarked: "ImeRefused", late: "ImeTimedOut", cancelled: "ImeCancelled",
+  }))
+})

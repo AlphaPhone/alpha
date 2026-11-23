@@ -1,4 +1,4 @@
-// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"
+// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"; spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"
 import { useState } from "react";
 import { BellRing, Check, ChevronLeft, CircleAlert, ListTodo, Plus, RefreshCw, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import { canBeginWrite, type ReminderRow, type Reminders } from "../../../gen/clock__reminders.ts";
@@ -8,9 +8,22 @@ import { Alert, Button, Dialog, DialogContent, DialogTitle, EmptyState, Input, L
 import { ReminderForm } from "./ReminderForm.tsx";
 import { reminderOutcome } from "./text.ts";
 
+/** The Reminders screen's listing, the write in progress, the kept drafts and every owner action. */
 export type RemindersViewProps = {
   /** The listing, its refreshes and the write in progress. */
   reminders: Reminders;
+  /** The kept form of a new reminder, if one was left unsaved. */
+  keptNew?: ReminderDraft;
+  /** The kept form of an edit, the reminder it edits and the revision it started on. */
+  keptEdit?: { readonly id: string; readonly revision: string; readonly draft: ReminderDraft };
+  /** The owner asked to discard a kept draft and has not answered yet. */
+  discarding: boolean;
+  /** The open form changed: keep it. */
+  onKeep: (form: "new" | "edit", draft: ReminderDraft) => void;
+  /** Asks to discard the kept draft of a form. */
+  onDiscard: (form: "new" | "edit") => void;
+  /** Answers the discard question. */
+  onDiscardAnswer: (confirmed: boolean) => void;
   /** Unconfirmed creations and changes kept in the journal. */
   unconfirmed: number;
   /** A tapped reminder whose link is still pending. */
@@ -61,7 +74,7 @@ function draftOf(row: ReminderRow | undefined): ReminderDraft {
  * @model spec/clock/reminders.md
  */
 export function RemindersView(props: RemindersViewProps) {
-  const { reminders, unconfirmed, tapPending, openId, now, onOpen, onBack, onRefresh, onCreate, onContinueCreate, onEdit, onDecide, onReopen, onDelete, onSaveTodo, onTodo, onOpenTap, onDismissTap } = props;
+  const { reminders, keptNew, keptEdit, discarding, unconfirmed, tapPending, openId, now, onOpen, onBack, onRefresh, onCreate, onContinueCreate, onEdit, onDecide, onReopen, onDelete, onSaveTodo, onTodo, onOpenTap, onDismissTap, onKeep, onDiscard, onDiscardAnswer } = props;
   const [form, setForm] = useState<"new" | "edit" | undefined>(undefined);
   const [submitted, setSubmitted] = useState(false);
   const [reopening, setReopening] = useState<"open" | "tomorrow" | undefined>(undefined);
@@ -81,6 +94,8 @@ export function RemindersView(props: RemindersViewProps) {
   const late = overdue(reminders.rows, now);
   const coming = upcoming(reminders.rows).filter((r) => !late.includes(r));
   const createReview = reminders.stage === "WReview" && reminders.kind === "CreateWrite";
+  const editKept = keptEdit !== undefined && row !== undefined && keptEdit.id === row.id ? keptEdit : undefined;
+  const formKept = form === "new" ? keptNew !== undefined : editKept !== undefined;
   return (
     <main className="flex min-h-full flex-col gap-4 bg-background px-4 pt-4 pb-28 text-foreground">
       <header className="flex items-center gap-2">
@@ -104,11 +119,29 @@ export function RemindersView(props: RemindersViewProps) {
         </Alert>
       )}
       {outcome && <p role="status" className="text-sm text-muted-foreground">{outcome}</p>}
+      {!editing && !row && keptNew !== undefined && (
+        <Alert className="flex items-center gap-2">
+          <span className="flex-1">{keptNew.title.trim() || "Unsaved reminder"}</span>
+          <Button size="sm" variant="secondary" disabled={saving} onClick={() => openForm("new")}>Resume</Button>
+          <Button size="sm" variant="ghost" onClick={() => onDiscard("new")}>Discard</Button>
+        </Alert>
+      )}
+      {!editing && row !== undefined && editKept !== undefined && (
+        <Alert className="flex items-center gap-2">
+          <span className="flex-1">Unsaved changes</span>
+          <Button size="sm" variant="secondary" disabled={saving} onClick={() => openForm("edit")}>Resume</Button>
+          <Button size="sm" variant="ghost" onClick={() => onDiscard("edit")}>Discard</Button>
+        </Alert>
+      )}
       {editing ? (
         <ReminderForm
-          initial={draftOf(form === "edit" ? row : undefined)}
+          key={form === "edit" ? `edit:${row?.id ?? ""}` : "new"}
+          initial={form === "edit" ? editKept?.draft ?? draftOf(row) : keptNew ?? draftOf(undefined)}
           saving={saving}
+          kept={formKept}
+          onChange={(draft) => onKeep(form === "edit" ? "edit" : "new", draft)}
           onCancel={() => setForm(undefined)}
+          onDiscard={() => onDiscard(form === "edit" ? "edit" : "new")}
           onSave={(draft) => { if (form === "edit" && row) onEdit(row, draft); else onCreate(draft); setSubmitted(true); }}
         />
       ) : row ? (
@@ -161,6 +194,15 @@ export function RemindersView(props: RemindersViewProps) {
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onContinueCreate(false)}>Cancel</Button>
             <Button onClick={() => onContinueCreate(true)}>Create another</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={discarding} onOpenChange={(open) => { if (!open) onDiscardAnswer(false); }}>
+        <DialogContent>
+          <DialogTitle>Discard unsaved reminder?</DialogTitle>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => onDiscardAnswer(false)}>Keep</Button>
+            <Button variant="destructive" onClick={() => { onDiscardAnswer(true); setForm(undefined); }}>Discard</Button>
           </div>
         </DialogContent>
       </Dialog>

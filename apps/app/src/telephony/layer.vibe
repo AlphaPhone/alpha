@@ -2,12 +2,11 @@
 import { machine as actionsMachine } from "../../gen/telephony__actions.effect.vibe"
 import { machine as attentionMachine } from "../../gen/telephony__attention.effect.vibe"
 import { machine as callBarMachine } from "../../gen/telephony__callBar.effect.vibe"
-import { stored as commsStored } from "../../gen/telephony__comms.effect.vibe"
+import { Machine as CommsMachine, decodeSender as commsSender, decodeState as decodeComms, initial as commsInitial, machineOver as commsOver } from "../../gen/telephony__comms.effect.vibe"
 import { machine as contactsMachine } from "../../gen/telephony__contacts.effect.vibe"
-import { stored as draftsStored } from "../../gen/telephony__drafts.effect.vibe"
+import { Machine as DraftsMachine, decodeSender as draftsSender, decodeState as decodeDrafts, initial as draftsInitial, machineOver as draftsOver } from "../../gen/telephony__drafts.effect.vibe"
 import { machine as messagesMachine } from "../../gen/telephony__messages.effect.vibe"
 import { machine as phoneMachine } from "../../gen/telephony__phone.effect.vibe"
-import { machine as undoMachine } from "../../gen/telephony__undo.effect.vibe"
 import { machine as voicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
 import { telephonyActionsLayer } from "./actions.vibe"
 import { homeAttentionLayer } from "./attention.vibe"
@@ -17,20 +16,63 @@ import { commsStageLayer } from "./comms.vibe"
 import { contactsViewLayer } from "./contacts.vibe"
 import { draftSendsLayer } from "./drafts.vibe"
 import { messagesViewLayer } from "./messages.vibe"
-import { telephonyKey } from "./owner.vibe"
+import { ownerKept } from "./owner.vibe"
 import { phoneViewLayer } from "./phone.vibe"
 import { listAskLayer } from "./list-ask.vibe"
 import { pictureAttachLayer } from "./share.vibe"
 import { deletionUndoLayer } from "./undo.vibe"
 import { voicemailViewLayer } from "./voicemail.vibe"
 
-export { messagesShareTarget } from "./share.vibe"
+export { messagePictureHandoff, messagesShareTarget } from "./share.vibe"
+export { operationPorts } from "./operations.vibe"
+export { TelephonyCalls, VoicemailTranscriber } from "./ports.vibe"
+
+/** The owner's drafts and requests, read and written under whoever is signed in now, and republished when that changes. */
+export const draftsKept = Layer.effect(DraftsMachine, effect {
+  const kept = try ownerKept("drafts", draftsInitial, decodeDrafts)
+  const inner = try draftsOver(kept.load, kept.keep)
+  return { ...inner, changes: Stream.merge(inner.changes, Stream.mapEffect(kept.owners, () => inner.get())) }
+})
+
+/** The comms stage and its open proposal, read and written under whoever is signed in now, and republished when that changes. */
+export const commsKept = Layer.effect(CommsMachine, effect {
+  const kept = try ownerKept("comms", commsInitial, decodeComms)
+  const inner = try commsOver(kept.load, kept.keep)
+  return { ...inner, changes: Stream.merge(inner.changes, Stream.mapEffect(kept.owners, () => inner.get())) }
+})
+
+/** One untrusted event and sender through the owner's stored drafts, as the conformance driver reaches them: false where it is refused, the state unchanged. */
+export effect function draftsDispatch(event: unknown, by: unknown) {
+  const drafts = try DraftsMachine
+  return try (effect {
+    try drafts.receive(event, try draftsSender(by))
+    return true
+  } catch () => false)
+}
+
+/** The owner's stored drafts as they are now. */
+export effect function draftsNow() {
+  return try (try DraftsMachine).get()
+}
+
+/** One untrusted event and sender through the owner's stored comms stage, as the conformance driver reaches it: false where it is refused. */
+export effect function commsDispatch(event: unknown, by: unknown) {
+  const comms = try CommsMachine
+  return try (effect {
+    try comms.receive(event, try commsSender(by))
+    return true
+  } catch () => false)
+}
+
+/** The owner's stored comms stage as it is now. */
+export effect function commsNow() {
+  return try (try CommsMachine).get()
+}
 
 /** Every telephony machine: the visit state in memory, and the owner's drafts and stage stored per owner. */
 export const machines = Layer.mergeAll(
-  callBarMachine(), phoneMachine(), voicemailMachine(), messagesMachine(), contactsMachine(), actionsMachine(), attentionMachine(), undoMachine(),
-  Layer.unwrap(effect { return draftsStored(try telephonyKey("drafts")) }),
-  Layer.unwrap(effect { return commsStored(try telephonyKey("comms")) }),
+  callBarMachine(), phoneMachine(), voicemailMachine(), messagesMachine(), contactsMachine(), actionsMachine(), attentionMachine(),
+  draftsKept, commsKept,
 )
 
 /** The area over a given way to reach the phone's providers: the image's bridges, or a test's. */
@@ -46,6 +88,8 @@ export function telephonyLayer<E, R>(bridges: Layer.Layer<TelephonyBridges, E, R
 
 /**
  * Phone, Messages, Contacts, voicemail, the call bar, the comms stage, Home's cards and the approved actions,
- * over the platform's Native, Build and KeyValueStore and the account's CloudSession (Files' FilePicker is needed only when attaching).
+ * over the platform's Native, Build and KeyValueStore, the shell's Foreground, the account's CloudSession and voice's VoiceConversation and Microphone
+ * (Files' FilePicker is needed only when attaching). `operationPorts`, `messagesShareTarget` and `messagePictureHandoff` are
+ * built over it by the shell; the TelephonyCalls and VoicemailTranscriber ports fall back to refusing defaults until provided.
  */
 export const layer = telephonyLayer(bridgesLayer)

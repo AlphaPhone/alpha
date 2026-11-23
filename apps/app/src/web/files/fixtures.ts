@@ -9,7 +9,6 @@ import type { Picker } from "../../../gen/files__picker.ts";
 import { initial as pickerInitial } from "../../../gen/files__picker.ts";
 import type { PreviewState } from "../../../gen/files__preview.ts";
 import { initial as previewInitial } from "../../../gen/files__preview.ts";
-import type { Recent } from "../../../gen/files__recent.ts";
 import type { SharePanel } from "../../../gen/files__share.ts";
 import { initial as panelInitial } from "../../../gen/files__share.ts";
 import type { Row } from "../../../gen/files__storage.ts";
@@ -48,15 +47,6 @@ export const partial: Browser = { ...browse, place: { tag: "InCategory", categor
 
 /** An empty folder, read completely. */
 export const empty: Browser = { ...browse, place: { tag: "InFolder", path: "Music", volume: "" }, listing: "Complete" };
-
-/** Two Recent documents, one whose access ended. */
-export const recent: Recent = {
-  rows: [
-    { key: "picked:s1", kind: "PickedDoc", name: "Tax return 2025.pdf", mimeType: "application/pdf", openedAt: at, status: "Ready", selection: "s1" },
-    { key: "tree:t1", kind: "TreeDoc", name: "Plan.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", openedAt: at - day, status: "Revoked", selection: "" },
-  ],
-  opened: "", grants: ["s1"], toRelease: [], restoreOpen: "",
-};
 
 /** Trash with two items, one from the SD card. */
 export const trash: TrashView = {

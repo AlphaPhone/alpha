@@ -1,0 +1,127 @@
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"
+import { initial as sessionInitial } from "../../gen/account__session.ts"
+import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
+import { fakeCloud, fakeNative, fakeResident, buildInfo } from "../../src/platform/layers.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
+import { CloudSession, GoogleAccounts } from "../../src/account/layer.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { Overview } from "../../src/shell/overview.vibe"
+import { ShellMail, type MailSender } from "../../src/shell/ports.vibe"
+import { BrowserAgent } from "../../src/browser/agent.vibe"
+import { FilePicker } from "../../src/files/picker.vibe"
+import { Preferences } from "../../src/settings/preferences.vibe"
+import { Assistant } from "../../src/assistant/assistant.vibe"
+import { layer as inbox } from "../../src/inbox/layer.vibe"
+
+/** The two Gmail grants of the test owner: one that may change mail, one that may only read. */
+export const grantA = "grant-a"
+export const grantB = "grant-b"
+
+/** A 64-hex review digest the fake ledger answers with. */
+export const zeroDigest = "0".repeat(64)
+
+/** One listed message as Cloud renders it. */
+export function card(id: string, unread: boolean, starred = false) {
+  return {
+    id, threadId: `t-${id}`, subject: `Subject ${id}`, from: "Bo <bo@example.com>", to: ["ann@example.com"], cc: ["cy@example.com"], snippet: `About ${id}`,
+    receivedAt: "2026-11-21T09:30:00Z", labels: [...(unread ? ["UNREAD"] : []), ...(starred ? ["STARRED"] : []), "INBOX"], isUnread: unread, metadata: { historyId: "41" }
+  }
+}
+
+/** One message read whole as Cloud renders it. */
+export function readMessage(id: string, unread: boolean, extra: { readonly bodyHtml?: string; readonly attachments?: readonly unknown[] } = {}) {
+  return {
+    message: card(id, unread), bodyText: `Body of ${id}. See https://example.com/plan`, bodyHtml: extra.bodyHtml ?? null,
+    bodyHtmlStatus: extra.bodyHtml === undefined ? "none" : "available", attachments: extra.attachments ?? []
+  }
+}
+
+/** What the fake platform and neighbors were asked, in order. */
+export interface Calls {
+  readonly cloud: string[]
+  readonly connected: unknown[]
+  readonly opened: string[]
+  readonly native: string[]
+  readonly filled: MailSender[]
+  readonly assistant: unknown[]
+  readonly attention: { readonly unread: number; readonly more: boolean; readonly connected: boolean }[]
+}
+
+/** Empty call lists. */
+export function calls(): Calls {
+  return { cloud: [], connected: [], opened: [], native: [], filled: [], assistant: [], attention: [] }
+}
+
+/** Managed Gmail for `grantA`: capabilities, an inbox page, a whole message, a one-page thread, drafts and an operation ledger. */
+export function mailCloud(log: Calls, routes: { readonly [route: string]: unknown } = {}, options: { readonly review?: Record<string, unknown>; readonly digest?: string; readonly kinds?: readonly string[] } = {}) {
+  const ledger = new Map<string, { review: Record<string, unknown>; digest: string; state: string; kind: string }>()
+  const inbox = "GET /api/v1/eliza/google/gmail/inbox-v1"
+  return fakeCloud({
+    [`${inbox}/capabilities`]: () => {
+      log.cloud.push("capabilities")
+      return { version: 1, from: "ann@example.com", kinds: options.kinds ?? ["send", "draft-create", "draft-replace", "draft-delete", "archive", "unarchive", "trash", "untrash", "mark-read", "mark-unread", "star", "unstar"], attachmentPolicy: { mimeTypes: ["application/pdf", "text/plain"], maxBytes: 5242880 } }
+    },
+    "GET /api/v1/eliza/google/gmail/search": () => {
+      log.cloud.push("search")
+      return { messages: [card("m1", true), card("m2", false)], nextPageToken: null, syncedAt: "2026-11-21T09:30:00Z", mailboxHistoryId: "41", supportsSpamTrash: false }
+    },
+    "GET /api/v1/eliza/google/gmail/read": () => { log.cloud.push("read"); return readMessage("m1", true) },
+    [`${inbox}/thread`]: () => {
+      log.cloud.push("thread")
+      return { version: 1, threadId: "t-m1", historyId: "41", total: 1, offset: 0, nextOffset: null, messages: [{ ...readMessage("m1", true), historyId: "41" }] }
+    },
+    [`${inbox}/drafts`]: () => {
+      log.cloud.push("drafts")
+      return { version: 1, drafts: [{ draftId: "g1", messageId: "gm1", subject: "Plan", to: ["bo@example.com"], snippet: "Draft", updatedAt: null }], nextPageToken: null }
+    },
+    [`${inbox}/draft`]: () => {
+      log.cloud.push("draft")
+      return { version: 1, id: "g1", messageId: "gm1", providerDigest: "d".repeat(64), content: { to: ["bo@example.com"], cc: [], bcc: [], subject: "Plan", bodyText: "Draft text", plainText: true, threaded: false, attachmentCount: 0 } }
+    },
+    "POST /api/v1/eliza/google/gmail/inbox-v1/operations": (body: unknown) => {
+      const { requestId, proposal } = body as { requestId: string; proposal: Record<string, unknown> }
+      log.cloud.push(`prepare ${String(proposal.kind)}`)
+      const entry = ledger.get(requestId) ?? { review: options.review ?? {}, digest: options.digest ?? zeroDigest, state: "prepared", kind: String(proposal.kind) }
+      ledger.set(requestId, entry)
+      return { version: 1, providerExactlyOnce: false, review: entry.review, receipt: { requestId, kind: entry.kind, reviewDigest: entry.digest, state: entry.state, providerResult: null, rejectionCode: null } }
+    },
+    ...routes,
+  })
+}
+
+/** The account area, shell, assistant, browser, files and settings as the Inbox sees them: one signed-in owner with two Gmail accounts. */
+export function neighbors(log: Calls, options: { readonly mailImages?: boolean; readonly picked?: readonly unknown[] } = {}) {
+  const rows = [
+    { connectionId: grantA, grantId: grantA, email: "ann@example.com", grantedCapabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.send", "google.gmail.drafts", "google.gmail.mailbox"] },
+    { connectionId: grantB, grantId: grantB, email: "ann@home.example", grantedCapabilities: ["google.basic_identity", "google.gmail.triage"] },
+  ]
+  const session = { ...sessionInitial, phase: "SignedIn" as const, generation: 1, account: { userId: "u1", organizationId: "org1", credentialId: "key-1", expiresAt: Date.now() + 86400000 } }
+  return Layer.mergeAll(
+    Layer.succeed(CloudSession, { changes: Stream.make(session), notices: Stream.empty, current: () => succeed(session), owner: () => succeed(1), ownerKey: (key: string) => succeed(`alpha/1/${key}`), run: () => Effect.void, adopt: () => Effect.void, attempt: () => Effect.void, signOut: () => succeed(true), rejected: () => Effect.void, admit: () => Effect.void } as unknown as CloudSession.Shape),
+    Layer.succeed(GoogleAccounts, { changes: Stream.empty, accounts: Stream.make(rows), list: () => succeed(rows), run: () => Effect.void, open: () => Effect.void, close: () => Effect.void, reload: () => Effect.void, connect: (capabilities: unknown) => sync(() => { log.connected.push(capabilities) }), connectCalendar: () => Effect.void, allowCalendar: () => Effect.void, cancel: () => Effect.void, disconnect: () => Effect.void, showCache: () => Effect.void, prepareReview: () => Effect.void } as unknown as GoogleAccounts.Shape),
+    Layer.succeed(Navigation, { open: (app: string) => sync(() => { log.opened.push(app); return true }) } as unknown as Navigation.Shape),
+    Layer.succeed(Overview, { reportAttention: (_: unknown, unread: number, more: boolean, _at: number, connected: boolean) => sync(() => { log.attention.push({ unread, more, connected }) }) } as unknown as Overview.Shape),
+    Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, recovered: () => Effect.void } as unknown as ResidentControl.Shape),
+    Layer.succeed(ShellMail, { send: () => succeed("Unsent" as SendAnswer), fill: (sender: MailSender) => sync(() => { log.filled.push(sender) }) } as unknown as ShellMail.Shape),
+    Layer.succeed(BrowserAgent, { openApproved: (url: string) => sync(() => { log.opened.push(url); return { tab: "t", present: Effect.void } }) } as unknown as BrowserAgent.Shape),
+    Layer.succeed(FilePicker, { choose: () => succeed(options.picked ?? []) } as unknown as FilePicker.Shape),
+    Layer.succeed(Preferences, { loadsMailImages: () => succeed(options.mailImages ?? false) } as unknown as Preferences.Shape),
+    Layer.succeed(Assistant, { openWith: (text: unknown) => sync(() => { log.assistant.push(text) }) } as unknown as Assistant.Shape),
+  )
+}
+
+/** The Inbox over the fake platform and neighbors. */
+export function inboxApp(log: Calls, cloud: ReturnType<typeof mailCloud>, native = fakeNative({}), options: Parameters<typeof neighbors>[1] = {}) {
+  return Layer.provide(inbox, Layer.mergeAll(cloud, native, fakeResident({}), buildInfo(), memoryStore, neighbors(log, options)))
+}
+
+/** Waits until a stream shows a value `ok` accepts. */
+export effect function settle<A>(changes: Stream.Stream<A>, ok: (a: A) => boolean) {
+  try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
+}
+
+/** Base64 of UTF-8 text. */
+export function base64(text: string): string {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(text)))
+}

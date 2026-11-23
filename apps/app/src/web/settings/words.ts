@@ -1,6 +1,7 @@
-// spec/settings/vocabulary.md, "Story: See only what Android reported"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/facts.md, "A broader page is named for what it covers"
+// spec/settings/vocabulary.md, "Story: See only what Android reported"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/facts.md, "A broader page is named for what it covers"; spec/settings/diagnostics.md, "A licence flag is shown by Alpha's name for it, an unlisted flag as written, with what it obliges"
 import type { Access, RoleHold, Switch } from "../../../gen/settings__vocabulary.ts";
-import type { BroaderNotice } from "../../../gen/settings__facts.ts";
+import type { BroaderNotice, ShadeAnswer } from "../../../gen/settings__facts.ts";
+import type { Export } from "../../../gen/settings__diagnostics.ts";
 import type { Notice } from "../../../gen/settings__reset.ts";
 import type { JoinPhase, Online } from "../../../gen/settings__network.ts";
 import type { Outcome, Permission } from "../../../gen/settings__updates.ts";
@@ -54,3 +55,22 @@ export const LISTENING: Record<Listening, string> = {
   ListenerUnavailable: "Unavailable", ListenerOff: "Off", ListenerOn: "Listening", ListenerPaused: "Paused",
   ListenerNeedsSetup: "Needs setup", MicStillOpen: "Microphone still open",
 };
+export const SHADE: Record<ShadeAnswer, string> = {
+  ShadeNotAsked: "", ShadeOpened: "", ShadeStandalone: "The shade opens only while Alpha is your Home app.",
+  ShadePermissionMissing: "Android hasn’t given Alpha the status bar permission.", ShadeUnsupported: "Unavailable",
+  ShadeNotInFront: "The shade opens only while Alpha is in front.",
+};
+export const EXPORT: Record<Export, string> = {
+  NoExport: "", Exporting: "", Shared: "", Saved: "Diagnostics saved", ExportFailed: "Export failed",
+};
+export const FLAGS: Record<string, string> = {
+  "copyleft-strong": "Copyleft (GPL family)", "network-copyleft": "Network copyleft (AGPL)", "copyleft-weak": "Weak copyleft (LGPL, MPL, EPL)",
+  "share-alike-data": "Share-alike data", "unknown-licence": "Unknown license", "licence-text-missing-from-package": "No license file in package",
+  unverified: "License unverified", "permissive-not-previously-listed": "Permissive, newly listed", "non-open-source-terms": "Not open-source terms",
+  "proprietary-licence-held-outside-repo": "Proprietary, license held by owner", "proprietary-no-licence-recorded": "Proprietary, no license recorded",
+};
+export const HANDOFF_UNAVAILABLE = "Unavailable";
+export const ROLE_NOT_CHANGED = "Not changed";
+export const SCALE_NOT_SAVED = "Text size could not be saved.";
+export const THEME_NOT_SAVED = "Theme not saved";
+export const CLEAR_FAILED = "Couldn’t clear";

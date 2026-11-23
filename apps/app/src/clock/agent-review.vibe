@@ -1,4 +1,5 @@
-// spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"
+// spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/agentReview.md, "A new owner retires the review: one not yet approved is cancelled, and nothing is confirmed after"
+import { CloudSession, ownerOf } from "../account/layer.vibe"
 import { Machine as ReviewMachine, machine as reviewMachine } from "../../gen/clock__agentReview.effect.vibe"
 import type { HandoffStatus } from "../../gen/clock__vocabulary.ts"
 import { AgentClockOperation, ClockReviewAnswer } from "./native.schema.vibe"
@@ -51,7 +52,7 @@ export const agentReviewLayer = Layer.effect(ClockReview, effect {
       const entry = { retire: effect { review.send({ type: "retireOwner" }) catch () => undefined; try cancel } }
       try Ref.update(active, (all) => [...all, entry])
       return try ensuring(effect {
-        const reviewed = call(ACTION_JOURNAL, "reviewClock", ClockReviewAnswer, { ...identity, operation: approved }) catch () => undefined
+        const reviewed = call(ACTION_JOURNAL, "reviewClock", ClockReviewAnswer, { ...identity, operation }) catch () => undefined
         if (reviewed === undefined) throw new ClockReviewUnavailable({ operationId: identity.operationId })
         const token = reviewed.reviewToken
         const usable = typeof token === "string" && token.length > 0 && token.length <= 128
@@ -83,3 +84,15 @@ export const agentReviewLayer = Layer.effect(ClockReview, effect {
     },
   }
 })
+
+/** Retires every open review each time the signed-in owner changes. Never returns. */
+export effect function followOwner() {
+  const session = try CloudSession
+  const review = try ClockReview
+  let owner = ownerOf(try session.current())
+  for try (const next of session.changes) {
+    const current = ownerOf(next)
+    if (current !== owner) try review.retire()
+    owner = current
+  }
+}

@@ -1,0 +1,235 @@
+// spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/deviceActions.md, "There is no direct path: the only way in is the owner's card on the bound screen"; spec/calendar/deviceActions.md, "A deletion is only queued, and its receipt says unknown while Undo can still win"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
+import { readOperation } from "@elizaos/agent/operations"
+import { deleteUndoMs } from "@elizaos/os/bridges/deletion-window"
+import type { CalendarOperation, ScreenView } from "../../gen/calendar__deviceActions.effect.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { Native } from "../platform/native.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { AgentCalendar } from "./agent.vibe"
+import { decodeAccess } from "./device.schema.vibe"
+import { DeviceCalendar, type SelectedObject } from "./device.vibe"
+import { AgentRequests, type ApprovedAction } from "./requests.vibe"
+import { deviceZone, formatDateTime } from "./time.ts"
+
+const PLUGIN = "AlphaCalendar"
+
+type Fields = { readonly title: string; readonly description: string; readonly location: string; readonly start: string; readonly end: string; readonly timeZone: string }
+type Target = { readonly sourceId: string; readonly sourceRevision: string; readonly eventId: string; readonly revision: string }
+
+/** The agent's Calendar operations this phone runs, as the agent's operation vocabulary names them. */
+type Wire =
+  | { readonly type: "calendar_create_local"; readonly fields: Fields }
+  | { readonly type: "calendar_read_next" }
+  | { readonly type: "calendar_create"; readonly source: { readonly sourceId: string; readonly sourceRevision: string }; readonly fields: Fields }
+  | { readonly type: "calendar_read_selected"; readonly target: Target }
+  | { readonly type: "calendar_update"; readonly target: Target; readonly fields: Fields }
+  | { readonly type: "calendar_delete"; readonly target: Target }
+  | { readonly type: "calendar_availability"; readonly start: string; readonly end: string; readonly timeZone: string }
+  | { readonly type: "calendar_named"; readonly action: "read" | "delete"; readonly name: string }
+  | { readonly type: "calendar_named"; readonly action: "update"; readonly name: string; readonly fields: Fields }
+
+const TYPES = new Set(["calendar_create_local", "calendar_read_next", "calendar_create", "calendar_read_selected", "calendar_update", "calendar_delete", "calendar_availability", "calendar_named"])
+
+/** The Calendar operation an untrusted value is, or undefined when it is not exactly one the agent's vocabulary admits. */
+function calendarOperation(operation: unknown): Wire | undefined {
+  const checked = readOperation(operation)
+  return checked !== undefined && TYPES.has(checked.operation.type) ? checked.operation as unknown as Wire : undefined
+}
+
+function machineOperation(op: Wire): CalendarOperation | undefined {
+  switch (op.type) {
+    case "calendar_create_local": return "CreateOnPhone"
+    case "calendar_read_next": return "ReadNext"
+    case "calendar_create": return "CreateSelected"
+    case "calendar_read_selected": return "ReadSelected"
+    case "calendar_update": return "UpdateSelected"
+    case "calendar_delete": return "DeleteSelected"
+    case "calendar_named": return op.action === "update" ? "UpdateSelected" : op.action === "delete" ? "DeleteSelected" : undefined
+    default: return undefined
+  }
+}
+
+function sameTarget(selected: SelectedObject | undefined, target: Target): boolean {
+  return selected?.kind === "calendar-event" && selected.accountId === target.sourceId && selected.sourceRevision === target.sourceRevision
+    && selected.id === target.eventId && selected.revision === target.revision
+}
+
+function targetOf(selected: SelectedObject | undefined): Target | undefined {
+  return selected?.kind === "calendar-event"
+    ? { sourceId: selected.accountId, sourceRevision: selected.sourceRevision, eventId: selected.id, revision: selected.revision } : undefined
+}
+
+function when(fields: Fields): string {
+  const start = Date.parse(fields.start)
+  const end = Date.parse(fields.end)
+  return Number.isFinite(start) && Number.isFinite(end) ? `${formatDateTime(start, fields.timeZone, true)} – ${formatDateTime(end, fields.timeZone, true)}` : ""
+}
+
+function detailOf(fields: Fields): string {
+  return [fields.title, when(fields), fields.location].filter((line) => line.trim() !== "").join("\n")
+}
+
+function isRead(op: Wire): boolean {
+  return op.type === "calendar_read_next" || op.type === "calendar_read_selected" || op.type === "calendar_availability" || (op.type === "calendar_named" && op.action === "read")
+}
+
+/** How the card names one Calendar operation, and where the owner reviews it. */
+export function describeCalendarOperation(op: Wire): { readonly title: string; readonly detail: string; readonly destination?: "home" | "notes" | "calendar" } {
+  switch (op.type) {
+    case "calendar_create_local": return { title: "Add an event to this phone’s calendar", detail: detailOf(op.fields) }
+    case "calendar_read_next": return { title: "Share your next Calendar event", detail: "The phone reads its own calendar and shows you the event before it is shared." }
+    case "calendar_create": return { title: "Add an event to the calendar you chose", detail: detailOf(op.fields), destination: "calendar" }
+    case "calendar_read_selected": return { title: "Share the event you have open", detail: "Only the open event is shared, after you review it.", destination: "calendar" }
+    case "calendar_update": return { title: "Change the event you have open", detail: detailOf(op.fields), destination: "calendar" }
+    case "calendar_delete": return { title: "Delete the event you have open", detail: "You can undo the deletion for 10 seconds.", destination: "calendar" }
+    case "calendar_availability": {
+      const start = Date.parse(op.start)
+      const end = Date.parse(op.end)
+      return {
+        title: "Check whether you are free",
+        detail: `From ${formatDateTime(start, op.timeZone)} to ${formatDateTime(end, op.timeZone)} (${op.timeZone}). You choose which calendars this phone reads. Only busy times are shared, not event titles or details.`,
+      }
+    }
+    case "calendar_named": return op.action === "read"
+      ? { title: `Share “${op.name}”`, detail: "Choose the matching event, then review what to share. Nothing changes yet.", destination: "calendar" }
+      : op.action === "delete"
+        ? { title: `Delete “${op.name}”`, detail: "Open the matching event in Calendar to review this deletion.", destination: "calendar" }
+        : { title: `Change “${op.name}”`, detail: detailOf(op.fields), destination: "calendar" }
+  }
+}
+
+/** The receipt sentence for a settled Calendar operation. */
+export function summarizeCalendarOperation(op: Wire, result: string): string {
+  if (result === "Applied") {
+    if (op.type === "calendar_availability") return "Shared your free and busy times."
+    if (isRead(op)) return "Shared from Calendar."
+    if (op.type === "calendar_create_local" || op.type === "calendar_create") return "Added to Calendar."
+    if (op.type === "calendar_delete" || (op.type === "calendar_named" && op.action === "delete")) return "Deleted from Calendar."
+    return "Changed in Calendar."
+  }
+  if (result === "Unknown") {
+    return op.type === "calendar_delete" || (op.type === "calendar_named" && op.action === "delete")
+      ? "The deletion waits out its Undo window. Check Calendar before asking again."
+      : "Calendar couldn’t confirm this. Check Calendar before asking again."
+  }
+  return isRead(op) ? "Nothing was shared." : "Nothing was changed in Calendar."
+}
+
+/** Calendar's family of agent device operations over its own services; the shell registers it in `deviceExecutorsLive`. */
+export const operationPorts = effect {
+  const requests = try AgentRequests
+  const device = try DeviceCalendar
+  const agent = try AgentCalendar
+  const navigation = try Navigation
+  const native = try Native
+
+  effect function screen() {
+    const nav = try navigation.get()
+    const view: ScreenView = nav.app === "calendar" ? "CalendarScreen" : nav.app === "" && !nav.library ? "HomeScreen" : "OtherScreen"
+    return { view, hidden: nav.hidden }
+  }
+
+  effect function access(op: CalendarOperation) {
+    const method = op === "CreateOnPhone" ? "requestAccess" : "requestWorkflowReadAccess"
+    const reply = effect { return try decodeAccess(try native.invoke(PLUGIN, method)) } catch () => undefined
+    return reply?.status === "granted"
+  }
+
+  effect function journalOf(call: ExecutorCall) {
+    const view = try agent.view()
+    return { scope: view.state.portOwner, proposalId: call.proposalId }
+  }
+
+  function answer(done: ApprovedAction, record: (result: unknown) => unknown) {
+    const action = done.action
+    if (action.outcome === "OutcomeSucceeded") return { kind: "applied", result: record(done.result) }
+    if (action.outcome === "OutcomeUnknown") return undefined
+    if (action.outcome === "OutcomeFailed" && action.nativeStep === "NativeCancelled") return { kind: "refused", code: "cancelled" }
+    if (action.outcome === "OutcomeFailed" && action.nativeStep === "NativeRefused") return { kind: "refused", code: "target_changed" }
+    return { kind: "refused", code: NOT_DISPATCHED }
+  }
+
+  effect function onPhone(exact: Wire, op: CalendarOperation, call: ExecutorCall, record: (result: unknown) => unknown) {
+    const unbound = op === "CreateOnPhone" || op === "ReadNext"
+    const selected = try device.selected()
+    const bound = unbound ? true
+      : exact.type === "calendar_create" ? selected?.kind === "calendar-source" && selected.accountId === exact.source.sourceId && selected.sourceRevision === exact.source.sourceRevision
+      : exact.type === "calendar_read_selected" || exact.type === "calendar_update" || exact.type === "calendar_delete" ? sameTarget(selected, exact.target)
+      : false
+    const permission = unbound ? (try access(op)) : true
+    const shown = try screen()
+    try requests.scene(shown.view, false, bound && !unbound ? selected?.id ?? "" : "", permission)
+    if (shown.hidden) try requests.hidden()
+    if (!(try requests.propose(op))) return { kind: "refused", code: NOT_DISPATCHED }
+    const done = try requests.approve({ operation: exact, operationId: call.operationId, journalIdentity: try journalOf(call) })
+    if (done.action.queued) fork.detached (effect {
+      try sleep(deleteUndoMs)
+      try requests.windowEnded()
+    })
+    try requests.settle()
+    return answer(done, record)
+  }
+
+  effect function availability(op: Extract<Wire, { type: "calendar_availability" }>) {
+    const current = () => Effect.runSync(effect {
+      const shown = try screen()
+      return !shown.hidden && (shown.view === "HomeScreen" || shown.view === "CalendarScreen")
+    })
+    if (!current()) return { kind: "refused", code: NOT_DISPATCHED }
+    const outcome = try requests.availability(op, deviceZone(), current)
+    return outcome.status === "succeeded" ? { kind: "applied", result: outcome.foregroundResult } : { kind: "refused", code: "not_shared", result: { summary: outcome.summary } }
+  }
+
+  effect function namedRead(op: Wire, call: ExecutorCall) {
+    effect function contextNow() {
+      const shown = try screen()
+      const selected = try device.selected()
+      const view = try agent.view()
+      return {
+        view: shown.hidden ? "hidden" : shown.view === "CalendarScreen" ? "calendar" : shown.view === "HomeScreen" ? "home" : "other",
+        sensitive: false, owner: view.state.portOwner,
+        ...(selected?.kind === "calendar-event" ? { selectedObject: selected } : {}),
+      }
+    }
+    const context = try contextNow()
+    const read = try requests.namedRead(op, call.operationId, context, () => Effect.runSync(contextNow()), try journalOf(call))
+    return read.outcome.status === "succeeded"
+      ? { kind: "applied", result: read.outcome.foregroundResult }
+      : { kind: "refused", code: "not_shared", result: { summary: read.sentence } }
+  }
+
+  effect function run(operation: unknown, call: ExecutorCall) {
+    const op = calendarOperation(operation)
+    if (op === undefined) return { kind: "refused", code: "unsupported" }
+    if (op.type === "calendar_availability") return try availability(op)
+    if (op.type === "calendar_named" && op.action === "read") return try namedRead(op, call)
+    const machineOp = machineOperation(op)
+    if (machineOp === undefined) return { kind: "refused", code: "unsupported" }
+    if (op.type !== "calendar_named") return try onPhone(op, machineOp, call, (result) => result)
+    const target = targetOf(try device.selected())
+    if (target === undefined) return { kind: "refused", code: NOT_DISPATCHED }
+    const exact: Wire = op.action === "update" ? { type: "calendar_update", target, fields: op.fields } : { type: "calendar_delete", target }
+    return try onPhone(exact, machineOp, call, (record) => ({ version: 1, kind: "calendar_named", action: op.action, name: op.name, basis: "owner-chosen", operation: exact, record }))
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => calendarOperation(operation) === undefined ? undefined : operation,
+    execute: (operation, call) => runPromise(run(operation, call)),
+    readBack: async () => undefined,
+    describe: (operation) => {
+      const op = calendarOperation(operation)
+      return op === undefined ? { title: "Action", detail: "" } : describeCalendarOperation(op)
+    },
+    classOf: (operation) => {
+      const op = calendarOperation(operation)
+      return op !== undefined && !isRead(op) ? "CreateReminder" : "NotesRead"
+    },
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (operation, result) => {
+      const op = calendarOperation(operation)
+      return op === undefined ? "" : summarizeCalendarOperation(op, result)
+    },
+  }
+  return ports
+}

@@ -109,10 +109,10 @@ export function VoicemailPanel({ voicemail, now, audioUrl, onOpen, onPlay, onSto
                   {row.number && onMessage && <Button variant="secondary" size="icon" aria-label={`Message ${name}`} onClick={() => onMessage(row.number)}><MessageSquare aria-hidden /></Button>}
                   <span className="flex-1" />
                   {open.confirming ? (
-                    <>
+                    <div role="alertdialog" aria-label="Delete this voicemail?" className="flex gap-2">
                       <Button variant="ghost" disabled={open.deleting} onClick={onDeleteDeclined}>Keep</Button>
                       <Button variant="destructive" loading={open.deleting} onClick={onDeleteConfirmed}>Delete</Button>
-                    </>
+                    </div>
                   ) : (
                     <Button variant="ghost" size="icon" aria-label="Delete voicemail" disabled={voicemail.writeBlocked} onClick={onDeleteAsked}><Trash2 aria-hidden /></Button>
                   )}

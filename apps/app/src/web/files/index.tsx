@@ -1,21 +1,24 @@
-// spec/files/index.md; spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"; spec/files/browserDownloads.md, "Story: Save a download only as I reviewed it"
-import { Effect, Stream } from "effect";
+// spec/files/index.md; spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"
+import { Effect } from "effect";
 import { FolderOpen } from "lucide-react";
+import { useState } from "react";
 import { useMachine as usePicker } from "../../../gen/files__picker.react.ts";
 import { initial as pickerInitial } from "../../../gen/files__picker.ts";
 import { Build } from "../../platform/build.vibe";
 import { FilePicker } from "../../files/picker.vibe";
-import { FilesDownloads } from "../../files/downloads.vibe";
-import type { AppId, AppScreen, AppSurface } from "../app-screen.ts";
+import type { AppScreen, AppSurface } from "../app-screen.ts";
 import { FilePickerSheet } from "./FilePickerSheet.tsx";
 import { FilesScreen } from "./FilesScreen.tsx";
-import { filesRuntime, run, start } from "./runtime.ts";
+import { run } from "./act.ts";
+import { runtime } from "./runtime.ts";
 
-const browserBuild = filesRuntime.runSync(Build.use((b) => Effect.succeed(b.info.variant === "browser")));
+/** The picker surface takes nothing from the shell: it follows the picker machine. */
+export type FilePickerSurfaceProps = Record<string, never>;
 
 /** The picker other areas open through `FilePicker.choose`, kept mounted above every screen. */
-function FilePickerSurface() {
-  const { state: picker = pickerInitial } = usePicker(filesRuntime);
+export function FilePickerSurface(_props: FilePickerSurfaceProps) {
+  const { state: picker = pickerInitial } = usePicker(runtime);
+  const [browserBuild] = useState(() => runtime.runSync(Build.use((b) => Effect.succeed(b.info.variant === "browser"))));
   return (
     <FilePickerSheet picker={picker} deviceLabel={browserBuild ? "From computer" : "Browse"}
       onBrowse={(path) => void run(FilePicker.use((p) => p.browse(path)))}
@@ -27,22 +30,12 @@ function FilePickerSurface() {
   );
 }
 
-/** Opens Files at Downloads each time the Browser's Downloads list asks to show its files. */
-function DownloadsRouteSurface({ open }: { readonly open: (app: AppId, route?: string) => void }) {
-  const follow = (node: HTMLElement | null) => {
-    if (!node) return;
-    return start(FilesDownloads.use((d) => Stream.runForEach(d.routes, (route) => Effect.sync(() => open("files", route)))));
-  };
-  return <span ref={follow} hidden />;
-}
-
 /** The Files app on Home and in the library. */
 export const screens: AppScreen[] = [
   { id: "files", title: "Files", icon: FolderOpen, availability: "everywhere", Screen: FilesScreen },
 ];
 
-/** The file picker over every screen, and the Browser's route into Downloads. */
+/** The file picker over every screen. */
 export const surfaces: AppSurface[] = [
   { id: "files-picker", slot: "overlay", availability: "everywhere", Surface: FilePickerSurface },
-  { id: "files-downloads-route", slot: "notices", availability: "everywhere", Surface: DownloadsRouteSurface },
 ];

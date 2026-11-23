@@ -13,7 +13,9 @@ what it read in memory for that visit. Drafts, the stage and an open proposal ar
 survive process death; nothing is sent, dialed or written on restore. The native side (Telecom,
 the SMS journal, the voicemail and contacts providers) is specified upstream in
 `spec/os/android/{phone,messages,contacts,voicemail}.md`; these specs state what Alpha's renderer
-does with what the native side answers.
+does with what the native side answers. A confirmed delete of a message, voicemail or contact waits in
+the upstream deletion window (`spec/os/android/deletionWindow.md`, `deferredDeletion.md`): its row is
+hidden from its list, and the window's own notice offers Undo while Undo can still win.
 
 - [Shared terms](./common.md): where the apps exist, who may act, the emergency-call gate, list queries and call outcomes.
 - [Ongoing-call bar](./callBar.md): the calls Telecom reports, the bar over every view, Return and End.
@@ -25,4 +27,3 @@ does with what the native side answers.
 - [Agentic comms](./comms.md): the bar's target, the stage, sheet heights, End placement, proposals and briefings.
 - [Approved phone actions](./actions.md): what runs after the owner approves an Alpha call, text or contact change.
 - [Home cards](./attention.md): unread texts, missed calls and new voicemail on Home.
-- [Undo a deletion](./undo.md): the window a confirmed message, voicemail or contact delete waits in, with Undo.

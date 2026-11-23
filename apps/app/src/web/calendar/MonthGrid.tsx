@@ -7,6 +7,7 @@ import { monthGrid } from "./layout.ts";
 
 const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
+/** The month a grid shows, its busy days and the day it picks. */
 export type MonthGridProps = {
   rows: readonly CalendarRow[];
   /** The selected day, from today. */

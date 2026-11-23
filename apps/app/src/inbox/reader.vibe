@@ -69,6 +69,7 @@ export const layer = Layer.effect(Reader, effect {
   const assistant = try Assistant
   const resident = try ResidentControl
   const pending = try Ref.make<Map<string, Deferred.Deferred<MailBody | undefined>>>(new Map())
+  const handing = try Ref.make(false)
   const file = try Ref.make<DownloadedFile | undefined>(undefined)
 
   effect function send(event: ReaderEvent) {
@@ -228,9 +229,13 @@ export const layer = Layer.effect(Reader, effect {
     effect handOff() {
       const s = try machine.get()
       const reviewed = try Ref.get(file)
-      if (reviewed === undefined || !handoffAllowed(s.attachment.sha256, reviewed.sha256, s.attachment.phase === "AttachmentShown" && !s.attachment.opaque)) return "HandedUnconfirmed"
+      if (reviewed === undefined || !handoffAllowed(s.attachment.sha256, reviewed.sha256, s.attachment.phase === "AttachmentShown" && !s.attachment.opaque)) return "HandedCancelled"
+      if (!(try Ref.modify(handing, (busy) => [!busy, true] as const))) return "HandedCancelled"
       const answer = native.invoke("AlphaMailAttachments", "openReviewed", { name: reviewed.name, mimeType: reviewed.mimeType, dataBase64: reviewed.dataBase64, sha256: reviewed.sha256, size: reviewed.bytes, reviewed: true }) catch () => undefined
+      try Ref.set(handing, false)
       const result = Schema.decodeUnknownEffect(WireHandoffResult)(answer) catch () => undefined
+      const still = try machine.get()
+      if (still.visit !== s.visit || still.attachment.sha256 !== s.attachment.sha256) return "HandedCancelled"
       return result?.status === "opened" ? "HandedOpened" : result?.status === "cancelled" ? "HandedCancelled" : "HandedUnconfirmed"
     },
     effect saveAttachment() {
@@ -259,7 +264,9 @@ export const layer = Layer.effect(Reader, effect {
       const s = try machine.get()
       const url = parseLink(review.href)
       if (url === undefined || !linkOpens(url.https, url.credentials, true, review.visit === s.visit && s.phase === "BodyShown")) return false
-      browser.openReviewed(url.href) catch () => undefined
+      const opened = browser.openApproved(url.href, true) catch () => undefined
+      if (opened === undefined) return false
+      try opened.present
       return true
     },
     effect askAgent() {

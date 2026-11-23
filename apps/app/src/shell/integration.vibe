@@ -1,20 +1,25 @@
 // spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"
 import { AccountSheet } from "../account/sheet.vibe"
 import { Entitlement } from "../account/entitlement.vibe"
+import { Assistant } from "../assistant/assistant.vibe"
 import { Conversations } from "../assistant/conversations.vibe"
 import { DeviceFacts } from "../settings/facts.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
 import { VoiceConversation } from "../voice/conversation.vibe"
+import { executorsLive } from "./compose/executors.vibe"
+import { fillsLive, idleFill } from "./compose/fills.vibe"
+import { handoffsLive } from "./handoffs.vibe"
 import { Navigation } from "./navigation.vibe"
 import { pageEvents, pageHidden } from "./page.ts"
 
-/** What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and invocations. */
+/** What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and returning, invocations and the assistant's dock. */
 export const integrationLive = Layer.effectDiscard(effect {
   const facts = try DeviceFacts
   const entitlement = try Entitlement
   const sheet = try AccountSheet
   const voice = try VoiceConversation
   const conversations = try Conversations
+  const assistant = try Assistant
   const calls = try CallWatch
   const navigation = try Navigation
 
@@ -31,15 +36,21 @@ export const integrationLive = Layer.effectDiscard(effect {
     if (try voice.startFromInvocation(screen, start)) try navigation.send({ type: "startVoice" })
   }
 
+  fork.scoped assistant.follow()
   fork.scoped (effect {
+    let callAtHide = false
     for try (const _ of pageEvents("visibilitychange", "document")) {
       const visible = !pageHidden()
       try entitlement.foreground(visible)
       if (visible) {
+        const callSeen = callAtHide || (try calls.live())
+        callAtHide = false
+        try voice.returned(callSeen)
         try facts.resume()
         try invocation()
       } else {
-        try voice.left()
+        callAtHide = try calls.live()
+        try voice.hidden()
       }
     }
   })
@@ -51,10 +62,16 @@ export const integrationLive = Layer.effectDiscard(effect {
       const next = nav.app !== "" || nav.library || nav.shade
       if (next !== covering) try sheet.covered(next)
       covering = next
-      if (speaking && !nav.voice) try voice.stop()
+      if (speaking && !nav.voice && !(try voice.claimed())) try voice.stop()
       speaking = nav.voice
     }
   })
   try entitlement.foreground(!pageHidden())
   try invocation()
 })
+
+/**
+ * The last step of the runtime: the late ports filled from their providers, the idle facts of Telephony and Account, every
+ * area's device executors, Notes' hand-overs and the shell's followers.
+ */
+export const shellIntegration = Layer.mergeAll(fillsLive, idleFill, executorsLive, handoffsLive, integrationLive)

@@ -104,6 +104,8 @@ const DEV_COMMANDS: Readonly<Record<string, NavigationEvent>> = {
   assistant: { type: "moveChat", detent: "ChatFull" },
   background: { type: "hide" },
   resume: { type: "show" },
+  power: { type: "hide" },
+  unlock: { type: "show" },
 }
 
 effect function followDevCommands(machine: NavigationMachine.Shape) {

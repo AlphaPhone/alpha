@@ -27,21 +27,23 @@ test mocks.
 
 ```quint
 type Page = Root | General | Display | Network | Privacy | Permissions | Apps | Passwords
-  | About | Problems | Licenses | LicenseDetail | Developer
+  | AppInbox | AppCamera | AppMaps | AppNotes | AppPhotos | About | Problems | Licenses | LicenseDetail | Developer
 type Settings = { page: Page, licence: int, developer: bool, opened: int }
 pure val initial: Settings = { page: Root, licence: -1, developer: false, opened: 0 }
 pure def parent(p: Page): Page =
   if (p == Display or p == Network) General
   else if (p == Permissions) Privacy
-  else if (p == Passwords) Apps
+  else if (p == Passwords or p == AppInbox or p == AppCamera or p == AppMaps or p == AppNotes or p == AppPhotos) Apps
   else if (p == Problems or p == Licenses) About
   else if (p == LicenseDetail) Licenses
   else Root
-pure val pageValues = Set(Root, General, Display, Network, Privacy, Permissions, Apps, Passwords, About, Problems, Licenses, Developer)
+pure val pageValues = Set(Root, General, Display, Network, Privacy, Permissions, Apps, Passwords, AppInbox, AppPhotos, About, Problems, Licenses, Developer)
 pure val sValues = Set(initial).union(Set({ ...initial, developer: true }))
 ```
 
 ### A page opens from its parent, and Back returns to that parent
+
+Android's Back does the same: it pops one page, and on the root it leaves Settings.
 
 ```quint
 pure def canOpen(s: Settings, page: Page): bool =
@@ -65,15 +67,59 @@ pure def sometimesDeveloperOpen(s: Settings): bool = s.page == Developer
 
 ### Another surface may open only a listed section, never Developer or Passwords
 
-The assistant or a notice can open General, Display, Privacy, Permissions, Apps or About.
+The assistant or a notice can open General, Display, Privacy, Permissions, Apps, Inbox's page or
+About. The account, Google and the AI provider live in the Account app: the root's Account, Google &
+email and AI provider rows open it, and a request for Settings' `plans`, `google` or `provider`
+route opens that section of the Account app instead; `calendar` and `workflows` open those apps.
 
 ```quint
 pure def listedSection(page: Page): bool =
-  page == General or page == Display or page == Privacy or page == Permissions or page == Apps or page == About
+  page == General or page == Display or page == Privacy or page == Permissions or page == Apps or page == AppInbox or page == About
 pure def canOpenSection(s: Settings, page: Page): bool = listedSection(page)
 pure def openSection(s: Settings, page: Page): Settings = { ...s, page: page, opened: s.opened + 1 }
 pure def stepNoSurfaceOpensDeveloperOrPasswords(before: Settings, via: str, after: Settings): bool =
   via == "openSection" implies (after.page != Developer and after.page != Passwords)
+```
+
+### A route names a listed section, or another app it is forwarded to
+
+The legacy section names still open their page: `sound` and `notifications` open General.
+
+```quint
+type Forward = ToSettings | ToPlans | ToProvider | ToGoogle | ToCalendar | ToWorkflows
+pure def forwardOf(route: str): Forward =
+  if (route == "plans" or route == "account") ToPlans else if (route == "provider") ToProvider
+  else if (route == "google") ToGoogle else if (route == "calendar") ToCalendar
+  else if (route == "workflows") ToWorkflows else ToSettings
+pure def sectionOf(route: str): Page =
+  if (route == "general" or route == "sound" or route == "notifications") General else if (route == "display") Display
+  else if (route == "privacy") Privacy else if (route == "permissions") Permissions else if (route == "apps") Apps
+  else if (route == "inbox") AppInbox else if (route == "about") About else Root
+pure def lawNoRouteOpensDeveloperOrPasswords(route: str): bool = sectionOf(route) != Developer and sectionOf(route) != Passwords
+pure def lawARouteSectionIsListed(route: str): bool = sectionOf(route) == Root or listedSection(sectionOf(route))
+```
+
+### Apps lists each app once, and opens its page in Settings or the app itself
+
+An app with nothing to set in Settings opens the app; Messages is listed only on the Alpha image,
+and Photos has a page on the phone, where Android decides its library access.
+
+```quint
+type AppRow = RowBrowser | RowCalendar | RowCamera | RowFiles | RowInbox | RowMaps | RowMessages | RowNotes
+  | RowPasswords | RowPhotos | RowWorkflows
+pure def appPage(app: AppRow, onPhone: bool): Page =
+  if (app == RowInbox) AppInbox else if (app == RowCamera) AppCamera else if (app == RowMaps) AppMaps
+  else if (app == RowNotes) AppNotes else if (app == RowPasswords) Passwords
+  else if (app == RowPhotos and onPhone) AppPhotos else Root
+pure def appListed(app: AppRow, aosp: bool): bool = app != RowMessages or aosp
+pure def lawAnAppPageOpensFromApps(app: AppRow, onPhone: bool): bool =
+  appPage(app, onPhone) == Root or parent(appPage(app, onPhone)) == Apps
+```
+
+### Privacy's Access setup reopens the first-run access walkthrough at its first step
+
+```quint
+pure val accessSetupStep: int = 0
 ```
 
 ### A licence opens its details from the list of licences
@@ -86,6 +132,9 @@ pure val indexValues = Set(-1, 0, 2)
 ```
 
 ### Leaving Settings returns to its root
+
+Settings leaves when another app or Home comes to the front; going to the background keeps the
+page, but a vault the page held is locked.
 
 ```quint
 pure def leave(s: Settings): Settings = { ...s, page: Root, licence: -1 }

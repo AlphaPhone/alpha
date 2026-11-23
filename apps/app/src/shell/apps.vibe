@@ -12,6 +12,9 @@ export const APP_IDS: readonly AppId[] = [
 /** Apps that exist only on the Alpha AOSP image (PRD AP-08). */
 export const AOSP_ONLY: ReadonlySet<AppId> = new Set<AppId>(["phone", "messages", "contacts"])
 
+/** The comms apps whose own bottom bar addresses the person or Alpha, so the assistant's pill stays away at rest (PRD AC-01). */
+export const BAR_APPS: ReadonlySet<AppId> = new Set<AppId>(["phone", "messages", "contacts"])
+
 /** The prefix of an Alpha app's key in Home's favorites. */
 export const BUILTIN_PREFIX = "alpha:"
 

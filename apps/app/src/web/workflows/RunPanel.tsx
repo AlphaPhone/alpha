@@ -6,6 +6,7 @@ import type { RunOutcome } from "../../workflows/runs.vibe";
 import { Alert, Button, ListRow } from "../components/ui/index.ts";
 import { occurredSentences, occurredWords, reconciliationText, runWords, when } from "./words.ts";
 
+/** The open workflow's runs, its kept run request and what they allow now. */
 export interface RunPanelProps {
   /** The runs Machine's state for the open workflow. */
   runs: Runs;

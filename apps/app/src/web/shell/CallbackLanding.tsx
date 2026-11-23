@@ -10,6 +10,7 @@ const MESSAGES: Readonly<Record<Message, string>> = {
   MessageContinue: "Your account is checked inside Alpha Phone before the connection is saved.",
 };
 
+/** The delegation return page: the cleaned hand-back address and its message. */
 export interface CallbackLandingProps {
   message: Message;
   /** The one link back into Alpha; empty when the return cannot be used. */

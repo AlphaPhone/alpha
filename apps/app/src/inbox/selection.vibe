@@ -5,7 +5,7 @@ import { Machine as MailboxMachine } from "../../gen/inbox__mailbox.effect.vibe"
 import { InboxAccounts } from "./accounts.vibe"
 import { Gmail } from "./gmail.vibe"
 import { MailOperations } from "./operations.vibe"
-import { Composer } from "./composer.vibe"
+import { MailComposer } from "./composer.vibe"
 
 const kinds: Record<Exclude<SelectAction, "SelDeleteDrafts">, OpKind> = {
   SelArchive: "ArchiveKind", SelUnarchive: "UnarchiveKind", SelTrash: "TrashKind", SelUntrash: "UntrashKind",
@@ -34,7 +34,7 @@ export const layer = Layer.effect(MailSelection, effect {
   const accounts = try InboxAccounts
   const gmail = try Gmail
   const operations = try MailOperations
-  const composer = try Composer
+  const composer = try MailComposer
 
   effect function send(event: SelectionEvent) {
     return machine.send(event) catch () => undefined

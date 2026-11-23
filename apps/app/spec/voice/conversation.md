@@ -9,7 +9,7 @@ and each failure as events.
 
 ## Domain
 
-### A conversation holds what it shows, its route and duplex, the speaker, its quiet retries, its notice and its retirement
+### A conversation holds what it shows, its route and duplex, the speaker, its quiet retries, its notice, its retirement and any screen the agent claimed
 
 ```quint
 type Route = Device | Cloud | Direct
@@ -18,12 +18,14 @@ type Shown = Off | Starting | Listening | Thinking | Speaking | AwaitingReview |
 type SessionPhase = PhaseStarting | PhaseListening | PhaseThinking | PhaseSpeaking
 type Notice = NoNotice | PausedForCall | CallHoldsMicrophone | CannotInterrupt | ReviewInChat | VoicePaused
   | StopUnconfirmed | RestOfReplyUnread
+type ScreenClaim = NoClaim | ClaimCommitted | ClaimPinned
 type Conversation = { shown: Shown, route: Route, duplex: Duplex, cloudDisclosed: bool, cartesiaDisclosed: bool,
   muted: bool, muteOffered: bool, retries: int, notice: Notice, mediaUnconfirmed: bool, starts: int,
-  typedAsked: int, typedSent: int, typedDropped: int, typedWaiting: bool }
+  typedAsked: int, typedSent: int, typedDropped: int, typedWaiting: bool, claim: ScreenClaim, claimsRefused: int, pins: int, kept: int, closedByHide: bool }
 pure val initial: Conversation = { shown: Off, route: Device, duplex: TakesTurns, cloudDisclosed: false, cartesiaDisclosed: false,
   muted: false, muteOffered: false, retries: 0, notice: NoNotice, mediaUnconfirmed: false, starts: 0,
-  typedAsked: 0, typedSent: 0, typedDropped: 0, typedWaiting: false }
+  typedAsked: 0, typedSent: 0, typedDropped: 0, typedWaiting: false, claim: NoClaim, claimsRefused: 0, pins: 0, kept: 0, closedByHide: false }
+pure def retiredAs(shown: Shown, c: Conversation): Conversation = { ...c, shown: shown, muted: false, claim: NoClaim }
 pure def running(s: Shown): bool =
   s == Starting or s == Listening or s == Thinking or s == Speaking or s == Retrying
 pure def startable(s: Shown): bool = s == Off or s == Failed
@@ -63,7 +65,7 @@ pure def canStart(c: Conversation, route: Route, echoCancelled: bool, live: bool
   startable(c.shown) and not(c.mediaUnconfirmed) and admitted and not(callActive) and disclosedFor(c, route)
 pure def start(c: Conversation, route: Route, echoCancelled: bool, live: bool, muteOffered: bool, admitted: bool, callActive: bool): Conversation = {
   val duplex = duplexOf(echoCancelled, live)
-  { ...c, shown: Starting, route: route, duplex: duplex, muted: false, muteOffered: muteOffered, retries: 0,
+  { ...c, shown: Starting, route: route, duplex: duplex, muted: false, muteOffered: muteOffered, retries: 0, claim: NoClaim, closedByHide: false,
     notice: if (duplex == TakesTurns) CannotInterrupt else NoNotice, starts: c.starts + 1 }
 }
 pure def canStartRefusedForCall(c: Conversation): bool = startable(c.shown)
@@ -170,12 +172,12 @@ only if its chat is still current.
 pure val maxQuietRetries = 2
 pure def canSessionFailed(c: Conversation, transient: bool, longWait: bool): bool = running(c.shown)
 pure def sessionFailed(c: Conversation, transient: bool, longWait: bool): Conversation =
-  if (c.route == Direct or not(transient)) { ...c, shown: Failed, notice: NoNotice, muted: false }
-  else if (c.retries >= maxQuietRetries or longWait) { ...c, shown: Off, notice: VoicePaused, retries: 0, muted: false }
-  else { ...c, shown: Retrying, retries: c.retries + 1 }
+  if (c.route == Direct or not(transient)) { ...retiredAs(Failed, c), notice: NoNotice }
+  else if (c.retries >= maxQuietRetries or longWait) { ...retiredAs(Off, c), notice: VoicePaused, retries: 0 }
+  else { ...c, shown: Retrying, retries: c.retries + 1, claim: NoClaim }
 pure def canRetryWaited(c: Conversation, chatCurrent: bool): bool = c.shown == Retrying
 pure def retryWaited(c: Conversation, chatCurrent: bool): Conversation =
-  if (chatCurrent) { ...c, shown: Starting } else { ...c, shown: Off, retries: 0, muted: false }
+  if (chatCurrent) { ...c, shown: Starting, claim: NoClaim } else { ...retiredAs(Off, c), retries: 0 }
 pure def alwaysAtMostTwoQuietRetries(c: Conversation): bool =
   c.retries >= 0 and c.retries <= maxQuietRetries and (c.shown == Retrying implies c.retries >= 1)
 pure def alwaysOwnKeyVoiceIsNeverRetriedQuietly(c: Conversation): bool = c.shown == Retrying implies c.route != Direct
@@ -194,9 +196,9 @@ Nothing streamed before it is spoken.
 
 ```quint
 pure def canReviewNeeded(c: Conversation): bool = c.shown == Thinking or c.shown == Speaking
-pure def reviewNeeded(c: Conversation): Conversation = { ...c, shown: AwaitingReview, notice: ReviewInChat }
+pure def reviewNeeded(c: Conversation): Conversation = { ...c, shown: AwaitingReview, notice: ReviewInChat, claim: NoClaim }
 pure def canReviewSettled(c: Conversation): bool = c.shown == AwaitingReview
-pure def reviewSettled(c: Conversation): Conversation = { ...c, shown: Retiring, muted: false }
+pure def reviewSettled(c: Conversation): Conversation = retiredAs(Retiring, c)
 pure def sometimesWaitingForReview(c: Conversation): bool = c.shown == AwaitingReview
 ```
 
@@ -222,18 +224,35 @@ pure def alwaysMutingNeedsItsControl(c: Conversation): bool = c.muted implies (c
 ### Stop, a call, a hidden or sensitive screen, sign-out and reset retire voice; a call says so once
 
 Retiring holds the panel until the media's stop is confirmed. A conversation with no media closes
-at once.
+at once. A screen change made inside the agent's own claim is not a departure; the claim's
+settlement decides it.
 
 ```quint
 pure def active(s: Shown): bool = running(s) or s == AwaitingReview
 pure def canStop(c: Conversation, media: bool): bool = active(c.shown) or c.shown == Failed
 pure def stop(c: Conversation, media: bool): Conversation =
-  if (media) { ...c, shown: Retiring, muted: false } else { ...c, shown: Off, muted: false, retries: 0 }
+  if (media) retiredAs(Retiring, c) else { ...retiredAs(Off, c), retries: 0 }
 pure def canCallStarted(c: Conversation): bool = active(c.shown)
-pure def callStarted(c: Conversation): Conversation = { ...c, shown: Retiring, muted: false, notice: PausedForCall }
-pure def canLeft(c: Conversation): bool = active(c.shown)
-pure def left(c: Conversation): Conversation = { ...c, shown: Retiring, muted: false }
+pure def callStarted(c: Conversation): Conversation = { ...retiredAs(Retiring, c), notice: PausedForCall }
+pure def canLeft(c: Conversation): bool = active(c.shown) and c.claim == NoClaim
+pure def left(c: Conversation): Conversation = retiredAs(Retiring, c)
 pure def sometimesPausedForACall(c: Conversation): bool = c.shown == Off and c.notice == PausedForCall
+```
+
+### Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing
+
+On the Alpha image the call screen is its own activity, so a call hides Alpha before Telecom's
+reading arrives; the hidden page's capture loss is never shown as a voice failure.
+
+```quint
+pure def canHidden(c: Conversation): bool = active(c.shown) and c.claim == NoClaim
+pure def hidden(c: Conversation): Conversation = { ...retiredAs(Retiring, c), closedByHide: true }
+pure def canReturned(c: Conversation, callSeen: bool): bool = c.closedByHide
+pure def returned(c: Conversation, callSeen: bool): Conversation =
+  { ...c, closedByHide: false, notice: if (callSeen) PausedForCall else c.notice }
+pure def stepAReturnTellsOfACallOnlyOnce(before: Conversation, via: str, after: Conversation): bool =
+  via == "returned" implies (before.closedByHide and not(after.closedByHide))
+pure def sometimesToldOfACallOnReturn(c: Conversation): bool = c.notice == PausedForCall and not(c.closedByHide) and c.shown == Off and c.starts >= 1
 ```
 
 ### A message typed while voice retires waits for the stop and goes out once, unless its chat changed
@@ -244,7 +263,7 @@ keeps voice closed, never the message.
 ```quint
 pure def canTypedSend(c: Conversation): bool = not(c.typedWaiting)
 pure def typedSend(c: Conversation): Conversation =
-  if (c.shown == Retiring or active(c.shown)) { ...c, shown: Retiring, muted: false, typedAsked: c.typedAsked + 1, typedWaiting: true }
+  if (c.shown == Retiring or active(c.shown)) { ...retiredAs(Retiring, c), typedAsked: c.typedAsked + 1, typedWaiting: true }
   else { ...c, typedAsked: c.typedAsked + 1, typedSent: c.typedSent + 1 }
 pure def canCleanupSettled(c: Conversation, confirmed: bool, sendCurrent: bool): bool = c.shown == Retiring
 pure def cleanupSettled(c: Conversation, confirmed: bool, sendCurrent: bool): Conversation = {
@@ -258,4 +277,37 @@ pure def alwaysATypedMessageIsNeverLost(c: Conversation): bool =
   c.typedAsked == c.typedSent + c.typedDropped + (if (c.typedWaiting) 1 else 0) and (c.typedWaiting implies c.shown == Retiring)
 pure def sometimesSentAfterVoiceStopped(c: Conversation): bool = c.typedSent >= 1 and c.shown == Off and c.starts >= 1
 pure def sometimesStopUnconfirmed(c: Conversation): bool = c.mediaUnconfirmed and c.notice == StopUnconfirmed
+```
+
+## Story: Keep talking on a screen the agent opens for me
+
+> As the owner talking to Alpha, I want voice to stay on when the assistant itself opens the screen
+> I asked for, and to stop when I go somewhere myself or the screen is not the one it said, so that
+> voice follows my request and never listens on a screen I did not expect.
+
+### Voice stays on through a screen change only when the agent claimed it, the screen pinned its context and the change was delivered with exactly that context
+
+A turn claims one destination while voice runs and its chat is current; a second claim, or one
+from a chat that is no longer current, is refused and leaves the first alone. The screen pins its
+context when it commits. Voice continues there only when the change was delivered, pinned and is
+still exactly what is shown; an undelivered, unpinned or changed screen retires voice. Any
+navigation by the owner, or by anything but the claim, retires voice as leaving does.
+
+```quint
+pure def canClaimScreen(c: Conversation, chatCurrent: bool): bool = running(c.shown)
+pure def claimScreen(c: Conversation, chatCurrent: bool): Conversation =
+  if (c.claim != NoClaim or not(chatCurrent)) { ...c, claimsRefused: c.claimsRefused + 1 } else { ...c, claim: ClaimCommitted }
+pure def canScreenPinned(c: Conversation): bool = c.claim == ClaimCommitted
+pure def screenPinned(c: Conversation): Conversation = { ...c, claim: ClaimPinned, pins: c.pins + 1 }
+pure def canScreenSettled(c: Conversation, delivered: bool, contextCurrent: bool): bool = c.claim != NoClaim
+pure def screenSettled(c: Conversation, delivered: bool, contextCurrent: bool): Conversation =
+  if (delivered and contextCurrent and c.claim == ClaimPinned) { ...c, claim: NoClaim, kept: c.kept + 1 }
+  else retiredAs(Retiring, c)
+pure def alwaysAClaimNeedsRunningVoice(c: Conversation): bool = c.claim != NoClaim implies running(c.shown)
+pure def alwaysAKeptScreenWasPinned(c: Conversation): bool = c.kept >= 0 and c.kept <= c.pins
+pure def stepOnlyAPinnedDeliveredScreenKeepsVoice(before: Conversation, via: str, after: Conversation): bool =
+  (via == "screenSettled" and running(after.shown)) implies (before.claim == ClaimPinned and after.kept == before.kept + 1)
+pure def sometimesKeptOnTheAgentsScreen(c: Conversation): bool = c.kept >= 1 and running(c.shown)
+pure def sometimesAnUnconfirmedScreenRetiredVoice(c: Conversation): bool = c.shown == Retiring and c.pins >= 1 and c.kept == 0
+pure def sometimesASecondClaimRefused(c: Conversation): bool = c.claimsRefused >= 1 and c.claim == ClaimPinned
 ```

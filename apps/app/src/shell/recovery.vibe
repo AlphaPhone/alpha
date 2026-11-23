@@ -2,6 +2,7 @@
 import { Machine as RecoveryMachine, type Event as RecoveryEvent } from "../../gen/shell__recovery.effect.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { Build } from "../platform/build.vibe"
+import { CrashJournal } from "../platform/crash-journal.vibe"
 import { Native } from "../platform/native.vibe"
 import { BuildFacts } from "./native.schema.vibe"
 import { Navigation } from "./navigation.vibe"
@@ -25,6 +26,7 @@ export service Recovery {
 export const recoveryLive = Layer.effect(Recovery, effect {
   const native = try Native
   const build = try Build
+  const journal = try CrashJournal
   const navigation = try Navigation
   const notices = try Notices
   const machine = try RecoveryMachine
@@ -35,7 +37,7 @@ export const recoveryLive = Layer.effect(Recovery, effect {
   }
 
   effect function record(kind: "render" | "startup" | "uncaught", error: unknown) {
-    native.invoke("AlphaDevice", "recordRendererFailure", { kind, errorClass: errorClass(error) }) catch () => undefined
+    try journal.record(kind, error)
   }
 
   effect function takeOver() {

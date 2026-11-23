@@ -21,16 +21,15 @@ pure val initial: Queue = { lastOrder: 0, syncs: List() }
 pure def running(q: Queue, scope: Scope): bool = q.syncs.some(x => x.scope == scope and x.phase == SyncRunning)
 pure def firstQueued(q: Queue, scope: Scope): int =
   q.syncs.foldl(0, (best, x) => if (x.scope == scope and x.phase == Queued and not(x.cancelled) and (best == 0 or x.order < best)) x.order else best)
-pure def advance(scope: Scope, q: Queue): Queue =
+pure def advance(scope: Scope, q: Queue): Queue = {
+  val first = firstQueued(q, scope)
   if (running(q, scope)) q
-  else {
-    val first = firstQueued(q, scope)
-    { ...q, syncs: q.syncs.listMap(x =>
-        if (x.scope != scope or x.phase != Queued) x
-        else if (x.cancelled and (first == 0 or x.order < first)) { ...x, phase: SyncAborted }
-        else if (x.order == first) { ...x, phase: SyncRunning, reads: 1 }
-        else x) }
-  }
+  else { ...q, syncs: q.syncs.listMap(x =>
+      if (x.scope != scope or x.phase != Queued) x
+      else if (x.cancelled and (first == 0 or x.order < first)) { ...x, phase: SyncAborted }
+      else if (x.order == first) { ...x, phase: SyncRunning, reads: 1 }
+      else x) }
+}
 ```
 
 ### What the simulator tries

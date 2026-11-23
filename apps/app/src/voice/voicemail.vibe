@@ -1,0 +1,29 @@
+// spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"; spec/voice/speech.md, "A reviewed page, a local reading and voicemail audio use only the phone; replies and turn guidance use the route in use"
+import { Native } from "../platform/native.vibe"
+import { TranscriptFailed, VoicemailTranscriber } from "../telephony/ports.vibe"
+import { newId } from "./ids.ts"
+import { LocalSpeechStatus, TranscriptReply } from "./native.schema.vibe"
+
+const decodeTranscript = Schema.decodeUnknownOption(TranscriptReply)
+const decodeStatus = Schema.decodeUnknownOption(LocalSpeechStatus)
+
+/** Telephony's voicemail recognizer: the phone's own recognizer, one window at a time; voicemail audio never goes to a network route. */
+export const voicemailTranscriber = Layer.effect(VoicemailTranscriber, effect {
+  const native = try Native
+  return {
+    effect ready() {
+      const raw = native.invoke("AlphaVoiceCloud", "localSpeechStatus", { requestId: newId() }) catch () => undefined
+      const status = raw === undefined ? undefined : Option.getOrUndefined(decodeStatus(raw))
+      return status !== undefined && status.ready && status.execution === "device"
+    },
+    effect transcribe(wavBase64: string) {
+      const requestId = newId()
+      const asked = effect { return native.invoke("AlphaVoiceCloud", "transcribeLocalAudio", { wav: wavBase64, requestId }) catch () => undefined }
+      const released = effect { native.invoke("AlphaVoiceCloud", "cancel", { requestId }) catch () => undefined }
+      const raw = try ensuring(asked, released)
+      const reply = raw === undefined ? undefined : Option.getOrUndefined(decodeTranscript(raw))
+      if (reply === undefined || !reply.local || reply.execution !== "device") throw new TranscriptFailed({ reason: "No usable on-device transcript" })
+      return reply.text.trim()
+    },
+  }
+})

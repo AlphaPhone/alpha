@@ -1,7 +1,7 @@
 // spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
 import { createCloudClient } from "@elizaos/cloud/client"
 import { initial as connectionStart, type Resident as ResidentConnection } from "../../gen/platform__resident.ts"
-import { cloudOutcomeOf, pathAdmitted } from "../../gen/platform.effect.vibe"
+import { adviceOf, cloudOutcomeOf, pathAdmitted } from "../../gen/platform.effect.vibe"
 import { Build, type BuildInfo } from "./build.vibe"
 import { buildLive } from "./build-live.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "./cloud.vibe"
@@ -12,9 +12,9 @@ import { deviceStorageLive } from "./device-storage.vibe"
 import { lifecycleLive } from "./lifecycle.vibe"
 import { Native, NativeFailed, NativeUnavailable } from "./native.vibe"
 import { nativeLive } from "./native-live.vibe"
-import { Resident, ResidentRefused, type ResidentAnswer } from "./resident.vibe"
-import { ResidentControl } from "./resident-control.vibe"
-import { pathShapeOf, residentLive } from "./resident-live.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer } from "./resident.vibe"
+import { ResidentControl, ResidentRecovery } from "./resident-control.vibe"
+import { pathShapeOf, residentLive, routeAllowed } from "./resident-live.vibe"
 import { browserStore, memoryStore } from "./storage.vibe"
 import { feedsLive } from "./view-events.vibe"
 import { answerRoute, routeFetch } from "./cloud-fetch.ts"
@@ -27,7 +27,7 @@ const platformServices = Layer.provideMerge(
   Layer.mergeAll(residentLive, cloudLive, crashJournalLive, lifecycleLive, deviceStorageLive),
 )
 
-/** Every platform service on this device: Native, Build, the KeyValueStore, Resident and its control and feeds, Cloud and its client, the problem log, the app lifecycle and device storage. */
+/** Every platform service on this device: Native, Build, the KeyValueStore, Resident and its control, recovery and feeds, Cloud and its client, the problem log, the app lifecycle and device storage. */
 export const live = Layer.provideMerge(platformServices, platformBase)
 
 /** One fake plugin method: its answer, or a `NativeFailed` it refuses with. */
@@ -59,11 +59,12 @@ export function fakeNative(table: FakeNativeTable, events: { readonly [pluginEve
 /** One fake resident route: its data, a function of the body that gives it, or a `ResidentRefused` it refuses with. */
 export type FakeRoute = unknown
 
-/** A Resident and ResidentControl layer for tests and stories: `routes` keyed `"METHOD /path"`, `streams` keyed by path with the text chunks each streams. */
+/** A Resident, ResidentControl and ResidentRecovery layer for tests and stories: `routes` keyed `"METHOD /path"`, `streams` keyed by path with the text chunks each streams; nothing is ever held for review. */
 export function fakeResident(routes: { readonly [route: string]: FakeRoute }, streams: { readonly [path: string]: readonly string[] } = {}, owner = "owner-test") {
   const connected: ResidentConnection = { ...connectionStart, phase: "Connected", generation: 1, owner, agent: "agent-test" }
-  effect function answer(method: string, path: string, body: unknown): ResidentAnswer!ResidentRefused {
+  effect function answer(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown): ResidentAnswer!ResidentRefused {
     if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
+    if (!routeAllowed(method, path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
     const key = `${method} ${path.split("?")[0]}`
     if (!Object.hasOwn(routes, key)) throw new ResidentRefused({ status: 404, code: "not_found", message: "Not found" })
     const route = routes[key]
@@ -87,11 +88,15 @@ export function fakeResident(routes: { readonly [route: string]: FakeRoute }, st
     stop: () => Effect.void,
     recovered: () => Effect.void,
   }
-  return Layer.merge(Layer.succeed(Resident, resident), Layer.succeed(ResidentControl, control))
+  const recovery: ResidentRecovery.Shape = {
+    review: () => succeed({ reviewable: false }),
+    restart: () => Effect.fail(new ResidentUnavailable({ state: "stopped", reason: "not-held" })),
+  }
+  return Layer.mergeAll(Layer.succeed(Resident, resident), Layer.succeed(ResidentControl, control), Layer.succeed(ResidentRecovery, recovery))
 }
 
-/** A Cloud and CloudServices layer for tests and stories: `routes` keyed `"METHOD /path"` give each answer's data; signed out, every route but a public one is refused. */
-export function fakeCloud(routes: { readonly [route: string]: unknown }, options: { readonly signedIn?: boolean; readonly status?: { readonly [route: string]: number } } = {}) {
+/** A Cloud and CloudServices layer for tests and stories: `routes` keyed `"METHOD /path"` give each answer's data, `status` its HTTP status and `retryAfter` a 429's wait in seconds; signed out, every route is refused. */
+export function fakeCloud(routes: { readonly [route: string]: unknown }, options: { readonly signedIn?: boolean; readonly status?: { readonly [route: string]: number }; readonly retryAfter?: { readonly [route: string]: number } } = {}) {
   const base = "https://cloud.test"
   const signedIn = options.signedIn ?? true
   const said = (method: string, path: string, body: unknown) => answerRoute(routes, options.status, signedIn, method, path, body)
@@ -101,7 +106,11 @@ export function fakeCloud(routes: { readonly [route: string]: unknown }, options
       const reply = said(method, path, body)
       const outcome = cloudOutcomeOf(reply.status)
       if (outcome === "CloudSignedOutNow") throw new CloudSignedOut()
-      if (outcome === "CloudDown") throw new CloudUnavailable({ status: reply.status, message: `Cloud request failed (HTTP ${reply.status}).` })
+      if (outcome === "CloudDown") {
+        const wait = options.retryAfter?.[`${method} ${path.split("?")[0]}`]
+        const advice = adviceOf(reply.status, wait !== undefined && Number.isSafeInteger(wait), wait ?? 0)
+        throw new CloudUnavailable({ status: reply.status, message: `Cloud request failed (HTTP ${reply.status}).`, ...(advice.tag === "WaitSeconds" ? { retryAfter: advice.seconds } : {}) })
+      }
       return reply.data
     },
   }

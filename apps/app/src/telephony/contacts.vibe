@@ -5,6 +5,8 @@ import {
   Machine as ContactsMachine, type ContactRow, type ContactsAnswer, type Detail, type EditMode, type Event as ContactsEvent, type WriteAnswer,
 } from "../../gen/telephony__contacts.effect.vibe"
 import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+import { contactsRouteOf } from "./routes.vibe"
 import { DeletionUndo } from "./undo.vibe"
 
 /** What Alpha may read of the open contact (`contact_read_selected`). */
@@ -16,8 +18,8 @@ export interface OpenContactRead {
 
 /** Contacts' effects over the image's address book. */
 export service ContactsView {
-  /** One visit of Contacts: the address book is open for it and closed when it ends. */
-  visit(): void!!
+  /** One visit of Contacts, opened at `route` (`filter:<query>` is Alpha's filter): while it is in front on an unlocked phone the address book is open, and it closes when it leaves. */
+  visit(route?: string): void!!
   /** Read the list for `query`; `explicit` is the owner's own Refresh, the only read that can settle an unknown write. */
   read(query: string, explicit: boolean): void!!
   /** Ask Android for Contacts access, then read again. */
@@ -79,6 +81,7 @@ export const contactsViewLayer = Layer.effect(ContactsView, effect {
   const bridgeCall = callerOf(try TelephonyBridges)
   const contacts = try ContactsMachine
   const undo = try DeletionUndo
+  const front = try frontChanges()
   const tell = (event: ContactsEvent) => contacts.send(event) catch () => undefined
 
   effect function answer(ticket: number, explicit: boolean) {
@@ -110,16 +113,20 @@ export const contactsViewLayer = Layer.effect(ContactsView, effect {
   }
 
   return {
-    effect visit() {
-      if ((try tell({ type: "contactsShown" })) === undefined) return
-      try (bridgeCall("open", (c) => c.contacts.open()) catch () => undefined)
-      try ensuring(effect {
-        const { epoch } = try contacts.get()
-        try answer(epoch, false)
-        try Effect.never
-      }, effect {
-        try tell({ type: "contactsHidden" })
-        try (bridgeCall("close", (c) => c.contacts.close()) catch () => undefined)
+    effect visit(route?: string) {
+      const ask = contactsRouteOf(route)
+      try whileInFront(front, effect (first: boolean) => {
+        if ((try tell({ type: "contactsShown" })) === undefined) return
+        try (bridgeCall("open", (c) => c.contacts.open()) catch () => undefined)
+        try ensuring(effect {
+          const filtered = first && ask.tag === "Filter" && ask.query !== "" ? try tell({ type: "alphaFiltered", query: ask.query, label: ask.query }) : undefined
+          const { epoch } = filtered ?? (try contacts.get())
+          try answer(epoch, false)
+          try Effect.never
+        }, effect {
+          try tell({ type: "contactsHidden" })
+          try (bridgeCall("close", (c) => c.contacts.close()) catch () => undefined)
+        })
       })
     },
     read,
@@ -167,7 +174,7 @@ export const contactsViewLayer = Layer.effect(ContactsView, effect {
       const detail = c.detail
       if (detail.tag !== "DetailRead" || !isContactId(detail.contactId) || !isContactVersion(detail.version)) return
       if ((try tell({ type: "deleteStarted" })) === undefined) return
-      const deferred = try undo.defer("ContactDeletion", [detail.contactId])
+      const deferred = try undo.defer({ kind: "contact", reviewed: { id: detail.contactId as ContactId, version: detail.version as ContactVersion } })
       const after = try tell({ type: "deleteAnswered", written: deferred.queued ? "WriteDeleted" : deferred.refused ? "WriteFailed" : "WriteUnknown" })
       if (after !== undefined && after.openId !== "") try loadDetail()
       try reread()

@@ -6,5 +6,5 @@ const noop = () => {};
 
 export const meta: ComponentMeta<ToastRegionProps> = {
   args: { toasts: undoToast, onHold: noop, onRelease: noop, onAction: noop },
-  examples: { Failure: { toasts: { ...undoToast, shown: { message: "Couldn't share. Try again.", chars: 26, action: "", failure: true } } } },
+  examples: { Failure: { toasts: { ...undoToast, shown: { message: "Couldn't share. Try again.", chars: 26, undo: "", failure: true } } } },
 };

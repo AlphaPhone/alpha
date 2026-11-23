@@ -5,6 +5,7 @@ import type { Recipient } from "../../maps/maps.schema.vibe";
 import { Button } from "../components/ui/index.ts";
 import googleBadge from "./google-maps-attribution.svg";
 
+/** What the credits show: the credit form for the basemap, the copyright of the view, who receives requests, and the location help. */
 export type MapCreditsProps = {
   credits: Credits;
   /** The copyright of the view in place, in full; never truncated. */
@@ -18,6 +19,9 @@ export type MapCreditsProps = {
   onClose: () => void;
   /** Search by typing a latitude and longitude instead of using location. */
   onCoordinates: () => void;
+  /** Android refused location to Maps, so the panel offers its settings. */
+  locationDenied: boolean;
+  onLocationSettings: () => void;
 };
 
 /** Who receives searches and route points, in one sentence, or "" for none. */
@@ -32,7 +36,7 @@ export function disclosure(recipients: ReadonlyArray<Recipient>): string {
  * @model spec/maps/plane.md
  * @design design.md
  */
-export function MapCredits({ credits, copyright, attribution, recipients, open, onOpen, onClose, onCoordinates }: MapCreditsProps) {
+export function MapCredits({ credits, copyright, attribution, recipients, open, onOpen, onClose, onCoordinates, locationDenied, onLocationSettings }: MapCreditsProps) {
   const text = copyright || attribution;
   return (
     <div className="flex flex-col items-start gap-2">
@@ -53,8 +57,13 @@ export function MapCredits({ credits, copyright, attribution, recipients, open, 
             <Button variant="ghost" size="icon" aria-label="Close map information" onClick={onClose}><X aria-hidden /></Button>
           </div>
           {recipients.length > 0 && <p className="text-sm text-muted-foreground">{disclosure(recipients)}</p>}
-          <p className="text-sm text-muted-foreground">Location access does not share it with your agent.</p>
-          <Button variant="secondary" size="sm" onClick={onCoordinates}>Enter coordinates</Button>
+          <p className="text-sm text-muted-foreground">
+            {locationDenied ? "Allow location in settings, or enter coordinates." : "Location access does not share it with your agent."}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {locationDenied && <Button variant="secondary" size="sm" onClick={onLocationSettings}>Open settings</Button>}
+            <Button variant="secondary" size="sm" onClick={onCoordinates}>Enter coordinates</Button>
+          </div>
         </section>
       )}
     </div>

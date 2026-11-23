@@ -8,6 +8,7 @@ import {
 import type { BillingDetails } from "../../account/billing.vibe";
 import { Button, Card, CardTitle, Input, Spinner } from "../components/ui/index.ts";
 
+/** The plan manager's state, Cloud's offers and the owner's plan actions. */
 export interface PlanManagerProps {
   billing: Billing;
   details: BillingDetails;

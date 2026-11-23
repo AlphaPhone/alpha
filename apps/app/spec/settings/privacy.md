@@ -58,6 +58,13 @@ pure def sometimesAStopUnconfirmed(r: ListenerRow): bool = r.stopUnconfirmed and
 pure def sometimesPausedByTheOwner(r: ListenerRow): bool = r.shown == ListenerPaused and r.actions >= 1
 ```
 
+### A stop the listener could not confirm shows on the Settings root too, with Android's Settings one tap away
+
+```quint
+pure def micMayBeOn(r: ListenerRow): bool = r.stopUnconfirmed
+pure def lawAnUnconfirmedStopIsShown(r: ListenerRow): bool = r.stopUnconfirmed implies micMayBeOn(r)
+```
+
 ### The microphone counts as on while the listener has it open, whatever its state says
 
 ```quint

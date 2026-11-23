@@ -138,3 +138,15 @@ pure def restoreRecord(d: Delegation, finishing: bool): DelegationStep =
 pure def stepAnotherAccountHoldsNoGrant(before: Delegation, via: str, after: Delegation): bool =
   via == "ownerChanged" implies (not(after.grant) and after.record == NoRecord)
 ```
+
+### Removing the grant is reviewed with what reads through it, and only a pending disconnect is retried as it is
+
+Removing the delegation's grant opens the digest sources' removal review (spec/workflows/digestSources.md),
+which lists every saved source and digest that reads through it (#983). A grant whose local reads are
+already off but whose Cloud disconnect is unconfirmed is offered a plain retry.
+
+```quint
+type GrantRemoval = RemoveGrant | RetryDisconnect
+pure def removalSent(kind: GrantRemoval, reviewed: bool): bool = kind == RetryDisconnect or reviewed
+pure def lawOnlyAPendingDisconnectSkipsTheReview(reviewed: bool): bool = removalSent(RemoveGrant, reviewed) iff reviewed
+```

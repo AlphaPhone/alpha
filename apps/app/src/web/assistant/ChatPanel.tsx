@@ -16,13 +16,16 @@ import { AssistantFlows } from "../../assistant/flows.vibe";
 import { pickForChat } from "../../assistant/files-bridge.vibe";
 import { emptyTranscript, type ProposalCard, type Row } from "../../assistant/transcript.vibe";
 import { unitsOf } from "../../assistant/units.vibe";
+import { MapsHandoff } from "../../maps/handoff.vibe";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Button, ScrollArea } from "../components/ui/index.ts";
 import { ChatSearchPanel } from "./ChatSearchPanel.tsx";
 import { ComposerBar } from "./ComposerBar.tsx";
 import { Transcript } from "./Transcript.tsx";
-import { emergencyNow, filesStream, inferenceOf, run, runtime, targetStream, transcriptStream } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
+import { emergencyNow, filesStream, inferenceOf, ownAddressNow, run, targetStream, transcriptStream } from "./services.ts";
 import { useServiceStream } from "./use-stream.ts";
 
+/** Where the conversation sends what it cannot show itself. */
 export type ChatPanelProps = {
   /** Open an app view the agent or a card named. */
   open: (app: string, route?: string) => void;
@@ -50,7 +53,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
   const text = draftText(drafts);
   const inference = inferenceOf();
   const now = Date.now();
-  const sendable = canSend({ ...sends, composer: unitsOf(text) }, false, true, []) || (files.length > 0 && !sends.typing);
+  const sendable = !draftUnsettled(drafts) && (canSend({ ...sends, composer: unitsOf(text) }, false, true, []) || (files.length > 0 && !sends.typing));
   const act = (card: ProposalCard, work: Effect.Effect<Row, unknown, DeviceReview | Composer>) => {
     setBusyCard(card.proposalId);
     runtime.runPromise(Effect.flatMap(work, (row) => Effect.flatMap(Effect.service(Composer), (composer) => composer.replaceRow(row))))
@@ -85,8 +88,8 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
         : (
           <ScrollArea className="min-h-0 flex-1 px-4">
             <Transcript
-              rows={transcript.rows} typing={sends.typing} draftEmpty={text.trim() === ""} canFork cloud={inference.provider}
-              emergency={emergencyNow()} busyCard={busyCard} now={now} emptyText={copy.emptyChat}
+              rows={transcript.rows} typing={sends.typing} draftEmpty={text.trim() === ""} canFork={transcript.conversation !== null} cloud={inference.provider}
+              emergency={emergencyNow()} ownAddress={ownAddressNow()} busyCard={busyCard} now={now} emptyText={copy.emptyChat}
               onQuote={(quote) => composer((c) => c.aim({ kind: "reply", quote }))}
               onEdit={(row) => composer((c) => c.aim({ kind: "edit", messageId: row.id, text: row.text, requestId: crypto.randomUUID() }))}
               onApprove={approve} onDecline={decline}
@@ -94,6 +97,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
               onChoose={(value) => composer((c) => c.send(value))}
               onPlan={() => open("account")}
               onOpenRun={(workflowId, runId) => open("workflows", `${workflowId}/${runId}`)}
+              onOpenMap={(card, ordinal) => { runtime.runFork(Effect.catchCause(Effect.flatMap(Effect.service(MapsHandoff), (maps) => maps.openCard(card, { message: ordinal, session: 1, conversation: 1, revision: 0 })), () => Effect.void)); }}
               onEmail={onEmail}
             />
           </ScrollArea>

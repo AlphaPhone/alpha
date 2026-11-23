@@ -1,0 +1,55 @@
+// spec/account/delegation.md, "The native shell keeps each return until its authorization is finished"; spec/account/delegation.md, "A pending authorization belongs to its account, and is restored for it"
+
+/** A pending authorization as the secure slot keeps it; the code arrives only with the return. */
+export schema PendingRecord {
+  state: string
+  authUrl: string
+  expiresAt: string
+  phase: "waiting" | "finishing"
+  code?: string
+}
+
+/** `AlphaConnection.secureRead`: the slot's value, absent when the slot is empty. */
+export schema SecureValue {
+  value?: string
+}
+
+/** `AlphaConnection.secureCompareExchange`: whether the expected value was replaced. */
+export schema SwapAnswer {
+  status: "saved" | "conflict"
+}
+
+/** The resident's start answer. */
+export schema Started {
+  authUrl: string
+  expiresAt: string
+}
+
+/** Cloud's state for an authorization. */
+export schema Status {
+  status: "waiting" | "finishing" | "complete" | "failed"
+  grantId?: string
+}
+
+/** The return the native shell keeps. */
+export schema Callback {
+  state: string
+  code?: string
+  error?: string
+}
+
+/** `AlphaConnection.readDelegationCallback`: the kept return, absent when there is none. */
+export schema CallbackSlot {
+  callback?: Callback
+}
+
+/** One grant whose revocation has not finished. */
+export schema PendingRevocation {
+  grantId: string
+  expiresAt: string
+}
+
+/** The grants whose revocation has not finished. */
+export schema Revocations {
+  grants: Array<PendingRevocation>
+}

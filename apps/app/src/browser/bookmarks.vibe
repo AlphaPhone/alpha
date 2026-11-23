@@ -1,6 +1,5 @@
 // spec/browser/bookmarks.md, "Story: Keep my bookmarks whole"
 import { type BookmarkEffect, type Bookmarks, type Event, Machine, machine } from "../../gen/browser__bookmarks.effect.vibe"
-import { Navigation } from "../shell/navigation.vibe"
 import { Toasts } from "../shell/toasts.vibe"
 import { refusalText } from "./messages.ts"
 import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
@@ -14,7 +13,7 @@ export service BrowserBookmarks {
   refresh(quiet: boolean): void!!
   /** Saves or removes one address, keeping the page's name with it. */
   set(url: string, title: string, saved: boolean): void!!
-  /** Opens the recovery of a damaged saved list in Settings. */
+  /** The owner's Recover: the damaged saved list is kept exactly as it is, and the owner is told so. */
   recover(): void!!
 }
 
@@ -23,7 +22,6 @@ export const bookmarksLayer = Layer.provideMerge(Layer.effect(BrowserBookmarks, 
   const marks = try Machine
   const host = try TabHost
   const toasts = try Toasts
-  const apps = try Navigation
   const lastFailure = try Ref.make("")
 
   effect function perform(out: BookmarkEffect) {
@@ -57,6 +55,6 @@ export const bookmarksLayer = Layer.provideMerge(Layer.effect(BrowserBookmarks, 
     get: () => marks.get(),
     refresh: (quiet: boolean) => send({ type: "requestRefresh", quiet }),
     set: (url: string, title: string, saved: boolean) => send({ type: "requestSave", url, title, saved }),
-    effect recover() { try apps.open("settings", "bookmark-recovery") },
+    recover: () => toasts.show("Saved bookmarks were kept as they are. Nothing was replaced."),
   }
 }), machine())

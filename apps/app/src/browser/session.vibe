@@ -1,14 +1,17 @@
-// spec/browser/session.md, "Story: Browse in tabs"; spec/browser/session.md, "Story: Keep my normal tabs and history across restarts"; spec/browser/session.md, "Story: Clear my browsing data"; spec/browser/persistence.md, "Story: Save my tabs without ever losing the saved record"; spec/browser/downloads.md, "Show in Files opens Files at Downloads only for this Browser session's list"
+// spec/browser/session.md, "Story: Browse in tabs"; spec/browser/page.md, "Story: Type an address or search words"; spec/browser/session.md, "A link the owner taps outside Browser opens in a new tab and is never searched"; spec/browser/session.md, "Story: Keep my normal tabs and history across restarts"; spec/browser/session.md, "Story: Clear my browsing data"; spec/browser/persistence.md, "Story: Save my tabs without ever losing the saved record"; spec/browser/downloads.md, "Show in Files opens Files at Downloads only for this Browser session's list"
+import { BROWSER_FIND_TEXT_MAX } from "@elizaos/plugin-browser/contract"
 import { type AgentSettled, type Event, type NativeReport, type Session, type SessionEffect, Machine, curTab, machine, mayPersist, snapshotOf, tabOf } from "../../gen/browser__session.effect.vibe"
 import { type WriterEffect, Machine as WriterMachine, machine as writerMachine } from "../../gen/browser__persistence.effect.vibe"
 import type { SavedSession, TabPage } from "../../gen/browser__page.ts"
 import { Navigation } from "../shell/navigation.vibe"
 import { Toasts } from "../shell/toasts.vibe"
-import { cleanTitle, insecureHttp, newTabId, now, pageFacts } from "./address.ts"
+import { classifyAddress } from "../../gen/browser__page.effect.vibe"
+import { mayClearSite } from "../../gen/browser__site.effect.vibe"
+import { addressFor, cleanTitle, insecureHttp, linkAddress, newTabId, now, pageFacts, secureTypedAddress, typedAddress } from "./address.ts"
 import { PROFILE_UNSUPPORTED_NATIVE, SESSION_NOTICES, noticeText, refusalText } from "./messages.ts"
 import { BrowserReviews } from "./reviews.vibe"
 import { BrowserCallFailed, TabHost, ours } from "./tabHost.vibe"
-import { Cleared, FindResult, Fullscreen, SavedRecord, ShowDownloads, SiteCleared, StateChanged, TabEvent, TabNotice, TabOpened } from "./tabHost.schema.vibe"
+import { Cleared, CommandReceipt, FindResult, Fullscreen, SavedRecord, ShowDownloads, SiteCleared, StateChanged, TabEvent, TabNotice, TabOpened } from "./tabHost.schema.vibe"
 
 /** What one event did: whether the rules allowed it, the agent requests it settled, and whether Back was left to the shell. */
 export interface Dispatched {
@@ -26,6 +29,10 @@ export service BrowserTabs {
   get(): Session!!
   /** One session event and every native call it leads to. */
   dispatch(event: Event): Dispatched!!
+  /** Enter in the address field: the typed address, the local development host or a search, in the selected tab; refused text says why. */
+  enter(text: string): void!!
+  /** A link the owner tapped in another app: a new tab on that address, or a notice when it is not a web address. */
+  openLink(url: string): void!!
   /** Starts the host's Browser: the first tab, the native events, the restore and the saver. Never returns. */
   run(): void!!
   /** A keystroke in the find bar, searched natively after a short pause. */
@@ -101,6 +108,9 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
         if (sent instanceof BrowserCallFailed) {
           done.failed = true
           try refused(sent)
+        } else {
+          const receipt = Schema.decodeUnknownOption(CommandReceipt)(sent)
+          if (Option.isSome(receipt) && ((receipt.value.session ?? host.session) !== host.session || (receipt.value.id ?? id) !== id)) done.failed = true
         }
       }
       when { tag: "SearchFind", let id, let query }: host.call("find", { id, query }) catch effect (error) => { try refused(error) }
@@ -127,10 +137,20 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
         when { tag: "Write", let snapshot }: {
           const ok = (host.call("saveBrowsingState", snapshot) catch () => undefined) !== undefined
           const next = writer.send({ type: "writeSettled", ok, now: now() }) catch () => undefined
+          if (!ok) try retryLater()
           if (next !== undefined) try write(next.out)
         }
         when { tag: "WarnSaveFailed" }: try toast("Tabs and history couldn’t be saved. Alpha will try again shortly.")
       }
+    }
+  }
+
+  effect function retryLater() {
+    const wait = (try writer.get()).retryAt - now()
+    if (wait <= 0) return
+    fork.detached effect {
+      try sleep(Duration.millis(wait))
+      try save(try tabs.get())
     }
   }
 
@@ -197,8 +217,20 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
       try dispatch({ type: "startBrowser", onDevice: host.onDevice, id: newTabId() })
       try.all [listen(), restore()]
     },
+    effect enter(text: string) {
+      const typed = typedAddress(secureTypedAddress(text, host.onDevice))
+      try dispatch({ type: "submitAddress", facts: typed.facts, url: addressFor(classifyAddress(typed.facts, false), typed) })
+    },
+    effect openLink(raw: string) {
+      const url = linkAddress(raw, host.onDevice)
+      if (url === undefined) {
+        try toast(SESSION_NOTICES.InvalidAddress)
+        return
+      }
+      try dispatch({ type: "openLink", id: newTabId(), url })
+    },
     effect typeFind(query: string) {
-      const cleaned = query.replace(/[\u0000-\u0008\u000a-\u001f\u007f]/g, "")
+      const cleaned = query.replace(/[\u0000-\u0008\u000a-\u001f\u007f]/g, "").slice(0, BROWSER_FIND_TEXT_MAX)
       const typed = try dispatch({ type: "typeFind", query: cleaned })
       if (!typed.accepted) return
       const id = (try tabs.get()).find.tab
@@ -235,7 +267,7 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
       const state = try tabs.get()
       const page = curTab(state).page
       const site = URL.parse(page.url)?.hostname ?? ""
-      if (!host.onDevice || site === "" || !page.committed || page.failed) {
+      if (!mayClearSite({ nativeHost: host.onDevice, committed: page.committed, failed: page.failed, hasHost: site !== "" })) {
         try toast("Load a website before clearing its data.")
         return
       }

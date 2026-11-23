@@ -61,17 +61,17 @@ export function primeAudio(): void {
   }
 }
 
-/** Plays one short tone: 880 Hz for an alarm or timer, 660 Hz for a new notice. `volume` is 0 to 100.
+/** Plays one short 880 Hz alarm or timer tone. `volume` is 0 to 100.
  * @throws {never}
  */
-export function playTone(kind: "alarm" | "notice", volume: number): void {
+export function playTone(volume: number): void {
   const level = Number.isFinite(volume) ? Math.max(0, Math.min(100, volume)) / 100 : 0.7;
   if (!level || !context || context.state !== "running") return;
   try {
   const tone = context.createOscillator();
   const gain = context.createGain();
   const at = context.currentTime;
-  tone.frequency.value = kind === "alarm" ? 880 : 660;
+  tone.frequency.value = 880;
   gain.gain.setValueAtTime(0, at);
   gain.gain.linearRampToValueAtTime(level * 0.12, at + 0.015);
   gain.gain.linearRampToValueAtTime(0, at + 0.3);

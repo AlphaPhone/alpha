@@ -18,8 +18,11 @@ export function Section({ caption, children }: SectionProps) {
   );
 }
 
+/** A state word and the token its dot is drawn in. */
+export interface StateMarkProps { readonly state: StateWord }
+
 /** A state shown as a dot and its word; the word is the accessible name of the dot. */
-export function StateMark({ state }: { readonly state: StateWord }) {
+export function StateMark({ state }: StateMarkProps) {
   const dot = { ok: "bg-ok", warn: "bg-warn", muted: "bg-muted-foreground", destructive: "bg-destructive" } as const;
   return (
     <span className="inline-flex items-center gap-2">

@@ -84,7 +84,9 @@ export const billingService = Layer.effect(Membership, effect {
   const checkoutKey = try Ref.make("")
   const quoteId = try Ref.make("")
   const accountCode = try Ref.make("")
-  const pendingCode = try Ref.make("")
+  const fundsCents = try Ref.make(0)
+  const referral = try Ref.make("")
+  const scope = try Scope.Scope
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -95,9 +97,7 @@ export const billingService = Layer.effect(Membership, effect {
   effect function openPage(url: string) {
     if (!stripePageAllowed(url)) return false
     const opened = native.invoke("AlphaConnection", "openExternal", { url, requestId: freshKey() }) catch () => false
-    if (opened === false) return false
-    try entitlement.paymentPageOpened()
-    return true
+    return opened !== false
   }
 
   effect function performAuthority(operation: Record<string, unknown>) {
@@ -160,7 +160,7 @@ export const billingService = Layer.effect(Membership, effect {
     try Ref.set(quoteId, review.quoteId)
     try SubscriptionRef.update(details, (d) => ({ ...d, quote: { dueNowCents: review.review.dueNow.amountDueCents, recurringCents: review.review.recurringEstimate.amountDueCents, effectiveAt: review.review.effectiveAt, expiresAt: review.review.expiresAt } }))
     try send({ type: "quoteReceived", plan: target })
-    fork.detached quoteTimer(review.review.expiresAt)
+    fork.in(scope) quoteTimer(review.review.expiresAt)
   }
 
   effect function quoteTimer(expires: number) {
@@ -204,8 +204,8 @@ export const billingService = Layer.effect(Membership, effect {
   }
 
   effect function fundsCheckout() {
-    const cents = Number(try Ref.get(pendingCode))
-    try Ref.set(pendingCode, "")
+    const cents = try Ref.get(fundsCents)
+    try Ref.set(fundsCents, 0)
     const target = billingReturnUrl(authority)
     const page = Effect.flatMap(cloud.json("POST", "/api/v1/credits/checkout", { amountUsd: cents / 100, success_url: target, cancel_url: `${target}?cancelled=1` }), Schema.decodeUnknownEffect(FundsCheckout)) catch () => undefined
     const opened = page !== undefined && (try openPage(page.url))
@@ -222,8 +222,8 @@ export const billingService = Layer.effect(Membership, effect {
   }
 
   effect function referralCode() {
-    const code = try Ref.get(pendingCode)
-    try Ref.set(pendingCode, "")
+    const code = try Ref.get(referral)
+    try Ref.set(referral, "")
     const applied = (cloud.json("POST", "/api/v1/referrals/apply", { code }) catch () => undefined) !== undefined
     try send({ type: "referralSettled", ok: applied })
   }
@@ -242,7 +242,7 @@ export const billingService = Layer.effect(Membership, effect {
         when "ConfirmChange": try confirmPlanChange();
         when "PerformCancel": try lifecycle("cancel");
         when "PerformKeep": try lifecycle("undo-cancel");
-        when "OpenPaymentPage": undefined;
+        when "OpenPaymentPage": try entitlement.paymentPageOpened();
         when "StartFundsCheckout": fundsCheckout() catch () => undefined;
         when "RedeemCode": redeemCode() catch () => undefined;
         when "ApplyReferral": referralCode() catch () => undefined;
@@ -280,7 +280,7 @@ export const billingService = Layer.effect(Membership, effect {
 
   return {
     changes: machine.changes,
-    details: details.changes,
+    details: SubscriptionRef.changes(details),
     effect run() {
       try send({ type: "configure", deployment })
       try.all [ignore(followAccount()), ignore(followReturns())]
@@ -305,7 +305,7 @@ export const billingService = Layer.effect(Membership, effect {
     effect closeFunds() { try send({ type: "closeFunds" }) },
     effect addFunds(cents: number) {
       if (!fundsAmountAccepted(cents)) return
-      try Ref.set(pendingCode, String(cents))
+      try Ref.set(fundsCents, cents)
       try send({ type: "startFunds", cents })
     },
     effect redeem(code: string) {
@@ -317,7 +317,7 @@ export const billingService = Layer.effect(Membership, effect {
     effect applyReferral(code: string) {
       const normalized = normalizeReferral(code)
       if (normalized === undefined) return
-      try Ref.set(pendingCode, normalized)
+      try Ref.set(referral, normalized)
       try send({ type: "applyReferral" })
     }
   }

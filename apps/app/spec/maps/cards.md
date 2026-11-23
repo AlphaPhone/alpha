@@ -55,7 +55,7 @@ pure val initial: ChatCards = {
   session: 1, conversation: 1, newest: 0, fromAgent: false, question: false, revision: 0, composer: quietComposer,
   answered: List(), inflight: List(), delivered: List(), notice: NoChoiceNotice, opened: List(),
 }
-pure def current(message: int, session: int, conversation: int, revision: int, s: ChatCards): bool =
+pure def isCurrent(message: int, session: int, conversation: int, revision: int, s: ChatCards): bool =
   message > 0 and message == s.newest and session == s.session and conversation == s.conversation and revision == s.revision and s.fromAgent
 pure def quiet(c: Composer): bool = not(c.busy) and not(c.typing) and not(c.recording) and not(c.hidden) and not(c.sheetOpen)
 pure val composerValues = Set(quietComposer, { ...quietComposer, draft: true }, { ...quietComposer, editing: true }, { ...quietComposer, busy: true })
@@ -86,7 +86,7 @@ pure def changeConversation(s: ChatCards, conversation: int): ChatCards = { ...s
 pure def canSetComposer(s: ChatCards, composer: Composer): bool = composer != s.composer
 pure def setComposer(s: ChatCards, composer: Composer): ChatCards = { ...s, composer: composer }
 pure def canOpenCard(s: ChatCards, message: int, session: int, conversation: int, revision: int): bool =
-  current(message, session, conversation, revision, s) and not(s.opened.includes(message))
+  isCurrent(message, session, conversation, revision, s) and not(s.opened.includes(message))
 pure def openCard(s: ChatCards, message: int, session: int, conversation: int, revision: int): ChatCards =
   { ...s, opened: s.opened.append(message) }
 pure def alwaysACardOpensOnce(s: ChatCards): bool = s.opened.every(m => s.opened.select(n => n == m).length() == 1)
@@ -96,7 +96,7 @@ pure def alwaysACardOpensOnce(s: ChatCards): bool = s.opened.every(m => s.opened
 
 ```quint
 pure def canTapChoice(s: ChatCards, message: int, session: int, conversation: int, revision: int): bool =
-  current(message, session, conversation, revision, s) and s.question and not(s.answered.includes(message)) and quiet(s.composer)
+  isCurrent(message, session, conversation, revision, s) and s.question and not(s.answered.includes(message)) and quiet(s.composer)
 pure def tapChoice(s: ChatCards, message: int, session: int, conversation: int, revision: int): ChatCards =
   if (s.composer.draft) { ...s, notice: DraftOpen }
   else if (s.composer.editing) { ...s, notice: EditingMessage }

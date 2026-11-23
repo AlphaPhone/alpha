@@ -2,14 +2,17 @@
 import { useState } from "react";
 import { WORKFLOW_OPERATION_LABELS } from "@elizaos/plugin-workflow/scope";
 import type { Authoring } from "../../../gen/workflows__authoring.ts";
-import type { ChangeOutcome, Described } from "../../workflows/definitions.vibe";
+import type { ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
 import { Alert, Button, Sheet, SheetContent, Textarea } from "../components/ui/index.ts";
 
+/** The typed draft sheet: the draft under review and the save kept for it. */
 export interface DraftSheetProps {
   open: boolean;
   authoring: Authoring;
   /** The last description's answer. */
   described?: Described;
+  /** When the described draft runs, as its review discloses it. */
+  note?: ScheduleNote;
   outcome?: ChangeOutcome;
   can: { readonly edit: boolean; readonly save: boolean; readonly resend: boolean; readonly recover: boolean; readonly discard: boolean };
   onOpenChange: (open: boolean) => void;
@@ -25,7 +28,7 @@ export interface DraftSheetProps {
  * @model spec/workflows/authoring.md
  * @design design.md
  */
-export function DraftSheet({ open, authoring, described, outcome, can, onOpenChange, onDescribe, onSave, onRecover, onResend, onDiscard }: DraftSheetProps) {
+export function DraftSheet({ open, authoring, described, note, outcome, can, onOpenChange, onDescribe, onSave, onRecover, onResend, onDiscard }: DraftSheetProps) {
   const [prompt, setPrompt] = useState("");
   const reviewing = authoring.review === authoring.spec && authoring.spec > 0 && authoring.pending === 0;
   const steps = described?.kind === "draft" ? described.spec.steps : [];
@@ -42,6 +45,10 @@ export function DraftSheet({ open, authoring, described, outcome, can, onOpenCha
               {steps.map((step, index) => <li key={step.id ?? index}>{WORKFLOW_OPERATION_LABELS[step.operation] ?? "Phone step"}</li>)}
             </ol>
           )}
+          {described?.kind === "draft" && note !== undefined && !note.manual && (
+            <p className="text-sm text-muted-foreground">Runs only while your phone and agent are on. A run more than {note.missedAfterMinutes} minutes late is recorded as missed and doesn’t run late.</p>
+          )}
+          {described?.kind === "draft" && note !== undefined && note.clockChange !== "" && <Alert variant="info" role="status" className="text-sm">{note.clockChange}</Alert>}
           {authoring.spec > 0 && !authoring.committed && <p className="text-sm text-muted-foreground">Saved paused. Turn it on when you are ready.</p>}
           {authoring.committed && <Alert variant="ok" role="status">Saved.</Alert>}
           {outcome === "unknown" && <Alert variant="warn" role="status">Your agent didn’t confirm the save. Check it before saving again.</Alert>}

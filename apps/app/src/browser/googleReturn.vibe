@@ -1,5 +1,6 @@
 // spec/browser/googleReturn.md, "Story: Link Google only when the account really changed"; spec/browser/googleReturn.md, "A callback is only a wakeup for the newest attempt of the same credential, and only a matching readback closes the panel"
 import { type Linking, beginLink, callback, readback } from "../../gen/browser__googleReturn.effect.vibe"
+import { GoogleAccountList } from "../account/google.schema.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 
 /** The Google link panel of the browser build: a returned callback wakes it, and only Cloud's readback closes it. */
@@ -17,11 +18,8 @@ export service GoogleLink {
 
 const unlinked: Linking = { credential: 0, attemptCredential: 0, attemptHost: 0, nonce: 0, used: false, expired: false, candidate: false, verified: false, panel: false }
 
-function linkedIn(answer: unknown): boolean {
-  return typeof answer === "object" && answer !== null && "connected" in answer && answer.connected === true
-}
 
-/** GoogleLink over a reference to its linking state and Cloud's account read. */
+/** GoogleLink over a reference to its linking state and Cloud's read of the owner's connected Google accounts. */
 export const googleLinkLayer = Layer.effect(GoogleLink, effect {
   const cloud = try Cloud
   const linking = try SubscriptionRef.make(unlinked)
@@ -34,8 +32,8 @@ export const googleLinkLayer = Layer.effect(GoogleLink, effect {
     effect returned(nonce: number, host: number) {
       const woken = try SubscriptionRef.updateAndGet(linking, (l) => callback(nonce, host, l))
       if (!woken.candidate) return
-      const answer = cloud.json("GET", "/api/v1/google/connection") catch () => undefined
-      try SubscriptionRef.update(linking, (l) => readback(linkedIn(answer), l))
+      const listed = effect { return try Schema.decodeUnknownEffect(GoogleAccountList)(try cloud.json("GET", "/api/v1/eliza/google/accounts?side=owner")) } catch () => undefined
+      try SubscriptionRef.update(linking, (l) => readback(listed !== undefined && listed.accounts.length > 0, l))
     },
     credentialChanged: (credential: number) => SubscriptionRef.update(linking, (l) => ({ ...l, credential, candidate: false, verified: false })),
     expire: () => SubscriptionRef.update(linking, (l) => ({ ...l, expired: true })),

@@ -1,18 +1,18 @@
-// spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "A 401 ends the session; every other refusal is Cloud unavailable with its status"; spec/platform/index.md, "Only a route the Cloud client lists is requested"; spec/platform/index.md, "The phone's key stays with native, and a leaving screen cancels only its own call"; spec/platform/index.md, "A request that needs the session is sent only while the owner is signed in"
+// spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "A 401 ends the session; every other refusal is Cloud unavailable with its status"; spec/platform/index.md, "Only a route the Cloud client lists is requested"; spec/platform/index.md, "The phone's key stays with native, and a leaving screen cancels only its own call"; spec/platform/index.md, "A request that needs the session is sent only while the owner is signed in"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"
 import { createCloudClient, lookupPath, type HttpMethod } from "@elizaos/cloud/client"
 import { cloudClient as nativeCloudClient, cloudPlugin } from "@elizaos/os/bridges/cloud"
-import type { CloudClient as NativeCloud, CloudPath } from "@elizaos/os/bridges/definitions/cloud"
-import { cloudOutcomeOf, routeAdmitted } from "../../gen/platform.effect.vibe"
+import type { CloudClient as NativeCloud, CloudPath, EnvironmentName } from "@elizaos/os/bridges/definitions/cloud"
+import { adviceOf, cloudOutcomeOf, routeAdmitted } from "../../gen/platform.effect.vibe"
 import { Build } from "./build.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "./cloud.vibe"
 import { CloudServices } from "./cloud-services.vibe"
-import { cloudAuthorityOf, cloudEnvironmentOf } from "./build-live.vibe"
-import { nativeCloudFetch, textOf } from "./cloud-fetch.ts"
+import { buildCloudEnvironment, cloudAuthorityOf, environmentName } from "./build-live.vibe"
+import { nativeCloudFetch, retryAfterSecondsOf, textOf } from "./cloud-fetch.ts"
 import { parsedJson } from "./native-capacitor.ts"
 import { ResidentRefusal } from "./native.schema.vibe"
 import type { CloudAuthority } from "./build-flags.ts"
 
-const verbs = { GET: "Get", POST: "Post", DELETE: "Delete" } as const satisfies Record<string, HttpMethod>
+const verbs = { GET: "Get", POST: "Post", PATCH: "Patch", DELETE: "Delete" } as const satisfies Record<string, HttpMethod>
 
 const signedOutFailures = new Set(["sign-in-required", "reauth-required"])
 
@@ -24,8 +24,9 @@ export function nativeFailureOf(cause: unknown): CloudUnavailable | CloudSignedO
     : new CloudUnavailable({ status: 0, code: failure, message: "Cloud could not be reached." })
 }
 
-/** The Cloud and CloudServices services over the native Cloud plugin `native`, for the Cloud at `authority`. */
-export function cloudOver(native: NativeCloud, authority: CloudAuthority) {
+/** The Cloud and CloudServices services over the native Cloud plugin `native`, for the Cloud at `authority` in the native environment `environment`. */
+export function cloudOver(native: NativeCloud, authority: CloudAuthority, environment: "production" | "staging" = "production") {
+  const named = environment as EnvironmentName
   const cloud: Cloud.Shape = {
     base: authority.api,
     effect json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) {
@@ -40,6 +41,7 @@ export function cloudOver(native: NativeCloud, authority: CloudAuthority) {
           path: url.pathname as CloudPath,
           ...(url.search === "" ? {} : { query: Object.fromEntries(url.searchParams) }),
           ...(body === undefined ? {} : { body }),
+          environment: named,
           signal,
         }),
         catch: nativeFailureOf,
@@ -49,25 +51,30 @@ export function cloudOver(native: NativeCloud, authority: CloudAuthority) {
       if (outcome === "CloudSignedOutNow") throw new CloudSignedOut()
       if (outcome === "CloudDown") {
         const said = Schema.decodeUnknownEffect(ResidentRefusal)(data) catch () => undefined
+        const now = try Clock.currentTimeMillis
+        const wait = retryAfterSecondsOf(reply.retryAfter, now)
+        const advice = adviceOf(reply.status, wait !== undefined, wait ?? 0)
         throw new CloudUnavailable({
           status: reply.status,
           message: said?.message ?? said?.error ?? `Cloud request failed (HTTP ${reply.status}).`,
           ...(said?.error === undefined ? {} : { code: said.error }),
+          ...(advice.tag === "WaitSeconds" ? { retryAfter: advice.seconds } : {}),
         })
       }
       return data
     },
   }
   const services: CloudServices.Shape = {
-    client: createCloudClient({ baseUrl: authority.api, credential: () => undefined, fetch: nativeCloudFetch(native, authority.api) }),
+    client: createCloudClient({ baseUrl: authority.api, credential: () => undefined, fetch: nativeCloudFetch(native, authority.api, named) }),
     authority,
-    openExternal: (url: string) => tryPromise({ try: () => native.openExternal({ url }), catch: () => new CloudUnavailable({ status: 0, code: "link-refused", message: "Can’t open page" }) }),
+    openExternal: (url: string) => tryPromise({ try: () => native.openExternal({ url, environment: named }), catch: () => new CloudUnavailable({ status: 0, code: "link-refused", message: "Can’t open page" }) }),
   }
   return Layer.merge(Layer.succeed(Cloud, cloud), Layer.succeed(CloudServices, services))
 }
 
-/** The Cloud this build talks to, through the agent service's `ElizaCloud` plugin. */
+/** The Cloud this build talks to, through the agent service's `ElizaCloud` plugin, every request naming the build's environment. */
 export const cloudLive = Layer.unwrap(effect {
   const build = try Build
-  return cloudOver(nativeCloudClient(cloudPlugin()), cloudAuthorityOf(cloudEnvironmentOf(build.info)))
+  const environment = buildCloudEnvironment(build.info)
+  return cloudOver(nativeCloudClient(cloudPlugin()), cloudAuthorityOf(environment), environmentName(environment))
 })

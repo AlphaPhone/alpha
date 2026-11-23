@@ -26,7 +26,7 @@ pure val initial: WorkflowNotices = { stage: WIdleTap, source: WorkflowTap, gene
 pure def back(again: bool, w: WorkflowNotices): WorkflowNotices = { ...w, stage: WIdleTap, token: "", runId: "", question: false, recheck: again }
 pure def canTapAnnounced(w: WorkflowNotices): bool = not(w.recheck)
 pure def tapAnnounced(w: WorkflowNotices): WorkflowNotices = { ...w, recheck: true }
-pure def canViewMoved(w: WorkflowNotices): bool = w.generation < 4
+pure def canViewMoved(w: WorkflowNotices): bool = true
 pure def viewMoved(w: WorkflowNotices): WorkflowNotices = { ...w, generation: w.generation + 1, stage: if (w.stage == WQuestionTap) WIdleTap else w.stage }
 pure def canBeginCheck(w: WorkflowNotices, source: NoticeTapSource): bool = w.stage == WIdleTap and w.recheck
 pure def beginCheck(w: WorkflowNotices, source: NoticeTapSource): WorkflowNotices =

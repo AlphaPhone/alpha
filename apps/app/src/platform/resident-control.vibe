@@ -1,4 +1,4 @@
-// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"
+// spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "A held start runs again only after the owner reviewed what the service kept and the service archived it"
 import type { Resident as ResidentConnection } from "../../gen/platform__resident.ts"
 import type { ResidentUnavailable } from "./resident.vibe"
 
@@ -22,4 +22,17 @@ export service ResidentControl {
   stop(): void!ResidentUnavailable
   /** After the owner reviewed a held recovery, lets the agent start again. */
   recovered(): void!!
+}
+
+/** What the agent service holds after a start it will not retry: a reviewable hold with its one-use token and how many interrupted requests it kept, or nothing to review. */
+export type HeldRecovery =
+  | { readonly reviewable: true; readonly reviewToken: string; readonly retainedCount: number }
+  | { readonly reviewable: false }
+
+/** The owner's guarded restart of an agent the service holds for review; nothing it kept is ever replayed. */
+export service ResidentRecovery {
+  /** Asks the service what it kept from the start it holds. */
+  review(): HeldRecovery!!
+  /** Archives what the owner reviewed under `reviewToken`, then starts the agent again; refused while nothing is held or the archive is not confirmed. */
+  restart(reviewToken: string): void!ResidentUnavailable
 }

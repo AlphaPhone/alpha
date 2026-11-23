@@ -4,6 +4,7 @@ import { ArrowUp, Folder, FolderPlus } from "lucide-react";
 import type { Row } from "../../../gen/files__storage.ts";
 import { Button, Dialog, DialogContent, DialogTitle, ListRow, Skeleton } from "../components/ui/index.ts";
 
+/** The rows being moved or copied, the folder the picker shows and how the owner walks and confirms it. */
 export type DestinationDialogProps = {
   /** Move or copy. */
   op: "move" | "copy";

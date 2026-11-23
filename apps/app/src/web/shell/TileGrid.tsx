@@ -15,6 +15,7 @@ export interface GestureControls {
   erase: (key: string) => void;
 }
 
+/** A grid of tiles with one pointer's press and drag custody. */
 export interface TileGridProps {
   faces: readonly TileFace[];
   /** Home's edit mode. */

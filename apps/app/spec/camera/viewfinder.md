@@ -25,13 +25,13 @@ type Lens = BackLens | FrontLens
 type RecordStart = RecordingStarted | MicrophoneRefused | RecordingNotStarted
 type Grant = AccessGranted | AccessNotGranted | AccessUnreadable
 type Camera = {
-  visible: bool, chat: Chat, landscape: bool, graceOver: bool, hold: bool,
+  visible: bool, onScreen: bool, chat: Chat, landscape: bool, graceOver: bool, hold: bool,
   phase: Phase, epoch: int, released: bool, notice: Notice,
   mode: Mode, bound: Mode, binding: bool,
   recording: Recording, withSound: bool, noSoundChosen: bool, stopCause: StopCause, saidMaxLength: bool, micDenied: bool,
   timer: int, countdown: int, capturing: bool, pendingShot: bool, elapsed: int, recordedBytes: int,
   flash: Flash, hasFlash: bool, light: bool, lens: Lens, zoom: int, widest: int, longest: int, grid: bool,
-  volumeKeys: bool, photos: int, lastShotChat: Chat, lastId: str, lastImage: str
+  volumeKeys: bool, modal: bool, photos: int, lastShotChat: Chat, lastId: str, lastImage: str
 }
 ```
 
@@ -41,13 +41,13 @@ Zoom is in tenths: 10 is 1×.
 
 ```quint
 pure val initial: Camera = {
-  visible: true, chat: ChatHidden, landscape: false, graceOver: false, hold: false,
+  visible: true, onScreen: true, chat: ChatHidden, landscape: false, graceOver: false, hold: false,
   phase: PreviewOff, epoch: 0, released: false, notice: NoNotice,
   mode: PhotoMode, bound: PhotoMode, binding: false,
   recording: RecordingIdle, withSound: true, noSoundChosen: false, stopCause: NoStop, saidMaxLength: false, micDenied: false,
   timer: 0, countdown: 0, capturing: false, pendingShot: false, elapsed: 0, recordedBytes: 0,
   flash: FlashOff, hasFlash: false, light: false, lens: BackLens, zoom: 10, widest: 10, longest: 10, grid: false,
-  volumeKeys: false, photos: 0, lastShotChat: ChatHidden, lastId: "", lastImage: ""
+  volumeKeys: false, modal: false, photos: 0, lastShotChat: ChatHidden, lastId: "", lastImage: ""
 }
 pure def ready(c: Camera): bool = c.phase == PreviewReady
 pure def recordingBusy(c: Camera): bool = c.recording != RecordingIdle
@@ -72,11 +72,14 @@ pure val weight_captureSettles = 2
 > use it, so that it never runs behind another app or a conversation I
 > expanded.
 
-### Camera is active while it shows, uncovered or within the conversation's grace, or while a request holds it
+### Camera is active while it shows on a page in front, uncovered or within the conversation's grace, or while a request holds it
+
+The conversation keeps the detent it had when Camera opened: closed, sheet
+or full.
 
 ```quint
 pure def chatCovers(c: Camera): bool = c.chat == ChatFull or (c.chat == ChatSheet and c.landscape)
-pure def active(c: Camera): bool = c.visible and (c.hold or not(chatCovers(c)) or not(c.graceOver))
+pure def active(c: Camera): bool = c.visible and c.onScreen and (c.hold or not(chatCovers(c)) or not(c.graceOver))
 pure def alwaysGraceOnlyWhileCovered(c: Camera): bool = c.graceOver implies chatCovers(c)
 pure def canOpenChat(c: Camera, panel: Chat): bool = panel != ChatHidden and c.chat != panel
 pure def openChat(c: Camera, panel: Chat): Camera = {
@@ -114,10 +117,14 @@ pure def alwaysEpochNotNegative(c: Camera): bool = c.epoch >= 0
 
 The shell syncs after every shell commit, chat change and visibility change.
 The volume keys are Camera's shutter only while Camera is active, uncovered,
-ready, without a notice and without a request holding it.
+ready, without a notice, without a request holding it and with no sheet,
+menu or dialog over it, such as a scan review.
 
 ```quint
-pure def shutterWanted(c: Camera): bool = active(c) and not(chatCovers(c)) and ready(c) and c.notice == NoNotice and not(c.hold)
+pure def shutterWanted(c: Camera): bool = active(c) and not(chatCovers(c)) and ready(c) and c.notice == NoNotice and not(c.hold) and not(c.modal)
+pure def canModalChanged(c: Camera, open: bool): bool = c.modal != open
+pure def modalChanged(c: Camera, open: bool): Camera = { ...c, modal: open, volumeKeys: c.volumeKeys and not(open) }
+pure def alwaysNoVolumeShutterBehindADialog(c: Camera): bool = c.modal implies not(c.volumeKeys)
 pure def sync(c: Camera): Camera = {
   val after = if (active(c)) {
       if (c.phase == PreviewOff and not(c.released) and c.notice == NoNotice) { ...c, phase: PreviewStarting, epoch: c.epoch + 1 } else c
@@ -144,6 +151,20 @@ pure def canPreviewFails(c: Camera, ticket: int, kind: Notice): bool =
   c.phase == PreviewStarting and ticket == c.epoch and (kind == CameraNotice or kind == UnavailableNotice)
 pure def previewFails(c: Camera, ticket: int, kind: Notice): Camera = { ...c, phase: PreviewOff, notice: kind }
 pure def alwaysZoomWithinLens(c: Camera): bool = c.widest <= c.zoom and c.zoom <= c.longest
+```
+
+### Hiding the page stops the preview, and showing it again starts a fresh one
+
+The shell follows the foreground: a hidden page, the screen turning off or
+another Android app in front. A notice stays, so that returning from Android's
+settings rechecks the grant instead of asking again.
+
+```quint
+pure def canScreenChanged(c: Camera, shown: bool): bool = c.onScreen != shown
+pure def screenChanged(c: Camera, shown: bool): Camera =
+  if (not(shown)) { ...stopView(LeftCamera, c), onScreen: false, volumeKeys: false, notice: c.notice } else { ...c, onScreen: true }
+pure def alwaysOffScreenRunsNothing(c: Camera): bool = not(c.onScreen) implies c.phase == PreviewOff
+pure def sometimesRestartedAfterHidden(c: Camera): bool = c.onScreen and ready(c) and c.epoch >= 3
 ```
 
 ### Leaving Camera releases the preview at once, and a released preview restarts only from Retry or a new visit
@@ -262,10 +283,10 @@ pure def lastLoaded(c: Camera, id: str, image: str): Camera = { ...c, lastId: id
 pure def alwaysTileHasAnIdentity(c: Camera): bool = c.lastImage != "" implies c.lastId != ""
 ```
 
-### The framing grid is the owner's choice for the visit
+### The framing grid is the owner's choice for the visit, offered over a ready preview and drawn over the preview only
 
 ```quint
-pure def canToggleGrid(c: Camera): bool = c.visible
+pure def canToggleGrid(c: Camera): bool = c.visible and ready(c)
 pure def toggleGrid(c: Camera): Camera = { ...c, grid: not(c.grid) }
 ```
 
@@ -357,6 +378,30 @@ pure def alwaysMaxLengthOnlyAfterLimit(c: Camera): bool = c.saidMaxLength implie
 pure def sometimesMaxLengthSaved(c: Camera): bool = c.saidMaxLength
 ```
 
+### The recording timer shows the time left once the length or the estimated size limit is within a minute
+
+The size limit is estimated from the bytes written so far, and only from two
+seconds in.
+
+```quint
+pure val warningSeconds = 60
+pure def secondsLeft(elapsed: int, recorded: int, limitSeconds: int, limitBytes: int): int = {
+  val byLength = if (limitSeconds > elapsed) limitSeconds - elapsed else 0
+  val bySize = if (elapsed >= 2 and recorded > 0) (if (limitBytes > recorded) (limitBytes - recorded) * elapsed / recorded else 0) else byLength
+  if (bySize < byLength) bySize else byLength
+}
+pure def showsTimeLeft(elapsed: int, recorded: int, limitSeconds: int, limitBytes: int): bool =
+  secondsLeft(elapsed, recorded, limitSeconds, limitBytes) <= warningSeconds
+pure def lawTimeLeftIsNeverNegative(elapsed: int, recorded: int, limitSeconds: int, limitBytes: int): bool =
+  secondsLeft(elapsed, recorded, limitSeconds, limitBytes) >= 0
+pure def lawLengthBoundsTimeLeft(elapsed: int, recorded: int, limitSeconds: int, limitBytes: int): bool =
+  (elapsed >= 0 and limitSeconds >= elapsed) implies secondsLeft(elapsed, recorded, limitSeconds, limitBytes) <= limitSeconds - elapsed
+pure val elapsedValues = Set(0, 1, 2, 30)
+pure val recordedValues = Set(0, 1, 50)
+pure val limitSecondsValues = Set(0, 60, 600)
+pure val limitBytesValues = Set(0, 100)
+```
+
 ### Video's light holds the flash unit on, chosen before the recording starts
 
 ```quint
@@ -373,7 +418,7 @@ pure def alwaysLightOnlyInReadyVideo(c: Camera): bool = c.light implies (c.mode 
 ### A camera or unavailable notice's Retry is an explicit restart
 
 ```quint
-pure def canRetryNotice(c: Camera): bool = c.visible and (c.notice == CameraNotice or c.notice == UnavailableNotice)
+pure def canRetryNotice(c: Camera): bool = c.visible and c.onScreen and (c.notice == CameraNotice or c.notice == UnavailableNotice)
 pure def retryNotice(c: Camera): Camera =
   if (c.phase == PreviewOff) { ...c, notice: NoNotice, released: false, phase: PreviewStarting, epoch: c.epoch + 1 }
   else { ...c, notice: NoNotice, released: false }
@@ -390,7 +435,7 @@ pure def canRearm(c: Camera, grant: Grant): bool = c.notice == CameraNotice
 pure def rearm(c: Camera, grant: Grant): Camera = if (grant == AccessGranted) { ...c, notice: NoNotice, released: false } else c
 pure def stepCameraNoticeEndsByGrantRetryOrStop(before: Camera, via: str, after: Camera): bool =
   (before.notice == CameraNotice and after.notice != CameraNotice) implies
-    (via == "rearm" or via == "retryNotice" or via == "leave" or via == "sync" or via == "bindStopsPreview")
+    (via == "rearm" or via == "retryNotice" or via == "leave" or via == "sync" or via == "bindStopsPreview" or via == "screenChanged")
 pure def sometimesCameraDenied(c: Camera): bool = c.notice == CameraNotice
 ```
 

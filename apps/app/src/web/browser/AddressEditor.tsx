@@ -6,6 +6,7 @@ import { type Session, curTab } from "../../../gen/browser__session.ts";
 import { Button, Input, ListRow } from "../components/ui/index.ts";
 import { HOST_CHROME } from "./measure.ts";
 
+/** What the address editor shows and where the owner's Enter and Cancel go. */
 export interface AddressEditorProps {
   session: Session;
   /** Saved bookmarks, offered as suggestions. */

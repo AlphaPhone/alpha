@@ -4,6 +4,7 @@ import type { Destination, SharePanel } from "../../../gen/files__share.ts";
 import { offers } from "../../../gen/files__share.ts";
 import { ListRow, Sheet, SheetContent } from "../components/ui/index.ts";
 
+/** The share panel on screen, its destinations and the choice the owner makes. */
 export type SharePanelSheetProps = {
   panel: SharePanel;
   /** What is shared, such as the file's name or "Selected files". */

@@ -1,42 +1,47 @@
 // spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/shell/navigation.md, "Story: Keep the assistant within reach"
-import { AssistantHost, type AgentIdentity, type ScreenFacts } from "../assistant/host.vibe"
+import { AssistantHost, type ScreenFacts } from "../assistant/host.vibe"
 import { DeviceExecutors, type OperationPorts } from "../assistant/review.vibe"
+import { AccountBindings } from "../account/bindings.vibe"
 import { CloudSession } from "../account/session.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
-import { Resident } from "../platform/resident.vibe"
+import { VoiceConversation } from "../voice/conversation.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { appOfKey } from "./apps.vibe"
+import { Foreground } from "./foreground.vibe"
 import { Navigation } from "./navigation.vibe"
 import { Notices } from "./notices.vibe"
 
 /** Apps whose screen the assistant never observes. */
 export const PRIVATE_APPS: ReadonlySet<string> = new Set(["passwords", "account"])
 
-/** The shell's side of the assistant: the signed-in session, the screen in front, the views it opens and its toasts. */
+/** The shell's side of the assistant: the verified agent session, the screen in front, the views it opens and its toasts. */
 export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const navigation = try Navigation
+  const foreground = try Foreground
   const notices = try Notices
   const session = try CloudSession
+  const bindings = try AccountBindings
   const calls = try CallWatch
-  const resident = try Resident
+  const voice = try VoiceConversation
+
+  effect function open(app: AppId, route: string | undefined) {
+    const before = (try navigation.get()).chat
+    const opened = try navigation.open(app, route)
+    if (opened && (before === "ChatSheet" || before === "ChatFull")) try navigation.moveChat(before)
+    return opened
+  }
+
   return {
-    effect identity() {
-      const current = try session.current()
-      if (current.phase !== "SignedIn" || (try resident.status()) !== "running") return undefined
-      const account = current.account
-      return {
-        origin: "resident", owner: account.userId, agent: account.organizationId, session: account.credentialId,
-        installationId: account.organizationId, enrollmentId: account.credentialId,
-      } satisfies AgentIdentity
-    },
+    identity: () => bindings.identity(),
     effect screen() {
       const nav = try navigation.get()
+      const front = try foreground.get()
       const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
       const privateView = PRIVATE_APPS.has(nav.app)
       const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
       return {
-        exposure: { privateView, locked: false, hidden: nav.hidden, connectionDialog: nav.layers.some((layer) => layer.id.startsWith("account")) },
-        observation: { view, revision: nav.revision, sensitive: privateView },
+        exposure: { privateView, locked: front.locked, hidden: nav.hidden, connectionDialog: nav.layers.some((layer) => layer.id.startsWith("account")) },
+        observation: { view, revision: nav.revision, sensitive: privateView || front.locked },
         onCalendar: nav.app === "calendar",
         contextKey: `${view}:${route}`,
       } satisfies ScreenFacts
@@ -50,16 +55,19 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     effect openView(app: string, route?: string) {
       const known = appOfKey(`alpha:${app}`)
       if (known === undefined) return false
-      const before = (try navigation.get()).chat
-      const opened = try navigation.open(known as AppId, route)
-      if (opened && (before === "ChatSheet" || before === "ChatFull")) try navigation.moveChat(before)
+      if (!(try navigation.get()).voice) return try open(known as AppId, route)
+      let opened = false
+      try voice.followScreen(() => effect {
+        opened = try open(known as AppId, route)
+        return opened
+      }, () => opened)
       return opened
     },
     toast: (text: string) => notices.show(text),
   }
 })
 
-/** The executors of every area as one: each operation belongs to the first family that validates it. */
+/** The executors of every area as one: each operation belongs to the first family that validates it, and one no family validates is refused. */
 export function composeExecutors(families: readonly OperationPorts[]): OperationPorts {
   const owner = (operation: unknown) => families.find((family) => family.validate(operation) !== undefined)
   return {
@@ -67,13 +75,39 @@ export function composeExecutors(families: readonly OperationPorts[]): Operation
     execute: (operation, call) => owner(operation)?.execute(operation, call) ?? Promise.resolve({ kind: "refused", code: "unsupported" }),
     readBack: (operation, call) => owner(operation)?.readBack(operation, call) ?? Promise.resolve({ kind: "refused", code: "unsupported" }),
     describe: (operation) => owner(operation)?.describe(operation) ?? { title: "Action", detail: "" },
-    classOf: (operation) => (owner(operation) ?? families[0]).classOf(operation),
-    target: (operation, text) => (owner(operation) ?? families[0]).target(operation, text),
+    classOf: (operation) => owner(operation)?.classOf(operation) ?? "SettingsWrite",
+    target: (operation, text) => owner(operation)?.target(operation, text) ?? { tag: "NoTarget" },
     summarize: (operation, result) => owner(operation)?.summarize(operation, result) ?? "",
   }
 }
 
-/** The device executors the shell gathers from the areas that run device operations. */
+/** Where each area's executors are registered once that area's services are built, so areas after the assistant can run device operations. */
+export service ExecutorFamilies {
+  /** Adds one area's executors; an operation goes to the first registered family that validates it. */
+  register(family: OperationPorts): void!!
+}
+
+/** The device executors over `families` and every family registered later, with the registry that adds them. */
 export function deviceExecutorsLive(families: readonly OperationPorts[]) {
-  return Layer.succeed(DeviceExecutors, { ports: composeExecutors(families) })
+  const registered: OperationPorts[] = [...families]
+  return Layer.mergeAll(
+    Layer.succeed(DeviceExecutors, { ports: composeExecutors(registered) }),
+    Layer.succeed(ExecutorFamilies, {
+      register: (family: OperationPorts) => sync(() => { if (!registered.includes(family)) registered.push(family) }),
+    }),
+  )
+}
+
+/** Builds one area's `operationPorts` over its services and registers it; a family that cannot be built is left out, so its operations are refused. */
+export effect function registerFamily<E, R>(family: Effect.Effect<OperationPorts, E, R>) {
+  const registry = try ExecutorFamilies
+  const ports = family catch () => undefined
+  if (ports !== undefined) try registry.register(ports)
+}
+
+/** Registers several families in order; the runtime runs it after the last of their areas. */
+export function registerExecutors<E, R>(families: readonly Effect.Effect<OperationPorts, E, R>[]) {
+  return Layer.effectDiscard(effect {
+    for (const family of families) try registerFamily(family)
+  })
 }

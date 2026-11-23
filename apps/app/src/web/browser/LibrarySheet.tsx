@@ -5,6 +5,7 @@ import type { Bookmarks } from "../../../gen/browser__bookmarks.ts";
 import { type Session, canClearHistory } from "../../../gen/browser__session.ts";
 import { Button, EmptyState, Input, ListRow, Sheet, SheetContent, Tabs, TabsList, TabsTrigger } from "../components/ui/index.ts";
 
+/** The history and bookmarks the library lists, and what the owner does with a row. */
 export interface LibrarySheetProps {
   session: Session;
   bookmarks: Bookmarks;
@@ -16,6 +17,8 @@ export interface LibrarySheetProps {
   onClearHistory: () => void;
   onRecover: () => void;
   onDismiss: () => void;
+  /** The moment history is grouped against, in milliseconds; now by default. */
+  today?: number;
 }
 
 function dayOf(at: number, today: number): string {
@@ -30,13 +33,12 @@ function dayOf(at: number, today: number): string {
  * Bookmarks and history, searchable by address or name; history sits under the day of each visit.
  * @model spec/browser/bookmarks.md
  */
-export function LibrarySheet({ session, bookmarks, onShelf, onOpen, onRemoveMark, onRemoveVisit, onClearHistory, onRecover, onDismiss }: LibrarySheetProps) {
+export function LibrarySheet({ session, bookmarks, onShelf, onOpen, onRemoveMark, onRemoveVisit, onClearHistory, onRecover, onDismiss, today = Date.now() }: LibrarySheetProps) {
   const [query, setQuery] = useState("");
   const history = session.layers.library === "HistoryList";
   const wanted = query.trim().toLocaleLowerCase();
   const rows = (history ? session.visits.map((v) => ({ url: v.url, title: v.title, at: v.at })) : bookmarks.marks.map((m) => ({ url: m.url, title: m.title, at: 0 })))
     .filter((r) => !wanted || `${r.url} ${r.title}`.toLocaleLowerCase().includes(wanted));
-  const today = Date.now();
   let section = "";
   return (
     <Sheet open={session.layers.library !== "NoLibrary"} onOpenChange={(open) => { if (!open) onDismiss(); }}>

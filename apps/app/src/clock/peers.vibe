@@ -2,12 +2,12 @@
 // What Clock needs of the shell, account, assistant, workflows and notes areas, each captured once when a layer is built.
 import type { AppId } from "../web/app-screen.ts"
 import { Navigation } from "../shell/navigation.vibe"
-import { CloudSession, ownerOf } from "../account/session.vibe"
+import { CloudSession, ownerOf } from "../account/layer.vibe"
 import { Composer } from "../assistant/composer.vibe"
 import { Assistant } from "../assistant/assistant.vibe"
 import { WorkflowRuns } from "../workflows/runs.vibe"
 import { NotesOrigins } from "../notes/origins.vibe"
-import { shownOf } from "./screen.ts"
+import { shownOf, viewOf, type ClockView } from "./screen.ts"
 
 /** Where the shell is: the app in front ("home" when none) and its route. */
 export interface Shown {
@@ -21,7 +21,7 @@ export interface NoticeOwner {
   readonly key: string
 }
 
-/** The shell's navigation: open an app at a route, and read where it is. */
+/** The shell's navigation: open an app at a route, read where it is, and follow each change of it. */
 export effect function navigationPeer() {
   const navigation = try Navigation
   return {
@@ -29,10 +29,14 @@ export effect function navigationPeer() {
     effect shown() {
       return shownOf(try navigation.get()) as Shown
     },
+    effect view() {
+      return viewOf(try navigation.get())
+    },
+    changes: (): Stream.Stream<ClockView> => Stream.map(navigation.changes, viewOf),
   }
 }
 
-/** The signed-in Cloud account, as notices name it: `organization:user`; undefined while signed out. */
+/** The signed-in Cloud account, as notices name it: `organization:user`, undefined while signed out; and each change of owner. */
 export effect function ownerPeer() {
   const session = try CloudSession
   return {
@@ -41,15 +45,19 @@ export effect function ownerPeer() {
       if (ownerOf(current) === 0 || current.account.userId === "") return undefined
       return { ownerId: `${current.account.organizationId}:${current.account.userId}`, key: JSON.stringify([current.account.organizationId, current.account.userId, current.generation]) } as NoticeOwner
     },
+    changes: (): Stream.Stream<number> => Stream.changes(Stream.map(session.changes, ownerOf)),
   }
 }
 
-/** The assistant: whether it is quiet enough to be navigated away from, and the draft a reviewed question opens. */
+/** The assistant: quiet enough to be navigated away from only while the owner holds no draft, no reply is being written and the connection chooser is closed; and the draft a reviewed question opens. */
 export effect function assistantPeer() {
   const composer = try Composer
   const assistant = try Assistant
+  const navigation = try Effect.serviceOption(Navigation)
   return {
     effect quiet() {
+      if (Option.isSome(navigation) && viewOf(try navigation.value.get()).chooser) return false
+      if (try assistant.holdingDraft()) return false
       const transcript = try Stream.runHead(composer.transcript)
       return !(Option.getOrUndefined(transcript)?.typing ?? false)
     },

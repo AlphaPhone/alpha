@@ -1,4 +1,4 @@
-// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/dock.md, "A click the platform still owes a gesture is swallowed inside its window"
+// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/dock.md, "A click the platform still owes a gesture is swallowed inside its window"
 import { Effect } from "effect";
 import { Maximize2, Minimize2, Sparkles } from "lucide-react";
 import { useRef, useState, type PointerEvent } from "react";
@@ -9,8 +9,10 @@ import { Assistant } from "../../assistant/assistant.vibe";
 import { Button } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 import { ChatPanel } from "./ChatPanel.tsx";
-import { run, runtime } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
+import { run } from "./services.ts";
 
+/** What the shell gives the dock: a way to open an app. */
 export type AssistantDockProps = {
   /** Open an app, as the shell does. */
   open: (app: AppId, route?: string) => void;
@@ -67,9 +69,13 @@ export function AssistantDock({ open }: AssistantDockProps) {
   const openSheet = state.chat === "Sheet" || state.chat === "Full";
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-col" data-alpha-chat-dragging={state.drag.active || undefined}>
+      {state.chat === "Sheet" && (
+        <div aria-hidden data-alpha-chat-outside="" className="pointer-events-auto fixed inset-0 hidden portrait:block"
+          onClick={(event) => { event.preventDefault(); event.stopPropagation(); if (can({ type: "touchOutside" })) void send({ type: "touchOutside" }); }} />
+      )}
       {openSheet ? (
         <div
-          className={cn("pointer-events-auto flex flex-col bg-background shadow-lg transition-[height] duration-slow ease-sheet motion-reduce:transition-none", state.chat === "Full" ? "rounded-none" : "rounded-t-xl")}
+          className={cn("pointer-events-auto relative flex flex-col bg-background shadow-lg transition-[height] duration-slow ease-sheet motion-reduce:transition-none", state.chat === "Full" ? "rounded-none" : "rounded-t-xl")}
           style={{ height: shown }}
         >
           {state.chat !== "Full" && (

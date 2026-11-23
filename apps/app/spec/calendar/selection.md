@@ -114,3 +114,24 @@ pure def canCloseForm(s: CalendarSelection): bool = s.form != NoSelectionForm
 pure def closeForm(s: CalendarSelection): CalendarSelection = { ...s, form: NoSelectionForm }
 pure def sometimesSourceSelected(s: CalendarSelection): bool = exposed(s).kind == SourceSelected
 ```
+
+## Story: Let the assistant know which day I am looking at
+
+> As the owner, I want the assistant to know the day Calendar shows when I ask about "this day",
+> and nothing more: no source, selection or read grant comes with it.
+
+### The shown day is lookup context only on a plain, ready day of the current owner, uncovered and unchanged
+
+No day is observed while the page is hidden or locked, Calendar is not in front, the shade covers
+it, its read is not ready, the owner changed, a write runs, a form or an event is open, or the
+month view or date picker shows.
+
+```quint
+pure def dayObservable(inFront: bool, calendarShown: bool, covered: bool, ready: bool, ownerCurrent: bool, writing: bool,
+  formOpen: bool, eventOpen: bool, monthShown: bool): bool =
+  inFront and calendarShown and not(covered) and ready and ownerCurrent and not(writing) and not(formOpen) and not(eventOpen) and not(monthShown)
+pure def lawNoDayUnderAForm(inFront: bool, calendarShown: bool, ready: bool, ownerCurrent: bool): bool =
+  not(dayObservable(inFront, calendarShown, false, ready, ownerCurrent, false, true, false, false))
+pure def lawNoDayForAnotherOwner(inFront: bool, calendarShown: bool, ready: bool): bool =
+  not(dayObservable(inFront, calendarShown, false, ready, false, false, false, false, false))
+```

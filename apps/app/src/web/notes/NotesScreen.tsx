@@ -1,5 +1,5 @@
-// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"; spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/share.md, "Story: Share the note I have open"
-import { Effect } from "effect";
+// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"; spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/share.md, "Story: Share the note I have open"; spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"
+import { Effect, type Stream } from "effect";
 import { Ellipsis, Folder, Mic, Plus, Search, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import type { ScreenProps } from "../app-screen.ts";
@@ -22,10 +22,11 @@ import { filterRows, matchesText, rowOf, shownRows, type NotesFilter } from "../
 import { NotesListFilter } from "../../notes/listFilter.vibe";
 import { NotesHandoff, NotesOrigins } from "../../notes/origins.vibe";
 import { NotesRecorder } from "../../notes/recorder.vibe";
-import { NotesShare, type ShareChannel } from "../../notes/share.vibe";
+import { type DocumentReceipt, NotesShare, type ShareChannel } from "../../notes/share.vibe";
 import { NotesSources } from "../../notes/sources.vibe";
-import { NotesTrash, type TrashRow } from "../../notes/trash.vibe";
+import { NotesTrash, type TrashNotice, type TrashRow } from "../../notes/trash.vibe";
 import { copyText } from "../../notes/platform.ts";
+import { testMocksBuilt } from "../../platform/build-flags.ts";
 import { FoldersSheet } from "./FoldersSheet.tsx";
 import { shareNoticeText, statusText, trashNoticeText } from "./messages.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
@@ -33,7 +34,8 @@ import { NoteRecorder } from "./NoteRecorder.tsx";
 import { NotesList } from "./NotesList.tsx";
 import { NotesReviewBar } from "./NotesReviewBar.tsx";
 import { NotesTrash as TrashView } from "./NotesTrash.tsx";
-import { call, notesRuntime, useServiceStream } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
+import { call, useServiceStream } from "./services.ts";
 import { WebSourceDialog } from "./WebSourceDialog.tsx";
 
 const snapshots = (collection: NotesCollection.Shape) => collection.snapshots;
@@ -44,6 +46,7 @@ const displays = (recorder: NotesRecorder.Shape) => recorder.display;
 const folderLists = (folders: NotesFolders.Shape) => folders.changes;
 const agentFilters = (filter: NotesListFilter.Shape) => filter.shown;
 const requestedFilters = (handoff: NotesHandoff.Shape) => handoff.filters;
+const documentReceipts = (share: NotesShare.Shape): Stream.Stream<DocumentReceipt | undefined> => share.receipts;
 
 const kindNames: Record<NonNullable<NotesFilter["kind"]>, string> = { text: "Notes", list: "Checklists", voice: "Voice notes", link: "Links" };
 
@@ -52,16 +55,19 @@ function filterLabel(filter: NotesFilter, folderName: (id: string) => string | u
   return [filter.text ? `“${filter.text}”` : "", filter.kind ? kindNames[filter.kind] : "", filter.folder ? folderName(filter.folder) ?? "" : ""].filter(Boolean).join(" · ") || "All notes";
 }
 
+/** The Notes screen takes what every app screen takes from the shell: its route and how to close it. */
+export type NotesScreenProps = ScreenProps;
+
 /**
  * The Notes app: the canonical list, the editor, Recently deleted, and the recorder.
  * @model spec/notes/collection.md
  */
-export function NotesScreen({ onClose }: ScreenProps) {
-  const collection = useCollection(notesRuntime);
-  const editorMachine = useEditor(notesRuntime);
-  const trashMachine = useTrash(notesRuntime);
-  const recorderMachine = useRecorder(notesRuntime);
-  const sourceMachine = useSourceDialog(notesRuntime);
+export function NotesScreen({ onClose }: NotesScreenProps) {
+  const collection = useCollection(runtime);
+  const editorMachine = useEditor(runtime);
+  const trashMachine = useTrash(runtime);
+  const recorderMachine = useRecorder(runtime);
+  const sourceMachine = useSourceDialog(runtime);
   const owned = useServiceStream(NotesCollection, snapshots, undefined);
   const draft = useServiceStream(NotesEditor, drafts, undefined);
   const kept = useServiceStream(NotesEditor, keptReviews, undefined);
@@ -70,13 +76,15 @@ export function NotesScreen({ onClose }: ScreenProps) {
   const folders = useServiceStream(NotesFolders, folderLists, []);
   const agentFilter = useServiceStream(NotesListFilter, agentFilters, undefined);
   const requestedFilter = useServiceStream(NotesHandoff, requestedFilters, undefined);
+  const receipt = useServiceStream(NotesShare, documentReceipts, undefined);
+  const [seenReceipt, setSeenReceipt] = useState<DocumentReceipt>();
   const [search, setSearch] = useState("");
   const [searching, setSearching] = useState(false);
   const [folder, setFolder] = useState<string>();
   const [foldersOpen, setFoldersOpen] = useState(false);
   const [asked, setAsked] = useState<TrashRow>();
   const [transcribing, setTranscribing] = useState(false);
-  const [notice, setNotice] = useState<{ text: string; action?: { label: string; onAction: () => void } }>();
+  const [notice, setNotice] = useState<{ text: string; action?: { label: string; onAction: () => void }; onDismiss?: () => void }>();
 
   const state = collection.state ?? collectionInitial;
   const editor = editorMachine.state ?? editorInitial;
@@ -90,7 +98,11 @@ export function NotesScreen({ onClose }: ScreenProps) {
   const shown = shownRows(filterRows(rows, filter, folderIds).filter((row) => matchesText(row, search)));
   const openRow = editor.draftId === "" ? undefined : rows.find((row) => row.id === editor.draftId);
   const status = statusText[statusLabel(dirty(editor), state)];
-  const tell = (text: string, action?: { label: string; onAction: () => void }) => { if (text !== "") setNotice({ text, ...(action === undefined ? {} : { action }) }); };
+  const tell = (text: string, action?: { label: string; onAction: () => void }, onDismiss?: () => void) => {
+    if (text !== "") setNotice({ text, ...(action === undefined ? {} : { action }), ...(onDismiss === undefined ? {} : { onDismiss }) });
+  };
+  const tellTrash = (said: TrashNotice) =>
+    tell(trashNoticeText[said], undefined, () => void call(NotesTrash, (service) => service.noticeShown()));
 
   const leave = () => void call(NotesEditor, (service) => service.leave());
   const openNote = (id: string) => void call(NotesEditor, (service) => service.leave(id));
@@ -101,14 +113,15 @@ export function NotesScreen({ onClose }: ScreenProps) {
       if (!outcome.deleted || outcome.deletedAt === undefined) return;
       const deletedAt = outcome.deletedAt;
       void call(NotesTrash, (service) => service.deleted());
-      tell("Deleted", { label: "Undo", onAction: () => void call(NotesTrash, (service) => service.undo(id, deletedAt)).then((said) => tell(trashNoticeText[said])) });
+      tell("Deleted", { label: "Undo", onAction: () => void call(NotesTrash, (service) => service.undo(id, deletedAt)).then(tellTrash) },
+        () => void call(NotesTrash, (service) => service.dismissUndo()));
     });
   };
   const share = (channel: ShareChannel) => {
     const id = editor.draftId;
     void call(NotesShare, (service) => service.snapshotOf(id)).then((snapshotText) => snapshotText === undefined
       ? tell(shareNoticeText.changed)
-      : call(NotesShare, (service) => service.share(id, snapshotText, channel)).then((said) => tell(shareNoticeText[said])));
+      : call(NotesShare, (service) => service.share(id, snapshotText, channel)).then((said) => { if (channel !== "save" || said === "busy" || said === "changed") tell(shareNoticeText[said]); }));
   };
   const schedule = (kind: "event" | "reminder") => {
     const id = editor.draftId;
@@ -127,10 +140,10 @@ export function NotesScreen({ onClose }: ScreenProps) {
         onClose={() => void call(NotesTrash, (service) => service.close())}
         onAsk={(row) => { setAsked(row); void call(NotesTrash, (service) => service.ask(row)); }}
         onCloseAsk={() => void call(NotesTrash, (service) => service.closeAsk())}
-        onRestore={(row) => void call(NotesTrash, (service) => service.restore(row)).then((said) => tell(trashNoticeText[said]))}
+        onRestore={(row) => void call(NotesTrash, (service) => service.restore(row)).then(tellTrash)}
         onAskErase={(all) => void call(NotesTrash, (service) => service.askErase(all))}
         onCancelErase={() => void call(NotesTrash, (service) => service.cancelErase())}
-        onErase={() => void call(NotesTrash, (service) => service.erase(asked)).then((said) => tell(trashNoticeText[said]))} />
+        onErase={() => void call(NotesTrash, (service) => service.erase(asked)).then(tellTrash)} />
     );
   } else if (draft !== undefined && editor.present) {
     body = (
@@ -161,6 +174,7 @@ export function NotesScreen({ onClose }: ScreenProps) {
             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Notes options"><Ellipsis aria-hidden /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled={!trashMachine.can({ type: "openTrash" })} onSelect={() => void call(NotesTrash, (service) => service.open())}>Recently deleted</DropdownMenuItem>
+              {testMocksBuilt && <DropdownMenuItem onSelect={() => void call(NotesShare, (service) => service.importText()).then((said) => { if (said === "busy" || said === "unavailable") tell(shareNoticeText[said]); })}>Import text file</DropdownMenuItem>}
               <DropdownMenuItem onSelect={onClose}>Close Notes</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -199,7 +213,6 @@ export function NotesScreen({ onClose }: ScreenProps) {
         {kept !== undefined && (
           <NotesReviewBar status="Kept draft" dirty canRetry={false} canCopy
             onDiscard={() => void call(NotesEditor, (service) => service.discard())}
-            onRetry={() => undefined}
             onCopy={() => void copyText([kept.title, kept.body].filter(Boolean).join("\n")).then(() => tell("Draft copied."), () => tell("Draft could not be copied."))} />
         )}
         {body}
@@ -230,7 +243,10 @@ export function NotesScreen({ onClose }: ScreenProps) {
               onRetry={() => void call(NotesRecorder, (service) => service.begin(folder ?? null, false))} />
           </SheetContent>
         </Sheet>
-        {notice !== undefined && <Toast open onOpenChange={(open) => { if (!open) setNotice(undefined); }} title={notice.text} {...(notice.action === undefined ? {} : { action: notice.action })} />}
+        {receipt !== undefined && receipt !== seenReceipt && shareNoticeText[receipt.notice] !== "" && (
+          <Toast open onOpenChange={(open) => { if (!open) setSeenReceipt(receipt); }} title={shareNoticeText[receipt.notice]} />
+        )}
+        {notice !== undefined && <Toast open onOpenChange={(open) => { if (!open) { notice.onDismiss?.(); setNotice(undefined); } }} title={notice.text} {...(notice.action === undefined ? {} : { action: notice.action })} />}
         <ToastViewport />
       </main>
     </ToastProvider>

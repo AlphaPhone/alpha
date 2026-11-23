@@ -1,0 +1,20 @@
+// spec/account/devBridge.md, "Story: Sign in through the development bridge"; spec/account/dedicated.md, "Story: Review a dedicated agent in a development build"
+
+/** The bridge's answer to one step. */
+export schema BridgeAnswer {
+  ok: boolean
+  reached?: boolean
+  result?: "confirmed" | "transient" | "refused"
+  store?: "before" | "mine" | "other"
+}
+
+/** The bridge's dedicated review. */
+export schema DedicatedReview {
+  adoption: boolean
+  available: boolean
+}
+
+/** The bridge's dedicated status. */
+export schema DedicatedStatus {
+  phase: "provisioning" | "cutover" | "ready" | "unconfirmed"
+}

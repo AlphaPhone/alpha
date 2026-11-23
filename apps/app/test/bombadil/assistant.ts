@@ -1,4 +1,4 @@
-// spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"; spec/assistant/approvals.md, "A card whose review time passed reads \"Review expired\" and can only be asked for again"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/send.md, "The typing indicator belongs to the newest send, and an older send settling never clears it"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"
+// spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"; spec/assistant/approvals.md, "A card whose review time passed reads \"Review expired\" and can only be asked for again"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/send.md, "The typing indicator belongs to the newest send, and an older send settling never clears it"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -52,3 +52,34 @@ export const assistantEmailNeverSendsWithoutATap = always(() => emailCards.curre
 
 /** A card whose review expired offers no Approve. */
 export const assistantExpiredCardOffersNoApprove = always(() => expiredCards.current);
+
+const attachmentsShown = extract(({ document }) => ({
+  chips: document.querySelectorAll('button[aria-label^="Remove "]').length,
+  attachOpen: document.querySelector<HTMLButtonElement>('button[aria-label="Attach media"]:not([disabled])') !== null,
+}));
+
+const unsettled = extract(({ document }) => ({
+  review: Array.from(document.querySelectorAll('[role="alert"]')).some((alert) => alert.textContent?.includes("may already have been sent") === true),
+  send: document.querySelector<HTMLButtonElement>('button[aria-label="Send"]:not([disabled])') !== null,
+}));
+
+const pendingTargets = extract(({ document }) =>
+  Array.from(document.querySelectorAll('[data-alpha-message-id^="local-"]')).every((row) =>
+    row.querySelector('[aria-label="Edit this message"], [aria-label="Reply to this message"]') === null));
+
+const outside = extract(({ document }) => ({
+  scrim: document.querySelector("[data-alpha-chat-outside]") !== null,
+  sheet: document.querySelector('section[aria-label="Assistant"]') !== null,
+}));
+
+/** The composer never holds more than four attachments, and Attach is never offered once it holds four. */
+export const assistantAtMostFourAttachments = always(() => attachmentsShown.current.chips <= 4 && (attachmentsShown.current.chips < 4 || !attachmentsShown.current.attachOpen));
+
+/** A message that may already have been sent is reviewed first: Send is never offered beside that review. */
+export const assistantUnsettledMessageIsNeverResent = always(() => !unsettled.current.review || !unsettled.current.send);
+
+/** A message the agent has not recorded is never quoted or edited. */
+export const assistantOnlyRecordedMessagesAreTargets = always(() => pendingTargets.current);
+
+/** The touch area above the chat exists only while the half sheet is open, so it never swallows a touch on a plain screen. */
+export const assistantOutsideTouchOnlyAboveTheSheet = always(() => !outside.current.scrim || outside.current.sheet);

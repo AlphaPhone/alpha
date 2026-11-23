@@ -1,6 +1,7 @@
 // spec/telephony/drafts.md, "A slot holds at most five JPEG, PNG or GIF pictures within the MMS size, and only the owner attaches them"; spec/telephony/drafts.md, "Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation"
 import { FilePicker } from "../files/picker.vibe"
 import type { FileShareTargets, SharedFile } from "../files/share.vibe"
+import type { CameraHandoffs, ReviewedFile } from "../camera/ports.vibe"
 import { maxPictures, occupied, slotOf, Machine as DraftsMachine } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as MessagesMachine } from "../../gen/telephony__messages.effect.vibe"
 import { bridgeCall, TelephonyBridges } from "./bridges.vibe"
@@ -41,28 +42,46 @@ export const pictureAttachLayer = Layer.effect(PictureAttach, effect {
   }
 })
 
+/** Starts a new MMS draft from a picture another area reviewed; it is never sent without the owner's tap, and false means Messages cannot take it now. */
+export effect function pictureDrafter() {
+  const bridges = try TelephonyBridges
+  const drafts = try DraftsMachine
+  const messages = try MessagesMachine
+  const sends = try DraftSends
+  return effect function (mimeType: string, size: number, dataBase64: string) {
+    if (!bridges.offered || !pictureFits(mimeType, size)) return false
+    const slot = slotOf((try drafts.get()).slots, "new")
+    if (occupied(slot) || slot.text !== "" || slot.recipients.length > 0) return false
+    const bytes = try (Effect.try(() => bytesOf(dataBase64)) catch () => undefined)
+    if (bytes === undefined) return false
+    try (messages.send({ type: "composeOpened" }) catch () => undefined)
+    return (try sends.addPicture("new", mimeType, bytes)) === "added"
+  }
+}
+
 /**
  * Messages' part of Files' share destinations: a shared picture starts a new MMS draft that is never sent without a tap,
  * on the Alpha image only, and only while the new-message composer is idle and empty.
  */
 export const messagesShareTarget = effect {
   const bridges = try TelephonyBridges
-  const drafts = try DraftsMachine
-  const messages = try MessagesMachine
-  const sends = try DraftSends
+  const draft = try pictureDrafter()
   const status = bridges.offered ? try (bridgeCall("status", (c) => c.messages.status()) catch () => undefined) : undefined
   return {
     messages: status?.mmsSend === true,
     effect message(file: SharedFile) {
       if (!bridges.offered || !pictureFits(file.mimeType, file.size)) return false
-      const slot = slotOf((try drafts.get()).slots, "new")
-      if (occupied(slot) || slot.text !== "" || slot.recipients.length > 0) return false
       const read = try (file.read catch () => undefined)
       if (read === undefined || read.mimeType !== file.mimeType || read.name !== file.name) return false
-      const bytes = try (Effect.try(() => bytesOf(read.dataBase64)) catch () => undefined)
-      if (bytes === undefined) return false
-      try (messages.send({ type: "composeOpened" }) catch () => undefined)
-      return (try sends.addPicture("new", read.mimeType, bytes)) === "added"
+      return try draft(read.mimeType, read.size, read.dataBase64)
     },
   } satisfies Pick<FileShareTargets.Shape, "messages" | "message">
+}
+
+/** Messages' part of Camera's handoffs: a reviewed photo or scan starts a new MMS draft, never sent without a tap. */
+export const messagePictureHandoff = effect {
+  const draft = try pictureDrafter()
+  return {
+    messagePicture: (file: ReviewedFile) => draft(file.mimeType, file.size, file.dataBase64),
+  } satisfies Pick<CameraHandoffs.Shape, "messagePicture">
 }

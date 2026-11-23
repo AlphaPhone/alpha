@@ -100,7 +100,7 @@ this copy was not applied while an earlier one may still arrive, so the change s
 lost answer leaves it kept.
 
 ```quint
-pure def settle(toVersion: int, l: Lifecycle): Lifecycle = {
+pure def settleTo(toVersion: int, l: Lifecycle): Lifecycle = {
   val op = l.intent.op
   { ...l, version: if (toVersion > l.version) toVersion else l.version, applied: l.applied.append(l.intent.mutation),
     removed: if (op == RemoveOp) true else if (op == RestoreOp) false else l.removed,
@@ -110,7 +110,7 @@ pure def settle(toVersion: int, l: Lifecycle): Lifecycle = {
 pure def canReplied(l: Lifecycle, reply: LifeReply, toVersion: int): bool =
   (l.stage == LifeSent or l.stage == LifeResending) and ((reply == LifeSaved or reply == LifeReplayed) implies toVersion > l.intent.fromVersion)
 pure def replied(l: Lifecycle, reply: LifeReply, toVersion: int): Lifecycle =
-  if (reply == LifeSaved or reply == LifeReplayed) (if (l.applied.includes(l.intent.mutation)) { ...l, intent: noLifeIntent, stage: LifeIdle, offer: false, seen: true } else settle(toVersion, l))
+  if (reply == LifeSaved or reply == LifeReplayed) (if (l.applied.includes(l.intent.mutation)) { ...l, intent: noLifeIntent, stage: LifeIdle, offer: false, seen: true } else settleTo(toVersion, l))
   else if (reply == LifeRefused) (if (l.resends == 0) { ...l, intent: noLifeIntent, stage: LifeIdle } else { ...l, stage: LifeIdle, offer: true })
   else { ...l, stage: LifeIdle }
 pure def alwaysAMutationAppliesOnce(l: Lifecycle): bool = l.applied.every(m => l.applied.select(o => o == m).length() == 1)

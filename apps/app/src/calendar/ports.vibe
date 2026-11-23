@@ -1,0 +1,18 @@
+// spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/agent.md, "Story: Return to the event I left Calendar from"
+// What Calendar needs from areas provided after it: Maps, which opens an event's place and offers the way back.
+
+/** The Calendar event a Maps visit starts from: its identity and start, never its location; version 2 is an agent Calendar event bound to its owner and revision. */
+export type CalendarEventOrigin =
+  | { readonly version: 1; readonly id: string; readonly begin: number; readonly rowId: string; readonly day: number; readonly title: string }
+  | {
+      readonly version: 2; readonly id: string; readonly begin: number; readonly rowId: string; readonly day: number; readonly title: string
+      readonly binding: string; readonly eventKey: string; readonly revision: string; readonly sourceRevision: string
+    }
+
+/** Maps as Calendar opens it: an event's place, with the origin "Back to event" checks; false where Maps is not provided. */
+export service CalendarMaps {
+  enterFromEvent(origin: CalendarEventOrigin, where: string): boolean!!
+  static readonly defaultValue = () => ({
+    enterFromEvent: () => succeed(false),
+  })
+}

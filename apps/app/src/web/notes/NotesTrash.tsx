@@ -1,6 +1,6 @@
-// spec/notes/trash.md, "Recently deleted opens while it has rows, one action runs at a time, and it closes once empty"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"; spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"
+// spec/notes/trash.md, "Recently deleted opens while it has rows, one action runs at a time, and it closes once empty"; spec/notes/trash.md, "Every Trash dialog is named by the actions it offers and the note it reviews"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"; spec/notes/trash.md, "Erase needs the three-day choice, a review of that exact deletion at the current revision, and no shared recording"
 import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
-import type { TrashView } from "../../../gen/notes__trash.ts";
+import { askDialogName, eraseDialogName, type TrashView } from "../../../gen/notes__trash.ts";
 import { Button, Dialog, DialogContent, DialogTitle, ListRow } from "../components/ui/index.ts";
 import type { TrashRow } from "../../notes/trash.vibe";
 import { daysLeftText } from "./messages.ts";
@@ -31,6 +31,7 @@ export type NotesTrashProps = {
  * @model spec/notes/trash.md
  */
 export function NotesTrash({ view, rows, asked, canAsk, canRestore, canAskErase, canErase, onClose, onAsk, onCloseAsk, onRestore, onAskErase, onCancelErase, onErase }: NotesTrashProps) {
+  const reviewed = asked === undefined || asked.title.trim() === "" ? "deleted note" : asked.title;
   return (
     <section className="flex h-full flex-col" aria-label="Recently deleted">
       <header className="flex flex-wrap items-center gap-2 px-2 py-2">
@@ -49,7 +50,7 @@ export function NotesTrash({ view, rows, asked, canAsk, canRestore, canAskErase,
         ))}
       </ul>
       <Dialog open={view.asking && asked !== undefined} onOpenChange={(open) => { if (!open) onCloseAsk(); }}>
-        <DialogContent aria-label={asked === undefined ? "Deleted note" : `Recover or delete ${asked.title}`}>
+        <DialogContent aria-label={`${askDialogName(view.retentionOn) === "RecoverOrDeleteName" ? "Recover or delete" : "Recover"} ${reviewed}`}>
           <DialogTitle>{asked?.title}</DialogTitle>
           <div className="flex justify-end gap-2">
             {view.retentionOn && <Button variant="destructive" disabled={!canAskErase} onClick={() => onAskErase(false)}><Trash2 aria-hidden />Delete now</Button>}
@@ -58,7 +59,7 @@ export function NotesTrash({ view, rows, asked, canAsk, canRestore, canAskErase,
         </DialogContent>
       </Dialog>
       <Dialog open={view.confirm !== "NoConfirm"} onOpenChange={(open) => { if (!open) onCancelErase(); }}>
-        <DialogContent aria-label={view.confirm === "ConfirmAll" ? "Delete all deleted notes" : `Delete ${asked?.title ?? "this note"} permanently`}>
+        <DialogContent aria-label={eraseDialogName(view.confirm === "ConfirmAll") === "DeleteAllName" ? "Delete all of Recently deleted permanently" : `Delete ${reviewed} permanently`}>
           <DialogTitle>{view.confirm === "ConfirmAll" ? "Delete all?" : `Delete “${asked?.title ?? "this note"}”?`}</DialogTitle>
           <p className="text-sm text-muted-foreground">This can’t be undone.</p>
           <div className="flex justify-end gap-2">

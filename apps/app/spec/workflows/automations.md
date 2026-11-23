@@ -38,6 +38,10 @@ pure def sourceOf(kind: RowKind): Source = match kind {
 }
 pure def complete(a: Automations): bool =
   a.automations == Listed and a.schedules == Listed and a.reminders == Listed and a.definitions == Listed and not(a.partial)
+pure def readOfSource(a: Automations, source: Source): Read = match source {
+  | AutomationSource => a.automations | ScheduleSource => a.schedules | ReminderSource => a.reminders | DefinitionSource => a.definitions
+}
+pure def sourceListed(a: Automations, key: str): bool = key == "" or readOfSource(a, sourceOf(rowOf(a, key).kind)) == Listed
 ```
 
 ### What the simulator tries
@@ -105,11 +109,13 @@ pure def sometimesSecondOwnerListed(a: Automations): bool = a.owner == "ben" and
 
 ### A change is held before it is sent, one per owner, and needs the row it names
 
-Turning on needs a row that is off, turning off one that is on; a create names no row.
+Turning on needs a row that is off, turning off one that is on; a create names no row. The
+detail's on/off switch goes through the same review as every other change, and the list shows the
+owner's workflows and automations only, with no removed-workflows or digests rows (#1316).
 
 ```quint
 pure def canChange(a: Automations, kind: ChangeKind, key: str, target: bool): bool =
-  a.owner != "" and not(a.busy) and not(holds(a)) and a.minted < 3 and
+  a.owner != "" and not(a.busy) and not(holds(a)) and a.minted < 3 and sourceListed(a, key) and
   (if (kind == CreateChange) key == "" else (key != "" and rowOf(a, key).key == key)) and
   (kind != EnableChange or rowOf(a, key).enabled != target)
 pure def change(a: Automations, kind: ChangeKind, key: str, target: bool): Automations =
@@ -120,12 +126,35 @@ pure def alwaysOneHeldPerOwner(a: Automations): bool = a.held.every(h => h.owner
 pure def alwaysAnUnknownAnswerStaysHeld(a: Automations): bool = a.answer == AnswerUnknown implies holds(a)
 ```
 
+### A row's controls are off while its source did not list, though its last rows stay shown
+
+A scheduled item whose source failed to refresh keeps its row on the list, but nothing is offered
+on it until a read of that source lists it again (legacy `ScheduledTaskControls`).
+
+```quint
+pure def stepAChangeNeedsItsSourceListed(before: Automations, via: str, after: Automations): bool =
+  via == "change" implies sourceListed(before, heldFor(after, after.owner).key)
+pure def stepAFailedReadKeepsTheRows(before: Automations, via: str, after: Automations): bool =
+  (via == "listed" and before.owner == after.owner and after.rows.length() < before.rows.length()) implies
+    (readOfSource(after, AutomationSource) == Listed or readOfSource(after, ScheduleSource) == Listed or
+     readOfSource(after, ReminderSource) == Listed or readOfSource(after, DefinitionSource) == Listed)
+```
+
 ### The agent's answer releases the change, and a lost answer keeps it held
 
 An applied answer and a refusal both release it, a refused create included, so a refusal never
-locks new prompts. A lost answer leaves the outcome unknown and the change held.
+locks new prompts. A lost answer leaves the outcome unknown and the change held. A 4xx answer, a
+definite 404 included, is a refusal released before the list is read again; a 5xx or a reply that
+never came is unknown; a request that was never sent is refused (#1209).
 
 ```quint
+pure def answerOfStatus(httpStatus: int, delivered: bool): Answer =
+  if (not(delivered)) AnswerRefused
+  else if (httpStatus >= 200 and httpStatus < 300) AnswerApplied
+  else if (httpStatus >= 400 and httpStatus < 500) AnswerRefused
+  else AnswerUnknown
+pure def lawAServerErrorIsNeverARefusal(httpStatus: int): bool = httpStatus >= 500 implies answerOfStatus(httpStatus, true) == AnswerUnknown
+pure def lawADefiniteNotFoundIsARefusal(delivered: bool): bool = answerOfStatus(404, delivered) == AnswerRefused
 pure def releaseHeld(why: Release, a: Automations): Automations = {
   val h = heldFor(a, a.owner)
   { ...a, held: a.held.select(o => o.owner != a.owner), busy: false, released: why, releasedKind: h.kind,
@@ -154,8 +183,8 @@ pure def canListed(a: Automations, source: Source, read: Read, rows: List[Row], 
   a.owner != "" and rows.every(r => sourceOf(r.kind) == source and r.key != "") and (read == Listed or rows.length() == 0)
 pure def listed(a: Automations, source: Source, read: Read, rows: List[Row], partial: bool): Automations = {
   val others = a.rows.select(r => sourceOf(r.kind) != source)
-  val next = { ...withSource(source, read, partial, a), rows: if (read == Listed) mergeRows(others, rows) else a.rows }
-  if (settledByList(next)) releaseHeld(ByList, next) else next
+  val merged = { ...withSource(source, read, partial, a), rows: if (read == Listed) mergeRows(others, rows) else a.rows }
+  if (settledByList(merged)) releaseHeld(ByList, merged) else merged
 }
 pure def stepAListNeverSettlesARun(before: Automations, via: str, after: Automations): bool =
   (via == "listed" and holds(before) and not(holds(after)) and before.owner == after.owner) implies
@@ -167,10 +196,14 @@ pure def sometimesSettledByList(a: Automations): bool = a.released == ByList
 
 ### Allow another releases a held change only after the owner confirms it
 
-The review says the earlier change may still apply. It is offered only while nothing is in flight.
+The review says the earlier change may still apply. It is offered only while nothing is in flight,
+and it names the exact held change it reviewed: a confirmation of a review whose change was
+replaced, or whose owner changed, releases nothing (#1014).
 
 ```quint
-pure def canAllowAnother(a: Automations): bool = not(a.busy) and holds(a)
-pure def allowAnother(a: Automations): Automations = releaseHeld(ByOwner, a)
+pure def canAllowAnother(a: Automations, id: int): bool = not(a.busy) and holds(a) and heldFor(a, a.owner).id == id
+pure def allowAnother(a: Automations, id: int): Automations = releaseHeld(ByOwner, a)
+pure def stepAllowAnotherReleasesOnlyTheReviewedChange(before: Automations, via: str, after: Automations): bool =
+  via == "allowAnother" implies (after.held.length() == before.held.length() - 1 and after.held.every(h => before.held.includes(h)))
 pure def sometimesReleasedByOwner(a: Automations): bool = a.released == ByOwner and a.releasedKind == RunChange
 ```

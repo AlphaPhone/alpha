@@ -3,6 +3,7 @@ import { useState } from "react";
 import type { MailNotices } from "../../../gen/inbox__notices.ts";
 import { Button, Sheet, SheetContent, Textarea } from "../components/ui/index.ts";
 
+/** What the Ask review of a tapped Gmail notice shows, and what confirming or cancelling asks for. */
 export type NoticeAskSheetProps = {
   /** The notice taps as their machine holds them. */
   notices: MailNotices;

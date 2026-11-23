@@ -1,0 +1,162 @@
+// spec/calendar/linkedLocal.md, "Story: Let sync change my local calendar only where I have not changed it since"; spec/calendar/linkedLocal.md, "A call is refused at once for an unbound controller, and a provider event that would lose fields before anything is written"; spec/calendar/linkedLocal.md, "The stored calendar is read and, for an update or deletion, changed in one transaction at the named revision"; spec/calendar/linkedLocal.md, "The closing check gives a controller unbound meanwhile no result and the page no notice; a write made stays"; spec/calendar/linkedLocal.md, "Sync fields keep only what both sides can say"
+import { guestsCross } from "../../gen/calendar__linkedLocal.ts"
+import type { LinkedCalendarLocalPort, LinkedCalendarLocalSnapshot, LinkedCalendarSemanticEvent } from "@elizaos/plugin-calendar/linked-sync"
+import type { Native } from "../platform/native.vibe"
+import { sha256Hex } from "./digest.ts"
+import { type LocalRefusalRecord, type LocalSnapshotRecord, decodeAck, decodeApply, decodeDelete, decodeDeletion, decodeEvents, decodeGet } from "./linkedLocal.schema.vibe"
+
+const PLUGIN = "AlphaCalendar"
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/
+const DATE = /^\d{4}-\d{2}-\d{2}$/
+const RRULE = /^RRULE:FREQ=(DAILY|WEEKLY)(;BYDAY=MO,TU,WE,TH,FR)?$|^EXDATE[:;]/
+const DELETION_WAIT_MS = 15_000
+
+/** The plugin refused a call and changed nothing, or its answer could not be confirmed. */
+export error LinkedLocalRefused { status: string; message: string }
+
+/** The controller's binding ended, or the page was hidden, while a call ran: it gets no result and the page no notice. */
+export error LinkedLocalAborted { reason: string }
+
+const WORDS: Readonly<Record<string, string>> = {
+  cancelled: "Calendar sync was not enabled.",
+  "context-changed": "Calendar permission, account or review changed. Review sync again.",
+  "permission-required": "Allow Calendar access to review device sync.",
+  conflict: "The Calendar event changed. Nothing was overwritten.",
+  pending: "This event has a deletion waiting for Undo. Nothing was changed.",
+  unknown: "Calendar write could not be confirmed. It will not be repeated.",
+  unavailable: "Device Calendar sync is unavailable. Existing events are retained.",
+}
+
+function refused(answer: LocalRefusalRecord): LinkedLocalRefused {
+  return new LinkedLocalRefused({ status: answer.status, message: answer.message ?? WORDS[answer.status] ?? WORDS.unavailable! })
+}
+
+/** What a device sync review prepared: the lease every call names, and the binding it was granted for. */
+export interface LinkedLease {
+  readonly lease: string
+  readonly binding: Readonly<Record<string, string>>
+}
+
+/** Whether a provider event can be written to the phone without losing a field: a title, a real span, whole UTC dates for all day, repeats the phone can say, and at most a hundred distinct valid guests. */
+export function crossesToPhone(event: LinkedCalendarSemanticEvent): boolean {
+  const begin = Date.parse(event.startAt)
+  const end = Date.parse(event.endAt)
+  if (event.title.trim() === "" || event.title.length > 4000 || event.deleted === true) return false
+  if (!Number.isFinite(begin) || !Number.isFinite(end) || end <= begin) return false
+  if (event.isAllDay && (!DATE.test(event.startAt) || !DATE.test(event.endAt))) return false
+  if ((event.recurrence ?? []).some((line) => !RRULE.test(line.trim()))) return false
+  const emails = event.attendees.map((guest) => guest.email.trim().toLowerCase())
+  return guestsCross(emails.length, emails.every((email) => EMAIL.test(email)), new Set(emails).size === emails.length)
+}
+
+function snapshotOf(found: LocalSnapshotRecord): LinkedCalendarLocalSnapshot {
+  const event = found.event
+  return {
+    eventId: found.eventId, revision: found.revision,
+    event: { title: event.title, description: event.description, location: event.location, startAt: event.startAt, endAt: event.endAt,
+      timeZone: event.isAllDay ? null : event.timeZone ?? null, isAllDay: event.isAllDay,
+      attendees: event.attendees.map((guest) => ({ email: guest.email, optional: guest.optional })),
+      ...(event.recurrence.length > 0 ? { recurrence: [...event.recurrence] } : {}) },
+  }
+}
+
+/** The local port's calls as effects, each failing with why nothing was changed. */
+export interface LinkedLocalCalls {
+  get(eventId: string): LinkedCalendarLocalSnapshot | null!(LinkedLocalRefused | LinkedLocalAborted)
+  apply(eventId: string, event: LinkedCalendarSemanticEvent, expectedRevision: string): LinkedCalendarLocalSnapshot!(LinkedLocalRefused | LinkedLocalAborted)
+  remove(eventId: string, expectedRevision: string): void!(LinkedLocalRefused | LinkedLocalAborted)
+  events(): ReadonlyArray<{ readonly id: string; readonly revision: string }>!(LinkedLocalRefused | LinkedLocalAborted)
+  deletionUndone(eventId: string): boolean
+}
+
+/**
+ * The phone's own calendar as linked sync's local side: every call names the lease, an update or
+ * deletion names the revision the controller read, a deletion waits out the owner's Undo window,
+ * and a call whose controller was unbound meanwhile gives no result.
+ */
+export function linkedLocalCalls(native: Native.Shape, admitted: LinkedLease, current: () => boolean, signal: AbortSignal): LinkedLocalCalls {
+  const undone = new Set<string>()
+  const input = { lease: admitted.lease }
+
+  effect function fence() {
+    if (signal.aborted || !current()) throw new LinkedLocalAborted({ reason: "Calendar sync context changed" })
+  }
+
+  effect function call(kind: string, args: Record<string, unknown>) {
+    try fence()
+    const answer = try mapError(native.invoke(PLUGIN, "sync", { kind, ...input, ...args }), () => new LinkedLocalRefused({ status: "unavailable", message: WORDS.unavailable! }))
+    try fence()
+    return answer
+  }
+
+  effect function acknowledge(operationId: string) {
+    try mapError(decodeAck(try call("ack", { operationId })), () => new LinkedLocalRefused({ status: "unknown", message: WORDS.unknown! }))
+  }
+
+  effect function operation(parts: readonly unknown[]) {
+    return try tryPromise({ try: () => sha256Hex(JSON.stringify(parts)), catch: () => new LinkedLocalRefused({ status: "unavailable", message: WORDS.unavailable! }) })
+  }
+
+  effect function get(eventId: string) {
+    const answer = try mapError(decodeGet(try call("get", { eventId })), () => new LinkedLocalRefused({ status: "unknown", message: "Invalid device Calendar event" }))
+    if (answer.status !== "ready") throw refused(answer)
+    for (const recovered of answer.recoveries ?? []) try acknowledge(recovered)
+    return answer.snapshot === null ? null : snapshotOf(answer.snapshot)
+  }
+
+  effect function apply(eventId: string, event: LinkedCalendarSemanticEvent, expectedRevision: string) {
+    try fence()
+    if (!crossesToPhone(event)) throw new LinkedLocalRefused({ status: "unsupported", message: "This event can’t be saved on the phone without losing details. Nothing was changed." })
+    const operationId = try operation(["native-calendar-apply-v1", admitted.binding, eventId, expectedRevision, event])
+    const answer = try mapError(decodeApply(try call("apply", { eventId, expectedRevision, event, operationId })), () => new LinkedLocalRefused({ status: "unknown", message: WORDS.unknown! }))
+    if (answer.status !== "saved") throw refused(answer)
+    if (answer.snapshot.eventId !== eventId) throw new LinkedLocalRefused({ status: "unknown", message: "Device Calendar save was not confirmed" })
+    try acknowledge(operationId)
+    return snapshotOf(answer.snapshot)
+  }
+
+  effect function remove(eventId: string, expectedRevision: string) {
+    const operationId = try operation(["native-calendar-delete-v1", admitted.binding, eventId, expectedRevision])
+    const staged = try mapError(decodeDelete(try call("delete", { eventId, expectedRevision, operationId })), () => new LinkedLocalRefused({ status: "unknown", message: WORDS.unknown! }))
+    if (staged.status !== "queued") throw refused(staged)
+    const deadline = (try Clock.currentTimeMillis) + DELETION_WAIT_MS
+    while ((try Clock.currentTimeMillis) < deadline) {
+      const answer = try mapError(decodeDeletion(try call("deletion", { operationId })), () => new LinkedLocalRefused({ status: "unknown", message: WORDS.unknown! }))
+      if (answer.status !== "receipt") throw refused(answer)
+      const phase = answer.receipt.phase
+      if (phase === "deleted") {
+        if ((try get(eventId)) !== null) throw new LinkedLocalRefused({ status: "conflict", message: "Calendar deletion readback changed" })
+        try acknowledge(operationId)
+        return
+      }
+      if (phase === "undone") {
+        undone.add(eventId)
+        try acknowledge(operationId)
+        throw new LinkedLocalRefused({ status: "undone", message: "Deletion undone. The local event is kept and its Google link is paused." })
+      }
+      if (phase !== "queued") throw new LinkedLocalRefused({ status: "unknown", message: "Calendar deletion is paused or unconfirmed and won’t be repeated." })
+      try sleep("400 millis")
+    }
+    throw new LinkedLocalRefused({ status: "pending", message: "Calendar deletion is still pending. Check its Undo receipt; it will not be repeated." })
+  }
+
+  effect function events() {
+    const answer = try mapError(decodeEvents(try call("list", {})), () => new LinkedLocalRefused({ status: "unknown", message: "Device Calendar event list needs review" }))
+    if (answer.status !== "ready") throw refused(answer)
+    return answer.events.map((row) => ({ id: row.id, revision: row.revision }))
+  }
+
+  return { get, apply, remove, events, deletionUndone: (eventId) => undone.has(eventId) }
+}
+
+/** The same calls as the upstream linked-sync controller takes its local port. */
+export function nativeLinkedPort(native: Native.Shape, admitted: LinkedLease, current: () => boolean, signal: AbortSignal): LinkedCalendarLocalPort & { deletionUndone(id: string): boolean; events(): Promise<ReadonlyArray<{ readonly id: string; readonly revision: string }>> } {
+  const calls = linkedLocalCalls(native, admitted, current, signal)
+  return {
+    get: (eventId) => runPromise(calls.get(eventId)),
+    applyProviderEvent: (eventId, event, expectedRevision) => runPromise(calls.apply(eventId, event, expectedRevision)),
+    delete: (eventId, expectedRevision) => runPromise(calls.remove(eventId, expectedRevision)),
+    deletionUndone: calls.deletionUndone,
+    events: () => runPromise(calls.events()),
+  }
+}

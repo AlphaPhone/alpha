@@ -4,17 +4,23 @@ import { useState } from "react";
 import { canSendEmail, type EmailCard } from "../../../gen/assistant__emailCard.ts";
 import { Button, Card, CardFooter, CardTitle, Input, Label, Textarea } from "../components/ui/index.ts";
 
+/** An email card's state, its fields as the agent drafted them, and the owner's answers. */
 export type EmailCardViewProps = {
   /** The card's state as its machine holds it. */
   card: EmailCard;
+  /** The recipients as drafted, separated by commas or semicolons. */
   to: string;
+  /** The subject as drafted. */
   subject: string;
+  /** The body as drafted. */
   body: string;
   /** The selected account's address, shown for "me" until the owner edits To. */
   ownAddress?: string;
   /** The owner changed a field; a new version follows. */
   onEdit: (fields: { readonly to: string; readonly subject: string; readonly body: string }) => void;
+  /** The owner pressed Send on the fields shown. */
   onSend: (fields: { readonly to: string; readonly subject: string; readonly body: string }) => void;
+  /** The owner chose not to send it. */
   onDecline: () => void;
 };
 

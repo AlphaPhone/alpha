@@ -3,6 +3,7 @@ import type { Shown } from "../../../gen/voice__conversation.ts";
 import { cn } from "../lib/cn.ts";
 import { shownLabel } from "./messages.ts";
 
+/** What the conversation shows, drawn as moving or resting bars. */
 export interface VoiceActivityProps {
   /** What the conversation shows now. */
   shown: Shown;

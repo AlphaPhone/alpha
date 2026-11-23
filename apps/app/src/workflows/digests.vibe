@@ -1,17 +1,17 @@
-// spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"; spec/workflows/digests.md, "Story: Read a digest's state plainly"; spec/workflows/digestInbox.md, "Story: Keep every digest result on my phone before my agent is told I have it"
+// spec/workflows/digests.md, "Story: See my digests and the newest brief, read only for my account"; spec/workflows/digests.md, "Story: Change a digest once, even when the answer is lost"; spec/workflows/digests.md, "Run now is offered only for a missed occurrence the agent offers, never for an overlap or an unavailable source"; spec/workflows/digests.md, "Story: Read a digest's state plainly"; spec/workflows/digests.md, "Pausing or resuming keeps the saved time, zone and source"; spec/workflows/digestInbox.md, "Story: Keep every digest result on my phone before my agent is told I have it"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { WorkflowHttpError } from "@elizaos/plugin-workflow/client"
 import {
-  type DigestInbox, type DigestLoop, type DigestResult, type DigestSource, type HostedDigestMutationPath, HostedSourceRejected, digestInbox,
+  type DigestInbox, type DigestLoop, type DigestResult, type DigestSource, type HostedDigestMutationPath, type MissedRunNow, HostedSourceRejected, digestInbox,
   digestRan, digestSourceState, missedRunNowOffers, parseDigestResult,
 } from "@elizaos/plugin-workflow/digests"
-import { type LoopRow, type MutationReply, type ResultRow, Machine as PanelMachine, briefOf, loopWord, runNowOffered, stored as panelStored } from "../../gen/workflows__digests.effect.vibe"
+import { type LoopRow, type MutationReply, type ResultRow, Machine as PanelMachine, briefOf, loopWord, runNowOffered, runNowRequestValid, stored as panelStored } from "../../gen/workflows__digests.effect.vibe"
 import { Machine as QueueMachine, machine as queueMachine } from "../../gen/workflows__digestInbox.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type OwnerScope, WorkflowApi } from "./api.vibe"
-import { instant, sha256Hex } from "./ids.ts"
+import { instant, newId, sha256Hex } from "./ids.ts"
 
 export const DIGESTS_KEY = ownerKey("device", "workflows/digests")
 
@@ -36,6 +36,12 @@ export service Digests {
   retry(): MutationReply | "busy"!!
   /** Discard a kept change still in review. */
   discard(): void!!
+  /** Pause or resume the digest `loopId`, keeping its saved time, zone and source, under its current version. */
+  toggle(loopId: string, on: boolean): MutationReply | "busy" | "withdrawn"!!
+  /** The agent's Run now offer for the missed result `runId`, as the review names it; undefined when none is offered now. */
+  runNowOffer(runId: string): MissedRunNow | undefined!!
+  /** Keep and send the reviewed Run now of the missed result `runId`, under that offer's source, revision and mutation id. */
+  runMissedNow(runId: string, reviewed: MissedRunNow): MutationReply | "busy" | "withdrawn"!!
   /** The loops, sources and results as last read, for the review sheets and the result notices. */
   catalog(): { readonly loops: ReadonlyArray<DigestLoop>; readonly sources: ReadonlyArray<DigestSource>; readonly results: ReadonlyArray<DigestResult> }!!
 }
@@ -222,6 +228,42 @@ export const digests = Layer.provideMerge(Layer.provideMerge(Layer.effect(Digest
       panel.send({ type: "cleared", session, ok: removed !== "failed" }) catch () => undefined
     },
     catalog: () => Ref.get(catalog),
+    effect toggle(loopId: string, on: boolean) {
+      const { loops } = try Ref.get(catalog)
+      const loop = loops.find((l) => l.id === loopId && !l.removed)
+      if (loop === undefined || loop.spec.enabled === on) return "withdrawn"
+      const kept = try (panel.send({ type: "keep" }) catch () => undefined)
+      if (kept === undefined) return "busy"
+      const { hash } = try Ref.get(scopes)
+      const change: DigestChange = { path: "loops", body: { spec: { ...loop.spec, enabled: on }, mutationId: newId(), confirmed: true, id: loop.id, expectedVersionId: loop.versionId } }
+      const saved = try (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      if (saved === "failed") return "MutationUnconfirmed"
+      const started = try (panel.send({ type: "retry" }) catch () => undefined)
+      if (started === undefined) return "busy"
+      return try send()
+    },
+    effect runNowOffer(runId: string) {
+      const { loops, sources, results } = try Ref.get(catalog)
+      const now = try Clock.currentTimeMillis
+      return missedRunNowOffers(results, loops, sources, now).get(runId)
+    },
+    effect runMissedNow(runId: string, reviewed: MissedRunNow) {
+      const { loops, sources, results } = try Ref.get(catalog)
+      const now = try Clock.currentTimeMillis
+      const offer = missedRunNowOffers(results, loops, sources, now).get(runId)
+      const valid = runNowRequestValid(offer !== undefined, offer?.sourceId === reviewed.sourceId, offer?.sourceRevision === reviewed.sourceRevision,
+        offer?.mutationId === reviewed.mutationId && reviewed.mutationId !== "")
+      if (!valid || offer === undefined) return "withdrawn"
+      const kept = try (panel.send({ type: "keep" }) catch () => undefined)
+      if (kept === undefined) return "busy"
+      const { hash } = try Ref.get(scopes)
+      const change: DigestChange = { path: "dossier", body: { sourceId: offer.sourceId, sourceRevision: offer.sourceRevision, mutationId: offer.mutationId, confirmed: true } }
+      const saved = try (store.set(pendingKey(hash), JSON.stringify({ phase: "review", change })) catch () => "failed")
+      if (saved === "failed") return "MutationUnconfirmed"
+      const started = try (panel.send({ type: "retry" }) catch () => undefined)
+      if (started === undefined) return "busy"
+      return try send()
+    },
   }
 }), panelStored(DIGESTS_KEY)), queueMachine())
 

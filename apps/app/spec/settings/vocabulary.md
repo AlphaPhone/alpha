@@ -27,6 +27,15 @@ pure def accessOf(reported: bool, granted: bool): Access = if (not(reported)) Un
 pure def lawAnUnreadGrantIsNeverDenied(granted: bool): bool = accessOf(false, granted) == Unread
 ```
 
+### A browser's permission answer is allowed, asks or denied, and no answer is unread
+
+```quint
+type BrowserAnswer = Granted | Prompt | Refused | NoAnswer
+pure def accessOfBrowser(answer: BrowserAnswer): Access =
+  if (answer == Granted) Allowed else if (answer == Prompt) Asks else if (answer == Refused) Denied else Unread
+pure def lawABrowserPromptAsks(answer: BrowserAnswer): bool = (answer == Prompt) iff (accessOfBrowser(answer) == Asks)
+```
+
 ### A role is held by Alpha, by another app, by none that Android names, or unavailable
 
 An empty or unreadable list of holders never claims that no app holds the role.

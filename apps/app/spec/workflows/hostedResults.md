@@ -142,9 +142,9 @@ pure def dismissQuestion(h: HostedResults, explicit: bool): HostedResults = { ..
 pure def canRecheckAnswered(h: HostedResults, exact: bool, canCompose: bool): bool = h.question == QuestionRecheck
 pure def recheckAnswered(h: HostedResults, exact: bool, canCompose: bool): HostedResults =
   if (exact and canCompose) { ...h, question: QuestionConsume } else { ...h, question: QuestionDone }
-pure def canQuestionConsumed(h: HostedResults, ok: bool, current: bool): bool = h.question == QuestionConsume
-pure def questionConsumed(h: HostedResults, ok: bool, current: bool): HostedResults =
-  if (ok) { ...h, question: QuestionDone, consumed: true, composed: current,
+pure def canQuestionConsumed(h: HostedResults, ok: bool, live: bool): bool = h.question == QuestionConsume
+pure def questionConsumed(h: HostedResults, ok: bool, live: bool): HostedResults =
+  if (ok) { ...h, question: QuestionDone, consumed: true, composed: live,
     notices: h.notices.listMap(n => if (n.key == h.pending) { ...n, phase: ResultOpened } else n), pending: "", token: 0, asks: false }
   else { ...h, question: QuestionDone }
 pure def alwaysAComposedDraftWasConsumed(h: HostedResults): bool = h.composed implies h.consumed

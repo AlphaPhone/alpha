@@ -212,6 +212,11 @@ export function clickedControl(target: unknown): {
   return { role: "PlainButton", disabled, inert, checked: false, inDialog, destructive };
 }
 
+/** Whether a key event moves focus by keyboard: Tab or an arrow key. @throws {never} */
+export function navigationKey(event: unknown): boolean {
+  return event instanceof KeyboardEvent && (event.key === "Tab" || event.key.startsWith("Arrow"));
+}
+
 /** One value of this origin's storage, or null when it is missing or storage refuses. @throws {never} */
 export function storedValue(key: string): string | null {
   try { return globalThis.localStorage.getItem(key); } catch { return null; }

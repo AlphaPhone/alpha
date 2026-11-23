@@ -4,9 +4,11 @@ import { useMachine as useSignIn } from "../../../gen/account__signIn.react.ts";
 import { entryOf, initial as signInInitial } from "../../../gen/account__signIn.ts";
 import { SignInScreen } from "../../account/signIn.vibe";
 import { SignInPanel } from "./SignInPanel.tsx";
-import { accountRuntime, act, useAccountStream } from "./runtime.ts";
+import { act, runtime, useAccountStream } from "./runtime.ts";
 
+/** What the sign-in host needs beyond the account runtime: the deployment's name and where its exits lead. */
 export interface SignInHostProps {
+  /** The deployment's display name, such as "Eliza Cloud". */
   serviceName: string;
   /** Leave the dialog the owner opened; the required page has none. */
   onClose?: () => void;
@@ -21,7 +23,7 @@ const screen = (use: (s: SignInScreen.Shape) => Effect.Effect<unknown>) => act(E
  * @model spec/account/signIn.md
  */
 export function SignInHost({ serviceName, onClose, onOwnKeys }: SignInHostProps) {
-  const { state: signIn = signInInitial } = useSignIn(accountRuntime);
+  const { state: signIn = signInInitial } = useSignIn(runtime);
   const terms = useAccountStream("account/service-info", Effect.map(Effect.service(SignInScreen), (s) => Stream.fromEffect(s.serviceInfo())), undefined);
   const leave = () => {
     const entry = entryOf(signIn);

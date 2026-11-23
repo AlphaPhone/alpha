@@ -1,29 +1,23 @@
-// spec/files/downloads.md, "Story: Download exactly the files I selected"; spec/files/browserDownloads.md, "Story: Save a download only as I reviewed it"
+// spec/files/downloads.md, "Story: Download exactly the files I selected"; spec/files/downloads.md, "An archive holds exactly the selected bytes, in selection order, under distinct names"
 import { type Export, Machine as ExportMachine } from "../../gen/files__downloads.effect.vibe"
 import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
-import { Native } from "../platform/native.vibe"
 import { type DownloadFile, fromBase64, handOver, pageVisible, storedZip } from "./download.ts"
 import { keyPath } from "./paths.vibe"
 import { Documents, FilesStorage } from "./storage.vibe"
 
-const BROWSER_PLUGIN = "AlphaBrowser"
-
 /** How a download request ended: handed to the browser, or why not. */
 export type DownloadResult = "handed" | "refused" | "changed" | "busy"
 
-/** Downloads of selected files in the browser build, and the route the native Browser's Downloads list asks Files to open. */
+/** Downloads of selected files in the browser build; the Browser area opens Files at Downloads for its own session's "Show in Files". */
 export service FilesDownloads {
   readonly exports: Stream.Stream<Export>
   download(keys: readonly string[]): DownloadResult!!
-  /** `"downloads"` each time the Browser's Downloads list asks to show its files in Files. */
-  readonly routes: Stream.Stream<string>
 }
 
 /** Downloads over the export machine, the device's storage and the browser's own downloads. */
 export const layer = Layer.effect(FilesDownloads, effect {
   const storage = try FilesStorage
   const documents = try Documents
-  const native = try Native
   const exports = try ExportMachine
   const view = try BrowserMachine
 
@@ -80,6 +74,5 @@ export const layer = Layer.effect(FilesDownloads, effect {
   return {
     exports: exports.changes,
     download,
-    routes: Stream.map(Stream.catch(native.listen(BROWSER_PLUGIN, "showDownloads"), () => Stream.empty), () => "downloads"),
   }
 })

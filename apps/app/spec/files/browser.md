@@ -81,6 +81,17 @@ pure def reload(s: Browser): Browser =
 pure def alwaysTicketsAreNotNegative(s: Browser): bool = s.generation >= 0 and s.accessTicket >= 0
 ```
 
+### Coming back to the phone with Files on screen reads it again
+
+Access granted in Android's settings, or a file changed by another app, shows as soon as the owner
+returns, as a refresh would show it.
+
+```quint
+pure def canReturned(s: Browser): bool = s.active
+pure def returned(s: Browser): Browser = reload(s)
+pure def lawReturningReadsAgain(s: Browser): bool = returned(s).generation == s.generation + 1 and returned(s).accessTicket == s.accessTicket + 1
+```
+
 ### Only the newest access read decides access, and without access nothing is listed
 
 A grant keeps the listing read going. On Android 10 the grant asked for is storage access rather than
@@ -142,13 +153,14 @@ pure def sometimesBackInAFolder(s: Browser): bool = s.active and isFolder(s.plac
 ### A listing reply publishes only for the read it answers, prunes the selection and never fakes an empty place
 
 A failed read shows nothing and says so; a partial read keeps the rows it read and says how many there
-are in all when it knows.
+are in all when it knows. In Trash, whose rows Trash keeps, the reply only ends the read.
 
 ```quint
 pure def canListReply(s: Browser, ticket: int, rows: List[Row], outcome: ListingOutcome): bool =
   ticket >= 1 and ticket <= s.generation and outcome != Unread and noRepeats(rows.listMap(r => r.key))
 pure def listReply(s: Browser, ticket: int, rows: List[Row], groups: List[FolderGroup], outcome: ListingOutcome, count: int): Browser =
-  if (not(s.active) or ticket != s.generation or s.access != AccessGranted or s.place == Browse or s.place == InTrash) s
+  if (not(s.active) or ticket != s.generation or s.access != AccessGranted or s.place == Browse) s
+  else if (s.place == InTrash) { ...s, loading: false }
   else {
     val shown = keptRows(outcome, rows)
     val kept = pruned(s.selected, shown)
@@ -164,11 +176,14 @@ pure def lawARetiredListingPublishesNothing(s: Browser, ticket: int, rows: List[
 pure def showsEmpty(s: Browser): bool = s.access == AccessGranted and not(s.loading) and isListing(s.place) and claimsEmpty(s.listing, s.rows)
 pure def sometimesPartialRows(s: Browser): bool = s.listing == Partial and s.rows.length() > 0 and not(showsEmpty(s))
 pure def sometimesEmptyFolder(s: Browser): bool = showsEmpty(s) and isFolder(s.place)
+pure def sometimesTrashRead(s: Browser): bool = s.active and s.place == InTrash and not(s.loading)
 ```
 
 ### Browse shows each category's count and size, and how many items Trash holds
 
-A count read that fails leaves its count blank; a size the device did not report is `-1` and is not shown; Trash's count is shown only when every volume's Trash
+Browse lists All files, the categories, each volume and Trash. It has no search box and no Recents:
+the agent filters (owner decision F2). A count read that fails leaves its count blank; a size the
+device did not report is `-1` and is not shown; Trash's count is shown only when every volume's Trash
 was read.
 
 ```quint
@@ -223,7 +238,7 @@ pure def canEndMutation(s: Browser): bool = s.mutations > 0
 pure def endMutation(s: Browser): Browser = { ...s, mutations: s.mutations - 1 }
 pure def alwaysMutationsAreCounted(s: Browser): bool = s.mutations >= 0
 pure def stepAReadNeverSettlesAMutation(before: Browser, via: str, after: Browser): bool =
-  (via == "listReply" or via == "accessReply" or via == "reload" or via == "countsReply") implies after.mutations == before.mutations
+  (via == "listReply" or via == "accessReply" or via == "reload" or via == "returned" or via == "countsReply") implies after.mutations == before.mutations
 pure def sometimesOpenWhileLoading(s: Browser): bool = s.mutations > 0 and s.loading
 ```
 

@@ -1,0 +1,149 @@
+// spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Story: Ask about a page once I approve the excerpt"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"
+import { assert, it } from "@effect/vitest"
+import { BrowserReading } from "../../src/browser/reading.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { callsTo, fakeHost, loadPage, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
+
+const supported = { readingSupport: () => ({ available: true }) }
+
+effect function readingIdle(reading: BrowserReading.Shape) {
+  try timeout(Stream.runHead(Stream.filter(reading.changes, (r) => r.phase === "NotReading" && r.support !== "SupportUnknown")), "2 seconds")
+}
+
+// spec/browser/reading.md, "Read aloud asks the native host for one reading of the shown settled HTTPS page, and speaks only the token it returns, once"
+it.live("Read aloud speaks the one token the host returned for the shown page, and says so when speech fails", () => effect {
+  for (const speaks of [true, false]) {
+    const fake = try fakeHost({ answers: { ...supported, reviewReading: () => ({ readingToken: "token-1" }) }, voice: { binding: true, ready: true, speaks } })
+    try scoped(effect {
+      provide fake.live {
+        const tabs = try BrowserTabs
+        const reading = try BrowserReading
+        try settledTabs(tabs)
+        const id = try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/story", "3", 1)
+        try readingIdle(reading)
+        try reading.readAloud()
+        try sleep("50 millis")
+        const asked = try callsTo(fake.calls, "reviewReading")
+        try Effect.try(() => assert.deepStrictEqual({
+          asked: asked.map((c) => [c.args.id, c.args.url, c.args.navigation, c.args.route]),
+          spoken: try Ref.get(fake.spoken),
+          cancelled: (try callsTo(fake.calls, "cancelReading")).length,
+          failed: (try Ref.get(fake.toasts)).includes("Alpha couldn’t read this page aloud. Try again."),
+        }, {
+          asked: [[id, "https://example.test/story", "3", "on-device"]],
+          spoken: ["token-1"],
+          cancelled: 1,
+          failed: !speaks,
+        }))
+      }
+    })
+  }
+})
+
+// spec/browser/reading.md, "Stop, leaving the page, a new document of the bound tab, hiding Alpha and the assistant opening end the reading"
+it.live("the assistant opening before the reading is asked for ends it, and nothing is read", () => effect {
+  const fake = try fakeHost({ answers: { ...supported, reviewReading: () => ({ readingToken: "token-1" }) }, voice: { binding: true, ready: true, speaks: true } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const reading = try BrowserReading
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/story", "3", 1)
+      try readingIdle(reading)
+      const asking = fork reading.readAloud()
+      try sleep("20 millis")
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, chat: "sheet" })
+      try join asking
+      try Effect.try(() => assert.deepStrictEqual(
+        { asked: (try callsTo(fake.calls, "reviewReading")).length, spoken: (try Ref.get(fake.spoken)).length, cancelled: (try callsTo(fake.calls, "cancelReading")).length > 0 },
+        { asked: 0, spoken: 0, cancelled: true },
+      ))
+    }
+  })
+})
+
+// spec/browser/reading.md, "A reading is bound to the shown page it was asked for, and the device's support is asked once"
+it.live("a device without isolated reading or without a voice asks the host for nothing and says why", () => effect {
+  const unsupported = try fakeHost({ answers: { readingSupport: () => ({ available: false }) }, voice: { binding: true, ready: true, speaks: true } })
+  const voiceless = try fakeHost({ answers: supported })
+  for (const fake of [unsupported, voiceless]) {
+    try scoped(effect {
+      provide fake.live {
+        const tabs = try BrowserTabs
+        const reading = try BrowserReading
+        try settledTabs(tabs)
+        try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/", "1", 1)
+        try readingIdle(reading)
+        try reading.readAloud()
+        try reading.readAloud()
+      }
+    })
+  }
+  try Effect.try(() => assert.deepStrictEqual({
+    asked: (try callsTo(unsupported.calls, "reviewReading")).length + (try callsTo(voiceless.calls, "reviewReading")).length,
+    supportQueries: (try callsTo(unsupported.calls, "readingSupport")).length,
+    unsupported: (try Ref.get(unsupported.toasts)).at(-1),
+    voiceless: (try Ref.get(voiceless.toasts)).at(-1),
+  }, {
+    asked: 0,
+    supportQueries: 1,
+    unsupported: "Read aloud and Ask about page are unavailable on this device: its Android System WebView cannot read a page privately. Update Android System WebView.",
+    voiceless: "This agent doesn’t offer speech to read this page.",
+  }))
+})
+
+// spec/browser/reading.md, "Story: Ask about a page once I approve the excerpt"
+it.live("Ask about page opens the question only after the owner approves the excerpt, takes pasted text when the page cannot be read, and refuses a sensitive page", () => effect {
+  const answers = [{ text: "Bread needs flour, water, salt and time." }, new Error("isolated-world-unavailable"), { text: "Your verification code is 482913" }]
+  const drafts: string[][] = []
+  const said: string[] = []
+  for (const answer of answers) {
+    const fake = try fakeHost({ answers: { ...supported, reviewQuestion: () => answer } })
+    try scoped(effect {
+      provide fake.live {
+        const tabs = try BrowserTabs
+        const reading = try BrowserReading
+        try settledTabs(tabs)
+        try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/bread", "2", 1)
+        try readingIdle(reading)
+        try reading.askAboutPage()
+        try reading.approveQuestion()
+        if (answer instanceof Error) {
+          try reading.editQuestion("Pasted notes about bread")
+          try reading.approveQuestion()
+        }
+        drafts.push(try Ref.get(fake.drafts))
+        said.push((try Ref.get(fake.toasts)).at(-1) ?? "")
+      }
+    })
+  }
+  try Effect.try(() => assert.deepStrictEqual({
+    excerpt: drafts[0]!.length === 1 && drafts[0]![0]!.includes("Bread needs flour") && drafts[0]![0]!.includes("https://example.test/bread"),
+    pasted: drafts[1]!.length === 1 && drafts[1]![0]!.includes("Pasted notes about bread"),
+    sensitive: drafts[2]!.length,
+    refusal: said[2],
+  }, { excerpt: true, pasted: true, sensitive: 0, refusal: "This page may contain credentials or verification codes. Open a different page." }))
+})
+
+// spec/browser/reading.md, "The review opens on a settled page, fetches its public text once, and a sensitive address or text refuses it for good"
+it.live("a sign-in page's local reading review is refused for good: no text is taken and nothing is spoken", () => effect {
+  const fake = try fakeHost({ answers: supported, voice: { binding: false, ready: true, speaks: true } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const reading = try BrowserReading
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/login", "1", 1)
+      try readingIdle(reading)
+      try reading.readLocally()
+      try timeout(Stream.runHead(Stream.filter(reading.changes, (r) => !r.sourcePending)), "2 seconds")
+      try reading.editLocal("Read this instead")
+      try reading.readLocal()
+      const now = try timeout(Stream.runHead(reading.changes), "1 second")
+      try Effect.try(() => assert.deepStrictEqual(
+        { blocked: Option.getOrUndefined(now)?.blocked, text: Option.getOrUndefined(now)?.text, spoken: (try Ref.get(fake.spoken)).length },
+        { blocked: true, text: "", spoken: 0 },
+      ))
+    }
+  })
+})

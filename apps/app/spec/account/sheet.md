@@ -12,6 +12,11 @@ Home notice; the key's expiry is shown only in Account.
 
 ### The sheet shows one section at a time, and Android Home closes it
 
+The sheet opens when the Account app comes to the front, at the section its route names, and
+closes when the app leaves the front. Closing it, by Done, by leaving the app or by Android Home,
+also closes the plan manager, the funds form and the Settings Google panel it opened. The mode is
+the AI provider's confirmed route (spec/account/provider.md), which the sheet only shows.
+
 ```quint
 type Section = AccountSection | ProviderSection | FundsSection | PlansSection | GoogleSection | DelegationSection
 type Mode = CloudMode | DirectMode
@@ -46,7 +51,8 @@ pure def sometimesDirectProviderReachable(s: Sheet): bool = s.mode == DirectMode
 
 Asking to sign out shows what stays on the phone. Another account replacing the reviewed one
 ends the review; dismissing the sheet removes nothing. Switching between Cloud and own keys keeps
-every saved key.
+every saved key. A new account and an earlier sign-in left unconfirmed are told here
+(spec/account/session.md).
 
 ```quint
 pure val ownerValues = Set(0, 1, 2)

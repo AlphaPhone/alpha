@@ -66,7 +66,8 @@ pure def sometimesQueuedBehindAWrite(w: Writer): bool = w.queued.held and w.infl
 ### A rejected write is not repeated until its wait has passed: two seconds, doubling to a minute, and the owner is told once
 
 A success resets the wait. A different snapshot does not wait. A write that settles while data is
-being cleared arms nothing.
+being cleared arms nothing. Once the wait has passed, the shell offers the current snapshot again
+even when nothing changed meanwhile, as the owner was told it would.
 
 ```quint
 pure def retryDelay(failures: int): int =

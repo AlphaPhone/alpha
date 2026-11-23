@@ -26,6 +26,7 @@ handing area.
 - [Email card](./emailCard.md): an email the agent drafted, reviewed and sent inside the chat.
 - [Receipts](./receipts.md): honest attribution of what a turn's actions did, and action history.
 - [Approvals](./approvals.md): live and recovered action cards, decline and the card's states.
+- [Recovery](./recovery.md): the listing of pending actions, read once per session, history and screen.
 - [Review](./review.md): which proposal may produce a device effect, on whose authority, and at most once.
 - [Decision](./decision.md): one owner decision on a workflow approval request.
 - [Stopped reply](./stoppedReply.md): the single later check after the owner stopped a reply.

@@ -82,8 +82,8 @@ pure def stepOnlyStartBeginsGuidance(before: Guidance, via: str, after: Guidance
 
 ### A fix guides only when usable, and only for the current session
 
-An unusable fix pauses voice and keeps the step ("A fresh, precise location
-fix is needed for turn guidance."). Arrival needs 25 meters at 30 meters
+An unusable fix pauses voice and keeps the step ("Turn guidance needs a
+precise, up-to-date location."). Arrival needs 25 meters at 30 meters
 accuracy and stops the watch; with Maps off screen the shell posts one
 "Arrived at" notice for this session. A turn is passed near it or after two
 clearing fixes on the route, never backwards and never past the arrival step.
@@ -144,9 +144,14 @@ pure def sometimesPausedInBackground(s: Guidance): bool = s.ended == PausedInBac
 
 ### A reroute belongs to its session; a failed or late one keeps the current route
 
+The fix is measured again when the reroute is sent: one that went stale or
+coarse since it arrived keeps the route ("Rerouting needs a precise,
+up-to-date location. The current route was kept.").
+
 ```quint
-pure def canReroute(s: Guidance): bool = s.phase == Guiding and s.fixUsable
-pure def reroute(s: Guidance): NavStep =
+pure def canReroute(s: Guidance, ageMs: int, accuracy: int): bool =
+  s.phase == Guiding and s.fixUsable and usableFix(Precise, ageMs, accuracy)
+pure def reroute(s: Guidance, ageMs: int, accuracy: int): NavStep =
   { state: { ...s, phase: Rerouting, rerouteTicket: s.rerouteTicket + 1 }, out: List(PlanReroute({ ticket: s.rerouteTicket + 1 })) }
 pure def canRerouteSettles(s: Guidance, ticket: int, route: int, steps: int): bool =
   s.phase == Rerouting and ticket == s.rerouteTicket and steps >= 1

@@ -2,6 +2,7 @@
 import { ArrowLeft, Search, X } from "lucide-react";
 import { Button, Input } from "../components/ui/index.ts";
 
+/** The search field's text and which of Back, Search and Clear it offers. */
 export type SearchBarProps = {
   /** The text in the field, as the screen machine holds it. */
   query: string;

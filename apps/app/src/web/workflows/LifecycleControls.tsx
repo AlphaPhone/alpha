@@ -5,6 +5,7 @@ import type { ChangeOutcome } from "../../workflows/definitions.vibe";
 import { Button, Input, Label } from "../components/ui/index.ts";
 import { ReviewDialog } from "./ReviewDialog.tsx";
 
+/** Remove, restore and rename for the open workflow, and the change kept for it. */
 export interface LifecycleControlsProps {
   lifecycle: Lifecycle;
   /** The workflow's current name, for a rename. */

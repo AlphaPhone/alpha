@@ -3,11 +3,13 @@
 import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
-import { CloudSession } from "../../src/account/session.vibe"
+import { CloudSession } from "../../src/account/layer.vibe"
 import { Composer } from "../../src/assistant/composer.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
 import { WorkflowRuns } from "../../src/workflows/runs.vibe"
 import { NotesOrigins } from "../../src/notes/origins.vibe"
+import { AssistantHost } from "../../src/assistant/host.vibe"
+import { Reminders } from "../../src/clock/reminders.vibe"
 import { initial as navInitial } from "../../gen/shell__navigation.ts"
 import { initial as sessionInitial } from "../../gen/account__session.ts"
 import { machine as facts } from "../../gen/settings__facts.effect.vibe"
@@ -20,6 +22,7 @@ import { machine as handoff } from "../../gen/clock__handoff.effect.vibe"
 import { machine as history } from "../../gen/clock__handoffHistory.effect.vibe"
 import { machine as reminders } from "../../gen/clock__reminders.effect.vibe"
 import { machine as journal } from "../../gen/clock__reminderJournal.effect.vibe"
+import { machine as drafts } from "../../gen/clock__reminderDrafts.effect.vibe"
 import { machine as taps } from "../../gen/clock__reminderTaps.effect.vibe"
 import { machine as shade } from "../../gen/clock__notifications.effect.vibe"
 import { machine as canonical } from "../../gen/clock__canonicalTaps.effect.vibe"
@@ -81,15 +84,16 @@ export function fakeNavigation() {
   const shape = {
     open: (app: string, route?: string) => sync(() => { opened.push({ app, route }); return true }),
     get: () => sync(nav),
+    changes: Stream.empty,
   }
   return { opened, layer: Layer.succeed(Navigation, shape as unknown as Navigation.Shape) }
 }
 
-/** The assistant: a composer that is quiet unless `busy`, and the drafts reviewed questions opened. */
-export function fakeAssistant(busy = false) {
+/** The assistant: a composer that is quiet unless `busy` writes a reply or `holding` keeps a draft, and the drafts reviewed questions opened. */
+export function fakeAssistant(busy = false, holding = false) {
   const asked: string[] = []
   const composer = { transcript: Stream.make({ conversation: null, rows: [], hasMore: false, typing: busy }) }
-  const assistant = { openWith: (draft: string) => sync(() => { asked.push(draft) }) }
+  const assistant = { holdingDraft: () => succeed(holding), openWith: (draft: string) => sync(() => { asked.push(draft) }) }
   return {
     asked,
     layer: Layer.merge(Layer.succeed(Composer, composer as unknown as Composer.Shape), Layer.succeed(Assistant, assistant as unknown as Assistant.Shape)),
@@ -100,7 +104,7 @@ export function fakeAssistant(busy = false) {
 export function session(ownerId: string | undefined) {
   const [organizationId, userId] = (ownerId ?? ":").split(":")
   const current = ownerId === undefined ? sessionInitial : { ...sessionInitial, phase: "SignedIn", generation: 1, account: { ...sessionInitial.account, organizationId, userId } }
-  return Layer.succeed(CloudSession, { current: () => succeed(current) } as unknown as CloudSession.Shape)
+  return Layer.succeed(CloudSession, { current: () => succeed(current), changes: Stream.make(current) } as unknown as CloudSession.Shape)
 }
 
 /** The workflows area's runs, remembering each run it opened and answering the route Workflows shows it under. */
@@ -117,7 +121,22 @@ export function fakeOrigins() {
   return { forgotten, layer: Layer.succeed(NotesOrigins, shape as unknown as NotesOrigins.Shape) }
 }
 
+/** The shell's side of the assistant: an unlocked, visible, non-private screen and the agent identity Clock binds reviews to. */
+export function fakeHost(signedIn = true) {
+  const identity = { origin: "resident", owner: "owner-1", agent: "agent-1", session: "credential-1", installationId: "install-1", enrollmentId: "enroll-1" }
+  const screen = { exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false }, observation: { view: "clock", revision: 1, sensitive: false }, onCalendar: false, contextKey: "clock:" }
+  const shape = { identity: () => succeed(signedIn ? identity : undefined), screen: () => succeed(screen) }
+  return Layer.succeed(AssistantHost, shape as unknown as AssistantHost.Shape)
+}
+
+/** The Reminders screen, counting the refreshes an agent change asked for. */
+export function fakeReminders() {
+  const refreshes: number[] = []
+  const shape = { refresh: () => sync(() => { refreshes.push(refreshes.length + 1) }) }
+  return { refreshes, layer: Layer.succeed(Reminders, shape as unknown as Reminders.Shape) }
+}
+
 /** Every Clock machine, in memory. */
 export const machines = Layer.mergeAll(
-  facts(), ringer(), alarms(), timers(), stopwatch(), world(), handoff(), history(), reminders(), journal(), taps(), shade(), canonical(), workflow(), deletions(), mirror(), notices(),
+  facts(), ringer(), alarms(), timers(), stopwatch(), world(), handoff(), history(), reminders(), journal(), drafts(), taps(), shade(), canonical(), workflow(), deletions(), mirror(), notices(),
 )

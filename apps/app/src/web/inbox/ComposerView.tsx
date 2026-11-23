@@ -8,6 +8,7 @@ import { literalMailAddress } from "../../inbox/text.ts";
 import { suggestRecipients } from "../../inbox/composer.vibe";
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from "../components/ui/index.ts";
 
+/** What the composer shows of the open draft and its account, and what each edit, attachment and send asks for. */
 export type ComposerViewProps = {
   /** The open draft. */
   draft: Draft;

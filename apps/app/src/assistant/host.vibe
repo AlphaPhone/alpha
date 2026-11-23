@@ -2,7 +2,6 @@
 import type { Observation } from "@elizaos/agent/client"
 import type { Inference } from "../../gen/assistant__context.ts"
 import type { Exposure } from "../../gen/assistant.ts"
-import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 
 /** The verified agent session the assistant talks to: one origin, owner, agent and session. */
 export interface AgentIdentity {
@@ -39,8 +38,6 @@ export service AssistantHost {
   emergency(): boolean!!
   /** Open an app view, keeping the chat detent. */
   openView(app: string, route?: string): boolean!!
-  /** Send an email the owner reviewed in the chat through Inbox, once per request id. */
-  sendEmail(draft: { readonly to: string; readonly subject: string; readonly body: string; readonly requestId: string }): SendAnswer!!
   /** A short message at the top of the screen. */
   toast(text: string): void!!
 }

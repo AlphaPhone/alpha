@@ -40,11 +40,11 @@ pure def select(d: Drafts, binding: str): Drafts =
   { ...d, active: binding, slots: d.slots.put(binding, slotOf(d, binding)),
     bindings: if (d.bindings.includes(binding)) d.bindings else d.bindings.append(binding),
     notice: if (slotOf(d, binding).unsettled) MaySent else Quiet }
-pure def canEdit(d: Drafts, text: List[int]): bool = not(d.failed) and text != shown(d)
+pure def canEdit(d: Drafts, text: List[int]): bool = text != shown(d)
 pure def edit(d: Drafts, text: List[int]): Drafts = {
   val s = slotOf(d, d.active)
   { ...d, slots: d.slots.put(d.active, { ...s, text: text, revision: s.revision + 1 }),
-    notice: if (text.length() > draftUnitLimit) TooLong else Quiet }
+    notice: if (d.failed) StorageUnavailable else if (text.length() > draftUnitLimit) TooLong else Quiet }
 }
 pure def alwaysEveryDraftHasItsBinding(d: Drafts): bool = d.bindings.includes(d.active) and d.bindings.every(b => d.bindings.select(c => c == b).length() == 1)
 pure def stepSelectingKeepsEveryText(before: Drafts, via: str, after: Drafts): bool =
@@ -67,11 +67,18 @@ pure def stepAHandoverNeverOverwritesTyping(before: Drafts, via: str, after: Dra
 
 ### Storage that fails keeps the editor and refuses to hold a send until it is retried
 
+The composer still takes typing, and a send goes ahead without a held copy;
+when it does not reach the agent the composer puts its text back itself
+(#1265). Only a message that may already have been sent still stops a send.
+
 ```quint
 pure def canStorageFails(d: Drafts): bool = not(d.failed)
 pure def storageFails(d: Drafts): Drafts = { ...d, failed: true, notice: StorageUnavailable }
 pure def canRetryStorage(d: Drafts): bool = d.failed
 pure def retryStorage(d: Drafts): Drafts = { ...d, failed: false, notice: Quiet }
+pure def stepAFailedStoreStillTakesTyping(before: Drafts, via: str, after: Drafts): bool =
+  (via == "edit" and before.failed) implies after.notice == StorageUnavailable
+pure def sometimesTypedWhileStorageFailed(d: Drafts): bool = d.failed and shown(d).length() > 0
 ```
 
 ## Story: Get my message back when it was not sent

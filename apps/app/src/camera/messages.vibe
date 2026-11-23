@@ -1,4 +1,5 @@
-// spec/camera/notices.md, "Story: Be told only what I need to act on"
+// spec/camera/notices.md, "Story: Be told only what I need to act on"; spec/camera/viewfinder.md, "The recording timer shows the time left once the length or the estimated size limit is within a minute"
+import { secondsLeft, showsTimeLeft } from "../../gen/camera__viewfinder.ts"
 import { NativeFailed, NativeUnavailable } from "../platform/native.vibe"
 
 /** Alpha's sentence for each code `ElizaCamera` rejects a capture or its preview with. */
@@ -172,26 +173,18 @@ export function accessDetail(kind: "CameraNotice" | "MicrophoneNotice" | "Unavai
     : `Videos record sound with the microphone. ${allow}, or record without sound.`
 }
 
-/** Seconds before a recording's limit at which the time left is shown. */
-export const RECORDING_WARNING = 60
-
 function clock(seconds: number): string {
   const whole = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0))
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`
 }
 
-/** The time a recording has left before its length or size limit; no estimate in its first two seconds. */
-export function recordingLeft(duration: number, fileSize: number, limits: { readonly maxDuration: number; readonly maxFileSize: number }): number | undefined {
-  const elapsed = Math.max(0, Number.isFinite(duration) ? duration : 0)
-  let left = limits.maxDuration > 0 ? limits.maxDuration - elapsed : Infinity
-  if (limits.maxFileSize > 0 && elapsed >= 2 && fileSize > 0) left = Math.min(left, (limits.maxFileSize - fileSize) / (fileSize / elapsed))
-  return Number.isFinite(left) ? Math.max(0, left) : undefined
-}
+const whole = (value: number) => Math.max(0, Math.floor(Number.isFinite(value) ? value : 0))
 
-/** The recording timer: elapsed time, and the time left once a limit is near. */
+/** The recording timer: elapsed time, and the time left once the length or the estimated size limit is within a minute. */
 export function recordingLabel(duration: number, fileSize: number, limits: { readonly maxDuration: number; readonly maxFileSize: number }): string {
-  const left = recordingLeft(duration, fileSize, limits)
-  return left !== undefined && left <= RECORDING_WARNING ? `${clock(duration)} · ${clock(Math.ceil(left))} left` : clock(duration)
+  const elapsed = whole(duration), recorded = whole(fileSize)
+  if (!showsTimeLeft(elapsed, recorded, limits.maxDuration, limits.maxFileSize)) return clock(elapsed)
+  return `${clock(elapsed)} · ${clock(secondsLeft(elapsed, recorded, limits.maxDuration, limits.maxFileSize))} left`
 }
 
 /** Minutes and tenths for the trim timeline, rounded to tenths first so the seconds never read 60. */

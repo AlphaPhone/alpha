@@ -1,0 +1,109 @@
+// spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"; spec/calendar/drafts.md, "A note or scan opens a draft only when no editor is open and the owner's slot is empty"
+import type { NoteScheduleDraft } from "@elizaos/plugin-notes/client"
+import { NotesHandoff } from "../notes/origins.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { Notices } from "../shell/notices.vibe"
+import { CalendarDrafts } from "./drafts.vibe"
+import type { DraftFieldsRecord } from "./drafts.schema.vibe"
+import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
+import { DeviceCalendar } from "./device.vibe"
+import { DRAFT_ROUTE, newFields } from "./screen.vibe"
+import { calendarWall, deviceZone, isoInstant, resolveWall } from "./time.ts"
+
+/** A Calendar form built from scanned text, as Camera hands it over; Calendar's own review and Save stay the only write. */
+export interface CalendarScan {
+  readonly creationId: string
+  readonly title: string
+  readonly date: string
+  readonly time: string
+  readonly minutes: number
+  readonly allDay: boolean
+  readonly location: string
+  readonly notes: string
+  readonly repeat: "none" | "daily" | "weekdays" | "weekly"
+}
+
+/** Work other areas hand to Calendar: a note's or a scan's event draft, opened in the new event form for the owner to review. */
+export service CalendarHandoff {
+  /** Open the new event form with a note's draft; false when another draft must be finished first. */
+  reviewNote(draft: NoteScheduleDraft): boolean!!
+  /** Open the new event form with a scanned event; false when another draft must be finished first or the scan has no usable time. */
+  reviewScan(scan: CalendarScan): boolean!!
+}
+
+const FINISH_FIRST = "Finish the event draft you started in Calendar first. Nothing was added."
+const NO_TIME = "The scan has no time Calendar can use. Nothing was added."
+const NOT_READY = "Calendar isn’t connected to your agent yet. Nothing was added."
+
+function wall(instant: number, zone: string): string {
+  return (calendarWall(instant, zone) ?? isoInstant(instant).slice(0, -1)).slice(0, 16)
+}
+
+function creationKey(raw: string): string {
+  return raw.replace(/[^-a-zA-Z0-9_]/g, "").slice(0, 100)
+}
+
+/** The scan as form fields in the device zone, or undefined when its date or time does not exist there. */
+export function scanFields(scan: CalendarScan, zone: string, creationId: string): DraftFieldsRecord | undefined {
+  if (!/^\d{4}-\d\d-\d\d$/.test(scan.date)) return undefined
+  const base = {
+    title: scan.title.slice(0, 2048), body: scan.notes.slice(0, 32768), location: scan.location.slice(0, 2048), zone,
+    allDay: scan.allDay, repeat: scan.repeat, alert: null, video: false, who: [], calendar: "local" as const, creationId, origin: "scan" as const,
+  }
+  if (scan.allDay) return { ...base, start: scan.date, end: scan.date }
+  if (!/^\d\d:\d\d$/.test(scan.time)) return undefined
+  const found = resolveWall(`${scan.date}T${scan.time}:00`, zone)
+  if (found.kind !== "exists") return undefined
+  const minutes = Number.isInteger(scan.minutes) && scan.minutes > 0 && scan.minutes <= 10_080 ? scan.minutes : 60
+  return { ...base, start: wall(found.at, zone), end: wall(found.at + minutes * 60_000, zone) }
+}
+
+/** The hand-over service over the drafts, the shell's navigation and its notices; a note's event draft is followed from Notes. */
+export const handoffLayer = Layer.effect(CalendarHandoff, effect {
+  const drafts = try CalendarDrafts
+  const navigation = try Navigation
+  const notices = try Notices
+  const notes = try NotesHandoff
+  const presentation = try PresentationMachine
+  const device = try DeviceCalendar
+
+  effect function admit(origin: "FromNote" | "FromScan", fields: DraftFieldsRecord) {
+    if ((try drafts.get()).owner === "") {
+      try notices.show(NOT_READY)
+      return false
+    }
+    const notice = try drafts.handoff(origin, fields)
+    if (notice !== "HandoffAdmitted") {
+      try notices.show(FINISH_FIRST)
+      return false
+    }
+    try navigation.open("calendar", DRAFT_ROUTE)
+    const opened = presentation.send({ type: "newForm" }) catch () => undefined
+    if (opened !== undefined) try device.openForm("new", false)
+    return true
+  }
+
+  effect function reviewNote(draft: NoteScheduleDraft) {
+    if (draft.kind !== "event") return false
+    const creationId = creationKey(try sync(() => crypto.randomUUID()))
+    const fields = try newFields(0, creationId)
+    return try admit("FromNote", { ...fields, title: draft.title.slice(0, 2048), body: draft.notes.slice(0, 32768), origin: "note" })
+  }
+
+  try fork.scoped Stream.runForEach(notes.requests, (request) =>
+    request.kind === "calendar-draft" ? Effect.asVoid(reviewNote(request.draft)) : Effect.void)
+
+  return {
+    reviewNote,
+    effect reviewScan(scan: CalendarScan) {
+      const fresh = creationKey(try sync(() => crypto.randomUUID()))
+      const creationId = creationKey(scan.creationId) || fresh
+      const fields = scanFields(scan, deviceZone(), creationId)
+      if (fields === undefined) {
+        try notices.show(NO_TIME)
+        return false
+      }
+      return try admit("FromScan", fields)
+    },
+  }
+})

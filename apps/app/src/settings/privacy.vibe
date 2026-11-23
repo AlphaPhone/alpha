@@ -1,6 +1,6 @@
 // spec/settings/privacy.md, "Story: Know where my voice goes"; spec/settings/privacy.md, "Story: Pause or turn off listening and see what the listener did"
 import { type Listening, type Route, type Stop, Machine } from "../../gen/settings__privacy.effect.vibe"
-import { Listener } from "../voice/listener.vibe"
+import { Listener, type ListenerStatus } from "../voice/listener.vibe"
 import { VoiceRoute } from "../voice/route.vibe"
 
 /** The Privacy page's view of Voice: the speech route and the always-on listener row. */
@@ -15,13 +15,13 @@ export service PrivacyRow {
   openListenerSettings(): boolean!!
 }
 
-function listening(status: { readonly available: boolean; readonly state?: string; readonly listening?: boolean; readonly microphoneOpen?: boolean; readonly consented?: boolean }): Listening {
-  if (!status.available) return "ListenerUnavailable"
-  if (status.state === "OFF" && (status.microphoneOpen === true || status.listening === true)) return "MicStillOpen"
-  if (status.listening === true || status.microphoneOpen === true) return "ListenerOn"
-  if (status.state === "PERMISSION_REQUIRED" || status.state === "NOTIFICATIONS_REQUIRED" || status.state === "SPEECH_UNAVAILABLE") return "ListenerNeedsSetup"
-  if (typeof status.state === "string" && status.state.startsWith("PAUSED")) return "ListenerPaused"
-  return status.consented === true && status.state !== "OFF" ? "ListenerOn" : "ListenerOff"
+function listening(status: ListenerStatus): Listening {
+  if (!status.available || status.mode === "Unavailable") return "ListenerUnavailable"
+  if (status.microphoneOpen) return status.mode === "ListeningOff" || status.mode === "StoppedByListener" ? "MicStillOpen" : "ListenerOn"
+  if (status.mode === "ListeningOn") return "ListenerOn"
+  if (status.mode === "NeedsSetup") return "ListenerNeedsSetup"
+  if (status.mode === "ListeningPaused") return "ListenerPaused"
+  return "ListenerOff"
 }
 
 /** PrivacyRow over the listener-row Machine it is given and Voice's route and listener. */
@@ -41,7 +41,7 @@ export const privacyRow = Layer.effect(PrivacyRow, effect {
       const begun = try (row.send({ type: "beginStop", stop }) catch () => undefined)
       if (begun === undefined) return
       const answer = try (stop === "Pause" ? listener.pause() : listener.turnOff())
-      try (row.send({ type: "stopAnswered", confirmed: answer.available, listening: listening(answer) }) catch () => undefined)
+      try (row.send({ type: "stopAnswered", confirmed: answer.confirmed, listening: listening(answer.status) }) catch () => undefined)
     },
     openListenerSettings: () => listener.openSettings(),
   }

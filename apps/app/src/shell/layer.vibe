@@ -25,6 +25,12 @@ import { overviewLive } from "./overview.vibe"
 import { permissionsLive } from "./permissions.vibe"
 import { recoveryLive } from "./recovery.vibe"
 import { shadeLive } from "./shade.vibe"
+import { portsLive } from "./ports.vibe"
+
+export { ShellMail, IdleSources, type ReviewedEmail, type QuietFacts } from "./ports.vibe"
+export { mapsShellLive } from "./mapsShell.vibe"
+export { handoffsLive } from "./handoffs.vibe"
+export { operationPorts } from "./operations.vibe"
 
 /** Where the shell keeps its durable machines: the navigation and Home's favorites are the device's, not an account's. */
 export const NAVIGATION_KEY = ownerKey("device", "shell/navigation")
@@ -36,9 +42,9 @@ const machines = Layer.mergeAll(
   focusMachine(), overviewMachine(), permissionsMachine(), recoveryMachine(), hapticsMachine(),
 )
 
-const foundation = Layer.provideMerge(Layer.mergeAll(navigationLive, noticesLive, hapticsLive), machines)
+const foundation = Layer.provideMerge(Layer.mergeAll(navigationLive, noticesLive, hapticsLive, portsLive), machines)
 
-/** Every shell service and Machine: Navigation, Notices, Haptics, Launcher, Shade, Focus, Overview, Permissions, Recovery, Activity and Foreground, over the platform services. */
+/** Every shell service and Machine (Navigation, Notices, Haptics, Launcher, Shade, Focus, Overview, Permissions, Recovery, Activity, Foreground) and the ports later areas fill (ShellMail, IdleSources), over the platform services. */
 export const layer = Layer.provideMerge(
   Layer.mergeAll(launcherLive, shadeLive, geometryLive, focusLive, foregroundLive, overviewLive, permissionsLive, recoveryLive, activityLive),
   foundation,

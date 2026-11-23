@@ -2,6 +2,7 @@
 import { Machine as BridgeMachine, type Event as BridgeEvent } from "../../gen/assistant__withdrawal.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
+import { BridgeAnswer } from "./payloads.schema.vibe"
 import { AgentUnreachable, ask } from "./transport.vibe"
 
 const plugin = "ElizaAgent"
@@ -37,10 +38,10 @@ export const withdrawableLayer = Layer.effect(WithdrawableRequests, effect {
       try quiet({ type: "takeUp", id })
       try quiet({ type: "dispatch", id })
       try quiet({ type: "transportAnswers", id })
-      const reply = typeof answered === "object" && answered !== null ? answered as { readonly status?: unknown; readonly data?: unknown } : {}
-      const status = typeof reply.status === "number" ? reply.status : 0
-      if (status < 200 || status >= 400) throw new AgentUnreachable({ status, message: "refused" })
-      return reply.data
+      const reply = Schema.decodeUnknownOption(BridgeAnswer)(answered)
+      const status = Option.isSome(reply) ? reply.value.status : 0
+      if (Option.isNone(reply) || status < 200 || status >= 400) throw new AgentUnreachable({ status, message: "refused" })
+      return reply.value.data
     },
   }
 })

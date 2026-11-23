@@ -9,13 +9,19 @@ import { useMachine as useListener } from "../../../gen/voice__listener.react.ts
 import { initial as listenerInitial } from "../../../gen/voice__listener.ts";
 import { Listener } from "../../voice/listener.vibe";
 import { VoiceIndicatorView } from "./VoiceIndicatorView.tsx";
-import { runVoice, useVoiceRuntime, type VoiceRuntime } from "./runtime.tsx";
+import { runtime } from "./runtime.ts";
 
+/** What the shell gives every top surface: a way to open an app. */
 export interface VoiceIndicatorProps {
+  /** Open an app, at a route inside it. */
   readonly open: (app: AppId, route?: string) => void;
 }
 
-function Connected({ runtime }: { runtime: VoiceRuntime }) {
+/**
+ * The voice indicator surface the shell keeps mounted at the top of every screen.
+ * @model spec/voice/listener.md
+ */
+export function VoiceIndicator(_props: VoiceIndicatorProps) {
   const { state: mic = micInitial } = useCapture(runtime);
   const { state: conversation = conversationInitial } = useConversation(runtime);
   const { state: listener = listenerInitial, can } = useListener(runtime);
@@ -28,13 +34,7 @@ function Connected({ runtime }: { runtime: VoiceRuntime }) {
       listenerMicrophoneOpen={listener.microphoneOpen}
       wakeStop={listener.wakeStop}
       canPause={listener.mode === "ListeningOn" && can({ type: "beginStop", stop: "PauseListening" })}
-      onPause={() => runVoice(runtime, Effect.flatMap(Effect.service(Listener), (l) => l.pause()))}
+      onPause={() => { runtime.runFork(Effect.flatMap(Effect.service(Listener), (l) => l.pause())); }}
     />
   );
-}
-
-/** The voice indicator surface the shell keeps mounted at the top of every screen. */
-export function VoiceIndicator(_props: VoiceIndicatorProps) {
-  const runtime = useVoiceRuntime();
-  return runtime === undefined ? null : <Connected runtime={runtime} />;
 }

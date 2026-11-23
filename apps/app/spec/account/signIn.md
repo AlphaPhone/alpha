@@ -24,7 +24,7 @@ type Screen = ScreenClosed | Choose | GoogleWait | CodeStep | FactorStep
 type Work = NoWork | Probing | GoogleWork | Sending | Resending | Verifying | SavingOwnKeys
 type CodeMethod = EmailCode | PhoneCode
 type FactorKind = TotpFactor | SmsFactor | PasskeyFactor
-type Fault = NoFault | AttemptFailed | SendFailed | ResendFailed | WrongCode | CodeSpent
+type Fault = NoFault | AttemptFailed | SendFailed | ResendFailed | WrongCode | CodeSpent | KeysBusy
 type Net = NetUnknown | NetOnline | NetOffline | NetUnvalidated
 type Methods = { known: bool, google: bool, email: bool, phone: bool }
 type SignIn = {
@@ -186,6 +186,23 @@ pure def sometimesCommittedAttemptSurvivesBack(s: SignIn): bool = s.commitBounda
 pure def sometimesGoogleSecondFactor(s: SignIn): bool = s.screen == FactorStep and s.priorKey == s.storedKey and s.attempts == 1 and not(s.address)
 ```
 
+### A second verification the host kept after its wait ended is offered once the host resumes it
+
+The host retains `signInMfaRequired` when a Google attempt asks for a second verification after its
+waiting call was released. Alpha asks the host to resume that attempt (`resumeMfa`) and shows the
+verification step only while the attempt is still live and nothing else holds the screen; a return
+that arrives while a step is in flight waits until it ends.
+
+```quint
+pure val returnedFactorValues = Set(TotpFactor, SmsFactor)
+pure def canFactorReturned(s: SignIn, returnedFactor: FactorKind): bool =
+  s.hostFixed and s.work == NoWork and not(s.ownKeys) and not(s.signedIn) and s.screen != CodeStep and s.screen != FactorStep
+pure def factorReturned(s: SignIn, returnedFactor: FactorKind): SignIn =
+  { ...s, screen: FactorStep, factor: returnedFactor, fault: NoFault, opened: s.opened or not(isPage(entryOf(s))), latch: false,
+    attempts: s.attempts + 1, attempt: s.attempts + 1, stale: false, address: false, prefill: false }
+pure def sometimesRetainedFactorShown(s: SignIn): bool = s.screen == FactorStep and s.probes == 0
+```
+
 ## Story: Sign in with a code
 
 > As the owner, I type the code sent to my email or phone, ask for a new one when it expires, and
@@ -220,7 +237,8 @@ pure def sometimesFailedResendKeepsTheAttempt(s: SignIn): bool = s.fault == Rese
 
 A second verification continues under the same attempt; a passkey factor cannot be completed in
 Alpha. Every other failure, an unreachable Cloud included, returns to the method choice with the
-address filled in when the step was reached from one.
+address filled in when the step was reached from one. An answer is taken only for the attempt it
+was sent for: one that arrives after Back or after a newer code is dropped.
 
 ```quint
 type VerifyOutcome = CodeAccepted | CodeNeedsFactor({ codeFactor: FactorKind }) | CodeWrong | CodeUsedUp | CodeFailed
@@ -229,8 +247,10 @@ pure def canVerify(s: SignIn): bool =
   (s.screen == CodeStep or (s.screen == FactorStep and s.factor != PasskeyFactor)) and s.work == NoWork and not(s.stale) and reachable(s.net)
 pure def verify(s: SignIn): SignInStep = { state: { ...s, work: Verifying, fault: NoFault }, out: List(VerifyCode) }
 pure def isFactorOutcome(v: VerifyOutcome): bool = match v { | CodeNeedsFactor(f) => true | _ => false }
-pure def canVerifyEnds(s: SignIn, verified: VerifyOutcome): bool = s.work == Verifying and (isFactorOutcome(verified) implies s.screen == CodeStep)
-pure def verifyEnds(s: SignIn, verified: VerifyOutcome): SignInStep = match verified {
+pure val attemptValues = Set(1, 2, 3)
+pure def canVerifyEnds(s: SignIn, verified: VerifyOutcome, attempt: int): bool =
+  s.work == Verifying and attempt == s.attempt and (isFactorOutcome(verified) implies s.screen == CodeStep)
+pure def verifyEnds(s: SignIn, verified: VerifyOutcome, attempt: int): SignInStep = match verified {
   | CodeAccepted => { state: signedInFrom(s.storedKey + 1, s), out: List(Adopted) }
   | CodeNeedsFactor(f) => { state: { ...s, work: NoWork, screen: FactorStep, factor: f.codeFactor }, out: List() }
   | CodeWrong => { state: { ...s, work: NoWork, fault: WrongCode }, out: List() }
@@ -286,8 +306,11 @@ pure def sometimesBackClosedTheDialog(s: SignIn): bool = entryOf(s) == NoEntry a
 
 ### Saving own keys ends a readiness check without starting anything, and ends the entry
 
-The owner may skip Cloud for their own provider keys. Saving them takes the slot from a readiness
-check (not an attempt the owner started) and is refused behind any other step.
+The owner may skip Cloud for their own provider keys (spec/account/provider.md). Saving them takes
+the slot from a readiness check (not an attempt the owner started); behind any other step it is
+refused, and the screen says the sign-in is busy. While the keys are being entered the page steps
+aside for Account's AI provider form. Own keys the host already holds end the entry at startup, and
+a switch back to Cloud brings it back.
 
 ```quint
 pure def canOwnKeysStart(s: SignIn): bool = (s.work == NoWork or s.work == Probing) and not(s.ownKeys) and s.hostFixed
@@ -300,6 +323,15 @@ pure def stepATakenOverCheckStartsNothing(before: SignIn, via: str, after: SignI
   via == "ownKeysStart" implies out.length() == 0
 pure def alwaysSavedOwnKeysEndTheEntry(s: SignIn): bool = s.ownKeys implies (s.screen == ScreenClosed and entryOf(s) == NoEntry)
 pure def sometimesOwnKeysSaved(s: SignIn): bool = s.ownKeys and s.probes >= 1 and s.screen == ScreenClosed
+pure def canOwnKeysRefused(s: SignIn): bool =
+  s.hostFixed and not(s.ownKeys) and s.work != NoWork and s.work != Probing and s.work != SavingOwnKeys
+pure def ownKeysRefused(s: SignIn): SignIn = { ...s, fault: KeysBusy }
+pure def canOwnKeysCleared(s: SignIn): bool = s.ownKeys and s.work == NoWork
+pure def ownKeysCleared(s: SignIn): SignIn = { ...s, ownKeys: false }
+pure def pageShown(s: SignIn): bool = isPage(entryOf(s)) and s.work != SavingOwnKeys
+pure def stepARefusedSaveStartsNothing(before: SignIn, via: str, after: SignIn, out: List[SignInEffect]): bool =
+  via == "ownKeysRefused" implies (out.length() == 0 and after.work == before.work)
+pure def sometimesOwnKeysRefused(s: SignIn): bool = s.fault == KeysBusy and s.work == Verifying
 ```
 
 ## Story: Read the service's terms before signing in

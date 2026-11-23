@@ -57,6 +57,8 @@ export interface MapsContentState {
   readonly copyright: string
   readonly viewport?: { readonly center: Coordinate; readonly zoom: number }
   readonly searchNear?: Coordinate
+  /** Where the quiet fix on open centred the map, while nothing was chosen or listed. */
+  readonly centerOn?: Coordinate
   readonly recent: ReadonlyArray<string>
   readonly eventOrigin?: EventOrigin
   /** Whether guidance voice is on. */

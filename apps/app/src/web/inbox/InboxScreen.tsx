@@ -17,8 +17,8 @@ import { initial as selectionInitial } from "../../../gen/inbox__selection.ts";
 import { InboxAccounts } from "../../inbox/accounts.vibe";
 import { Mailbox } from "../../inbox/mailbox.vibe";
 import { Reader, type LinkReview } from "../../inbox/reader.vibe";
-import { Composer, recipientCandidates } from "../../inbox/composer.vibe";
-import { MailOperations, composerRef } from "../../inbox/operations.vibe";
+import { MailComposer, recipientCandidates, type ComposerRefusal } from "../../inbox/composer.vibe";
+import { MailOperations, composerRef, type OperationOutcome } from "../../inbox/operations.vibe";
 import { MailSelection } from "../../inbox/selection.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, EmptyState, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/index.ts";
@@ -27,9 +27,10 @@ import { DraftsList } from "./DraftsList.tsx";
 import { MailList } from "./MailList.tsx";
 import { LinkReviewDialog, MessageView } from "./MessageView.tsx";
 import { ReviewSheet } from "./ReviewSheet.tsx";
-import { admissionRefusal, attachmentRefusal, composerRefusal, folderNames, operationOutcome } from "./messages.ts";
+import { admissionRefusal, attachmentRefusal, composerRefusal, folderNames, operationOutcome, outcomeFeedback } from "./messages.ts";
 import type { AppServices } from "../runtime.ts";
-import { act, ask, runtime } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
+import { act, ask } from "./run.ts";
 
 /**
  * The Inbox: the selected account's folders and searches, the open message, the composer, Drafts and the review of
@@ -57,17 +58,27 @@ export function InboxScreen({ onClose }: ScreenProps) {
   const readableRows = accounts.rows.filter(readable);
   const writable = canChangeMail(accounts);
   const say = (text: string | undefined) => setNotice(text ?? "");
-  const running = (program: Effect.Effect<string | undefined, unknown, AppServices>) => {
+  const answered = (outcome: OperationOutcome | ComposerRefusal | undefined) => {
+    if (outcome === undefined) { say(""); return; }
+    if (outcome in operationOutcome) {
+      const feedback = outcomeFeedback(outcome as OperationOutcome);
+      say(feedback.notice);
+      if (feedback.review !== "keep") setReviewOpen(feedback.review === "open");
+      return;
+    }
+    say(composerRefusal[outcome as ComposerRefusal]);
+  };
+  const operating = (program: Effect.Effect<OperationOutcome | ComposerRefusal | undefined, unknown, AppServices>) => {
     setBusy(true);
-    ask(Effect.ensuring(program, Effect.sync(() => setBusy(false))), say);
+    ask(Effect.ensuring(program, Effect.sync(() => setBusy(false))), answered);
   };
 
   const back = () => {
-    if (mine.composing) { ask(Effect.flatMap(Effect.service(Composer), (c) => c.back()), (r) => say(r && composerRefusal[r])); return; }
+    if (mine.composing) { ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.back()), (r) => say(r && composerRefusal[r])); return; }
     if (reader.phase !== "Closed") { act(Effect.flatMap(Effect.service(Reader), (r) => r.close())); return; }
     if (selection.phase !== "NotSelecting") { act(Effect.flatMap(Effect.service(MailSelection), (s) => s.finish())); return; }
     if (mailbox.query !== "") { setQuery(""); setSearching(false); act(Effect.flatMap(Effect.service(Mailbox), (m) => m.search(""))); return; }
-    act(Effect.flatMap(Effect.service(Composer), (c) => c.hide()));
+    act(Effect.flatMap(Effect.service(MailComposer), (c) => c.hide()));
     onClose();
   };
 
@@ -101,13 +112,13 @@ export function InboxScreen({ onClose }: ScreenProps) {
           key={`${openDraft.id}:${openDraft.fields.files.length}:${openDraft.fields.forward.parts.length}`}
           draft={openDraft} account={account} accounts={readableRows} busy={busy}
           canSend={writable && caps.send} canSaveToGmail={writable && caps.providerDrafts}
-          onEdit={(fields, pendingTo) => act(Effect.flatMap(Effect.service(Composer), (c) => c.edit(fields, pendingTo)))}
-          onAttach={() => ask(Effect.flatMap(Effect.service(Composer), (c) => c.pickAndAttach()), (r) => say(r === undefined ? "" : r in admissionRefusal ? admissionRefusal[r as keyof typeof admissionRefusal] : composerRefusal[r as keyof typeof composerRefusal]))}
+          onEdit={(fields, pendingTo) => act(Effect.flatMap(Effect.service(MailComposer), (c) => c.edit(fields, pendingTo)))}
+          onAttach={() => ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.pickAndAttach()), (r) => say(r === undefined ? "" : r in admissionRefusal ? admissionRefusal[r as keyof typeof admissionRefusal] : composerRefusal[r as keyof typeof composerRefusal]))}
           onBack={back}
-          onSend={() => running(Effect.map(Effect.flatMap(Effect.service(Composer), (c) => c.send()), (r) => (r in operationOutcome ? operationOutcome[r as keyof typeof operationOutcome] : composerRefusal[r as keyof typeof composerRefusal])))}
-          onSaveToGmail={() => { setReviewOpen(true); running(Effect.map(Effect.flatMap(Effect.service(Composer), (c) => c.saveToGmail()), (r) => (r === undefined ? undefined : r in operationOutcome ? operationOutcome[r as keyof typeof operationOutcome] : composerRefusal[r as keyof typeof composerRefusal]))); }}
+          onSend={() => operating(Effect.flatMap(Effect.service(MailComposer), (c) => c.send()))}
+          onSaveToGmail={() => { setReviewOpen(true); operating(Effect.flatMap(Effect.service(MailComposer), (c) => c.saveToGmail())); }}
           candidates={recipientCandidates(mailbox, reader, mine.shelf)}
-          onMove={(grant) => ask(Effect.flatMap(Effect.service(Composer), (c) => c.transfer(grant)), (r) => say(r === undefined ? `Draft in ${readableRows.find((a) => a.id === grant)?.label ?? "the other account"}` : composerRefusal[r]))}
+          onMove={(grant) => ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.transfer(grant)), (r) => say(r === undefined ? `Draft in ${readableRows.find((a) => a.id === grant)?.label ?? "the other account"}` : composerRefusal[r]))}
         />
       ) : (
         <>
@@ -133,14 +144,14 @@ export function InboxScreen({ onClose }: ScreenProps) {
                   <Input aria-label="Search mail" autoFocus value={query} onChange={(event) => setQuery(event.currentTarget.value)} className="w-40" />
                 </form>
               ) : <Button size="icon" variant="ghost" aria-label="Search" onClick={() => setSearching(true)}><Search aria-hidden /></Button>}
-              <Button size="icon" variant="ghost" aria-label="New email" disabled={drafts.owner === ""} onClick={() => ask(Effect.flatMap(Effect.service(Composer), (c) => c.compose()), (r) => say(r && composerRefusal[r]))}><PenSquare aria-hidden /></Button>
+              <Button size="icon" variant="ghost" aria-label="New email" disabled={drafts.owner === ""} onClick={() => ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.compose()), (r) => say(r && composerRefusal[r]))}><PenSquare aria-hidden /></Button>
             </div>
           </header>
           <div className="flex flex-wrap gap-2 px-4 py-1">
             {account.capabilities.includes("CapTriage") && !account.capabilities.includes("CapMailbox") && !accounts.fromDisk && (
               <Button size="sm" variant="ghost" onClick={() => act(Effect.flatMap(Effect.service(InboxAccounts), (a) => a.requestAccess("ChangeMail")))}>Allow Gmail changes</Button>
             )}
-            {hasDraft(openDraft) && !mine.composing && <Button size="sm" variant="secondary" onClick={() => act(Effect.flatMap(Effect.service(Composer), (c) => c.resume()))}>Continue draft</Button>}
+            {hasDraft(openDraft) && !mine.composing && <Button size="sm" variant="secondary" onClick={() => act(Effect.flatMap(Effect.service(MailComposer), (c) => c.resume()))}>Continue draft</Button>}
             {record !== undefined && !(record.kind === "SendKind" && record.receipt.receiptState === "SucceededReceipt") && (
               <Button size="sm" variant="secondary" onClick={() => setReviewOpen(true)}>Mail review / receipt</Button>
             )}
@@ -152,11 +163,11 @@ export function InboxScreen({ onClose }: ScreenProps) {
             <MessageView
               reader={reader} canMarkRead={writable && caps.readState} canChange={writable && caps.mailboxChanges}
               onBack={back}
-              onReply={(mode) => ask(Effect.flatMap(Effect.service(Composer), (c) => c.reply(mode)), (r) => say(r === undefined ? "" : r in composerRefusal ? composerRefusal[r as keyof typeof composerRefusal] : `Not forwarded: ${r}`))}
+              onReply={(mode) => ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.reply(mode)), (r) => say(r === undefined ? "" : r in composerRefusal ? composerRefusal[r as keyof typeof composerRefusal] : `Not forwarded: ${r}`))}
               onChange={(kind) => {
                 if (!kindAllowed(caps, kind)) { say(operationOutcome.Refused); return; }
                 setReviewOpen(true);
-                running(Effect.map(Effect.flatMap(Effect.service(MailOperations), (o) => o.prepare(kind, { tag: "LabelProposal", messageId: reader.body.id, expectedHistoryId: reader.body.historyId }, { draftId: "", content: "" }, { localDraft: "", revision: 0, gmailDraft: "", gmailDigest: "" })), (r) => (r === undefined ? undefined : operationOutcome[r])));
+                operating(Effect.flatMap(Effect.service(MailOperations), (o) => o.prepare(kind, { tag: "LabelProposal", messageId: reader.body.id, expectedHistoryId: reader.body.historyId }, { draftId: "", content: "" }, { localDraft: "", revision: 0, gmailDraft: "", gmailDigest: "" })));
               }}
               onSetRead={(unread) => act(Effect.flatMap(Effect.service(Reader), (r) => r.setRead(unread, true)))}
               onShowImages={() => act(Effect.flatMap(Effect.service(Reader), (r) => r.showImages()))}
@@ -171,9 +182,9 @@ export function InboxScreen({ onClose }: ScreenProps) {
           ) : draftsView(mailbox) ? (
             <DraftsList
               drafts={mine} gmailDrafts={mailbox.drafts} localOnly={mailbox.localDraftsOnly}
-              onOpenLocal={(id, confirmed) => ask(Effect.flatMap(Effect.service(Composer), (c) => c.openShelved(id, confirmed)), (r) => say(r && composerRefusal[r]))}
-              onOpenGmail={(row) => ask(Effect.flatMap(Effect.service(Composer), (c) => c.openGmailDraft(row, false)), (r) => say(r && composerRefusal[r]))}
-              onDelete={(picks) => ask(Effect.flatMap(Effect.service(Composer), (c) => c.deleteShelved(picks)), (ok) => say(ok ? "Drafts deleted." : "These drafts changed. Select them again."))}
+              onOpenLocal={(id, confirmed) => ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.openShelved(id, confirmed)), (r) => say(r && composerRefusal[r]))}
+              onOpenGmail={(row) => ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.openGmailDraft(row, false)), (r) => say(r && composerRefusal[r]))}
+              onDelete={(picks) => ask(Effect.flatMap(Effect.service(MailComposer), (c) => c.deleteShelved(picks)), (ok) => say(ok ? "Drafts deleted." : "These drafts changed. Select them again."))}
             />
           ) : (
             <MailList
@@ -185,6 +196,8 @@ export function InboxScreen({ onClose }: ScreenProps) {
               onPickAll={(items) => act(Effect.flatMap(Effect.service(MailSelection), (s) => s.pickAll(items)))}
               onReview={(action) => act(Effect.flatMap(Effect.service(MailSelection), (s) => Effect.andThen(s.review(action), s.apply())))}
               onFinishSelecting={() => act(Effect.flatMap(Effect.service(MailSelection), (s) => s.finish()))}
+              canSwipeArchive={writable && kindAllowed(caps, "ArchiveKind")}
+              onSwipeArchive={(row) => { setReviewOpen(true); operating(Effect.flatMap(Effect.service(MailOperations), (o) => o.archiveListed(row.id))); }}
             />
           )}
         </>
@@ -193,14 +206,14 @@ export function InboxScreen({ onClose }: ScreenProps) {
       <ReviewSheet
         record={record} open={reviewOpen} busy={busy}
         confirmable={record !== undefined && kindAllowed(caps, record.kind) && (!isComposerKind(record.kind) || (hasDraft(openDraft) && composerRef(openDraft).content === record.composer.content && openDraft.id === record.composer.draftId))}
-        onConfirm={() => running(Effect.map(Effect.flatMap(Effect.service(MailOperations), (o) => o.confirm(hasDraft(openDraft) ? composerRef(openDraft) : { draftId: "", content: "" })), (r) => operationOutcome[r]))}
-        onRefresh={() => running(Effect.map(Effect.flatMap(Effect.service(MailOperations), (o) => o.refresh()), (r) => (r === undefined ? undefined : operationOutcome[r])))}
-        onRetry={() => running(Effect.map(Effect.flatMap(Effect.service(MailOperations), (o) => o.retry()), (r) => (r === undefined ? undefined : operationOutcome[r])))}
+        onConfirm={() => operating(Effect.flatMap(Effect.service(MailOperations), (o) => o.confirm(hasDraft(openDraft) ? composerRef(openDraft) : { draftId: "", content: "" })))}
+        onRefresh={() => operating(Effect.flatMap(Effect.service(MailOperations), (o) => o.refresh()))}
+        onRetry={() => operating(Effect.flatMap(Effect.service(MailOperations), (o) => o.retry()))}
         onClear={() => ask(Effect.flatMap(Effect.service(MailOperations), (o) => o.clear()), () => setReviewOpen(false))}
         onAbandon={() => ask(Effect.flatMap(Effect.service(MailOperations), (o) => o.abandon()), (ok) => { if (ok) setReviewOpen(false); })}
-        onUndo={() => running(Effect.map(Effect.flatMap(Effect.service(MailOperations), (o) => o.undo()), (r) => (r === undefined ? undefined : operationOutcome[r])))}
+        onUndo={() => operating(Effect.flatMap(Effect.service(MailOperations), (o) => o.undo()))}
         onContinueDraft={() => ask(Effect.flatMap(Effect.service(MailOperations), (o) => o.continueDraft()), (r) => { if (r === "opened") setReviewOpen(false); else say(r === "changed" ? composerRefusal["gmail-draft-changed"] : r === "busy" ? composerRefusal["drafts-full"] : "Unavailable"); })}
-        onDeleteDraft={() => running(Effect.map(Effect.flatMap(Effect.service(MailOperations), (o) => o.deleteGmailDraft()), (r) => (r === undefined ? undefined : operationOutcome[r])))}
+        onDeleteDraft={() => operating(Effect.flatMap(Effect.service(MailOperations), (o) => o.deleteGmailDraft()))}
         onClose={() => setReviewOpen(false)}
       />
       <LinkReviewDialog

@@ -1,5 +1,6 @@
-// spec/maps/connection.md, "Story: Back off when Maps asks me to wait"; spec/maps/connection.md, "A request may start only on the installed provider, for its account and generation, outside a pause"
+// spec/maps/connection.md, "Story: Back off when Maps asks me to wait"; spec/maps/connection.md, "A request may start only on the installed provider, for its account and generation, outside a pause"; spec/maps/connection.md, "A wait Cloud names is shown and kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute"
 import { MapsFailure, type MapsFailureCode } from "@elizaos/plugin-maps/client/contracts"
+import { pauseSeconds, resetNamed, waitNamed } from "../../gen/maps__connection.ts"
 import type { CloudSignedOut, CloudUnavailable } from "../platform/cloud.vibe"
 
 export { MapsFailure }
@@ -9,12 +10,29 @@ export function failure(code: MapsFailureCode, message: string): MapsFailure {
   return new MapsFailure({ code, message })
 }
 
-/** How long to pause after Cloud refuses with 429; the platform's Cloud error names no wait, so one minute. */
-export const DEFAULT_PAUSE_MS = 60000
-
-/** The pause a refusal asks for, or undefined when it asks for none. */
+/** The pause a refusal asks for in milliseconds: the wait Cloud named when at most a day, otherwise one minute; undefined when it asks for none. */
 export function pauseOf(error: CloudUnavailable | CloudSignedOut): number | undefined {
-  return error._tag === "CloudUnavailable" && error.status === 429 ? DEFAULT_PAUSE_MS : undefined
+  if (error._tag !== "CloudUnavailable" || error.status !== 429) return undefined
+  return pauseSeconds(Math.ceil(error.retryAfter ?? 0)) * 1000
+}
+
+/** A wait in words: "45 seconds", "5 minutes", "2 hours", "3 days". */
+export function waitText(seconds: number): string {
+  const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
+  if (seconds < 60) return unit(Math.ceil(seconds), "second")
+  if (seconds < 3600) return unit(Math.ceil(seconds / 60), "minute")
+  if (seconds < 86400) return unit(Math.ceil(seconds / 3600), "hour")
+  return unit(Math.ceil(seconds / 86400), "day")
+}
+
+function limitText(error: CloudUnavailable): string {
+  const seconds = Math.ceil(error.retryAfter ?? 0)
+  return waitNamed(seconds) ? `Maps request limit reached. Try again in ${waitText(seconds)}.` : "Maps request limit reached. Try again later."
+}
+
+function allowanceText(error: CloudUnavailable): string {
+  const seconds = Math.ceil(error.retryAfter ?? 0)
+  return resetNamed(seconds) ? `You have used your Maps allowance for this period. It resets in ${waitText(seconds)}.` : "You have used your Maps allowance for this period."
 }
 
 /** A Cloud refusal as the owner reads it: sign-in, plan and outages kept apart, never the provider's own text, no automatic retry. */
@@ -36,8 +54,8 @@ export function cloudFailure(error: CloudUnavailable | CloudSignedOut): MapsFail
     case 422: return failure("unsupported", code === "no_route" ? "No route is available between these places."
       : code === "unsupported_mode" ? "This travel mode is not available from Cloud Maps." : "This location is outside Cloud Maps coverage.")
     case 429: return code === "allowance_exhausted" || code === "maps_allowance_exhausted"
-      ? failure("rate-limited", "You have used your Maps allowance for this period.")
-      : failure("rate-limited", "Maps request limit reached. Try again later.")
+      ? failure("rate-limited", allowanceText(error))
+      : failure("rate-limited", limitText(error))
     case 502: return failure("invalid-response", "Cloud Maps could not complete this request.")
     case 503: return code === "maps_not_configured" ? failure("unconfigured", "Cloud Maps is not available yet.")
       : failure("unavailable", "Cloud Maps is temporarily unavailable. Try again later.")

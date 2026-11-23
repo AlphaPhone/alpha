@@ -10,14 +10,28 @@ import { AgentRequests } from "../../calendar/requests.vibe";
 import { formatDateTime } from "../../calendar/time.ts";
 import type { AppId } from "../app-screen.ts";
 import { Button, Checkbox, Sheet, SheetContent, Toast, ToastProvider, ToastViewport } from "../components/ui/index.ts";
-import { useAgentView, useApprovalSheet, useHeld, useRequestSheet } from "./hooks.ts";
-import { run } from "./runtime.ts";
+import { useAgentView, useApprovalSheet, useHeld, useRequestSheet, run } from "./hooks.ts";
+
+/** What the shell gives an always-mounted Calendar surface: a way to open an app. */
+export type SurfaceProps = { readonly open: (app: AppId, route?: string) => void };
+
+/** The Undo notice's props, as the shell mounts it in the notices slot. */
+export type UndoNoticesProps = SurfaceProps;
+
+/** The approval review's props, as the shell mounts it in the overlay slot. */
+export type ApprovalReviewProps = SurfaceProps;
+
+/** The agent request review's props, as the shell mounts it in the overlay slot. */
+export type AgentRequestReviewProps = SurfaceProps;
+
+/** The saved app calendar review takes nothing: it shows while the agent's Calendar waits for it. */
+export type PreservationReviewProps = Record<string, never>;
 
 /**
  * The Undo notice of the newest held deletion; its window does not end while it is on screen.
  * @model spec/calendar/deletions.md
  */
-export function UndoNotices(_props: { readonly open: (app: AppId, route?: string) => void }) {
+export function UndoNotices(_props: UndoNoticesProps) {
   const held = useHeld();
   const waiting = held.held.find((entry) => entry.phase === "Waiting");
   return (
@@ -42,7 +56,7 @@ const STATUS_TEXT: Readonly<Record<ApprovalStatus, string>> = {
  * The review of a Calendar change waiting for approval: exactly the fields it would apply, read again at the tap.
  * @model spec/calendar/approvals.md
  */
-export function ApprovalReview(_props: { readonly open: (app: AppId, route?: string) => void }) {
+export function ApprovalReview(_props: ApprovalReviewProps) {
   const sheet = useApprovalSheet();
   const state = sheet.state;
   if (state.phase === "ReviewIdle") return null;
@@ -78,7 +92,7 @@ export function ApprovalReview(_props: { readonly open: (app: AppId, route?: str
  * The owner's two steps of an availability check: which calendars may be read, then the exact answer to share.
  * @model spec/calendar/availability.md
  */
-export function AgentRequestReview(_props: { readonly open: (app: AppId, route?: string) => void }) {
+export function AgentRequestReview(_props: AgentRequestReviewProps) {
   const sheet = useRequestSheet();
   const [ticked, setTicked] = useState<readonly string[]>([]);
   if (sheet.kind === "none") return null;
@@ -133,7 +147,7 @@ export function AgentRequestReview(_props: { readonly open: (app: AppId, route?:
  * The review of the saved app calendar before the agent's Calendar starts: keep it read only, for this account.
  * @model spec/calendar/preservation.md
  */
-export function PreservationReview() {
+export function PreservationReview(_props: PreservationReviewProps = {}) {
   const agent = useAgentView();
   const [notice, setNotice] = useState("");
   if (agent.state.status !== "TransitionRequired" && agent.state.status !== "LegacyRecovery") return null;

@@ -6,6 +6,7 @@ import { type Session, canMoveFind } from "../../../gen/browser__session.ts";
 import { Button, Input } from "../components/ui/index.ts";
 import { HOST_CHROME } from "./measure.ts";
 
+/** The find bar's session, and the owner's query, steps and close. */
 export interface FindBarProps {
   session: Session;
   onQuery: (query: string) => void;

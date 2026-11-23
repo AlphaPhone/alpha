@@ -10,11 +10,14 @@ const ICONS: Readonly<Record<FileKind, LucideIcon>> = {
   KindFolder: Folder, KindImage: FileImage, KindVideo: FileVideo, KindAudio: FileAudio, KindPdf: FileText, KindDocument: FileText, KindOther: File,
 };
 
+const LONG_PRESS_MS = 500;
+
 /** The icon of a kind of file. */
 export function kindIcon(kind: FileKind): LucideIcon {
   return ICONS[kind];
 }
 
+/** One listed row, how the listing shows it, and what a tap and a long press do. */
 export type FileRowProps = {
   row: Row;
   /** Whether the listing is selecting; undefined offers no selection. */
@@ -29,7 +32,7 @@ export type FileRowProps = {
   disabled?: boolean;
   /** A tap: open the file or folder, or, while selecting, select it. */
   onOpen: () => void;
-  /** A long press or a secondary click: start or extend the selection. */
+  /** A press held half a second or a secondary click: start or extend the selection. */
   onPress?: () => void;
 };
 
@@ -38,35 +41,35 @@ export type FileRowProps = {
  * @model spec/files/browser.md
  */
 export function FileRow({ row, selecting, selected = false, showFolder = false, grid = false, disabled, onOpen, onPress }: FileRowProps) {
-  const pressed = useRef<number | undefined>(undefined);
-  const held = useRef(false);
+  const down = useRef<number | undefined>(undefined);
+  const pressedByMenu = useRef(false);
   const Icon = kindIcon(row.kind);
   const detail = row.kind === "KindFolder"
     ? row.children >= 0 ? countLabel(row.children) : ""
     : [formatSize(row.size), shortDate(row.modified), showFolder ? row.folder || "Internal storage" : ""].filter(Boolean).join(" · ");
   const label = selecting ? `${selected ? "Deselect" : "Select"} ${row.name}` : `Open ${row.name}`;
   const press = {
-    onPointerDown: () => {
-      held.current = false;
-      pressed.current = window.setTimeout(() => {
-        held.current = true;
-        onPress?.();
-      }, 500);
+    onPointerDown: (event: { timeStamp: number }) => {
+      down.current = event.timeStamp;
+      pressedByMenu.current = false;
     },
-    onPointerUp: () => window.clearTimeout(pressed.current),
-    onPointerCancel: () => window.clearTimeout(pressed.current),
-    onPointerLeave: () => window.clearTimeout(pressed.current),
+    onPointerCancel: () => {
+      down.current = undefined;
+    },
     onContextMenu: (event: { preventDefault(): void }) => {
       event.preventDefault();
-      window.clearTimeout(pressed.current);
-      if (!held.current) onPress?.();
-      held.current = true;
+      down.current = undefined;
+      pressedByMenu.current = true;
+      onPress?.();
     },
-    onClick: () => {
-      if (held.current) {
-        held.current = false;
+    onClick: (event: { timeStamp: number }) => {
+      const since = down.current;
+      down.current = undefined;
+      if (pressedByMenu.current) {
+        pressedByMenu.current = false;
         return;
       }
+      if (onPress && since !== undefined && event.timeStamp - since >= LONG_PRESS_MS) return onPress();
       onOpen();
     },
   };

@@ -1,7 +1,28 @@
 // spec/telephony/drafts.md, "Story: Write to someone, in my own words or Alpha's"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
-import { CloudSession } from "../account/layer.vibe"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { CloudSession, ownerOf } from "../account/layer.vibe"
 
-/** The stored key of one of telephony's machines, under the signed-in account's owner namespace. */
-export effect function telephonyKey(name: string) {
-  return try (try CloudSession).ownerKey(`telephony/${name}`)
+/** A machine's state kept under the key of whoever is signed in when it is read or written, and the owner changes that republish it. */
+export interface OwnerKept<S> {
+  load(): S!unknown
+  keep(next: S): void!!
+  readonly owners: Stream.Stream<number>
+}
+
+/**
+ * One machine's stored state, bound to the owner signed in at each read and write rather than at layer build,
+ * so a start signed out never lands the next owner's drafts under the wrong key. `decode` refuses what is not a state.
+ */
+export effect function ownerKept<S>(name: string, start: S, decode: (input: unknown) => S!unknown) {
+  const session = try CloudSession
+  const store = try KeyValueStore.KeyValueStore
+  effect function load() {
+    const found = try store.get(try session.ownerKey(`telephony/${name}`))
+    return found === undefined ? start : try decode(try Effect.try(() => JSON.parse(found) as unknown))
+  }
+  effect function keep(next: S) {
+    try orDie(store.set(try session.ownerKey(`telephony/${name}`), JSON.stringify(next)))
+  }
+  const owners = Stream.drop(Stream.changesWith(Stream.map(session.changes, ownerOf), (a, b) => a === b), 1)
+  return { load, keep, owners } satisfies OwnerKept<S>
 }

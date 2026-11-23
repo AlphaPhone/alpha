@@ -1,5 +1,7 @@
-// spec/inbox/reader.md, "Formatted mail is sanitized, isolated and shown whole or not at all"
+// spec/inbox/reader.md, "Formatted mail is sanitized, isolated and shown whole or not at all"; spec/inbox/reader.md, "A mail link opens only over HTTPS, only in Alpha's Browser, after the owner reviews it"
 import createDOMPurify from "dompurify";
+import { linkTextMismatch } from "@elizaos/plugin-inbox/mailbox";
+import type { MailLink } from "../../gen/inbox__reader.ts";
 
 /** Formatted mail ready for an isolated frame: the document, how many remote images it holds, and its inline links. */
 export interface PreparedMail {
@@ -104,4 +106,28 @@ export function fitMailFrame(frame: HTMLIFrameElement): () => void {
   doc.addEventListener("load", fit, true);
   fit();
   return () => { observer.disconnect(); doc.removeEventListener("load", fit, true); };
+}
+
+/** A link of formatted mail as the reader reviews it: the message's own entry for that address, or one built from the anchor. */
+export function inlineMailLink(href: string, text: string, known: readonly MailLink[]): MailLink {
+  const listed = known.find((link) => link.href === href);
+  if (listed) return listed;
+  const host = /^https:\/\/([^/?#:]+)/i.exec(href)?.[1] ?? "";
+  return { href, text: text.trim() || href, host, mismatch: linkTextMismatch({ href, text }) };
+}
+
+/** Sends a tap or Enter on a sanitized anchor of the frame to the link review instead of navigating; returns the cleanup. */
+export function bindMailLinks(frame: HTMLIFrameElement, onLink: (href: string, text: string) => void): () => void {
+  const doc = frame.contentDocument;
+  if (!doc) return () => undefined;
+  const follow = (event: Event) => {
+    if (event instanceof KeyboardEvent && event.key !== "Enter") return;
+    const anchor = (event.target as Element | null)?.closest?.("a[data-alpha-link]");
+    if (!anchor) return;
+    event.preventDefault();
+    onLink(anchor.getAttribute("data-alpha-link") ?? "", anchor.textContent ?? "");
+  };
+  doc.addEventListener("click", follow, true);
+  doc.addEventListener("keydown", follow, true);
+  return () => { doc.removeEventListener("click", follow, true); doc.removeEventListener("keydown", follow, true); };
 }

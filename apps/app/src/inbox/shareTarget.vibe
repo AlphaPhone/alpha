@@ -1,13 +1,15 @@
 // spec/inbox/attachments.md, "A shared file always starts a new local draft for the account it was reviewed for"
 import type { FileShareTargets } from "../files/share.vibe"
 import type { AttachmentBytes } from "../files/native.schema.vibe"
-import { Composer } from "./composer.vibe"
+import { MailComposer } from "./composer.vibe"
 import { InboxAccounts } from "./accounts.vibe"
+import { Navigation } from "../shell/navigation.vibe"
 
-/** The email members of Files' share targets: the account a new draft would go to, and a new reviewed draft holding the shared file. */
+/** The email members of Files' share targets: the account a new draft would go to, and a new reviewed draft holding the shared file, opened in Inbox. */
 export const emailShareTarget = effect {
-  const composer = try Composer
+  const composer = try MailComposer
   const accounts = try InboxAccounts
+  const navigation = try Navigation
   const target: Pick<FileShareTargets.Shape, "emailAccount" | "email"> = {
     effect emailAccount() {
       const a = try accounts.get()
@@ -20,7 +22,7 @@ export const emailShareTarget = effect {
       const picked = { name: file.name, mimeType: file.mimeType, dataBase64: file.dataBase64, sha256: file.sha256 }
       const outcome = try composer.shareFile(picked, picked, token)
       switch (outcome) {
-        case "FileAdded": return { kind: "inserted" as const }
+        case "FileAdded": try navigation.open("inbox"); return { kind: "inserted" as const }
         case "AlreadyAttached": return { kind: "duplicate" as const }
         case "AccountChanged": return { kind: "refused" as const, reason: "The email account changed. Nothing was added." }
         case "DraftsFull": return { kind: "refused" as const, reason: "Local drafts are full. Delete one in Inbox, then share again. Nothing was added." }

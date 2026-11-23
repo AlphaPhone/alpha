@@ -1,81 +1,24 @@
 // spec/telephony/messages.md, "Story: Read my conversations while Messages is open"; spec/telephony/messages.md, "Story: Open a conversation"; spec/telephony/messages.md, "Story: Start a new message"; spec/telephony/messages.md, "Story: Find a conversation"; spec/telephony/messages.md, "Story: Copy or delete one message"; spec/telephony/drafts.md, "Story: Send only what I reviewed, once"; spec/telephony/comms.md, "Story: Address the person or Alpha from one bar"
-import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/messages";
-import { ArrowLeft, Phone as PhoneIcon, Plus, Search, Users, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone";
+import { ArrowLeft, Phone as PhoneIcon, Plus, Search, X } from "lucide-react";
+import { useCallback, useState } from "react";
 import { slotOf } from "../../../gen/telephony__drafts.ts";
 import { useMachine as useMessagesMachine } from "../../../gen/telephony__messages.react.ts";
-import { initial as messagesInitial, type Messages } from "../../../gen/telephony__messages.ts";
+import { initial as messagesInitial, threadCallNumber } from "../../../gen/telephony__messages.ts";
 import { DraftSends, type SendProblem } from "../../telephony/drafts.vibe";
 import { MessagesView } from "../../telephony/messages.vibe";
-import { placeOwnerCall } from "../../telephony/phone.vibe";
 import { PictureAttach } from "../../telephony/share.vibe";
 import type { ScreenProps } from "../app-screen.ts";
-import { Avatar, Button, EmptyState, Input, ListRow } from "../components/ui/index.ts";
+import { Avatar, Button, Input, ListRow } from "../components/ui/index.ts";
 import { openApp } from "./open.ts";
 import { CommsBar } from "./CommsBar.tsx";
 import { DraftBubble } from "./DraftBubble.tsx";
 import { MessageBubble } from "./MessageBubble.tsx";
-import { deleteNoticeText, isAskSentence, matchesThread, phoneNoticeText, queryOf, sendProblemText, shortWhen, threadTitle } from "./present.ts";
+import { deleteNoticeText, isAskSentence, phoneNoticeText, queryOf, sendProblemText, threadTitle } from "./present.ts";
+import { ThreadList } from "./ThreadList.tsx";
 import { ListAsk } from "../../telephony/list-ask.vibe";
 import { runtime, type TelephonyRuntime } from "./runtime.ts";
 import { useComms } from "./useComms.ts";
-
-export interface ThreadListProps {
-  /** Messages' state: conversations, access, failure and the query. */
-  messages: Messages;
-  /** The time the rows are placed against. */
-  now: number;
-  /** Open a conversation. */
-  onOpen: (threadId: string) => void;
-  /** Allow SMS read access, Refresh and Load more. */
-  onAllow: () => void;
-  onRefresh: () => void;
-  onMore: () => void;
-  /** Clear Alpha's filter. */
-  onClearQuery: () => void;
-}
-
-/**
- * The conversation list: unread in bold, an incomplete conversation offered to the system app, and an Alpha filter chip.
- * @model spec/telephony/messages.md
- * @design design.md
- */
-export function ThreadList({ messages, now, onOpen, onAllow, onRefresh, onMore, onClearQuery }: ThreadListProps) {
-  const query = queryOf(messages.listQuery);
-  const rows = messages.threads.filter((t) => matchesThread(threadTitle(t.title, t.addresses), t.snippet, query.text));
-  if (messages.access === "SmsNotGranted") return <EmptyState title="Allow messages"><Button onClick={onAllow}>Allow</Button></EmptyState>;
-  if (messages.failed) return <EmptyState title="Messages could not be read"><Button variant="secondary" onClick={onRefresh}>Refresh</Button></EmptyState>;
-  if (!messages.busy && messages.access === "SmsGranted" && messages.threads.length === 0) return <EmptyState title="No messages" />;
-  return (
-    <div className="flex flex-col">
-      {query.chip && (
-        <div className="px-4 py-2">
-          <Button variant="secondary" size="sm" aria-label={`Clear filter ${query.chip}`} onClick={onClearQuery}>{query.chip}<X aria-hidden /></Button>
-        </div>
-      )}
-      {query.text && rows.length === 0 && messages.threads.length > 0 && <EmptyState title="No matches" />}
-      <ul className="divide-y divide-border">
-        {rows.map((t) => {
-          const title = t.complete ? threadTitle(t.title, t.addresses) : "Conversation content unavailable";
-          return (
-            <li key={t.id}>
-              <ListRow
-                title={<span className={t.unread ? "font-semibold" : undefined}>{title}</span>}
-                detail={t.complete ? t.snippet : "Use the system messaging app to view this conversation."}
-                leading={t.addresses.length > 1 ? <Users aria-hidden /> : <Avatar name={title} />}
-                trailing={<span className="font-mono text-xs uppercase tabular-nums text-muted-foreground">{shortWhen(t.date, now)}</span>}
-                disabled={!t.complete}
-                aria-label={`${title}, ${shortWhen(t.date, now)}${t.unread ? ", unread" : ""}`}
-                onClick={() => onOpen(t.id)}
-              />
-            </li>
-          );
-        })}
-      </ul>
-      {messages.more && <Button variant="ghost" onClick={onMore}>Load more</Button>}
-    </div>
-  );
-}
 
 export interface MessagesScreenProps extends ScreenProps {
   /** The runtime the screen runs on. */
@@ -93,27 +36,11 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
   const [notice, setNotice] = useState("");
   const [answer, setAnswer] = useState("");
   const [query, setQuery] = useState("");
-  useEffect(() => {
-    let visit = on.runFork(MessagesView.use((v) => v.visit()));
-    if (route?.startsWith("compose:")) {
-      const number = normalizePhoneNumber(route.slice("compose:".length));
-      send({ type: "composeOpened" });
-      if (number) on.runFork(DraftSends.use((d) => d.addRecipient(number)));
-    }
-    if (route?.startsWith("thread:")) on.runFork(MessagesView.use((v) => v.openThread(route.slice("thread:".length))));
+  const visit = useCallback((node: HTMLElement | null) => {
+    if (!node) return;
+    const running = on.runFork(MessagesView.use((v) => v.visit(route)));
     stage.show("MessagesApp", "ListSubject", "messages:list:");
-    const visibility = () => {
-      visit.interruptUnsafe();
-      if (!document.hidden) {
-        visit = on.runFork(MessagesView.use((v) => v.visit()));
-        on.runFork(MessagesView.use((v) => v.openNotice(true)));
-      }
-    };
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      document.removeEventListener("visibilitychange", visibility);
-      visit.interruptUnsafe();
-    };
+    return () => running.interruptUnsafe();
   }, [on, route]);
 
   const open = m.view.tag === "InThread" ? m.view : null;
@@ -145,20 +72,23 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
     } else if (m.view.tag === "Composing") on.runFork(MessagesView.use((v) => v.pickerClose()));
     else if (m.searching) send({ type: "searchClosed" });
   };
-  const sole = open && open.addresses.length === 1 ? normalizePhoneNumber(open.addresses[0]) : null;
+  const sole = threadCallNumber(m.view) !== "";
   const attach = async () => {
     const answer = await on.runPromise(PictureAttach.use((p) => p.attach(thread)));
     setNotice(answer === "refused" ? "Only JPEG, PNG and GIF pictures up to 1 MB, five at most, can be sent." : "");
   };
 
   return (
-    <section aria-label="Messages" className="flex h-full flex-col bg-background text-foreground">
+    <section ref={visit} aria-label="Messages" className="flex h-full flex-col bg-background text-foreground">
       <header className="flex items-center gap-2 px-4 pt-4 pb-2">
         {(open || m.view.tag === "Composing") && <Button variant="ghost" size="icon" aria-label="Back" onClick={back}><ArrowLeft aria-hidden /></Button>}
         {open && <Avatar name={title} />}
         <h1 className="min-w-0 flex-1 truncate font-serif text-2xl">{open ? title : m.view.tag === "Composing" ? "New message" : "Messages"}</h1>
         {sole && (
-          <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={async () => setNotice(phoneNoticeText({ tag: "Placement", outcome: await on.runPromise(placeOwnerCall(sole)) }))}>
+          <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={async () => {
+            const outcome = await on.runPromise(MessagesView.use((v) => v.callThread()));
+            setNotice(outcome === undefined ? "" : phoneNoticeText({ tag: "Placement", outcome }));
+          }}>
             <PhoneIcon aria-hidden />
           </Button>
         )}

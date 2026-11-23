@@ -1,6 +1,7 @@
 // spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"
 import { Machine, initial, machine } from "../../gen/workflows__clockDraft.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { WorkflowClockPort } from "./ports.vibe"
 
 /** The Clock draft Workflows opens over itself, handed to Clock once the owner approves it. */
 export service WorkflowClockDraft {
@@ -12,9 +13,9 @@ export service WorkflowClockDraft {
   close(): void!!
   visibility(hidden: boolean): void!!
   prepare(): boolean!!
-  /** Approve the reviewed draft: "dispatch" when the screen may now hand it to Clock, once. */
-  approve(): "dispatch" | "failed" | "refused"!!
-  /** What Clock answered the handoff the screen made. */
+  /** Approve the reviewed draft and hand it to Clock once: "opened" or "unknown" after a handoff, "failed" when the save was retired. */
+  approve(): "opened" | "unknown" | "failed" | "refused"!!
+  /** What Clock answered a handoff made outside this service. */
   handedOver(opened: boolean): void!!
 }
 
@@ -23,21 +24,36 @@ export const clockDraft = Layer.unwrap(effect {
   const start = { ...initial, browser: build.info.variant === "browser", mock: build.info.testMocks && build.info.variant === "browser" }
   return Layer.provideMerge(Layer.effect(WorkflowClockDraft, effect {
     const held = try Machine
+    const clock = try WorkflowClockPort
     const sent = (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
     return {
       enter: effect () => { try sent({ type: "enter" }) },
-      leave: effect () => { try sent({ type: "leave" }) },
+      effect leave() {
+        try sent({ type: "leave" })
+        try clock.retire()
+      },
       remember: effect () => { try sent({ type: "remember" }) },
       effect open(retained: boolean) { return (try sent({ type: "openClock", retained })) !== undefined },
-      close: effect () => { try sent({ type: "closeClock" }) },
-      effect visibility(hidden: boolean) { try sent({ type: "visibility", hidden }) },
-      effect prepare() { return (try sent({ type: "prepare" })) !== undefined },
+      effect close() {
+        try sent({ type: "closeClock" })
+        try clock.retire()
+      },
+      effect visibility(hidden: boolean) {
+        try sent({ type: "visibility", hidden })
+        if (hidden) try clock.retire()
+      },
+      effect prepare() {
+        if (!(try held.get()).shown || !(try clock.prepare())) return false
+        return (try sent({ type: "prepare" })) !== undefined
+      },
       effect approve() {
         const approved = try sent({ type: "approve" })
         if (approved === undefined || (try held.get()).phase !== "DraftSaving") return "refused"
         try sent({ type: "savedDraft" })
-        const after = try held.get()
-        return after.phase === "DraftDispatching" ? "dispatch" : "failed"
+        if ((try held.get()).phase !== "DraftDispatching") return "failed"
+        const opened = try clock.confirm()
+        try sent({ type: "finishHandoff", opened })
+        return opened ? "opened" : "unknown"
       },
       effect handedOver(opened: boolean) { try sent({ type: "finishHandoff", opened }) },
     }

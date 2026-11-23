@@ -4,6 +4,7 @@ import type { FileKind } from "../../../gen/files__storage.ts";
 import { Button, Dialog, DialogContent, DialogTitle } from "../components/ui/index.ts";
 import { countLabel, formatSize, fullDate, locationLabel, typeLabel } from "./format.ts";
 
+/** What Files knows of one file or folder, each unknown fact left out. */
 export type DetailsDialogProps = {
   name: string;
   path: string;

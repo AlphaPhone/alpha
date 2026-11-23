@@ -1,7 +1,7 @@
-// spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
+// spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "Swiping a listed message left reviews its archive at its current revision, and swiping right changes nothing"; spec/inbox/operations.md, "Send of the email on screen continues its open operation, and an unresolved one blocks another"; spec/inbox/operations.md, "Sent is said once, by the step that first learns of the success, and an unresolved send opens its receipt"; spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
 import {
   type Event as JournalEvent, type Journal, type OpKind, type Proposal, type ComposedMail, type ComposerRef, type SendSource, type OperationRecord, type Receipt,
-  Machine as JournalMachine, recordOf, cleanupReady, canUndo, undoKind, canContinueDraft, canDeleteGmailDraft, isLabelKind, notStarted
+  Machine as JournalMachine, recordOf, noRecord, sendStep, swipeArchives, swipeDistance, cleanupReady, canUndo, undoKind, canContinueDraft, canDeleteGmailDraft, isLabelKind, notStarted
 } from "../../gen/inbox__operations.effect.vibe"
 import { type Event as DraftsEvent, type DraftFields, type Draft, type Mode, Machine as DraftsMachine, continuedDraft } from "../../gen/inbox__drafts.effect.vibe"
 import { InboxAccounts } from "./accounts.vibe"
@@ -10,7 +10,7 @@ import { Mailbox } from "./mailbox.vibe"
 import { canonicalJson, jsonBytes, newId } from "./text.ts"
 
 /** What a send or change came to, as the owner is told. */
-export type OperationOutcome = "Sent" | "Changed" | "Rejected" | "Uncertain" | "NotStarted" | "Unsent" | "Refused" | "Discarded" | "SignedOut"
+export type OperationOutcome = "Sent" | "SentBefore" | "AwaitingReview" | "Changed" | "Rejected" | "Uncertain" | "NotStarted" | "Unsent" | "Refused" | "Discarded" | "SignedOut"
 
 const modes: Record<Mode, ComposedMail["mode"]> = { ComposeMode: "ComposeMail", ReplyMode: "ReplyMail", ReplyAllMode: "ReplyAllMail", ForwardMode: "ForwardMail" }
 const draftModes: Record<ComposedMail["mode"], Mode> = { ComposeMail: "ComposeMode", ReplyMail: "ReplyMode", ReplyAllMail: "ReplyAllMode", ForwardMail: "ForwardMode" }
@@ -53,6 +53,8 @@ export service MailOperations {
   clear(): boolean!!
   /** Discards an unsent review the composer no longer shows. */
   discardStale(shown: ComposerRef): boolean!!
+  /** Reviews the archive of a listed message at the revision read for it now, as a swipe left asks. */
+  archiveListed(messageId: string): OperationOutcome | undefined!!
   /** Undoes a confirmed archive or Trash. */
   undo(): OperationOutcome | undefined!!
   /** Reviews the permanent deletion of the Gmail draft the operation saved or sent from. */
@@ -82,19 +84,19 @@ export const layer = Layer.effect(MailOperations, effect {
     return s.records.some((r) => r.owner === s.owner) ? recordOf(s.owner, s) : undefined
   }
 
-  effect function outcomeOf(r: OperationRecord | undefined): OperationOutcome | undefined {
+  effect function outcomeOf(r: OperationRecord | undefined, announcedNow: boolean): OperationOutcome | undefined {
     if (r === undefined) return undefined
     if (notStarted(r)) return "NotStarted"
     switch (r.receipt.receiptState) {
-      case "SucceededReceipt": return r.kind === "SendKind" ? "Sent" : "Changed"
+      case "SucceededReceipt": return r.kind !== "SendKind" ? "Changed" : announcedNow ? "Sent" : "SentBefore"
       case "RejectedReceipt": return "Rejected"
       case "UnknownReceipt": case "DispatchedReceipt": return "Uncertain"
       default: return r.phase === "Dispatching" ? "Uncertain" : undefined
     }
   }
 
-  effect function settle(r: OperationRecord) {
-    if (r.receipt.receiptState !== "SucceededReceipt") return
+  effect function settle(r: OperationRecord): boolean {
+    if (r.receipt.receiptState !== "SucceededReceipt") return false
     if (isLabelKind(r.kind) && r.proposal.tag === "LabelProposal") {
       const id = r.proposal.messageId
       switch (r.kind) {
@@ -108,7 +110,7 @@ export const layer = Layer.effect(MailOperations, effect {
       const copy = Effect.try(() => JSON.parse(r.composer.content) as DraftFields) catch () => undefined
       if (copy !== undefined) drafts.send({ type: "sent", owner: r.owner, id: r.source.localDraft, copy } satisfies DraftsEvent) catch () => undefined
     }
-    try send({ type: "announce", requestId: r.requestId })
+    return (try send({ type: "announce", requestId: r.requestId })) !== undefined
   }
 
   effect function failed(error: GmailFailed | SignInExpired): OperationOutcome {
@@ -128,8 +130,8 @@ export const layer = Layer.effect(MailOperations, effect {
     if (prepared === undefined) return "Unsent"
     try send({ type: "reviewed", requestId, review: prepared.review, receipt: prepared.receipt, exact: prepared.exact })
     const after = try record()
-    if (after !== undefined && after.phase === "Observed") try settle(after)
-    return try outcomeOf(after)
+    const announcedNow = after !== undefined && after.phase === "Observed" ? try settle(after) : false
+    return try outcomeOf(after, announcedNow)
   }
 
   effect function prepare(kind: OpKind, proposal: Proposal, composer: ComposerRef, source: SendSource, requestId?: string) {
@@ -150,8 +152,8 @@ export const layer = Layer.effect(MailOperations, effect {
     if (receipt === undefined) return "Uncertain"
     try send({ type: "answered", requestId: r.requestId, receipt })
     const after = try record()
-    if (after !== undefined) try settle(after)
-    return (try outcomeOf(after)) ?? "Uncertain"
+    const announcedNow = after !== undefined ? try settle(after) : false
+    return (try outcomeOf(after, announcedNow)) ?? "Uncertain"
   }
 
   effect function read(): Receipt | undefined {
@@ -163,12 +165,12 @@ export const layer = Layer.effect(MailOperations, effect {
   effect function refresh() {
     const r = try record()
     const receipt = try read()
-    if (r === undefined || receipt === undefined) return try outcomeOf(r)
+    if (r === undefined || receipt === undefined) return try outcomeOf(r, false)
     if (r.sourceHeld) try send({ type: "sourceConfirmed", requestId: r.requestId, receipt })
     else try send({ type: "answered", requestId: r.requestId, receipt })
     const after = try record()
-    if (after !== undefined) try settle(after)
-    return try outcomeOf(after)
+    const announcedNow = after !== undefined ? try settle(after) : false
+    return try outcomeOf(after, announcedNow)
   }
 
   fork.scoped (effect {
@@ -201,20 +203,29 @@ export const layer = Layer.effect(MailOperations, effect {
     prepare,
     confirm,
     effect sendDraft(draft: Draft, requestId?: string) {
+      const shown = composerRef(draft)
       const existing = try record()
-      if (existing !== undefined) {
-        if (existing.composer.draftId === draft.id && existing.composer.content === canonicalJson(draft.fields) && existing.phase === "Reviewing") return try confirm(composerRef(draft))
-        if (existing.phase === "Preparing" || existing.phase === "Reviewing") try send({ type: "discardStale", requestId: existing.requestId, shown: composerRef(draft) })
-        else if (existing.receipt.receiptState === "SucceededReceipt" || existing.receipt.receiptState === "RejectedReceipt") try send({ type: "clear", requestId: existing.requestId })
-        else return "Uncertain"
+      switch (sendStep(existing !== undefined, existing ?? noRecord, shown)) {
+        case "AlreadySent": return "SentBefore"
+        case "ConfirmOpen": return try confirm(shown)
+        case "ReviewOpen": {
+          const reviewedNow = try review(existing!.requestId)
+          const r = try record()
+          return r !== undefined && r.phase === "Reviewing" ? try confirm(shown) : reviewedNow ?? "Unsent"
+        }
+        case "ReadReceipt": return existing!.composer.content === shown.content && existing!.composer.draftId === shown.draftId ? (try refresh()) ?? "Uncertain" : "Uncertain"
+        case "ShowReview": return "AwaitingReview"
+        case "ReplaceUnsent": try send({ type: "clear", requestId: existing!.requestId }); break
+        case "ReplaceSettled": try send({ type: "clear", requestId: existing!.requestId }); break
+        case "PrepareNew": break
       }
       const source: SendSource = { localDraft: draft.id, revision: draft.revision, gmailDraft: draft.provider.draftId, gmailDigest: draft.provider.digest }
       const proposal: Proposal = { tag: "MessageProposal", mail: composedMail(draft.fields), draftId: "", expectedDigest: "" }
-      const prepared = try prepare("SendKind", proposal, composerRef(draft), source, requestId)
+      const prepared = try prepare("SendKind", proposal, shown, source, requestId)
       if (prepared !== undefined && prepared !== "Refused" && prepared !== "Unsent") return prepared
       const r = try record()
       if (r === undefined || r.phase !== "Reviewing") return prepared ?? "Unsent"
-      return try confirm(composerRef(draft))
+      return try confirm(shown)
     },
     effect saveGmailDraft(draft: Draft) {
       const replacing = draft.provider.draftId !== ""
@@ -242,6 +253,11 @@ export const layer = Layer.effect(MailOperations, effect {
     effect discardStale(shown: ComposerRef) {
       const r = try record()
       return r !== undefined && (try send({ type: "discardStale", requestId: r.requestId, shown })) !== undefined
+    },
+    effect archiveListed(messageId: string) {
+      const fresh = gmail.read(try grant(), messageId) catch () => undefined
+      if (fresh === undefined || !swipeArchives(-swipeDistance, (try machine.get()).capabilities, fresh.historyId)) return "Unsent"
+      return try prepare("ArchiveKind", { tag: "LabelProposal", messageId, expectedHistoryId: fresh.historyId }, { draftId: "", content: "" }, { localDraft: "", revision: 0, gmailDraft: "", gmailDigest: "" })
     },
     effect undo() {
       const r = try record()

@@ -4,11 +4,11 @@ import type { GoogleGrant } from "../../../gen/calendar__googleLink.ts";
 import { syncWord } from "../../../gen/calendar__sync.ts";
 import { CalendarSync, type SyncDestination } from "../../calendar/sync.vibe";
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from "../components/ui/index.ts";
-import { useSyncView } from "./hooks.ts";
-import { run } from "./runtime.ts";
+import { useSyncView, run } from "./hooks.ts";
 
 const WORDS = { SyncOff: "Off", SyncOn: "On", SyncSynced: "Synced", SyncNeedsReview: "Needs review", SyncPaused: "Paused" } as const;
 
+/** The Google grant and writable calendars the account area verified for sync. */
 export type SyncSettingsProps = {
   /** The Google account's grant, as the account area verified it. */
   grant: GoogleGrant;

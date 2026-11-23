@@ -2,7 +2,7 @@
 import { backgroundNavigation, type NavigationBridge, NavigationBridgeFailed } from "@elizaos/plugin-maps/client/device-navigation"
 import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, readingUsable } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
-import { maySpeak } from "../../gen/maps__vocabulary.effect.vibe"
+import { maySpeak, usableFix } from "../../gen/maps__vocabulary.ts"
 import { Native } from "../platform/native.vibe"
 import { MapsProvider } from "./cloud.vibe"
 import { MapsContent } from "./content.vibe"
@@ -16,7 +16,7 @@ const SERVICE = "AlphaMapsTransport"
 const LOCALE = "en-US"
 
 /** Turn-by-turn guidance along the route the owner started. */
-export service Navigation {
+export service MapsNavigation {
   /** Start guidance on the screen's chosen route; only the owner's Start reaches this. */
   start(): void!MapsFailure
   end(): void!!
@@ -48,7 +48,7 @@ export function bannerOf(route: Route, marks: ReadonlyArray<number>, step: numbe
 }
 
 /** Guidance over its machine, the location watch, and the plugin's screen-off navigation service on `AlphaMapsTransport`. */
-export const navigationLayer = Layer.effect(Navigation, effect {
+export const navigationLayer = Layer.effect(MapsNavigation, effect {
   const guidance = try GuidanceMachine
   const screen = try ScreenMachine
   const content = try MapsContent
@@ -179,7 +179,7 @@ export const navigationLayer = Layer.effect(Navigation, effect {
     const speak = maySpeak(g.kind)
     if (!readingUsable(reading)) {
       try voice.pause()
-      return try tell("A fresh, precise location fix is needed for turn guidance.")
+      return try tell("Turn guidance needs a precise, up-to-date location.")
     }
     if (after.phase === "Arrived") {
       try service.arrive(true, true)
@@ -239,13 +239,18 @@ export const navigationLayer = Layer.effect(Navigation, effect {
       if (g.phase === "NotGuiding") throw failure("unavailable", "No navigation is active on the phone.")
       if (g.phase === "Arrived") throw failure("unavailable", "The phone has already arrived at the destination.")
       if (g.phase === "Rerouting") throw failure("unavailable", "The phone is already planning a new route.")
-      if (!g.fixUsable) {
-        try tell("A fresh, precise location fix is needed to reroute. The current route was kept.")
-        throw failure("unavailable", "The phone has no fresh, precise location fix, so it kept the current route.")
+      const fix = (try content.get()).guidance?.fix
+      const now = try Clock.currentTimeMillis
+      const ageMs = fix ? Math.round(now - fix.timestamp) : Number.MAX_SAFE_INTEGER
+      const accuracy = fix ? Math.ceil(fix.accuracyMeters) : Number.MAX_SAFE_INTEGER
+      if (!g.fixUsable || !fix || fix.precision !== "precise" || !usableFix("Precise", ageMs, accuracy)) {
+        try tell("Rerouting needs a precise, up-to-date location. The current route was kept.")
+        throw failure("unavailable", "The phone has no precise, up-to-date location, so it kept the current route.")
       }
       try voice.pause()
-      const after = try apply({ type: "reroute" })
-      if (after?.session !== g.session || after.phase === "NotGuiding") throw failure("unavailable", "Navigation ended on the phone before the new route was ready.")
+      const sent = try apply({ type: "reroute", ageMs, accuracy })
+      const after = try guidance.get()
+      if (sent === undefined || after.session !== g.session || after.phase === "NotGuiding") throw failure("unavailable", "Navigation ended on the phone before the new route was ready.")
       if (after.route === g.route) throw failure("unavailable", "The phone kept the previous route.")
     },
     stopFollowing: () => map(apply({ type: "stopFollowing" }), () => undefined),

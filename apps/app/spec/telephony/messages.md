@@ -138,6 +138,22 @@ pure def stepAConversationOpensOnlyFromItsListing(before: Messages, via: str, af
     implies (via == "threadOpened" and before.threads.some(t => t.id == openThreadId(after.view) and t.complete))
 ```
 
+### Call in a one-person conversation's header calls its one number and keeps the draft
+
+The header's Call is offered only in a conversation with exactly one address. The owner's tap asks
+Telecom to place the call, with the system dial screen as the fallback, exactly as Phone does
+(#1361); the conversation's draft slot is left as it was.
+
+```quint
+pure def threadCallNumber(view: MessagesView): str = match view {
+  | InThread(t) => if (t.addresses.length() == 1) t.addresses.nthOr(0, "") else ""
+  | _ => ""
+}
+pure val addressesValues = Set(List()).union(Set(List("4155550100"))).union(Set(List("4155550100", "4155550111")))
+pure def lawOnlyAOnePersonConversationOffersCall(threadId: str, addresses: List[str]): bool =
+  (threadCallNumber(InThread({ threadId: threadId, addresses: addresses })) != "") iff (addresses.length() == 1 and addresses.nthOr(0, "") != "")
+```
+
 ## Story: Start a new message
 
 > As the owner, I want to write to a number or pick people from my contacts, and close the new
@@ -269,4 +285,22 @@ pure def outgoingSettled(m: Messages, operationId: str): Messages = { ...m, outg
 pure def alwaysLocalBubblesOnlyWhileShown(m: Messages): bool = m.outgoing.length() > 0 implies m.shown
 pure def alwaysOneBubblePerSend(m: Messages): bool = m.outgoing.every(o => m.outgoing.select(x => x.operationId == o.operationId).length() == 1)
 pure def sometimesABubbleWaitsForItsRow(m: Messages): bool = m.outgoing.some(o => o.progress == Handed and o.createdAt > 0)
+```
+
+### A sent text reads Delivered only on the radio's confirmed delivery report, and a picture message never does
+
+Each provider row shows its own timestamp and status: sending, sent, not sent, or Delivered for an
+SMS whose delivery report Android confirmed. An MMS has no delivery report Alpha can trust, so it
+reads sent at most (#1278).
+
+```quint
+type OutStatus = OutPending | OutFailed | OutSent
+pure def conditionOf(kind: MessageKind, outgoing: bool, status: OutStatus, deliveryConfirmed: bool): RowCondition =
+  if (not(outgoing)) Received
+  else if (status == OutFailed) FailedOut
+  else if (status == OutPending) PendingOut
+  else if (kind == SmsKind and deliveryConfirmed) DeliveredOut
+  else SentOut
+pure def lawOnlyAConfirmedTextReadsDelivered(kind: MessageKind, outgoing: bool, status: OutStatus, deliveryConfirmed: bool): bool =
+  (conditionOf(kind, outgoing, status, deliveryConfirmed) == DeliveredOut) iff (kind == SmsKind and outgoing and status == OutSent and deliveryConfirmed)
 ```

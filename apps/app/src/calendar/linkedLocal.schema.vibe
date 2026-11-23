@@ -1,0 +1,75 @@
+// spec/calendar/linkedLocal.md, "Story: Let sync change my local calendar only where I have not changed it since"; spec/calendar/linkedLocal.md, "Sync fields keep only what both sides can say"
+// Decoders for the AlphaCalendar plugin's device sync answers to linked sync's local port. spec/os/android/calendar.md owns what the plugin does.
+
+const Id = Schema.String.check(Schema.isPattern(/^[1-9][0-9]{0,18}$/))
+const Revision = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
+const Lease = Schema.String.check(Schema.isPattern(/^[a-f0-9-]{36}$/))
+const Text = (max: number) => Schema.String.check(Schema.isMaxLength(max))
+const Refusal = Schema.Literals(["pending", "context-changed", "permission-required", "conflict", "unknown", "cancelled", "unavailable"])
+
+/** One guest as both sides of linked sync can say it. */
+export const LocalGuest = Schema.Struct({ email: Text(320), optional: Schema.Boolean })
+
+/** A device event's fields that linked sync compares and writes. */
+export const LocalEvent = Schema.Struct({
+  title: Text(4000),
+  description: Text(32768),
+  location: Text(4000),
+  startAt: Text(64),
+  endAt: Text(64),
+  timeZone: Schema.optionalKey(Schema.NullOr(Text(128))),
+  isAllDay: Schema.Boolean,
+  attendees: Schema.Array(LocalGuest).check(Schema.isMaxLength(100)),
+  recurrence: Schema.Array(Text(2048)).check(Schema.isMaxLength(16)),
+})
+
+/** A device event at the revision the plugin read it. */
+export const LocalSnapshot = Schema.Struct({ eventId: Id, revision: Revision, event: LocalEvent })
+
+/** A refusal: nothing was changed, with the plugin's own words when it gave them. */
+export const LocalRefusal = Schema.Struct({ status: Refusal, message: Schema.optionalKey(Text(512)) })
+
+/** The answer to a read of one event, with the receipts of writes the plugin recovered meanwhile. */
+export const GetReply = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ready"), snapshot: Schema.NullOr(LocalSnapshot), recoveries: Schema.optionalKey(Schema.Array(Revision).check(Schema.isMaxLength(64))) }),
+  LocalRefusal,
+])
+
+/** The answer to a compare-and-set write of one event. */
+export const ApplyReply = Schema.Union([Schema.Struct({ status: Schema.Literal("saved"), snapshot: LocalSnapshot }), LocalRefusal])
+
+/** The answer to staging a deletion behind the owner's Undo window. */
+export const DeleteReply = Schema.Union([Schema.Struct({ status: Schema.Literal("queued") }), LocalRefusal])
+
+/** A staged deletion's receipt. */
+export const DeletionReply = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("receipt"), receipt: Schema.Struct({ phase: Schema.Literals(["queued", "deleted", "undone", "paused", "unknown"]) }) }),
+  LocalRefusal,
+])
+
+/** The answer to acknowledging a receipt. */
+export const AckReply = Schema.Struct({ status: Schema.Literals(["acknowledged", "ready", "unavailable"]) })
+
+/** The device events the lease covers, each at its revision. */
+export const EventsReply = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ready"), events: Schema.Array(Schema.Struct({ id: Id, revision: Revision })).check(Schema.isMaxLength(2000)) }),
+  LocalRefusal,
+])
+
+/** A prepared device sync review: its lease, whether the device switch is on, and the destination it names. */
+export const PreparedReply = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("ready"), lease: Lease, enabled: Schema.Boolean, destination: Schema.Struct({ account: Text(320), calendar: Text(1024) }) }),
+  LocalRefusal,
+])
+
+export type LocalSnapshotRecord = typeof LocalSnapshot.Type
+export type LocalRefusalRecord = typeof LocalRefusal.Type
+
+/** Decoders, failing with Schema's own issue on anything else. */
+export const decodeGet = Schema.decodeUnknownEffect(GetReply)
+export const decodeApply = Schema.decodeUnknownEffect(ApplyReply)
+export const decodeDelete = Schema.decodeUnknownEffect(DeleteReply)
+export const decodeDeletion = Schema.decodeUnknownEffect(DeletionReply)
+export const decodeAck = Schema.decodeUnknownEffect(AckReply)
+export const decodeEvents = Schema.decodeUnknownEffect(EventsReply)
+export const decodePrepared = Schema.decodeUnknownEffect(PreparedReply)

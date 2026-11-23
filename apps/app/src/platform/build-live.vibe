@@ -2,7 +2,7 @@
 import { environmentOf, fixturesAllowed, hostOf, mockAdmitted, toolsShown, type Choice, type Environment, type Variant } from "../../gen/platform.effect.vibe"
 import { Build, type BuildInfo } from "./build.vibe"
 import { Native } from "./native.vibe"
-import { alphaCloud, alphaCloudCutover, appVersion, developmentServer, elizaCloud, testMocksBuilt, toolsAsked, type CloudAuthority } from "./build-flags.ts"
+import { alphaCloud, alphaCloudCutover, appVersion, cloudEnvironmentAsked, cloudResidentPreview, developmentServer, elizaCloud, markPage, testMocksBuilt, toolsAsked, type CloudAuthority } from "./build-flags.ts"
 import { capacitor } from "./native-capacitor.ts"
 import { detectVariant } from "./native-live.vibe"
 
@@ -16,9 +16,11 @@ export function buildInfoOf(variant: Variant): BuildInfo {
   return { version: appVersion, variant: variantNames[variant], testMocks: testMocksBuilt }
 }
 
-/** This build on this device: its version, the variant it detected and whether it allows test mocks. */
+/** This build on this device: its version, the variant it detected and whether it allows test mocks, also marked on the page root. */
 export const buildLive = Layer.effect(Build, effect {
-  return { info: buildInfoOf(try detectVariant(capacitor)) }
+  const info = buildInfoOf(try detectVariant(capacitor))
+  try sync(() => markPage(info))
+  return { info }
 })
 
 /** Whether fixtures, remote transports and simulated device events may load. */
@@ -37,6 +39,16 @@ const choices = { production: "ChoseProduction", staging: "ChoseStaging" } as co
 export function cloudEnvironmentOf(info: BuildInfo, chosen?: "production" | "staging", preview?: { readonly staging: boolean; readonly cloudResident: boolean }): Environment {
   return environmentOf(developmentServer, info.testMocks, info.variant !== "browser", preview?.staging === true, preview?.cloudResident === true,
     chosen === undefined ? "NoChoice" : choices[chosen])
+}
+
+/** The Cloud environment of this build: the one `VITE_ALPHA_CLOUD_ENVIRONMENT` asked for, where a test-mocks build or the Cloud resident preview honours it. */
+export function buildCloudEnvironment(info: BuildInfo): Environment {
+  return cloudEnvironmentOf(info, cloudEnvironmentAsked, { staging: cloudEnvironmentAsked === "staging", cloudResident: cloudResidentPreview(info.variant !== "browser") })
+}
+
+/** The name native's Cloud plugin knows `environment` by. */
+export function environmentName(environment: Environment): "production" | "staging" {
+  return environment === "Staging" ? "staging" : "production"
 }
 
 /** The public authorities of the Cloud this build talks to: Eliza Cloud unless the cutover flag is set. */

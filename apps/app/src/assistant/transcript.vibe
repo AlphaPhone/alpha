@@ -4,6 +4,7 @@ import type { PlanAction, ReplyView } from "../../gen/assistant__reply.ts"
 import { initial as replyStart, keptNotices, noticeFits, systemNoticeShown } from "../../gen/assistant__reply.effect.vibe"
 import type { CardState } from "../../gen/assistant__approvals.ts"
 import type { EmailCard } from "../../gen/assistant__emailCard.ts"
+import { StagedEmail } from "./payloads.schema.vibe"
 import { classify, type Segment } from "./reply-lines.vibe"
 
 /** A file the owner attached, as it travels and as it is saved beside its message. */
@@ -29,7 +30,7 @@ export interface ProposalCard {
 /** One row of the transcript. */
 export type Row =
   | { readonly kind: "user"; readonly id: string; readonly text: string; readonly files: readonly ChatFile[]; readonly status: "pending" | "recorded" | "unconfirmed"; readonly quote?: Quote; readonly clientMessageId?: string }
-  | { readonly kind: "agent"; readonly id: string; readonly text: string; readonly segments: readonly Segment[]; readonly reply: ReplyView; readonly label?: string; readonly notices: readonly string[]; readonly plan?: PlanAction; readonly cutOff: CutOff; readonly recorded: boolean }
+  | { readonly kind: "agent"; readonly id: string; readonly text: string; readonly segments: readonly Segment[]; readonly reply: ReplyView; readonly label?: string; readonly notices: readonly string[]; readonly plan?: PlanAction; readonly cutOff: CutOff; readonly recorded: boolean; readonly ordinal?: number }
   | { readonly kind: "receipt"; readonly id: string; readonly proposalId: string; readonly title: string; readonly summary: string }
   | { readonly kind: "notice"; readonly id: string; readonly text: string; readonly system: boolean }
   | { readonly kind: "card"; readonly id: string; readonly card: ProposalCard }
@@ -78,9 +79,11 @@ export function collapseSystemNotices(rows: readonly Row[]): readonly Row[] {
 /** The email draft an agent reply staged, from its action results, or none. */
 export function emailDraftOf(actionResults: readonly { readonly action: string; readonly data: unknown }[]): { readonly to: string; readonly subject: string; readonly body: string } | undefined {
   for (const result of actionResults) {
-    if (!/EMAIL|GMAIL|MAIL_DRAFT/i.test(result.action) || typeof result.data !== "object" || result.data === null) continue
-    const { to, subject, body } = result.data as { readonly to?: unknown; readonly subject?: unknown; readonly body?: unknown }
-    if (typeof body === "string" && body.trim() !== "") return { to: typeof to === "string" ? to : Array.isArray(to) ? to.filter((x) => typeof x === "string").join(", ") : "", subject: typeof subject === "string" ? subject : "", body }
+    if (!/EMAIL|GMAIL|MAIL_DRAFT/i.test(result.action)) continue
+    const staged = Schema.decodeUnknownOption(StagedEmail)(result.data)
+    if (Option.isNone(staged) || staged.value.body.trim() === "") continue
+    const to = staged.value.to
+    return { to: to === undefined ? "" : typeof to === "string" ? to : to.join(", "), subject: staged.value.subject ?? "", body: staged.value.body }
   }
   return undefined
 }

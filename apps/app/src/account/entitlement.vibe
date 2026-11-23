@@ -1,4 +1,4 @@
-// spec/account/plan.md, "Story: Use my plan's AI on the phone"; spec/account/plan.md, "Story: See a plan change soon after I make it"
+// spec/account/plan.md, "Story: Use my plan's AI on the phone"; spec/account/plan.md, "An answer read for an earlier sign-in changes nothing"; spec/account/plan.md, "The phone's agent host alone confirms what its inference is"; spec/account/plan.md, "Story: See a plan change soon after I make it"
 import {
   type Admission, type AdmissionEffect, type EndsAt, type SignedPlan, type SnapshotPlan,
   Machine as PlanMachine, admittedKind, admits, enabled, stored as storedPlan
@@ -49,8 +49,7 @@ function refusal(error: CloudUnavailable | CloudSignedOut): PlanUnread {
   return new PlanUnread({ offline: error.status === 0, signedOut: error.status === 401, absent: [404, 405, 501].includes(error.status) })
 }
 
-effect function read(path: string) {
-  const cloud = try Cloud
+effect function read(cloud: Cloud.Shape, path: string) {
   return try mapError(cloud.json("GET", path), refusal)
 }
 
@@ -76,7 +75,10 @@ export const entitlementService = Layer.effect(Entitlement, effect {
   const machine = try PlanMachine
   const session = try CloudSession
   const native = try Native
+  const cloud = try Cloud
   const build = try Build
+  const scope = try Scope.Scope
+  const host = try Semaphore.make(1)
   const authority = authorityOf(deployment, environmentFor(build.info.testMocks))
   const summary = try SubscriptionRef.make<PlanSummary>({ owner: 0, view: undefined, planEndsAt: null })
   const failures = try Ref.make(0)
@@ -89,21 +91,37 @@ export const entitlementService = Layer.effect(Entitlement, effect {
     return step !== undefined
   }
 
+  effect function bind() {
+    const s = try session.current()
+    const ok = try Semaphore.withPermit(host, bindInference(native, s.account.credentialId))
+    try send({ type: "hostAnswered", removing: false, ok })
+  }
+
+  effect function unbind() {
+    const ok = try Semaphore.withPermit(host, unbindInference(native))
+    try send({ type: "hostAnswered", removing: true, ok })
+  }
+
+  effect function admitting() {
+    const credential = (try machine.get()).credential
+    admit(credential) catch effect () => { try send({ type: "checkFailed", credential }) }
+  }
+
   effect function perform(out: ReadonlyArray<AdmissionEffect>): void!! {
     for (const effectOf of out) {
       match (effectOf) {
-        when "ReadPlan": fork admit();
-        when "BindInference": bindInference() catch () => undefined;
-        when "UnbindInference": unbindInference() catch () => undefined;
+        when "ReadPlan": fork.in(scope) admitting();
+        when "BindInference": fork.in(scope) bind();
+        when "UnbindInference": fork.in(scope) unbind();
       }
     }
   }
 
   effect function signedPlan(now: number) {
-    const keysBody = try read("/api/v1/subscription/entitlement-keys")
+    const keysBody = try read(cloud, "/api/v1/subscription/entitlement-keys")
     const keys = parseEntitlementKeys(keysBody)
     if (keys === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
-    const body = try read("/api/v1/subscription/entitlement")
+    const body = try read(cloud, "/api/v1/subscription/entitlement")
     const token = typeof body === "object" && body !== null && typeof (body as { entitlement?: unknown }).entitlement === "string" ? (body as { entitlement: string }).entitlement : ""
     const checked = tryPromise(() => checkEntitlement(token, { keys, issuer: authority.api, audience: authority.entitlementAudience, now })) catch () => undefined
     if (checked === undefined) return { signed: "SignedInvalid" as SignedPlan, planEndsAt: null, expires: 0 }
@@ -111,48 +129,53 @@ export const entitlementService = Layer.effect(Entitlement, effect {
   }
 
   effect function snapshotView(now: number) {
-    const body = try read("/api/v1/billing/limits")
+    const body = try read(cloud, "/api/v1/billing/limits")
     const snapshot = snapshotFromResponse(body) catch () => undefined
     return snapshot === undefined ? undefined : subscriptionView(snapshot, now)
   }
 
-  effect function admit() {
-    const owner = try session.owner()
-    if (owner === 0) return
+  effect function admit(credential: number) {
+    if (credential === 0 || credential !== (try session.owner())) {
+      try send({ type: "checkFailed", credential })
+      return
+    }
     const now = try Clock.currentTimeMillis
     const signed = signedPlan(now) catch (error) => error
     if (signed instanceof PlanUnread && signed.signedOut) {
-      try send({ type: "signInRejected" })
-      try session.rejected()
+      if ((try send({ type: "signInRejected", credential })) && credential === (try session.owner())) try session.rejected()
       return
     }
     if (signed instanceof PlanUnread && signed.offline) {
-      try send({ type: "admitOffline" })
+      try send({ type: "admitOffline", credential })
       return
     }
     const view = snapshotView(now) catch () => undefined
-    if (owner !== (try session.owner())) return
-    try SubscriptionRef.set(summary, { owner, view, planEndsAt: signed instanceof PlanUnread ? null : signed.planEndsAt })
+    if (credential !== (try session.owner())) {
+      try send({ type: "checkFailed", credential })
+      return
+    }
+    try SubscriptionRef.set(summary, { owner: credential, view, planEndsAt: signed instanceof PlanUnread ? null : signed.planEndsAt })
     const signedKind: SignedPlan = signed instanceof PlanUnread ? (signed.absent ? "SignedAbsent" : "SignedInvalid") : signed.signed
     if (signed instanceof PlanUnread && !signed.absent && view === undefined) {
-      try send({ type: "admitBillingOutage" })
+      try send({ type: "admitBillingOutage", credential })
       return
     }
     const kind = admittedKind(signedKind, snapshotOf(view))
     if (kind === "AdmissionUnknown") {
-      try send({ type: "admitBillingOutage" })
+      try send({ type: "admitBillingOutage", credential })
       return
     }
     if (admits(kind)) {
       const end = endOf(signed instanceof PlanUnread ? null : signed.planEndsAt, now)
-      try send({ type: "verified", kind: kind === "AdmitCredits" ? "CreditsPlan" : "ActivePlan", reported: kind === "AdmitCredits" || end === "PastEnd" ? "NoEnd" : end })
+      const accepted = try send({ type: "verified", credential, kind: kind === "AdmitCredits" ? "CreditsPlan" : "ActivePlan", reported: kind === "AdmitCredits" || end === "PastEnd" ? "NoEnd" : end })
+      if (!accepted) return
       try Ref.set(expiresAt, signed instanceof PlanUnread ? 0 : signed.expires)
       try Ref.set(failures, 0)
       try Ref.set(verifiedAt, now)
       return
     }
     const before = try machine.get()
-    try send(before.binding === "CloudBound" || before.binding === "KeptOffline" ? { type: "planEnded" } : { type: "needsPlan" })
+    try send(before.binding === "CloudBound" || before.binding === "KeptOffline" ? { type: "planEnded", credential } : { type: "needsPlan", credential })
   }
 
   effect function refreshLoop() {
@@ -163,6 +186,7 @@ export const entitlementService = Layer.effect(Entitlement, effect {
       try sleep(Duration.millis(nextRefreshDelay(Math.max(0, until - now), failed)))
       const a = try machine.get()
       if (a.binding !== "CloudBound") continue
+      const credential = a.credential
       const at = try Clock.currentTimeMillis
       const signed = signedPlan(at) catch () => undefined
       if (signed === undefined || !admits(admittedKind(signed.signed, "SnapshotUnread"))) {
@@ -172,7 +196,7 @@ export const entitlementService = Layer.effect(Entitlement, effect {
       try Ref.set(failures, 0)
       try Ref.set(expiresAt, signed.expires)
       const end = endOf(signed.planEndsAt, at)
-      try send({ type: "refreshVerified", kind: "ActivePlan", reported: end === "PastEnd" ? "NoEnd" : end })
+      try send({ type: "refreshVerified", credential, kind: "ActivePlan", reported: end === "PastEnd" ? "NoEnd" : end })
     }
   }
 
@@ -216,7 +240,7 @@ export const entitlementService = Layer.effect(Entitlement, effect {
 
   return {
     changes: machine.changes,
-    summaries: summary.changes,
+    summaries: SubscriptionRef.changes(summary),
     current: () => machine.get(),
     summary: () => SubscriptionRef.get(summary),
     effect run() {

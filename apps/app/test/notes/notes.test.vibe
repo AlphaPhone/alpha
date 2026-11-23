@@ -1,63 +1,17 @@
-// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/trash.md, "Story: Let deleted notes expire after three days when I choose that"; spec/notes/cleanup.md, "Story: Erase only the recording of the note I erased, and only once the device proves it"; spec/notes/recorder.md, "Story: Save the recording as one voice note"; spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/folders.md, "Story: Keep my notes in folders I name"; spec/notes/collection.md, "Story: See the notes I saved before this version"
+// spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/trash.md, "Story: Let deleted notes expire after three days when I choose that"; spec/notes/cleanup.md, "Story: Erase only the recording of the note I erased, and only once the device proves it"; spec/notes/recorder.md, "Story: Save the recording as one voice note"; spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/folders.md, "Story: Keep my notes in folders I name"; spec/notes/collection.md, "Story: See the notes I saved before this version"; spec/notes/trash.md, "Story: Keep the notes I deleted before this version"
 import { assert, describe, it } from "@effect/vitest"
-import { CloudSession } from "../../src/account/layer.vibe"
-import { initial as signedOut } from "../../gen/account__session.effect.vibe"
-import { Build } from "../../src/platform/build.vibe"
-import { Native, NativeFailed } from "../../src/platform/native.vibe"
-import { Resident } from "../../src/platform/resident.vibe"
-import { memoryStore } from "../../src/platform/storage.vibe"
 import { NotesCleanup } from "../../src/notes/cleanup.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { NotesEditor } from "../../src/notes/editor.vibe"
 import { NotesFolders } from "../../src/notes/folders.vibe"
-import { layer } from "../../src/notes/layer.vibe"
 import { NotesOrganize } from "../../src/notes/organize.vibe"
 import { NotesRecorder } from "../../src/notes/recorder.vibe"
 import { NotesTrash } from "../../src/notes/trash.vibe"
 import { slots } from "../../src/notes/slots.vibe"
 import { statusLabel } from "../../gen/notes__collection.effect.vibe"
 import { Machine as CollectionMachine } from "../../gen/notes__collection.effect.vibe"
+import { bound, check, notesOver } from "./harness.vibe"
 import { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
-
-effect function check(run: () => void) {
-  try Effect.try(run)
-}
-
-function fakes(agent: NotesAgentFake, device: DeviceFake) {
-  return Layer.mergeAll(
-    Layer.succeed(Resident, {
-      status: () => succeed("running" as const),
-      ensureRunning: () => Effect.void,
-      json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => sync(() => agent.json(method, path, body)),
-      stream: () => Stream.empty,
-    }),
-    Layer.succeed(Native, {
-      available: (plugin: string) => sync(() => device.available(plugin)),
-      invoke: (plugin: string, method: string, args?: unknown) => Effect.try({
-        try: () => device.invoke(plugin, method, (args ?? {}) as Record<string, unknown>),
-        catch: (error) => new NativeFailed({ plugin, method, message: String(error), code: (error as { code?: string }).code }),
-      }),
-      listen: () => Stream.empty,
-    }),
-    Layer.succeed(Build, { info: { version: "test", variant: "browser", testMocks: true } }),
-    Layer.succeed(CloudSession, {
-      changes: Stream.make({ ...signedOut, phase: "SignedIn" as const, generation: 1 }),
-      notices: Stream.empty,
-      current: () => succeed({ ...signedOut, phase: "SignedIn" as const, generation: 1 }),
-      owner: () => succeed(1),
-      ownerKey: (key: string) => succeed(`alpha/1/${key}`),
-      run: () => Effect.void, adopt: () => Effect.void, attempt: () => Effect.void, signOut: () => succeed(true), rejected: () => Effect.void, admit: () => Effect.void,
-    }),
-    memoryStore,
-  )
-}
-
-const notesOver = (agent: NotesAgentFake, device: DeviceFake) => Layer.provide(layer, fakes(agent, device))
-
-effect function bound() {
-  const collection = try NotesCollection
-  return try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => owned !== undefined)), "5 seconds")
-}
 
 describe("Notes journeys", () => {
   it.live("Read and save a note under the current connection (spec/notes/collection.md, \"Story: Read my notes under the account I am signed in as\")", () => effect {
@@ -208,6 +162,28 @@ describe("Notes journeys", () => {
       try check(() => assert.deepStrictEqual(
         { label: statusLabel(false, reviewing), hidden, imported: imported !== undefined, cleared: settled.priorReview },
         { label: "EarlierNotesNeedReview", hidden: undefined, imported: true, cleared: false },
+      ))
+    }
+  })
+
+  it.live("Notes deleted before this version stay recoverable (spec/notes/trash.md, \"Story: Keep the notes I deleted before this version\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    const now = Date.now()
+    device.slots.set(slots.legacyTrash, JSON.stringify({ version: 1, entries: [
+      { id: "op-recent", index: 0, deletedAt: now - 86400000, note: { id: "n-1", kind: "list", title: "Groceries", items: [{ t: "Milk", done: true }], folderId: "f-home" } },
+      { id: "op-old", index: 1, deletedAt: now - 40 * 86400000, note: { id: "n-2", kind: "text", title: "Old", body: "Gone" } },
+    ] }))
+    provide notesOver(agent, device) {
+      const collection = try NotesCollection
+      try bound()
+      // spec/notes/trash.md, "An earlier device Trash row comes into the canonical Trash once, and the device slot clears only after every row is settled"
+      try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => (owned?.snapshot.trash ?? []).length === 1)), "5 seconds")
+      try timeout(effect { while (device.slots.has(slots.legacyTrash)) try sleep("10 millis") }, "5 seconds")
+      const restored = agent.trash[0]?.note
+      try check(() => assert.deepStrictEqual(
+        { live: agent.notes.length, trashed: agent.trash.length, title: restored?.title, items: restored?.format?.data.items, folder: restored?.format?.data.folderId, slot: device.slots.has(slots.legacyTrash) },
+        { live: 0, trashed: 1, title: "Groceries", items: [{ t: "Milk", done: true }], folder: "f-home", slot: false },
       ))
     }
   })

@@ -3,6 +3,7 @@ import type { HostedResults } from "../../../gen/workflows__hostedResults.ts";
 import type { ResolvedTap } from "../../workflows/results.vibe";
 import { Button, Card, CardTitle, Textarea } from "../components/ui/index.ts";
 
+/** A tapped result notice, its question and what it allows now. */
 export interface ResultNoticeProps {
   results: HostedResults;
   /** The tap the shade captured, as resolved for this account. */

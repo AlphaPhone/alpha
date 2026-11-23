@@ -1,4 +1,4 @@
-// spec/browser/handoff.md, "Story: Open the page I see in another browser"; spec/browser/handoff.md, "Story: Leave a private page for another app only when I say so"
+// spec/browser/handoff.md, "Story: Open the page I see in another browser"
 import { type Event, type HandoffEffect, type ShownPage, Machine, machine } from "../../gen/browser__handoff.effect.vibe"
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
 import { settled } from "../../gen/browser__page.effect.vibe"
@@ -8,14 +8,13 @@ import { HANDOFF_NOTICES, refusalText } from "./messages.ts"
 import { BrowserPresenter } from "./presentation.vibe"
 import { BrowserReviews } from "./reviews.vibe"
 import { BrowserTabs } from "./session.vibe"
-import { BrowserCallFailed, TabHost, ours } from "./tabHost.vibe"
-import { AppLinkRequested } from "./tabHost.schema.vibe"
+import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
 
-/** Open in another browser, and the owner's answer for an app link tapped in a private tab. */
+/** Open in another browser for the page the owner sees. */
 export service BrowserHandoff {
   /** The menu's Open in another browser. */
   openExternal(): void!!
-  /** Follows tapped app links and the Browser view's visits; never returns. */
+  /** Follows the Browser view's visits, retiring a handoff whose view was left or hidden; never returns. */
   follow(): void!!
 }
 
@@ -60,11 +59,6 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
         try send({ type: "dispatched", ok: !(opened instanceof BrowserCallFailed) })
       }
       when { tag: "Notice", let problem }: if (problem !== "NotOpened") try toasts.show(HANDOFF_NOTICES[problem])
-      when { tag: "AskLink", let url }: {
-        const approved = try reviews.confirm("private-app-link", "OpenAppLink", url)
-        try send({ type: "linkAnswered", approved, shown: try shown() })
-      }
-      when { tag: "AnswerLink", let approved }: host.call("answerAppLink", { approved }) catch () => undefined
     }
   }
 
@@ -96,23 +90,12 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
       }
     },
     effect follow() {
-      try.all [
-        effect {
-          let was = false
-          for try (const state of foreground.changes) {
-            const now = browserShown(state)
-            if (was && !now) try send({ type: "retire" })
-            was = now
-          }
-        },
-        effect {
-          for try (const raw of host.events("appLinkRequested")) {
-            if (!ours(host.session, raw)) continue
-            const asked = Schema.decodeUnknownEffect(AppLinkRequested)(raw) catch () => undefined
-            if (asked !== undefined) try send({ type: "linkAsked", shown: try shown() })
-          }
-        },
-      ]
+      let was = false
+      for try (const state of foreground.changes) {
+        const now = browserShown(state)
+        if (was && !now) try send({ type: "retire" })
+        was = now
+      }
     },
   }
 }), machine())

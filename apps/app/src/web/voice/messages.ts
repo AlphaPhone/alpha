@@ -3,22 +3,32 @@ import type { Notice, Shown } from "../../../gen/voice__conversation.ts";
 import type { DictationFailure } from "../../../gen/voice__dictation.ts";
 import type { ListenerMode } from "../../../gen/voice__listener.ts";
 import type { Route } from "../../../gen/voice__route.ts";
+import { CANNOT_INTERRUPT, MEDIA_UNCONFIRMED, REST_UNREAD, REVIEW_IN_CHAT, VOICE_CALL_ACTIVE, VOICE_CALL_ENDED, VOICE_PAUSED, microphoneMessage, nothingHeardMessage, serviceName } from "../../voice/failure.vibe";
 
-/** The one line a conversation notice says, or nothing. */
+/** Said when Record is pressed while Alpha's speech is still stopping. */
+export const SPEECH_STILL_STOPPING = "Alpha is still stopping its speech. Try again in a moment.";
+
+/**
+ * The one line a conversation notice says, or nothing.
+ * @throws {never}
+ */
 export function noticeText(notice: Notice): string | undefined {
   switch (notice) {
     case "NoNotice": return undefined;
-    case "PausedForCall": return "Voice paused for a phone call.";
-    case "CallHoldsMicrophone": return "Voice is paused during a phone call.";
-    case "CannotInterrupt": return "Voice can't interrupt a reply here. Tap Stop speaking to cut it short.";
-    case "ReviewInChat": return "Review it in the chat. The microphone is off.";
-    case "VoicePaused": return "Voice paused. Cloud is busy; start again in a moment.";
-    case "StopUnconfirmed": return "Speech could not be stopped. Restart Alpha.";
-    case "RestOfReplyUnread": return "Couldn't read the rest aloud. The full reply is above.";
+    case "PausedForCall": return VOICE_CALL_ENDED;
+    case "CallHoldsMicrophone": return VOICE_CALL_ACTIVE;
+    case "CannotInterrupt": return CANNOT_INTERRUPT;
+    case "ReviewInChat": return REVIEW_IN_CHAT;
+    case "VoicePaused": return VOICE_PAUSED;
+    case "StopUnconfirmed": return MEDIA_UNCONFIRMED;
+    case "RestOfReplyUnread": return REST_UNREAD;
   }
 }
 
-/** The accessible name of what a conversation shows. */
+/**
+ * The accessible name of what a conversation shows.
+ * @throws {never}
+ */
 export function shownLabel(shown: Shown): string {
   switch (shown) {
     case "Off": return "Voice off";
@@ -33,21 +43,28 @@ export function shownLabel(shown: Shown): string {
   }
 }
 
-/** The one line a dictation failure says, on the route it used. */
+/**
+ * The one line a dictation failure says, on the route it used.
+ * @throws {never}
+ */
 export function dictationFailureText(failure: DictationFailure, route: Route, native: boolean): string | undefined {
   switch (failure) {
     case "NoFailure": return undefined;
-    case "MicrophoneDenied": return native ? "Microphone access is off. Open app settings to allow it. Nothing was recorded." : "Microphone access is blocked. Allow the microphone for this site in your browser's site settings. Nothing was recorded.";
-    case "NoMicrophone": return "No usable microphone was found. Connect or enable a microphone, then try again.";
-    case "CallActive": return "Voice paused for a phone call.";
+    case "MicrophoneDenied": return microphoneMessage({ code: "permission-denied", name: "" }, !native);
+    case "NoMicrophone": return microphoneMessage({ code: "", name: "NotFoundError" }, !native);
+    case "CallActive": return VOICE_CALL_ENDED;
     case "CaptureLost": return "Recording stopped. Start again when you're ready.";
-    case "NothingHeard": return route === "Device" ? "No speech was detected. Record again, or type instead." : `${route === "Direct" ? "Cartesia" : "Eliza Cloud"} heard no speech. Your recording is kept.`;
+    case "NothingHeard": return nothingHeardMessage(route);
     case "TranscriptionFailed": return "Transcription failed. Your recording is kept.";
-    case "MediaNotStopped": return "Speech could not be stopped. Restart Alpha.";
+    case "MediaNotStopped": return MEDIA_UNCONFIRMED;
+    case "SpeechStillStopping": return SPEECH_STILL_STOPPING;
   }
 }
 
-/** The accessible name of the listener's mode. */
+/**
+ * The accessible name of the listener's mode.
+ * @throws {never}
+ */
 export function listenerLabel(mode: ListenerMode, microphoneOpen: boolean): string {
   if (microphoneOpen && mode !== "ListeningOn") return "Listener still holds the microphone";
   switch (mode) {
@@ -60,7 +77,10 @@ export function listenerLabel(mode: ListenerMode, microphoneOpen: boolean): stri
   }
 }
 
-/** The recipient a network route names in its disclosure. */
+/**
+ * The recipient a network route names in its disclosure.
+ * @throws {never}
+ */
 export function recipientName(route: Route): string {
-  return route === "Direct" ? "Cartesia" : route === "Cloud" ? "Eliza Cloud" : "this phone";
+  return route === "Device" ? "this phone" : serviceName(route);
 }

@@ -1,9 +1,10 @@
-// spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"
+// spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"; spec/workflows/scheduling.md, "Story: Schedule a typed workflow at a local time"; spec/workflows/scheduling.md, "Story: Have my schedules run only while my phone and agent are on"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
-  type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected, WorkflowMetadataRejected,
-  WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, workflowSpecDigest, workflowUuid,
+  type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected,
+  WorkflowMetadataRejected, WorkflowPauseRejected, WorkflowResponseInvalid, WorkflowTypedRejected, phoneTriggerClockChangeNote, workflowSpecDigest, workflowUuid,
 } from "@elizaos/plugin-workflow/client"
+import { type TypedTrigger, generatedKeepsSchedule, missedWindowMs, validTrigger } from "../../gen/workflows__scheduling.effect.vibe"
 import { type WorkflowScopeCategory, checkWorkflowScope } from "@elizaos/plugin-workflow/scope"
 import { type LifeOp, type LifeReply, Machine as LifecycleMachine, stored as lifecycleStored } from "../../gen/workflows__lifecycle.effect.vibe"
 import { type Category, Machine as DraftMachine, scopeRefused, stored as draftStored } from "../../gen/workflows__authoring.effect.vibe"
@@ -26,6 +27,20 @@ export type Described =
 
 const categoryOf: Record<WorkflowScopeCategory, Category> = {
   calls: "Calls", sms: "Sms", payments: "Payments", contacts: "Contacts", code: "ArbitraryCode", email: "UnnamedEmail",
+}
+
+/** What a draft's review says about when it runs: the missed window, and the next day a clock change skips its time. */
+export interface ScheduleNote {
+  readonly manual: boolean
+  readonly missedAfterMinutes: number
+  readonly clockChange: string
+}
+
+/** A phone trigger as the scheduling rules read it. */
+export function typedTrigger(trigger: PhoneWorkflowTrigger): TypedTrigger {
+  if (trigger.kind === "manual") return { tag: "ManualTrigger" }
+  const [hour, minute] = trigger.localTime.split(":").map(Number)
+  return { tag: "TimeTrigger", days: [...trigger.days], minuteOfDay: (hour ?? -1) * 60 + (minute ?? 0) }
 }
 
 /** The draft kept on the phone until its save is settled. */
@@ -65,6 +80,8 @@ export service WorkflowDefinitions {
   resendSave(): ChangeOutcome!!
   /** Discard the draft: the first tap asks. */
   discard(): void!!
+  /** When the reviewed draft runs, as its review discloses it. */
+  scheduleNote(spec: PhoneWorkflowSpec): ScheduleNote!!
 }
 
 function manualTyped(workflow: RemoteWorkflow): boolean {
@@ -248,8 +265,8 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
       if (scoped.refused && scopeRefused(scoped.categories.map((c) => categoryOf[c]))) return { kind: "refused", message: scoped.message } satisfies Described
       const kept = try keptDraft()
       const spec = try (client.generatePhone(prompt, known, operations, kept?.spec) catch () => undefined)
-      if (spec === undefined) return { kind: "unavailable" } satisfies Described
-      if (kept !== undefined && JSON.stringify(kept.spec.trigger) !== JSON.stringify(spec.trigger)) return { kind: "unavailable" } satisfies Described
+      if (spec === undefined || !validTrigger(typedTrigger(spec.trigger))) return { kind: "unavailable" } satisfies Described
+      if (kept !== undefined && !generatedKeepsSchedule(typedTrigger(kept.spec.trigger), typedTrigger(spec.trigger))) return { kind: "unavailable" } satisfies Described
       const edited = try (drafts.send({ type: "edit" }) catch () => undefined)
       if (edited === undefined) return { kind: "unavailable" } satisfies Described
       const mutation = kept?.mutation ?? try workflowUuid()
@@ -297,6 +314,14 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
     effect discard() {
       drafts.send({ type: "discardTap" }) catch () => undefined
       if (!(try drafts.get()).draft) store.remove(DRAFT_BYTES_KEY) catch () => undefined
+    },
+    effect scheduleNote(spec: PhoneWorkflowSpec) {
+      const now = try Clock.currentTimeMillis
+      const trigger = spec.trigger
+      return {
+        manual: trigger.kind === "manual", missedAfterMinutes: missedWindowMs / 60000,
+        clockChange: trigger.kind === "time" ? phoneTriggerClockChangeNote(trigger, now) : "",
+      } satisfies ScheduleNote
     },
   }
 }), lifecycleStored(LIFECYCLE_KEY)), draftStored(DRAFT_KEY))

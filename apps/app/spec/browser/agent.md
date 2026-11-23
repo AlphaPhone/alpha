@@ -85,7 +85,7 @@ while the claim waited refuses it.
 
 ```quint
 pure def canClaim(a: AgentBrowsing, revision: int, inBrowser: bool): bool =
-  (a.command == NoCommand or a.command == Acknowledged) and inBrowser and a.claims < 3
+  (a.command == NoCommand or a.command == Acknowledged) and inBrowser
 pure def claim(a: AgentBrowsing, revision: int, inBrowser: bool): AgentBrowsing =
   { ...a, command: Claimed, claims: a.claims + 1, claimRevision: revision, boundRevision: -1, sentRevision: -1 }
 pure def canClaimSettled(a: AgentBrowsing, revision: int, nativeHost: bool, shown: bool, covered: bool): bool = a.command == Claimed
@@ -98,7 +98,8 @@ pure def alwaysABoundCommandHadReviewsOff(a: AgentBrowsing): bool = (a.command =
 ### The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page
 
 One acknowledgement settles each claim, delivered or lost; the command is never sent again to get
-one. A dispatched back, forward or reload reports that the command was sent and asks for a read of
+one. A native receipt that names another tab or host session is not delivered, and the agent is told
+the result belongs elsewhere. A dispatched back, forward or reload reports that the command was sent and asks for a read of
 the page afterwards (eliza#40019).
 
 ```quint

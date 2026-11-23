@@ -1,0 +1,32 @@
+// spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"; spec/browser/egress.md, "Share by email opens a draft with the page's address and name, and Copy link copies its address, each only from a shown settled page"
+
+/** A page reading's speech did not run or ended early. */
+export error ReadingSpeechFailed { reason: string }
+
+/** The voice area's page reading: an approved page's one-use token spoken on the phone, or the browser build's reviewed text spoken locally; page text never leaves the device. */
+export service ReadingVoice {
+  /** The on-device reading binding `reviewReading` names, or undefined when no on-device voice may read a page now. */
+  binding(): Record<string, unknown> | undefined!!
+  /** Whether that voice can play speech now. */
+  ready(): boolean!!
+  /** Speaks the page text the native host holds behind `readingToken`, until it ends or is stopped. */
+  speakToken(readingToken: string): void!ReadingSpeechFailed
+  /** Speaks the owner's reviewed excerpt on this device, until it ends or is stopped. */
+  speakText(text: string): void!ReadingSpeechFailed
+  /** Stops the page reading that is speaking. */
+  stop(): void!!
+  static readonly defaultValue = () => ({
+    binding: () => succeed(undefined),
+    ready: () => succeed(false),
+    speakToken: () => fail(new ReadingSpeechFailed({ reason: "No on-device reading voice" })),
+    speakText: () => fail(new ReadingSpeechFailed({ reason: "No on-device reading voice" })),
+    stop: () => succeed(undefined),
+  })
+}
+
+/** Inbox's new draft for Share by email: it opens Inbox with the page's name as the subject and its address as the body. */
+export service PageMail {
+  /** Opens a new draft; the answer is why nothing opened, or undefined when Inbox shows the draft. */
+  compose(subject: string, body: string): string | undefined!!
+  static readonly defaultValue = () => ({ compose: () => succeed("Email isn’t available on this phone.") })
+}

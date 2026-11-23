@@ -17,9 +17,10 @@ them.
 - [Speech route](./route.md): the key each account gives the local inference package's route, plan
   limits, and what each route sends.
 - [Dictation](./dictation.md): recording into another area's draft, transcription and insertion.
-- [Conversation](./conversation.md): starting, disclosure, interruption, review, retries, calls and
-  retirement.
-- [Speech output](./speech.md): cleanup of each speaking channel, warm-up and what may be spoken.
+- [Conversation](./conversation.md): starting, disclosure, interruption, review, retries, calls,
+  retirement and a screen the agent opens.
+- [Speech output](./speech.md): cleanup of each speaking channel, warm-up, what may be spoken, and
+  what is spoken or transcribed only on the phone (page readings, voicemail).
 - [Microphone](./capture.md): one owner of the renderer's capture, permission and calls.
 - [Voice activity](./vad.md): the energy gate that segments a browser or batch capture, and the
   native segment gate.

@@ -1,6 +1,7 @@
 // spec/shell/recovery.md, "Story: Get my phone back when something breaks"
 import { Button } from "../components/ui/index.ts";
 
+/** The recovery screen: its diagnostics and the reload and Switch Home actions. */
 export interface RecoveryScreenProps {
   /** Only the failure's kind, class, version, platform and time; never a message. */
   diagnostics: string;

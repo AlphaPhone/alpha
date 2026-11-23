@@ -3,9 +3,12 @@ import type { Actions } from "../../../gen/telephony__actions.ts";
 import type { Attention } from "../../../gen/telephony__attention.ts";
 import type { CallBar } from "../../../gen/telephony__callBar.ts";
 import type { Comms } from "../../../gen/telephony__comms.ts";
+import type { Contacts, Detail, Editor } from "../../../gen/telephony__contacts.ts";
 import type { Slot } from "../../../gen/telephony__drafts.ts";
+import type { MessageRow, Messages } from "../../../gen/telephony__messages.ts";
 import type { Phone } from "../../../gen/telephony__phone.ts";
 import type { Voicemail } from "../../../gen/telephony__voicemail.ts";
+import type { UndoView } from "../../telephony/undo.vibe";
 
 const at = 1_763_800_000_000;
 
@@ -71,3 +74,70 @@ export const attention: Attention = {
   threadsRead: true, unread: [{ threadId: "thread:1", title: "Maya Chen", snippet: "See you at five", date: at - 60_000 }],
   callsRead: true, missed: [{ callerKey: "4155550111", title: "4155550111", date: at - 120_000 }], voicemailRead: true, fresh: [],
 };
+
+/** A voicemail open with its delete waiting for the owner's confirmation. */
+export const voicemailConfirming: Voicemail = { ...voicemail, opened: { ...voicemail.opened, confirming: true } };
+/** A carrier without visual voicemail: never shown as "no voicemail". */
+export const voicemailUnsupported: Voicemail = { ...voicemail, carrier: "CarrierUnsupported", rows: [], opened: { ...voicemail.opened, openId: "", audio: "AudioNone", transcript: "TranscriptNone", words: "", engine: "NoEngine", heard: false } };
+
+/** Two conversations listed, one unread, and one the host would not clip. */
+export const threads: Messages = {
+  shown: true, epoch: 2, busy: false, access: "SmsGranted", failed: false, roleHeld: true, readAt: at,
+  view: { tag: "ThreadList" },
+  threads: [
+    { id: "thread:1", title: "Maya Chen", addresses: ["4155550100"], snippet: "See you at five", date: at - 60_000, unread: true, complete: true },
+    { id: "thread:2", title: "", addresses: [], snippet: "", date: at - 3_600_000, unread: false, complete: false },
+  ],
+  rows: [], more: true, listQuery: { tag: "NoQuery" }, searching: false, menu: { tag: "NoMenu" }, deleting: false, uncertain: [],
+  deleteNotice: { tag: "NoDeleteNotice" }, outgoing: [], picker: { tag: "PickerClosed" }, pickTicket: 0,
+};
+/** Alpha's filter applied to the list, with its chip. */
+export const threadsFiltered: Messages = { ...threads, listQuery: { tag: "AlphaQuery", query: "five", label: "five" } };
+/** Messages without SMS read access. */
+export const threadsNeedAccess: Messages = { ...threads, access: "SmsNotGranted", threads: [], more: false };
+/** A read that failed: never "no messages". */
+export const threadsFailed: Messages = { ...threads, failed: true, threads: [], more: false };
+
+/** A received text with a safe link. */
+export const receivedText: MessageRow = { id: "sms:1", kind: "SmsKind", threadId: "thread:1", outgoing: false, condition: "Received", date: at - 60_000, body: "See you at five https://example.com/map", pictures: 0, complete: true };
+/** An SMS the radio confirmed delivered. */
+export const deliveredText: MessageRow = { ...receivedText, id: "sms:2", outgoing: true, condition: "DeliveredOut", body: "On my way" };
+/** A picture message the owner sent: an MMS never reads Delivered. */
+export const sentPictures: MessageRow = { ...receivedText, id: "mms:3", kind: "MmsKind", outgoing: true, condition: "SentOut", body: "", pictures: 2 };
+
+/** One contact open as the phone holds it now. */
+export const contactDetail: Extract<Detail, { tag: "DetailRead" }> = {
+  tag: "DetailRead", contactId: "7", version: "a".repeat(64), displayName: "Maya Chen", givenName: "Maya", familyName: "Chen",
+  notes: "Climbing on Tuesdays", notesEditable: true,
+  phoneFields: [{ number: "4155550100", phoneType: "mobile" }], emailFields: [{ address: "maya@example.com", emailType: "home" }],
+};
+/** Contacts with one contact open, writable and idle. */
+export const contactOpen: Contacts = {
+  shown: true, epoch: 3, loading: false, explicitRead: false, readable: true, writable: true, failed: false,
+  rows: [{ id: "7", title: "Maya Chen", phones: ["4155550100"], emails: ["maya@example.com"], complete: true, lookup: "k7", revision: "r1" }],
+  rowsQuery: "", query: "", more: false, limit: 50, openId: "7", detail: contactDetail, detailTicket: 2, editor: { tag: "EditorClosed" },
+  confirming: false, gate: "WriteIdle", writeKind: "NoWrite", lastWrite: { tag: "NothingWritten" }, chip: "", notice: { tag: "NoContactsNotice" },
+};
+/** The open contact's removal waiting for confirmation. */
+export const contactConfirming: Contacts = { ...contactOpen, confirming: true };
+/** A lost write answer: every write held until an explicit read. */
+export const contactUnsettled: Contacts = { ...contactOpen, gate: "WriteUnsettled", notice: { tag: "OutcomeUnknown" } };
+/** The in-app editor open on the contact read whole. */
+export const editing: Extract<Editor, { tag: "EditorOpen" }> = { tag: "EditorOpen", mode: "Editing", editId: "7", editVersion: "a".repeat(64), dirty: false, stale: false, notesEditable: true };
+/** The editor after the contact changed on the phone since it opened. */
+export const editingStale: Extract<Editor, { tag: "EditorOpen" }> = { ...editing, dirty: true, stale: true };
+/** The editor for a new contact. */
+export const creating: Extract<Editor, { tag: "EditorOpen" }> = { ...editing, mode: "Creating", editId: "", editVersion: "" };
+
+/** A message deletion queued in the phone's window, Undo still able to win. */
+export const undoQueued: UndoView = {
+  notices: [{ key: "message:sms:1", title: "Message deleted", notice: "NoticeQueued", message: "Undo is available for a moment.", canUndo: true, uncertain: false }],
+  said: "",
+};
+/** A deletion whose outcome the phone could not confirm. */
+export const undoUncertain: UndoView = {
+  notices: [{ key: "voicemail:v1", title: "Voicemail", notice: "NoticeUncertain", message: "The phone could not confirm the delete.", canUndo: false, uncertain: true }],
+  said: "",
+};
+/** What a refused Undo said. */
+export const undoRefused: UndoView = { notices: [], said: "It could not be restored." };

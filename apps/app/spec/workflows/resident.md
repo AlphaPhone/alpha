@@ -24,8 +24,8 @@ pure val initial: Resident = {
   unlocked: true, packaged: true, enabled: true, lifecycle: LifecycleIdle, confirmed: false,
   running: false, deferred: false, starts: 0, failedStarts: 0, epoch: 0, lastDecision: Ignore
 }
-pure def decide(r: Resident, event: Broadcast): Decision =
-  if (event == OtherBroadcast) Ignore
+pure def decide(r: Resident, signal: Broadcast): Decision =
+  if (signal == OtherBroadcast) Ignore
   else if (not(r.unlocked)) Locked
   else if (not(r.packaged)) NotPackaged
   else if (not(r.enabled)) NotEnabled
@@ -44,10 +44,10 @@ A running agent is never started again; a start the service refused is deferred 
 broadcast or launch.
 
 ```quint
-pure def canBroadcast(r: Resident, event: Broadcast, works: bool): bool =
-  (r.starts < 3 or r.running or decide(r, event) != Start) and (works or (decide(r, event) == Start and not(r.running) and r.failedStarts < 2))
-pure def broadcast(r: Resident, event: Broadcast, works: bool): Resident = {
-  val d = decide(r, event)
+pure def canBroadcast(r: Resident, signal: Broadcast, works: bool): bool =
+  (r.starts < 3 or r.running or decide(r, signal) != Start) and (works or (decide(r, signal) == Start and not(r.running) and r.failedStarts < 2))
+pure def broadcast(r: Resident, signal: Broadcast, works: bool): Resident = {
+  val d = decide(r, signal)
   val starting = d == Start and not(r.running)
   { ...r, lastDecision: d, running: r.running or (starting and works), starts: if (starting and works) r.starts + 1 else r.starts,
     deferred: if (d == Start) (starting and not(works)) else r.deferred, failedStarts: if (starting and not(works)) r.failedStarts + 1 else r.failedStarts }

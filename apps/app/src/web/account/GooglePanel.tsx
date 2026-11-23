@@ -6,6 +6,7 @@ import { type Capability, type Google, canAllowCalendar, canCancelWait, canConne
 import type { GoogleAccount } from "../../account/google.vibe";
 import { Button, ListRow, Spinner, Switch } from "../components/ui/index.ts";
 
+/** The Google connection, its accounts, the agent's switches and the owner's actions on them. */
 export interface GooglePanelProps {
   google: Google;
   accounts: ReadonlyArray<GoogleAccount>;

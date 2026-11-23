@@ -107,7 +107,9 @@ pure val hValues = Set({ tokenAtStart: "o1", tokenNow: "o1", destinationReady: t
 The viewer gets a temporary read-only copy; Files gets an exact copy whose SHA-256 is checked again
 after it was written. Android only confirms that it was asked to open the file. A save that could
 not be confirmed says so and is not offered again in the same review; a cancelled save may be
-retried. A view left by Back, by leaving the app or by another opening cancels the handoff.
+retried. A view left by Back, by leaving the app or by another opening cancels the handoff. An Open
+of a view that was retired, or while another Open of it is still waiting for Android, asks for
+nothing and stays quiet; a cancelled or closed review says nothing either.
 
 ```quint
 type HandoffResult = HandedOpened | HandedCancelled | HandedSaved | HandedUnconfirmed
@@ -116,6 +118,8 @@ pure def reportsDone(result: HandoffResult): bool = result == HandedOpened or re
 pure def saveOfferedAgain(result: HandoffResult): bool = result == HandedCancelled
 pure def lawAnotherViewHandsNothingOver(reviewedHash: str, currentHash: str): bool = not(handoffAllowed(reviewedHash, currentHash, false))
 pure def lawOnlyACancelledSaveIsOfferedAgain(result: HandoffResult): bool = saveOfferedAgain(result) iff result == HandedCancelled
+pure def handoffStarts(reviewedHash: str, currentHash: str, sameView: bool, inProgress: bool): bool = handoffAllowed(reviewedHash, currentHash, sameView) and not(inProgress)
+pure def lawAnOpenInProgressStartsNoOther(reviewedHash: str, currentHash: str, sameView: bool): bool = not(handoffStarts(reviewedHash, currentHash, sameView, true))
 pure val reviewedHashValues = Set("", "a1")
 pure val currentHashValues = Set("a1", "b2")
 ```

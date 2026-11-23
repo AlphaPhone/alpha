@@ -131,8 +131,11 @@ pure def sometimesALateClickWasSwallowed(d: Dock): bool = d.ignored > 0
 ### Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open
 
 Off Home the bar dismisses to the pill and the pill's Type control brings it
-back. Closing the chat, navigating or collapsing forgets the dragged height,
-so the chat reopens at its fitted height.
+back; the shell lowers a raised bar the same way when Back closes it. Closing
+the chat, navigating or collapsing forgets the dragged height, so the chat
+reopens at its fitted height. In portrait a touch anywhere above the open
+half sheet closes it and reaches nothing underneath; the next touch is
+ordinary (#796).
 
 ```quint
 pure def canSizeButton(d: Dock): bool = not(d.drag.active) and not(d.ghost) and isOpen(d.chat)
@@ -148,6 +151,12 @@ pure def navigate(d: Dock, view: Surface): Dock =
     drag: noDrag, swallowAge: if (d.drag.moved) 0 else d.swallowAge, dragAge: if (d.drag.moved) 0 else d.dragAge }
 pure def canOpenSheet(d: Dock): bool = not(d.drag.active) and not(swallowed(d)) and not(isOpen(d.chat))
 pure def openSheet(d: Dock): Dock = { ...d, chat: Sheet, remembered: false }
+pure def canLowerBar(d: Dock): bool = not(d.drag.active) and d.chat == Input and d.view != HomeView
+pure def lowerBar(d: Dock): Dock = { ...d, chat: Hidden, barKept: false }
+pure def canTouchOutside(d: Dock): bool = not(d.drag.active) and not(d.ghost) and d.chat == Sheet
+pure def touchOutside(d: Dock): Dock = closeChat(d)
+pure def stepATouchAboveTheSheetOnlyClosesIt(before: Dock, via: str, after: Dock): bool =
+  via == "touchOutside" implies (after.voice == before.voice and after.view == before.view and not(isOpen(after.chat)))
 pure def canVoiceEnds(d: Dock): bool = d.voice
 pure def voiceEnds(d: Dock): Dock = { ...d, voice: false }
 pure def alwaysHomeKeepsItsBar(d: Dock): bool = d.view == HomeView implies d.chat != Hidden

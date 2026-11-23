@@ -41,6 +41,8 @@ pure def lawAFutureAnswerIsDue(checkedAt: int): bool = checkDue(checkedAt + 1, c
 ### One check or install runs at a time, and an explicit check keeps its answer in Settings
 
 A failed read keeps the offer shown and retires its automatic authority until the next good check.
+The offer's row names its version as the feed gives it, beside its version code. Opening General
+answers from the saved feed unless a check is due.
 
 ```quint
 type Busy = Idle | Checking | Installing | Polling
@@ -48,12 +50,12 @@ type Outcome = NoOutcome | UpdateReady | NoneOffered | CheckFailed | InstallStar
 type Permission = PermissionUnread | AndroidStarting | PermissionRequired | AutomaticAllowed | AutomaticUnsupported
 type Activation = NoActivation | Preparing | Paused | Continuing | Ended
 type Updates = {
-  busy: Busy, manual: bool, outcome: Outcome, offer: int, bound: bool, checkedAt: int, installed: int,
+  busy: Busy, manual: bool, outcome: Outcome, offer: int, offerName: str, bound: bool, checkedAt: int, installed: int,
   permission: Permission, pending: bool, active: bool, failures: int, wakeAt: int,
   activation: Activation, canContinue: bool, acknowledged: bool,
 }
 pure val initial: Updates = {
-  busy: Idle, manual: false, outcome: NoOutcome, offer: 0, bound: false, checkedAt: -1, installed: 0,
+  busy: Idle, manual: false, outcome: NoOutcome, offer: 0, offerName: "", bound: false, checkedAt: -1, installed: 0,
   permission: PermissionUnread, pending: false, active: false, failures: 0, wakeAt: 0,
   activation: NoActivation, canContinue: false, acknowledged: false,
 }
@@ -63,9 +65,9 @@ pure val uValues = Set(initial).union(Set({ ...initial, installed: 2, permission
 pure def offered(u: Updates): bool = u.offer > u.installed
 pure def canBeginCheck(u: Updates, manual: bool): bool = u.busy == Idle
 pure def beginCheck(u: Updates, manual: bool): Updates = { ...u, busy: Checking, manual: manual, outcome: if (manual) NoOutcome else u.outcome }
-pure def canCheckAnswered(u: Updates, now: int, offer: int, bound: bool): bool = u.busy == Checking and offer >= 0
-pure def checkAnswered(u: Updates, now: int, offer: int, bound: bool): Updates = {
-  val next = { ...u, busy: Idle, offer: offer, bound: bound and offer > u.installed, checkedAt: now }
+pure def canCheckAnswered(u: Updates, now: int, offer: int, versionName: str, bound: bool): bool = u.busy == Checking and offer >= 0
+pure def checkAnswered(u: Updates, now: int, offer: int, versionName: str, bound: bool): Updates = {
+  val next = { ...u, busy: Idle, offer: offer, offerName: if (offer > u.installed) versionName else "", bound: bound and offer > u.installed, checkedAt: now }
   if (u.manual) { ...next, outcome: if (offer > u.installed) UpdateReady else NoneOffered } else next
 }
 pure def canCheckFailed(u: Updates): bool = u.busy == Checking
@@ -83,7 +85,7 @@ pure def install(u: Updates): Updates = { ...u, busy: Installing, manual: true }
 pure def canInstallAnswered(u: Updates, answer: InstallAnswer): bool = u.busy == Installing or u.busy == Polling
 pure def installAnswered(u: Updates, answer: InstallAnswer): Updates =
   if (answer == Accepted) { ...u, busy: Idle, outcome: if (u.manual) InstallStarted else u.outcome }
-  else if (answer == OfferWithdrawn) { ...u, busy: Idle, offer: 0, bound: false, checkedAt: -1, outcome: if (u.manual) InstallRefused else u.outcome }
+  else if (answer == OfferWithdrawn) { ...u, busy: Idle, offer: 0, offerName: "", bound: false, checkedAt: -1, outcome: if (u.manual) InstallRefused else u.outcome }
   else if (answer == OfferUnavailable or answer == OfferChanged) { ...u, busy: Idle, bound: false }
   else if (answer == StillStarting) { ...u, busy: Idle, permission: AndroidStarting }
   else if (answer == NeedsPermission) { ...u, busy: Idle, permission: PermissionRequired }
@@ -164,6 +166,7 @@ pure def alwaysFailuresAreBounded(u: Updates): bool = u.failures >= 0 and u.fail
 ### Android's activation is acknowledged once, after the page has kept its drafts
 
 A page that could not keep its drafts acknowledges that it is not ready, and Android cancels.
+Android's ready and settled events, and the app's start, each read the activation again.
 
 ```quint
 pure def canActivationRead(u: Updates, activation: Activation, canContinue: bool): bool = activation != Continuing

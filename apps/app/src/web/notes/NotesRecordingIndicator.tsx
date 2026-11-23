@@ -4,7 +4,8 @@ import type { AppId } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
 import { useMachine } from "../../../gen/notes__recorder.react.ts";
 import { NotesRecorder, recordingClock } from "../../notes/recorder.vibe";
-import { notesRuntime, useServiceStream } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
+import { useServiceStream } from "./services.ts";
 
 export type NotesRecordingIndicatorProps = {
   /** Open an app, as the shell gives every surface. */
@@ -18,7 +19,7 @@ const displays = (recorder: NotesRecorder.Shape) => recorder.display;
  * @model spec/notes/recorder.md
  */
 export function NotesRecordingIndicator({ open }: NotesRecordingIndicatorProps) {
-  const { state } = useMachine(notesRuntime);
+  const { state } = useMachine(runtime);
   const display = useServiceStream(NotesRecorder, displays, { durationMs: 0, levels: [], transcript: "", positionMs: 0 });
   if (state === undefined || (state.phase !== "RecRecording" && state.phase !== "RecPaused")) return null;
   return (

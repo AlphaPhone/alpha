@@ -34,11 +34,14 @@ type Tab = (typeof TABS)[number];
 const act = (use: (actions: ClockActions.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ClockActions), use));
 const handoffDo = (use: (handoff: ClockHandoff.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ClockHandoff), use));
 
+/** What the shell gives the Clock app: the tab a route names (alarms, timers, stopwatch or world), and how to leave. */
+export type ClockScreenProps = ScreenProps;
+
 /**
  * The Clock app: alarms (the browser build's own, or a reviewed request to Android Clock), timers, the stopwatch and world clocks.
  * @model spec/clock/ringer.md
  */
-export function ClockScreen({ route, onClose }: ScreenProps) {
+export function ClockScreen({ route, onClose }: ClockScreenProps) {
   const [tab, setTab] = useState<Tab>(TABS.includes(route as Tab) ? (route as Tab) : "alarms");
   const { state: ringer = ringerInitial } = useRinger(runtime);
   const { state: alarms = alarmsInitial } = useAlarms(runtime);

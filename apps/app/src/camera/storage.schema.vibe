@@ -1,0 +1,85 @@
+// spec/camera/scan.md, "A draft write compares the revision it expects with the stored one, and an explicit save or load makes the draft the owner's"; spec/camera/albums.md, "An album write applies only to the listed album revision and to a current, untrashed item"; spec/camera/browse.md, "Delete forever runs only from Recently deleted, on the items its confirmation prepared"
+
+/** One recognised line of a stored page, in page fractions. */
+export schema StoredTextLine {
+  readonly text: string
+  readonly x: number
+  readonly y: number
+  readonly width: number
+  readonly height: number
+}
+
+/** One stored scan page: its image type and base64 bytes. */
+export schema StoredPage {
+  readonly type: "image/jpeg" | "image/png" | "image/webp"
+  readonly data: string
+}
+
+/** The scan draft as the device keeps it: its revision, its pages and each page's text layer. */
+export schema StoredDraft {
+  readonly revision: number
+  readonly pages: readonly StoredPage[]
+  readonly layers: readonly (readonly StoredTextLine[] | null)[]
+}
+
+/** One item of the browser build's own library. */
+export schema StoredItem {
+  readonly id: string
+  readonly kind: "image" | "video"
+  readonly data: string
+  readonly image: string
+  readonly width: number
+  readonly height: number
+  readonly date: number
+  readonly size: number
+  readonly duration?: number
+  readonly revision: number
+  readonly favorite: boolean
+  readonly trashedAt?: number
+}
+
+/** One album of the browser build's library, by member id. */
+export schema StoredAlbum {
+  readonly id: string
+  readonly name: string
+  readonly revision: number
+  readonly members: readonly string[]
+}
+
+/** A browser photo edit's durable receipt, by operation id. */
+export schema StoredReceipt {
+  readonly operationId: string
+  readonly status: "prepared" | "saving" | "saved" | "failed" | "cancelled" | "unchanged"
+  readonly source: string
+  readonly revision: number
+  readonly parameters: string
+  readonly replace: boolean
+  readonly id?: string
+}
+
+/** A frame kept from a scan, under the identity its Keep used. */
+export schema StoredKeep {
+  readonly operationId: string
+  readonly id: string
+  readonly digest: string
+}
+
+/** The browser build's whole library as it is stored. */
+export schema StoredLibrary {
+  readonly serial: number
+  readonly items: readonly StoredItem[]
+  readonly albums: readonly StoredAlbum[]
+  readonly receipts: readonly StoredReceipt[]
+  readonly keeps: readonly StoredKeep[]
+}
+
+/** One item a Delete forever confirmation prepared: its id and the revision it was reviewed at. */
+export schema PreparedItem {
+  readonly id: string
+  readonly revision: string
+}
+
+/** What a Delete forever confirmation names. */
+export schema PreparedDeletion {
+  readonly items: readonly PreparedItem[]
+}

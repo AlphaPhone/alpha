@@ -83,6 +83,26 @@ pure def recovered(r: Resident): Resident = { ...r, phase: Stopped }
 pure def sometimesRefused(r: Resident): bool = r.phase == Refused
 ```
 
+### A held start runs again only after the owner reviewed what the service kept and the service archived it
+
+The service answers `reviewRecovery` with a one-use token and how many interrupted requests it kept
+(one to 64), and `archiveRecovery` with that token archives them. An unavailable review, a malformed
+token or an archive it does not confirm leaves the agent held. Nothing it kept is ever replayed.
+
+```quint
+type RecoveryStep = Reviewable | Archived | Blocked
+
+pure def recoveryAfterReview(offered: bool): RecoveryStep = if (offered) Reviewable else Blocked
+
+pure def recoveryAfterArchive(step: RecoveryStep, kept: bool): RecoveryStep =
+  if (step == Reviewable) (if (kept) Archived else Blocked) else step
+
+pure def lawOnlyAReviewedArchiveRestarts(offered: bool, kept: bool): bool =
+  (recoveryAfterArchive(recoveryAfterReview(offered), kept) == Archived) iff (offered and kept)
+
+pure def lawABlockedRecoveryStaysBlocked(kept: bool): bool = recoveryAfterArchive(Blocked, kept) == Blocked
+```
+
 ### A connection is one verified owner with exactly one running agent
 
 The resident's `/api/auth/me` must name the owner with local or session access as OWNER, and
@@ -206,9 +226,12 @@ pure def sometimesReboundAfterAccountChange(r: Resident): bool = r.account >= 1 
 
 ### Only a record read the resident deferred is retried, and only before its deadline
 
-The resident answers `503 feature_starting`, retryable, before it dispatches anything. A read of the
-owner's records is retried after the resident's hint, between a quarter second and five seconds,
-and never past the request's 120-second deadline; a write or any other 503 is the outcome.
+The resident answers `503 feature_starting`, retryable, before it dispatches anything: a body whose
+code and error are both `feature_starting`, in the agent's deferred boot or its app-route tail,
+pending (or `runtime_starting`, only in the tail), with a hint of no negative seconds. A read of the
+owner's records is retried after that hint, one second when it gives none, between a quarter
+second and five seconds, and never past the request's 120-second deadline; a write or any other
+503 is the outcome.
 
 ```quint
 pure def retriesDeferred(recordRead: bool, httpStatus: int, featureStarting: bool, remainingMs: int): bool =
@@ -238,7 +261,9 @@ pure def lawTheRetryWaitIsBounded(hintMs: int, remainingMs: int): bool =
 ### An abandoned request is withdrawn by its id, and its outcome is unknown unless native withdrew it first
 
 The service answers `abort` with whether the call was still waiting to be sent; a call already on
-its way to the agent is not recalled and may have completed.
+its way to the agent is not recalled and may have completed. A request the resident has not
+answered by its 120-second deadline is withdrawn the same way and reported not sent or of unknown
+outcome.
 
 ```quint
 type AbortOutcome = NotSent | OutcomeUnknown

@@ -29,3 +29,4 @@ receipts; these specs state what Alpha shows, sends and keeps.
 - [Clock draft](./clockDraft.md): an alarm a workflow suggests, handed to Clock.
 - [Request recovery](./recovery.md): backing up or resetting saved requests in the browser build.
 - [Simulator](./simulator.md): simulated workflows in the browser build, with test mocks only.
+- [Simulated triggers](./simulatedTriggers.md): the browser build's place and message trigger checks, their cursors and queue.

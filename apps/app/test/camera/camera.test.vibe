@@ -1,9 +1,14 @@
-// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/scan.md, "Story: Ask Alpha to scan what Camera sees"
+// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/viewfinder.md, "Story: Leave the lock screen to the system camera"; spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/media.md, "Story: Ask Alpha about what Camera sees"; spec/camera/libraryReview.md, "Story: Share only reviewed identities with the assistant"
 import { assert, it } from "@effect/vitest"
+import { readRefusal } from "../../gen/camera__libraryReview.ts"
 import { Machine as NoticeMachine } from "../../gen/camera__notices.effect.vibe"
+import { cameraFor, secondsLeft, showsTimeLeft } from "../../gen/camera__viewfinder.ts"
 import { CameraActions } from "../../src/camera/actions.vibe"
+import { CameraChat } from "../../src/camera/chat.vibe"
+import { recordingLabel } from "../../src/camera/messages.vibe"
+import type { FrameQuestion } from "../../src/camera/ports.vibe"
 import { Viewfinder } from "../../src/camera/viewfinder.vibe"
-import { cameraOver, phone, preview, until } from "./support.vibe"
+import { cameraOver, cameraWith, onHome, phone, preview, until } from "./support.vibe"
 
 function camera(extra: Record<string, (args: unknown) => unknown> = {}) {
   let recordingNow = false
@@ -19,10 +24,9 @@ function camera(extra: Record<string, (args: unknown) => unknown> = {}) {
     "ElizaCamera.startRecording": () => { recordingNow = true; return undefined },
     "ElizaCamera.getRecordingState": () => ({ isRecording: recordingNow, duration: 3, fileSize: 1000 }),
     "ElizaCamera.stopRecording": () => ({ path: "content://media/external/video/media/7", duration: 3, width: 1920, height: 1080, fileSize: 1000 }),
-    "AlphaDevice.setVolumeShutter": () => undefined,
     "AlphaPhotos.list": () => ({ items: [], next: "" }),
     "AlphaPhotos.read": (args) => ({ id: (args as { id: string }).id, kind: "video", width: 1920, height: 1080, date: 1, size: 1000, revision: "r1", image: "data:image/jpeg;base64,VV" }),
-    "AlphaPhotos.libraryAccess": () => ({ scope: "full", images: "full", videos: "full" }),
+    "AlphaPhotoLibrary.scope": () => ({ scope: "full", imageAccess: "full", videoAccess: "full", images: true, videos: true, canSelectMore: false, canEditOthers: true, locked: false, version: "1" }),
     "AlphaPhotos.albums": () => ({ items: [] }),
     ...extra,
   })
@@ -122,5 +126,143 @@ it.live("a recording refuses the assistant's photo and takes nothing (spec/camer
     const refused = actions.execute({ type: "camera_capture_photo" }, { operationId: "op-5", reviewed: true, ownerWords: false }) catch (failure) => failure.message
     const after = device.calls.filter((call) => call.method === "ElizaCamera.capturePhoto").length
     try Effect.try(() => assert.deepStrictEqual({ refused, shutters: after - before }, { refused: "Recording — no photo", shutters: 0 }))
+  }
+})
+
+// spec/camera/viewfinder.md, "A volume key press is rechecked: one shutter press, or the keys go back to Android"
+it.live("the volume keys are Camera's shutter only while the ready preview is in front (spec/camera/viewfinder.md, \"A volume key press is rechecked: one shutter press, or the keys go back to Android\")", () => effect {
+  const device = camera({ "AlphaDevice.setVolumeShutter": () => undefined })
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { return (try view.get()).volumeKeys })
+    try view.volumeKey()
+    try until(() => effect { return (try view.get()).photos === 1 })
+    try view.leave()
+    const shutter = device.calls.filter((call) => call.method === "AlphaDevice.setVolumeShutter").map((call) => (call.args as { enabled: boolean }).enabled)
+    try Effect.try(() => assert.deepStrictEqual({ first: shutter[0], last: shutter[shutter.length - 1] }, { first: true, last: false }))
+  }
+})
+
+// spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"
+it.live("a full conversation keeps the preview through its grace, hiding the page stops it, and coming back starts a fresh one (spec/camera/viewfinder.md, \"Story: Keep the viewfinder only while Camera is in front\")", () => effect {
+  const device = camera()
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    const onCamera = { ...onHome, view: "camera" }
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    try view.foreground({ ...onCamera, chat: "full" })
+    const covered = try view.get()
+    try view.graceEnds()
+    const afterGrace = try view.get()
+    try view.foreground({ ...onCamera, chat: "closed" })
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    try view.foreground({ ...onCamera, visible: false, screen: "off" })
+    const hidden = try view.get()
+    try view.foreground(onCamera)
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    const back = try view.get()
+    const stops = device.calls.filter((call) => call.method === "ElizaCamera.stopPreview").length
+    try Effect.try(() => assert.deepStrictEqual(
+      { covered: [covered.chat, covered.phase], afterGrace: afterGrace.phase, hidden: [hidden.onScreen, hidden.phase, hidden.volumeKeys], back: [back.onScreen, back.released], stopped: stops >= 2 },
+      { covered: ["ChatFull", "PreviewReady"], afterGrace: "PreviewOff", hidden: [false, "PreviewOff", false], back: [true, false], stopped: true },
+    ))
+  }
+})
+
+// spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"
+it.live("a denied camera offers its notice, and returning from Android's settings restarts it only on a granted read (spec/camera/viewfinder.md, \"Story: Recover when the camera is denied or stops\")", () => effect {
+  let granted = false
+  const device = camera({
+    "ElizaCamera.startPreview": () => granted ? preview : { reject: "CAMERA_PERMISSION_DENIED" },
+    "ElizaCamera.checkPermissions": () => ({ camera: granted ? "granted" : "denied" }),
+    "ElizaSystem.openAppInfo": () => undefined,
+  })
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { return (try view.get()).notice === "CameraNotice" })
+    try view.allow()
+    try view.resumed()
+    const stillDenied = try view.get()
+    granted = true
+    try view.resumed()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    const restarted = try view.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { denied: [stillDenied.notice, stillDenied.phase], restarted: [restarted.notice, restarted.phase], settings: device.calls.some((call) => call.method === "ElizaSystem.openAppInfo") },
+      { denied: ["CameraNotice", "PreviewOff"], restarted: ["NoNotice", "PreviewReady"], settings: true },
+    ))
+  }
+})
+
+// spec/camera/viewfinder.md, "Story: Leave the lock screen to the system camera"
+it.effect("a locked phone's camera gesture is the system's secure camera, never Alpha's (spec/camera/viewfinder.md, \"Story: Leave the lock screen to the system camera\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual([cameraFor(true), cameraFor(false)], ["SystemSecureCamera", "AlphaCamera"]))
+})
+
+// spec/camera/viewfinder.md, "The recording timer shows the time left once the length or the estimated size limit is within a minute"
+it.effect("the recording timer adds the time left only within a minute of a limit (spec/camera/viewfinder.md, \"The recording timer shows the time left once the length or the estimated size limit is within a minute\")", () => effect {
+  const limits = { maxDuration: 600, maxFileSize: 100_000_000 }
+  try Effect.try(() => assert.deepStrictEqual(
+    { early: recordingLabel(30, 1_000_000, limits), length: recordingLabel(560, 1_000_000, limits), size: recordingLabel(100, 95_000_000, limits), left: secondsLeft(100, 95_000_000, 600, 100_000_000), shown: showsTimeLeft(1, 99_000_000, 600, 100_000_000) },
+    { early: "0:30", length: "9:20 · 0:40 left", size: "1:40 · 0:05 left", left: 5, shown: false },
+  ))
+})
+
+// spec/camera/media.md, "Story: Ask Alpha about what Camera sees"
+it.live("\"what am I looking at?\" over the ready Camera sends one reviewed frame with the question, and other chat passes through (spec/camera/media.md, \"Story: Ask Alpha about what Camera sees\")", () => effect {
+  const asked: FrameQuestion[] = []
+  const device = camera({ "ElizaCamera.capturePhoto": () => ({ format: "jpeg", base64: "AA", width: 1600, height: 1200 }) })
+  provide cameraWith(device, { askAboutFrame: (question: FrameQuestion) => effect { asked.push(question); return true } }) {
+    const view = try Viewfinder
+    const chat = try CameraChat
+    const closed = try chat.intercept({ text: "what am I looking at?", attachments: 0, editing: false })
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    const other = try chat.intercept({ text: "what is the weather tomorrow?", attachments: 0, editing: false })
+    const attached = try chat.intercept({ text: "what am I looking at?", attachments: 1, editing: false })
+    const frame = try chat.intercept({ text: "What am I looking at?", attachments: 0, editing: false })
+    const saved = device.calls.filter((call) => call.method === "ElizaCamera.capturePhoto").map((call) => (call.args as { saveToGallery: boolean }).saveToGallery)
+    try Effect.try(() => assert.deepStrictEqual(
+      { closed, other, attached, frame, questions: asked.map((q) => q.question), saved, photos: (try view.get()).photos },
+      { closed: "none", other: "none", attached: "none", frame: "frame", questions: ["What am I looking at?"], saved: [false], photos: 0 },
+    ))
+  }
+})
+
+// spec/camera/libraryReview.md, "Story: Share only reviewed identities with the assistant"
+it.live("a library read the assistant did not offer is refused before anything is read, and a locked phone shares nothing (spec/camera/libraryReview.md, \"Story: Share only reviewed identities with the assistant\")", () => effect {
+  const device = camera()
+  provide cameraOver(device) {
+    const actions = try CameraActions
+    const refused = actions.execute({ type: "photo_library_search" }, { operationId: "op-9", reviewed: true, ownerWords: false, capabilities: "photos.view.v1" }) catch (failure) => failure.message
+    const listed = device.calls.some((call) => call.method === "AlphaPhotos.list" && (call.args as { album?: string } | undefined)?.album !== "camera")
+    try Effect.try(() => assert.deepStrictEqual(
+      { refused, listed, locked: readRefusal(true, true, true), noAccess: readRefusal(true, false, false), allowed: readRefusal(true, true, false) },
+      { refused: "This Photos request isn’t supported.", listed: false, locked: "ReadLocked", noAccess: "ReadNoAccess", allowed: "ReadAllowed" },
+    ))
+  }
+})
+
+// spec/camera/viewfinder.md, "Camera starts its preview only when active, and stops it once it is not"
+it.live("a dialog over Camera hands the volume keys back to Android until it closes (spec/camera/viewfinder.md, \"Camera starts its preview only when active, and stops it once it is not\")", () => effect {
+  const device = camera({ "AlphaDevice.setVolumeShutter": () => undefined })
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { return (try view.get()).volumeKeys })
+    try view.dialog(true)
+    const covered = try view.get()
+    try view.volumeKey()
+    const pressed = try view.get()
+    try view.dialog(false)
+    const uncovered = try view.get()
+    const shutter = device.calls.filter((call) => call.method === "AlphaDevice.setVolumeShutter").map((call) => (call.args as { enabled: boolean }).enabled)
+    try Effect.try(() => assert.deepStrictEqual(
+      { covered: [covered.modal, covered.volumeKeys], photos: pressed.photos, capturing: pressed.capturing, uncovered: uncovered.volumeKeys, shutter },
+      { covered: [true, false], photos: 0, capturing: false, uncovered: true, shutter: [true, false, false, true] },
+    ))
   }
 })

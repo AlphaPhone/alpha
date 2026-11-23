@@ -1,4 +1,4 @@
-// spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminders.md, "The outcome is decided by reading the reminders back, and a reopen counts only as a new open occurrence at the reviewed time"
+// spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"; spec/clock/reminders.md, "The outcome is decided by reading the reminders back, and a reopen counts only as a new open occurrence at the reviewed time"
 // A reminder's due instant, alert and recurrence in the phone's time zone, worked out before anything starts.
 import type { Delivery, Precheck, ReminderRow, ReminderStatus } from "../../gen/clock__reminders.ts";
 import { localDateTime, phoneTimeZone, wallTime } from "./page.ts";
@@ -13,6 +13,44 @@ export interface ReminderDraft {
   readonly minuteOfDay: number;
   readonly repeat: "none" | "daily" | "weekdays" | "weekly";
   readonly alertMinutes: number | null;
+}
+
+/** A reminder form as it is kept between visits: the civil day it names, never an offset from a day that has passed. */
+export interface KeptForm {
+  readonly title: string;
+  readonly body: string;
+  readonly date: string;
+  readonly minuteOfDay: number;
+  readonly repeat: ReminderDraft["repeat"];
+  readonly alertMinutes: number | null;
+}
+
+const DAY = 86_400_000;
+
+function localMidnight(at: number): number {
+  const d = new Date(at);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * The form to keep for a draft, naming the civil day it was written for.
+ * @throws {never}
+ */
+export function keptFormOf(draft: ReminderDraft, now: number): KeptForm {
+  const day = new Date(localMidnight(now));
+  day.setDate(day.getDate() + draft.dayOffset);
+  return { title: draft.title, body: draft.body, date: localDateTime(day.getTime()).date, minuteOfDay: draft.minuteOfDay, repeat: draft.repeat, alertMinutes: draft.alertMinutes };
+}
+
+/**
+ * The draft a kept form resumes as today: the same civil day, whatever day it is now.
+ * @throws {never}
+ */
+export function draftOfKept(form: KeptForm, now: number): ReminderDraft {
+  const [y, m, d] = form.date.split("-").map(Number);
+  const offset = Math.round((new Date(y, m - 1, d).getTime() - localMidnight(now)) / DAY);
+  return { title: form.title, body: form.body, dayOffset: offset, minuteOfDay: form.minuteOfDay, repeat: form.repeat, alertMinutes: form.alertMinutes };
 }
 
 /** The store's schedule for a dated reminder. */

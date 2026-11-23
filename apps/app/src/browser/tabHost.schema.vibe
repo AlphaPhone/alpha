@@ -62,13 +62,6 @@ export schema ShowDownloads {
   readonly session: string
 }
 
-/** A tapped app link in a private tab, waiting for the owner. */
-export schema AppLinkRequested {
-  readonly session: string
-  readonly id: string
-  readonly navigation: string
-}
-
 /** The bookmark list the store returned. */
 export schema MarkList {
   readonly urls: ReadonlyArray<string>

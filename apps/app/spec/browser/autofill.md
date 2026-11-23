@@ -6,7 +6,7 @@ every frame reports trusted focus on a username or password field of its own fra
 page script cannot reach. An HTTP sign-in prompt offers its fields only for a challenge the engine
 reports for the page's own secure host. This spec states the native host's contract; the renderer
 reads `loginFillStatus` to say whether this device can fill, and the menu's Passwords entry opens
-Settings at the password provider.
+Alpha's Passwords app, where the password provider is chosen.
 
 ## Story: Fill a login only on the site I see
 

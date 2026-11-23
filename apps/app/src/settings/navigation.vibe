@@ -1,0 +1,156 @@
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/passwords.md, "Leaving the page or the app going to the background locks the vault and forgets the visit"
+import { type AppRow, type Page, Machine, appPage, forwardOf, initial, machine, sectionOf } from "../../gen/settings.effect.vibe"
+import type { AppId } from "../web/app-screen.ts"
+import { Build } from "../platform/build.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { Permissions } from "../shell/permissions.vibe"
+import { Diagnostics } from "./diagnostics.vibe"
+import { DeviceFacts } from "./facts.vibe"
+import { Wifi } from "./network.vibe"
+import { Vault } from "./passwords.vibe"
+import { PrivacyRow } from "./privacy.vibe"
+import { Updates } from "./updates.vibe"
+
+const APPS: Record<AppRow, AppId> = {
+  RowBrowser: "browser", RowCalendar: "calendar", RowCamera: "camera", RowFiles: "files", RowInbox: "inbox", RowMaps: "maps",
+  RowMessages: "messages", RowNotes: "notes", RowPasswords: "passwords", RowPhotos: "photos", RowWorkflows: "workflows",
+}
+
+/** Settings' pages: what opens from where, what each reads when it opens, Back, and the routes other surfaces send. */
+export service SettingsPages {
+  /** Open what a route another surface sent names: a listed section, or the app it is forwarded to. */
+  route(route: string): void!!
+  /** Open a page from the one shown, and read what it shows. */
+  open(page: Page): void!!
+  /** Android's Back: one page up; false on the root, where Back leaves Settings. */
+  back(): boolean!!
+  /** Open a licence's details from the list. */
+  openLicence(index: number): void!!
+  /** An app's row on Apps: its page in Settings, or the app itself. */
+  openApp(app: AppRow): void!!
+  /** Open a section of the Account app. */
+  openAccount(section: "plans" | "google" | "provider"): void!!
+  /** Settings left the front: return to the root and lock a vault the page held. */
+  leave(): void!!
+  /** Privacy's Access setup: the first-run access walkthrough at its first step. */
+  accessSetup(): void!!
+}
+
+/** The navigation Machine, with the developer pages a build with test mocks allows. */
+export const pagesMachine = Layer.unwrap(effect {
+  const mocks = (try Build).info.testMocks
+  return machine({ ...initial, developer: mocks })
+})
+
+/** SettingsPages over the navigation Machine and the Settings services each page reads. */
+export const settingsPages = Layer.effect(SettingsPages, effect {
+  const held = try Machine
+  const navigation = try Navigation
+  const permissions = try Permissions
+  const facts = try DeviceFacts
+  const wifi = try Wifi
+  const privacy = try PrivacyRow
+  const updates = try Updates
+  const vault = try Vault
+  const diagnostics = try Diagnostics
+  const onPhone = (try Build).info.variant !== "browser"
+
+  effect function entered(page: Page) {
+    if (page === "Network") {
+      try wifi.readConnectivity()
+      try wifi.scan()
+    }
+    if (page === "General") try updates.check(false)
+    if (page === "Privacy") try privacy.readListener()
+    if (page === "Passwords") try vault.open()
+    if (page === "About") try diagnostics.readLog(false)
+    if (page === "Problems") try diagnostics.readLog(true)
+    if (page === "Licenses") try diagnostics.loadLicences()
+    if (page === "Permissions" || page === "AppPhotos" || page === "AppCamera" || page === "AppMaps" || page === "AppNotes") try facts.refresh()
+  }
+
+  effect function open(page: Page) {
+    const opened = try (held.send({ type: "open", page }) catch () => undefined)
+    if (opened !== undefined) try entered(page)
+  }
+
+  return {
+    effect route(route: string) {
+      const forward = forwardOf(route)
+      if (forward === "ToPlans") { try navigation.open("account", "plans"); return }
+      if (forward === "ToProvider") { try navigation.open("account", "provider"); return }
+      if (forward === "ToGoogle") { try navigation.open("account", "google"); return }
+      if (forward === "ToCalendar") { try navigation.open("calendar"); return }
+      if (forward === "ToWorkflows") { try navigation.open("workflows"); return }
+      const section = sectionOf(route.toLowerCase())
+      if (section === "Root") return
+      const opened = try (held.send({ type: "openSection", page: section }) catch () => undefined)
+      if (opened !== undefined) try entered(section)
+    },
+    open,
+    effect back() {
+      const before = try held.get()
+      const after = try (held.send({ type: "back" }) catch () => undefined)
+      if (after === undefined) return false
+      if (before.page === "Passwords") try vault.leave()
+      return true
+    },
+    effect openLicence(index: number) {
+      try (held.send({ type: "openLicence", index }) catch () => undefined)
+    },
+    effect openApp(app: AppRow) {
+      const page = appPage(app, onPhone)
+      if (page === "Root") { try navigation.open(APPS[app]); return }
+      try open(page)
+    },
+    effect openAccount(section: "plans" | "google" | "provider") {
+      try navigation.open("account", section)
+    },
+    effect leave() {
+      const before = try held.get()
+      try (held.send({ type: "leave" }) catch () => undefined)
+      if (before.page === "Passwords") try vault.leave()
+    },
+    effect accessSetup() {
+      try permissions.reopen(0)
+    },
+  }
+})
+
+/** Settings follows the front: shown, it reads the device and opens the route it was sent; left, it returns to its root; hidden, it locks a vault it held. The Passwords app does the same for its vault. */
+export const settingsFollow = Layer.effectDiscard(effect {
+  const navigation = try Navigation
+  const pages = try SettingsPages
+  const facts = try DeviceFacts
+  const vault = try Vault
+  const held = try Machine
+  const seen = { view: "", visible: false, route: "" }
+  try fork.scoped (effect {
+    for try (const nav of navigation.changes) {
+      const view = nav.app
+      const visible = !nav.hidden
+      const route = nav.places.find((p) => p.app === "settings")?.route ?? ""
+      const settingsBefore = seen.view === "settings" && seen.visible
+      const passwordsBefore = seen.view === "passwords" && seen.visible
+      const routeBefore = seen.route
+      seen.view = view
+      seen.visible = visible
+      seen.route = route
+      const settingsNow = view === "settings" && visible
+      if (settingsNow && !settingsBefore) {
+        if (route !== "") try pages.route(route)
+        try facts.show()
+        if ((try held.get()).page === "Passwords") try vault.open()
+      } else if (settingsNow && route !== routeBefore && route !== "") {
+        try pages.route(route)
+      } else if (!settingsNow && settingsBefore) {
+        try facts.hide()
+        if (view !== "settings") try pages.leave()
+        else try vault.leave()
+      }
+      const passwordsNow = view === "passwords" && visible
+      if (passwordsNow && !passwordsBefore) try vault.open()
+      if (!passwordsNow && passwordsBefore) try vault.leave()
+    }
+  })
+})

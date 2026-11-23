@@ -4,6 +4,7 @@ import { type Session, curTab } from "../../../gen/browser__session.ts";
 import { pageErrorText, PROFILE_UNSUPPORTED } from "../../browser/messages.ts";
 import { EmptyState, Spinner } from "../components/ui/index.ts";
 
+/** The session whose selected tab the viewport stands in for, and how the screen measures it. */
 export interface PageViewportProps {
   session: Session;
   /** Receives the viewport element as it mounts, to measure it; returns how to stop. */

@@ -1,4 +1,4 @@
-// spec/browser/session.md, "Opening the menu, the switcher or the library ends address editing, and the menu never covers editing"; spec/browser/session.md, "A started Browser always has a tab, selects one of them, and never holds more than eight"; spec/browser/session.md, "Next and previous step through matches only when there are matches, and closing clears the native search"; spec/browser/reviews.md, "Reviews are open dialogs, one per identity, each of a kind"
+// spec/browser/session.md, "Opening the menu, the switcher or the library ends address editing, and the menu never covers editing"; spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"; spec/browser/egress.md, "What the shell reads at each tap is the selected tab's page and whether the Browser view shows it"; spec/browser/reading.md, "The question goes to the editor only with an excerpt or clean pasted text, and only while the same page is shown"; spec/browser/session.md, "A started Browser always has a tab, selects one of them, and never holds more than eight"; spec/browser/session.md, "Next and previous step through matches only when there are matches, and closing clears the native search"; spec/browser/reviews.md, "Reviews are open dialogs, one per identity, each of a kind"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -30,3 +30,45 @@ const reviewDialogs = extract(({ document }) => document.querySelectorAll('[role
 
 /** At most one Browser confirmation is shown at a time. */
 export const browserShowsOneReviewAtATime = always(() => reviewDialogs.current <= 1);
+
+const privateEditorUnmarked = extract(({ document }) => {
+  const editor = document.querySelector<HTMLInputElement>('[role="search"][aria-label="Address"] input');
+  const privateTab = [...document.querySelectorAll('nav[aria-label="Browser"] span')].some((span) => span.textContent === "Private");
+  return editor !== null && privateTab && editor.getAttribute("aria-label") !== "Search or address, private";
+});
+
+/** An address editor over a private tab always says the tab is private. */
+export const browserPrivateTabStaysMarkedWhileEditing = always(() => !privateEditorUnmarked.current);
+
+const newTabAtTheLimit = extract(({ document }) => {
+  const cards = document.querySelectorAll('button[aria-label^="Switch to"]').length;
+  const offered = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
+    .some((button) => (button.textContent === "New tab" || button.textContent === "Private") && !button.disabled);
+  return cards >= 8 && offered;
+});
+
+/** With eight tabs open the switcher offers no new tab. */
+export const browserNoNewTabAtTheLimit = always(() => !newTabAtTheLimit.current);
+
+const egressWithoutAPage = extract(({ document }) => {
+  const viewport = document.querySelector("[data-browser-surfaces]");
+  const blank = viewport !== null && [...viewport.querySelectorAll("p")].some((p) => p.textContent === "New tab" || p.textContent === "Private · cleared on close");
+  const loading = viewport?.getAttribute("aria-label") === "Loading website";
+  const offered = [...document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="Browser menu"] [role="menuitem"]')]
+    .some((item) => ["Share", "Bookmark", "Bookmarked", "Open in another browser"].includes(item.textContent ?? "") && !item.disabled);
+  return (blank || loading) && offered;
+});
+
+/** Share, Bookmark and Open in another browser are offered only for a loaded page. */
+export const browserNoEgressWithoutALoadedPage = always(() => !egressWithoutAPage.current);
+
+const questionWithoutText = extract(({ document }) => {
+  const dialog = [...document.querySelectorAll('[role="dialog"]')].find((d) => d.querySelector("h2")?.textContent === "Ask about page");
+  if (dialog === undefined) return false;
+  const text = dialog.querySelector<HTMLTextAreaElement>('textarea[aria-label="Excerpt"]')?.value ?? "";
+  const go = [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Continue");
+  return text.trim() === "" && go !== undefined && !go.disabled;
+});
+
+/** Ask about page never continues without an excerpt or pasted text. */
+export const browserQuestionNeedsText = always(() => !questionWithoutText.current);

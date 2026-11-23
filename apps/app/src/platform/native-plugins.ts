@@ -10,27 +10,14 @@ export interface NativePluginEntry {
   readonly events: readonly string[];
 }
 
-const speechBridge = [
-  "cancel", "startRecording", "requestPermissions", "getRecordingMetrics", "stopRecording", "cancelRecording",
-  "releaseLocalSpeech", "holdSpeechEngine", "releaseSpeechEngineHold", "warmSpeechOutput", "localSpeechStatus",
-  "transcribeLocalRecording", "synthesizeLocal", "setSpeechOutputMuted", "play", "stopPlayback", "nativeVoiceTiming",
-  "markVoiceTurn", "clearNativeVoiceTiming", "liveCaptureStatus", "startLiveCapture", "stopLiveCapture",
-] as const;
-
-const sense = [
-  "status", "pause", "turnOff", "openSettings", "bindInvocationSession", "discardProtectedPowerInvocation",
-  "claimProtectedPowerLaunch", "discardProtectedPowerLaunch", "takeInvocation",
-] as const;
-
-/** Every Capacitor plugin and method the renderer uses, as `MainActivity` registers them. */
+/** Every Capacitor plugin, method and event the renderer uses, each implemented by the Android plugin of that name; a method the plugin on the device does not list is unavailable there. */
 export const nativePlugins = {
   Agent: {
     reach: "AnyNative",
     methods: [
-      "launchSurface", "takeInvocation", "residentAttachment", "setGoogleAgentAccess", "configureProvider",
-      "prepareProviderConfiguration", "cancelProviderConfiguration", "clearProvider", "clearProviderIfCurrent",
-      "configureCloudProvider", "providerStatus", "selectProvider", "editProviderKeys", "removeProviderKey",
-      "revealProviderKey",
+      "residentAttachment", "setGoogleAgentAccess", "configureProvider", "prepareProviderConfiguration",
+      "cancelProviderConfiguration", "clearProvider", "configureCloudProvider", "providerStatus", "selectProvider",
+      "removeProviderKey", "revealProviderKey",
     ],
     events: [],
   },
@@ -47,7 +34,10 @@ export const nativePlugins = {
   ElizaSecureStore: { reach: "AnyNative", methods: ["get", "set", "remove", "compareAndExchange", "status"], events: [] },
   AlphaActionJournal: {
     reach: "AnyNative",
-    methods: ["recoverNotification", "recoverDeletion", "recoverReminder", "reviewClock", "cancelClock", "confirmClock"],
+    methods: [
+      "get", "edit", "list", "reserve", "markApplying", "finish", "pending", "undo", "dismiss", "reviewClock",
+      "cancelClock", "confirmClock",
+    ],
     events: [],
   },
   AlphaBillingAuthority: { reach: "AnyNative", methods: ["status", "clear", "start", "verify", "perform"], events: [] },
@@ -63,9 +53,10 @@ export const nativePlugins = {
   AlphaCalendar: {
     reach: "AnyNative",
     methods: [
-      "sync", "inspectDeletion", "removeScoped", "executeAgent", "cancelAgent", "requestPermissions", "requestAccess",
-      "requestWorkflowReadAccess", "pendingCreations", "readOptions", "availabilitySources", "readAvailability",
-      "insertHandoff",
+      "checkPermissions", "requestPermissions", "requestAccess", "requestWorkflowReadAccess", "list", "inspect", "open",
+      "save", "saveOptions", "readOptions", "insertHandoff", "pendingCreations", "acknowledgeCreation", "remove",
+      "inspectDeletion", "removeScoped", "prepareAgentSource", "executeAgent", "cancelAgent", "availabilitySources",
+      "readAvailability", "sync",
     ],
     events: ["calendarSyncChanged"],
   },
@@ -73,39 +64,31 @@ export const nativePlugins = {
   AlphaCloudSignIn: {
     reach: "AnyNative",
     methods: [
-      "credentialIdentity", "serviceInfo", "status", "startGoogle", "startEmail", "startPhone", "verifyPhone",
-      "verifyEmail", "verifyMfa", "resumeMfa", "clearCredentialState", "cancel", "renewSignIn",
+      "credentialIdentity", "status", "startGoogle", "startEmail", "startPhone", "verifyPhone", "verifyEmail", "verifyMfa",
+      "resumeMfa", "clearCredentialState", "cancel", "renewSignIn",
     ],
     events: ["signInCompleted", "signInIncomplete", "signInMfaRequired", "signInReadinessChanged", "signInRenewed"],
   },
-  AlphaCloudSpeechStream: {
-    reach: "AnyNative",
-    methods: [
-      "load", "requestPermissions", "startCloudSpeech", "stopCloudSpeech", "setCloudSpeechOutputMuted",
-      "setCloudSpeechMuted", "speakCloudSpeech", "cancelCloudSpeech",
-    ],
-    events: ["cloudSpeechEvent", "error"],
-  },
+  AlphaCloudSpeechStream: { reach: "AnyNative", methods: ["startCloudSpeech", "stopCloudSpeech"], events: ["cloudSpeechEvent"] },
   AlphaConnection: {
     reach: "AnyNative",
     methods: [
       "readDelegationCallback", "clearDelegationCallback", "prepareGoogleWorkspaceReturn", "consumeGoogleWorkspaceReturn",
-      "cancelGoogleWorkspaceReturn", "pauseNotificationCollection",
+      "cancelGoogleWorkspaceReturn", "pauseNotificationCollection", "secureRead", "secureCompareExchange", "openExternal",
     ],
     events: ["cloudDelegationCallback", "googleWorkspaceReturn"],
   },
   AlphaContacts: {
     reach: "AospImage",
-    methods: ["status", "requestPermissions", "list", "create", "edit", "get", "save", "remove"],
+    methods: ["status", "requestPermissions", "list", "create", "edit", "get", "save", "remove", "resolveNames"],
     events: [],
   },
   AlphaDeletions: { reach: "AnyNative", methods: ["pending", "dismiss", "undo", "reviewReminder", "reviewAgentReminder"], events: [] },
   AlphaDevice: {
     reach: "AnyNative",
     methods: [
-      "shareText", "copyText", "setTextScale", "recommendedTimeout", "snapshot", "openPasswordProvider",
-      "openNotificationShade", "openSettings", "diagnosticsFacts",
-      "shareDiagnostics", "openUpdatePermissionSettings", "activateUpdate", "updateState", "reconcileUpdate",
+      "shareText", "copyText", "setTextScale", "recommendedTimeout", "snapshot", "openNotificationShade", "openSettings",
+      "diagnosticsFacts", "shareDiagnostics", "openUpdatePermissionSettings", "activateUpdate", "updateState",
       "continueUpdate", "checkForUpdate", "installUpdate", "setVolumeShutter", "setSystemBarAppearance", "haptic",
     ],
     events: ["alphaUpdateReady", "alphaUpdateSettled"],
@@ -113,10 +96,10 @@ export const nativePlugins = {
   AlphaFiles: {
     reach: "AnyNative",
     methods: [
-      "requestPermissions", "load", "storageState", "storageRequestAccess", "storageList", "storageCategory",
-      "storageQuery", "storageReviewedIdentities", "storageReadAttachment", "storageTransfer", "storageRename",
-      "storageCreateFolder", "storageTrash", "storageTrashList", "storageRestore", "storageEmptyTrash", "storageShare",
-      "storageSelect", "storageOpen", "storageWatch", "storageUnwatch",
+      "checkPermissions", "requestPermissions", "storageState", "storageRequestAccess", "storageList", "storageCategory",
+      "storageQuery", "storageReviewedIdentities", "storageTransfer", "storageRename", "storageCreateFolder", "storageTrash",
+      "storageTrashList", "storageRestore", "storageEmptyTrash", "storageShare", "storageSelect", "storageOpen",
+      "storageWatch", "storageUnwatch",
     ],
     events: ["storageChanged"],
   },
@@ -128,22 +111,17 @@ export const nativePlugins = {
   AlphaHostedResults: {
     reach: "AnyNative",
     methods: [
-      "nativeSourceIdentity", "nativeSourceConsent", "beginBackground", "cancelBackground", "configureBackground",
-      "disableBackground", "syncInbox", "setBackgroundPolling", "inboxHistory", "scheduleSourceRenewal",
-      "clearSourceRenewal", "postWorkflowApprovalNotice", "withdrawWorkflowApprovalNotice",
-      "withdrawOtherOwnerApprovalNotices", "resumeWorkflowApprovalNotice", "pendingSourceRenewal", "settleSourceRenewal",
-      "setResultsShowing", "withdrawResult", "publishResult", "pendingResult", "consumeResult", "releaseResultQuestion",
-      "status", "enable", "requestPermissions",
+      "status", "enable", "nativeSourceIdentity", "nativeSourceConsent", "beginBackground", "cancelBackground",
+      "configureBackground", "disableBackground", "syncInbox", "inboxHistory", "scheduleSourceRenewal", "clearSourceRenewal",
+      "pendingSourceRenewal", "settleSourceRenewal", "postWorkflowApprovalNotice", "withdrawWorkflowApprovalNotice",
+      "withdrawOtherOwnerApprovalNotices", "resumeWorkflowApprovalNotice", "setResultsShowing", "withdrawResult",
+      "publishResult", "pendingResult", "consumeResult", "releaseResultQuestion",
     ],
     events: ["pendingResult", "renewSource"],
   },
-  AlphaListener: { reach: "AospImage", methods: sense, events: [] },
   AlphaMailAttachments: {
     reach: "AnyNative",
-    methods: [
-      "readSelected", "readPhotoSelected", "cancelPhotoSelected", "cancel", "openReviewed", "retainSourceReference",
-      "openSourceReference", "releaseSourceReferences", "saveReviewed",
-    ],
+    methods: ["readSelected", "readPhotoSelected", "cancel", "openReviewed", "openSourceReference", "releaseSourceReferences", "saveReviewed"],
     events: [],
   },
   AlphaMapsTransport: {
@@ -156,24 +134,32 @@ export const nativePlugins = {
   },
   AlphaNoteAudio: {
     reach: "AnyNative",
-    methods: ["migrationStatus", "describe", "play", "stop", "state", "remove", "restore", "purge", "deletionStatus"],
-    events: ["started", "ended", "failed"],
+    methods: ["describe", "play", "stop", "state", "remove", "purge", "deletionStatus"],
+    events: [],
   },
   AlphaNoteDocuments: { reach: "AnyNative", methods: ["importText", "exportText", "exportPdf"], events: [] },
-  AlphaNotifications: { reach: "AnyNative", methods: ["canonicalPending", "acknowledgeCanonical"], events: ["canonicalNotificationTap"] },
+  AlphaNotifications: {
+    reach: "AnyNative",
+    methods: [
+      "status", "list", "open", "dismiss", "clear", "canonicalPending", "acknowledgeCanonical", "crossAppStatus",
+      "notificationApps", "setNotificationPolicy", "resumeCrossApp", "openNotificationAccess", "notificationHistory",
+      "clearNotificationHistory", "pendingWorkflowTap", "consumeWorkflowTap",
+    ],
+    events: ["canonicalNotificationTap", "pendingWorkflowTap"],
+  },
   AlphaOngoingCall: { reach: "AospImage", methods: ["ongoingCall", "showCall", "endCall"], events: ["ongoingCall"] },
   AlphaPhotoLibrary: {
     reach: "AnyNative",
-    methods: ["scope", "requestAccess", "requestPermissions", "watch", "page", "inspect", "validate", "changes", "requestChange", "share"],
-    events: ["libraryChanged", "scopeChanged"],
+    methods: ["scope", "requestAccess", "requestPermissions", "watch", "page", "inspect", "validate", "requestChange", "share"],
+    events: ["libraryChanged"],
   },
   AlphaPhotos: {
     reach: "AnyNative",
     methods: [
-      "beginEdit", "previewEdit", "saveEdit", "editResult", "cancelEdit", "beginVideoEdit", "saveVideoEdit",
-      "cancelVideoEdit", "list", "thumbnails", "read", "keepCapture", "share", "shareMany", "setTrashed", "setFavorite",
-      "deletePermittedTrash", "changeMany", "summary", "prepareDeleteTrash", "cancelDeleteTrash", "deletePreparedTrash",
-      "albums", "changeAlbum",
+      "libraryAccess", "list", "thumbnails", "read", "keepCapture", "share", "shareMany", "setFavorite", "changeMany",
+      "summary", "prepareDeleteTrash", "cancelDeleteTrash", "deletePreparedTrash", "albums", "changeAlbum", "beginEdit",
+      "previewEdit", "saveEdit", "editResult", "cancelEdit", "beginVideoEdit", "saveVideoEdit", "cancelVideoEdit",
+      "reviewRemovedVideoCopy",
     ],
     events: [],
   },
@@ -181,50 +167,45 @@ export const nativePlugins = {
   AlphaTelephony: {
     reach: "AospImage",
     methods: [
-      "requestPermissions", "checkPermissions", "imageCapability", "status", "phoneInfo", "requestAccess", "requestRole",
-      "listRecentCalls", "dial", "placeCall", "composeSms", "listThreads", "listMessages", "latestIncomingSender",
-      "markThreadRead", "deleteMessage", "observeMessages", "voicemailStatus", "listVoicemail", "fetchVoicemailAudio",
-      "voicemailAudio", "voicemailPcm", "markVoicemailHeard", "deleteVoicemail", "observeVoicemail", "sendSms",
-      "cancelSmsReview", "smsSendHistory", "smsSendResult", "sendMms", "mmsSendResult", "smsNoticePending",
-      "acknowledgeSmsNotice", "contactForNumber", "searchContacts",
+      "imageCapability", "status", "phoneInfo", "requestAccess", "requestRole", "requestPermissions", "listRecentCalls",
+      "dial", "placeCall", "voicemailStatus", "listVoicemail", "fetchVoicemailAudio", "voicemailAudio", "voicemailPcm",
+      "markVoicemailHeard", "deleteVoicemail", "observeVoicemail", "composeSms", "listThreads", "listMessages",
+      "latestIncomingSender", "markThreadRead", "deleteMessage", "observeMessages", "sendSms", "sendMms", "cancelSmsReview",
+      "smsSendHistory", "smsSendResult", "mmsSendResult", "smsNoticePending", "acknowledgeSmsNotice",
     ],
-    events: ["messagesChanged", "voicemailChanged"],
+    events: ["messagesChanged", "voicemailChanged", "smsSendUpdated", "mmsSendUpdated"],
   },
   AlphaVoiceCloud: {
     reach: "AnyNative",
     methods: [
-      ...speechBridge,
-      "transcribeLocalAudio", "cloudVoiceTiming", "workflowPresentationCapabilities", "saveRecording",
-      "startNoteRecording", "consumeNoteRecordingOpen", "clearNoteRecordingOpen", "noteRecordingStatus",
-      "pauseNoteRecording", "resumeNoteRecording", "stopNoteRecording", "discardNoteRecording", "setNoteSegmentText",
-      "claimCanonicalNoteSave", "saveNoteRecording", "transcribeRecording", "synthesize", "transcribeOwnRecording",
-      "synthesizeOwn", "pairedVoiceStatus", "pairedTranscriptionStatus", "transcribePairedRecording", "synthesizePaired",
-      "synthesizeBrowserReading", "synthesizeLocalBrowserReading",
+      "checkPermissions", "requestPermissions", "cancel", "startRecording", "stopRecording", "cancelRecording",
+      "getRecordingMetrics", "warmSpeechOutput", "localSpeechStatus", "transcribeLocalRecording", "transcribeLocalAudio",
+      "synthesizeLocal", "setSpeechOutputMuted", "play", "stopPlayback", "nativeVoiceTiming", "markVoiceTurn",
+      "liveCaptureStatus", "startLiveCapture", "stopLiveCapture", "transcribeRecording", "transcribeOwnRecording",
+      "synthesize", "synthesizeOwn", "synthesizeLocalBrowserReading", "startNoteRecording", "consumeNoteRecordingOpen",
+      "clearNoteRecordingOpen", "noteRecordingStatus", "pauseNoteRecording", "resumeNoteRecording", "stopNoteRecording",
+      "discardNoteRecording", "setNoteSegmentText", "claimCanonicalNoteSave", "saveNoteRecording",
     ],
-    events: [
-      "noteRecordingChanged", "recordingState", "recordingStopped", "playbackEnded", "playbackFailed",
-      "playbackSegmentStarted", "playbackStopped", "liveCaptureBargeIn", "liveCaptureEnded", "liveCaptureFrames",
-      "liveCaptureTranscript", "error",
-    ],
+    events: ["noteRecordingChanged", "recordingStopped", "playbackEnded", "playbackFailed", "playbackStopped", "liveCaptureEnded"],
   },
   DailyApps: {
     reach: "AnyNative",
     methods: [
-      "operateReminder", "cancelReminder", "load", "requestPermissions", "scheduleReminder", "surfaceInfo",
-      "closeAssistant", "restoreSelected", "renameSelected", "pdfSelected", "describeSelected", "readSelected",
-      "openSelected", "shareSelected", "forgetSelected", "clockHandoff", "capabilities", "perform",
+      "checkPermissions", "requestPermissions", "perform", "surfaceInfo", "clockHandoff", "listReminders", "selectedReminder",
+      "scheduleReminder", "operateReminder", "reminderOperationReceipt", "saveTodo", "todoDecision", "pendingReminderTap",
+      "consumeReminderTap", "dismissReminderTap", "releaseReminderQuestion", "restoreSelected", "renameSelected",
+      "pdfSelected", "describeSelected", "readSelected", "openSelected", "shareSelected", "forgetSelected",
     ],
-    events: ["assistantInvoked", "restoredResult"],
+    events: ["assistantInvoked", "pendingReminderTap", "appResumed", "reminderOpened"],
   },
   DeviceApps: { reach: "AnyNative", methods: ["platformCapabilities", "openHomeChooser"], events: [] },
   ElizaCamera: {
     reach: "AnyNative",
     methods: [
-      "getDevices", "startPreview", "setCaptureMode", "stopPreview", "switchCamera", "capturePhoto", "startRecording",
-      "stopRecording", "getRecordingState", "getSettings", "setSettings", "setZoom", "setFocusPoint",
-      "setExposurePoint", "checkCameraPermission", "requestCameraPermission", "checkPermissions", "requestPermissions",
+      "checkPermissions", "startPreview", "stopPreview", "setCaptureMode", "switchCamera", "capturePhoto", "startRecording",
+      "stopRecording", "getRecordingState", "setSettings", "setZoom", "setFocusPoint",
     ],
-    events: ["frame", "recordingState", "error"],
+    events: [],
   },
   ElizaLocation: {
     reach: "AnyNative",
@@ -233,19 +214,25 @@ export const nativePlugins = {
   },
   ElizaPasswords: {
     reach: "AnyNative",
-    methods: ["status", "unlock", "lock", "list", "save", "openEditor", "remove", "reset", "reveal", "copy", "openAutofillSettings"],
+    methods: ["status", "unlock", "lock", "list", "openEditor", "remove", "reset", "reveal", "copy", "openAutofillSettings"],
     events: [],
   },
-  ElizaPasswordTransfer: { reach: "AnyNative", methods: ["exportVault", "importVault"], events: [] },
-  ElizaSense: { reach: "AospImage", methods: sense, events: [] },
+  ElizaSense: {
+    reach: "AospImage",
+    methods: ["status", "pause", "turnOff", "openSettings", "bindInvocationSession", "discardProtectedPowerInvocation", "takeInvocation"],
+    events: [],
+  },
+  ElizaWiFi: {
+    reach: "AnyNative",
+    methods: ["listAvailableNetworks", "addNetworkWithApproval", "getConnectivity", "openInternetPanel"],
+    events: [],
+  },
   ElizaSystem: {
     reach: "AnyNative",
     methods: [
-      "getStatus", "requestRole", "openSettings", "openNetworkSettings", "openWriteSettings", "openDisplaySettings",
-      "openSoundSettings", "getDeviceSettings", "getSystemFacts", "openSettingsPage", "openNotificationShade",
-      "setScreenBrightness", "setVolume", "setFlashlight", "listLauncherApps", "launchApp", "resolveDefaultApp",
-      "openDefaultApp", "getBuildInfo", "getLaunchInfo", "getLocaleInfo", "getNetworkStatus", "requestPermissions",
-      "openAppInfo", "openClock", "switchStates", "mute", "crashLog", "recordRendererFailure", "clearCrashLog",
+      "getStatus", "getSystemFacts", "getDeviceSettings", "getBuildInfo", "getLaunchInfo", "getNetworkStatus", "requestRole",
+      "openSettings", "openSettingsPage", "openNetworkSettings", "openNotificationShade", "openAppInfo", "listLauncherApps",
+      "launchApp", "resolveDefaultApp", "openDefaultApp", "crashLog", "recordRendererFailure", "clearCrashLog",
     ],
     events: ["networkStatusChanged", "launcherAppsChanged"],
   },
@@ -265,7 +252,37 @@ export function isNativePlugin(name: string): name is NativePluginName {
   return Object.hasOwn(nativePlugins, name);
 }
 
-/** Where `name` is offered; a plugin the table does not list is offered nowhere. @throws {never} */
+/** Where `name` is offered; undefined for a plugin the table does not list, which Native then offers wherever the build registers it. @throws {never} */
 export function reachOf(name: string): NativeReach | undefined {
   return isNativePlugin(name) ? nativePlugins[name].reach : undefined;
+}
+
+/** One `AlphaActionJournal` call: the method and its arguments, answered with the plugin's reply. */
+export type JournalInvoke = (method: "get" | "edit" | "list", args: Readonly<Record<string, unknown>>) => Promise<unknown>;
+
+function field(reply: unknown, name: string): unknown {
+  if (typeof reply !== "object" || reply === null || !Object.hasOwn(reply, name)) throw new Error(`AlphaActionJournal answered without ${name}`);
+  return (reply as Record<string, unknown>)[name];
+}
+
+/** The agent device-execution journal (`DeviceJournal` of @elizaos/agent/client) over `AlphaActionJournal`: `get` answers the entry or undefined, `edit` whether the compare-and-set held, `list` every entry; a malformed reply rejects, so it never reads as an absent entry. @throws {never} */
+export function deviceJournalOver(invoke: JournalInvoke): {
+  get(proposalId: string): Promise<unknown>;
+  edit(proposalId: string, expectedRevision: number, next: unknown): Promise<boolean>;
+  list(): Promise<readonly unknown[]>;
+} {
+  return {
+    async get(proposalId) {
+      const entry = field(await invoke("get", { proposalId }), "entry");
+      return entry === null ? undefined : entry;
+    },
+    async edit(proposalId, expectedRevision, next) {
+      return field(await invoke("edit", { proposalId, expectedRevision, next }), "kept") === true;
+    },
+    async list() {
+      const entries = field(await invoke("list", {}), "entries");
+      if (!Array.isArray(entries)) throw new Error("AlphaActionJournal answered without entries");
+      return entries;
+    },
+  };
 }

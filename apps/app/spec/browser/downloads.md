@@ -4,7 +4,8 @@ A website's download is held by the native tab host: it asks the owner, fetches 
 page origin's cookies only, captures blob and data downloads from the page's isolated world, and
 publishes the file to Android's Downloads before it counts as done. The renderer opens the host's
 Downloads list from the menu, and the list's Show in Files hands the owner to Alpha's Files at
-Downloads. This spec states the host's contract the renderer relies on, and the hand-off.
+Downloads, and Open hands a finished file to an app that can show it. This spec states the host's
+contract the renderer relies on, and the hand-off.
 
 ## Story: Save a file only when I chose Save
 
@@ -135,4 +136,25 @@ pure def lawShowInFilesNeedsTheShownList(h: Handover, session: str): bool =
   showInFiles(h, session).filesOpened > h.filesOpened implies (session == h.shown and h.shown != "")
 pure val hValues: Set[Handover] = Set({ session: "s1", shown: "s1", filesOpened: 0 }).union(Set({ session: "s1", shown: "", filesOpened: 0 }))
 pure val sessionValues = Set("s1", "s2")
+```
+
+### Open on a finished entry hands its file to an app only while the file is still in Downloads, and otherwise says why
+
+A row offers Open only for a completed download; a file the owner removed from Downloads, or one no
+installed app can show, is named in a plain notice and nothing opens.
+
+```quint
+type OpenAnswer = OpenedInApp | NotFinished | FileGone | NoAppCanOpen
+pure def openAnswer(row: Download, fileThere: bool, handler: bool): OpenAnswer =
+  if (not(row.completed and row.published and row.reviewed and row.entry)) NotFinished
+  else if (not(fileThere)) FileGone
+  else if (not(handler)) NoAppCanOpen
+  else OpenedInApp
+pure def lawOnlyAFinishedFileStillThereOpens(row: Download, fileThere: bool, handler: bool): bool =
+  openAnswer(row, fileThere, handler) == OpenedInApp implies (row.completed and row.published and fileThere and handler)
+pure def lawAnUnreviewedFileNeverOpens(row: Download, fileThere: bool, handler: bool): bool =
+  openAnswer(row, fileThere, handler) == OpenedInApp implies row.reviewed
+pure val rowValues: Set[Download] = Set({ ...initial, phase: Completed, kind: PublicFile, reviewed: true, entry: true, published: true, completed: true })
+  .union(Set({ ...initial, phase: Fetching, kind: PublicFile, reviewed: true, entry: true }))
+  .union(Set(initial))
 ```

@@ -147,8 +147,8 @@ calendar at its start.
 type ApprovalAction = ScheduleEvent | ModifyEvent | CancelEvent
 pure def targetVerified(sources: int, events: int, startMatches: bool, versionMatches: bool): bool =
   sources == 1 and events == 1 and startMatches and versionMatches
-pure def approvalComplete(action: ApprovalAction, onlyKnownFields: bool, verified: bool, detailsValid: bool): bool =
-  onlyKnownFields and detailsValid and (action == ScheduleEvent or verified)
+pure def approvalComplete(change: ApprovalAction, onlyKnownFields: bool, verified: bool, detailsValid: bool): bool =
+  onlyKnownFields and detailsValid and (change == ScheduleEvent or verified)
 pure def lawUnverifiedChangeIsIncomplete(onlyKnownFields: bool, detailsValid: bool): bool =
   not(approvalComplete(ModifyEvent, onlyKnownFields, false, detailsValid))
 ```

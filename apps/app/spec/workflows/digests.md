@@ -163,14 +163,18 @@ the source to be renewed.
 
 ```quint
 type LoopWord = LoopRemoved | LoopPaused | SourceRevoked | SourceExpired | LoopOn
-pure def loopWord(removed: bool, enabled: bool, active: bool, revoked: bool, expired: bool): LoopWord =
-  if (removed) LoopRemoved else if (not(enabled) or not(active)) LoopPaused
+pure def loopWord(removed: bool, switchedOn: bool, active: bool, revoked: bool, expired: bool): LoopWord =
+  if (removed) LoopRemoved else if (not(switchedOn) or not(active)) LoopPaused
   else if (revoked) SourceRevoked else if (expired) SourceExpired else LoopOn
-pure def lawARemovedDigestReadsRemoved(enabled: bool, active: bool, revoked: bool, expired: bool): bool =
-  loopWord(true, enabled, active, revoked, expired) == LoopRemoved
+pure def lawARemovedDigestReadsRemoved(switchedOn: bool, active: bool, revoked: bool, expired: bool): bool =
+  loopWord(true, switchedOn, active, revoked, expired) == LoopRemoved
 ```
 
 ### Pausing or resuming keeps the saved time, zone and source
+
+The request carries the whole saved schedule with only `enabled` changed, the digest's id, the
+version it was read at and a fresh mutation id; the agent's digest route offers no removal, so the
+panel pauses a digest and never claims to remove one.
 
 ```quint
 type DigestSchedule = { localMinute: int, zone: str, sourceId: str, sourceRevision: str, enabled: bool }
@@ -212,8 +216,16 @@ pure def lawANotRunOccurrenceNeverBecomesTheBrief(rows: List[BriefRow]): bool = 
 
 ### Run now is offered only for a missed occurrence the agent offers, never for an overlap or an unavailable source
 
+The review names the phone source it reads and that it goes to the agent's model; the request
+carries that offer's source, its revision and the occurrence's own mutation id, so a second tap is
+the same request, and the missed record stays (#494).
+
 ```quint
 pure def runNowOffered(status: str, agentOffers: bool): bool = status == "missed" and agentOffers
+pure def runNowRequestValid(offered: bool, sameSource: bool, sameRevision: bool, occurrenceMutation: bool): bool =
+  offered and sameSource and sameRevision and occurrenceMutation
+pure def lawARunNowWithoutTheOffersSourceIsNeverSent(offered: bool, sameRevision: bool, occurrenceMutation: bool): bool =
+  not(runNowRequestValid(offered, false, sameRevision, occurrenceMutation))
 pure val statusValues = Set("missed", "overlap", "unavailable")
 pure def lawAnUnavailableOccurrenceOffersNoRunNow(agentOffers: bool): bool = not(runNowOffered("unavailable", agentOffers))
 ```

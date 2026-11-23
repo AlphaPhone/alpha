@@ -14,6 +14,7 @@ const MODES: ReadonlyArray<{ travel: Travel; label: string; Icon: typeof Car }> 
   { travel: "Walk", label: "Walk", Icon: Footprints }, { travel: "Bicycle", label: "Bike", Icon: Bike },
 ];
 
+/** The destination, the starting point and its candidates, the travel modes, the provider's routes and Start. */
 export type DirectionsSheetProps = {
   destination: string;
   originText: string;

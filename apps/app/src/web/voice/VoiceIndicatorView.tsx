@@ -6,14 +6,17 @@ import type { ListenerMode, WakeStop } from "../../../gen/voice__listener.ts";
 import { Button } from "../components/ui/index.ts";
 import { listenerLabel } from "./messages.ts";
 
+/** Who has the microphone, what voice and the listener are doing, and the Pause the owner may use. */
 export interface VoiceIndicatorViewProps {
-  /** Who holds the renderer's microphone, and whether it is open. */
+  /** Who holds the renderer's microphone. */
   owner: MicOwner;
+  /** Whether the renderer's capture is open. */
   micOpen: boolean;
   /** What the conversation shows. */
   shown: Shown;
   /** The always-on listener, as it last answered; "Unavailable" off the Alpha image. */
   listenerMode: ListenerMode;
+  /** Whether the listener still holds the microphone. */
   listenerMicrophoneOpen: boolean;
   /** The startup stop of a listener the image does not admit. */
   wakeStop: WakeStop;

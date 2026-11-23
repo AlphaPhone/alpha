@@ -5,20 +5,27 @@ import type { Row } from "../../../gen/camera__library.ts";
 import { groupSections } from "../../camera/photoGrid.vibe";
 import { cn, focusRing } from "../lib/cn.ts";
 
+/** The tiles of the open list and what the owner's touches on them do. */
 export interface PhotoGridProps {
   /** The open list, newest first. */
   rows: readonly Row[];
   /** The selected items, when selecting. */
   selection: readonly string[];
+  /** Selection mode: a tap toggles instead of opening. */
   selecting: boolean;
   /** Three to five tiles a row. */
   columns: number;
   /** The time "Today" is counted from. */
   now: number;
+  /** Open one item in the viewer. */
   onOpen: (id: string) => void;
+  /** Add or remove one item from the selection. */
   onToggle: (id: string) => void;
+  /** A long press: start selecting with this item. */
   onHold: (id: string) => void;
+  /** A drag after a long press: add the range from the anchor. */
   onDrag: (anchor: string, id: string) => void;
+  /** A pinch: wider shows fewer columns. */
   onPinch: (wider: boolean) => void;
 }
 

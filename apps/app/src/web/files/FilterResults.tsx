@@ -19,6 +19,7 @@ export function chipLabel(f: Filtering): string {
   return `${parts.filter(Boolean).join(" · ")} · ${f.rows.length}${f.complete ? "" : "+"}`;
 }
 
+/** The agent's filter on screen and what the owner does with its results. */
 export type FilterResultsProps = {
   filter: Filtering;
   /** A change is in flight. */

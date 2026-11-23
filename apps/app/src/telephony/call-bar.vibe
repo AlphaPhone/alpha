@@ -2,7 +2,11 @@
 import { Machine as CallBarMachine, type CallPhase, type Event as CallBarEvent, type LiveCall } from "../../gen/telephony__callBar.effect.vibe"
 import { effectAllowed, emergencyLive, noReading, type CallReading, type Known } from "../../gen/telephony__common.effect.vibe"
 import { Native } from "../platform/native.vibe"
+import { Microphone } from "../voice/capture.vibe"
+import { VoiceConversation } from "../voice/conversation.vibe"
+import { Foreground } from "../shell/foreground.vibe"
 import { CALL_STATE_PLUGIN, ONGOING_CALL_PLUGIN } from "./bridges.vibe"
+import { barEligibleIn, readableIn } from "./front.vibe"
 import { CallStateReading, OngoingCalls, exact } from "./call-bar.schema.vibe"
 
 /** How often the bar polls while Telecom's listener is not yet registered (phone-state access can come later). */
@@ -11,7 +15,7 @@ const TICK = "1 second"
 
 /** The ongoing-call bar's source: Telecom's calls, Return and End, and the emergency gate. */
 export service CallWatch {
-  /** Follow Telecom's reports for as long as it runs. */
+  /** Follow Telecom's reports, and where the bar may show, for as long as it runs; a return to the page reads Telecom again. */
   watch(): void!!
   /** Read Telecom again, as a return to the app does. */
   refresh(): void!!
@@ -23,6 +27,13 @@ export service CallWatch {
   end(callId: string): void!!
   /** A fresh Telecom reading that rules out an emergency call; any failure refuses. */
   allowed(): boolean!!
+  /** Whether a call holds the phone now, from the latest reading: the shell's idle fact `call`. */
+  live(): boolean!!
+}
+
+/** A call holds the phone: Telecom says so, or the bar shows one of its calls. */
+export function callHolds(bar: { readonly calls: readonly LiveCall[]; readonly reading: CallReading }): boolean {
+  return bar.calls.length > 0 || bar.reading.inCall === "KnownYes"
 }
 
 const PHASES: Record<string, CallPhase> = { dialing: "Dialing", ringing: "Ringing", active: "Active", held: "Held" }
@@ -47,6 +58,9 @@ export effect function readCallState(raw: unknown) {
 export const callWatchLayer = Layer.effect(CallWatch, effect {
   const native = try Native
   const bar = try CallBarMachine
+  const voice = try VoiceConversation
+  const microphone = try Microphone
+  const foreground = try Foreground
   const tell = (event: CallBarEvent) => bar.send(event) catch () => undefined
   const ongoing = try native.available(ONGOING_CALL_PLUGIN)
   const callState = try native.available(CALL_STATE_PLUGIN)
@@ -88,6 +102,27 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
     }
   }
 
+  effect function voiceFollow() {
+    let held = false
+    for try (const state of bar.changes) {
+      const now = callHolds(state)
+      if (now === held) continue
+      held = now
+      try microphone.callChanged(now)
+      if (now) try voice.callStarted()
+    }
+  }
+
+  effect function place() {
+    let readable = false
+    for try (const state of foreground.changes) {
+      try tell({ type: "eligibilityChanged", eligible: barEligibleIn(state) })
+      const now = readableIn(state)
+      if (now && !readable) try refresh()
+      readable = now
+    }
+  }
+
   effect function poll() {
     while (true) {
       try sleep(POLL)
@@ -107,6 +142,8 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
         }) catch () => undefined) : Effect.void,
         clock(),
         poll(),
+        voiceFollow(),
+        place(),
       ]
     },
     refresh,
@@ -129,6 +166,9 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
       if (fresh === undefined) return false
       const latest = (try bar.get()).reading
       return effectAllowed(true, fresh) && effectAllowed(true, latest ?? noReading)
+    },
+    effect live() {
+      return callHolds(try bar.get())
     },
   }
 })

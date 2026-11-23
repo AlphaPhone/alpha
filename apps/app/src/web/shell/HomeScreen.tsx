@@ -1,15 +1,21 @@
 // spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Use the library and arrange Home"; spec/shell/overview.md, "Story: See my day on Home"
 import { Bell, LayoutGrid, Plus } from "lucide-react";
+import type { ReactNode } from "react";
 import type { Overview } from "../../../gen/shell__overview.ts";
 import type { AppId } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
-import { cn, focusRing } from "../lib/cn.ts";
-import type { TileFace } from "./AppTile.tsx";
+import { cn } from "../lib/cn.ts";
+import { launcherFocusRing, type TileFace } from "./AppTile.tsx";
 import { OverviewCards } from "./OverviewCards.tsx";
 import { TileGrid, type GestureControls } from "./TileGrid.tsx";
 
+/** Home: the overview, the agenda and attention slots, the tiles and the launcher controls. */
 export interface HomeScreenProps {
   overview: Overview;
+  /** Calendar's card of the next event, shown in place of the overview's own event card. */
+  agenda?: ReactNode;
+  /** What Home's other sources have that is new, such as missed calls and messages on the image. */
+  attention?: ReactNode;
   /** Home's tiles in the owner's order. */
   tiles: readonly TileFace[];
   /** Home's edit mode. */
@@ -39,7 +45,7 @@ export interface HomeScreenProps {
  * @model spec/shell/navigation.md
  */
 export function HomeScreen({
-  overview, tiles, editing = false, editError = "", canAdd = false, library = false, notifications = false, launching = null, covered = false,
+  overview, agenda, attention, tiles, editing = false, editError = "", canAdd = false, library = false, notifications = false, launching = null, covered = false,
   controls, onOpen, onLibrary, onAdd, onDone, onNotifications,
 }: HomeScreenProps) {
   return (
@@ -69,13 +75,16 @@ export function HomeScreen({
           {editError && <p role="alert" className="text-sm text-destructive">{editError}</p>}
         </div>
       ) : (
-        <OverviewCards overview={overview} onOpen={onOpen} />
+        <>
+          <OverviewCards overview={overview} agenda={agenda} onOpen={onOpen} />
+          {attention}
+        </>
       )}
       <TileGrid label="Apps on Home" faces={tiles} editing={editing} launching={launching} controls={controls} />
       {library && !editing && (
         <div className="px-3">
           <button type="button" aria-haspopup="dialog" onClick={onLibrary} data-alpha-focus="tile:library"
-            className={cn(focusRing, "flex min-h-24 w-24 flex-col items-center gap-2 rounded-lg p-2 text-sm")}>
+            className={cn(launcherFocusRing, "flex min-h-24 w-24 flex-col items-center gap-2 rounded-lg p-2 text-sm")}>
             <span className="flex size-14 items-center justify-center rounded-xl bg-secondary text-secondary-foreground">
               <LayoutGrid aria-hidden className="size-7" />
             </span>

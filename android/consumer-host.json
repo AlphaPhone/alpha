@@ -87,6 +87,9 @@
       },
       {
         "module": "location"
+      },
+      {
+        "module": "wifi"
       }
     ],
     "modules": [

@@ -2,12 +2,12 @@
 import { type Event, type ReadPage, type Reading, type ReadingEffect, Machine, machine } from "../../gen/browser__reading.effect.vibe"
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
 import { settled } from "../../gen/browser__page.effect.vibe"
-import { AssistantDraft } from "../assistant/draft.vibe"
+import { Assistant } from "../assistant/assistant.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Toasts } from "../shell/toasts.vibe"
-import { ReadingVoice } from "../voice/reading.vibe"
 import { READING_NOTICES, refusalText } from "./messages.ts"
 import { MAX_EXCERPT, publicPageText, sensitiveAddress, sensitiveText } from "./page-text.ts"
+import { ReadingVoice } from "./ports.vibe"
 import { BrowserTabs } from "./session.vibe"
 import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
 import { Excerpt, ReadingToken, Support } from "./tabHost.schema.vibe"
@@ -34,6 +34,12 @@ export service BrowserReading {
 const MENU_CLOSING = "150 millis"
 const ISOLATED_WORLD_UNAVAILABLE = "isolated-world-unavailable"
 
+/** The question the assistant's editor opens with: a prompt the owner edits, the page's name and address, and the approved excerpt. */
+export function questionDraft(name: string, url: string, excerpt: string): string {
+  const source = name === "" || name === url ? url : `${name}\n${url}`
+  return `Summarize this excerpt.\n\nSource: ${source}\n\n${excerpt.trim()}`
+}
+
 /** The selected tab's page as a reading reads it. */
 export function readPageOf(s: Session, shown: boolean): ReadPage {
   const tab = curTab(s)
@@ -50,10 +56,11 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
   const tabs = try BrowserTabs
   const host = try TabHost
   const voice = try ReadingVoice
-  const draft = try AssistantDraft
+  const assistant = try Assistant
   const foreground = try Foreground
   const toasts = try Toasts
   const token = try Ref.make("")
+  const question = try Ref.make("")
 
   effect function page() {
     return readPageOf(try tabs.get(), readingShown(try foreground.get()))
@@ -62,8 +69,10 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
   effect function perform(out: ReadingEffect) {
     match (out) {
       when { tag: "QuerySupport" }: {
-        const answer = effect { return try Schema.decodeUnknownEffect(Support)(try host.call("readingSupport")) } catch () => undefined
-        try send({ type: "supportAnswered", available: answer?.available === true, definite: answer !== undefined })
+        if (host.onDevice) {
+          const answer = effect { return try Schema.decodeUnknownEffect(Support)(try host.call("readingSupport")) } catch () => undefined
+          try send({ type: "supportAnswered", available: answer?.available === true, definite: answer !== undefined })
+        } else try send({ type: "supportAnswered", available: true, definite: true })
       }
       when { tag: "RequestReading", let tab, let url, let navigation }: {
         const binding = try voice.binding()
@@ -81,8 +90,8 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
       when { tag: "SpendToken" }: {
         const spent = try Ref.getAndSet(token, "")
         fork.detached effect {
-          voice.speakToken(spent) catch () => undefined
-          try send({ type: "speechEnded" })
+          const ok = (voice.speakToken(spent) catch () => false) !== false
+          try send({ type: "speechEnded", ok })
         }
       }
       when { tag: "CancelReading" }: {
@@ -105,9 +114,9 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
         }
       }
       when { tag: "ComposeQuestion", let url }: {
-        const state = try reading.get()
+        const approved = try Ref.getAndSet(question, "")
         const title = curTab(try tabs.get()).page.title
-        try draft.askAbout({ name: title || url, url, text: state.text })
+        try assistant.openWith(questionDraft(title, url, approved))
       }
       when { tag: "FetchSource", let url }: {
         const source = tryPromise((signal) => publicPageText(url, signal)) catch () => undefined
@@ -119,8 +128,8 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
       when { tag: "SpeakLocally", let generation }: {
         const text = (try reading.get()).text
         fork.detached effect {
-          voice.speakText(text) catch () => undefined
-          try send({ type: "localSpeechEnded", generation })
+          const ok = (voice.speakText(text) catch () => false) !== false
+          try send({ type: "localSpeechEnded", generation, ok })
         }
       }
       when { tag: "StopLocalSpeech" }: try voice.stop()
@@ -160,7 +169,10 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
     },
     stop: () => send({ type: "stopReading" }),
     editQuestion: (text: string) => send({ type: "questionEdited", empty: text.trim() === "", sensitive: sensitiveText(text), body: text.slice(0, MAX_EXCERPT) }),
-    effect approveQuestion() { try send({ type: "questionApproved", page: try page() }) },
+    effect approveQuestion() {
+      try Ref.set(question, (try reading.get()).text)
+      try send({ type: "questionApproved", page: try page() })
+    },
     closeQuestion: () => send({ type: "questionClosed" }),
     effect readLocally() {
       try tabs.dispatch({ type: "closeMenu" })

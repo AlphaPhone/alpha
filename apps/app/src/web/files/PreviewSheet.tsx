@@ -18,6 +18,7 @@ export interface PreviewActions {
   readonly reselect: boolean;
 }
 
+/** The shown file, its PDF pages, the actions it allows and what each of them does. */
 export type PreviewSheetProps = {
   preview: PreviewState;
   pages: PdfPages;
@@ -42,13 +43,15 @@ export type PreviewSheetProps = {
   onReselect: () => void;
   onForget: () => void;
   onViewer: (open: boolean) => void;
+  /** The picture or recording could not be played here. */
+  onMediaError: () => void;
 };
 
 /**
  * The file the owner opened: its text, picture, recording or PDF page, and one menu of what it allows.
  * @model spec/files/preview.md
  */
-export function PreviewSheet({ preview, pages, actions, elsewhereLabel, location, busy = false, onClose, onPage, onShare, onEmail, onMessage, onAsk, onMove, onRename, onDetails, onTrash, onElsewhere, onReselect, onForget, onViewer }: PreviewSheetProps) {
+export function PreviewSheet({ preview, pages, actions, elsewhereLabel, location, busy = false, onClose, onPage, onShare, onEmail, onMessage, onAsk, onMove, onRename, onDetails, onTrash, onElsewhere, onReselect, onForget, onViewer, onMediaError }: PreviewSheetProps) {
   const doc = preview.doc;
   const viewable = preview.body.startsWith("blob:");
   const meta = [typeLabel(doc.mimeType, doc.kind), doc.size >= 0 ? formatSize(doc.size) : "", shortDate(doc.modified), location].filter(Boolean).join(" · ");
@@ -76,16 +79,16 @@ export function PreviewSheet({ preview, pages, actions, elsewhereLabel, location
               <DropdownMenuItem onSelect={onDetails}><Info className="size-4" />Details</DropdownMenuItem>
               {(actions.trash || doc.source !== "Browsed") && <DropdownMenuSeparator />}
               {actions.trash && <DropdownMenuItem destructive onSelect={onTrash}><Trash2 className="size-4" />Delete</DropdownMenuItem>}
-              {doc.source !== "Browsed" && <DropdownMenuItem onSelect={onForget}>Remove from Recent</DropdownMenuItem>}
+              {doc.source !== "Browsed" && <DropdownMenuItem aria-label="Forget selected file" onSelect={onForget}><X className="size-4" />Forget</DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-4">
           {preview.content === "ContentReading" && <div className="flex justify-center py-8"><Spinner label="Reading the file" /></div>}
           {preview.content === "ContentText" && <pre className="font-legible text-base whitespace-pre-wrap break-words">{preview.body}</pre>}
-          {preview.content === "ContentMedia" && doc.kind === "KindImage" && <img src={preview.body} alt={doc.name} className="mx-auto max-h-full object-contain" />}
-          {preview.content === "ContentMedia" && doc.kind === "KindVideo" && <video src={preview.body} controls playsInline aria-label={doc.name} className="mx-auto max-h-full" />}
-          {preview.content === "ContentMedia" && doc.kind === "KindAudio" && <audio src={preview.body} controls aria-label={doc.name} className="w-full" />}
+          {preview.content === "ContentMedia" && doc.kind === "KindImage" && <img src={preview.body} alt={doc.name} onError={onMediaError} className="mx-auto max-h-full object-contain" />}
+          {preview.content === "ContentMedia" && doc.kind === "KindVideo" && <video src={preview.body} controls playsInline aria-label={doc.name} onError={onMediaError} className="mx-auto max-h-full" />}
+          {preview.content === "ContentMedia" && doc.kind === "KindAudio" && <audio src={preview.body} controls aria-label={doc.name} onError={onMediaError} className="w-full" />}
           {preview.content === "ContentPdf" && pages.shown && (
             <figure className="flex flex-col items-center gap-2">
               <img src={pages.image} alt={`${doc.name}, page ${pages.page + 1}`} className="max-w-full" />

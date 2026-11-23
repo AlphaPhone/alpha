@@ -5,6 +5,7 @@ import { Button } from "../components/ui/index.ts";
 import { noticeText } from "./messages.ts";
 import { VoiceActivity } from "./VoiceActivity.tsx";
 
+/** The running conversation and the owner's controls over it. */
 export interface ConversationPanelProps {
   /** The conversation as the voice machine holds it. */
   conversation: Conversation;
@@ -61,7 +62,7 @@ export function ConversationPanel({ conversation, onTalk, onStop, onStopSpeaking
         )}
       </div>
       {notice && (
-        <p role="status" className="text-muted-foreground">
+        <p role="status" data-voice-notice={conversation.notice} className="text-muted-foreground">
           {notice}
         </p>
       )}

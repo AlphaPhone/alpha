@@ -1,0 +1,64 @@
+// spec/files/index.md
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { layer } from "../../src/files/layer.vibe"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilePicker } from "../../src/files/picker.vibe"
+import type { Browser } from "../../gen/files__browser.ts"
+import type { Filtering } from "../../gen/files__filter.ts"
+import type { Picker } from "../../gen/files__picker.ts"
+import { Machine as FilterMachine } from "../../gen/files__filter.effect.vibe"
+
+/** A build of the launcher, with or without test mocks. */
+export const build = (testMocks: boolean) => Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks } })
+
+/** No native plugin: the development volume answers. */
+export const noNative = Layer.succeed(Native, {
+  available: () => succeed(false),
+  invoke: (plugin, method) => fail(new NativeUnavailable({ plugin, method })),
+  listen: () => Stream.empty,
+})
+
+/** One native call the fake device was asked. */
+export interface Call { readonly plugin: string; readonly method: string; readonly args: unknown }
+
+/** A device whose files bridge and document plugins answer each call with `answer`, recording every call in `calls`. */
+export function device(answer: (plugin: string, method: string, args: any) => unknown, calls: Call[] = []) {
+  return Layer.succeed(Native, {
+    available: (plugin) => succeed(plugin === "AlphaFiles" || plugin === "DailyApps" || plugin === "AlphaMailAttachments"),
+    invoke: (plugin, method, args) => effect {
+      calls.push({ plugin, method, args })
+      const answered = answer(plugin, method, args)
+      if (answered === undefined) throw new NativeUnavailable({ plugin, method })
+      return answered
+    },
+    listen: () => Stream.empty,
+  })
+}
+
+/** Primary storage with all-files access. */
+export const granted = { status: "ready", access: "granted", volumes: [{ id: "primary", name: "Internal storage", primary: true, free: 40, total: 100 }] }
+
+/** The Files layer over `native`, a memory store and a launcher build. */
+export const files = (native: Layer.Layer<Native>, mocks = true) => Layer.provide(layer, Layer.mergeAll(native, build(mocks), memoryStore))
+
+/** Wait until the browser reaches a state `ok` accepts. */
+export effect function until(ok: (s: Browser) => boolean) {
+  const browser = try FilesBrowser
+  try timeout(Stream.runHead(Stream.filter(browser.changes, ok)), "5 seconds")
+  return try browser.get()
+}
+
+/** Wait until the filter reaches a state `ok` accepts. */
+export effect function untilFilter(ok: (s: Filtering) => boolean) {
+  const filter = try FilterMachine
+  try timeout(Stream.runHead(Stream.filter(filter.changes, ok)), "5 seconds")
+  return try filter.get()
+}
+
+/** Wait until the picker reaches a state `ok` accepts. */
+export effect function untilPicker(ok: (s: Picker) => boolean) {
+  const picker = try FilePicker
+  try timeout(Stream.runHead(Stream.filter(picker.changes, ok)), "5 seconds")
+}

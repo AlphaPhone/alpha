@@ -28,14 +28,14 @@ type Session = {
   deployment: Deployment, environment: Environment, testMocks: bool, loaded: bool,
   phase: Phase, account: Account, generation: int, expiryWarning: bool, renewals: int,
   startupResolved: bool, holder: Holder, waiting: Waiting, waitingGeneration: int,
-  notices: int, dropped: int, revocation: Revocation
+  notices: int, dropped: int, revocation: Revocation, created: bool, priorUnconfirmed: bool
 }
 pure val noAccount: Account = { userId: "", organizationId: "", credentialId: "", expiresAt: 0 }
 pure val initial: Session = {
   deployment: ElizaCloud, environment: Production, testMocks: false, loaded: false,
   phase: SignedOut, account: noAccount, generation: 0, expiryWarning: false, renewals: 0,
   startupResolved: false, holder: Free, waiting: NoNotice, waitingGeneration: 0,
-  notices: 0, dropped: 0, revocation: NoRevocation
+  notices: 0, dropped: 0, revocation: NoRevocation, created: false, priorUnconfirmed: false
 }
 pure def canLoad(s: Session, deployment: Deployment, environment: Environment, testMocks: bool): bool =
   not(s.loaded) and (environment == Production or testMocks)
@@ -57,7 +57,7 @@ pure def wellFormed(a: Account): bool = a.userId != "" and a.organizationId != "
 pure def isSignedIn(p: Phase): bool = p != SignedOut
 pure def sameOwner(a: Account, b: Account): bool = a.userId == b.userId and a.organizationId == b.organizationId
 pure def adopted(account: Account, phase: Phase, s: Session): Session =
-  { ...s, phase: phase, account: account, expiryWarning: false, revocation: NoRevocation,
+  { ...s, phase: phase, account: account, expiryWarning: false, revocation: NoRevocation, created: false, priorUnconfirmed: false,
     generation: if (isSignedIn(s.phase) and sameOwner(account, s.account)) s.generation else s.generation + 1 }
 pure val accountValues = Set(
   { userId: "u1", organizationId: "o1", credentialId: "c1", expiresAt: 5 },
@@ -93,12 +93,28 @@ the resident agent is ensured: Cloud never stops it (P-43).
 ```quint
 type SessionEffect = EnsureResident | UnbindInference | RevokeKey({ credentialId: str }) | ShowIncomplete({ restarted: bool })
 type SessionStep = { state: Session, out: List[SessionEffect] }
-pure def canSignInCompleted(s: Session, account: Account): bool = s.loaded and s.holder != SigningOut and wellFormed(account)
-pure def signInCompleted(s: Session, account: Account): SessionStep =
-  { state: adopted(account, SignedIn, s), out: List(EnsureResident) }
+pure def canSignInCompleted(s: Session, account: Account, created: bool, priorUnconfirmed: bool): bool =
+  s.loaded and s.holder != SigningOut and wellFormed(account)
+pure def signInCompleted(s: Session, account: Account, created: bool, priorUnconfirmed: bool): SessionStep =
+  { state: { ...adopted(account, SignedIn, s), created: created, priorUnconfirmed: priorUnconfirmed and not(created) }, out: List(EnsureResident) }
 pure def stepACompletedSignInEnsuresTheAgent(before: Session, via: str, after: Session, out: List[SessionEffect]): bool =
   via == "signInCompleted" implies out.includes(EnsureResident)
 pure def sometimesSignedIn(s: Session): bool = s.phase == SignedIn and s.generation >= 2
+```
+
+### A new account, and an earlier sign-in left unconfirmed, are told for the sign-in that reported them
+
+The host's answer says whether Cloud created the account, and whether the key this sign-in
+replaced was revoked or is unconfirmed. Account shows "New account", or "Signed in · check devices"
+while an earlier key may still work, until the account changes or signs out.
+
+```quint
+pure def alwaysNewsBelongsToASignIn(s: Session): bool = (s.created or s.priorUnconfirmed) implies isSignedIn(s.phase)
+pure def alwaysANewAccountHadNoEarlierSignIn(s: Session): bool = s.created implies not(s.priorUnconfirmed)
+pure def stepNewsComesOnlyWithACompletedSignIn(before: Session, via: str, after: Session): bool =
+  ((after.created and not(before.created)) or (after.priorUnconfirmed and not(before.priorUnconfirmed))) implies via == "signInCompleted"
+pure def sometimesNewAccount(s: Session): bool = s.created and s.phase == SignedIn
+pure def sometimesEarlierSignInUnconfirmed(s: Session): bool = s.priorUnconfirmed and s.phase == SignedIn
 ```
 
 ## Story: Keep my sign-in working until I sign out
@@ -150,9 +166,10 @@ pure def sometimesKeyExpired(s: Session): bool = s.phase == KeyExpired
 
 ### Sign-out revokes exactly the key it was asked for, and the agent keeps running
 
-Sign-out is fenced to the captured key: Cloud inference is unbound first, then that key is
-revoked and removed by the host. Only a confirmed revocation reads as signed out everywhere; any
-other answer is signed out here only. The agent is started again without Cloud inference.
+Sign-out is fenced to the captured key: Cloud inference is unbound first, then, only while the
+host still holds that key, Cloud's self-revocation route (`DELETE /api/v1/api-keys/current`) is
+asked once and the host clears its credential state. Only a confirmed revocation reads as signed
+out everywhere; any other answer is signed out here only. The agent is started again without Cloud inference.
 
 ```quint
 pure def canBeginSignOut(s: Session, credentialId: str): bool =
@@ -162,7 +179,7 @@ pure def beginSignOut(s: Session, credentialId: str): SessionStep =
 pure def canSignOutSettled(s: Session, revoked: bool): bool = s.holder == SigningOut
 pure def signOutSettled(s: Session, revoked: bool): SessionStep =
   drain(List(EnsureResident), { ...s, holder: Free, phase: SignedOut, account: noAccount, generation: s.generation + 1,
-    expiryWarning: false, revocation: if (revoked) Revoked else HereOnly })
+    expiryWarning: false, created: false, priorUnconfirmed: false, revocation: if (revoked) Revoked else HereOnly })
 pure def revokesOnly(e: SessionEffect, credentialId: str): bool = match e { | RevokeKey(r) => r.credentialId == credentialId | _ => true }
 pure def stepSignOutRevokesOnlyTheCapturedKey(before: Session, via: str, after: Session, out: List[SessionEffect]): bool =
   out.every(e => revokesOnly(e, before.account.credentialId))
@@ -199,7 +216,7 @@ pure def canAttemptEnds(s: Session): bool = s.holder == Attempt
 pure def attemptEnds(s: Session): SessionStep = drain(List(), { ...s, holder: Free })
 pure def afterIncomplete(code: IncompleteCode, s: Session): Session =
   if (code == ActivationExpired and s.phase == ActivationPending)
-    { ...s, phase: SignedOut, account: noAccount, generation: s.generation + 1, expiryWarning: false }
+    { ...s, phase: SignedOut, account: noAccount, generation: s.generation + 1, expiryWarning: false, created: false, priorUnconfirmed: false }
   else s
 pure def canIncompleteArrives(s: Session, code: IncompleteCode): bool = s.loaded
 pure def incompleteArrives(s: Session, code: IncompleteCode): SessionStep = {

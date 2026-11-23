@@ -1,4 +1,4 @@
-// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish"; spec/account/session.md, "Story: Use Cloud only for managed services"
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "A new account, and an earlier sign-in left unconfirmed, are told for the sign-in that reported them"; spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish"; spec/account/session.md, "Story: Use Cloud only for managed services"
 import {
   type Account, type IncompleteCode, type RouteKind, type Session, type SessionEffect,
   Machine as SessionMachine, isSignedIn, routeAdmitted, stored as storedSession
@@ -6,10 +6,11 @@ import {
 import { Build } from "../platform/build.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { deployment, environmentFor, hostEnvironment } from "./deployment.ts"
 import { ensureResident, unbindInference } from "./inference.vibe"
-import { CredentialIdentity, Incomplete, Renewal, Renewed, SignedOutAnswer, UserAnswer } from "./signIn.schema.vibe"
+import { Completed, CredentialIdentity, Incomplete, Renewal, Renewed, UserAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
 
@@ -19,9 +20,25 @@ export error RouteRefused { route: RouteKind }
 /** A sign-in return that did not finish, for the notice it shows. */
 export interface IncompleteNotice { readonly restarted: boolean }
 
+/** What the host said of a completed sign-in: whether Cloud created the account, and whether the key it replaced is unconfirmed. */
+export interface SignInNews { readonly created: boolean; readonly priorUnconfirmed: boolean }
+
+/** No news: an ordinary sign-in of an existing account that replaced nothing left active. */
+export const noNews: SignInNews = { created: false, priorUnconfirmed: false }
+
+/** The news a host answer or retained completion carries. */
+export function newsOf(answer: { readonly accountCreated?: unknown; readonly previousSignIn?: unknown }): SignInNews {
+  return { created: answer.accountCreated === true, priorUnconfirmed: answer.previousSignIn === "unconfirmed" }
+}
+
 /** The account other areas fence their requests and results to: its generation, or 0 while signed out. */
 export function ownerOf(s: Session): number {
   return isSignedIn(s.phase) ? s.generation : 0
+}
+
+/** The storage namespace of the account signed in now, or `device` while signed out. */
+export function ownerNameOf(s: Session): string {
+  return isSignedIn(s.phase) ? `${s.account.userId}.${s.account.organizationId}` : "device"
 }
 
 /** The signed-in Cloud account, its key's expiry and renewal, and sign-out. */
@@ -35,8 +52,8 @@ export service CloudSession {
   ownerKey(key: string): string!!
   /** Load, restore the saved sign-in, settle startup, and follow the host's sign-in events; runs for the app's life. */
   run(): void!!
-  /** The sign-in screen finished: adopt the account Cloud names for the key the host stored. */
-  adopt(): void!!
+  /** A sign-in finished: adopt the account Cloud names for the key the host stored, with what the host said of it. */
+  adopt(news: SignInNews): void!!
   /** A sign-in attempt holds the slot, or released it. */
   attempt(started: boolean): void!!
   /** Sign out of the account signed in now; whether Cloud confirmed the revocation. */
@@ -47,22 +64,20 @@ export service CloudSession {
   admit(route: RouteKind): void!RouteRefused
 }
 
-effect function readIdentity(environment: string) {
-  const native = try Native
+effect function readIdentity(native: Native.Shape, environment: string) {
   return try Schema.decodeUnknownEffect(CredentialIdentity)(try native.invoke(plugin, "credentialIdentity", { environment }))
 }
 
-effect function readUser() {
-  const cloud = try Cloud
+effect function readUser(cloud: Cloud.Shape) {
   const answer = try Schema.decodeUnknownEffect(UserAnswer)(try cloud.json("GET", "/api/v1/user"))
   return answer.success ? answer.data : undefined
 }
 
 /** The account Cloud names for the key the host holds now, with whether Cloud confirmed that key. */
-effect function readAccount(environment: string) {
-  const identity = readIdentity(environment) catch () => undefined
+effect function readAccount(native: Native.Shape, cloud: Cloud.Shape, environment: string) {
+  const identity = readIdentity(native, environment) catch () => undefined
   if (identity === undefined) return undefined
-  const user = readUser() catch () => undefined
+  const user = readUser(cloud) catch () => undefined
   if (user === undefined) return undefined
   const account: Account = { userId: user.id, organizationId: user.organization_id, credentialId: identity.credentialId, expiresAt: identity.expiresAt }
   return { account, confirmed: identity.activationPending !== true }
@@ -74,6 +89,8 @@ const incompleteCodes = { "app-link-unverified": "AppLinkUnverified", storage: "
 export const sessionService = Layer.effect(CloudSession, effect {
   const machine = try SessionMachine
   const native = try Native
+  const cloud = try Cloud
+  const resident = try Resident
   const build = try Build
   const notices = try PubSub.unbounded<IncompleteNotice>()
   const environment = hostEnvironment(environmentFor(build.info.testMocks))
@@ -85,17 +102,20 @@ export const sessionService = Layer.effect(CloudSession, effect {
   }
 
   effect function revoke(credentialId: string) {
+    const held = readIdentity(native, environment) catch () => undefined
+    if (held === undefined || held.credentialId !== credentialId) return false
     const answer = effect {
-      return try Schema.decodeUnknownEffect(SignedOutAnswer)(try native.invoke(plugin, "signOut", { environment, credentialId }))
-    } catch () => undefined
-    return answer?.revocation === "revoked"
+      try cloud.json("DELETE", "/api/v1/api-keys/current")
+      return true
+    } catch () => false
+    return answer
   }
 
   effect function perform(out: ReadonlyArray<SessionEffect>): void!! {
     for (const effectOf of out) {
       match (effectOf) {
-        when { tag: "EnsureResident" }: try ensureResident();
-        when { tag: "UnbindInference" }: unbindInference() catch () => undefined;
+        when { tag: "EnsureResident" }: try ensureResident(resident);
+        when { tag: "UnbindInference" }: try unbindInference(native);
         when { tag: "RevokeKey", let credentialId }: {
           const revoked = try revoke(credentialId)
           native.invoke(plugin, "clearCredentialState") catch () => undefined
@@ -106,10 +126,12 @@ export const sessionService = Layer.effect(CloudSession, effect {
     }
   }
 
-  effect function adopt() {
-    const read = try readAccount(environment)
+  effect function adopt(news: SignInNews) {
+    const read = try readAccount(native, cloud, environment)
     if (read === undefined) return
-    try send(read.confirmed ? { type: "signInCompleted", account: read.account } : { type: "restore", account: read.account, confirmed: false })
+    try send(read.confirmed
+      ? { type: "signInCompleted", account: read.account, created: news.created, priorUnconfirmed: news.priorUnconfirmed }
+      : { type: "restore", account: read.account, confirmed: false })
   }
 
   effect function renewalCheck() {
@@ -145,20 +167,23 @@ export const sessionService = Layer.effect(CloudSession, effect {
     effect owner() { return ownerOf(try machine.get()) },
     effect ownerKey(key: string) {
       const s = try machine.get()
-      return ownerKey(isSignedIn(s.phase) ? `${s.account.userId}.${s.account.organizationId}` : "device", key)
+      return ownerKey(ownerNameOf(s), key)
     },
     effect run() {
       try send({ type: "load", deployment, environment: environmentFor(build.info.testMocks), testMocks: build.info.testMocks })
       const s = try machine.get()
       if (!isSignedIn(s.phase) && (try native.available(plugin))) {
-        const read = try readAccount(environment)
+        const read = try readAccount(native, cloud, environment)
         if (read !== undefined) try send({ type: "restore", account: read.account, confirmed: read.confirmed })
       }
       try send({ type: "startupSettles" })
-      try ensureResident()
+      try ensureResident(resident)
       try renewalCheck()
       try.all [
-        ignore(follow("signInCompleted", effect () => { try adopt() })),
+        ignore(follow("signInCompleted", effect (raw) => {
+          const completed = Schema.decodeUnknownEffect(Completed)(raw) catch () => ({})
+          try adopt(newsOf(completed))
+        })),
         ignore(follow("signInIncomplete", effect (raw) => {
           const read = Schema.decodeUnknownEffect(Incomplete)(raw) catch () => undefined
           if (read !== undefined) try send({ type: "incompleteArrives", code: incompleteCodes[read.code] })

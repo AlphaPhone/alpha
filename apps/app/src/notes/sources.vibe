@@ -21,12 +21,15 @@ export service NotesSources {
   releaseUnused(): number!!
 }
 
-function sourceReferences(snapshot: NotesSnapshot): string[] {
+/** Every document reference a saved note or a Trash copy still names. */
+export function sourceReferences(snapshot: NotesSnapshot): string[] {
   return [...snapshot.notes, ...(snapshot.trash ?? []).map((entry) => entry.note)].flatMap((note) => {
     const reference = rowOf(note).documentSource?.reference
     return reference === undefined ? [] : [reference]
   })
 }
+
+const releaseAfterMs = 3 * 24 * 60 * 60 * 1000
 
 const make = effect {
   const collection = try NotesCollection
@@ -60,7 +63,9 @@ const make = effect {
   return {
     effect openDialog(noteId: string) {
       const print = try printOf(noteId)
-      if (print === undefined) return false
+      const note = (try collection.current())?.snapshot.notes.find((item) => item.id === noteId)
+      if (print === undefined || note === undefined) return false
+      try sendDialog({ type: "showLink", linked: rowOf(note).webSource !== undefined })
       try Ref.set(opened, { noteId, print })
       return (try sendDialog({ type: "openDialog" })) !== undefined
     },
@@ -131,8 +136,8 @@ const make = effect {
     effect releaseUnused() {
       if (!(try native.available("AlphaMailAttachments"))) return 0
       const snapshot = (try collection.current())?.snapshot
-      if (!releasesSource(snapshot !== undefined, false, false, 259200001) || snapshot === undefined) return 0
-      const answer = try (native.invoke("AlphaMailAttachments", "releaseSourceReferences", { keep: sourceReferences(snapshot) }) catch () => undefined)
+      if (snapshot === undefined || !releasesSource(snapshot.trash !== undefined, false, false, releaseAfterMs + 1)) return 0
+      const answer = try (native.invoke("AlphaMailAttachments", "releaseSourceReferences", { keep: sourceReferences(snapshot), olderThanMs: releaseAfterMs }) catch () => undefined)
       return typeof answer === "object" && answer !== null && "released" in answer && typeof answer.released === "number" ? answer.released : 0
     },
   }

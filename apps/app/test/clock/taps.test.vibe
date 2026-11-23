@@ -1,0 +1,111 @@
+// spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"; spec/clock/reminderTaps.md, "Story: Ask about a reminder I tapped"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"
+// @vitest-environment happy-dom
+import { assert, describe, it } from "@effect/vitest"
+import { Machine as TapsMachine } from "../../gen/clock__reminderTaps.effect.vibe"
+import { Machine as ShadeMachine } from "../../gen/clock__notifications.effect.vibe"
+import { ReminderTaps, reminderTapsLayer } from "../../src/clock/reminder-taps.vibe"
+import { Notifications, notificationsLayer } from "../../src/clock/notifications.vibe"
+import { fakeAssistant, fakeNavigation, fakePhone, machines } from "./phone.vibe"
+
+const target = { sourceId: "device", sourceRevision: "s1", reminderId: "r1", occurrenceId: "o1", revision: "v1" }
+const listed = { id: "r1", title: "Call the dentist", body: "Ask about Friday", occurrenceId: "o1", target, createdAt: 0, dueAt: 1, alertMinutes: 0, status: "posted" }
+
+/** The reminder store's tap custody: the current token, consumed or released only by the store. */
+function tapStore(question: boolean) {
+  let token: string | undefined = "tap1"
+  const phone = fakePhone({
+    "DailyApps.surfaceInfo": () => ({ reminderTapVersion: 1 }),
+    "DailyApps.pendingReminderTap": () => (token === undefined ? {} : { token, target, retained: true, question }),
+    "DailyApps.listReminders": () => ({ reminders: [listed] }),
+    "DailyApps.consumeReminderTap": (args) => {
+      if ((args as { token: string }).token === token) token = undefined
+      return {}
+    },
+    "DailyApps.releaseReminderQuestion": () => ({}),
+  })
+  return { phone }
+}
+
+describe("Reminder taps (spec/clock/reminderTaps.md, \"Story: Open the reminder I tapped\")", () => {
+  it.effect("open exactly the tapped reminder and consume its token once, after its detail shows (spec/clock/reminderTaps.md, \"Story: Open the reminder I tapped\")", () => effect {
+    const store = tapStore(false)
+    const navigator = fakeNavigation()
+    provide Layer.provideMerge(reminderTapsLayer, machines), store.phone.layer, navigator.layer, fakeAssistant().layer {
+      const taps = try ReminderTaps
+      const machine = try TapsMachine
+      try taps.check(true)
+      try taps.check(false)
+      const after = try machine.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: navigator.opened, consumed: store.phone.calls.filter((c) => c.method === "consumeReminderTap").map((c) => c.args), stage: after.stage, banner: after.banner },
+        { opened: [{ app: "reminders", route: "r1" }], consumed: [{ token: "tap1" }], stage: "TapIdle", banner: false },
+      ))
+    }
+  })
+
+  it.effect("hold the tap while the page is hidden, and keep the link (spec/clock/reminderTaps.md, \"Story: Open the reminder I tapped\")", () => effect {
+    const store = tapStore(false)
+    const navigator = fakeNavigation()
+    provide Layer.provideMerge(reminderTapsLayer, machines), store.phone.layer, navigator.layer, fakeAssistant().layer {
+      const taps = try ReminderTaps
+      try taps.setBlocked(true)
+      try taps.check(true)
+      const held = navigator.opened.length
+      try taps.setBlocked(false)
+      try taps.check(true)
+      try Effect.try(() => assert.deepStrictEqual({ held, opened: navigator.opened.length }, { held: 0, opened: 1 }))
+    }
+  })
+})
+
+describe("Reminder questions (spec/clock/reminderTaps.md, \"Story: Ask about a reminder I tapped\")", () => {
+  it.effect("release the tap when the review closes, and consume it before the reviewed question is drafted (spec/clock/reminderTaps.md, \"Story: Ask about a reminder I tapped\")", () => effect {
+    const store = tapStore(true)
+    const assistant = fakeAssistant()
+    provide Layer.provideMerge(reminderTapsLayer, machines), store.phone.layer, fakeNavigation().layer, assistant.layer {
+      const taps = try ReminderTaps
+      try taps.check(true)
+      const asked = try taps.question()
+      try taps.closeQuestion(undefined)
+      const released = store.phone.calls.filter((c) => c.method === "releaseReminderQuestion").length
+      const unspent = store.phone.calls.filter((c) => c.method === "consumeReminderTap").length
+      try taps.check(true)
+      try taps.closeQuestion("When is my appointment?")
+      try Effect.try(() => assert.deepStrictEqual(
+        { asked, released, unspent, consumed: store.phone.calls.filter((c) => c.method === "consumeReminderTap").length, drafted: assistant.asked },
+        { asked: { id: "r1", title: "Call the dentist", text: "Ask about Friday" }, released: 1, unspent: 0, consumed: 1, drafted: ["When is my appointment?"] },
+      ))
+    }
+  })
+})
+
+describe("Notification questions (spec/clock/notifications.md, \"Story: Ask Alpha about one of its notifications\")", () => {
+  it.effect("give the agent only Alpha's own row, and draft a question only for the row still listed unchanged (spec/clock/notifications.md, \"Story: Ask Alpha about one of its notifications\")", () => effect {
+    const own = { id: "reminder-1", revision: "v1", source: "own", kind: "reminder", appLabel: "Alpha Phone", title: "Call", text: "Ask about Friday", at: 1, clearable: true, canOpen: true }
+    const mail = { ...own, id: "mail-1", source: "external", kind: "other", appLabel: "Mail", title: "Invoice", text: "Pay now" }
+    let items = [own, mail]
+    const assistant = fakeAssistant()
+    const phone = fakePhone({ "AlphaNotifications.list": () => ({ items, scope: "device" }) })
+    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, assistant.layer {
+      const notifications = try Notifications
+      const shade = try ShadeMachine
+      try notifications.open()
+      try notifications.select("mail-1", "v1")
+      const external = (try shade.get()).selected
+      try notifications.ask("mail-1", "v1")
+      const externalQuestion = (try shade.get()).question
+      try notifications.ask("reminder-1", "v1")
+      try notifications.answer("What should I bring?")
+      const drafted = [...assistant.asked]
+      try notifications.ask("reminder-1", "v1")
+      items = [{ ...own, revision: "v2", text: "Moved to Monday" }, mail]
+      try notifications.answer("And now?")
+      const gone = (try shade.get()).report
+      const shared = (try notifications.own()).map((r) => r.id)
+      try Effect.try(() => assert.deepStrictEqual(
+        { external, externalQuestion, drafted, gone, later: assistant.asked.length, shared },
+        { external: "", externalQuestion: { tag: "NoQuestion" }, drafted: ["What should I bring?"], gone: "ReportGone", later: 1, shared: ["reminder-1"] },
+      ))
+    }
+  })
+})

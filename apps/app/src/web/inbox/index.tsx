@@ -12,7 +12,8 @@ import { Button } from "../components/ui/index.ts";
 import { InboxScreen } from "./InboxScreen.tsx";
 import { NoticeAskSheet } from "./NoticeAskSheet.tsx";
 import { askFailure } from "./messages.ts";
-import { act, ask, runtime } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
+import { act, ask } from "./run.ts";
 
 /** The review of an Ask notice tap, above every screen. */
 function NoticeAskSurface(_: { readonly open: (app: AppId, route?: string) => void }) {
@@ -48,4 +49,3 @@ export const surfaces: AppSurface[] = [
   { id: "inbox-attention", slot: "notices", availability: "everywhere", Surface: MailAttentionSurface },
 ];
 
-export { EmailCardView } from "./EmailCardView.tsx";

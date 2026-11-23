@@ -10,7 +10,9 @@ late answer of a retired session changes nothing. Only the owner's own locate
 and the guidance watch the owner started may show the permission prompt.
 
 The chat's view of the phone's position, sent with ordinary turns when the
-owner allows Location for Alpha, is the second story.
+owner allows Location for Alpha, is the assistant's
+([turn context](../assistant/context.md)); it carries no precision, so it is
+never the origin of a route, which Maps plans from its own fresh fix.
 
 ## Domain
 
@@ -140,38 +142,4 @@ pure def sometimesGuidanceWatches(s: Locator): bool = s.purpose == GuidanceWatch
 pure def sometimesCleanupRefused(s: Locator): bool = s.failure == CleanupUnconfirmed
 pure val fair_cleanupSettles = "weak"
 pure def leadsToCleanupSettles(s: Locator, later: Locator): bool = s.cleanupPending implies not(later.cleanupPending)
-```
-
-## Story: Tell my agent where the phone is, only when I allow it
-
-> As the owner, I want ordinary chat turns to carry the phone's last known
-> position when Location for Alpha is on and Android allows it, so that "near
-> me" works, and never to prompt or guess when it is not.
-
-### A chat turn waits at most 1.5 seconds for a position, reuses one for a minute, and serves a nearby search only while recent
-
-Only an already granted permission is read; the chat never prompts. Reading
-asks the platform for a fix at most 5 minutes old within 10 seconds. A newer
-capture replaces an older one, revoking the permission or turning Location
-for Alpha off forgets it, and coordinates are rounded to 0.00001 degrees. The
-position sent with a turn serves "near me" only while at most 30 minutes old,
-at most one minute ahead and no coarser than 5 km when an accuracy is given;
-it carries no precision, so it is never the origin of a route, which the phone
-plans from its own fresh fix.
-
-```quint
-pure val phoneReuseMs = 60000
-pure val phoneWaitMs = 1500
-pure val phonePlatformMaxAgeMs = 300000
-pure val phoneReadTimeoutMs = 10000
-pure val phoneStaleMs = 1800000
-type PhoneLocationGate = { allowed: bool, granted: bool, native: bool }
-pure val gateValues = Set({ allowed: true, granted: true, native: true }, { allowed: false, granted: true, native: true },
-  { allowed: true, granted: false, native: true }, { allowed: true, granted: true, native: false })
-pure def mayReadPhone(gate: PhoneLocationGate): bool = gate.allowed and gate.granted and gate.native
-pure def reusePhoneFix(ageMs: int): bool = ageMs >= 0 and ageMs <= phoneReuseMs
-pure def reportPhoneFix(ageMs: int, accuracy: int): bool = ageMs >= 0 - 60000 and ageMs <= phoneStaleMs and accuracy <= 5000
-pure def lawPhoneLocationNeedsEveryGate(gate: PhoneLocationGate): bool =
-  mayReadPhone(gate) implies gate.allowed and gate.granted
-pure def lawAReportedPositionIsNeverARouteOrigin(ageMs: int, accuracy: int): bool = not(usableFix(UnknownPrecision, ageMs, accuracy))
 ```

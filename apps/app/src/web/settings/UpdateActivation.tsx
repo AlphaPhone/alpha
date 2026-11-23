@@ -2,6 +2,7 @@
 import type { Updates } from "../../../gen/settings__updates.ts";
 import { Button, Spinner } from "../components/ui/index.ts";
 
+/** Android's activation of a staged update, and Continue where Android paused it. */
 export interface UpdateActivationProps {
   readonly updates: Updates;
   readonly onContinue: () => void;

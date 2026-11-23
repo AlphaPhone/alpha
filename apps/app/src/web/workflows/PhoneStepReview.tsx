@@ -4,9 +4,10 @@ import type { Steps } from "../../../gen/workflows__deviceSteps.ts";
 import type { StepReview } from "../../workflows/notices.vibe";
 import { Alert, Button, Card, CardTitle } from "../components/ui/index.ts";
 
+/** The open run's phone step and whether a tap is allowed now. */
 export interface PhoneStepReviewProps {
   steps: Steps;
-  /** The step's approval as the agent recorded it; its title and summary are the workflow author's own words. */
+  /** The step's approval as the agent recorded it; its operation is the step's label and its title and summary are the workflow author's own words. */
   review?: StepReview;
   /** Whether a tap is allowed now. */
   canTap: boolean;
@@ -20,12 +21,7 @@ const statusText: Partial<Record<Steps["status"], string>> = {
   StepDeniedStatus: "Denied.",
   StepApplied: "Done.",
   StepUnknown: "This step may not have finished. Check the run before trying again.",
-  StepUnsynced: "Done on this phone. Your agent will be told when it can be reached.",
-};
-
-const stepTitles: Record<string, string> = {
-  "read selected reminders": "Read reminders", "read selected notes": "Read selected notes", "read calendar range": "Read calendars",
-  "create note": "Save a note", "post notification": "Post notification", "speak text": "Read aloud",
+  StepUnsynced: "Approved. Your agent hasn’t confirmed this step yet. Check the run before trying again.",
 };
 
 /**
@@ -38,7 +34,7 @@ export function PhoneStepReview({ steps, review, canTap, onTap }: PhoneStepRevie
   if (!steps.shown && message === undefined) return null;
   return (
     <Card className="mx-4 flex flex-col gap-3 p-4">
-      <CardTitle className="flex items-center gap-2"><Smartphone aria-hidden className="size-5 text-primary" />{stepTitles[review?.approval.operation ?? ""] ?? "Phone step"}</CardTitle>
+      <CardTitle className="flex items-center gap-2"><Smartphone aria-hidden className="size-5 text-primary" />{review?.approval.operation || "Phone step"}</CardTitle>
       {review !== undefined && steps.shown && (
         <>
           <p>{review.approval.title}</p>

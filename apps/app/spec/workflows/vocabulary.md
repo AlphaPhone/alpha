@@ -82,14 +82,14 @@ pure val wordedStatuses = Set("active", "paused", "completed", "draft", "system"
   "acknowledged", "skipped", "expired", "failed", "dismissed", "snoozed", "archived", "cancelled", "muted",
   "delivered", "blocked", "duplicate", "unknown", "unscheduled", "pending", "posted", "permission-denied",
   "scheduling-failed", "removed")
-pure def statusWord(schedule: bool, status: str, enabled: bool): StatusWord =
+pure def statusWord(schedule: bool, status: str, switchedOn: bool): StatusWord =
   if (schedule and status == "snoozed") NoWord
-  else if (status == "") (if (enabled) ActiveWord else InactiveWord)
+  else if (status == "") (if (switchedOn) ActiveWord else InactiveWord)
   else if (wordedStatuses.contains(status)) Worded
   else Unknown
 pure val rowStatusValues = Set("", "snoozed", "fired", "engine-internal")
-pure def lawAStatusIsWordedOnlyFromTheList(schedule: bool, status: str, enabled: bool): bool =
-  statusWord(schedule, status, enabled) == Worded implies wordedStatuses.contains(status)
+pure def lawAStatusIsWordedOnlyFromTheList(schedule: bool, status: str, switchedOn: bool): bool =
+  statusWord(schedule, status, switchedOn) == Worded implies wordedStatuses.contains(status)
 ```
 
 ## Story: See what my agent changed

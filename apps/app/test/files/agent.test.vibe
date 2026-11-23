@@ -1,0 +1,147 @@
+// spec/files/proposal.md, "Story: Offer the agent only what this phone can do"; spec/files/proposal.md, "Story: Let the agent show me files without changing them"; spec/files/proposal.md, "Story: Carry out the change I approved, exactly"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"; spec/files/filter.md, "Story: Stop a filter I no longer want"; spec/files/filter.md, "Story: Let the agent name a file by its place in the results"
+import { assert, it } from "@effect/vitest"
+import { showsNoMatches } from "../../gen/files__filter.ts"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesAgent } from "../../src/files/agent.vibe"
+import { FilesPreview } from "../../src/files/preview.vibe"
+import { FilesChanges } from "../../src/files/changes.vibe"
+import { rowKey } from "../../src/files/paths.vibe"
+import { files, noNative, until, untilFilter } from "./harness.vibe"
+
+const onFiles = { view: "files", sensitive: false, foreground: true } as const
+const onHome = { view: "home", sensitive: false, foreground: true } as const
+
+it.live("an agent that does not negotiate Files is offered nothing, and positions need their own capability (spec/files/proposal.md, \"Story: Offer the agent only what this phone can do\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const agent = try FilesAgent
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const none = try agent.advertise(["notes.v1"])
+      const filterless = try agent.prepare({ type: "files_filter", kind: "pdf" }, onFiles)
+      try agent.advertise(["files.browser.v1"])
+      const byPath = try agent.prepare({ type: "files_share", paths: ["Download/lease.pdf"] }, onFiles)
+      const byPosition = try agent.prepare({ type: "files_share", shown: [1] }, onFiles)
+      try Effect.try(() => assert.deepStrictEqual(
+        { none, filterless: filterless.kind, byPath: byPath.kind, byPosition: byPosition.kind },
+        { none: [], filterless: "notAvailable", byPath: "ready", byPosition: "notAvailable" },
+      ))
+    })
+  }
+})
+
+it.live("\"find my PDFs\" from Home brings Files forward on Browse and shows only PDFs, changing nothing (spec/files/proposal.md, \"Story: Let the agent show me files without changing them\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const agent = try FilesAgent
+      try agent.advertise(["files.browser.v1"])
+      const bringForward = effect {
+        try Effect.forkScoped(browser.visit())
+        return true
+      }
+      const result = try agent.run({ type: "files_filter", kind: "pdf" }, onHome, bringForward)
+      const shown = try untilFilter((f) => f.shown !== 0 && f.pending === 0)
+      const place = (try browser.get()).place.tag
+      try Effect.try(() => assert.deepStrictEqual(
+        { result, rows: shown.rows.map((r) => r.name), complete: shown.complete, place },
+        { result: { status: "succeeded", summary: "Showing 1 item in Files." }, rows: ["lease.pdf"], complete: true, place: "Browse" },
+      ))
+    })
+  }
+})
+
+it.live("a filter shows only files of its kind, and a search that matches nothing says so only after it finished (spec/files/filter.md, \"Story: Let the agent show me the files I asked about\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const agent = try FilesAgent
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try agent.advertise(["files.browser.v1"])
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      try until((s) => s.listing === "Complete")
+      const documents = try agent.run({ type: "files_filter", kind: "document" }, onFiles, succeed(true))
+      const shown = try untilFilter((f) => f.pending === 0)
+      const place = (try browser.get()).place.tag
+      const nothing = try agent.run({ type: "files_filter", text: "zebra" }, onFiles, succeed(true))
+      const empty = try untilFilter((f) => f.pending === 0)
+      try Effect.try(() => assert.deepStrictEqual(
+        { documents: documents.status, kinds: shown.rows.map((r) => r.kind).sort(), place, nothing: nothing.summary, noMatches: showsNoMatches(empty) },
+        { documents: "succeeded", kinds: ["KindDocument", "KindDocument", "KindPdf"], place: "Browse", nothing: "Showing 0 items in Files.", noMatches: true },
+      ))
+    })
+  }
+})
+
+it.live("leaving Files ends the filter, so a late answer never brings it back (spec/files/filter.md, \"Story: Stop a filter I no longer want\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const agent = try FilesAgent
+      try agent.advertise(["files.browser.v1"])
+      const visit = try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try agent.run({ type: "files_filter", kind: "pdf" }, onFiles, succeed(true))
+      const shown = try untilFilter((f) => f.shown !== 0 && f.pending === 0)
+      try Fiber.interrupt(visit)
+      const left = try untilFilter((f) => !f.active)
+      const afterLeave = try agent.run({ type: "files_filter", kind: "pdf" }, onFiles, succeed(false))
+      try Effect.try(() => assert.deepStrictEqual(
+        { shown: shown.rows.length, left: [left.shown, left.pending, left.rows.length], afterLeave: afterLeave.status },
+        { shown: 1, left: [0, 0, 0], afterLeave: "failed" },
+      ))
+    })
+  }
+})
+
+it.live("\"open the first one\" opens the first result shown, and a position beyond the results opens nothing (spec/files/filter.md, \"Story: Let the agent name a file by its place in the results\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const agent = try FilesAgent
+      const preview = try FilesPreview
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try preview.enter()
+      try agent.advertise(["files.browser.v1"])
+      try agent.run({ type: "files_filter", text: "notes" }, onFiles, succeed(true))
+      try untilFilter((f) => f.shown !== 0 && f.pending === 0)
+      const beyond = try agent.run({ type: "files_open", shown: 4 }, onFiles, succeed(true))
+      const first = try agent.run({ type: "files_open", shown: 1 }, onFiles, succeed(true))
+      try Effect.try(() => assert.deepStrictEqual(
+        { beyond: beyond.status, first: first.status, opened: (try preview.get()).doc.name },
+        { beyond: "failed", first: "succeeded", opened: "notes.txt" },
+      ))
+    })
+  }
+})
+
+it.live("an approved new folder is made where the card said, and a reviewed trash leaves alone a file that changed after review (spec/files/proposal.md, \"Story: Carry out the change I approved, exactly\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const agent = try FilesAgent
+      const changes = try FilesChanges
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try agent.advertise(["files.browser.v1"])
+      const folder = try agent.prepare({ type: "files_folder_create", parent: "Download", name: "Taxes" }, onFiles)
+      const made = folder.kind === "ready" ? try agent.run(folder.op, onFiles, succeed(false)) : { status: "failed", summary: folder.kind }
+      const move = try agent.prepare({ type: "files_move", paths: ["Download/notes.txt"], dest: "Documents" }, onFiles)
+      const moved = move.kind === "ready" ? try agent.run(move.op, onFiles, succeed(false)) : { status: "failed", summary: move.kind }
+      // spec/files/proposal.md, "A move or trash card binds the identity of each file as primary storage reads it in the open view"
+      const trash = try agent.prepare({ type: "files_trash", paths: ["Download/lease.pdf"] }, onFiles)
+      try changes.rename(rowKey("", "Download/lease.pdf"), "lease 2.pdf")
+      try changes.rename(rowKey("", "Download/lease 2.pdf"), "lease.pdf")
+      const trashed = trash.kind === "ready" ? try agent.run(trash.op, onFiles, succeed(false)) : { status: "failed", summary: trash.kind }
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      const download = try until((s) => s.place.tag === "InFolder" && s.listing === "Complete")
+      try Effect.try(() => assert.deepStrictEqual(
+        { made: made.summary, moved: moved.summary, trashed, download: download.rows.map((r) => r.name).sort() },
+        { made: "Created Download/Taxes.", moved: "Moved 1 of 1.", trashed: { status: "failed", summary: "Moved 0 of 1 to Trash." }, download: ["Taxes", "lease.pdf"] },
+      ))
+    })
+  }
+})

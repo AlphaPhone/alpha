@@ -1,6 +1,6 @@
 // spec/maps/guidance.md, "Start begins a new session from a ready route"; spec/maps/agentSurface.md, "Maps opens at most once per request, only over an unblocked launcher, and the answer waits for the open to commit or two seconds"; spec/maps/delivery.md, "The relay belongs to the last accepted turn, and only that turn's end clears it"; spec/maps/delivery.md, "A navigation effect runs only under a returned claim, and a redelivery never runs it twice"; spec/maps/selectedRead.md, "The context revision changes exactly when what is shown changes, and clears when Maps is not in front"; spec/maps/selectedRead.md, "A read is approved only for the selection the card showed, and its result is uploaded only while that selection is still shown"
 import { Machine as SurfaceMachine, openWaitMs, showable } from "../../gen/maps__agentSurface.effect.vibe"
-import { Machine as DeliveryMachine } from "../../gen/maps__delivery.effect.vibe"
+import { Machine as DeliveryMachine, claimDeadlineMs, negativeCleanupMs } from "../../gen/maps__delivery.effect.vibe"
 import { type Guidance, Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { type Screen, Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { type ContextKind, Machine as ReadMachine, maxReadBytes } from "../../gen/maps__selectedRead.effect.vibe"
@@ -14,7 +14,8 @@ import { modelTravel, wireMode } from "./cloud.vibe"
 import { emptyContent, MapsContent, type MapsContentState } from "./content.vibe"
 import { failure } from "./failure.vibe"
 import { MapsLocation } from "./location.vibe"
-import { Navigation } from "./navigation.vibe"
+import { InteractClaim } from "./maps.schema.vibe"
+import { MapsNavigation } from "./navigation.vibe"
 import { MapsShell } from "./ports.vibe"
 import { MapsScreen } from "./screen.vibe"
 
@@ -81,7 +82,7 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
   const guidanceMachine = try GuidanceMachine
   const content = try MapsContent
   const location = try MapsLocation
-  const navigation = try Navigation
+  const navigation = try MapsNavigation
   const actions = try MapsScreen
   let latest: { screen: Screen; content: MapsContentState; guidance: Guidance } = { screen: try screen.get(), content: emptyContent, guidance: try guidanceMachine.get() }
   let contextKey = ""
@@ -217,14 +218,15 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
     effect deliver(request: number, effectKey: number, binding: NavigationBinding, apply: void!!) {
       const begun = delivery.send({ type: "grantArrives", request, effectKey }) catch () => undefined
       if (!begun) return
-      const claimed = timeout(resident.json("POST", "/api/views/interact-claim", binding), 5000) catch () => undefined
-      const claimId = typeof (claimed?.data as { claimId?: unknown } | undefined)?.claimId === "string" ? (claimed?.data as { claimId: string }).claimId : undefined
+      const claimed = timeout(resident.json("POST", "/api/views/interact-claim", binding), claimDeadlineMs) catch () => undefined
+      const claim = claimed === undefined ? undefined : (Schema.decodeUnknownEffect(InteractClaim)(claimed.data) catch () => undefined)
+      const claimId = claim?.claimId
       const step = delivery.send({ type: "claimSettles", request, claim: claimId ? 1 : 0 }) catch () => undefined
       if (!claimId || step === undefined) return
       const applied = delivery.send({ type: "applyClaimed", request }) catch () => undefined
       if (!applied) {
         delivery.send({ type: "failBeforeEffect", request }) catch () => undefined
-        timeout(resident.json("POST", "/api/views/interact-result", { ...binding, claimId, success: false, result: { switched: false } }), 1500) catch () => undefined
+        timeout(resident.json("POST", "/api/views/interact-result", { ...binding, claimId, success: false, result: { switched: false } }), negativeCleanupMs) catch () => undefined
         return
       }
       for (const out of applied.out) {

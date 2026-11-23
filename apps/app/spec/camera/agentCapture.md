@@ -7,55 +7,53 @@ portrait sheet keeps its place because Camera is laid out above it. The
 request waits until no closing panel is painted over the viewfinder and for a
 preview that is still starting, checks everything again right before the
 shutter, and is `unknown` only after the shutter fired. A request that names
-a camera is never answered with a photo from the other one. Proposal
-admission, the journal and the claim are the assistant's device-action
-review (`@elizaos/agent`).
+a camera is never answered with a photo from the other one. The Camera it
+looks at is [the viewfinder's](./viewfinder.md) own state, read whenever the
+request moves: this machine keeps only the request. Proposal admission, the
+journal and the claim are the assistant's device-action review
+(`@elizaos/agent`).
 
 ## Domain
 
-### A request records the scene it runs in and what it did
+### A request keeps its stage, what it holds and what it did; the Camera is read from the viewfinder each time it moves
 
-`rows` counts the photos the request left in the library; the shot fields
-freeze the scene when the shutter fired.
+`Scene` is the viewfinder's state as the request reads it: shown, covered by
+a conversation, preview ready or starting, recording, the shutter busy, and
+the front camera bound. `rows` counts the photos the request left in the
+library; the shot fields freeze the scene when the shutter fired.
 
 ```quint
-type Scene = CameraShown | OtherScreen
-type Panel = NoChat | SheetChat | FullChat
-type Preview = PreviewIdle | PreviewWarming | PreviewLive | PreviewBroken
+type Scene = { shown: bool, covers: bool, ready: bool, starting: bool, recording: bool, busy: bool, front: bool }
 type Stage = NoRequest | Revealing | Queued | Armed | Writing
 type Outcome = NoOutcome | Succeeded | Failed | Unknown
-type CameraLens = UsingBack | UsingFront
 type Wanted = AnyLens | WantBack | WantFront
 type WriteResult = SavedWithId | SavedWithoutId | WriteThrew | NotTaken
 type Capture = {
-  scene: Scene, sensitive: bool, hidden: bool, chat: Panel, landscape: bool, panel: bool,
-  preview: Preview, recording: bool, ownerShooting: bool,
-  request: Stage, holds: int, current: bool, aborted: bool, ownerCovered: bool, refusedByRecording: bool,
-  shutters: int, rows: int, outcome: Outcome, cancelledBeforeCapture: bool,
-  lens: CameraLens, wanted: Wanted, flipped: bool,
+  request: Stage, holds: int, current: bool, aborted: bool, sensitive: bool, panel: bool, refusedByRecording: bool,
+  shutters: int, rows: int, outcome: Outcome, cancelledBeforeCapture: bool, wanted: Wanted, flipped: bool,
   directTaken: bool, libraryIdOffered: bool, libraryIdShared: bool,
-  shotVisible: bool, shotReady: bool, shotCovered: bool, shotCurrent: bool, shotLens: CameraLens
+  shotShown: bool, shotReady: bool, shotCovered: bool, shotCurrent: bool, shotRecording: bool, shotFront: bool
 }
 pure val initial: Capture = {
-  scene: CameraShown, sensitive: false, hidden: false, chat: NoChat, landscape: false, panel: false,
-  preview: PreviewIdle, recording: false, ownerShooting: false,
-  request: NoRequest, holds: 0, current: true, aborted: false, ownerCovered: false, refusedByRecording: false,
-  shutters: 0, rows: 0, outcome: NoOutcome, cancelledBeforeCapture: false,
-  lens: UsingBack, wanted: AnyLens, flipped: false,
+  request: NoRequest, holds: 0, current: true, aborted: false, sensitive: false, panel: false, refusedByRecording: false,
+  shutters: 0, rows: 0, outcome: NoOutcome, cancelledBeforeCapture: false, wanted: AnyLens, flipped: false,
   directTaken: false, libraryIdOffered: false, libraryIdShared: false,
-  shotVisible: true, shotReady: true, shotCovered: false, shotCurrent: true, shotLens: UsingBack
+  shotShown: true, shotReady: true, shotCovered: false, shotCurrent: true, shotRecording: false, shotFront: false
 }
-pure def visible(c: Capture): bool = c.scene == CameraShown and not(c.hidden)
-pure def chatCovers(c: Capture): bool = c.chat == FullChat or (c.chat == SheetChat and c.landscape)
-pure def covered(c: Capture): bool = chatCovers(c) or c.panel
-pure def admitted(c: Capture): bool = c.current and not(c.aborted) and visible(c) and not(c.sensitive)
-pure def lensMatches(c: Capture): bool =
-  c.wanted == AnyLens or (c.wanted == WantBack and c.lens == UsingBack) or (c.wanted == WantFront and c.lens == UsingFront)
+pure def admitted(c: Capture, scene: Scene): bool = c.current and not(c.aborted) and scene.shown and not(c.sensitive)
+pure def lensMatches(c: Capture, scene: Scene): bool =
+  c.wanted == AnyLens or (c.wanted == WantBack and not(scene.front)) or (c.wanted == WantFront and scene.front)
+pure val readyScene: Scene = { shown: true, covers: false, ready: true, starting: false, recording: false, busy: false, front: false }
+pure val sceneValues = Set(readyScene)
+  .union(Set({ ...readyScene, front: true }))
+  .union(Set({ ...readyScene, covers: true }))
+  .union(Set({ ...readyScene, ready: false, starting: true }))
+  .union(Set({ ...readyScene, ready: false }))
+  .union(Set({ ...readyScene, recording: true }))
+  .union(Set({ ...readyScene, shown: false, ready: false }))
 pure val wantedValues = Set(AnyLens, WantBack, WantFront)
-pure val panelValues = Set(SheetChat, FullChat)
 pure val resultValues = Set(SavedWithId, SavedWithoutId, WriteThrew, NotTaken)
 pure val weight_ask = 3
-pure val weight_previewReady = 2
 pure val weight_shutter = 3
 pure val weight_written = 3
 ```
@@ -76,87 +74,52 @@ pure def lawADirectPhotoNeedsTheOwnersWords(reviewed: bool, ownerWords: bool, di
   not(needsCard(reviewed, ownerWords, directTaken)) implies (reviewed or (ownerWords and not(directTaken)))
 ```
 
-### A request is admitted only over the visible, free Camera; a covering conversation is closed and the request waits for its panel
+### A request is admitted only over the visible, free Camera of an unprotected screen; a covering conversation is closed and the request waits for its panel
 
 A hidden Camera, another screen, a protected screen, a recording or a busy
 shutter fails at once and touches nothing.
 
 ```quint
-pure def stageAfterWait(c: Capture): Stage = if (c.preview == PreviewLive) Armed else Queued
-pure def previewAfterWait(c: Capture): Preview = if (c.preview == PreviewIdle or c.preview == PreviewBroken) PreviewWarming else c.preview
-pure def canAsk(c: Capture, wanted: Wanted, reviewed: bool, ownerWords: bool, offersLibraryId: bool): bool = c.request == NoRequest
-pure def ask(c: Capture, wanted: Wanted, reviewed: bool, ownerWords: bool, offersLibraryId: bool): Capture = {
-  val fresh = { ...c, outcome: NoOutcome, shutters: 0, rows: 0, ownerCovered: false, current: true, aborted: false,
-    wanted: wanted, flipped: false, libraryIdOffered: offersLibraryId, libraryIdShared: false,
-    refusedByRecording: false, cancelledBeforeCapture: false }
-  if (needsCard(reviewed, ownerWords, c.directTaken) or not(visible(c)) or c.recording or c.ownerShooting or c.sensitive)
-    { ...fresh, outcome: Failed }
+pure def stageAfterWait(scene: Scene): Stage = if (scene.ready) Armed else Queued
+pure def canAsk(c: Capture, scene: Scene, wanted: Wanted, reviewed: bool, ownerWords: bool, offersLibraryId: bool, sensitive: bool): bool = c.request == NoRequest
+pure def ask(c: Capture, scene: Scene, wanted: Wanted, reviewed: bool, ownerWords: bool, offersLibraryId: bool, sensitive: bool): Capture = {
+  val fresh = { ...c, outcome: NoOutcome, shutters: 0, rows: 0, current: true, aborted: false, sensitive: sensitive, panel: false,
+    wanted: wanted, flipped: false, libraryIdOffered: offersLibraryId, libraryIdShared: false, refusedByRecording: false, cancelledBeforeCapture: false }
+  if (needsCard(reviewed, ownerWords, c.directTaken) or not(scene.shown) or scene.recording or scene.busy or sensitive) { ...fresh, outcome: Failed }
   else {
     val held = { ...fresh, holds: c.holds + 1, directTaken: c.directTaken or not(reviewed) }
-    if (covered(c)) { ...held, chat: if (chatCovers(c)) NoChat else c.chat, panel: true, request: Revealing }
-    else { ...held, request: stageAfterWait(c), preview: previewAfterWait(c) }
+    if (scene.covers) { ...held, panel: true, request: Revealing } else { ...held, request: stageAfterWait(scene) }
   }
 }
 pure def alwaysHoldReleased(c: Capture): bool = c.holds == (if (c.request == NoRequest) 0 else 1)
-pure def sometimesQueuedForStartingPreview(c: Capture): bool = c.request == Queued and c.preview == PreviewWarming
+pure def alwaysPanelOnlyWhileRevealing(c: Capture): bool = c.panel implies c.request == Revealing
 ```
 
-### The reveal ends only once no closing panel is painted; an abort, a changed context or a hidden Camera ends it with nothing taken
+### The reveal ends only once the closing panel is gone; an abort, a changed context or a hidden Camera ends it with nothing taken
 
 ```quint
 pure def canPanelCleared(c: Capture): bool = c.panel
 pure def panelCleared(c: Capture): Capture = { ...c, panel: false }
-pure def canRevealed(c: Capture): bool = c.request == Revealing and not(c.panel) and admitted(c)
-pure def revealed(c: Capture): Capture = { ...c, request: stageAfterWait(c), preview: previewAfterWait(c) }
-pure def canRevealFails(c: Capture): bool = c.request == Revealing and not(admitted(c))
-pure def revealFails(c: Capture): Capture = { ...c, request: NoRequest, holds: c.holds - 1, outcome: Failed }
-pure def alwaysRequestUncoversViewfinder(c: Capture): bool =
-  ((c.request == Queued or c.request == Armed or c.request == Writing) and not(c.ownerCovered)) implies not(covered(c))
+pure def canRevealed(c: Capture, scene: Scene): bool = c.request == Revealing and not(c.panel) and admitted(c, scene) and not(scene.covers)
+pure def revealed(c: Capture, scene: Scene): Capture = { ...c, request: stageAfterWait(scene) }
+pure def canRevealFails(c: Capture, scene: Scene): bool = c.request == Revealing and not(c.panel) and (not(admitted(c, scene)) or scene.covers)
+pure def revealFails(c: Capture, scene: Scene): Capture = { ...c, request: NoRequest, holds: c.holds - 1, outcome: Failed }
 ```
 
-### A queued request waits for the preview's start to settle
+### A queued request waits until the preview's start settles
 
 ```quint
-pure def canPreviewReady(c: Capture): bool = c.preview == PreviewWarming
-pure def previewReady(c: Capture): Capture = { ...c, preview: PreviewLive, request: if (c.request == Queued) Armed else c.request }
-pure def canPreviewFails(c: Capture): bool = c.preview == PreviewWarming
-pure def previewFails(c: Capture): Capture = { ...c, preview: PreviewBroken, request: if (c.request == Queued) Armed else c.request }
-pure def alwaysQueuedRequestWaitsForStart(c: Capture): bool = c.request == Queued implies (c.preview == PreviewWarming and c.outcome == NoOutcome)
+pure def canPreviewSettled(c: Capture, scene: Scene): bool = c.request == Queued and not(scene.starting)
+pure def previewSettled(c: Capture, scene: Scene): Capture = { ...c, request: Armed }
+pure def alwaysQueuedRequestHasNoOutcome(c: Capture): bool = (c.request == Queued or c.request == Revealing or c.request == Armed) implies c.outcome == NoOutcome
+pure def sometimesQueuedForStartingPreview(c: Capture): bool = c.request == Queued
 ```
 
-### While the request waits, the owner may change anything
+### The context may change and the request may be aborted while it waits; an abort releases a queued request at once
 
 ```quint
-pure def canOwnerCoversChat(c: Capture, panel: Panel): bool = panel != NoChat
-pure def ownerCoversChat(c: Capture, panel: Panel): Capture =
-  { ...c, chat: panel, panel: false, ownerCovered: c.ownerCovered or c.request != NoRequest }
-pure def rotate(c: Capture): Capture =
-  { ...c, landscape: not(c.landscape), ownerCovered: c.ownerCovered or (c.chat == SheetChat and c.request != NoRequest) }
-pure def canOwnerClosesChat(c: Capture): bool = c.chat != NoChat
-pure def ownerClosesChat(c: Capture): Capture = { ...c, chat: NoChat, panel: true, ownerCovered: c.ownerCovered or c.request != NoRequest }
-pure def canChatGraceReleases(c: Capture): bool =
-  c.holds == 0 and chatCovers(c) and (c.preview == PreviewWarming or c.preview == PreviewLive) and not(c.recording)
-pure def chatGraceReleases(c: Capture): Capture = { ...c, preview: PreviewIdle }
-pure def canOwnerLeaves(c: Capture): bool = c.scene == CameraShown
-pure def ownerLeaves(c: Capture): Capture = { ...c, scene: OtherScreen, current: false, preview: if (c.holds > 0) c.preview else PreviewIdle }
-pure def canOwnerReturns(c: Capture): bool = c.scene == OtherScreen and c.request == NoRequest
-pure def ownerReturns(c: Capture): Capture = { ...c, scene: CameraShown }
-pure def canContextChanges(c: Capture): bool = c.current
+pure def canContextChanges(c: Capture): bool = c.current and c.request != NoRequest
 pure def contextChanges(c: Capture): Capture = { ...c, current: false }
-pure def canBecomeHidden(c: Capture): bool = not(c.hidden)
-pure def becomeHidden(c: Capture): Capture = { ...c, hidden: true }
-pure def canBecomeShown(c: Capture): bool = c.hidden
-pure def becomeShown(c: Capture): Capture = { ...c, hidden: false }
-pure def canEnterProtectedScreen(c: Capture): bool = not(c.sensitive)
-pure def enterProtectedScreen(c: Capture): Capture = { ...c, sensitive: true }
-pure def canLeaveProtectedScreen(c: Capture): bool = c.sensitive
-pure def leaveProtectedScreen(c: Capture): Capture = { ...c, sensitive: false }
-pure def sometimesReopenedChatRefused(c: Capture): bool = c.ownerCovered and covered(c) and c.outcome == Failed
-```
-
-### An abort releases a waiting request at once, before any photo
-
-```quint
 pure def canAbort(c: Capture): bool = not(c.aborted) and c.request != NoRequest and c.request != Writing
 pure def abort(c: Capture): Capture =
   if (c.request == Queued) { ...c, aborted: true, request: NoRequest, holds: c.holds - 1, outcome: Failed, cancelledBeforeCapture: true }
@@ -165,53 +128,43 @@ pure def alwaysCancelledMeansNoShutter(c: Capture): bool = c.cancelledBeforeCapt
 pure def sometimesCancelledBeforeCapture(c: Capture): bool = c.cancelledBeforeCapture
 ```
 
-### A recording or another shutter that starts first refuses a waiting request
+### A recording that starts while the request waits refuses it
 
 ```quint
-pure def canOwnerStartsRecording(c: Capture): bool =
-  c.preview == PreviewLive and not(c.recording) and not(c.ownerShooting) and c.request != Writing
-pure def ownerStartsRecording(c: Capture): Capture =
-  { ...c, recording: true, refusedByRecording: c.refusedByRecording or c.request == Revealing or c.request == Queued }
-pure def canOwnerStopsRecording(c: Capture): bool = c.recording
-pure def ownerStopsRecording(c: Capture): Capture = { ...c, recording: false }
-pure def canOwnerShutter(c: Capture): bool = c.preview == PreviewLive and not(c.recording) and not(c.ownerShooting) and c.request != Writing
-pure def ownerShutter(c: Capture): Capture = { ...c, ownerShooting: true }
-pure def canOwnerShotDone(c: Capture): bool = c.ownerShooting
-pure def ownerShotDone(c: Capture): Capture = { ...c, ownerShooting: false }
+pure def canRecordingStarted(c: Capture): bool = c.request == Revealing or c.request == Queued
+pure def recordingStarted(c: Capture): Capture = { ...c, refusedByRecording: true }
 pure def alwaysRefusalBelongsToAWaitingRequest(c: Capture): bool = c.refusedByRecording implies c.request != Writing
 pure def sometimesRecordingRefused(c: Capture): bool = c.refusedByRecording and c.outcome == Failed
 ```
 
-### A request that names the other camera flips to it once, after the second check; a failed flip takes no photo
+### A request that names the other camera has the viewfinder flip once, after the second check; a failed flip takes no photo
 
 ```quint
-pure def canFlipForRequest(c: Capture, ok: bool): bool =
-  c.request == Armed and admitted(c) and c.preview == PreviewLive and not(lensMatches(c)) and not(c.flipped) and not(c.recording)
-pure def flipForRequest(c: Capture, ok: bool): Capture =
-  if (ok) { ...c, lens: if (c.wanted == WantFront) UsingFront else UsingBack, flipped: true }
-  else { ...c, request: NoRequest, holds: c.holds - 1, outcome: Failed }
-pure def canOwnerFlips(c: Capture): bool = c.preview == PreviewLive and not(c.recording) and c.request != Writing
-pure def ownerFlips(c: Capture): Capture = { ...c, lens: if (c.lens == UsingBack) UsingFront else UsingBack }
+pure def canFlipForRequest(c: Capture, scene: Scene, ok: bool): bool =
+  c.request == Armed and admitted(c, scene) and scene.ready and not(lensMatches(c, scene)) and not(c.flipped) and not(scene.recording)
+pure def flipForRequest(c: Capture, scene: Scene, ok: bool): Capture =
+  if (ok) { ...c, flipped: true } else { ...c, request: NoRequest, holds: c.holds - 1, outcome: Failed }
 ```
 
-### Right before the shutter everything is checked again: an uncovered, ready, current Camera, no recording, and the named camera
+### Right before the shutter everything is read again from the viewfinder: shown, uncovered, ready, idle, no recording, and the named camera
 
 ```quint
-pure def shutterAllowed(c: Capture): bool =
-  admitted(c) and not(covered(c)) and c.preview == PreviewLive and not(c.recording) and not(c.ownerShooting) and
-  not(c.refusedByRecording) and lensMatches(c) and c.shutters == 0
-pure def canRecheckFails(c: Capture): bool = c.request == Armed and not(shutterAllowed(c)) and (c.flipped or lensMatches(c) or not(admitted(c)) or c.preview != PreviewLive or covered(c) or c.recording or c.refusedByRecording or c.ownerShooting)
-pure def recheckFails(c: Capture): Capture = { ...c, request: NoRequest, holds: c.holds - 1, outcome: Failed }
-pure def canShutter(c: Capture): bool = c.request == Armed and shutterAllowed(c)
-pure def shutter(c: Capture): Capture =
-  { ...c, request: Writing, shutters: 1, shotVisible: visible(c), shotReady: c.preview == PreviewLive,
-    shotCovered: covered(c), shotCurrent: c.current, shotLens: c.lens }
-pure def alwaysCaptureNeedsVisibleCamera(c: Capture): bool = c.shutters == 1 implies (c.shotVisible and c.shotReady and c.shotCurrent)
+pure def shutterAllowed(c: Capture, scene: Scene): bool =
+  admitted(c, scene) and not(c.panel) and not(scene.covers) and scene.ready and not(scene.recording) and not(scene.busy) and
+  not(c.refusedByRecording) and lensMatches(c, scene) and c.shutters == 0
+pure def canRecheckFails(c: Capture, scene: Scene): bool =
+  c.request == Armed and not(shutterAllowed(c, scene)) and (c.flipped or lensMatches(c, scene) or not(admitted(c, scene)) or not(scene.ready) or scene.recording)
+pure def recheckFails(c: Capture, scene: Scene): Capture = { ...c, request: NoRequest, holds: c.holds - 1, outcome: Failed }
+pure def canShutter(c: Capture, scene: Scene): bool = c.request == Armed and shutterAllowed(c, scene)
+pure def shutter(c: Capture, scene: Scene): Capture =
+  { ...c, request: Writing, shutters: 1, shotShown: scene.shown, shotReady: scene.ready, shotCovered: scene.covers,
+    shotCurrent: c.current, shotRecording: scene.recording, shotFront: scene.front }
+pure def alwaysCaptureNeedsVisibleCamera(c: Capture): bool = c.shutters == 1 implies (c.shotShown and c.shotReady and c.shotCurrent)
 pure def alwaysShutterNeverCovered(c: Capture): bool = c.shutters == 1 implies not(c.shotCovered)
 pure def alwaysAtMostOneShutter(c: Capture): bool = c.shutters >= 0 and c.shutters <= 1
+pure def alwaysNoCaptureWhileRecording(c: Capture): bool = c.shutters == 1 implies not(c.shotRecording)
 pure def alwaysNamedLensHonoured(c: Capture): bool =
-  c.shutters == 1 implies (c.wanted == AnyLens or (c.wanted == WantFront and c.shotLens == UsingFront) or (c.wanted == WantBack and c.shotLens == UsingBack))
-pure def alwaysNoCaptureWhileRecording(c: Capture): bool = c.request == Writing implies not(c.recording)
+  c.shutters == 1 implies (c.wanted == AnyLens or (c.wanted == WantFront and c.shotFront) or (c.wanted == WantBack and not(c.shotFront)))
 pure def sometimesNamedLensShot(c: Capture): bool = c.shutters == 1 and c.flipped
 ```
 

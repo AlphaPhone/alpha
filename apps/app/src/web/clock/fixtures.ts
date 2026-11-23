@@ -8,11 +8,12 @@ import { initial as remindersInitial, type ReminderRow, type Reminders } from ".
 import type { DeletionNotices } from "../../../gen/clock__deletions.ts";
 import { initial as shadeInitial, type Shade } from "../../../gen/clock__notifications.ts";
 import type { Ringer } from "../../../gen/clock__ringer.ts";
+import type { ReminderDraft } from "../../clock/schedule.ts";
 
 const NOW = 1_800_000_000_000;
 
 /** A page in front, at a fixed instant. */
-export const ringer: Ringer = { now: NOW, allowed: true, asking: false, owns: false, ringing: "", rangAt: 0, sounding: false };
+export const ringer: Ringer = { now: NOW, allowed: true, asking: false, owns: false, ringing: "", rangAt: 0, sounding: false, level: 100 };
 
 /** A page ringing an alarm. */
 export const sounding: Ringer = { ...ringer, owns: true, ringing: "alarm_a:3", rangAt: NOW, sounding: true };
@@ -93,3 +94,12 @@ export const shade: Shade = {
     { id: "mail-1", revision: "v1", source: "ExternalNotice", kind: "OtherKind", appLabel: "Mail", title: "Mail", text: "", at: NOW - 60_000, clearable: false, canOpen: false, redacted: true, opaque: false },
   ],
 };
+
+/** A reminder form the owner left unsaved: tomorrow at nine, alerting at the time. */
+export const keptDraft: ReminderDraft = { title: "Book the vet", body: "Ask for Saturday", dayOffset: 1, minuteOfDay: 9 * 60, repeat: "none", alertMinutes: 0 };
+
+/** The same listing while a creation is being saved. */
+export const savingReminders: Reminders = { ...reminders, kind: "CreateWrite", stage: "WSend", targetId: "c1", own: true };
+
+/** The question review of an own reminder notification. */
+export const question = { name: "Alpha Phone notification", excerpt: "Call the dentist\nAsk about Friday" };

@@ -27,7 +27,7 @@ pure val initial: EventReturn = {
   origin: 0, lastOrigin: 0, active: 0, lastAttempt: 0, attemptOrigin: 0, returned: 0, notice: NoReturnNotice,
 }
 pure def retireAttempt(keep: bool, s: EventReturn): EventReturn = if (keep) s else { ...s, active: 0, attemptOrigin: 0 }
-pure def canReturn(o: int, s: EventReturn): bool =
+pure def returnable(o: int, s: EventReturn): bool =
   s.inMaps and s.visible and not(s.suspended) and not(s.navigating) and s.fromCalendar and o > 0 and o == s.origin
 pure val originValues = Set(1, 2, 3)
 pure val attemptValues = Set(1, 2, 3)
@@ -58,7 +58,7 @@ pure def canSetNavigating(s: EventReturn, on: bool): bool = s.inMaps and on != s
 pure def setNavigating(s: EventReturn, on: bool): EventReturn = { ...s, navigating: on }
 pure def canSetFromCalendar(s: EventReturn, on: bool): bool = s.inMaps and on != s.fromCalendar
 pure def setFromCalendar(s: EventReturn, on: bool): EventReturn = { ...s, fromCalendar: on }
-pure def offered(s: EventReturn): bool = canReturn(s.origin, s)
+pure def offered(s: EventReturn): bool = returnable(s.origin, s)
 ```
 
 ### One check per tap, and only its reply for the current origin returns, once
@@ -67,12 +67,12 @@ A tap while a check is pending, or when return is not offered, does nothing.
 A reply of an earlier visit, or one after Maps left, changes nothing.
 
 ```quint
-pure def canTapReturn(s: EventReturn, origin: int): bool = canReturn(origin, s) and s.active == 0
+pure def canTapReturn(s: EventReturn, origin: int): bool = returnable(origin, s) and s.active == 0
 pure def tapReturn(s: EventReturn, origin: int): EventReturn =
   { ...s, active: s.lastAttempt + 1, lastAttempt: s.lastAttempt + 1, attemptOrigin: origin, notice: NoReturnNotice }
 pure def canReturnReply(s: EventReturn, attempt: int, reply: ReturnReply): bool = attempt > 0 and attempt <= s.lastAttempt
 pure def returnReply(s: EventReturn, attempt: int, reply: ReturnReply): EventReturn =
-  if (attempt != s.active or not(canReturn(s.attemptOrigin, s))) s
+  if (attempt != s.active or not(returnable(s.attemptOrigin, s))) s
   else if (reply == EventFound) { ...retireAttempt(false, s), inMaps: false, fromCalendar: false, returned: s.returned + 1, origin: 0 }
   else if (reply == EventMissing or reply == EventAmbiguous) { ...retireAttempt(false, s), origin: 0, notice: EventMoved }
   else if (reply == OwnerChanged) { ...retireAttempt(false, s), origin: 0, notice: EventChanged }

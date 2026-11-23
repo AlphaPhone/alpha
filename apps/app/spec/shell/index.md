@@ -23,6 +23,7 @@ table the Android request gate shares. Each child spec is one machine or library
 - [Haptics](./haptics.md): touch feedback.
 - [Routes](./routes.md): the owner route table.
 - [System](./system.md): what the renderer relies on from Android's handoffs.
+- [Handoffs](./handoffs.md): what Notes hands the shell to open in Inbox, Browser or Notes.
 
 ## Story: Open an app from Home and keep my place
 

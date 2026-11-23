@@ -1,0 +1,91 @@
+// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/receipts.md, "Story: Hear what my actions actually did"; spec/assistant/receipts.md, "Story: Settle an action whose outcome is unknown"; spec/assistant/approvals.md, "Story: See what my agent asked for after a restart"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/context.md, "Story: Know when my words leave the phone"
+import { assert, it } from "@effect/vitest"
+import { mayExecute } from "../../gen/assistant__approvals.ts"
+import { disclosed } from "../../gen/assistant__context.ts"
+import { admitted, attributed, cutOffLabel, titleOf } from "../../gen/assistant__receipts.ts"
+import { offersManagePlan, refusedBeforeOutput } from "../../gen/assistant__reply.ts"
+import { contradicts } from "../../gen/assistant__review.ts"
+import { browserCommand, ownPhotoRequest, targetOf, writtenNumbers } from "../../src/assistant/grounding.vibe"
+import { StoredSuggestion } from "../../src/assistant/payloads.schema.vibe"
+import { actionResultText, copy, cutOffText, failureKindOf, failureText, receiptTitle, unsyncedSummary } from "../../src/assistant/presentation.vibe"
+import { emailDraftOf, replyNotices } from "../../src/assistant/transcript.vibe"
+
+it.effect("Understand why a reply did not finish (spec/assistant/reply.md, \"A failure refused before any output replaces the streamed text; any other failure is added after it\")", () => effect {
+  const plan = failureKindOf("allowance-exhausted")
+  const other = failureKindOf("something-new")
+  try Effect.try(() => assert.deepStrictEqual(
+    { plan, managed: offersManagePlan(plan), replaces: refusedBeforeOutput(plan), planText: failureText(plan).includes("Manage your plan"), other, otherText: failureText(other), kept: refusedBeforeOutput(other) },
+    { plan: "PlanLimit", managed: true, replaces: true, planText: true, other: "OtherFailure", otherText: copy.replyFailed, kept: false },
+  ))
+})
+
+it.effect("At most five reply notices of at most 500 characters reach the transcript (spec/assistant/reply.md, \"At most five reply notices of at most 500 characters reach the transcript, and only the latest system notice stays, until a real reply follows it\")", () => effect {
+  const kept = replyNotices(["a", "", "b", "x".repeat(501), "c", "d", "e", "f", 7])
+  try Effect.try(() => assert.deepStrictEqual(kept, ["a", "b", "c", "d", "e"]))
+})
+
+it.effect("Hear what my actions actually did (spec/assistant/receipts.md, \"An action's result in a turn is its latest receipt from that turn, and a success is never replaced by a later failure\")", () => effect {
+  const result = attributed([{ turn: 1, action: 1, result: "Failed" }, { turn: 1, action: 1, result: "Applied" }, { turn: 1, action: 1, result: "Failed" }, { turn: 2, action: 1, result: "Failed" }], 1, 1)
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      result, title: receiptTitle(titleOf(result)), unknown: receiptTitle(titleOf("Unknown")),
+      lost: actionResultText("The action could not reach a confirmed result."), unsynced: unsyncedSummary("Saved note."),
+      cut: cutOffText(cutOffLabel(true, 1, 1, false)),
+    },
+    {
+      result: "Applied", title: "Completed", unknown: "Not confirmed", lost: copy.unconfirmed, unsynced: "Saved note, but it isn't synced yet.",
+      cut: "Needs your approval · reply cut off",
+    },
+  ))
+})
+
+it.effect("Settle an action whose outcome is unknown (spec/assistant/receipts.md, \"An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      appliedWithout: admitted(false, "NoEvidence", "ResolvedApplied"), appliedWith: admitted(false, "AppliedEvidence", "ResolvedApplied"),
+      handoffOpen: admitted(true, "NoEvidence", "Unresolved"), otherOpen: admitted(false, "NoEvidence", "Unresolved"),
+      title: receiptTitle(titleOf("Unknown")),
+    },
+    { appliedWithout: false, appliedWith: true, handoffOpen: true, otherOpen: false, title: "Not confirmed" },
+  ))
+})
+
+it.effect("See what my agent asked for after a restart (spec/assistant/approvals.md, \"A card restored from the phone's own store is shown but never executed\")", () => effect {
+  const stored = { v: 1, briefed: null, open: { text: "Call Ann back?", title: "Call Ann", detail: "Missed call at 9:14" } }
+  const read = Schema.decodeUnknownOption(StoredSuggestion)(stored)
+  const newer = Schema.decodeUnknownOption(StoredSuggestion)({ ...stored, v: 2 })
+  try Effect.try(() => assert.deepStrictEqual(
+    { read: Option.isSome(read), newer: Option.isSome(newer), runs: mayExecute("FromStore"), live: mayExecute("FromLiveReply") },
+    { read: true, newer: false, runs: false, live: true },
+  ))
+})
+
+it.effect("Act only on what I asked for (spec/assistant/review.md, \"A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back\")", () => effect {
+  const text = "Call 415-555-0100 please"
+  const wrong = targetOf(text, { number: "+1 415 555 0199" })
+  const right = targetOf(text, { number: "4155550100" })
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      written: writtenNumbers(text).length, wrong: contradicts(1, wrong), right: contradicts(1, right),
+      photo: ownPhotoRequest("Could you take a photo of the receipt"), askedFirst: ownPhotoRequest("What is this? take a photo"),
+      command: browserCommand("open nytimes.com"), question: browserCommand("is nytimes.com reliable"),
+    },
+    { written: 1, wrong: true, right: false, photo: true, askedFirst: false, command: true, question: false },
+  ))
+})
+
+it.effect("Know when my words leave the phone (spec/assistant/context.md, \"A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual(
+    { cloud: disclosed("CloudHosted"), own: disclosed("OwnKeyHosted"), device: disclosed("OnDevice"), text: copy.hostedDisclosure("Eliza Cloud") },
+    { cloud: true, own: true, device: false, text: "Prompts and the context you share go to Eliza Cloud." },
+  ))
+})
+
+it.effect("An email the agent staged becomes its card only when its body reads (spec/assistant/emailCard.md, \"Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version\")", () => effect {
+  const staged = emailDraftOf([
+    { action: "SEARCH", data: { body: "not mail" } },
+    { action: "GMAIL_DRAFT", data: { to: 7, body: "x" } },
+    { action: "GMAIL_DRAFT", data: { to: ["ann@example.com", "bo@example.com"], subject: "Lunch", body: "Noon?" } },
+  ])
+  try Effect.try(() => assert.deepStrictEqual(staged, { to: "ann@example.com, bo@example.com", subject: "Lunch", body: "Noon?" }))
+})

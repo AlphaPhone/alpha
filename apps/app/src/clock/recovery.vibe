@@ -2,7 +2,6 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Build } from "../platform/build.vibe"
 import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
-import { pageVisible } from "./page.ts"
 
 /** A store whose saved state could not be read, kept as it was. */
 export interface Unreadable {
@@ -11,6 +10,7 @@ export interface Unreadable {
 }
 
 const unreadable: Unreadable[] = []
+const told = new Set<string>()
 
 /** Records a store that could not be read; its notice shows once the page is in front. */
 export function keepUnreadable(heading: string, key: string): void {
@@ -19,8 +19,10 @@ export function keepUnreadable(heading: string, key: string): void {
 
 /** The retained-data notice, and in a test-mocks build the developer's download and reset of the kept bytes. */
 export service ClockRecovery {
-  /** Shows the notice of the first unreadable store, when the page is in front. */
+  /** Shows the notice of the first unreadable store the owner has not closed yet, when the page is in front. */
   announce(): void!!
+  /** The owner closed the notice: it is not shown again, and the next unreadable store's notice follows. */
+  close(): void!!
   /** The kept bytes of the store the notice names, for a download; only in a test-mocks build. */
   download(): string | undefined!!
   /** Removes the saved state of the store the notice names, after its confirmation; only in a test-mocks build. */
@@ -41,8 +43,16 @@ export const recoveryLayer = Layer.effect(ClockRecovery, effect {
 
   return {
     effect announce() {
-      const first = unreadable[0]
-      if (first !== undefined && pageVisible()) notices.send({ type: "showRetained", heading: first.heading }) catch () => undefined
+      const first = unreadable.find((u) => !told.has(u.key))
+      if (first !== undefined) notices.send({ type: "showRetained", heading: first.heading }) catch () => undefined
+    },
+    effect close() {
+      const target = try named()
+      const closed = notices.send({ type: "closeRetained" }) catch () => undefined
+      if (closed === undefined) return
+      if (target !== undefined) told.add(target.key)
+      const next = unreadable.find((u) => !told.has(u.key))
+      if (next !== undefined) notices.send({ type: "showRetained", heading: next.heading }) catch () => undefined
     },
     effect download() {
       if (!mocks) return undefined

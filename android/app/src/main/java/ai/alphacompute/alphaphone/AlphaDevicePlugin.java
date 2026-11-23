@@ -508,9 +508,6 @@ public final class AlphaDevicePlugin extends Plugin {
   }catch(Exception unavailable){/* Unknown stays paused; no replay. */}
   return false;
  }
- @PluginMethod public void reconcileUpdate(PluginCall call){
-  PluginWorkers.submit(updateWorker,()->{reconcileUpdate();try{call.resolve(readUpdateState());}catch(Exception unavailable){call.reject("Update status unavailable");}},()->call.reject("Update status unavailable"));
- }
  /** Downloads run here, never on the problem-log worker. */
  private final java.util.concurrent.ExecutorService updateWorker=java.util.concurrent.Executors.newSingleThreadExecutor();
  /** The session this process last handed to Android, set before its commit. Only updateOwner acts on a forwarded status. */

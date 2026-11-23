@@ -35,8 +35,18 @@ export function errorClassOf(error: unknown): string {
   return error === null ? "null" : typeof error
 }
 
+/** The detail of a decoded Cloud inference failure: its stage, reason, HTTP status, parameter and keyword, each from a fixed list. */
+export function inferenceDetail(failure: InferenceFailure): string {
+  return [failure.stage, failure.reason, failure.status === undefined ? "" : `HTTP ${failure.status}`, failure.parameter ?? "", failure.keyword ?? ""]
+    .filter((part) => part !== "").join(" · ")
+}
+
+function withoutDetail(entry: CrashEntry): CrashEntry {
+  return Object.fromEntries(Object.entries(entry).filter(([name]) => name !== "detail")) as CrashEntry
+}
+
 function shown(entry: Entry): CrashEntry {
-  if (entry.source === "InferenceSource") return { at: entry.at, source: "inference", errorClass: entry.errorClass }
+  if (entry.source === "InferenceSource") return { at: entry.at, source: "inference", ...(entry.detail === "" ? {} : { detail: entry.detail }) }
   const kind = kindNames[entry.kind]
   return { at: entry.at, source: "renderer", ...(kind === undefined ? {} : { kind }), errorClass: entry.errorClass }
 }
@@ -59,8 +69,8 @@ export const crashJournalLive = Layer.effect(CrashJournal, effect {
     effect recordInference(failure: unknown) {
       const now = try Clock.currentTimeMillis
       const read = Schema.decodeUnknownEffect(InferenceFailure)(failure) catch () => undefined
-      if (read === undefined) return
-      journal.send({ type: "inferenceFailed", at: read.at, now }) catch () => undefined
+      if (read === undefined || (read.status !== undefined && (read.status < 400 || read.status > 599))) return
+      journal.send({ type: "inferenceFailed", at: read.at, now, detail: inferenceDetail(read) }) catch () => undefined
     },
     effect read() {
       const now = try Clock.currentTimeMillis
@@ -74,7 +84,7 @@ export const crashJournalLive = Layer.effect(CrashJournal, effect {
       for (const item of raw) {
         const entry = Schema.decodeUnknownEffect(CrashEntry)(item) catch () => undefined
         if (entry === undefined || entry.at <= now - retentionMs || entry.at > now + retentionMs) continue
-        natives.push({ ...entry, ...(entry.errorClass !== undefined && !PLAIN_CLASS.test(entry.errorClass) && !/^[A-Za-z_$][\w$.]{0,255}$/.test(entry.errorClass) ? { errorClass: "Error" } : {}) })
+        natives.push({ ...withoutDetail(entry), ...(entry.errorClass !== undefined && !PLAIN_CLASS.test(entry.errorClass) && !/^[A-Za-z_$][\w$.]{0,255}$/.test(entry.errorClass) ? { errorClass: "Error" } : {}) })
       }
       return { entries: [...natives, ...kept].sort((a, b) => a.at - b.at).slice(-50), exitHistory: reply?.exitHistory === true }
     },

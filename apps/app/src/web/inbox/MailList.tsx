@@ -1,12 +1,15 @@
-// spec/inbox/mailbox.md, "Story: Read my mailbox page by page"; spec/inbox/selection.md, "Story: Change several messages at once"
+// spec/inbox/mailbox.md, "Story: Read my mailbox page by page"; spec/inbox/selection.md, "Story: Change several messages at once"; spec/inbox/operations.md, "Swiping a listed message left reviews its archive at its current revision, and swiping right changes nothing"
+import { useState } from "react";
 import { Archive, CheckSquare, Mail, MailOpen, Paperclip, RotateCcw, Square, Star, Trash2 } from "lucide-react";
 import type { Mailbox, MailRow } from "../../../gen/inbox__mailbox.ts";
 import type { Selection, SelectAction, Picked } from "../../../gen/inbox__selection.ts";
 import { canBeginMore } from "../../../gen/inbox__mailbox.ts";
+import { swipeOf } from "../../../gen/inbox__operations.ts";
 import { Avatar, Button, EmptyState, ListRow, Skeleton } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 import { emptyFolder, newerMail, readFailure } from "./messages.ts";
 
+/** What the message list shows of one folder or search, its selection, and what its controls ask for. */
 export type MailListProps = {
   /** The list as the mailbox machine holds it. */
   mailbox: Mailbox;
@@ -21,6 +24,10 @@ export type MailListProps = {
   onPickAll: (items: Picked[]) => void;
   onReview: (action: SelectAction) => void;
   onFinishSelecting: () => void;
+  /** Whether a swipe left may start the reviewed archive of a row now. */
+  canSwipeArchive: boolean;
+  /** Starts the reviewed archive of a row swiped left. */
+  onSwipeArchive: (row: MailRow) => void;
 };
 
 const time = (at: string) => {
@@ -44,7 +51,8 @@ const actions: { action: SelectAction; label: string; icon: typeof Archive }[] =
  * The messages of one folder or search, newest first, with Load more, the changed-mailbox notice and selection.
  * @model spec/inbox/mailbox.md
  */
-export function MailList({ mailbox, selection, readOnly, onOpen, onLoadMore, onRetry, onToggle, onPickAll, onReview, onFinishSelecting }: MailListProps) {
+export function MailList({ mailbox, selection, readOnly, onOpen, onLoadMore, onRetry, onToggle, onPickAll, onReview, onFinishSelecting, canSwipeArchive, onSwipeArchive }: MailListProps) {
+  const [press, setPress] = useState<{ readonly id: string; readonly x: number; readonly swiped: boolean } | undefined>(undefined);
   const selecting = selection.phase === "Selecting";
   const picked = new Set(selection.picked.map((p) => p.id));
   if (mailbox.phase === "ListLoading" && mailbox.rows.length === 0) {
@@ -78,7 +86,17 @@ export function MailList({ mailbox, selection, readOnly, onOpen, onLoadMore, onR
       {mailbox.rows.length === 0 && mailbox.phase === "ListReady" && <EmptyState title={mailbox.query ? "No messages match this search" : emptyFolder[mailbox.folder]} />}
       <ul className="flex flex-col">
         {mailbox.rows.map((row) => (
-          <li key={row.id}>
+          <li
+            key={row.id}
+            onPointerDown={(event) => setPress({ id: row.id, x: event.clientX, swiped: false })}
+            onPointerUp={(event) => {
+              if (press?.id !== row.id) return;
+              const swipe = swipeOf(Math.round(event.clientX - press.x));
+              setPress({ ...press, swiped: swipe !== "SwipeShort" });
+              if (swipe === "SwipeLeft" && canSwipeArchive && !selecting && !readOnly) onSwipeArchive(row);
+            }}
+            onClickCapture={(event) => { if (press?.id === row.id && press.swiped) { event.preventDefault(); event.stopPropagation(); setPress(undefined); } }}
+          >
             <ListRow
               selected={picked.has(row.id)}
               aria-label={`${row.unread ? "Unread. " : ""}${row.sender}: ${row.subject}`}

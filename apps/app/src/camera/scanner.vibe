@@ -4,17 +4,19 @@ import { Machine as ScanMachine, type Event as ScanEvent, type ExportResult, typ
 import { Machine as DialogMachine, type Event as DialogEvent, type PhotoKeep } from "../../gen/camera__scanDialogs.effect.vibe"
 import { retireBrowserPicker } from "./browserCamera.ts"
 import { CameraBridge } from "./bridge.vibe"
-import { CameraHandoffs } from "./handoffs.vibe"
+import { CameraHandoffs } from "./ports.vibe"
 import { photosText, scanExportTitle } from "./messages.vibe"
 import { CameraNotices } from "./notices.vibe"
 import { PhotoStore } from "./photos.vibe"
 import { scannedLinks, suggestScanEvent, textLayerValid, type TextLine } from "./scanText.ts"
 import { base64Of, blobFromBase64, buildPdf, copyText, correctPage, detectEdges, fullPage, imageSize, jpegBlob, objectUrl, recognizeText, revokeUrl, type Corners } from "./scanWork.ts"
+import { StoredDraft as StoredDraftShape, StoredPage } from "./storage.schema.vibe"
 import { Viewfinder } from "./viewfinder.vibe"
 
 const DRAFT = "alpha/camera/scan-draft/v1"
 
-interface StoredDraft { readonly revision: number; readonly pages: readonly { readonly type: string; readonly data: string }[]; readonly layers: readonly (readonly TextLine[] | null)[] }
+type StoredDraft = typeof StoredDraftShape.Type
+type PageType = typeof StoredPage.Type["type"]
 
 /** Scanning: a frame or a picked image into the text review, multi-page documents with drafts and export, and Keep into Photos. */
 export service Scanner {
@@ -40,7 +42,18 @@ export service Scanner {
   loadDraft(replace: boolean): void!!
   deleteDraft(): void!!
   closeDocument(): void!!
+  /** Save the open pages as a PDF; the searchable one first opens its text review. */
   exportDocument(searchable: boolean): void!!
+  /** The recognised lines of each page in the searchable review, as the owner corrected them. */
+  searchablePages(): readonly (readonly TextLine[])[]!!
+  /** Correct one recognised line before the searchable PDF is made. */
+  editSearchLine(page: number, line: number, text: string): void!!
+  /** Keep the reviewed lines on the pages, without making a PDF. */
+  keepSearchableText(): void!!
+  /** Make the searchable PDF from the reviewed lines; nothing is written before this. */
+  downloadSearchable(): void!!
+  /** Close the searchable review. */
+  closeSearchable(): void!!
   openCorrection(index: number): void!!
   moveCorner(corner: number, x: number, y: number): void!!
   detect(): void!!
@@ -74,13 +87,16 @@ export const scanner = Layer.effect(Scanner, effect {
   let corrected: { index: number; corners: Corners; preview: Blob | undefined; previewUrl: string } | undefined
   let captured: Blob | undefined
   let noteId = ""
+  let searchLines: TextLine[][] = []
 
   effect function say(text: string) {
     try notices.say(text, false)
   }
 
   effect function dialog(event: DialogEvent) {
-    return dialogs.send(event) catch () => undefined
+    const after = dialogs.send(event) catch () => undefined
+    if (after !== undefined) try viewfinder.dialog(after.text.shown || after.document)
+    return after
   }
 
   effect function doc(event: ScanEvent) {
@@ -115,7 +131,8 @@ export const scanner = Layer.effect(Scanner, effect {
   effect function readDraft(): StoredDraft | undefined!! {
     const raw = kv.get(DRAFT) catch () => undefined
     if (raw === undefined) return undefined
-    return Effect.try({ try: () => JSON.parse(raw) as StoredDraft, catch: () => undefined }) catch () => undefined
+    const parsed = Effect.try({ try: (): unknown => JSON.parse(raw), catch: () => undefined }) catch () => undefined
+    return Schema.decodeUnknownEffect(StoredDraftShape)(parsed) catch () => undefined
   }
 
   effect function writeDraft(expected: number): number | undefined!! {
@@ -126,7 +143,7 @@ export const scanner = Layer.effect(Scanner, effect {
     const encoded = all(entries.map((page) => tryPromise(() => base64Of(page.blob)))) catch () => undefined
     if (encoded === undefined) return undefined
     const revision = expected + 1
-    const draft: StoredDraft = { revision, pages: entries.map((page, at) => ({ type: page.blob.type, data: encoded[at]! })), layers: entries.map((page) => page.layer) }
+    const draft: StoredDraft = { revision, pages: entries.map((page, at) => ({ type: page.blob.type as PageType, data: encoded[at]! })), layers: entries.map((page) => page.layer) }
     const written = kv.set(DRAFT, JSON.stringify(draft)) catch () => false
     return written === false ? undefined : revision
   }
@@ -370,22 +387,65 @@ export const scanner = Layer.effect(Scanner, effect {
       const ids = (try scan.get()).pageIds
       const entries = ids.map((id) => pages.get(id)).filter((page) => page !== undefined)
       if (searchable) {
-        try dialog({ type: "openSearchable" })
-        const layers: (readonly TextLine[] | null)[] = []
+        if ((try dialog({ type: "openSearchable" })) === undefined) return
+        searchLines = []
+        const read: TextLine[][] = []
         for (const page of entries) {
-          const read = tryPromise(() => recognizeText(page.blob, undefined, () => undefined, true)) catch () => undefined
-          layers.push(read?.lines ?? null)
+          const lines = tryPromise(() => recognizeText(page.blob, undefined, () => undefined, true)) catch () => undefined
+          if (!(try dialogs.get()).searchable.shown) return
+          read.push((lines?.lines ?? (page.layer === null ? [] : [...page.layer])).map((line) => ({ ...line })))
         }
+        searchLines = read
         try dialog({ type: "recognised" })
-        entries.forEach((page, at) => pages.set(ids[at]!, { blob: page.blob, layer: layers[at] ?? null }))
-        try dialog({ type: "download" })
+        return
       }
       if ((try doc({ type: "beginExport" })) === undefined) return
-      if (searchable) try dialog({ type: "providerAsked" })
-      const result = try exportPages(entries.map((page) => page.blob), searchable ? entries.map((page) => page.layer) : entries.map(() => null), searchable ? "searchable scan" : "scan")
+      const result = try exportPages(entries.map((page) => page.blob), entries.map(() => null), "scan")
       try doc({ type: "finishExport", result })
-      if (searchable) try dialog(result === "ExportRetryable" ? { type: "providerCancelled" } : { type: "providerSettled", outcome: result === "ExportConfirmed" ? "PdfExported" : "PdfFailed" })
       try settleAutosave()
+    },
+    searchablePages: () => effect { return searchLines },
+    effect editSearchLine(page: number, line: number, text: string) {
+      const now = try dialogs.get()
+      const target = searchLines[page]?.[line]
+      if (!now.searchable.shown || !now.searchable.ready || now.searchable.busy || target === undefined) return
+      searchLines = searchLines.map((lines, at) => at !== page ? lines : lines.map((entry, index) => index === line ? { ...entry, text: text.slice(0, 4000) } : entry))
+    },
+    effect keepSearchableText() {
+      const ids = (try scan.get()).pageIds
+      if (searchLines.length !== ids.length || !searchLines.every((lines) => textLayerValid(lines))) return try say("Not kept")
+      if ((try dialog({ type: "keepText" })) === undefined) return
+      ids.forEach((id, at) => {
+        const page = pages.get(id)
+        if (page !== undefined) pages.set(id, { blob: page.blob, layer: searchLines[at] ?? null })
+      })
+      searchLines = []
+      try say("Kept")
+      try settleAutosave()
+    },
+    effect downloadSearchable() {
+      const ids = (try scan.get()).pageIds
+      const entries = ids.map((id) => pages.get(id)).filter((page) => page !== undefined)
+      if ((try dialog({ type: "download" })) === undefined) return
+      if ((try doc({ type: "beginExport" })) === undefined) return try dialog({ type: "prepareFailed" })
+      const layers = entries.map((_, at) => searchLines[at] ?? null)
+      try dialog({ type: "providerAsked" })
+      const result = try exportPages(entries.map((page) => page.blob), layers, "searchable scan")
+      try doc({ type: "finishExport", result })
+      if (result === "ExportRetryable") try dialog({ type: "providerCancelled" })
+      else {
+        ids.forEach((id, at) => {
+          const page = pages.get(id)
+          if (page !== undefined) pages.set(id, { blob: page.blob, layer: layers[at] ?? null })
+        })
+        try dialog({ type: "providerSettled", outcome: result === "ExportConfirmed" ? "PdfExported" : "PdfFailed" })
+        searchLines = []
+      }
+      try settleAutosave()
+    },
+    effect closeSearchable() {
+      try dialog({ type: "searchableClose" })
+      searchLines = []
     },
     effect openCorrection(index: number) {
       if ((try dialog({ type: "openCorrection" })) === undefined) return

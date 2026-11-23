@@ -1,0 +1,19 @@
+// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"
+import { WorkflowClockPort } from "../workflows/ports.vibe"
+import { Machine as HandoffMachine } from "../../gen/clock__handoff.effect.vibe"
+import { answeredWith } from "../../gen/clock__handoff.ts"
+import { ClockHandoff } from "./handoff.vibe"
+
+/** Workflows' Clock draft over Clock's own handoff: the same review, the same recorded dispatch, and only Clock's answer reported. */
+export const workflowClockPort = Layer.effect(WorkflowClockPort, effect {
+  const handoff = try ClockHandoff
+  const draft = try HandoffMachine
+  return {
+    prepare: () => handoff.prepare(),
+    effect confirm() {
+      try handoff.confirm()
+      return answeredWith((try draft.get()).message, "ClockOpened")
+    },
+    retire: () => handoff.retire(),
+  }
+})

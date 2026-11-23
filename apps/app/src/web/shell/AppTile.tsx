@@ -1,7 +1,7 @@
-// spec/shell/gestures.md, "Story: Arrange Home with my fingers"
+// spec/shell/gestures.md, "Story: Arrange Home with my fingers"; spec/shell/focus.md, "Launcher controls show a focus ring only while the owner moves by keyboard"
 import { Minus, type LucideIcon } from "lucide-react";
 import type { PointerEvent } from "react";
-import { cn, focusRing } from "../lib/cn.ts";
+import { cn } from "../lib/cn.ts";
 
 /** One tile's identity and look: an Alpha app's icon, or an installed app's own image. */
 export interface TileFace {
@@ -23,6 +23,7 @@ export interface TileHandlers {
   onKey: (key: string, pressed: string) => void;
 }
 
+/** One tile: its face, edit state, drag offset and gesture handlers. */
 export interface AppTileProps extends TileHandlers {
   face: TileFace;
   /** Home's edit mode: the tile wiggles and shows its minus. */
@@ -32,6 +33,10 @@ export interface AppTileProps extends TileHandlers {
   /** The installed entry is being opened. */
   launching?: boolean;
 }
+
+/** The ring a launcher control shows under focus, drawn only while the owner moves by keyboard. */
+export const launcherFocusRing =
+  "outline-none [:root[data-alpha-keyboard-navigation]_&]:focus-visible:ring-2 [:root[data-alpha-keyboard-navigation]_&]:focus-visible:ring-ring [:root[data-alpha-keyboard-navigation]_&]:focus-visible:ring-offset-2 [:root[data-alpha-keyboard-navigation]_&]:focus-visible:ring-offset-background";
 
 /** A Home tile or library entry: one target that opens, holds or, in edit mode, removes and moves. */
 export function AppTile({ face, editing = false, offset, launching = false, onPointerDown, onContextMenu, onActivate, onKey }: AppTileProps) {
@@ -50,7 +55,7 @@ export function AppTile({ face, editing = false, offset, launching = false, onPo
       onKeyDown={(event) => onKey(face.key, event.key)}
       style={offset ? { translate: `${offset.x}px ${offset.y}px` } : undefined}
       className={cn(
-        focusRing,
+        launcherFocusRing,
         "group relative flex min-h-24 flex-col items-center gap-2 rounded-lg p-2 text-center select-none touch-manipulation [-webkit-tap-highlight-color:transparent]",
         editing && "touch-none motion-safe:animate-pulse",
         offset && "z-10 shadow-lg",

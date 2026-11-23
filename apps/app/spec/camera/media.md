@@ -160,7 +160,7 @@ The draft it joins is a fresh email draft; nothing is sent from Photos.
 ```quint
 type PictureType = Jpeg | Png | Webp | Heic | OtherType
 pure val emailAttachmentLimit = 5242880
-pure def emailable(kind: PictureType, size: int): bool = (kind == Jpeg or kind == Png or kind == Webp) and size > 0 and size <= emailAttachmentLimit
+pure def emailable(kind: PictureType, bytes: int): bool = (kind == Jpeg or kind == Png or kind == Webp) and bytes > 0 and bytes <= emailAttachmentLimit
 pure def lawUnknownSizeIsNeverEmailed(kind: PictureType): bool = not(emailable(kind, 0))
 ```
 
@@ -168,10 +168,10 @@ pure def lawUnknownSizeIsNeverEmailed(kind: PictureType): bool = not(emailable(k
 
 ```quint
 pure val messagesPictureLimit = 1048576
-pure def messagesSendable(kind: PictureType, size: int): bool = (kind == Jpeg or kind == Png) and size > 0 and size <= messagesPictureLimit
-pure def lawLargeCameraPhotoIsNotOfferedToMessages(kind: PictureType, size: int): bool = size > messagesPictureLimit implies not(messagesSendable(kind, size))
+pure def messagesSendable(kind: PictureType, bytes: int): bool = (kind == Jpeg or kind == Png) and bytes > 0 and bytes <= messagesPictureLimit
+pure def lawLargeCameraPhotoIsNotOfferedToMessages(kind: PictureType, bytes: int): bool = bytes > messagesPictureLimit implies not(messagesSendable(kind, bytes))
 pure val kindValues = Set(Jpeg, Png, Webp, Heic, OtherType)
-pure val sizeValues = Set(0, 1048576, 1048577, 5242880, 5242881)
+pure val bytesValues = Set(0, 1048576, 1048577, 5242880, 5242881)
 ```
 
 ## Story: Look closely without changing anything

@@ -9,7 +9,7 @@ import { Support } from "./tabHost.schema.vibe"
 export service BrowserAutofill {
   /** Asks the native host; an unanswered query is unknown, never available. */
   status(): FillSupport!!
-  /** The menu's Passwords: Settings at the password provider. */
+  /** The menu's Passwords: the Passwords app, where Android's autofill provider is chosen. */
   openPasswords(): void!!
 }
 
@@ -25,7 +25,7 @@ export const autofillLayer = Layer.effect(BrowserAutofill, effect {
     },
     effect openPasswords() {
       try tabs.dispatch({ type: "closeMenu" })
-      try apps.open("settings", "password-provider")
+      try apps.open("passwords")
     },
   }
 })

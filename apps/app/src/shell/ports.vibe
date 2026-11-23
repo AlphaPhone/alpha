@@ -1,0 +1,79 @@
+// spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"
+import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
+
+/** An email the owner reviewed in the chat, sent once per request id. */
+export interface ReviewedEmail {
+  readonly to: string
+  readonly subject: string
+  readonly body: string
+  readonly requestId: string
+}
+
+/** The send of a reviewed email, as Inbox carries it out. */
+export type MailSender = (draft: ReviewedEmail) => SendAnswer!!
+
+/** Inbox's send of a reviewed chat email, which the shell's assistant host hands on; Inbox fills it once its layer is built. */
+export service ShellMail {
+  /** Sends a reviewed email through the filled sender; with none filled nothing is sent and the card stays a draft. */
+  send(draft: ReviewedEmail): SendAnswer!!
+  /** Inbox's sender, from the layer that builds after the shell. */
+  fill(sender: MailSender): void!!
+}
+
+/** The idle facts other areas own: a call, Cloud connection work and the sign-in card. */
+export interface QuietFacts {
+  readonly call: boolean
+  readonly connectionBusy: boolean
+  readonly signInOpen: boolean
+  readonly signInUntouched: boolean
+}
+
+/** A reader of the idle facts other areas own. */
+export type QuietSource = () => QuietFacts!!
+
+/** The facts the idle decision needs from Telephony (a call) and Account (connection work, the sign-in card); those areas fill it once built. */
+export service IdleSources {
+  /** The facts as the filled sources report them now; quiet until a source is filled. */
+  facts(): QuietFacts!!
+  /** One area's reader; every filled reader is asked, and any busy answer makes the phone busy. */
+  fill(source: QuietSource): void!!
+}
+
+const QUIET: QuietFacts = { call: false, connectionBusy: false, signInOpen: false, signInUntouched: true }
+
+/** The mail port: refuses as unsent until Inbox fills it. */
+export const shellMailLive = Layer.effect(ShellMail, effect {
+  const sender = try Ref.make<MailSender | undefined>(undefined)
+  return {
+    effect send(draft: ReviewedEmail) {
+      const send = try Ref.get(sender)
+      if (send === undefined) return "Unsent" as SendAnswer
+      return try send(draft)
+    },
+    fill: (next: MailSender) => Ref.set(sender, next),
+  }
+})
+
+/** The idle sources port: every filled reader combined, quiet until one is filled. */
+export const idleSourcesLive = Layer.effect(IdleSources, effect {
+  const sources = try Ref.make<readonly QuietSource[]>([])
+  return {
+    effect facts() {
+      let facts = QUIET
+      for (const source of try Ref.get(sources)) {
+        const read = try source()
+        facts = {
+          call: facts.call || read.call,
+          connectionBusy: facts.connectionBusy || read.connectionBusy,
+          signInOpen: facts.signInOpen || read.signInOpen,
+          signInUntouched: facts.signInUntouched && read.signInUntouched,
+        }
+      }
+      return facts
+    },
+    fill: (source: QuietSource) => Ref.update(sources, (all) => [...all, source]),
+  }
+})
+
+/** Every port the shell keeps for the areas built after it. */
+export const portsLive = Layer.mergeAll(shellMailLive, idleSourcesLive)

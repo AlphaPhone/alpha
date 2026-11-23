@@ -13,8 +13,14 @@ export const meta: ComponentMeta<PlaceSheetProps> = {
     Google: { shown: shownGooglePlace, restricted: true },
     LoadingDetails: { details: "Loading", shown: { ...shownPlace, place: undefined } },
     Saved: { saved: true, shown: { ...shownPlace, savedId: 1 } },
+    LauncherBuild: { canCall: false },
   },
   play: {
+    LauncherBuild: async ({ canvasElement }) => {
+      const canvas = within(canvasElement);
+      await expect(canvas.queryByRole("button", { name: "Call" })).toBeNull();
+      await expect(canvas.getByRole("button", { name: "Copy number" })).toBeEnabled();
+    },
     Google: async ({ canvasElement }) => {
       const canvas = within(canvasElement);
       await expect(canvas.queryByRole("button", { name: "Share" })).toBeNull();

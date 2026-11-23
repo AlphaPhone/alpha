@@ -114,8 +114,3 @@ export const AttachmentBytes = Schema.Struct({
   sourceReferenceVersion: Schema.optionalKey(Schema.Literal(1)),
 })
 export type AttachmentBytes = typeof AttachmentBytes.Type
-/** The device's storage use by this app, where no volume reports its totals. */
-export const UsageAnswer = Schema.Struct({ bytes: Count, files: Count })
-export type UsageAnswer = typeof UsageAnswer.Type
-/** The native Browser asking Files to show its Downloads. */
-export const ShowDownloads = Schema.Struct({ session: Schema.optionalKey(Text) })

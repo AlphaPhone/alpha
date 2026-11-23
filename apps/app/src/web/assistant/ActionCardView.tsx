@@ -1,10 +1,12 @@
-// spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"
+// spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"
 import { Check, Clock, X } from "lucide-react";
+import type { PointerEvent } from "react";
 import { canTapApprove, canTapDecline, initial } from "../../../gen/assistant__approvals.ts";
 import { approvalExpiryText, copy } from "../../assistant/presentation.vibe";
 import type { ProposalCard } from "../../assistant/transcript.vibe";
 import { Button, Card, CardFooter, CardTitle } from "../components/ui/index.ts";
 
+/** One action card, the call state it is read under, and the owner's answers to it. */
 export type ActionCardViewProps = {
   /** The card as the transcript holds it. */
   card: ProposalCard;
@@ -14,11 +16,15 @@ export type ActionCardViewProps = {
   busy: boolean;
   /** The time the expiry is shown against. */
   now: number;
+  /** The owner approved the card. */
   onApprove: (card: ProposalCard) => void;
+  /** The owner declined the card; nothing runs. */
   onDecline: (card: ProposalCard) => void;
   /** Open the view a navigation-only card names. */
   onOpen?: (card: ProposalCard) => void;
 };
+
+const keepFocus = (event: PointerEvent<HTMLButtonElement>) => { if (event.button === 0) event.preventDefault(); };
 
 const settledTitles: Partial<Record<ProposalCard["state"], string>> = {
   DoneCard: "Completed", UnconfirmedCard: "Not confirmed", DeclinedCard: "Declined", ExpiredCard: copy.reviewExpiredTitle,
@@ -44,9 +50,9 @@ export function ActionCardView({ card, emergency, busy, now, onApprove, onDeclin
       {settled === undefined && (
         <CardFooter className="gap-2">
           {card.destination !== undefined
-            ? <Button onClick={() => onOpen?.(card)} disabled={busy}>Open</Button>
-            : <Button onClick={() => onApprove(card)} disabled={!approvable} aria-label={emergency ? copy.emergency : `Approve ${card.title}`}><Check aria-hidden className="size-4" />Approve</Button>}
-          <Button variant="outline" onClick={() => onDecline(card)} disabled={!declinable} aria-label={`Decline ${card.title}`}><X aria-hidden className="size-4" />Decline</Button>
+            ? <Button onClick={() => onOpen?.(card)} onPointerDown={keepFocus} disabled={busy}>Open</Button>
+            : <Button onClick={() => onApprove(card)} onPointerDown={keepFocus} disabled={!approvable} aria-label={emergency ? copy.emergency : `Approve ${card.title}`}><Check aria-hidden className="size-4" />Approve</Button>}
+          <Button variant="outline" onClick={() => onDecline(card)} onPointerDown={keepFocus} disabled={!declinable} aria-label={`Decline ${card.title}`}><X aria-hidden className="size-4" />Decline</Button>
         </CardFooter>
       )}
     </Card>

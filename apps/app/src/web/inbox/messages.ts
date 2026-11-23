@@ -79,6 +79,8 @@ export const handoffOutcome: Record<HandoffOutcome, string> = {
 /** What an operation's outcome tells the owner. */
 export const operationOutcome: Record<OperationOutcome, string> = {
   Sent: "Sent.",
+  SentBefore: "",
+  AwaitingReview: "Finish or cancel the open mail review first. Nothing was sent.",
   Changed: "Done.",
   Rejected: "Gmail rejected this.",
   Uncertain: "The outcome is unknown. Check the saved receipt; don't repeat it.",
@@ -88,6 +90,15 @@ export const operationOutcome: Record<OperationOutcome, string> = {
   Discarded: "The email changed after review, so the review was discarded. Nothing was sent.",
   SignedOut: "Sign-in expired. Sign in again, then check the review.",
 };
+
+/** How the Inbox answers an operation's outcome: the notice it says, and whether the receipt sheet closes or opens. */
+export function outcomeFeedback(outcome: OperationOutcome): { readonly notice: string; readonly review: "close" | "open" | "keep" } {
+  switch (outcome) {
+    case "Sent": return { notice: operationOutcome.Sent, review: "close" };
+    case "Uncertain": case "NotStarted": case "AwaitingReview": return { notice: "", review: "open" };
+    default: return { notice: operationOutcome[outcome], review: "keep" };
+  }
+}
 
 /** A review sheet's title by kind. */
 export const reviewTitle: Record<OpKind, string> = {

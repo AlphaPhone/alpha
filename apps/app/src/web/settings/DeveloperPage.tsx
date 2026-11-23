@@ -1,6 +1,7 @@
 // spec/settings/index.md, "Developer pages open only in a build with test mocks"
+import type { SettingsPage } from "../../../gen/settings__facts.ts";
 import { Button } from "../components/ui/index.ts";
-import { Section } from "./Rows.tsx";
+import { Section, SettingRow } from "./Rows.tsx";
 
 /** The simulated device commands a development build offers. */
 export type DevCommand = "home" | "back" | "power" | "unlock" | "boot" | "assistant" | "shade" | "background" | "resume" | "incoming-call" | "incoming-message" | "pickup";
@@ -13,7 +14,13 @@ export interface DeveloperActs {
   readonly profile: "app" | "development";
 }
 
-export interface DeveloperPageProps { readonly developerActs: DeveloperActs }
+/** The developer page of a build with test mocks: its controls, the version and Android's developer settings. */
+export interface DeveloperPageProps {
+  readonly developerActs: DeveloperActs;
+  readonly version: string;
+  readonly native: boolean;
+  readonly onHandoff: (page: SettingsPage) => void;
+}
 
 const COMMANDS: [DevCommand, string][] = [
   ["home", "Home"], ["back", "Back"], ["power", "Power"], ["unlock", "Unlock"], ["boot", "Restart"], ["assistant", "Assistant"],
@@ -22,9 +29,13 @@ const COMMANDS: [DevCommand, string][] = [
 ];
 
 /** Development device controls, roles and the simulated profile, in a build with test mocks only. */
-export function DeveloperPage({ developerActs }: DeveloperPageProps) {
+export function DeveloperPage({ developerActs, version, native, onHandoff }: DeveloperPageProps) {
   return (
     <>
+      <Section>
+        <SettingRow label="App version" state={{ word: version || "Development preview" }} />
+        {native && <SettingRow label="Android developer settings" ariaLabel="Android developer settings" onHandoff={() => onHandoff("PageDeveloper")} />}
+      </Section>
       <Section caption="Device controls">
         <div className="grid grid-cols-3 gap-2 p-3">
           {COMMANDS.map(([command, label]) => <Button key={command} variant="secondary" size="sm" onClick={() => developerActs.command(command)}>{label}</Button>)}

@@ -83,6 +83,17 @@ pure def sometimesRecovered(s: SpeechChains): bool = s.app.stage == Playing and 
 pure def sometimesReadingRefused(s: SpeechChains): bool = s.reading.stage == Latched and s.refusals >= 1
 ```
 
+### A reading the owner starts first retires a running voice conversation and waits for its replies to stop
+
+A message read aloud from the chat ends the conversation that is talking, and starts only once the
+reply channel is idle; it never plays over a reply.
+
+```quint
+pure def readingMayStart(conversationActive: bool, repliesStage: ChainStage): bool = not(conversationActive) and repliesStage == Idle
+pure def lawAReadingNeverPlaysOverAReply(conversationActive: bool, repliesStage: ChainStage): bool =
+  readingMayStart(conversationActive, repliesStage) implies (repliesStage != Playing and repliesStage != Retiring and not(conversationActive))
+```
+
 ### Voice enters only when its replies are not latched, not still retiring, and no recording is open
 
 ```quint
@@ -194,4 +205,30 @@ pure def lawAVerbatimRequestIsSaidInFull(sayableLeft: bool): bool =
   spokenLineOf(OtherAction({ verbatimAsked: true, sayableLeft: sayableLeft })) == WholeReply
 pure def lawAnEmailIsNeverReadOut(validatedCard: bool): bool =
   spokenLineOf(EmailDraft({ validatedCard: validatedCard })) != WholeReply
+```
+
+## Story: Keep a page I read and my voicemail on my phone
+
+> As the owner, I want a page I asked to hear read aloud and my voicemail transcribed only by my
+> phone's own voice and recognizer, so that neither the page's text nor a caller's audio leaves the
+> phone, whatever speech route my account gives.
+
+### A reviewed page, a local reading and voicemail audio use only the phone; replies and turn guidance use the route in use
+
+A reviewed page plays only from the phone's own synthesis of its one-use reading token, and only when
+the phone says the audio was made on the device. A reading the owner reviewed on the browser build
+is synthesized on the phone. A voicemail window is transcribed only by the on-device recognizer, and
+with no recognizer ready no transcript is made. Replies and Maps turn guidance speak on the route in
+use, on the phone when a network route fails before audio.
+
+```quint
+type SpeechSource = ConversationReply | TurnGuidance | ReviewedPage | LocalReading | VoicemailAudio
+type SpeechEngine = PhoneEngine | RouteInUse
+pure def engineFor(source: SpeechSource): SpeechEngine =
+  if (source == ReviewedPage or source == LocalReading or source == VoicemailAudio) PhoneEngine else RouteInUse
+pure val sourceValues = Set(ConversationReply, TurnGuidance, ReviewedPage, LocalReading, VoicemailAudio)
+pure def lawPageTextAndVoicemailNeverLeaveThePhone(source: SpeechSource): bool =
+  (source == ReviewedPage or source == LocalReading or source == VoicemailAudio) implies engineFor(source) == PhoneEngine
+pure def lawRepliesAndGuidanceFollowTheRoute(source: SpeechSource): bool =
+  (source == ConversationReply or source == TurnGuidance) implies engineFor(source) == RouteInUse
 ```

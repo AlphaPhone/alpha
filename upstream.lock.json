@@ -1,7 +1,7 @@
 {
   "url": "https://github.com/elizaOS/eliza.git",
-  "branch": "vibestack",
-  "commit": "PENDING_VIBESTACK_MIGRATION_COMMIT",
+  "branch": "claude/vibestack-alphaphone-migration",
+  "commit": "c84e5d68e37ea567d9ae260973bb94fa0e5bb4b4",
   "appSource": "apps/app",
   "osSource": "packages/os",
   "androidSource": "packages/os/android",
@@ -9,5 +9,6 @@
   "agentSource": "packages/agent",
   "agentBundle": "@elizaos/agent/bundle",
   "cloudSource": "packages/cloud",
-  "vibestackSource": "vibestack"
+  "vibestackSource": "vibestack",
+  "pullRequest": "https://github.com/elizaOS/eliza/pull/40140"
 }

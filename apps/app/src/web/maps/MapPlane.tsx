@@ -1,10 +1,13 @@
-// spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"
+// spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "The compass shows only while the map is turned or tilted and guidance is not following, and puts north up"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"
 import maplibregl, { type GeoJSONSource, type Map as MapLibre, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { useCallback, useState } from "react";
+import { Compass } from "lucide-react";
+import { useCallback, useRef, useState } from "react";
 import type { Basemap } from "../../../gen/maps__plane.ts";
+import { compassShown } from "../../../gen/maps__plane.ts";
 import type { Coordinate } from "../../maps/maps.schema.vibe";
-import { ask } from "./runtime.ts";
+import { Button } from "../components/ui/index.ts";
+import { ask } from "./actions.ts";
 
 const WORLD_STYLE = "https://tiles.openfreemap.org/styles/bright";
 const OPENING: { center: [number, number]; zoom: number } = { center: [-98, 39], zoom: 2.6 };
@@ -12,6 +15,7 @@ const OPENING: { center: [number, number]; zoom: number } = { center: [-98, 39],
 /** A place drawn on the map; tapping it reports its id. */
 export type MapPin = { readonly id: string; readonly label: string; readonly coordinate: Coordinate };
 
+/** What the plane draws and the reports it makes: basemap, pins, position, route, camera and its callbacks. */
 export type MapPlaneProps = {
   /** Which map to draw; NoBasemap draws nothing. */
   basemap: Basemap;
@@ -66,6 +70,7 @@ function lineOf(route: ReadonlyArray<Coordinate> | undefined) {
  */
 export function MapPlane(props: MapPlaneProps) {
   const [map, setMap] = useState<MapLibre>();
+  const [turn, setTurn] = useState({ bearing: 0, pitch: 0 });
   const { basemap, tileSize = 256, maxZoom = 20, generation } = props;
 
   const mount = useCallback((node: HTMLDivElement | null) => {
@@ -97,6 +102,9 @@ export function MapPlane(props: MapPlaneProps) {
     instance.on("touchend", () => props.onPressEnd());
     instance.on("touchcancel", () => props.onPressEnd());
     instance.on("contextmenu", (e) => props.onLongPress({ latitude: e.lngLat.lat, longitude: e.lngLat.lng }));
+    const turned = () => setTurn({ bearing: Math.trunc(instance.getBearing()), pitch: Math.trunc(instance.getPitch()) });
+    instance.on("rotate", turned);
+    instance.on("pitch", turned);
     setMap(instance);
     return () => {
       instance.remove();
@@ -105,7 +113,7 @@ export function MapPlane(props: MapPlaneProps) {
     };
   }, [basemap, tileSize, maxZoom, generation]);
 
-  const markers = useState<maplibregl.Marker[]>([])[0];
+  const markers = useRef<maplibregl.Marker[]>([]).current;
   const routeKey = JSON.stringify(props.route?.length ? [props.route[0], props.route.at(-1), props.route.length] : []);
   const pinKey = JSON.stringify(props.pins.map((p) => p.id));
   const viewKey = JSON.stringify([props.selection, props.follow, props.follow ? props.position : undefined]);
@@ -146,10 +154,21 @@ export function MapPlane(props: MapPlaneProps) {
     }
   }, [map, viewKey]);
 
+  const northUp = () => {
+    if (!map) return;
+    map.easeTo({ bearing: 0, pitch: 0, duration: 300 });
+    map.getCanvas().focus({ preventScroll: true });
+  };
+
   if (basemap === "NoBasemap") return <div role="img" aria-label="Google map unavailable" className="size-full bg-muted" />;
   return (
     <div className="relative size-full">
       <div ref={mount} role="application" aria-label={props.label} className="size-full" />
+      {compassShown(turn.bearing, turn.pitch, props.follow) && (
+        <Button variant="secondary" size="icon" aria-label="Turn map north up" className="absolute right-4 top-24 rounded-full shadow-md" onClick={northUp}>
+          <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />
+        </Button>
+      )}
       <span ref={syncRoute} hidden />
       <span ref={syncPins} hidden />
       <span ref={syncCamera} hidden />

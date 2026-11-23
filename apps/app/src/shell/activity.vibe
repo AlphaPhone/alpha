@@ -3,24 +3,27 @@ import type { IdleFacts } from "../../gen/settings__updates.ts"
 import { Machine as GeometryMachine } from "../../gen/shell__geometry.effect.vibe"
 import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
 import { activeShown, blurActive, focusedField } from "./page.ts"
+import { IdleSources } from "./ports.vibe"
 
 /** What the owner is doing in the shell, for an update that must wait for idle Home and keep what was typed. */
 export service Activity {
-  /** The shell's facts of the idle decision. Calls, connection work and the sign-in card belong to their own areas and read as quiet here. */
+  /** The facts of the idle decision: the shell's own, and a call, connection work and the sign-in card as their areas report them. */
   updateIdleFacts(): IdleFacts!!
   /** Commits the field being typed in, so every draft is in its area's kept state; true when no field still holds input. */
   keepDrafts(): boolean!!
 }
 
-/** The activity service over the navigation and geometry machines. */
+/** The activity service over the navigation and geometry machines and the idle sources other areas fill. */
 export const activityLive = Layer.effect(Activity, effect {
   const navigation = try NavigationMachine
   const geometry = try GeometryMachine
+  const sources = try IdleSources
   return {
     effect updateIdleFacts() {
       const nav = try navigation.get()
       const window = try geometry.get()
       const field = focusedField()
+      const quiet = try sources.facts()
       return {
         home: nav.app === "" && !nav.hidden,
         viewOpen: nav.app !== "",
@@ -33,10 +36,10 @@ export const activityLive = Layer.effect(Activity, effect {
         shade: nav.shade,
         homeEdit: nav.editing || nav.adding,
         review: nav.layers.length > 0 || nav.holds.length > 0,
-        connectionBusy: false,
-        signInOpen: false,
-        signInUntouched: true,
-        call: false,
+        connectionBusy: quiet.connectionBusy,
+        signInOpen: quiet.signInOpen,
+        signInUntouched: quiet.signInUntouched,
+        call: quiet.call,
       } satisfies IdleFacts
     },
     effect keepDrafts() {

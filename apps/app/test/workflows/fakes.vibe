@@ -1,0 +1,102 @@
+// spec/workflows/index.md
+import { Build } from "../../src/platform/build.vibe"
+import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
+import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
+import { memoryStore } from "../../src/platform/storage.vibe"
+import { Foreground } from "../../src/shell/foreground.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { layer } from "../../src/workflows/layer.vibe"
+import { WorkflowClockPort } from "../../src/workflows/ports.vibe"
+
+/** What the fake agent answers one request with. */
+export interface Answer { readonly status: number; readonly data?: unknown }
+/** One fake agent route: an answer, or undefined to let the next one answer. */
+export type Handler = (method: string, path: string, body: unknown) => Answer | undefined
+/** One request the fake agent received. */
+export interface Sent { readonly method: string; readonly path: string; readonly body: unknown }
+/** One native call the fake bridge received. */
+export interface NativeCall { readonly plugin: string; readonly method: string; readonly args: unknown }
+/** One fake native method: its answer, or undefined when the plugin does not have it. */
+export type NativeHandler = (plugin: string, method: string, args: unknown) => unknown
+
+/** The resident's owner. */
+export const me: Handler = (method, path) => method === "GET" && path === "/api/auth/me" ? { status: 200, data: { identity: { kind: "owner", id: "agent-1" } } } : undefined
+
+/** The workflow engine's status: every protocol Workflows reads. */
+export const engineStatus = { engine: "eliza-typed", status: "ready", manualSubmissionProtocol: 1, approvalReceiptProtocol: 1, hostedDigestProtocol: 1, hostedNativeSourceProtocol: 1 }
+
+/** The status route, answered with the engine's status. */
+export const statusRoute: Handler = (m, p) => m === "GET" && p === "/api/workflow/status" ? { status: 200, data: engineStatus } : undefined
+
+/** The resident's local API, answering from `handlers` in order; anything else is 404. */
+export function residentOf(handlers: ReadonlyArray<Handler>, sent: Sent[]) {
+  return Layer.succeed(Resident, {
+    status: () => succeed("running" as const),
+    ensureRunning: () => succeed(undefined),
+    effect json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) {
+      sent.push({ method, path, body })
+      const answer = [me, ...handlers].reduce<Answer | undefined>((found, h) => found ?? h(method, path, body), undefined) ?? { status: 404 }
+      if (answer.status >= 200 && answer.status < 300) return { status: answer.status, data: answer.data }
+      throw new ResidentRefused({ status: answer.status, message: "refused" })
+    },
+    stream: () => Stream.empty,
+  })
+}
+
+/** A native bridge answering from `handler`, recording every call; with no handler no plugin is installed. */
+export function nativeOf(handler: NativeHandler | undefined, calls: NativeCall[]) {
+  return Layer.succeed(Native, {
+    available: () => succeed(handler !== undefined),
+    effect invoke(plugin: string, method: string, args?: unknown) {
+      calls.push({ plugin, method, args })
+      const value = handler === undefined ? undefined : handler(plugin, method, args)
+      if (value === undefined) throw new NativeUnavailable({ plugin, method })
+      return value
+    },
+    listen: () => Stream.empty,
+  })
+}
+
+/** The build: its variant and whether test mocks are on. */
+export function buildOf(variant: "launcher" | "aosp" | "browser", testMocks = false) {
+  return Layer.succeed(Build, { info: { version: "test", variant, testMocks } })
+}
+
+/** Navigation that records each app and route it opened. */
+export function navigationOf(opened: Array<{ app: string; route?: string }>) {
+  return Layer.succeed(Navigation, {
+    open: (app: string, route?: string) => sync(() => { opened.push(route === undefined ? { app } : { app, route }); return true }),
+  } as unknown as Navigation.Shape)
+}
+
+/** Alpha in front with Workflows open, never changing. */
+export const inFront = Layer.succeed(Foreground, {
+  changes: Stream.empty,
+  get: () => succeed({ visible: true, locked: false, screen: "home", view: "workflows", shade: false, chat: false, modal: false }),
+} as unknown as Foreground.Shape)
+
+/** A Clock that reviews the alarm and answers that it opened. */
+export const openingClock = Layer.succeed(WorkflowClockPort, {
+  prepare: () => succeed(true),
+  confirm: () => succeed(true),
+  retire: () => succeed(undefined),
+})
+
+/** How a test builds Workflows. */
+export interface Rig {
+  readonly variant?: "launcher" | "aosp" | "browser"
+  readonly testMocks?: boolean
+  readonly native?: NativeHandler
+  readonly calls?: NativeCall[]
+  readonly opened?: Array<{ app: string; route?: string }>
+  readonly clock?: boolean
+}
+
+/** Workflows' layer over the fake agent, bridge, build, navigation and memory storage. */
+export function workflowsOf(handlers: ReadonlyArray<Handler>, sent: Sent[], rig: Rig = {}) {
+  const platform = Layer.mergeAll(
+    residentOf(handlers, sent), nativeOf(rig.native, rig.calls ?? []), buildOf(rig.variant ?? "launcher", rig.testMocks ?? false), memoryStore,
+    navigationOf(rig.opened ?? []), inFront,
+  )
+  return Layer.provide(layer, rig.clock === true ? Layer.merge(platform, openingClock) : platform)
+}

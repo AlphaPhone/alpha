@@ -1,0 +1,542 @@
+// spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/billing.md, "Story: Choose or change my plan in Alpha"; spec/account/sheet.md, "Story: Look after my account in one place"; spec/account/provider.md, "Story: Use my own keys instead of Cloud"
+import { assert, it } from "@effect/vitest"
+import { entryOf } from "../../gen/account__signIn.ts"
+import { GoogleAgentAccess } from "../../src/account/agentAccess.vibe"
+import { Membership } from "../../src/account/billing.vibe"
+import { CloudDelegation } from "../../src/account/delegation.vibe"
+import { DedicatedSetup, DevBridgeSignIn } from "../../src/account/devBridge.vibe"
+import { Entitlement } from "../../src/account/entitlement.vibe"
+import { GoogleAccounts } from "../../src/account/google.vibe"
+import { AiProvider } from "../../src/account/provider.vibe"
+import { CloudSession } from "../../src/account/session.vibe"
+import { AccountSheet } from "../../src/account/sheet.vibe"
+import { SignInScreen } from "../../src/account/signIn.vibe"
+import { type Answer, type Calls, account, cloudAnswers, expiresAt, found, names, now, providerStatus, signedInNative, snapshot, until } from "./platform.vibe"
+
+/** A signed-out host whose next sign-in stores `key-2`. */
+function signedOutNative(held: { key: boolean }): Record<string, Answer> {
+  return {
+    ...signedInNative,
+    "AlphaCloudSignIn.credentialIdentity": () => (held.key ? { credentialId: "key-2", expiresAt } : { refuse: "signed-out" }),
+    "AlphaCloudSignIn.startGoogle": () => {
+      held.key = true
+      return { status: "authenticated", expiresAt, credentialId: "key-2", accountCreated: true }
+    },
+    "AlphaCloudSignIn.startEmail": { attemptId: "attempt-1", expiresAt, resendAt: now },
+    "AlphaCloudSignIn.verifyEmail": (args: unknown) => {
+      if ((args as { code?: string }).code !== "123456") return { refuse: "invalid-code" }
+      held.key = true
+      return { status: "authenticated", expiresAt, credentialId: "key-2", accountCreated: null, previousSignIn: "unconfirmed" }
+    },
+    "AlphaCloudSignIn.resumeMfa": { active: true }
+  }
+}
+
+// spec/account/session.md, "Story: Keep my sign-in working until I sign out"
+it.live(`A renewal replaces the key of the same account, and a refused key asks for a new sign-in (spec/account/session.md, "Story: Keep my sign-in working until I sign out")`, () => effect {
+  const renewed = { ...signedInNative, "AlphaCloudSignIn.renewSignIn": { status: "renewed", expiryWarning: false, expiresAt: expiresAt + 1000, credentialId: "key-9" } }
+  const refused = { ...signedInNative, "AlphaCloudSignIn.renewSignIn": { status: "sign-in-required", expiryWarning: true, keyRefused: true } }
+  const first = try scoped(effect {
+    provide account([], renewed) {
+      const session = try CloudSession
+      fork.scoped session.run()
+      return try found(try until(session.changes, (s) => s.renewals >= 1))
+    }
+  })
+  const second = try scoped(effect {
+    provide account([], refused) {
+      const session = try CloudSession
+      fork.scoped session.run()
+      return try found(try until(session.changes, (s) => s.phase === "KeyRefused"))
+    }
+  })
+  try Effect.try(() => assert.deepStrictEqual(
+    { renewed: [first.account.credentialId, first.account.userId, first.generation, first.phase], refused: [second.expiryWarning, second.account.credentialId] },
+    { renewed: ["key-9", "user-1", 1, "SignedIn"], refused: [true, "key-1"] }
+  ))
+})
+
+// spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish"
+it.live(`A retained incomplete return is told once startup has settled (spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish")`, () => effect {
+  provide account([], signedInNative, cloudAnswers, { events: { "AlphaCloudSignIn.signInIncomplete": [{ code: "storage" }, { code: "unknown-code" }] } }) {
+    try scoped(effect {
+      const session = try CloudSession
+      fork.scoped session.run()
+      const told = try found(try until(session.changes, (s) => s.notices >= 1))
+      try Effect.try(() => assert.deepStrictEqual({ notices: told.notices, waiting: told.waiting, phase: told.phase }, { notices: 1, waiting: "NoNotice", phase: "SignedIn" }))
+    })
+  }
+})
+
+// spec/account/session.md, "Story: Use Cloud only for managed services"
+it.live(`Only managed routes leave the phone (spec/account/session.md, "Story: Use Cloud only for managed services")`, () => effect {
+  provide account([]) {
+    try scoped(effect {
+      const session = try CloudSession
+      fork.scoped session.run()
+      try until(session.changes, (s) => s.loaded)
+      const refused = (route: "HandOffRoute" | "PairingRoute" | "FundsRoute" | "MapsRoute") => Effect.match(session.admit(route), { onFailure: () => true, onSuccess: () => false })
+      try Effect.try(() => assert.deepStrictEqual(
+        { handOff: try refused("HandOffRoute"), pairing: try refused("PairingRoute"), funds: try refused("FundsRoute"), maps: try refused("MapsRoute") },
+        { handOff: true, pairing: true, funds: false, maps: false }
+      ))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Choose how to sign in"
+it.live(`A signed-out phone shows the required page with the methods the host reports (spec/account/signIn.md, "Story: Choose how to sign in")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedOutNative({ key: false })) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      const shown = try found(try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known))
+      // spec/account/signIn.md, "The automatic page checks readiness once, and an owner's check keeps the agent running"
+      const probes = names(calls).filter((n) => n === "AlphaCloudSignIn.status").length
+      try Effect.try(() => assert.deepStrictEqual(
+        { entry: entryOf(shown), methods: shown.methods, net: shown.net, probes, started: calls.some((c) => c.name === "AlphaCloudSignIn.startGoogle" || c.name === "AlphaCloudSignIn.startEmail") },
+        { entry: "RequiredEntry", methods: { known: true, google: true, email: true, phone: false }, net: "NetOnline", probes: 1, started: false }
+      ))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Sign in with Google"
+it.live(`Google signs in a new account and keeps the agent running (spec/account/signIn.md, "Story: Sign in with Google")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedOutNative({ key: false })) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known)
+      try signIn.google()
+      // spec/account/session.md, "A new account, and an earlier sign-in left unconfirmed, are told for the sign-in that reported them"
+      const signedIn = try found(try until(session.changes, (s) => s.phase === "SignedIn"))
+      const screen = try signIn.current()
+      try Effect.try(() => assert.deepStrictEqual(
+        { credential: signedIn.account.credentialId, created: signedIn.created, prior: signedIn.priorUnconfirmed, screen: screen.screen, held: signedIn.holder,
+          ensured: names(calls).lastIndexOf("Resident.ensureRunning") > names(calls).indexOf("AlphaCloudSignIn.startGoogle") },
+        { credential: "key-2", created: true, prior: false, screen: "ScreenClosed", held: "Free", ensured: true }
+      ))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Sign in with Google"
+it.live(`A second verification the host kept is offered once resumed (spec/account/signIn.md, "Story: Sign in with Google")`, () => effect {
+  const calls: Calls = []
+  const retained = { status: "mfa", method: "sms", attemptId: "attempt-9", expiresAt: now + 600000 }
+  provide account(calls, signedOutNative({ key: false }), cloudAnswers, { events: { "AlphaCloudSignIn.signInMfaRequired": [retained] } }) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      // spec/account/signIn.md, "A second verification the host kept after its wait ended is offered once the host resumes it"
+      const step = try found(try until(signIn.changes, (s) => s.screen === "FactorStep"))
+      try Effect.try(() => assert.deepStrictEqual(
+        { factor: step.factor, attempt: step.attempt, resumed: calls.find((c) => c.name === "AlphaCloudSignIn.resumeMfa")?.args },
+        { factor: "SmsFactor", attempt: 1, resumed: { attemptId: "attempt-9", environment: "production" } }
+      ))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Sign in with a code"
+it.live(`A wrong code keeps the step and the right one signs in (spec/account/signIn.md, "Story: Sign in with a code")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedOutNative({ key: false })) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known)
+      try signIn.submit(" owner@example.com ")
+      try until(signIn.changes, (s) => s.screen === "CodeStep" && s.work === "NoWork")
+      // spec/account/signIn.md, "A wrong code keeps the step, a spent code leaves only Resend, and any other failure returns to the choice"
+      try signIn.verify("000000")
+      const wrong = try signIn.current()
+      try signIn.verify("123 456")
+      const signedIn = try found(try until(session.changes, (s) => s.phase === "SignedIn"))
+      try Effect.try(() => assert.deepStrictEqual({
+        sent: calls.find((c) => c.name === "AlphaCloudSignIn.startEmail")?.args,
+        wrong: [wrong.screen, wrong.fault, wrong.attempt],
+        verified: calls.filter((c) => c.name === "AlphaCloudSignIn.verifyEmail").map((c) => (c.args as { code: string }).code),
+        prior: signedIn.priorUnconfirmed, created: signedIn.created
+      }, {
+        sent: { environment: "production", email: "owner@example.com", requestId: (calls.find((c) => c.name === "AlphaCloudSignIn.startEmail")?.args as { requestId: string }).requestId },
+        wrong: ["CodeStep", "WrongCode", 1],
+        verified: ["000000", "123456"],
+        prior: true, created: false
+      }))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Leave sign-in"
+it.live(`Back from the code step cancels the attempt and keeps the address (spec/account/signIn.md, "Story: Leave sign-in")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedOutNative({ key: false })) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known)
+      try signIn.submit("owner@example.com")
+      try until(signIn.changes, (s) => s.screen === "CodeStep")
+      try signIn.back()
+      const left = try signIn.current()
+      // spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"
+      try signIn.back()
+      const kept = try signIn.current()
+      try Effect.try(() => assert.deepStrictEqual(
+        { left: [left.screen, left.prefill, left.attempt], cancelled: names(calls).includes("AlphaCloudSignIn.cancel"), kept: [kept.screen, entryOf(kept)] },
+        { left: ["Choose", true, 0], cancelled: true, kept: ["Choose", "RequiredEntry"] }
+      ))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Read the service's terms before signing in"
+it.live(`Terms are shown only as the service's plain published text (spec/account/signIn.md, "Story: Read the service's terms before signing in")`, () => effect {
+  const document = { title: "Terms", revision: "r1", sections: [{ title: "Use", paragraphs: ["Plain text."] }] }
+  const published = { ...cloudAnswers, "GET /api/public/service": { success: true, version: 1, service: { name: "Eliza Cloud", terms: document, privacy: { ...document, title: "Privacy" } } } }
+  const later = { ...cloudAnswers, "GET /api/public/service": { success: true, version: 2, service: { name: "Eliza Cloud", terms: document, privacy: document } } }
+  const shown = try scoped(effect { provide account([], signedInNative, published) { return try (try SignInScreen).serviceInfo() } })
+  const unknown = try scoped(effect { provide account([], signedInNative, later) { return try (try SignInScreen).serviceInfo() } })
+  const missing = try scoped(effect { provide account([]) { return try (try SignInScreen).serviceInfo() } })
+  try Effect.try(() => assert.deepStrictEqual({ name: shown?.name, privacy: shown?.privacy.title, unknown, missing }, { name: "Eliza Cloud", privacy: "Privacy", unknown: undefined, missing: undefined }))
+})
+
+// spec/account/devBridge.md, "Story: Sign in through the development bridge"
+it.live(`A product build has no development bridge and asks it nothing (spec/account/devBridge.md, "Story: Sign in through the development bridge")`, () => effect {
+  provide account([]) {
+    try scoped(effect {
+      const bridge = try DevBridgeSignIn
+      try bridge.signIn()
+      try bridge.cancel()
+      const state = try found(try until(bridge.changes, () => true))
+      try Effect.try(() => assert.deepStrictEqual({ allowed: state.allowed, phase: state.phase, store: state.store }, { allowed: false, phase: "BridgeIdle", store: "StoreBefore" }))
+    })
+  }
+})
+
+// spec/account/dedicated.md, "Story: Review a dedicated agent in a development build"
+it.live(`A product build has no dedicated review (spec/account/dedicated.md, "Story: Review a dedicated agent in a development build")`, () => effect {
+  provide account([]) {
+    try scoped(effect {
+      const dedicated = try DedicatedSetup
+      try dedicated.review()
+      try dedicated.accept()
+      try dedicated.poll()
+      const state = try found(try until(dedicated.changes, () => true))
+      try Effect.try(() => assert.deepStrictEqual({ allowed: state.allowed, view: state.view, accepted: state.accepted }, { allowed: false, view: { tag: "NoView" }, accepted: 0 }))
+    })
+  }
+})
+
+// spec/account/plan.md, "Story: See a plan change soon after I make it"
+it.live(`Coming back from a payment page checks the plan once at once (spec/account/plan.md, "Story: See a plan change soon after I make it")`, () => effect {
+  const calls: Calls = []
+  provide account(calls) {
+    try scoped(effect {
+      const session = try CloudSession
+      const entitlement = try Entitlement
+      fork.scoped session.run()
+      fork.scoped entitlement.run()
+      try until(entitlement.changes, (a) => a.binding === "CloudBound" && !a.recheck.reading)
+      const before = names(calls).filter((n) => n === "GET /api/v1/billing/limits").length
+      // spec/account/plan.md, "A check runs at most once a minute, once at once after a real network return, and once after a payment page"
+      try entitlement.foreground(true)
+      const quiet = names(calls).filter((n) => n === "GET /api/v1/billing/limits").length
+      try entitlement.paymentPageOpened()
+      try entitlement.foreground(false)
+      try entitlement.foreground(true)
+      const checked = try found(try until(entitlement.changes, (a) => a.writes >= 2 && !a.recheck.reading))
+      try Effect.try(() => assert.deepStrictEqual(
+        { quiet: quiet === before, again: names(calls).filter((n) => n === "GET /api/v1/billing/limits").length > before, permit: checked.recheck.paymentReturn },
+        { quiet: true, again: true, permit: false }
+      ))
+    })
+  }
+})
+
+// spec/account/billing.md, "Story: Choose or change my plan in Alpha"
+it.live(`Subscribing opens Stripe's page and Cloud's confirmation on return activates the plan (spec/account/billing.md, "Story: Choose or change my plan in Alpha")`, () => effect {
+  const calls: Calls = []
+  const plans = { plans: [{ key: "plus_monthly", name: "Plus", amountCents: 3000, currency: "usd", interval: "month", allowance: { amountUsd: "25" } }] }
+  const cloud = {
+    ...cloudAnswers,
+    "GET /api/v1/subscriptions/plans": plans,
+    "GET /api/v1/referrals": { code: "ALPHA-1", total_referrals: 0, is_active: true },
+    "POST /api/v1/subscriptions/checkout": { status: "open", commandId: "cmd-1", checkoutUrl: "https://checkout.stripe.com/c/pay/plus", sessionId: "cs-1", expiresAt: now + 600000 },
+    "POST /api/v1/subscriptions/checkout/confirm": { status: "completed", commandId: "cmd-1" }
+  }
+  provide account(calls, signedInNative, cloud) {
+    try scoped(effect {
+      const session = try CloudSession
+      const entitlement = try Entitlement
+      const membership = try Membership
+      fork.scoped session.run()
+      fork.scoped entitlement.run()
+      fork.scoped membership.run()
+      try until(membership.changes, (b) => b.owner === 1)
+      // spec/account/billing.md, "The plans and the current plan are read when the manager opens"
+      try membership.openManager()
+      try until(membership.changes, (b) => b.manager === "ManagerShown")
+      // spec/account/billing.md, "Subscribing opens Stripe's checkout, and only Cloud's confirmation on return activates the plan"
+      try membership.subscribe("Plus")
+      const waiting = try found(try until(membership.changes, (b) => b.checkout.tag === "AwaitingReturn"))
+      try entitlement.foreground(false)
+      try entitlement.foreground(true)
+      const active = try found(try until(membership.changes, (b) => b.outcome === "PlanActive"))
+      try Effect.try(() => assert.deepStrictEqual({
+        asked: (calls.find((c) => c.name === "POST /api/v1/subscriptions/checkout")?.args as { planKey?: string } | undefined)?.planKey,
+        opened: calls.filter((c) => c.name === "AlphaConnection.openExternal").map((c) => (c.args as { url: string }).url),
+        waitingCurrent: waiting.current, current: active.current, checkout: active.checkout.tag,
+        confirmed: calls.find((c) => c.name === "POST /api/v1/subscriptions/checkout/confirm")?.args
+      }, {
+        asked: "plus_monthly", opened: ["https://checkout.stripe.com/c/pay/plus"], waitingCurrent: { tag: "NoPaidPlan" },
+        current: { tag: "OnPlan", plan: "Plus", endsAtPeriodEnd: false, paymentDue: false }, checkout: "NoCheckout", confirmed: { sessionId: "cs-1" }
+      }))
+    })
+  }
+})
+
+// spec/account/billing.md, "Story: Redeem a membership code"
+it.live(`A refused code says so and is sent only once, to the redemption (spec/account/billing.md, "Story: Redeem a membership code")`, () => effect {
+  const calls: Calls = []
+  provide account(calls) {
+    try scoped(effect {
+      const session = try CloudSession
+      const membership = try Membership
+      fork.scoped session.run()
+      fork.scoped membership.run()
+      try until(membership.changes, (b) => b.owner === 1)
+      const started = try membership.redeem("  GIFT-CODE-7  ")
+      const settled = try found(try until(membership.changes, (b) => b.redeem.tag === "RedeemIdle" && b.outcome !== "NoOutcome"))
+      const carrying = calls.filter((c) => JSON.stringify(c.args ?? null).includes("GIFT-CODE-7")).map((c) => c.name)
+      try Effect.try(() => assert.deepStrictEqual({ started, outcome: settled.outcome, carrying }, { started: true, outcome: "CodeRefused", carrying: ["POST /api/v1/subscription/redeem"] }))
+    })
+  }
+})
+
+// spec/account/billing.md, "Story: Share or enter a referral code"
+it.live(`A referral code is applied once, trimmed (spec/account/billing.md, "Story: Share or enter a referral code")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedInNative, { ...cloudAnswers, "POST /api/v1/referrals/apply": { success: true } }) {
+    try scoped(effect {
+      const session = try CloudSession
+      const membership = try Membership
+      fork.scoped session.run()
+      fork.scoped membership.run()
+      try until(membership.changes, (b) => b.owner === 1)
+      try membership.applyReferral("  REF-1234 ")
+      const applied = try found(try until(membership.changes, (b) => b.outcome === "ReferralApplied"))
+      try membership.applyReferral("no spaces allowed here")
+      try Effect.try(() => assert.deepStrictEqual(
+        { sent: calls.filter((c) => c.name === "POST /api/v1/referrals/apply").map((c) => c.args), referring: applied.referring },
+        { sent: [{ code: "REF-1234" }], referring: false }
+      ))
+    })
+  }
+})
+
+// spec/account/sheet.md, "Story: Look after my account in one place"
+it.live(`Sign-out is confirmed only for the reviewed account, and Home closes the sheet (spec/account/sheet.md, "Story: Look after my account in one place")`, () => effect {
+  const calls: Calls = []
+  provide account(calls) {
+    try scoped(effect {
+      const session = try CloudSession
+      const sheet = try AccountSheet
+      fork.scoped session.run()
+      fork.scoped sheet.run()
+      try until(sheet.changes, (s) => s.owner === 1)
+      try sheet.show()
+      try sheet.askSignOut()
+      try sheet.close()
+      const dismissed = names(calls).includes("DELETE /api/v1/api-keys/current")
+      try sheet.show()
+      try sheet.askSignOut()
+      const reviewing = try sheet.current()
+      try sheet.confirmSignOut()
+      const after = try found(try until(sheet.changes, (s) => s.owner === 0))
+      try sheet.returnHome()
+      const home = try sheet.current()
+      try Effect.try(() => assert.deepStrictEqual(
+        { dismissed, reviewOwner: reviewing.reviewOwner, revoked: names(calls).includes("DELETE /api/v1/api-keys/current"), confirmed: after.confirmed, home: [home.open, home.covered] },
+        { dismissed: false, reviewOwner: 1, revoked: true, confirmed: 1, home: [false, false] }
+      ))
+    })
+  }
+})
+
+// spec/account/sheet.md, "Story: Notice what needs my attention"
+it.live(`A plan that needs attention is a Home notice until dismissed (spec/account/sheet.md, "Story: Notice what needs my attention")`, () => effect {
+  provide account([], signedInNative, { ...cloudAnswers, "GET /api/v1/billing/limits": snapshot(0) }) {
+    try scoped(effect {
+      const session = try CloudSession
+      const entitlement = try Entitlement
+      const sheet = try AccountSheet
+      fork.scoped session.run()
+      fork.scoped entitlement.run()
+      fork.scoped sheet.run()
+      const needed = try found(try until(sheet.changes, (s) => s.planRequired))
+      try sheet.covered(true)
+      const covered = try sheet.current()
+      try sheet.covered(false)
+      try sheet.dismissPlan()
+      const dismissed = try sheet.current()
+      try Effect.try(() => assert.deepStrictEqual(
+        { needed: needed.planRequired, coveredHides: covered.covered, dismissed: dismissed.planDismissed, admission: (try entitlement.current()).notice },
+        { needed: true, coveredHides: true, dismissed: true, admission: "NeedsPlanNotice" }
+      ))
+    })
+  }
+})
+
+// spec/account/google.md, "Story: Use and remove my Google access"
+it.live(`A disconnect is confirmed only by reading the accounts back (spec/account/google.md, "Story: Use and remove my Google access")`, () => effect {
+  const calls: Calls = []
+  const connected = { connectionId: "conn-1", email: "owner@example.com", grantedCapabilities: ["google.basic_identity", "google.gmail.triage", "google.gmail.manage"] }
+  const state = { connected: true }
+  const cloud = {
+    ...cloudAnswers,
+    "GET /api/v1/eliza/google/accounts?side=owner": () => ({ accounts: state.connected ? [connected] : [] }),
+    "POST /api/v1/eliza/google/disconnect": () => {
+      state.connected = false
+      return { success: true }
+    }
+  }
+  provide account(calls, signedInNative, cloud) {
+    try scoped(effect {
+      const session = try CloudSession
+      const google = try GoogleAccounts
+      fork.scoped session.run()
+      fork.scoped google.run()
+      try until(google.changes, (g) => g.owner === 1)
+      try google.open("SettingsPanel")
+      try until(google.changes, (g) => g.account !== 0 && !g.readPending)
+      // spec/account/google.md, "Cached mail needs read access, and a review needs change access"
+      try google.showCache()
+      try google.prepareReview()
+      const using = try google.current()
+      // spec/account/google.md, "A disconnect is confirmed only by reading the accounts back"
+      try google.disconnect()
+      const gone = try found(try until(google.changes, (g) => g.outcome !== "NoDisconnect"))
+      try Effect.try(() => assert.deepStrictEqual(
+        { using: [using.cacheVisible, using.review], gone: [gone.outcome, gone.account, gone.readGrant, gone.cacheVisible], asked: calls.find((c) => c.name === "POST /api/v1/eliza/google/disconnect")?.args },
+        { using: [true, true], gone: ["Disconnected", 0, false, false], asked: { side: "owner", connectionId: "conn-1" } }
+      ))
+    })
+  }
+})
+
+// spec/account/agentAccess.md, "Story: Choose what the agent may change through Google"
+it.live(`The switches are published in order, and an outdated change is refused (spec/account/agentAccess.md, "Story: Choose what the agent may change through Google")`, () => effect {
+  const calls: Calls = []
+  provide account(calls) {
+    try scoped(effect {
+      const access = try GoogleAgentAccess
+      try access.run()
+      const published = try access.current()
+      try access.set("GmailChanges", false, published.revision)
+      try access.set("CalendarEdits", false, published.revision)
+      const after = try access.current()
+      try Effect.try(() => assert.deepStrictEqual({
+        writes: calls.filter((c) => c.name === "Agent.setGoogleAgentAccess").map((c) => c.args),
+        after: [after.saved, after.host, after.refused, after.hostUnconfirmed]
+      }, {
+        writes: [{ gmailChanges: true, calendarEdits: true }, { gmailChanges: false, calendarEdits: true }],
+        after: [{ gmailChanges: false, calendarEdits: true }, { gmailChanges: false, calendarEdits: true }, 1, false]
+      }))
+    })
+  }
+})
+
+// spec/account/delegation.md, "Story: Let Cloud run my hosted results"
+it.live(`Authorizing keeps the pending record in the account's slot and opens Cloud's page (spec/account/delegation.md, "Story: Let Cloud run my hosted results")`, () => effect {
+  const calls: Calls = []
+  const authUrl = `https://api.eliza.app/app-auth/authorize?state=${"s".repeat(43)}`
+  const native = { ...signedInNative, "AlphaConnection.secureRead": {}, "AlphaConnection.secureCompareExchange": { status: "saved" } }
+  const resident = {
+    "POST /api/workflow/hosted/cloud-delegation/revocations": { grants: [] },
+    "POST /api/workflow/hosted/cloud-delegation/start": { authUrl, expiresAt: new Date(now + 600000).toISOString() }
+  }
+  provide account(calls, native, cloudAnswers, { resident }) {
+    try scoped(effect {
+      const session = try CloudSession
+      const delegation = try CloudDelegation
+      fork.scoped session.run()
+      fork.scoped delegation.run()
+      try until(delegation.changes, (d) => d.owner === 1)
+      try delegation.start(true, false)
+      const waiting = try found(try until(delegation.changes, (d) => d.record === "WaitingRecord" && d.running === "NoStep"))
+      const saved = calls.find((c) => c.name === "AlphaConnection.secureCompareExchange")?.args as { slot: string; value: string } | undefined
+      try Effect.try(() => assert.deepStrictEqual({
+        kinds: (calls.find((c) => c.name === "POST /api/workflow/hosted/cloud-delegation/start")?.args as { kinds?: Array<string> } | undefined)?.kinds,
+        slot: saved?.slot.startsWith("cloud-delegation:v1:"), phase: saved === undefined ? undefined : (JSON.parse(saved.value) as { phase: string }).phase,
+        opened: calls.filter((c) => c.name === "AlphaConnection.openExternal").map((c) => (c.args as { url: string }).url),
+        grant: waiting.grant, cloud: waiting.cloud
+      }, { kinds: ["email"], slot: true, phase: "waiting", opened: [authUrl], grant: false, cloud: "CloudWaiting" }))
+    })
+  }
+})
+
+// spec/account/provider.md, "Story: Use my own keys instead of Cloud"
+it.live(`Own keys go to the host only, and switching back keeps them (spec/account/provider.md, "Story: Use my own keys instead of Cloud")`, () => effect {
+  const calls: Calls = []
+  const key = "csk-test-key-0123456789"
+  const host = { mode: "cloud" as "cloud" | "own", text: false, voice: false, revision: 1 }
+  const status = () => providerStatus(host.mode, host.text, host.voice, `r${host.revision}`)
+  const native = {
+    ...signedInNative,
+    "Agent.providerStatus": status,
+    "Agent.configureProvider": () => {
+      host.mode = "own"
+      host.text = true
+      host.revision += 1
+      return status()
+    },
+    "Agent.selectProvider": (args: unknown) => {
+      if ((args as { expectedRevision?: string }).expectedRevision !== `r${host.revision}`) return { refuse: "stale" }
+      host.mode = (args as { mode: "cloud" | "own" }).mode
+      host.revision += 1
+      return status()
+    }
+  }
+  provide account(calls, native) {
+    try scoped(effect {
+      const session = try CloudSession
+      const provider = try AiProvider
+      fork.scoped session.run()
+      fork.scoped provider.run()
+      try until(provider.changes, (p) => p.known && p.signedIn)
+      // spec/account/provider.md, "Saving keys selects them, and adds a key only on the host's word"
+      try provider.save(` ${key} `, "")
+      const saved = try provider.current()
+      // spec/account/provider.md, "Switching keeps both keys, needs a saved text key for own keys and a sign-in for Cloud"
+      try provider.choose("CloudRoute")
+      const back = try provider.current()
+      // spec/account/provider.md, "A key is removed only after its own review, and shown only in the host's secure dialog"
+      try provider.confirmRemove()
+      const carrying = calls.filter((c) => JSON.stringify(c.args ?? null).includes(key)).map((c) => c.name)
+      try Effect.try(() => assert.deepStrictEqual({
+        saved: [saved.route, saved.textKey, saved.voiceKey, saved.fault], back: [back.route, back.textKey, back.switches],
+        carrying, chose: calls.find((c) => c.name === "Agent.selectProvider")?.args,
+        removedWithoutReview: names(calls).includes("Agent.removeProviderKey")
+      }, {
+        saved: ["OwnRoute", true, false, "NoProviderFault"], back: ["CloudRoute", true, 1],
+        carrying: ["Agent.configureProvider"], chose: { mode: "cloud", expectedRevision: "r2", requestId: "lease-1" },
+        removedWithoutReview: false
+      }))
+    })
+  }
+})

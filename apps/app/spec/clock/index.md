@@ -27,6 +27,8 @@ chose, and acts only on the exact row the owner sees.
 - [Agent Clock review](./agentReview.md): an alarm the agent proposes, reviewed on the phone.
 - [Reminders](./reminders.md): the listing, its refreshes and the one reminder write at a time.
 - [Reminder journal](./reminderJournal.md): creations and changes kept until the phone confirms them.
+- [Reminder drafts](./reminderDrafts.md): unsaved reminder forms kept across reloads until saved or discarded.
+- [Reminder reads](./reminderReads.md): what a reviewed workflow step may read of one day's reminders.
 - [Reminder taps](./reminderTaps.md): a tapped reminder notification opens its exact reminder.
 - [Notifications](./notifications.md): the current notifications, acted on row by row.
 - [Notification taps](./canonicalTaps.md): a tapped Alpha notification opens the view it names.

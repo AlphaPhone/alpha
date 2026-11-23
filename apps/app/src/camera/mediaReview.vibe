@@ -1,7 +1,7 @@
 // spec/camera/media.md, "Story: Use a photo only as I selected it"; spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"; spec/camera/media.md, "Story: Send a photo only as a reviewed copy"; spec/camera/media.md, "Story: Ask Alpha about what Camera sees"
 import { Machine as MediaMachine, asksAboutFrame, emailable, messagesSendable, type Event as MediaEvent, type Invalidation, type PictureType } from "../../gen/camera__media.effect.vibe"
 import { CameraBridge } from "./bridge.vibe"
-import { CameraHandoffs } from "./handoffs.vibe"
+import { CameraHandoffs } from "./ports.vibe"
 import { PhotoLibrary } from "./library.vibe"
 import { CameraNotices } from "./notices.vibe"
 import { jpegBlob } from "./scanWork.ts"

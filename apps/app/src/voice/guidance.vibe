@@ -1,0 +1,18 @@
+// spec/voice/speech.md, "A reviewed page, a local reading and voicemail audio use only the phone; replies and turn guidance use the route in use"; spec/voice/speech.md, "An unconfirmed stop latches the channel; app speech and Cloud reading get one native stop to reopen it"
+import { GuidanceSpeechStopped } from "@elizaos/plugin-maps/client/guidance"
+import { GuidanceSpeaker } from "../maps/ports.vibe"
+import { Speech, SpeechInterrupted, SpeechNotStopped } from "./speech.vibe"
+
+/** Maps' turn guidance on the app speech channel, on the route in use; interrupting the effect stops the speech. */
+export const guidanceSpeaker = Layer.effect(GuidanceSpeaker, effect {
+  const speech = try Speech
+  return {
+    effect speak(text: string) {
+      speech.speak(text, "AppSpeech") catch effect (error) => match (error) {
+        when SpeechNotStopped: throw new GuidanceSpeechStopped({ reason: "cleanup-unconfirmed" });
+        when SpeechInterrupted: throw new GuidanceSpeechStopped({ reason: error.reason === "playbackFailed" ? "failed" : "interrupted" });
+        default: throw new GuidanceSpeechStopped({ reason: "failed" });
+      }
+    },
+  }
+})

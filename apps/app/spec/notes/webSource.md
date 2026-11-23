@@ -14,7 +14,9 @@ controls; a dialog that is closed, hidden, left or over a changed note accepts n
 
 Closing aborts a visit that has not started, and a visit that happened closes the dialog. A saved removal
 lands even when its dialog is gone, and a removal that is not confirmed says Unconfirmed in its open
-dialog. A dialog left open over a note whose link was removed can no longer act.
+dialog. A dialog left open over a note whose link was removed can no longer act. Before a dialog opens it
+takes whether the note in front carries a link, so a removal on one note never keeps the dialog of another
+note's link from opening.
 
 ```quint
 type DialogAction = NoAction | VisitAction | RemoveAction
@@ -25,6 +27,8 @@ pure val initial: SourceDialog = { visit: true, hidden: false, rev: 0, linked: t
   busy: false, acted: 0, unconfirmed: false, op: NoAction, opGen: 0, edits: 0, navigations: 0, removals: 0, refused: 0 }
 pure def fresh(s: SourceDialog): bool = s.opened and s.visit and s.rev == s.expected
 pure def shown(s: SourceDialog): bool = s.opGen == s.gen and s.opened
+pure def canShowLink(s: SourceDialog, linked: bool): bool = not(s.opened)
+pure def showLink(s: SourceDialog, linked: bool): SourceDialog = { ...s, linked: linked }
 pure def canOpenDialog(s: SourceDialog): bool = s.visit and not(s.hidden) and s.linked
 pure def openDialog(s: SourceDialog): SourceDialog =
   { ...s, gen: s.gen + 1, opened: true, expected: s.rev, busy: false, acted: 0, unconfirmed: false }

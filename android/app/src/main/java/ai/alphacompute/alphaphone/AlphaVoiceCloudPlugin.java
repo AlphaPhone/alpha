@@ -56,7 +56,6 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private static final int AUDIO_LIMIT=8*1024*1024;
  private final CloudSpeechTimings cloudTimings=new CloudSpeechTimings();
  /** Numeric batch stages begin after worker admission; queue wait and audible playback are not claimed. */
- @PluginMethod public void cloudVoiceTiming(PluginCall call){try{call.resolve(JSObject.fromJSONObject(new JSONObject(cloudTimings.snapshot())).put("format","alpha-cloud-speech-timing-v1"));}catch(org.json.JSONException invalid){call.reject("Cloud speech timing unavailable");}}
  private void answeredTimed(HttpURLConnection connection,CloudSpeechTimings.Record timing)throws Exception{
   int status=connection.getResponseCode();cloudTimings.mark(timing,"headers");
   String provider=connection.getHeaderField("X-Eliza-STT-Provider");if(provider==null)provider=connection.getHeaderField("X-Eliza-TTS-Provider");
@@ -265,22 +264,6 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  private HttpURLConnection connectPaired(PluginCall call,boolean status,SpeechRequestGate.Request request,boolean asr)throws Exception{
   throw new IOException("Network speech is not enabled");
  }
- @PluginMethod public void pairedVoiceStatus(PluginCall call){submit(call,request->{
-  HttpURLConnection c=connectPaired(call,true,request,false);answered(c);byte[] response;try(InputStream in=c.getInputStream()){response=read(in,16384,request);}
-  JSONObject body=new JSONObject(new String(response,StandardCharsets.UTF_8));JSObject value=new JSObject();value.put("ready",PairedSpeechContract.ttsReady(body));if(request.cancelled||destroyed())throw new IOException();request.result=value;
- });}
- @PluginMethod public void pairedTranscriptionStatus(PluginCall call){submit(call,request->{
-  HttpURLConnection c=connectPaired(call,true,request,true);answered(c);byte[] response;try(InputStream in=c.getInputStream()){response=read(in,16384,request);}JSONObject data=new JSONObject(new String(response,StandardCharsets.UTF_8));boolean valid=PairedSpeechContract.asrReady(data);JSObject value=new JSObject();value.put("ready",valid);value.put("provider",PairedSpeechContract.ASR_PROVIDER);if(request.cancelled||destroyed())throw new IOException();request.result=value;
- });}
- @PluginMethod public void transcribePairedRecording(PluginCall call){submit(call,request->{
-  String recordingId=required(call.getString("recordingId"),256);File file=recording().selected(recordingId);if(file==null)throw new IOException();
-  // Establish exact saved credential binding before decoding; no user paths or URLs are accepted.
-  HttpURLConnection c=connectPaired(call,false,request,true);byte[] audio=RecordingPcm.decode(file,()->request.cancelled||destroyed());
-  try{c.setRequestProperty("Content-Type","audio/wav");c.setRequestProperty("X-Request-Id",PairedSpeechContract.requestId(call.getString("requestId")));c.setFixedLengthStreamingMode(audio.length);try(OutputStream out=c.getOutputStream()){if(request.cancelled)throw new IOException();out.write(audio);}}finally{Arrays.fill(audio,(byte)0);}
-  answered(c);byte[] response;try(InputStream in=c.getInputStream()){response=read(in,128*1024,request);}JSONObject data=new JSONObject(new String(response,StandardCharsets.UTF_8));String text=PairedSpeechContract.transcript(data);if(request.cancelled||destroyed())throw new IOException();JSObject value=new JSObject();value.put("text",text);value.put("local",true);value.put("provider",PairedSpeechContract.ASR_PROVIDER);request.result=value;
- });}
- /** Like {@link #synthesize}: a request that asked not to replace speech never interrupts a clip or a streamed utterance. */
- @PluginMethod public void synthesizePaired(PluginCall call){if(Boolean.FALSE.equals(call.getBoolean("replace",true))&&speakerBusy()){call.reject("Speaker is in use","playback-busy");return;}synthesizeAudio(call,true,null);}
 
  // ---- Browser read-aloud (reviewed passages from AlphaBrowser) --------------------------------
 

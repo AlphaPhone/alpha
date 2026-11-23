@@ -12,7 +12,7 @@ Cloud side of each route is managed Gmail in `vendor/eliza/spec/cloud/services/g
 | --- | --- |
 | Accounts | [Gmail accounts, selection and incremental grants](./accounts.md) |
 | Reading | [Mailbox list and paging](./mailbox.md), [message and conversation reader](./reader.md) |
-| Writing | [Local drafts and the composer](./drafts.md), [attachments](./attachments.md), [agent email drafts](./agentDrafts.md), [agent suggestions](./suggestions.md) |
+| Writing | [Local drafts and the composer](./drafts.md), [attachments](./attachments.md), [agent suggestions](./suggestions.md) |
 | Changing | [Reviewed operations and receipts](./operations.md), [selected messages](./selection.md) |
-| Notices | [Background Gmail notices](./notices.md), [digest results inbox](./digest.md) |
+| Notices | [Background Gmail notices](./notices.md) |
 | Failures | [What a failure means](./failures.md) |

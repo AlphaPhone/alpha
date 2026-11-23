@@ -6,6 +6,7 @@ import { Button, EmptyState, Input, Label, Progress } from "../components/ui/ind
 import { cn } from "../lib/cn.ts";
 import { duration } from "./text.ts";
 
+/** Every timer and the page's instant, and the owner's start, change and stop of a timer. */
 export type TimersPanelProps = {
   /** Every timer and its phase. */
   timers: Timers;

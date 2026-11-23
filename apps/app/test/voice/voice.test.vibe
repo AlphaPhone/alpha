@@ -4,7 +4,9 @@ import { Build } from "../../src/platform/build.vibe"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident } from "../../src/platform/resident.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
+import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { Microphone } from "../../src/voice/capture.vibe"
 import { VoiceConversation } from "../../src/voice/conversation.vibe"
 import { Dictation, type DictationTarget } from "../../src/voice/dictation.vibe"
@@ -12,6 +14,9 @@ import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
 import { VoiceRoute } from "../../src/voice/route.vibe"
 import { Speech } from "../../src/voice/speech.vibe"
+import { replyActionOf, spokenLineOf, EMAIL_DRAFT_READY } from "../../src/voice/spoken-text.ts"
+import { ReadingVoice } from "../../src/browser/ports.vibe"
+import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
 
 /** What the fakes were asked, in order, as `plugin.method`. */
 type Calls = Array<{ readonly name: string; readonly args: unknown }>
@@ -47,14 +52,22 @@ function platform(calls: Calls, native: Record<string, Answer>, variant: "launch
     }),
     Layer.succeed(Cloud, {
       base: "https://api.eliza.app",
-      json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string) => Effect.fail(new CloudUnavailable({ status: 404, message: `${method} ${path}` })),
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.fail(new CloudUnavailable({ status: 404, message: `${method} ${path}` })),
     }),
     Layer.succeed(Resident, {
       status: () => Effect.succeed("running" as const),
       ensureRunning: () => Effect.void,
-      json: (method: "GET" | "POST" | "PUT" | "DELETE", path: string) => Effect.succeed({ status: 200, data: { method, path } }),
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.succeed({ status: 200, data: { method, path } }),
       stream: () => Stream.empty,
     }),
+    Layer.succeed(ResidentControl, {
+      changes: Stream.never,
+      session: () => Effect.succeed(undefined),
+      refreshAccount: () => Effect.void,
+      stop: () => Effect.void,
+      recovered: () => Effect.void,
+    }),
+    Layer.succeed(ResidentFeeds, { view: () => Stream.never, voice: () => Stream.never }),
     Layer.succeed(Build, { info: { version: "test", variant, testMocks: false } }),
     memoryStore,
   )
@@ -202,4 +215,31 @@ it.live(`Start talking only when Alpha can listen safely (spec/voice/conversatio
     try Effect.try(() => assert.deepStrictEqual({ shown: refusedForCall.shown, notice: refusedForCall.notice, ticket, refusal: mic.refusal, captured: names(calls).includes("AlphaVoiceCloud.startLiveCapture") },
       { shown: "Off", notice: "CallHoldsMicrophone", ticket: undefined, refusal: "RefusedCall", captured: false }))
   }
+})
+
+it.live(`Keep a page I read and my voicemail on my phone (spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone")`, () => effect {
+  const calls: Calls = []
+  const cloudKept = { ...onPhone, "AlphaVoiceCloud.transcribeLocalAudio": { text: " left a message ", local: true, execution: "device" } }
+  provide voice(calls, cloudKept) {
+    const routes = try VoiceRoute
+    try routes.observeAccount({ kind: "cloud", environment: "production", credentialId: "key-1" })
+    // spec/voice/speech.md, "A reviewed page, a local reading and voicemail audio use only the phone; replies and turn guidance use the route in use"
+    const voicemail = try VoicemailTranscriber
+    const ready = try voicemail.ready()
+    const words = try voicemail.transcribe("UklGRg==")
+    const reading = try ReadingVoice
+    const unbound = try reading.binding()
+    const refused = Effect.flip(reading.speakToken("token-1")) catch () => undefined
+    const transcribed = names(calls).filter((n) => n.includes("transcribe"))
+    try Effect.try(() => assert.deepStrictEqual({ ready, words, unbound, refused: refused?._tag, transcribed, synthesized: names(calls).some((n) => n.includes("synthesize")) },
+      { ready: true, words: "left a message", unbound: undefined, refused: "ReadingSpeechFailed", transcribed: ["AlphaVoiceCloud.transcribeLocalAudio"], synthesized: false }))
+  }
+})
+
+it.effect(`Hear a short line for an action (spec/voice/speech.md, "Story: Hear a short line for an action, and read the details in the chat")`, () => effect {
+  // spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"
+  const drafted = spokenLineOf("To: ana@example.com\nSubject: Hi\nHello Ana", replyActionOf({ kind: "INBOX_COMPOSE_EMAIL", validatedCard: true, verbatimAsked: false }))
+  const plain = spokenLineOf("It is sunny.", replyActionOf(undefined))
+  const verbatim = spokenLineOf("Event ID: ev_123 is booked.", replyActionOf({ kind: "CALENDAR_CREATE", validatedCard: false, verbatimAsked: true }))
+  try Effect.try(() => assert.deepStrictEqual({ drafted, plain, verbatim }, { drafted: EMAIL_DRAFT_READY, plain: "It is sunny.", verbatim: "Event ID: ev_123 is booked." }))
 })

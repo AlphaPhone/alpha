@@ -2,7 +2,7 @@
 import { Machine as Life, sendRefused, stored as storedLife, type App, type Net } from "../../gen/platform__lifecycle.effect.vibe"
 import { Native } from "./native.vibe"
 import { MeteredHint, NetworkStatus } from "./native.schema.vibe"
-import { watchPage } from "./page-events.ts"
+import { watchPage, type PageWatch } from "./page-events.ts"
 
 /** The send was refused: Android confirmed the app has no network. */
 export error Offline
@@ -25,69 +25,74 @@ export service AppLifecycle {
 const LIFECYCLE_KEY = "alpha/device/lifecycle"
 const NETWORK_TIMEOUT = "1500 millis"
 
-/** The lifecycle over the page's visibility and focus and Android's network status. */
-export const lifecycleLive = Layer.effect(AppLifecycle, effect {
-  const native = try Native
-  const life = try Effect.provide(effect { return try Life }, storedLife(LIFECYCLE_KEY))
-  life.send({ type: "processDied" }) catch () => undefined
+/** The lifecycle over the page events `watch` reports, until the call it returns disposes it, and Android's network status. */
+export function lifecycleOver(watch: (page: PageWatch) => () => void) {
+  return Layer.effect(AppLifecycle, effect {
+    const native = try Native
+    const life = try Effect.provide(effect { return try Life }, storedLife(LIFECYCLE_KEY))
+    life.send({ type: "processDied" }) catch () => undefined
 
-  effect function refreshNetwork() {
-    const said = timeout(native.invoke("ElizaSystem", "getNetworkStatus", {}), NETWORK_TIMEOUT) catch () => undefined
-    const status = Schema.decodeUnknownEffect(NetworkStatus)(said) catch () => undefined
-    const network: Net = status?.connected === true ? "NetOnline" : status?.connected === false ? "NetOffline" : "NetUnknown"
-    life.send({ type: "networkObserved", network }) catch () => undefined
-    return network
-  }
+    effect function refreshNetwork() {
+      const said = timeout(native.invoke("ElizaSystem", "getNetworkStatus", {}), NETWORK_TIMEOUT) catch () => undefined
+      const status = Schema.decodeUnknownEffect(NetworkStatus)(said) catch () => undefined
+      const network: Net = status?.connected === true ? "NetOnline" : status?.connected === false ? "NetOffline" : "NetUnknown"
+      life.send({ type: "networkObserved", network }) catch () => undefined
+      return network
+    }
 
-  effect function watchPageEvents() {
-    const watcher = (try life.get()).watcher
-    const events = Stream.callback<{ readonly kind: "paused" } | { readonly kind: "returned"; readonly at: number }>((queue) => effect {
-      const dispose = watchPage({
-        paused: () => { Queue.offerUnsafe(queue, { kind: "paused" }) },
-        returned: (at) => { Queue.offerUnsafe(queue, { kind: "returned", at: Math.round(at) }) },
+    effect function watchPageEvents() {
+      const watcher = (try life.get()).watcher
+      const events = Stream.callback<{ readonly kind: "paused" } | { readonly kind: "returned"; readonly at: number }>((queue) => effect {
+        const dispose = watch({
+          paused: () => { Queue.offerUnsafe(queue, { kind: "paused" }) },
+          returned: (at) => { Queue.offerUnsafe(queue, { kind: "returned", at: Math.round(at) }) },
+        })
+        try addFinalizer(() => sync(dispose))
       })
-      try addFinalizer(() => sync(dispose))
-    })
-    for try (const event of events) {
-      if (event.kind === "paused") {
-        life.send({ type: "paused" }) catch () => undefined
-        continue
+      for try (const event of events) {
+        if (event.kind === "paused") {
+          life.send({ type: "paused" }) catch () => undefined
+          continue
+        }
+        life.send({ type: "returned", ofWatcher: watcher, at: event.at }) catch () => undefined
+        refreshNetwork() catch () => undefined
       }
-      life.send({ type: "returned", ofWatcher: watcher, at: event.at }) catch () => undefined
-      refreshNetwork() catch () => undefined
+      life.send({ type: "disposeWatcher" }) catch () => undefined
     }
-    life.send({ type: "disposeWatcher" }) catch () => undefined
-  }
 
-  effect function watchNetwork() {
-    const following = effect {
-      for try (const _ of native.listen("ElizaSystem", "networkStatusChanged")) {
-        try refreshNetwork()
+    effect function watchNetwork() {
+      const following = effect {
+        for try (const _ of native.listen("ElizaSystem", "networkStatusChanged")) {
+          try refreshNetwork()
+        }
       }
+      following catch () => undefined
     }
-    following catch () => undefined
-  }
 
-  fork.scoped watchPageEvents()
-  fork.scoped watchNetwork()
-  fork.scoped refreshNetwork()
+    fork.scoped watchPageEvents()
+    fork.scoped watchNetwork()
+    fork.scoped refreshNetwork()
 
-  return {
-    changes: life.changes,
-    get: () => life.get(),
-    refreshNetwork,
-    effect metered() {
-      const said = native.invoke("ElizaNetworkPolicy", "getMeteredHint", {}) catch () => undefined
-      const hint = Schema.decodeUnknownEffect(MeteredHint)(said) catch () => undefined
-      return hint?.metered ?? null
-    },
-    effect turnSent() {
-      const network = try refreshNetwork()
-      if (sendRefused(network)) throw new Offline()
-      life.send({ type: "turnSent" }) catch effect () => { throw new Offline() }
-    },
-    effect turnSettled() {
-      life.send({ type: "turnSettled" }) catch () => undefined
-    },
-  }
-})
+    return {
+      changes: life.changes,
+      get: () => life.get(),
+      refreshNetwork,
+      effect metered() {
+        const said = native.invoke("ElizaNetworkPolicy", "getMeteredHint", {}) catch () => undefined
+        const hint = Schema.decodeUnknownEffect(MeteredHint)(said) catch () => undefined
+        return hint?.metered ?? null
+      },
+      effect turnSent() {
+        const network = try refreshNetwork()
+        if (sendRefused(network)) throw new Offline()
+        life.send({ type: "turnSent" }) catch effect () => { throw new Offline() }
+      },
+      effect turnSettled() {
+        life.send({ type: "turnSettled" }) catch () => undefined
+      },
+    }
+  })
+}
+
+/** The lifecycle over the page's visibility and focus and Android's network status. */
+export const lifecycleLive = lifecycleOver(watchPage)

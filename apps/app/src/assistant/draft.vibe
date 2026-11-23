@@ -1,0 +1,135 @@
+// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"
+import type { CameraHandoffs, FrameQuestion, PhotoAttachment } from "../camera/handoffs.vibe"
+import { sensitiveText } from "../browser/page-text.ts"
+import { Assistant } from "./assistant.vibe"
+import { ChatAttachments } from "./attachments.vibe"
+import { Composer } from "./composer.vibe"
+import { AssistantHost } from "./host.vibe"
+import { blobOf } from "./image-encode.ts"
+
+/** What another area asks the assistant about: a page, a frame or a passage, and the question the review starts with. */
+export interface AskSource {
+  readonly name: string
+  readonly url?: string
+  readonly text: string
+  readonly question?: string
+  readonly image?: Blob
+}
+
+/** A question the owner reviews before it joins the draft; nothing is sent from the review. */
+export interface QuestionReview {
+  readonly id: number
+  readonly name: string
+  readonly url?: string
+  readonly text: string
+  readonly question: string
+  readonly image?: Blob
+  readonly notice: string
+}
+
+/** The longest question a review takes. */
+export const questionLimit = 2000
+/** The longest excerpt a review takes. */
+export const excerptLimit = 12000
+
+const notices = {
+  truncated: "Truncated",
+  empty: "Add a question and some text first.",
+  secrets: "Remove secrets first",
+  full: "Remove an attachment before adding another.",
+} as const
+
+/** The draft a reviewed question composes: the question, its source and the excerpt. */
+export function questionDraft(question: string, name: string, url: string | undefined, excerpt: string): string {
+  const source = url !== undefined && url !== "" && url !== name ? `${name} (${url})` : name
+  return excerpt.trim() === "" ? `${question.trim()}\n\nSource: ${source}` : `${question.trim()}\n\nSource: ${source}\n\n${excerpt.trim()}`
+}
+
+/** Questions other areas hand to the assistant, reviewed by the owner and then composed into the draft once. */
+export service AssistantDraft {
+  /** The review open now, or undefined. */
+  readonly review: Stream.Stream<QuestionReview | undefined>
+  /** Open the review of a question about a page, passage or frame; a newer one replaces it. */
+  askAbout(source: AskSource): void!!
+  /** The owner chose Add to chat: the question joins the draft once, and the sheet opens; false keeps the review with its notice. */
+  compose(id: number, question: string, excerpt: string): boolean!!
+  /** The owner left the review; nothing joins the draft. */
+  dismiss(id: number): void!!
+}
+
+/** Question reviews over the assistant's draft and attachments. */
+export const draftLayer = Layer.effect(AssistantDraft, effect {
+  const assistant = try Assistant
+  const attachments = try ChatAttachments
+  const review = try SubscriptionRef.make<QuestionReview | undefined>(undefined)
+  let next = 0
+  effect function refuse(open: QuestionReview, notice: string) {
+    try SubscriptionRef.set(review, { ...open, notice })
+    return false
+  }
+  return {
+    review: SubscriptionRef.changes(review),
+    askAbout: (source: AskSource) => effect {
+      next += 1
+      const question = (source.question ?? (source.image === undefined ? "Summarize this excerpt." : "What does this mean?")).slice(0, questionLimit)
+      try SubscriptionRef.set(review, {
+        id: next, name: source.name, text: source.text.slice(0, excerptLimit), question,
+        notice: source.text.length > excerptLimit ? notices.truncated : "",
+        ...(source.url === undefined ? {} : { url: source.url }), ...(source.image === undefined ? {} : { image: source.image }),
+      })
+    },
+    compose: (id: number, question: string, excerpt: string) => effect {
+      const open = try SubscriptionRef.get(review)
+      if (open === undefined || open.id !== id) return false
+      const asked = question.slice(0, questionLimit)
+      const passage = excerpt.slice(0, excerptLimit)
+      if (asked.trim() === "" || (passage.trim() === "" && open.image === undefined)) return try refuse(open, notices.empty)
+      if (sensitiveText(passage)) return try refuse(open, notices.secrets)
+      if (open.image !== undefined) {
+        const image = open.image
+        const added = map(attachments.add([{ id: `question-${id}`, name: `${open.name}.jpg`, mimeType: image.type === "" ? "image/jpeg" : image.type, blob: image }]), () => true) catch () => false
+        if (!added) return try refuse(open, notices.full)
+      }
+      try SubscriptionRef.set(review, undefined)
+      try assistant.openWith(questionDraft(asked, open.name, open.url, passage))
+      return true
+    },
+    dismiss: (id: number) => effect {
+      const open = try SubscriptionRef.get(review)
+      if (open !== undefined && open.id === id) try SubscriptionRef.set(review, undefined)
+    },
+  }
+})
+
+/** The assistant's part of Camera's handoffs, for the shell to merge into `CameraHandoffs`: the conversation shown, a reviewed photo, a frame question and hiding the chat. */
+export effect function cameraHandoffsFromAssistant() {
+  const composer = try Composer
+  const attachments = try ChatAttachments
+  const assistant = try Assistant
+  const draft = try AssistantDraft
+  const host = try AssistantHost
+  effect function conversation() {
+    const shown = try Stream.runHead(composer.transcript)
+    return Option.isSome(shown) ? shown.value.conversation ?? "" : ""
+  }
+  const handoffs: Pick<CameraHandoffs.Shape, "conversation" | "attachPhoto" | "askAboutFrame" | "hideConversation"> = {
+    conversation,
+    attachPhoto: (attachment: PhotoAttachment) => effect {
+      if ((try conversation()) !== attachment.conversation || attachment.image === "") return false
+      const blob = tryPromise(() => blobOf(attachment.image)) catch () => undefined
+      if (blob === undefined) return false
+      const added = map(attachments.add([{ id: `photo-${attachment.mediaId}-${attachment.revision}`, name: "Photo.jpg", mimeType: blob.type === "" ? "image/jpeg" : blob.type, blob }]), () => true) catch effect (refused) => {
+        try host.toast(refused.message)
+        return false
+      }
+      if (added) try assistant.show("Sheet")
+      return added
+    },
+    askAboutFrame: (frame: FrameQuestion) => effect {
+      try draft.askAbout({ name: "Camera frame", text: "", question: frame.question, image: frame.image })
+      return true
+    },
+    hideConversation: () => assistant.show("Input"),
+  }
+  return handoffs
+}

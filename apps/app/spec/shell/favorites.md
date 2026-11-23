@@ -47,12 +47,12 @@ Earlier Alpha keys are renamed once: Workflows was `alpha:automations` and befor
 pure def unique(xs: List[str]): List[str] = xs.foldl(List(), (acc, k) => if (acc.includes(k)) acc else acc.append(k))
 pure def renamed(key: str): str =
   if (key == "alpha:automations") "alpha:workflows" else if (key == "alpha:chat") "alpha:assistant" else key
-pure def current(xs: List[str]): List[str] =
+pure def currentKeys(xs: List[str]): List[str] =
   unique(xs.select(k => k != "alpha:inventory").listMap(k => renamed(k)))
 pure def alwaysFavoritesAreCurrentAndUnique(f: Favorites): bool =
   f.entries == unique(f.entries) and not(f.entries.includes("alpha:automations")) and
   not(f.entries.includes("alpha:chat")) and not(f.entries.includes("alpha:inventory"))
-pure def lawRenamingIsIdempotent(keys: List[str]): bool = current(current(keys)) == current(keys)
+pure def lawRenamingIsIdempotent(keys: List[str]): bool = currentKeys(currentKeys(keys)) == currentKeys(keys)
 ```
 
 ### An earlier record is imported once, and only into a list that was never stored
@@ -66,9 +66,9 @@ other v2 record is the owner's choice. A record that is missing or unreadable le
 pure def canImportLegacy(f: Favorites, record: Legacy, keys: List[str]): bool = not(f.imported)
 pure def importLegacy(f: Favorites, record: Legacy, keys: List[str]): Favorites = match record {
   | NoLegacy => { ...f, imported: true }
-  | LegacyV1 => { ...f, imported: true, chosen: true, entries: current(keys), mergeViews: true }
-  | LegacyBareDefaults => { ...f, imported: true, chosen: true, entries: current(keys), trimBare: true, previous: keys }
-  | LegacyChoice => { ...f, imported: true, chosen: true, entries: current(keys) }
+  | LegacyV1 => { ...f, imported: true, chosen: true, entries: currentKeys(keys), mergeViews: true }
+  | LegacyBareDefaults => { ...f, imported: true, chosen: true, entries: currentKeys(keys), trimBare: true, previous: keys }
+  | LegacyChoice => { ...f, imported: true, chosen: true, entries: currentKeys(keys) }
 }
 pure def stepImportHappensOnce(before: Favorites, via: str, after: Favorites): bool =
   via == "importLegacy" implies not(before.imported)
@@ -84,13 +84,13 @@ choice, including an empty Home, is never replaced by defaults again.
 ```quint
 pure def defaults(views: List[str], apps: List[str]): List[str] = if (views.length() > 0) views else apps
 pure def syncViews(f: Favorites, views: List[str]): Favorites =
-  if (not(f.chosen)) { ...f, views: views, entries: current(views) }
-  else if (f.mergeViews) { ...f, views: views, entries: current(f.entries.concat(views)), mergeViews: views.length() == 0 }
+  if (not(f.chosen)) { ...f, views: views, entries: currentKeys(views) }
+  else if (f.mergeViews) { ...f, views: views, entries: currentKeys(f.entries.concat(views)), mergeViews: views.length() == 0 }
   else { ...f, views: views }
 pure def inventoryLoaded(f: Favorites, apps: List[str]): Favorites = {
   val shown = f.entries.select(k => f.views.includes(k) or apps.includes(k))
   val loaded = f.views.concat(apps)
-  if (not(f.chosen)) { ...f, chosen: true, entries: current(defaults(f.views, apps)) }
+  if (not(f.chosen)) { ...f, chosen: true, entries: currentKeys(defaults(f.views, apps)) }
   else if (f.trimBare and f.views.length() > 0 and shown == loaded)
     { ...f, trimBare: false, previous: f.entries, entries: f.entries.select(k => f.views.includes(k) or not(apps.includes(k))) }
   else { ...f, trimBare: f.trimBare and f.views.length() == 0 }
@@ -124,7 +124,7 @@ pure def refill(entries: List[str], shown: List[str], order: List[str]): List[st
 pure def shownOf(f: Favorites, visible: List[str]): List[str] = f.entries.select(k => visible.includes(k))
 pure def canToggle(f: Favorites, key: str, available: List[str]): bool = f.entries.includes(key) or available.includes(key)
 pure def toggle(f: Favorites, key: str, available: List[str]): Favorites =
-  { ...f, chosen: true, entries: if (f.entries.includes(key)) f.entries.select(k => k != key) else current(f.entries.append(key)) }
+  { ...f, chosen: true, entries: if (f.entries.includes(key)) f.entries.select(k => k != key) else currentKeys(f.entries.append(key)) }
 pure def canRemove(f: Favorites, key: str): bool = f.entries.includes(key)
 pure def remove(f: Favorites, key: str): Favorites = { ...f, chosen: true, entries: f.entries.select(k => k != key) }
 pure def canMove(f: Favorites, key: str, direction: int, visible: List[str]): bool = {

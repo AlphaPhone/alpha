@@ -53,7 +53,7 @@ pure val ownerValues = Set("", "owner-a", "owner-b")
 pure val sessionValues = Set(1, 2)
 pure val windowValues = Set("w1", "w2")
 pure val idValues = Set(1, 2, 3)
-pure val sValues = Set(initial, { ...initial, epoch: 1, read: { ...noRead, id: 1, revalidating: true, phase: Reading }, feed: FeedComplete, feedEpoch: 1, status: Ready })
+pure val sValues = Set(initial).union(Set({ ...initial, epoch: 1, read: { ...noRead, id: 1, revalidating: true, phase: Reading }, feed: FeedComplete, feedEpoch: 1, status: Ready }))
 pure val weight_feedReply = 3
 pure val weight_sourcesReply = 3
 pure val weight_upcomingReply = 3
@@ -75,6 +75,10 @@ pure def writeCurrent(s: AgentCalendar): bool =
 > using now, and never a result that arrived for another one.
 
 ### The port reports the current agent binding; a usable port always names an owner
+
+The binding is the resident agent's verified session: its owner and agent, under the session's
+generation. Calendar takes it when it starts and again whenever that session changes; without a
+verified session the port is not usable and Calendar reads nothing.
 
 ```quint
 pure def canBindPort(s: AgentCalendar, owner: str, session: int, usable: bool): bool = owner != "" or not(usable)
@@ -325,6 +329,10 @@ pure def lawAppliedDeleteIsNeverALookupFailure(readback: Readback): bool =
 > version I left.
 
 ### A returning event is found only for the same binding and epoch, unchanged, from an exact readable feed
+
+The origin Maps carries names the binding, the event key, its provider version and a source
+revision: the SHA-256 of the event's source key with that provider version, never a value made up
+from the key alone. Where Maps is not part of the build, the place button opens nothing.
 
 ```quint
 type EventReturn = ReturnFound | ReturnMissing | ReturnUnknown | ReturnOwnerChanged

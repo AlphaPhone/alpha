@@ -4,21 +4,13 @@ import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.v
 import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
 import { Machine as VoicemailMachine, type Event as VoicemailEvent, type Voicemail, type VoicemailAnswer, type VoicemailWritten } from "../../gen/telephony__voicemail.effect.vibe"
 import { callerOf, displayNames, refusalTag, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+import { VoicemailTranscriber } from "./ports.vibe"
 import { DeletionUndo } from "./undo.vibe"
 import { base64Of, bytesOf, wavWindows } from "./wav.ts"
 
 /** The longest transcript kept for a voicemail. */
 export const TRANSCRIPT_MAX = 8000
-
-/** The on-device recognizer did not transcribe a window. */
-export error TranscriptFailed { reason: string }
-
-/** The on-device recognizer the voice area provides; without it no voicemail is transcribed beyond the carrier's own text. */
-export service VoicemailTranscriber {
-  ready(): boolean!!
-  transcribe(wavBase64: string): string!TranscriptFailed
-  static readonly defaultValue = () => ({ ready: () => succeed(false), transcribe: () => fail(new TranscriptFailed({ reason: "No on-device recognizer" })) })
-}
 
 /** What Alpha may read of the open voicemail (`voicemail_read_selected`). */
 export interface OpenVoicemailRead {
@@ -32,7 +24,7 @@ export interface OpenVoicemailRead {
 
 /** The voicemail tab's effects over the phone's voicemail store. */
 export service VoicemailView {
-  /** One showing of Phone: the carrier's state and rows, kept current by the provider observer. */
+  /** One visit of Phone: while it is in front on an unlocked phone, the carrier's state and rows, kept current by the provider observer; lock or background stop playback and forget them. */
   visit(): void!!
   /** The owner's Refresh. */
   refresh(): void!!
@@ -82,11 +74,12 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
   const calls = try CallBarMachine
   const recognizer = try VoicemailTranscriber
   const undo = try DeletionUndo
+  const front = try frontChanges()
   const audio = try Ref.make<{ ticket: number; wav: Uint8Array } | undefined>(undefined)
   const tell = (event: VoicemailEvent) => voicemail.send(event) catch () => undefined
 
   effect function publish(listing: VoicemailListing) {
-    const names = try displayNames(bridgeCall, listing.voicemails.filter((row) => !row.cachedName).map((row) => row.number))
+    const names = try displayNames(bridgeCall, "phone", listing.voicemails.filter((row) => !row.cachedName).map((row) => row.number))
     const named = { ...listing, voicemails: listing.voicemails.map((row) => ({ ...row, cachedName: row.cachedName || names[row.number] || null })) }
     const asked = try tell({ type: "listAsked" })
     if (asked === undefined) return
@@ -140,18 +133,21 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
 
   return {
     effect visit() {
-      if ((try tell({ type: "voicemailShown" })) === undefined) return
-      const stop = try (bridgeCall("observeVoicemail", (c) => c.phone.observeVoicemail((refreshed) => {
-        runFork(effect { try publish(try promise(() => refreshed)) } catch () => undefined)
-      })) catch () => undefined)
-      try ensuring(effect {
-        try read("AutomaticRead")
-        try followCalls()
-        try Effect.never
-      }, effect {
-        try Ref.set(audio, undefined)
-        try tell({ type: "voicemailHidden" })
-        if (stop !== undefined) try (promise(() => stop()) catch () => undefined)
+      try whileInFront(front, effect () => {
+        if ((try tell({ type: "voicemailShown" })) === undefined) return
+        const stop = try (bridgeCall("observeVoicemail", (c) => c.phone.observeVoicemail((refreshed) => {
+          runFork(effect { try publish(try promise(() => refreshed)) } catch () => undefined)
+        })) catch () => undefined)
+        try ensuring(effect {
+          try read("AutomaticRead")
+          try followCalls()
+          try Effect.never
+        }, effect {
+          try tell({ type: "readinessLost" })
+          try Ref.set(audio, undefined)
+          try tell({ type: "voicemailHidden" })
+          if (stop !== undefined) try (promise(() => stop()) catch () => undefined)
+        })
       })
     },
     effect refresh() {
@@ -178,7 +174,7 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
       const started = try tell({ type: "deleteStarted" })
       if (started === undefined) return
       const { openId, ticket } = started.opened
-      const deferred = try undo.defer("VoicemailDeletion", [openId])
+      const deferred = try undo.defer({ kind: "voicemail", id: openId as VoicemailId })
       try tell({ type: "deleteAnswered", ticket, written: deferred.queued ? "VoicemailRemoved" : deferred.refused ? "VoicemailKept" : "VoicemailUnconfirmed" })
     },
     effect deleteSelected() {

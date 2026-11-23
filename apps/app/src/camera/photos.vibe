@@ -95,15 +95,19 @@ effect function run(native: Native.Shape, plugin: string, method: string, args?:
     new PhotosFailed({ method, code: failure._tag === "NativeFailed" ? failure.code ?? "FAILED" : "UNAVAILABLE", message: failure._tag === "NativeFailed" ? failure.message : "" }))
 }
 
+function accessOf(scope: typeof LibraryScope.Type): typeof LibraryAccess.Type {
+  return { scope: scope.scope, images: scope.imageAccess, videos: scope.videoAccess }
+}
+
 /** Android's `AlphaPhotos` (the permitted catalog, owned captures, albums, edits) and `AlphaPhotoLibrary` (the reviewed device library). */
 export const nativePhotoStore = Layer.effect(PhotoStore, effect {
   const native = try Native
   return {
-    libraryAccess: () => call(native, PHOTOS, "libraryAccess", LibraryAccess),
-    requestLibraryAccess: () => call(native, PHOTOS, "requestLibraryAccess", LibraryAccess),
-    openLibrarySettings: () => run(native, PHOTOS, "openLibrarySettings"),
-    watch: (active: boolean) => run(native, PHOTOS, "watchLibrary", { active }),
-    changed: Stream.map(Stream.catch(native.listen(PHOTOS, "libraryChanged"), () => Stream.empty), () => undefined),
+    libraryAccess: () => Effect.map(call(native, DEVICE, "scope", LibraryScope), accessOf),
+    requestLibraryAccess: () => Effect.map(call(native, DEVICE, "requestAccess", LibraryScope), accessOf),
+    openLibrarySettings: () => run(native, "ElizaSystem", "openAppInfo", { packageName: "ai.alphacompute.alphaphone" }),
+    watch: (active: boolean) => run(native, DEVICE, "watch", { active }),
+    changed: Stream.map(Stream.catch(native.listen(DEVICE, "libraryChanged"), () => Stream.empty), () => undefined),
     list: (options: ListOptions) => call(native, PHOTOS, "list", MediaPage, options),
     read: (id: string, includeTrashed: boolean) => call(native, PHOTOS, "read", MediaItem, { id, includeTrashed }),
     thumbnails: (ids: readonly string[]) => call(native, PHOTOS, "thumbnails", Thumbnails, { ids }),
@@ -127,7 +131,7 @@ export const nativePhotoStore = Layer.effect(PhotoStore, effect {
     beginVideoEdit: (item: Reviewed) => call(native, PHOTOS, "beginVideoEdit", VideoEditSession, item),
     saveVideoEdit: (edit: VideoEditRequest) => call(native, PHOTOS, "saveVideoEdit", EditReceipt, edit),
     cancelVideoEdit: (sessionId: string) => run(native, PHOTOS, "cancelVideoEdit", { sessionId }),
-    reviewRemovedVideoCopy: (operationId: string) => call(native, PHOTOS, "reviewRemovedVideoCopy", EditReceipt, { operationId }),
+    reviewRemovedVideoCopy: () => fail(new PhotosFailed({ method: "reviewRemovedVideoCopy", code: "UNAVAILABLE", message: "" })),
     deviceScope: () => call(native, DEVICE, "scope", LibraryScope),
     devicePage: (options) => call(native, DEVICE, "page", LibraryPage, { ...options, thumbnails: false }),
     deviceInspect: (id: string) => call(native, DEVICE, "inspect", MediaItem, { id, pixels: false }),

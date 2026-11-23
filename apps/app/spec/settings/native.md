@@ -114,6 +114,9 @@ pure def lawAnOwnerChoiceStopsMigration(m: Migration): bool = not(mayGrantRole({
 
 ### A Settings handoff opens only an allowlisted page, or the password provider's own settings
 
+Android's Settings home is a listed page: `AlphaDevice.openSettings` opens it as `system`, and every
+other listed page opens through `ElizaSystem.openSettingsPage`.
+
 ```quint
 type HandoffTarget = ListedPage | ProviderSettings | OtherTarget
 pure def mayHandOff(target: HandoffTarget): bool = target != OtherTarget

@@ -1,10 +1,9 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
-import { Effect, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { KeyRound, Settings as Gear } from "lucide-react";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { useMachine as useNavigation } from "../../../gen/settings.react.ts";
-import { type Page, initial as navigationStart, listedSection } from "../../../gen/settings.ts";
-import { machine as navigationMachine } from "../../../gen/settings.effect.vibe";
+import { initial as navigationStart } from "../../../gen/settings.ts";
 import { useMachine as useAppearance } from "../../../gen/settings__appearance.react.ts";
 import { dark, initial as appearanceStart } from "../../../gen/settings__appearance.ts";
 import { useMachine as useDiagnostics } from "../../../gen/settings__diagnostics.react.ts";
@@ -28,6 +27,7 @@ import { Native } from "../../platform/native.vibe";
 import { Appearance } from "../../settings/appearance.vibe";
 import { Diagnostics } from "../../settings/diagnostics.vibe";
 import { DeviceFacts } from "../../settings/facts.vibe";
+import { SettingsPages } from "../../settings/navigation.vibe";
 import { Wifi } from "../../settings/network.vibe";
 import { Vault } from "../../settings/passwords.vibe";
 import { Preferences } from "../../settings/preferences.vibe";
@@ -39,27 +39,34 @@ import type { DevCommand } from "./DeveloperPage.tsx";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
-import { type SettingsServices, perform, runtime } from "./runtime.ts";
+import { type AppServices, runtime } from "./runtime.ts";
 
 const mocks = __ALPHA_TEST_MOCKS__;
-const scheme = typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : undefined;
-const subscribeScheme = (changed: () => void) => { scheme?.addEventListener("change", changed); return () => scheme?.removeEventListener("change", changed); };
-const systemDark = () => scheme?.matches === true;
+
+/** Run one Settings effect for a control; it cannot fail, so nothing is awaited. */
+function perform<A>(program: Effect.Effect<A, never, AppServices>): Promise<A> {
+  return runtime.runPromise(program);
+}
+
+/** A value read now from the app runtime, or `fallback` while the runtime is still being built. */
+function now<A>(program: Effect.Effect<A, never, AppServices>, fallback: A): A {
+  try {
+    return runtime.runSync(program);
+  } catch {
+    return fallback;
+  }
+}
+
+const pages = <A,>(use: (p: SettingsPages.Shape) => Effect.Effect<A>) => perform(Effect.flatMap(Effect.service(SettingsPages), use));
 
 /** The theme and legible text the shell draws its root with: `.dark` or `.light`, and `font-legible`. */
 export function useAppearanceClass(): string {
   const { state = appearanceStart } = useAppearance(runtime);
-  const isDark = dark({ ...state, systemDark: useSyncExternalStore(subscribeScheme, systemDark, () => false) });
-  return `${isDark ? "dark" : "light"}${state.legible ? " font-legible" : ""}`;
+  return `${dark(state) ? "dark" : "light"}${state.legible ? " font-legible" : ""}`;
 }
 
-function SettingsApp({ route, onClose }: ScreenProps) {
-  const [navigation] = useState(() => ManagedRuntime.make(navigationMachine({
-    ...navigationStart, developer: mocks, page: route !== undefined && listedSection(route as Page) ? (route as Page) : "Root",
-  })));
-  const nav = useNavigation(navigation);
-  useState(() => perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.show())));
-  const close = () => { void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.hide())); onClose(); };
+function SettingsApp({ onClose }: ScreenProps) {
+  const nav = useNavigation(runtime).state ?? { ...navigationStart, developer: mocks };
   const facts = useFacts(runtime).state ?? factsStart;
   const appearance = useAppearance(runtime).state ?? appearanceStart;
   const preferences = usePreferences(runtime);
@@ -68,31 +75,26 @@ function SettingsApp({ route, onClose }: ScreenProps) {
   const reset = useReset(runtime).state ?? resetStart;
   const privacyMachine = usePrivacy(runtime);
   const diagnostics = useDiagnostics(runtime);
-  const isDark = useSyncExternalStore(subscribeScheme, systemDark, () => false);
-  const [offerLabel, setOfferLabel] = useState<string | undefined>(undefined);
   const [profile, setProfile] = useState<"app" | "development">(() => new URLSearchParams(location.search).get("mode") === "dev" ? "development" : "app");
-  const variant = runtime.runSync(Effect.map(Effect.service(Build), (b) => b.info.variant));
-  const sync = <A,>(use: Effect.Effect<A, never, SettingsServices>) => runtime.runSync(use);
-  const readable = sync(Effect.flatMap(Effect.service(Preferences), (p) => Effect.map(p.current(), (c) => c.readable)));
-  const route_ = sync(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.route()));
-  if (nav.state?.page === "Passwords") return <PasswordsApp onClose={() => void nav.send({ type: "back" })} />;
+  const variant = now(Effect.map(Effect.service(Build), (b) => b.info.variant), "browser");
+  const readable = now(Effect.flatMap(Effect.service(Preferences), (p) => Effect.map(p.current(), (c) => c.readable)), false);
+  const route = now(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.route()), "RouteUnavailable");
+  if (nav.page === "Passwords") return <PasswordsApp onClose={() => void pages((p) => p.back())} />;
   return (
     <SettingsScreen
       model={{
-        nav: nav.state ?? { ...navigationStart, developer: mocks }, facts, appearance, systemDark: isDark,
+        nav, facts, appearance, network, updates, reset, variant,
         preferences: { value: preferences.state ?? preferencesStart, readable: preferences.cause === undefined && readable },
-        network, updates, offerLabel, reset, variant,
       }}
       act={{
-        navigate: (event) => {
-          void nav.send(event);
-          if (event.type === "open" && event.page === "Network") void perform(Effect.flatMap(Effect.service(Wifi), (w) => Effect.andThen(w.readConnectivity(), w.scan())));
-          if (event.type === "open" && event.page === "General") void perform(Effect.flatMap(Effect.service(Updates), (u) => Effect.map(u.offer(), (o) => setOfferLabel(o === undefined ? undefined : o.versionName ? `${o.versionName} (${o.versionCode})` : String(o.versionCode)))));
-          if (event.type === "open" && event.page === "Privacy") void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.readListener()));
-        },
+        open: (page) => void pages((p) => p.open(page)),
+        back: () => void pages((p) => p.back()),
+        openLicence: (index) => void pages((p) => p.openLicence(index)),
+        openApp: (app) => void pages((p) => p.openApp(app)),
+        openAccount: (section) => void pages((p) => p.openAccount(section)),
+        accessSetup: () => void pages((p) => p.accessSetup()),
         openPage: (page) => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openPage(page))),
         openShade: () => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openShade())),
-        openAppInfo: () => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openAppInfo())),
         askHome: () => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.askHome())),
         textScale: (percent) => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.requestScale(percent))),
         choose: (choice) => void perform(Effect.flatMap(Effect.service(Appearance), (a) => a.choose(choice))),
@@ -102,21 +104,20 @@ function SettingsApp({ route, onClose }: ScreenProps) {
         scan: () => void perform(Effect.flatMap(Effect.service(Wifi), (w) => w.scan())),
         join: (name, security, passphrase) => void perform(Effect.flatMap(Effect.service(Wifi), (w) => w.join(name, security, passphrase))),
         openPanel: () => void perform(Effect.flatMap(Effect.service(Wifi), (w) => w.openPanel())),
-        check: () => void perform(Effect.flatMap(Effect.service(Updates), (u) => Effect.andThen(u.check(true), Effect.map(u.offer(), (o) => setOfferLabel(o === undefined ? undefined : o.versionName ? `${o.versionName} (${o.versionCode})` : String(o.versionCode)))))),
+        check: () => void perform(Effect.flatMap(Effect.service(Updates), (u) => u.check(true))),
         install: () => void perform(Effect.flatMap(Effect.service(Updates), (u) => u.install())),
         allowAutomatic: () => void perform(Effect.flatMap(Effect.service(Updates), (u) => u.allowAutomatic())),
         eraseAll: () => void perform(Effect.flatMap(Effect.service(Reset), (r) => r.review())),
-        openPasswords: () => void nav.send({ type: "open", page: "Passwords" }),
       }}
-      onClose={close}
-      privacy={{ route: route_, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
+      onClose={onClose}
+      privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),
         listenerSettings: () => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.openListenerSettings())),
       }}
       diagnostics={diagnostics.state ?? diagnosticsStart}
       aboutActs={{
-        readLog: () => void perform(Effect.flatMap(Effect.service(Diagnostics), (d) => d.readLog())),
+        readLog: () => void perform(Effect.flatMap(Effect.service(Diagnostics), (d) => d.readLog(true))),
         askClear: () => void diagnostics.send({ type: "askClear" }),
         cancelClear: () => void diagnostics.send({ type: "cancelClear" }),
         clear: () => void perform(Effect.flatMap(Effect.service(Diagnostics), (d) => d.clearLog())),
@@ -135,10 +136,8 @@ function SettingsApp({ route, onClose }: ScreenProps) {
 
 function PasswordsApp({ onClose }: ScreenProps) {
   const vault = useVault(runtime);
-  const [opened] = useState(() => perform(Effect.flatMap(Effect.service(Vault), (v) => v.open())));
-  const close = () => { void opened.then(() => perform(Effect.flatMap(Effect.service(Vault), (v) => v.leave()))); onClose(); };
   return (
-    <PasswordsScreen vault={vault.state ?? vaultStart} onClose={close} acts={{
+    <PasswordsScreen vault={vault.state ?? vaultStart} onClose={onClose} acts={{
       run: (task, id) => void perform(Effect.flatMap(Effect.service(Vault), (v) => v.run(task, id))),
       edit: (id) => void perform(Effect.flatMap(Effect.service(Vault), (v) => v.edit(id))),
       askRemove: (id) => void vault.send({ type: "askRemove", id }),
@@ -153,9 +152,9 @@ function UpdateSurface() {
   return <UpdateActivation updates={updates} onContinue={() => void perform(Effect.flatMap(Effect.service(Updates), (u) => u.continueInstall()))} />;
 }
 
-/** Settings and Passwords. */
+/** Settings and Passwords; Android's Back pops one Settings page and leaves from the root. */
 export const screens: AppScreen[] = [
-  { id: "settings", title: "Settings", icon: Gear, availability: "everywhere", Screen: SettingsApp },
+  { id: "settings", title: "Settings", icon: Gear, availability: "everywhere", Screen: SettingsApp, back: () => pages((p) => p.back()) },
   { id: "passwords", title: "Passwords", icon: KeyRound, availability: "everywhere", Screen: PasswordsApp },
 ];
 

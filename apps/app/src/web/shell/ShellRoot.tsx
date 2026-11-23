@@ -1,4 +1,4 @@
-// spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/gestures.md, "Story: Swipe the way the phone expects"
+// spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/gestures.md, "Story: Swipe the way the phone expects"; spec/shell/navigation.md, "On Phone, Messages and Contacts the app's own bar stands in for the dock until a conversation opens"
 import { Effect } from "effect";
 import { useRef, useState, useSyncExternalStore } from "react";
 import { useMachine as useNavigation } from "../../../gen/shell__navigation.react.ts";
@@ -8,7 +8,7 @@ import { useMachine as useOverview } from "../../../gen/shell__overview.react.ts
 import { useMachine as usePermissions } from "../../../gen/shell__permissions.react.ts";
 import { useMachine as useRecovery } from "../../../gen/shell__recovery.react.ts";
 import { useMachine as useAppInfo } from "../../../gen/shell__appInfo.react.ts";
-import { appInert, initial as navStart, talking, type Nav } from "../../../gen/shell__navigation.ts";
+import { appInert, dockShown, initial as navStart, talking, type Nav } from "../../../gen/shell__navigation.ts";
 import { initial as favoritesStart } from "../../../gen/shell__favorites.ts";
 import { initial as toastsStart } from "../../../gen/shell__toasts.ts";
 import { initial as overviewStart } from "../../../gen/shell__overview.ts";
@@ -25,7 +25,9 @@ import { Permissions } from "../../shell/permissions.vibe";
 import { Recovery } from "../../shell/recovery.vibe";
 import { Shade } from "../../shell/shade.vibe";
 import type { AppId, SurfaceSlot } from "../app-screen.ts";
+import { HomeAgendaCard } from "../calendar/index.tsx";
 import { useAppearanceClass } from "../settings/index.tsx";
+import { HomeCards } from "../telephony/index.tsx";
 import { VoiceRuntimeProvider } from "../voice/index.tsx";
 import { runtime } from "../runtime.ts";
 import { cn } from "../lib/cn.ts";
@@ -39,11 +41,12 @@ import { StandInShade } from "./StandInShade.tsx";
 import { StartupPermissions } from "./StartupPermissions.tsx";
 import { NoticesSlot, ToastRegion } from "./ToastRegion.tsx";
 import type { GestureControls } from "./TileGrid.tsx";
-import { admittedScreens, allScreens, screenOf, surfacesIn } from "./registry.ts";
+import { admittedScreens, allScreens, onImage, screenOf, surfacesIn } from "./registry.ts";
 import { perform } from "./useLayer.ts";
 
 const launcher = (f: (l: Launcher.Shape) => Effect.Effect<void>) => perform(Effect.flatMap(Effect.service(Launcher), f));
 const navigate = (f: (n: Navigation.Shape) => Effect.Effect<unknown>) => perform(Effect.flatMap(Effect.service(Navigation), f));
+const openApp = (app: AppId, route?: string) => navigate((n) => n.open(app, route));
 
 function faceOf(key: string, apps: readonly InstalledApp[], details: ReadonlyMap<string, string[]>, admitted: readonly string[]): TileFace | undefined {
   const app = appOfKey(key);
@@ -69,9 +72,11 @@ const controls: GestureControls = {
 };
 
 function Surfaces({ slot, admitted }: { slot: SurfaceSlot; admitted: readonly string[] }) {
-  const open = (app: AppId, route?: string) => navigate((n) => n.open(app, route));
-  return <>{surfacesIn(slot, admitted).map(({ id, Surface }) => <Surface key={id} open={open} />)}</>;
+  return <>{surfacesIn(slot, admitted).map(({ id, Surface }) => <Surface key={id} open={openApp} />)}</>;
 }
+
+/** The shell root takes nothing: it reads every machine from the one app runtime. */
+export type ShellRootProps = Record<string, never>;
 
 /**
  * The phone: Home or the open app, the library, the assistant's dock, the shell's layers, toasts and notices.
@@ -87,7 +92,6 @@ export function ShellRoot() {
   const info = useAppInfo(runtime).state ?? appInfoStart;
   const { snapshot, details } = useSyncExternalStore(inventory.subscribe, inventory.getSnapshot, inventory.getSnapshot);
   const appearance = useAppearanceClass();
-  const [busy, setBusy] = useState(false);
   useState(() => perform(Effect.flatMap(Effect.service(Recovery), (r) => r.mounted())));
   const start = useRef<{ id: number; x: number; y: number } | null>(null);
 
@@ -143,6 +147,8 @@ export function ShellRoot() {
         <Surfaces slot="top" admitted={admitted} />
         <HomeScreen
           overview={overview}
+          agenda={<HomeAgendaCard open={openApp} />}
+          attention={onImage(admitted) ? <HomeCards open={openApp} /> : undefined}
           tiles={tiles}
           editing={nav.editing}
           editError={nav.editing ? launchErrorText(snapshot.launchError) : ""}
@@ -184,7 +190,7 @@ export function ShellRoot() {
         <AppFrame nav={nav} screens={screens} failures={recovery.recorded} onClose={() => navigate((n) => n.home())} />
         <AddToHomeSheet hidden={hidden} open={nav.adding} onAdd={(key) => launcher((l) => l.addView(key))} onClose={() => launcher((l) => l.closeAdd())} />
         <StandInShade open={nav.shade} onClose={() => navigate((n) => n.send({ type: "closeShade" }))} />
-        <Surfaces slot="dock" admitted={admitted} />
+        {dockShown(nav) && <Surfaces slot="dock" admitted={admitted} />}
         <div className="absolute inset-x-0 z-40 flex flex-col gap-2" style={{ top: "calc(var(--alpha-header-clearance, 0px) + 4rem)" }}>
           <Surfaces slot="notices" admitted={admitted} />
           <NoticesSlot notices={toasts.notices} onDismiss={(message) => perform(Effect.flatMap(Effect.service(Notices), (n) => n.dismiss(message)))} />
@@ -198,8 +204,7 @@ export function ShellRoot() {
         />
         <StartupPermissions
           walkthrough={walkthrough}
-          busy={busy}
-          onAllow={() => { setBusy(true); void runtime.runPromise(Effect.flatMap(Effect.service(Permissions), (p) => p.allow())).finally(() => setBusy(false)); }}
+          onAllow={() => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.allow()))}
           onNext={(skip) => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.next(skip)))}
           onFinish={() => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.finish()))}
           onClose={() => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.close()))}

@@ -3,6 +3,7 @@ import type { CalendarRow } from "../../calendar/model.vibe";
 import { EmptyState, ListRow } from "../components/ui/index.ts";
 import type { ListGroup } from "./layout.ts";
 
+/** The day groups a schedule or search lists, its range line and what it says when empty. */
 export type ScheduleListProps = {
   groups: readonly ListGroup[];
   /** The dates the list covers, so a missing event outside them is not taken for none. */

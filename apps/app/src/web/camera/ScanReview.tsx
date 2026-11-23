@@ -1,28 +1,40 @@
-// spec/camera/scanDialogs.md, "Story: Review the text I scanned before anything is saved"; spec/camera/scan.md, "Story: Assemble a document and keep a draft I can reload"; spec/camera/scanDialogs.md, "Story: Correct a page's perspective before it replaces the page"; spec/camera/scanDialogs.md, "Story: Capture a document page with Camera"
-import { Effect } from "effect";
+// spec/camera/scanDialogs.md, "Story: Review the text I scanned before anything is saved"; spec/camera/scanDialogs.md, "Story: Make a searchable PDF of the pages I reviewed"; spec/camera/scan.md, "Story: Assemble a document and keep a draft I can reload"; spec/camera/scanDialogs.md, "Story: Correct a page's perspective before it replaces the page"; spec/camera/scanDialogs.md, "Story: Capture a document page with Camera"
+import type { Effect } from "effect";
 import { ArrowDown, ArrowUp, Copy, FileDown, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { useMachine as useDialogs } from "../../../gen/camera__scanDialogs.react.ts";
-import { useMachine as useScan } from "../../../gen/camera__scan.react.ts";
-import { Scanner } from "../../camera/scanner.vibe";
-import { scannedLinks } from "../../camera/scanText.ts";
+import type { Dialogs, Event as DialogEvent } from "../../../gen/camera__scanDialogs.ts";
+import type { Event as ScanEvent, Scan } from "../../../gen/camera__scan.ts";
+import type { Scanner } from "../../camera/scanner.vibe";
+import { scannedLinks, type TextLine } from "../../camera/scanText.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Textarea } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
-import { cameraRuntime, run } from "./runtime.ts";
 
-const scanner = (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(Scanner), use));
+/** The scan dialogs' state, what may be done now, and the scanner that does it. */
+export interface ScanReviewProps {
+  /** The dialogs as the scan dialogs Machine keeps them. */
+  dialogs: Dialogs;
+  /** The open document as the scan Machine keeps it. */
+  scan: Scan;
+  /** Whether a dialog event is allowed now. */
+  can: (event: DialogEvent) => boolean;
+  /** Whether a document event is allowed now. */
+  canScan: (event: ScanEvent) => boolean;
+  /** The recognised lines of each page while the searchable review is open. */
+  searchLines: readonly (readonly TextLine[])[];
+  /** Run one of the scanner's controls. */
+  scanner: (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => void;
+}
 
 /**
- * The scan dialogs over Camera: text review, document, correction and page capture.
+ * The scan dialogs over Camera: text review, document, searchable review, correction and page capture.
  * @model spec/camera/scanDialogs.md
  */
-export function ScanReview() {
-  const { state: dialogs, can } = useDialogs(cameraRuntime);
-  const { state: scan, can: canScan } = useScan(cameraRuntime);
+export function ScanReview({ dialogs, scan, can, canScan, searchLines, scanner }: ScanReviewProps) {
   const [draft, setDraft] = useState<string | undefined>(undefined);
   const [corners, setCorners] = useState<{ x: number; y: number }[] | undefined>(undefined);
-  if (dialogs === undefined || scan === undefined) return null;
+  const [replacing, setReplacing] = useState(false);
   const text = dialogs.text;
+  const searchable = dialogs.searchable;
   const body = draft ?? text.body;
   const links = scannedLinks(text.body);
   return (
@@ -80,7 +92,7 @@ export function ScanReview() {
             <Button variant="secondary" size="sm" disabled={!canScan({ type: "beginEdit" })} onClick={() => scanner((s) => s.addPage("picker"))}>Add image</Button>
             <Button variant="secondary" size="sm" disabled={!can({ type: "openCapture" })} onClick={() => scanner((s) => s.openCapture())}>Capture page</Button>
             <Button variant="secondary" size="sm" disabled={!canScan({ type: "beginDraftAction" })} onClick={() => scanner((s) => s.saveDraft())}>Save draft</Button>
-            <Button variant="secondary" size="sm" disabled={!canScan({ type: "beginDraftAction" })} onClick={() => scanner((s) => s.loadDraft(scan.pages.count === 0 || window.confirm("Replace the open pages with the saved draft?")))}>Load draft</Button>
+            <Button variant="secondary" size="sm" disabled={!canScan({ type: "beginDraftAction" })} onClick={() => (scan.pages.count === 0 ? scanner((s) => s.loadDraft(true)) : setReplacing(true))}>Load draft</Button>
             {scan.draftOwner !== "NoDraft" && <Button variant="ghost" size="sm" onClick={() => scanner((s) => s.deleteDraft())}>Delete draft</Button>}
           </div>
           <p role="status" className="text-sm text-muted-foreground">
@@ -89,6 +101,45 @@ export function ScanReview() {
           <div className="flex justify-end gap-2">
             <Button variant="secondary" disabled={!canScan({ type: "beginExport" })} onClick={() => scanner((s) => s.exportDocument(true))}>Searchable PDF</Button>
             <Button disabled={!canScan({ type: "beginExport" })} onClick={() => scanner((s) => s.exportDocument(false))}>Save PDF</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={replacing} onOpenChange={setReplacing}>
+        <DialogContent closeLabel="Keep the open pages">
+          <DialogTitle>Replace the open pages?</DialogTitle>
+          <p className="text-sm text-muted-foreground">The saved draft replaces the pages open now.</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setReplacing(false)}>Keep pages</Button>
+            <Button onClick={() => { setReplacing(false); scanner((s) => s.loadDraft(true)); }}>Replace</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={searchable.shown} onOpenChange={(open) => { if (!open) scanner((s) => s.closeSearchable()); }}>
+        <DialogContent closeLabel="Cancel searchable PDF" aria-label="Review searchable PDF">
+          <DialogTitle>Review text</DialogTitle>
+          <span className="w-fit rounded-full bg-secondary px-3 py-0.5 font-mono text-xs uppercase">On device</span>
+          <p role="status" className="text-sm text-muted-foreground">
+            {!searchable.ready ? "Reading text…" : searchable.busy ? "Preparing searchable PDF…" : ""}
+          </p>
+          {searchable.ready && (
+            <div role="region" aria-label="Review details" tabIndex={0} className={cn("flex max-h-[50dvh] flex-col gap-3 overflow-y-auto", focusRing)}>
+              {searchLines.map((lines, page) => (
+                <section key={page} className="flex flex-col gap-2">
+                  <h3 className="font-mono text-xs uppercase">Page {page + 1}</h3>
+                  {lines.length === 0 && <p className="text-sm text-muted-foreground">No text</p>}
+                  {lines.map((line, at) => (
+                    <Textarea key={at} aria-label={`Page ${page + 1} line ${at + 1}`} rows={2} maxLength={4000} defaultValue={line.text} disabled={searchable.busy}
+                      onBlur={(event) => scanner((s) => s.editSearchLine(page, at, event.target.value))} />
+                  ))}
+                </section>
+              ))}
+            </div>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="secondary" aria-label="Keep reviewed text" disabled={!can({ type: "keepText" })} onClick={() => scanner((s) => s.keepSearchableText())}>Keep text</Button>
+            <Button aria-label="Save reviewed searchable PDF" loading={searchable.busy} disabled={!can({ type: "download" })} onClick={() => scanner((s) => s.downloadSearchable())}>Save PDF</Button>
           </div>
         </DialogContent>
       </Dialog>

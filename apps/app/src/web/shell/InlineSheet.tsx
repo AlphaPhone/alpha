@@ -3,6 +3,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { sheetRelease } from "../../../gen/shell__gestures.ts";
 import { Sheet, SheetContent } from "../components/ui/index.ts";
 
+/** A sheet inside the phone frame, listed as a navigation layer. */
 export interface InlineSheetProps {
   /** The sheet's accessible name and one title. */
   title: string;

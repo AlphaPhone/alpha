@@ -3,8 +3,9 @@
 Passkeys are outside Alpha's Browser; the menu's Open in another browser hands the unchanged visible
 HTTPS page to an installed browser (the native host's `openExternalBrowser` builds the chooser and
 refuses a stale session, document or hidden page itself). A private page leaves Alpha only after the
-owner confirms it. A mail, phone, text, map or app link tapped on a page opens Android's handler
-from the native host; in a private tab the host first asks the renderer, which asks the owner.
+owner confirms it. A mail, phone, text, map or app link tapped on a page is the native host's own
+handoff: it opens Android's handler for a normal tab, and in a private tab it asks "Leave private
+browsing?" in its own dialog first; the renderer only shows the notices the host sends about it.
 Every step checks again that the same page is still the one shown.
 
 ## Story: Open the page I see in another browser
@@ -22,17 +23,14 @@ view is left or hidden, so a handoff of an earlier visit can never continue.
 type ShownPage = { visible: bool, tab: str, url: str, navigation: str, revision: int, settled: bool, secure: bool, priv: bool }
 type HandoffPhase = HandoffIdle | PreparingReview | Reviewing | Presenting | Dispatching | CleaningUp
 type ExternalOpen = { tab: str, url: str, navigation: str, priv: bool, approved: bool, exact: bool }
-type Handoff = { phase: HandoffPhase, visit: int, boundVisit: int, bound: ShownPage, approved: bool, launched: List[ExternalOpen],
-  linkPending: bool, linkPage: ShownPage, linkVisit: int, links: List[LinkOpen] }
-type LinkOpen = { priv: bool, approved: bool }
+type Handoff = { phase: HandoffPhase, visit: int, boundVisit: int, bound: ShownPage, approved: bool, launched: List[ExternalOpen] }
 pure val noPage: ShownPage = { visible: false, tab: "", url: "", navigation: "", revision: 0, settled: false, secure: false, priv: false }
-pure val initial: Handoff = { phase: HandoffIdle, visit: 0, boundVisit: 0, bound: noPage, approved: false, launched: List(),
-  linkPending: false, linkPage: noPage, linkVisit: 0, links: List() }
+pure val initial: Handoff = { phase: HandoffIdle, visit: 0, boundVisit: 0, bound: noPage, approved: false, launched: List() }
 pure def samePage(a: ShownPage, b: ShownPage): bool =
   b.visible and a.tab == b.tab and a.url == b.url and a.navigation == b.navigation and a.revision == b.revision and b.settled
 pure def stillCurrent(h: Handoff, shown: ShownPage): bool = h.visit == h.boundVisit and samePage(h.bound, shown)
 type HandoffProblem = NeedsHttpsPage | PageChanged | NotOpened
-type HandoffEffect = AskLeavePrivate(ShownPage) | Dispatch(ExternalOpen) | Notice(HandoffNote) | AskLink(ShownPage) | AnswerLink(LinkOpen)
+type HandoffEffect = AskLeavePrivate(ShownPage) | Dispatch(ExternalOpen) | Notice(HandoffNote)
 type HandoffNote = { problem: HandoffProblem }
 type HandoffChange = { state: Handoff, out: List[HandoffEffect] }
 pure def changedPage(problem: HandoffProblem, h: Handoff): HandoffChange = { state: { ...h, phase: CleaningUp }, out: List(Notice({ problem: problem })) }
@@ -45,7 +43,7 @@ pure val shownValues: Set[ShownPage] = List(publicPage, { ...publicPage, priv: t
 ### Asking binds a settled HTTPS page, or says one is needed; a request while one is in progress does nothing
 
 ```quint
-pure def canStartHandoff(h: Handoff, shown: ShownPage): bool = h.phase == HandoffIdle and h.launched.length() < 3
+pure def canStartHandoff(h: Handoff, shown: ShownPage): bool = h.phase == HandoffIdle
 pure def startHandoff(h: Handoff, shown: ShownPage): HandoffChange =
   if (not(shown.visible and shown.settled and shown.secure)) { state: h, out: List(Notice({ problem: NeedsHttpsPage })) }
   else {
@@ -90,7 +88,6 @@ pure def sometimesAPrivatePageLeft(h: Handoff): bool = h.launched.some(l => l.pr
 ### Leaving or hiding the Browser view retires the handoff in progress
 
 ```quint
-pure def canRetire(h: Handoff): bool = h.visit < 4
 pure def retire(h: Handoff): Handoff = { ...h, visit: h.visit + 1 }
 ```
 
@@ -99,22 +96,50 @@ pure def retire(h: Handoff): Handoff = { ...h, visit: h.visit + 1 }
 > As the owner, I want a link to mail, phone, messages, maps or another app tapped in a private
 > tab to ask me first, and to open nothing if the page changed meanwhile.
 
-### A tapped app link in a private tab waits for the owner's answer, which opens the app only while the same page is shown
+### A tapped link opens another app at once only from a normal tab; a private tab asks first, and a link nobody tapped opens nothing
 
-The native host opens a link from a normal tab on its own, and ignores a link no one tapped.
+The host decides on the link's own tab: a tab that is not shown ignores it, and a fresh pop-up from
+a tapped `target=_blank` link whose tab and opener are both hidden closes. A link that opened without
+a tap is blocked, and one that is no app link this Browser hands off is unsupported; the page is
+told so, and the renderer shows the host's notice in Alpha's words.
 
 ```quint
-pure def canLinkAsked(h: Handoff, shown: ShownPage): bool = not(h.linkPending) and shown.visible and shown.priv and h.links.length() < 3
-pure def linkAsked(h: Handoff, shown: ShownPage): HandoffChange =
-  { state: { ...h, linkPending: true, linkPage: shown, linkVisit: h.visit }, out: List(AskLink(shown)) }
-pure def canLinkAnswered(h: Handoff, approved: bool, shown: ShownPage): bool = h.linkPending
-pure def linkAnswered(h: Handoff, approved: bool, shown: ShownPage): HandoffChange = {
-  val opens = approved and h.linkVisit == h.visit and samePage(h.linkPage, shown)
-  { state: { ...h, linkPending: false, links: if (opens) h.links.append({ priv: true, approved: true }) else h.links },
-    out: List(AnswerLink({ priv: true, approved: opens })) }
+type LinkAction = IgnoreLink | ClosePopup | BlockedLink | UnsupportedLink | AskLeavePrivateLink | LaunchApp
+pure def linkAction(fresh: bool, shownSelf: bool, shownOpener: bool, gesture: bool, supported: bool, priv: bool): LinkAction =
+  if (fresh and not(shownSelf) and not(shownOpener)) ClosePopup
+  else if (not(fresh) and not(shownSelf)) IgnoreLink
+  else if (not(fresh) and not(gesture)) BlockedLink
+  else if (not(supported)) UnsupportedLink
+  else if (priv) AskLeavePrivateLink
+  else LaunchApp
+pure def lawAPrivateLinkNeverOpensWithoutAsking(fresh: bool, shownSelf: bool, shownOpener: bool, gesture: bool, supported: bool, priv: bool): bool =
+  priv implies linkAction(fresh, shownSelf, shownOpener, gesture, supported, priv) != LaunchApp
+pure def lawALinkNobodyTappedNeverLeaves(shownSelf: bool, shownOpener: bool, supported: bool, priv: bool): bool = {
+  val decided = linkAction(false, shownSelf, shownOpener, false, supported, priv)
+  decided != LaunchApp and decided != AskLeavePrivateLink
 }
-pure def alwaysAPrivateLinkOpensOnlyWhenApproved(h: Handoff): bool = h.links.every(l => l.priv implies l.approved)
-pure def stepALinkOpensOnlyOnItsPage(before: Handoff, via: str, after: Handoff, out: List[HandoffEffect]): bool =
-  via == "linkAnswered" implies out.every(e => match e { | AnswerLink(a) => not(a.approved) or after.links.length() == before.links.length() + 1 | _ => true })
-pure def sometimesAPrivateLinkOpened(h: Handoff): bool = h.links.length() > 0
+pure def lawOnlyTheShownTabsLinkLeaves(gesture: bool, supported: bool, priv: bool): bool =
+  linkAction(false, false, true, gesture, supported, priv) == IgnoreLink
+```
+
+### The owner's Open app opens the app only while Browser runs and the same page of the same tab is still presented
+
+A fresh pop-up may itself be the shown tab, so the host compares the presentation, not which tab is
+shown, and the pop-up must still be open; otherwise the pop-up closes and nothing opens.
+
+```quint
+type LinkAsked = { navigation: int, presentation: int, fresh: bool }
+type LinkNow = { running: bool, reportOpen: bool, navigation: int, presentation: int, popupOpen: bool }
+pure def answerStillValid(asked: LinkAsked, now: LinkNow): bool =
+  now.running and now.reportOpen and asked.navigation == now.navigation and asked.presentation == now.presentation
+    and (not(asked.fresh) or now.popupOpen)
+pure def lawAMovedPageNeverOpensTheApp(asked: LinkAsked, now: LinkNow): bool =
+  (asked.navigation != now.navigation or asked.presentation != now.presentation) implies not(answerStillValid(asked, now))
+pure def lawAClosedPopupNeverOpensTheApp(asked: LinkAsked, now: LinkNow): bool =
+  (asked.fresh and not(now.popupOpen)) implies not(answerStillValid(asked, now))
+pure val askedValues: Set[LinkAsked] = Set({ navigation: 1, presentation: 1, fresh: false }).union(Set({ navigation: 1, presentation: 1, fresh: true }))
+pure val nowValues: Set[LinkNow] = Set({ running: true, reportOpen: true, navigation: 1, presentation: 1, popupOpen: true })
+  .union(Set({ running: true, reportOpen: true, navigation: 2, presentation: 1, popupOpen: true }))
+  .union(Set({ running: true, reportOpen: true, navigation: 1, presentation: 2, popupOpen: false }))
+  .union(Set({ running: false, reportOpen: true, navigation: 1, presentation: 1, popupOpen: true }))
 ```

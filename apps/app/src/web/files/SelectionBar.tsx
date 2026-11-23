@@ -2,6 +2,7 @@
 import { CheckCheck, Copy, Download, FolderInput, Info, Pencil, Share2, Trash2, X } from "lucide-react";
 import { Button } from "../components/ui/index.ts";
 
+/** How many rows are selected and what the owner does with them. */
 export type SelectionBarProps = {
   /** How many rows are selected. */
   count: number;

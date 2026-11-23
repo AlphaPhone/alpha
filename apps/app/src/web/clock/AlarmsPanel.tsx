@@ -7,6 +7,7 @@ import { cn } from "../lib/cn.ts";
 import { DayPicker } from "./DayPicker.tsx";
 import { describeDays, wall } from "./text.ts";
 
+/** The browser build's alarms, the page's instant, and each owner decision about an alarm. */
 export type AlarmsPanelProps = {
   /** The browser build's alarms. */
   clock: AlarmClock;

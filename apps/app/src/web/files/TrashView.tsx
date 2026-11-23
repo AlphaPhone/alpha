@@ -7,6 +7,7 @@ import { Alert, Button, EmptyState, ListRow, Skeleton } from "../components/ui/i
 import { kindIcon } from "./FileRow.tsx";
 import { formatSize, locationLabel } from "./format.ts";
 
+/** Trash's rows, selection and confirmations, and what each control does. */
 export type TrashViewProps = {
   trash: Trash;
   /** Now, in milliseconds, for each item's days left. */

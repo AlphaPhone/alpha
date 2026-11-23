@@ -1,8 +1,9 @@
 // spec/account/devBridge.md, "Story: Sign in through the development bridge"; spec/account/dedicated.md, "Story: Review a dedicated agent in a development build"
-import { type Bridge, canBegin, canCancel } from "../../../gen/account__devBridge.ts";
+import { type Bridge, type BridgeFailure, canBegin, canCancel } from "../../../gen/account__devBridge.ts";
 import { type Dedicated, canAccept, canDecline, canFinalize, canPoll, canReviewRead } from "../../../gen/account__dedicated.ts";
 import { Button, Card, CardTitle } from "../components/ui/index.ts";
 
+/** The test-mocks bridge and dedicated review states, and the developer's actions on them. */
 export interface DeveloperPanelProps {
   bridge: Bridge;
   dedicated: Dedicated;
@@ -14,6 +15,14 @@ export interface DeveloperPanelProps {
   onPoll: () => void;
   onFinalize: () => void;
 }
+
+const failures: Record<BridgeFailure, string> = {
+  NoBridgeFailure: "Bridge sign-in failed",
+  BridgeUnavailable: "Bridge unavailable",
+  BridgeActivationPending: "Key not activated · nothing stored",
+  BridgeAccountChanged: "Account changed meanwhile · nothing stored",
+  BridgeStorage: "Key could not be stored",
+};
 
 /**
  * Test-mocks developer surfaces: the bridge's own sign-in and the dedicated agent review. Absent from product builds.
@@ -29,7 +38,7 @@ export function DeveloperPanel({ bridge, dedicated, onBridgeSignIn, onBridgeCanc
         <Button variant="outline" disabled={!canBegin(bridge)} onClick={onBridgeSignIn}>Bridge sign-in</Button>
         <Button variant="ghost" disabled={!canCancel(bridge)} onClick={onBridgeCancel}>Cancel</Button>
       </div>
-      {bridge.phase === "BridgeFailed" && <p role="alert">{bridge.failure}</p>}
+      {bridge.phase === "BridgeFailed" && <p role="alert">{failures[bridge.failure]}</p>}
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" disabled={!canReviewRead(dedicated, false, false)} onClick={onReview}>Dedicated review</Button>
         {view.tag === "Review" && (

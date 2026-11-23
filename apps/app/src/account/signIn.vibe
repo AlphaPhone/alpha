@@ -1,15 +1,16 @@
 // spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
 import {
-  type CodeMethod, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
+  type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
   Machine as SignInMachine, enabled, machine as signInMachine
 } from "../../gen/account__signIn.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
 import { environmentFor, freshKey, hostEnvironment } from "./deployment.ts"
 import { ensureResident } from "./inference.vibe"
-import { CloudSession } from "./session.vibe"
-import { CodeStarted, HostStatus, NativeRejection, NetworkStatus, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
+import { CloudSession, noNews, newsOf, type SignInNews } from "./session.vibe"
+import { CodeStarted, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
 
@@ -20,7 +21,7 @@ export type ServiceInfo = ServiceAnswer["service"]
 export service SignInScreen {
   readonly changes: Stream.Stream<SignIn>
   current(): SignIn!!
-  /** Fix the host, follow the session, the network and the host's readiness; runs for the app's life. */
+  /** Fix the host, follow the session, the network, the host's readiness and its retained second verifications; runs for the app's life. */
   run(): void!!
   /** The owner opens sign-in, or checks the methods again. */
   open(): void!!
@@ -31,8 +32,10 @@ export service SignInScreen {
   verify(code: string): void!!
   resend(address: string): void!!
   back(): void!!
-  /** Saving own provider keys started, or ended. */
-  ownKeys(started: boolean, saved: boolean): void!!
+  /** Saving own provider keys started, or ended; a start behind another step is refused and says so. Whether a start was admitted. */
+  ownKeys(started: boolean, saved: boolean): boolean!!
+  /** The host holds own keys in use, or no longer: the entry ends, or comes back. */
+  useOwnKeys(using: boolean): void!!
   /** The deployment's Terms and Privacy, or undefined when they cannot be read. */
   serviceInfo(): ServiceInfo | undefined!!
   /** Opens Android's network settings from the network notice; whether they opened. */
@@ -55,23 +58,34 @@ export function methodsOf(status: HostStatus): Methods {
 }
 
 /** How a refused verification reads on the code step. */
-export function verifyRefusal(code: string): VerifyOutcome {
+export function verifyRefusal(code: string | undefined): VerifyOutcome {
   if (code === "invalid-code") return { tag: "CodeWrong" }
   if (code === "expired" || code === "attempts-exhausted") return { tag: "CodeUsedUp" }
   return { tag: "CodeFailed" }
+}
+
+/** The second verification a host answer names. */
+export function factorOf(method: string | undefined): FactorKind {
+  return method === "sms" ? "SmsFactor" : method === "passkey" ? "PasskeyFactor" : "TotpFactor"
 }
 
 /** The sign-in screen service over its in-memory machine. */
 export const signInService = Layer.effect(SignInScreen, effect {
   const machine = try SignInMachine
   const native = try Native
+  const cloud = try Cloud
+  const resident = try Resident
   const build = try Build
   const session = try CloudSession
+  const scope = try Scope.Scope
   const environment = hostEnvironment(environmentFor(build.info.testMocks))
   const android = build.info.variant !== "browser"
   const attemptId = try Ref.make("")
   const requestId = try Ref.make("")
-  const resendAt = try Ref.make(0)
+  const typed = try Ref.make({ address: "", code: "" })
+  const news = try Ref.make<SignInNews>(noNews)
+  const epoch = try Ref.make(0)
+  const retained = try Ref.make<MfaRequired | undefined>(undefined)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -82,13 +96,13 @@ export const signInService = Layer.effect(SignInScreen, effect {
   effect function perform(out: ReadonlyArray<SignInEffect>): void!! {
     for (const effectOf of out) {
       match (effectOf) {
-        when "ReadMethods": fork readMethods();
-        when "EnsureResident": try ensureResident();
-        when "Adopted": try session.adopt();
+        when "ReadMethods": fork.in(scope) readMethods();
+        when "StartGoogle": try runGoogle();
+        when "SendCode": try runSend();
+        when "VerifyCode": try runVerify();
         when "CancelAttempt": native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined;
-        when "StartGoogle": undefined;
-        when "SendCode": undefined;
-        when "VerifyCode": undefined;
+        when "EnsureResident": try ensureResident(resident);
+        when "Adopted": try session.adopt(try Ref.get(news));
       }
     }
   }
@@ -100,15 +114,18 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try send({ type: "probeSettles", methods: methodsOf(status), lateFollows: true })
   }
 
-  effect function rejectionCode(error: unknown) {
-    const read = Schema.decodeUnknownEffect(NativeRejection)(error) catch () => undefined
-    return read?.code ?? "unavailable"
-  }
-
   effect function held<A>(work: A!!) {
     try session.attempt(true)
     const result = try ensuring(work, session.attempt(false))
     return result
+  }
+
+  effect function stillCurrent(turn: number) {
+    return (try Ref.get(epoch)) === turn
+  }
+
+  effect function begin() {
+    return try Ref.updateAndGet(epoch, (n) => n + 1)
   }
 
   effect function cooldown(until: number) {
@@ -117,21 +134,86 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try send({ type: "cooldownEnds" })
   }
 
-  effect function sendCode(address: string, resending: boolean) {
+  effect function runGoogle() {
+    const turn = try begin()
+    const id = freshKey()
+    try Ref.set(requestId, id)
+    try Ref.set(news, noNews)
+    const outcome = try held(effect {
+      const raw = native.invoke(plugin, "startGoogle", { environment, requestId: id }) catch () => undefined
+      const answer = raw === undefined ? undefined : (Schema.decodeUnknownEffect(SignInAnswer)(raw) catch () => undefined)
+      if (answer === undefined) return { tag: "GoogleFailed" } as const
+      if (answer.status === "authenticated") {
+        try Ref.set(news, newsOf(answer))
+        if (try stillCurrent(turn)) try send({ type: "hostCommitsKey" })
+        return { tag: "GoogleSignedIn" } as const
+      }
+      if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
+      return { tag: "GoogleFactor", googleFactor: factorOf(answer.method) } as const
+    })
+    if (try stillCurrent(turn)) try send({ type: "googleEnds", outcome })
+  }
+
+  effect function runSend() {
+    const turn = try begin()
     const s = try machine.get()
-    if (!(try send(resending ? { type: "resend" } : { type: "submitAddress" }))) return
+    const resending = s.work === "Resending"
     const names = methodNames[s.method]
+    const address = (try Ref.get(typed)).address
     const id = freshKey()
     try Ref.set(requestId, id)
     const started = try held(effect {
-      return try Schema.decodeUnknownEffect(CodeStarted)(try native.invoke(plugin, names.start, { environment, [names.field]: address.trim(), requestId: id }))
-    } catch () => undefined)
+      const raw = native.invoke(plugin, names.start, { environment, [names.field]: address, requestId: id }) catch () => undefined
+      if (raw === undefined) return undefined
+      return Schema.decodeUnknownEffect(CodeStarted)(raw) catch () => undefined
+    })
+    if (!(try stillCurrent(turn))) return
     if (started !== undefined) {
       try Ref.set(attemptId, started.attemptId)
-      try Ref.set(resendAt, started.resendAt)
-      fork.detached cooldown(started.resendAt)
+      fork.in(scope) cooldown(started.resendAt)
     }
     try send(resending ? { type: "resendEnds", accepted: started !== undefined } : { type: "sendEnds", accepted: started !== undefined })
+  }
+
+  effect function runVerify() {
+    const turn = try begin()
+    const s = try machine.get()
+    const attempt = try Ref.get(attemptId)
+    const code = (try Ref.get(typed)).code
+    try Ref.update(typed, (t) => ({ ...t, code: "" }))
+    try Ref.set(news, noNews)
+    const method = s.screen === "FactorStep" ? "verifyMfa" : methodNames[s.method].verify
+    const verified = try held(effect {
+      const call = Effect.map(native.invoke(plugin, method, { attemptId: attempt, code }), (value) => ({ ok: true as const, value }))
+      const result = call catch (error) => ({ ok: false as const, code: error._tag === "NativeFailed" ? error.code : undefined })
+      if (!result.ok) return verifyRefusal(result.code)
+      const answer = Schema.decodeUnknownEffect(SignInAnswer)(result.value) catch () => undefined
+      if (answer === undefined) return { tag: "CodeFailed" } as VerifyOutcome
+      if (answer.status === "authenticated") {
+        try Ref.set(news, newsOf(answer))
+        return { tag: "CodeAccepted" } as VerifyOutcome
+      }
+      if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
+      return { tag: "CodeNeedsFactor", codeFactor: factorOf(answer.method) } as VerifyOutcome
+    })
+    if (try stillCurrent(turn)) try send({ type: "verifyEnds", verified, attempt: s.attempt })
+  }
+
+  effect function offerRetained() {
+    const waiting = try Ref.get(retained)
+    if (waiting === undefined) return
+    const s = try machine.get()
+    const factor = factorOf(waiting.method)
+    if (!enabled(s, { type: "factorReturned", returnedFactor: factor })) return
+    try Ref.set(retained, undefined)
+    const now = try Clock.currentTimeMillis
+    if (waiting.expiresAt <= now) return
+    const resumed = effect {
+      return try Schema.decodeUnknownEffect(MfaResumed)(try native.invoke(plugin, "resumeMfa", { attemptId: waiting.attemptId, environment }))
+    } catch () => ({ active: false })
+    if (!resumed.active) return
+    try Ref.set(attemptId, waiting.attemptId)
+    try send({ type: "factorReturned", returnedFactor: factor })
   }
 
   effect function followSession() {
@@ -143,6 +225,12 @@ export const signInService = Layer.effect(SignInScreen, effect {
       const after = try machine.get()
       if (enabled(after, { type: "automaticProbe" })) try send({ type: "automaticProbe" })
       if (enabled(after, { type: "latchReleases" })) try send({ type: "latchReleases" })
+    }
+  }
+
+  effect function followQueued() {
+    for try (const s of machine.changes) {
+      if (s.work === "NoWork") try offerRetained()
     }
   }
 
@@ -163,14 +251,19 @@ export const signInService = Layer.effect(SignInScreen, effect {
 
   effect function followReadiness() {
     for try (const raw of native.listen(plugin, "signInReadinessChanged")) {
-      const row = typeof raw === "object" && raw !== null && "readiness" in raw ? (raw as { readiness: unknown }).readiness : undefined
-      const read = Schema.decodeUnknownEffect(HostStatus)(row ?? {}) catch () => ({})
-      try send({ type: "lateMethods", methods: methodsOf({ ...read, methodsKnown: row !== null && row !== undefined }) })
+      const read = Schema.decodeUnknownEffect(ReadinessChanged)(raw) catch () => undefined
+      if (read === undefined || read.environment !== environment) continue
+      try send({ type: "lateMethods", methods: methodsOf(read) })
     }
   }
 
-  effect function answered(raw: unknown) {
-    return try Schema.decodeUnknownEffect(SignInAnswer)(raw)
+  effect function followRetained() {
+    for try (const raw of native.listen(plugin, "signInMfaRequired")) {
+      const read = Schema.decodeUnknownEffect(MfaRequired)(raw) catch () => undefined
+      if (read === undefined) continue
+      try Ref.set(retained, read)
+      try offerRetained()
+    }
   }
 
   return {
@@ -182,51 +275,47 @@ export const signInService = Layer.effect(SignInScreen, effect {
       try.all [
         ignore(followSession()),
         ignore(followNetwork()),
-        ignore(followReadiness())
+        ignore(followReadiness()),
+        ignore(followRetained()),
+        ignore(followQueued())
       ]
     },
     effect open() { try send({ type: "ownerOpens" }) },
     effect choose(method: CodeMethod) { try send({ type: "chooseMethod", method }) },
-    effect google() {
-      if (!(try send({ type: "tapGoogle" }))) return
-      const id = freshKey()
-      try Ref.set(requestId, id)
-      const outcome = try held(effect {
-        const answer = try answered(try native.invoke(plugin, "startGoogle", { environment, requestId: id }))
-        if (answer.status === "authenticated") {
-          try send({ type: "hostCommitsKey" })
-          return { tag: "GoogleSignedIn" } as const
-        }
-        if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
-        return { tag: "GoogleFactor", googleFactor: answer.method === "sms" ? "SmsFactor" : answer.method === "passkey" ? "PasskeyFactor" : "TotpFactor" } as const
-      } catch () => ({ tag: "GoogleFailed" } as const))
-      try send({ type: "googleEnds", outcome })
+    effect google() { try send({ type: "tapGoogle" }) },
+    effect submit(address: string) {
+      try Ref.set(typed, { address: address.trim(), code: "" })
+      try send({ type: "submitAddress" })
     },
-    submit: (address: string) => sendCode(address, false),
-    resend: (address: string) => sendCode(address, true),
+    effect resend(address: string) {
+      try Ref.set(typed, { address: address.trim(), code: "" })
+      try send({ type: "resend" })
+    },
     effect verify(code: string) {
-      const s = try machine.get()
-      if (!(try send({ type: "verify" }))) return
-      const attempt = try Ref.get(attemptId)
-      const method = s.screen === "FactorStep" ? "verifyMfa" : methodNames[s.method].verify
-      const verified = try held(effect {
-        const answer = try answered(try native.invoke(plugin, method, { attemptId: attempt, code: code.replace(/[\s-]/g, "") }))
-        if (answer.status === "authenticated") return { tag: "CodeAccepted" } as const
-        if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
-        return { tag: "CodeNeedsFactor", codeFactor: answer.method === "sms" ? "SmsFactor" : answer.method === "passkey" ? "PasskeyFactor" : "TotpFactor" } as const
-      } catch effect (error) => verifyRefusal(try rejectionCode(error)))
-      try send({ type: "verifyEnds", verified })
+      try Ref.update(typed, (t) => ({ ...t, code: code.replace(/[\s-]/g, "") }))
+      if (!(try send({ type: "verify" }))) try Ref.update(typed, (t) => ({ ...t, code: "" }))
     },
     effect back() {
-      const s = try machine.get()
-      if (s.work === "GoogleWork") try send({ type: "backDuringGoogle" })
+      const before = try machine.get()
+      if (before.work === "GoogleWork") try send({ type: "backDuringGoogle" })
       else try send({ type: "back" })
+      const after = try machine.get()
+      if (after.work !== before.work || after.screen !== before.screen) try Ref.update(epoch, (n) => n + 1)
     },
     effect ownKeys(started: boolean, saved: boolean) {
-      try send(started ? { type: "ownKeysStart" } : { type: "ownKeysEnd", saved })
+      if (!started) return try send({ type: "ownKeysEnd", saved })
+      if (try send({ type: "ownKeysStart" })) return true
+      try send({ type: "ownKeysRefused" })
+      return false
+    },
+    effect useOwnKeys(using: boolean) {
+      if (!using) {
+        try send({ type: "ownKeysCleared" })
+        return
+      }
+      if (try send({ type: "ownKeysStart" })) try send({ type: "ownKeysEnd", saved: true })
     },
     effect serviceInfo() {
-      const cloud = try Cloud
       const answer = effect {
         return try Schema.decodeUnknownEffect(ServiceAnswer)(try cloud.json("GET", "/api/public/service"))
       } catch () => undefined

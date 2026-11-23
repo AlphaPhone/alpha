@@ -52,6 +52,17 @@ pure def lawANewPromptIsConfirmedOnlyPaused(saved: Saved): bool =
   saveConfirmed(true, "", "Plan", "Plan my day", "", saved) implies not(saved.enabled)
 ```
 
+### Changing a prompt starts from the prompt the agent keeps, and keeps its time zone
+
+The sheet opens with the saved name, instructions, trigger and time zone read back for that id; a
+prompt whose trigger Alpha cannot read, or a reply for another id, is not offered for change, so a
+change never sends a trigger the owner did not see.
+
+```quint
+pure def promptEditable(idMatches: bool, kindKnown: bool): bool = idMatches and kindKnown
+pure def lawAnotherPromptIsNeverChanged(kindKnown: bool): bool = not(promptEditable(false, kindKnown))
+```
+
 ### Turning a prompt on that the agent answered 429 is settled by reading it again
 
 A 429 alone may come from a proxy after the write landed, so the prompt is read again: still paused
@@ -133,17 +144,17 @@ item is scheduled with exactly the requested fire time.
 
 ```quint
 pure val snoozeMs = 600000
-pure def snoozeBase(scheduled: bool, next: int, now: int, snoozedUntil: int, sameDay: bool): int = {
-  val base = if (scheduled and next > 0) next else now
-  if (snoozedUntil > now and (next <= 0 or snoozedUntil >= next or not(sameDay))) snoozedUntil else base
+pure def snoozeBase(scheduled: bool, upcoming: int, now: int, snoozedUntil: int, sameDay: bool): int = {
+  val base = if (scheduled and upcoming > 0) upcoming else now
+  if (snoozedUntil > now and (upcoming <= 0 or snoozedUntil >= upcoming or not(sameDay))) snoozedUntil else base
 }
-pure def snoozeUntil(scheduled: bool, next: int, now: int, snoozedUntil: int, sameDay: bool): int =
-  snoozeBase(scheduled, next, now, snoozedUntil, sameDay) + snoozeMs
+pure def snoozeUntil(scheduled: bool, upcoming: int, now: int, snoozedUntil: int, sameDay: bool): int =
+  snoozeBase(scheduled, upcoming, now, snoozedUntil, sameDay) + snoozeMs
 pure def snoozeConfirmed(requested: int, s: TaskStatus, firedAt: int): bool = s == TaskScheduled and firedAt == requested
-pure val nextValues = Set(0, 7)
+pure val upcomingValues = Set(0, 7)
 pure val snoozedUntilValues = Set(0, 9)
-pure def lawASnoozeIsAlwaysInTheFuture(scheduled: bool, next: int, now: int, snoozedUntil: int, sameDay: bool): bool =
-  (next >= 0) implies snoozeUntil(scheduled, next, now, snoozedUntil, sameDay) > now
+pure def lawASnoozeIsAlwaysInTheFuture(scheduled: bool, upcoming: int, now: int, snoozedUntil: int, sameDay: bool): bool =
+  (upcoming >= 0) implies snoozeUntil(scheduled, upcoming, now, snoozedUntil, sameDay) > now
 ```
 
 ### Fire now reports fired, skipped, deferred, failed or raced, and only for the item asked
@@ -166,7 +177,8 @@ pure def lawAnotherItemNeverConfirmsAFire(kind: str): bool = kind != "raced" imp
 
 ### Any other verb is confirmed by the item it names, and an edit by the instructions and trigger it sent
 
-An edit sends a cron trigger only when its time changed.
+An edit sends a cron trigger only when its time changed, keeping the item's days, month fields and
+time zone; only an item on a cron schedule offers a time at all (legacy `ScheduledTaskControls`).
 
 ```quint
 pure def editConfirmed(sentInstructions: str, savedInstructions: str, sentTrigger: bool, sameTrigger: bool): bool =

@@ -32,7 +32,7 @@ pure val initial: Recorder = {
 }
 pure val maxBytes = 100000000
 pure val limitValues = Set(2)
-pure val sizeValues = Set(1, 2, 3)
+pure val pieceValues = Set(1, 2, 3)
 ```
 
 ### A chunk that would pass the limit is left out, and the recording stops with what was collected
@@ -42,12 +42,12 @@ the saved video never has a gap.
 
 ```quint
 type Admission = { keep: bool, stop: bool, total: int }
-pure def admitChunk(bytes: int, chunk: int, limit: int): Admission =
-  if (bytes + chunk > limit) { keep: false, stop: true, total: bytes }
-  else { keep: true, stop: bytes + chunk == limit, total: bytes + chunk }
-pure def lawAdmissionNeverPassesTheLimit(bytes: int, chunk: int, limit: int): bool =
-  (chunk >= 0 and bytes <= limit) implies (admitChunk(bytes, chunk, limit).total <= limit and
-    (admitChunk(bytes, chunk, limit).keep iff bytes + chunk <= limit))
+pure def admitChunk(bytes: int, piece: int, limit: int): Admission =
+  if (bytes + piece > limit) { keep: false, stop: true, total: bytes }
+  else { keep: true, stop: bytes + piece == limit, total: bytes + piece }
+pure def lawAdmissionNeverPassesTheLimit(bytes: int, piece: int, limit: int): bool =
+  (piece >= 0 and bytes <= limit) implies (admitChunk(bytes, piece, limit).total <= limit and
+    (admitChunk(bytes, piece, limit).keep iff bytes + piece <= limit))
 pure def canShutter(r: Recorder, limit: int): bool =
   r.adapter == AdapterIdle and not(r.finalizing) and not(r.leaving) and not(r.previewStopped) and limit > 0
 pure def shutter(r: Recorder, limit: int): Recorder = { ...r, adapter: AdapterStarting, limit: limit }
@@ -57,11 +57,11 @@ pure def startResolved(r: Recorder, ok: bool): Recorder =
     { ...r, adapter: AdapterRecording, session: Capturing, generation: r.generation + 1,
       bytes: 0, chunks: 0, full: false, truncated: false, prefix: PrefixUnread, settles: 0, cause: NoCause }
   else { ...r, adapter: AdapterIdle }
-pure def canChunk(r: Recorder, size: int): bool = (r.session == Capturing or r.session == Stopping) and size >= 0
-pure def chunk(r: Recorder, size: int): Recorder =
+pure def canChunk(r: Recorder, piece: int): bool = (r.session == Capturing or r.session == Stopping) and piece >= 0
+pure def chunk(r: Recorder, piece: int): Recorder =
   if (r.full) { ...r, truncated: true }
   else {
-    val admitted = admitChunk(r.bytes, size, r.limit)
+    val admitted = admitChunk(r.bytes, piece, r.limit)
     { ...r, bytes: admitted.total, chunks: if (admitted.keep) r.chunks + 1 else r.chunks, truncated: not(admitted.keep),
       full: admitted.stop, session: if (admitted.stop) Stopping else r.session }
   }

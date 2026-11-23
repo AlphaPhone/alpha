@@ -4,8 +4,11 @@ import type { Recorder } from "../../../gen/notes__recorder.ts";
 import { initial as recorderInitial } from "../../../gen/notes__recorder.ts";
 import type { TrashView } from "../../../gen/notes__trash.ts";
 import { initial as trashInitial } from "../../../gen/notes__trash.ts";
+import type { SourceDialog } from "../../../gen/notes__webSource.ts";
+import { initial as sourceDialogInitial } from "../../../gen/notes__webSource.ts";
 import type { DraftContent } from "../../notes/editor.vibe";
-import { rowOf, type NoteRow } from "../../notes/list.vibe";
+import type { NotesFolder } from "../../notes/folders.vibe";
+import { rowOf, type NoteRow, type WebSource } from "../../notes/list.vibe";
 import type { RecorderDisplay } from "../../notes/recorder.vibe";
 import type { TrashRow } from "../../notes/trash.vibe";
 
@@ -37,3 +40,11 @@ export const trashRestoreOnly: TrashView = { ...trashOpen, retentionOn: false };
 export const recording: Recorder = { ...recorderInitial, phase: "RecRecording", attempt: 1, recording: 1, segments: 2, transcribed: 1, longEnough: true, lastCapture: 1 };
 export const claimUnconfirmed: Recorder = { ...recording, phase: "RecStopped", savePending: true, error: "CheckNotes" };
 export const recordingDisplay: RecorderDisplay = { recordingId: "rec_2", durationMs: 75000, levels: [0.2, 0.6, 0.4, 0.8, 0.3], transcript: "First thing tomorrow", positionMs: 0 };
+
+/** The owner's folders. */
+export const folders: NotesFolder[] = [{ id: "f-work", name: "Work", createdAt: now - 10 * day }, { id: "f-home", name: "Home", createdAt: now - 5 * day }];
+
+/** The page a summary note came from, and its dialog open, then after a removal that could not be confirmed. */
+export const webSource: WebSource = { name: "Planning the week", url: "https://example.com/articles/planning-the-week" };
+export const sourceOpen: SourceDialog = { ...sourceDialogInitial, opened: true, gen: 1 };
+export const sourceUnconfirmed: SourceDialog = { ...sourceOpen, busy: true, acted: 1, unconfirmed: true };

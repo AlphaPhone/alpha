@@ -32,6 +32,7 @@ export service Suggestions {
   close(slot: number): void!!
   /** Insert the reviewed wording through `insert`, once; false when anything about it changed. */
   confirm(slot: number, insert: (text: string, appendMode: boolean) => boolean): boolean!!
+  static readonly key = "alpha/assistant/Suggestions"
 }
 
 /** Suggestions over the suggestion machine. */

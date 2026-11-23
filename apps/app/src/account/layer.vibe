@@ -1,31 +1,46 @@
-// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Use Cloud only for managed services"
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "Story: Use Cloud only for managed services"; spec/account/provider.md, "Story: Use my own keys instead of Cloud"
 import { GoogleAgentAccess, agentAccessLayer } from "./agentAccess.vibe"
 import { Membership, billingLayer } from "./billing.vibe"
+import { bindingsService, followersLive, mapsAccountLive } from "./bindings.vibe"
 import { CloudDelegation, delegationLayer } from "./delegation.vibe"
 import { devLayer } from "./devBridge.vibe"
 import { Entitlement, entitlementLayer } from "./entitlement.vibe"
 import { GoogleAccounts, googleLayer } from "./google.vibe"
 import { limitsLayer } from "./limits.vibe"
+import { presentationLive, presentationService } from "./presentation.vibe"
+import { AiProvider, providerLayer } from "./provider.vibe"
 import { CloudSession, sessionLayer } from "./session.vibe"
 import { AccountSheet, sheetLayer } from "./sheet.vibe"
 import { SignInScreen, signInLayer } from "./signIn.vibe"
 
-export { CloudSession, ownerOf } from "./session.vibe"
+export { CloudSession, newsOf, noNews, ownerNameOf, ownerOf, type SignInNews } from "./session.vibe"
 export { Entitlement } from "./entitlement.vibe"
 export { GoogleAccounts, type GoogleAccount } from "./google.vibe"
 export { VoiceLimit, type LimitFacts } from "./limits.vibe"
+export { AiProvider } from "./provider.vibe"
+export { AccountPresentation } from "./presentation.vibe"
+export { AccountBindings, usableSession, type AgentBinding, type AgentSession, type ConnectionIdle } from "./bindings.vibe"
 
-/** Every account service, needing only Native, Resident, Cloud, Build and a KeyValueStore. */
-export const layer = Layer.mergeAll(
+/**
+ * Every account service with its machine, needing only Native, Resident, Cloud, Build and a KeyValueStore; nothing runs
+ * until `run()`.
+ */
+export const services = Layer.mergeAll(
   agentAccessLayer,
   limitsLayer,
   Layer.provideMerge(
-    Layer.mergeAll(signInLayer, billingLayer, googleLayer, sheetLayer, delegationLayer, devLayer),
-    Layer.provideMerge(entitlementLayer, sessionLayer)
+    presentationService,
+    Layer.provideMerge(
+      providerLayer,
+      Layer.provideMerge(
+        Layer.mergeAll(signInLayer, billingLayer, googleLayer, sheetLayer, delegationLayer, devLayer),
+        Layer.provideMerge(entitlementLayer, sessionLayer)
+      )
+    )
   )
 )
 
-/** The account area's long-running work: the session, sign-in, plan, billing, Google, delegation, sheet and agent access. */
+/** The account area's long-running work: the session, sign-in, plan, billing, Google, delegation, sheet, AI provider and agent access. */
 export effect function run() {
   const session = try CloudSession
   const signIn = try SignInScreen
@@ -35,5 +50,18 @@ export effect function run() {
   const sheet = try AccountSheet
   const delegation = try CloudDelegation
   const access = try GoogleAgentAccess
-  try.all [session.run(), signIn.run(), entitlement.run(), membership.run(), google.run(), sheet.run(), delegation.run(), access.run()]
+  const provider = try AiProvider
+  try.all [session.run(), signIn.run(), entitlement.run(), membership.run(), google.run(), sheet.run(), delegation.run(), access.run(), provider.run()]
 }
+
+const running = Layer.effectDiscard(effect {
+  fork.scoped run()
+})
+
+/**
+ * Every account service running for the app's life, with AccountBindings, Maps' MapsAccount port and the sheet following
+ * the Account app in front, keeping the resident's account, speech's key and plan limit and the startup walkthrough
+ * current. Needs the platform's Native, Resident, ResidentControl, Cloud, Build and KeyValueStore, the shell's Navigation
+ * and Permissions, and voice's VoiceRoute.
+ */
+export const layer = Layer.provideMerge(Layer.mergeAll(bindingsService, mapsAccountLive, followersLive, presentationLive, running), services)

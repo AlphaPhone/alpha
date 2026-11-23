@@ -1,6 +1,7 @@
 // spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"
 import { recognizedMapsCards, type MapsCard } from "@elizaos/plugin-maps/cards"
 import type { Line } from "../../gen/assistant__reply.ts"
+import { FormBlockBody, WorkflowBlock } from "./payloads.schema.vibe"
 
 /** A workflow run a reply announced. */
 export interface WorkflowRun { readonly workflowId: string; readonly runId: string; readonly title: string }
@@ -49,16 +50,14 @@ function parsed(text: string): unknown {
 }
 
 function workflowRun(body: readonly string[]): WorkflowRun | undefined {
-  const value = parsed(body.join("\n"))
-  if (typeof value !== "object" || value === null) return undefined
-  const { workflowId, runId, title } = value as { readonly workflowId?: unknown; readonly runId?: unknown; readonly title?: unknown }
-  if (typeof workflowId !== "string" || typeof runId !== "string" || workflowId === "" || runId === "") return undefined
-  return { workflowId, runId, title: typeof title === "string" && title.trim() !== "" ? title.trim().slice(0, 200) : "Workflow run" }
+  const found = Schema.decodeUnknownOption(WorkflowBlock)(parsed(body.join("\n")))
+  if (Option.isNone(found)) return undefined
+  const title = found.value.title?.trim() ?? ""
+  return { workflowId: found.value.workflowId, runId: found.value.runId, title: title === "" ? "Workflow run" : title.slice(0, 200) }
 }
 
 function validForm(body: string): boolean {
-  const value = parsed(body)
-  return typeof value === "object" && value !== null && typeof (value as { id?: unknown }).id === "string" && Array.isArray((value as { fields?: unknown }).fields)
+  return Option.isSome(Schema.decodeUnknownOption(FormBlockBody)(parsed(body)))
 }
 
 function closingIndex(lines: readonly string[], from: number, closes: RegExp): number {

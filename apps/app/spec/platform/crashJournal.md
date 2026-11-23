@@ -1,11 +1,12 @@
 # The problem log
 
 The privacy-bounded log of what went wrong, for Settings and for a support report the owner chooses
-to share. On the phone, native keeps it in no-backup storage (`AlphaDevice.crashLog`,
+to share. On the phone, native keeps it in no-backup storage (`ElizaSystem.crashLog`,
 `recordRendererFailure`, `clearCrashLog`) with Android's exit history; the renderer adds its own
 Cloud inference failure records and, off the phone, keeps the whole log in the page's storage. An
-entry holds a failure class, a source and a time, never text the owner wrote, an address, a token
-or a URL. Entries older than 30 days are dropped and at most 50 are kept.
+entry holds a failure class, a source and a time, and an inference failure also its fixed stage,
+reason, HTTP status, request parameter and schema keyword; never text the owner wrote, an address, a
+token or a URL. Entries older than 30 days are dropped and at most 50 are kept.
 
 ## Domain
 
@@ -14,7 +15,7 @@ or a URL. Entries older than 30 days are dropped and at most 50 are kept.
 ```quint
 type Source = RendererSource | UncaughtSource | ExitSource | InferenceSource
 type FailureKind = Render | Startup | Uncaught | NoKind
-type Entry = { at: int, source: Source, kind: FailureKind, errorClass: str }
+type Entry = { at: int, source: Source, kind: FailureKind, errorClass: str, detail: str }
 type Seen = { kind: FailureKind, errorClass: str, at: int }
 type Journal = { entries: List[Entry], recent: List[Seen], lastAt: int, inferenceSeenAt: int }
 
@@ -53,7 +54,7 @@ pure def record(j: Journal, now: int, kind: FailureKind, errorClass: str): Journ
   if (throttled(j.recent, kind, errorClass, now)) { ...j, lastAt: now }
   else {
     ...j, lastAt: now,
-    entries: bounded(j.entries.append({ at: now, source: RendererSource, kind: kind, errorClass: errorClass })),
+    entries: bounded(j.entries.append({ at: now, source: RendererSource, kind: kind, errorClass: errorClass, detail: "" })),
     recent: j.recent.select(s => not(s.kind == kind and s.errorClass == errorClass)).append({ kind: kind, errorClass: errorClass, at: now })
   }
 
@@ -66,15 +67,21 @@ pure def sometimesTwoProblems(j: Journal): bool = j.entries.length() >= 2
 ### A Cloud inference failure is taken once, and only while it is recent
 
 The renderer keeps the time of the newest record it took, so a record seen again after a reload is
-not logged twice.
+not logged twice. Its detail is built only from the record's allowlisted stage, reason, status,
+parameter and keyword, so Settings can say which part of the request Cloud refused.
 
 ```quint
 pure def canInferenceFailed(j: Journal, at: int, now: int): bool =
   at > j.inferenceSeenAt and at >= j.lastAt and at > now - retentionMs and at <= now + repeatWindowMs
-pure def inferenceFailed(j: Journal, at: int, now: int): Journal = {
+pure def inferenceFailed(j: Journal, at: int, now: int, detail: str): Journal = {
   ...j, inferenceSeenAt: at, lastAt: at,
-  entries: bounded(j.entries.append({ at: at, source: InferenceSource, kind: NoKind, errorClass: "" }))
+  entries: bounded(j.entries.append({ at: at, source: InferenceSource, kind: NoKind, errorClass: "", detail: detail }))
 }
+
+pure val detailValues = Set("", "text rate-limit HTTP 429")
+
+pure def alwaysOnlyInferenceEntriesCarryADetail(j: Journal): bool =
+  j.entries.every(e => e.source != InferenceSource implies e.detail == "")
 
 pure def alwaysInferenceRecordsAreTakenOnce(j: Journal): bool =
   j.entries.every(e => e.source == InferenceSource implies e.at <= j.inferenceSeenAt)

@@ -190,3 +190,17 @@ pure def stepASettlementWithoutEffectNeverDispatches(before: Actions, via: str, 
   via == "settledWithoutEffect" implies after.dispatches == before.dispatches
 pure def sometimesDraftedInsteadOfSent(a: Actions): bool = kindOf(a.run) == ComposeText and resultOf(a.run) == Applied and a.dispatches == 0
 ```
+
+### A view change that shows the outcome waits for the reply that carries it
+
+Opening the keypad, a conversation with Alpha's draft, or a filtered Contacts list shows what an
+approved or direct action did. It runs at once when no chat request is in flight, and otherwise
+only once the request carrying the action's reply has ended, so it never reads as the owner
+leaving and never stops that reply (#1433). Nothing is dialed or sent by it.
+
+```quint
+type ReplyState = ReplyInFlight | ReplySettled
+pure def presentNow(reply: ReplyState, changesView: bool): bool = not(changesView) or reply == ReplySettled
+pure def lawAViewChangeNeverCutsTheReplyShort(reply: ReplyState, changesView: bool): bool =
+  (presentNow(reply, changesView) and changesView) implies reply == ReplySettled
+```

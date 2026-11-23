@@ -1,9 +1,9 @@
-// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"
+// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "Story: Choose which calendars I see"
 import { Effect } from "effect";
-import { CalendarDays, Plus, RefreshCw, Search, X } from "lucide-react";
+import { CalendarDays, Layers, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
 import { useState } from "react";
 import { useMachine } from "../../../gen/calendar__presentation.react.ts";
-import { type CalendarView, type Event as PresentationEvent, dayEmptiness, initial } from "../../../gen/calendar__presentation.ts";
+import { type CalendarView, type Event as PresentationEvent, dayEmptiness, initial, rowShown, statusAction } from "../../../gen/calendar__presentation.ts";
 import type { RecurrenceScope } from "../../../gen/calendar__editor.ts";
 import { readCalendar } from "../../calendar/binding.vibe";
 import { CalendarDrafts } from "../../calendar/drafts.vibe";
@@ -11,8 +11,10 @@ import type { DraftFieldsRecord } from "../../calendar/drafts.schema.vibe";
 import { type CalendarRow, agentEventKey, eventSourceKey } from "../../calendar/model.vibe";
 import { closeEditor, closeRow, deleteRow, newFields, openEditor, openRow, placeRow, rowFields, rowTimingLocked, saveEditor, timingChanged } from "../../calendar/screen.vibe";
 import { deviceZone, formatLongDate, midnightAfter } from "../../calendar/time.ts";
+import { Navigation } from "../../shell/navigation.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button, Input, Tabs, TabsList, TabsTrigger } from "../components/ui/index.ts";
+import { CalendarSources } from "./CalendarSources.tsx";
 import { DatePicker } from "./DatePicker.tsx";
 import { EventDetail, eventFacts } from "./EventDetail.tsx";
 import { EventEditor } from "./EventEditor.tsx";
@@ -20,9 +22,9 @@ import { PreservationReview } from "./Surfaces.tsx";
 import { MonthGrid } from "./MonthGrid.tsx";
 import { ScheduleList } from "./ScheduleList.tsx";
 import { Timeline } from "./Timeline.tsx";
-import { useAgentView, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
+import { run, useAgentView, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
 import { calendarRows, coveredRange, listGroups, visibleDays } from "./layout.ts";
-import { run, runtime } from "./runtime.ts";
+import { runtime } from "./runtime.ts";
 
 const VIEWS: readonly { readonly view: CalendarView; readonly label: string }[] = [
   { view: "DayView", label: "Day" }, { view: "WeekView", label: "Week" }, { view: "MonthView", label: "Month" }, { view: "ScheduleView", label: "Schedule" },
@@ -37,11 +39,22 @@ const STATUS_WORDS: Readonly<Record<string, string>> = {
   LegacyRecovery: "Needs review", TransitionRequired: "Review needed",
 };
 
+function draftFields(text: string): DraftFieldsRecord | undefined {
+  try {
+    return JSON.parse(text) as DraftFieldsRecord;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The Calendar screen's props: the route it opened at and how to close it. */
+export type CalendarScreenProps = ScreenProps;
+
 /**
  * The Calendar app: day, week, month and schedule views of the agent's Calendar and the phone's calendars.
  * @model spec/calendar/presentation.md
  */
-export function CalendarScreen({ route, onClose }: ScreenProps) {
+export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
   useRouteOpen(route);
   const { state, can, send } = useMachine(runtime);
   const p = state ?? initial;
@@ -53,10 +66,15 @@ export function CalendarScreen({ route, onClose }: ScreenProps) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<{ fields: DraftFieldsRecord; row: CalendarRow | undefined; owner: string } | undefined>(undefined);
   const [problem, setProblem] = useState("");
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const zone = deviceZone();
   const now = Date.now();
   const heldTargets = new Set(held.held.map((entry) => entry.target));
-  const rows = calendarRows(agent, device, zone, now, (row) => row.source === "agent" && agent.feed?.events.some((event) => `agent:${agentEventKey(event)}` === row.id && heldTargets.has(event.id)) === true);
+  const agentHidden = p.owner !== "" && p.hiddenAgentOwners.includes(p.owner);
+  const deviceShown = p.deviceVisible && p.deviceAccess;
+  const heldHidden = (row: CalendarRow) => row.source === "agent" && agent.feed?.events.some((event) => `agent:${agentEventKey(event)}` === row.id && heldTargets.has(event.id)) === true;
+  const rows = calendarRows(agent, device, zone, now, (row) =>
+    heldHidden(row) || (row.source !== "document" && !rowShown(row.source === "agent", agentHidden, deviceShown)));
   const open = rows.find((row) => row.id === p.openEvent);
   const openEvent = open?.source === "agent" ? agent.feed?.events.find((event) => `agent:${agentEventKey(event)}` === open.id) : undefined;
   const openCalendar = openEvent === undefined ? undefined : agent.calendars.find((calendar) => JSON.stringify([calendar.provider, calendar.side, calendar.grantId, calendar.connectorAccountId, calendar.calendarId]) === eventSourceKey(openEvent));
@@ -73,7 +91,10 @@ export function CalendarScreen({ route, onClose }: ScreenProps) {
   const windowEnd = agent.window?.range.end ?? midnightAfter(now, zone, 62);
   const from = p.searching ? windowStart : Math.max(windowStart, midnightAfter(now, zone, 0));
   const groups = listGroups(rows, from, windowEnd, p.searching ? query : null, zone, now);
+  const action = statusAction(agent.state.status !== "Disconnected", agent.state.status === "Failed" || agent.state.status === "Unavailable" || device.status === "failed");
   const status = agent.savedAt !== undefined ? (agent.state.read.id !== 0 ? "Refreshing" : "Couldn’t refresh") : STATUS_WORDS[agent.state.status] ?? "";
+  const handedOver = editing === undefined && p.form === "NewForm" && draft.alive && draft.origin !== "TypedHere" ? draftFields(draft.text) : undefined;
+  const shown = editing ?? (handedOver === undefined ? undefined : { fields: handedOver, row: undefined, owner: agent.state.owner });
   const startEditor = (row: CalendarRow | undefined) => {
     setProblem("");
     void run(Effect.gen(function* () {
@@ -93,6 +114,7 @@ export function CalendarScreen({ route, onClose }: ScreenProps) {
           {formatLongDate(midnightAfter(now, zone, p.day), zone)}
         </Button>
         <Button variant="ghost" size="icon" aria-label="Search events" onClick={() => go({ type: "openSearch" })}><Search /></Button>
+        <Button variant="ghost" size="icon" aria-label="Calendars" onClick={() => setSourcesOpen(true)}><Layers /></Button>
         <Button variant="ghost" size="icon" aria-label="New event" disabled={!can({ type: "newForm" })} onClick={() => startEditor(undefined)}><Plus /></Button>
       </header>
       <Tabs value={p.view} onValueChange={(view) => go({ type: "chooseView", view: view as CalendarView }, true)} className="px-4">
@@ -102,7 +124,10 @@ export function CalendarScreen({ route, onClose }: ScreenProps) {
       {(status !== "" || device.status === "limited" || device.status === "failed") && (
         <div role="status" className="flex items-center justify-between gap-2 px-4 py-1 text-sm text-muted-foreground">
           <span>{[status, device.status === "limited" ? "2,000 max" : device.status === "failed" ? "Couldn’t load device calendars" : ""].filter(Boolean).join(" · ")}</span>
-          {agent.state.status === "Disconnected" ? null : (
+          {action === "OfferSettings" && (
+            <Button variant="outline" size="sm" aria-label="Open Calendar settings" onClick={() => void run(Navigation.use((navigation) => navigation.open("account", "google")))}><Settings aria-hidden />Settings</Button>
+          )}
+          {action === "OfferRetry" && (
             <Button variant="ghost" size="icon" aria-label="Retry calendar and reminders" onClick={() => void run(readCalendar(true, false))}><RefreshCw /></Button>
           )}
         </div>
@@ -128,6 +153,8 @@ export function CalendarScreen({ route, onClose }: ScreenProps) {
         <Timeline rows={rows} days={days} day={p.day} zone={zone} now={now} emptyText={emptyText}
           onOpen={(row) => void run(openRow(row))} onPickDay={(day) => go({ type: "chooseDay", day }, true)} />
       )}
+      <CalendarSources open={sourcesOpen} agentShown={!agentHidden} deviceShown={p.deviceVisible} agentAccess={p.agentAccess && p.owner !== ""} deviceAccess={p.deviceAccess}
+        onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => setSourcesOpen(false)} />
       <DatePicker open={p.datePicker} rows={rows} day={p.day} month={p.month} zone={zone} now={now}
         onMonth={(month) => go({ type: "chooseMonth", month }, true)} onPickDay={(day) => { go({ type: "chooseDay", day }, true); }} onClose={() => go({ type: "closeDatePicker" })} />
       {p.form === "NoForm" && (
@@ -138,16 +165,18 @@ export function CalendarScreen({ route, onClose }: ScreenProps) {
           onCloseDelete={() => go({ type: "closeDeleteSheet" })} onCheckAgain={() => void run(readCalendar(true, false))}
           onOpenLink={(url) => window.open(url, "_blank", "noopener")} onPlace={() => open && void run(placeRow(open))} onClose={() => void run(closeRow())} />
       )}
-      {p.form !== "NoForm" && editing !== undefined && (
-        <EventEditor fields={editing.fields} draft={draft} recurring={editing.row?.recurring === true} timingLocked={rowTimingLocked(editing.row)} deviceZone={zone}
-          loading={agent.state.read.id !== 0} otherAccount={editing.owner !== agent.state.owner}
-          eventChanged={editing.row !== undefined && rows.find((row) => row.id === editing.row?.id)?.revision !== editing.row.revision} problem={problem}
+      {p.form !== "NoForm" && shown !== undefined && (
+        <EventEditor fields={shown.fields} draft={draft} recurring={shown.row?.recurring === true} timingLocked={rowTimingLocked(shown.row)} deviceZone={zone}
+          loading={agent.state.read.id !== 0} otherAccount={shown.owner !== agent.state.owner}
+          eventChanged={shown.row !== undefined && rows.find((row) => row.id === shown.row?.id)?.revision !== shown.row.revision} problem={problem}
           onEdit={(fields) => void run(CalendarDrafts.use((drafts) => drafts.edit(fields)))}
           onRestore={() => run(CalendarDrafts.use((drafts) => drafts.restore()))}
           onReview={(kind) => void run(CalendarDrafts.use((drafts) => drafts.openReview(kind)))}
           onAnswerReview={(confirmed) => void run(CalendarDrafts.use((drafts) => drafts.answerReview(confirmed)))}
           onRetry={() => void run(CalendarDrafts.use((drafts) => drafts.retry()))}
-          onSave={(fields) => void run(saveEditor(fields, editing.row, rowTimingLocked(editing.row), timingChanged(editing.fields, fields))).then((text) => { setProblem(text); if (text === "") setEditing(undefined); })}
+          onRecovery={(step) => void run(CalendarDrafts.use((drafts) => step === "open" ? Effect.flatMap(drafts.openRecovery(), () => drafts.captureRecovery())
+            : step === "request" ? drafts.requestReset() : step === "confirm" ? drafts.confirmReset() : drafts.closeRecovery()))}
+          onSave={(fields) => void run(saveEditor(fields, shown.row, rowTimingLocked(shown.row), timingChanged(shown.fields, fields))).then((text) => { setProblem(text); if (text === "") setEditing(undefined); })}
           onClose={() => { setEditing(undefined); void run(closeEditor()); }} />
       )}
     </main>

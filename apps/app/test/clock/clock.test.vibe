@@ -1,11 +1,14 @@
-// spec/clock/alarms.md, "Story: Set an alarm in the browser build"; spec/clock/alarms.md, "Story: Stop a ringing alarm"; spec/clock/timers.md, "Story: Time something"; spec/clock/timers.md, "Story: Hear a timer end"; spec/clock/stopwatch.md, "Story: Measure elapsed time"; spec/clock/worldClock.md, "Story: See the time where others are"
+// spec/clock/alarms.md, "Story: Set an alarm in the browser build"; spec/clock/alarms.md, "Story: Stop a ringing alarm"; spec/clock/vocabulary.md, "Story: Say a time and its repeat days the same way everywhere"; spec/clock/ringer.md, "Story: Hear an alarm once, from the page in front"; spec/clock/ringer.md, "Story: Hear an alarm as loud as my phone's alarm volume, and through Do Not Disturb only as Android lets alarms through"; spec/clock/timers.md, "Story: Time something"; spec/clock/timers.md, "Story: Hear a timer end"; spec/clock/stopwatch.md, "Story: Measure elapsed time"; spec/clock/worldClock.md, "Story: See the time where others are"
 // @vitest-environment happy-dom
 import { assert, describe, it } from "@effect/vitest"
 import { Machine as AlarmsMachine } from "../../gen/clock__alarms.effect.vibe"
 import { Machine as TimersMachine } from "../../gen/clock__timers.effect.vibe"
 import { Machine as StopwatchMachine } from "../../gen/clock__stopwatch.effect.vibe"
 import { Machine as WorldMachine } from "../../gen/clock__worldClock.effect.vibe"
-import { ClockActions, actionsLayer, keepTime } from "../../src/clock/clock.vibe"
+import { Machine as RingerMachine } from "../../gen/clock__ringer.effect.vibe"
+import { initial as handoffInitial } from "../../gen/clock__handoff.ts"
+import { ClockActions, actionsLayer, keepTime, ringingKey, soundEventOf } from "../../src/clock/clock.vibe"
+import { handoffRequest } from "../../src/clock/handoff.vibe"
 import { build, fakePhone, machines } from "./phone.vibe"
 
 const clock = Layer.merge(Layer.provideMerge(actionsLayer, machines), fakePhone({}).layer)
@@ -83,6 +86,69 @@ describe("Clock (spec/clock/alarms.md, \"Story: Set an alarm in the browser buil
         { stopped: [stopped.laps, stopped.banked], kept: [kept.laps, kept.banked], resetWhileStopped, paris, twice, unknown, zones },
         { stopped: [[1500], 2500], kept: [[], 0], resetWhileStopped: true, paris: true, twice: false, unknown: false, zones: ["Europe/Paris"] },
       ))
+    }
+  })
+})
+
+describe("Clock vocabulary (spec/clock/vocabulary.md, \"Story: Say a time and its repeat days the same way everywhere\")", () => {
+  it.effect("keep a wall time and its repeat days as chosen, on the Clock screen and in a Clock request (spec/clock/vocabulary.md, \"Story: Say a time and its repeat days the same way everywhere\")", () => effect {
+    provide clock, build("browser") {
+      const actions = try ClockActions
+      const alarms = try AlarmsMachine
+      const late = try actions.addAlarm(23, 60, "", [])
+      const repeated = try actions.addAlarm(6, 30, "", [2, 2])
+      const set = try actions.addAlarm(6, 30, "Gym", [6, 2])
+      const kept = (try alarms.get()).alarms.map((a) => [a.hour, a.minute, a.days])
+      const request = handoffRequest({ ...handoffInitial, hour: 6, minute: 30, label: " Gym ", days: [6, 2] }, "Europe/Paris")
+      try Effect.try(() => assert.deepStrictEqual(
+        { late, repeated, set, kept, request },
+        { late: false, repeated: false, set: true, kept: [[6, 30, [2, 6]]], request: { action: "set", hour: 6, minute: 30, label: "Gym", timeZone: "Europe/Paris", reviewed: true, days: [2, 6] } },
+      ))
+    }
+  })
+})
+
+describe("Ringer (spec/clock/ringer.md, \"Story: Hear an alarm once, from the page in front\")", () => {
+  it.effect("ring a finished timer once with the lock, stop at Silence, and ring again only for a changed set (spec/clock/ringer.md, \"Story: Hear an alarm once, from the page in front\")", () => effect {
+    provide clock, build("launcher") {
+      const actions = try ClockActions
+      const ringer = try RingerMachine
+      const timers = try TimersMachine
+      try ringer.send({ type: "setAllowed", allowed: true })
+      try actions.startTimer("Tea", 1000)
+      const started = (try timers.get()).timers[0]!
+      try timers.send({ type: "finishTimer", id: started.id, now: started.endsAt })
+      const alarms = try AlarmsMachine
+      const key = ringingKey(try alarms.get(), try timers.get(), false)
+      try ringer.send({ type: "requestLock", key })
+      try ringer.send({ type: "lockGranted", key })
+      const sounding = (try ringer.get()).sounding
+      const silenced = try actions.silence()
+      const quiet = (try ringer.get()).sounding
+      try ringer.send({ type: "follow", key })
+      const same = (try ringer.get()).sounding
+      try ringer.send({ type: "setAllowed", allowed: false })
+      const hidden = try ringer.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { key: key.startsWith("timer_") && key.endsWith(":2"), sounding, silenced, quiet, same, hidden: [hidden.owns, hidden.sounding, hidden.ringing] },
+        { key: true, sounding: true, silenced: true, quiet: false, same: false, hidden: [false, false, ""] },
+      ))
+    }
+  })
+
+  it.effect("play the tone at the alarm stream's level, silent only under total silence (spec/clock/ringer.md, \"Story: Hear an alarm as loud as my phone's alarm volume, and through Do Not Disturb only as Android lets alarms through\")", () => effect {
+    provide clock, build("launcher") {
+      const ringer = try RingerMachine
+      const stream = { volumes: [{ stream: "alarm", current: 3, max: 7 }, { stream: "music", current: 7, max: 7 }] }
+      effect function level(event: Parameters<typeof ringer.send>[0]) {
+        try ringer.send(event)
+        return (try ringer.get()).level
+      }
+      const alarmStream = try level(soundEventOf("Off", { interruptionFilter: "all" }, stream))
+      const priority = try level(soundEventOf("On", { interruptionFilter: "priority" }, stream))
+      const silence = try level(soundEventOf("On", { interruptionFilter: "none" }, stream))
+      const browser = try level(soundEventOf("Unknown", undefined, undefined))
+      try Effect.try(() => assert.deepStrictEqual({ alarmStream, priority, silence, browser }, { alarmStream: 42, priority: 42, silence: 0, browser: 100 }))
     }
   })
 })

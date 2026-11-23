@@ -17,7 +17,9 @@ page-reading rules of `@elizaos/os/browser`.
 
 ### A reading is bound to the shown page it was asked for, and the device's support is asked once
 
-Only a definite answer about isolated reading is remembered; a failed query asks again.
+Only a definite answer about isolated reading is remembered; a failed query asks again. The browser
+build reads a page's public text itself rather than through an isolated world, so it answers
+supported at once.
 
 ```quint
 type ReadPage = { tab: str, url: str, navigation: str, revision: int, shown: bool, settled: bool, secure: bool }
@@ -32,7 +34,7 @@ type Reading = {
 }
 pure val initial: Reading = { support: SupportUnknown, phase: NotReading, kind: ReadAloud, bound: noReadPage,
   excerpt: NoExcerpt, text: "", blocked: false, sourcePending: false, edited: false, generation: 0, speech: 0 }
-type ReadingProblem = ReadingUnsupported | NoVoice | LoadHttpsToRead | LoadHttpsToAsk | SensitivePage | ReadingFailed | ReadingStopped
+type ReadingProblem = ReadingUnsupported | NoVoice | LoadHttpsToRead | LoadHttpsToAsk | SensitivePage | ReadingFailed | ReadingStopped | SpeechFailed
 type ReadingNote = { problem: ReadingProblem }
 type Utterance = { generation: int }
 type ReadingEffect = QuerySupport | RequestReading(ReadPage) | SpendToken | CancelReading | RequestExcerpt(ReadPage)
@@ -59,7 +61,7 @@ pure def alwaysAReadingIsBoundToAPage(r: Reading): bool = r.phase != NotReading 
 
 Without isolated reading, or without a voice for this agent, nothing is asked for and the owner is
 told why. The menu closes first, and the page must still be the one asked about when the native
-request goes out.
+request goes out. Speech that fails before it ends says so; speech the owner stopped says nothing.
 
 ```quint
 pure def canReadAloud(r: Reading, page: ReadPage, voice: bool): bool = r.phase == NotReading
@@ -76,8 +78,9 @@ pure def canReadingReturned(r: Reading, ok: bool, sensitive: bool): bool = r.pha
 pure def readingReturned(r: Reading, ok: bool, sensitive: bool): ReadingChange =
   if (ok) { state: { ...r, phase: Speaking }, out: List(SpendToken) }
   else { state: ended(1, r), out: List(CancelReading, note(if (sensitive) SensitivePage else ReadingFailed)) }
-pure def canSpeechEnded(r: Reading): bool = r.phase == Speaking and r.kind == ReadAloud
-pure def speechEnded(r: Reading): ReadingChange = { state: ended(1, r), out: List(CancelReading) }
+pure def canSpeechEnded(r: Reading, ok: bool): bool = r.phase == Speaking and r.kind == ReadAloud
+pure def speechEnded(r: Reading, ok: bool): ReadingChange =
+  { state: ended(1, r), out: if (ok) List(CancelReading) else List(CancelReading, note(SpeechFailed)) }
 pure def stepATokenIsSpentOnlyForAReturnedReading(before: Reading, via: str, after: Reading, out: List[ReadingEffect]): bool =
   out.every(e => match e { | SpendToken => via == "readingReturned" and before.phase == Extracting | _ => true })
 pure def sometimesSpeaking(r: Reading): bool = r.phase == Speaking and r.kind == ReadAloud
@@ -179,9 +182,13 @@ pure def localRead(r: Reading, current: bool): ReadingChange =
   else if (r.excerpt == NoExcerpt) { state: { ...r, edited: true }, out: List() }
   else { state: { ...r, phase: Speaking, edited: true, generation: r.generation + 1, speech: r.generation + 1 },
     out: List(SpeakLocally({ generation: r.generation + 1 })) }
-pure def canLocalSpeechEnded(r: Reading, generation: int): bool = generation >= 1
-pure def localSpeechEnded(r: Reading, generation: int): Reading =
-  if (r.kind == ReadLocally and r.phase == Speaking and generation == r.speech) { ...r, phase: Reviewing, speech: 0, generation: r.generation + 1 } else r
+pure def canLocalSpeechEnded(r: Reading, generation: int, ok: bool): bool = generation >= 1
+pure def localSpeechEnded(r: Reading, generation: int, ok: bool): ReadingChange =
+  if (r.kind == ReadLocally and r.phase == Speaking and generation == r.speech)
+    { state: { ...r, phase: Reviewing, speech: 0, generation: r.generation + 1 }, out: if (ok) List() else List(note(SpeechFailed)) }
+  else { state: r, out: List() }
+pure def stepOnlyTheLatestSpeechReportsItsFailure(before: Reading, via: str, after: Reading, out: List[ReadingEffect]): bool =
+  (via == "localSpeechEnded" and out.length() > 0) implies (before.phase == Speaking and after.phase == Reviewing)
 pure def canLocalStopped(r: Reading): bool = r.kind == ReadLocally and r.phase == Speaking
 pure def localStopped(r: Reading): ReadingChange = { state: { ...r, phase: Reviewing, speech: 0, generation: r.generation + 1 }, out: List(StopLocalSpeech) }
 pure def alwaysLocalSpeechReadsCleanText(r: Reading): bool =

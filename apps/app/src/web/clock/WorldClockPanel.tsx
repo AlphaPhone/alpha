@@ -4,6 +4,7 @@ import { Globe, Plus, X } from "lucide-react";
 import { canAddZone, canRemoveZone, type WorldClock } from "../../../gen/clock__worldClock.ts";
 import { Button, EmptyState, Input, Label, ListRow } from "../components/ui/index.ts";
 
+/** The zones followed, the page's instant, the zones the phone knows, and adding or removing one. */
 export type WorldClockPanelProps = {
   /** The zones followed. */
   world: WorldClock;

@@ -1,0 +1,81 @@
+// spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/agentSurface.md, "Maps opens at most once per request, only over an unblocked launcher, and the answer waits for the open to commit or two seconds"; spec/maps/notificationOpen.md, "A read starts only when Maps can be shown and none is in flight, and opens Maps at most once per tap"
+import { GuidanceSpeechStopped } from "@elizaos/plugin-maps/client/guidance"
+import { type Nav, running } from "../../gen/shell__navigation.effect.vibe"
+import { Machine as CallBarMachine, type CallBar } from "../../gen/telephony__callBar.effect.vibe"
+import type { Session } from "../../gen/account__session.ts"
+import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { Build } from "../platform/build.vibe"
+import { ResidentControl } from "../platform/resident-control.vibe"
+import { foregroundOf } from "../shell/foreground.vibe"
+import { Navigation as ShellNavigation } from "../shell/navigation.vibe"
+import { pageEvents } from "../shell/page.ts"
+import type { AppId } from "../web/app-screen.ts"
+import { Speech } from "../voice/speech.vibe"
+import { MapsHandoff } from "./handoff.vibe"
+import { type AccountBinding, GuidanceSpeaker, MapsAccount, MapsShell, type ShellState } from "./ports.vibe"
+
+/** The Maps binding of an account session: its sign-in generation and credential, or undefined while signed out. */
+export function bindingOf(session: Session): AccountBinding | undefined {
+  const owner = ownerOf(session)
+  return owner === 0 ? undefined : { sessionId: String(owner), credentialId: session.account.credentialId }
+}
+
+/** The launcher as Maps reads it, from the shell's navigation, Telecom's calls and the build. */
+export function shellStateOf(nav: Nav, calls: CallBar, native: boolean): ShellState {
+  const front = foregroundOf(nav)
+  return {
+    live: running(nav), hidden: nav.hidden, suspended: false, assistantWindow: nav.host === "AssistantSurface",
+    connectionOpen: nav.layers.some((layer) => layer.id.startsWith("account")), home: front.screen === "home", secure: front.locked,
+    shaded: nav.shade, ringing: calls.calls.some((call) => call.phase === "Ringing"), native,
+    view: nav.app === "" ? "home" : nav.app, stack: nav.stack,
+  }
+}
+
+const accountLive = Layer.effect(MapsAccount, effect {
+  const session = try CloudSession
+  const resident = try ResidentControl
+  return {
+    changes: Stream.changesWith(Stream.map(session.changes, bindingOf), (a, b) => a?.sessionId === b?.sessionId && a?.credentialId === b?.credentialId),
+    residentReady: Stream.changes(Stream.map(resident.changes, (r) => r.phase === "Connected")),
+  }
+})
+
+const speakerLive = Layer.effect(GuidanceSpeaker, effect {
+  const speech = try Speech
+  return {
+    effect speak(text: string) {
+      try (onInterrupt(speech.speak(text, "AppSpeech"), () => speech.stop("AppSpeech")) catch effect (error) => {
+        throw new GuidanceSpeechStopped({ reason: error._tag === "SpeechInterrupted" ? "interrupted" : error._tag === "SpeechNotStopped" ? "cleanup-unconfirmed" : "failed" })
+      })
+    },
+  }
+})
+
+const shellLive = Layer.effect(MapsShell, effect {
+  const navigation = try ShellNavigation
+  const calls = try CallBarMachine
+  const native = (try Build).info.variant !== "browser"
+  let agentOpen = ""
+  return {
+    states: Stream.map(Stream.zipLatest(navigation.changes, calls.changes), ([nav, bar]) => shellStateOf(nav, bar, native)),
+    effect current() { return shellStateOf(try navigation.get(), try calls.get(), native) },
+    effect open(app: string, route?: string) {
+      const forAgent = agentOpen === app
+      agentOpen = ""
+      if (forAgent) try navigation.switchForAgent(app as AppId, route ?? "")
+      else try navigation.open(app as AppId, route)
+    },
+    effect admitOwnViewOpen(app: string) { agentOpen = app },
+    effect back() { try navigation.back() },
+  }
+})
+
+/** What Maps needs from the account, voice, telephony and shell areas, built over their own services. */
+export const portsLive = Layer.mergeAll(accountLive, speakerLive, shellLive)
+
+/** The navigation notification's tap and the launcher's HOME, as the Android activity posts them to the page. */
+export const pageLinksLive = Layer.effectDiscard(effect {
+  const handoff = try MapsHandoff
+  fork.scoped (effect { for try (const _ of pageEvents("alpha:maps-open")) try handoff.notificationTapped() })
+  fork.scoped (effect { for try (const _ of pageEvents("launcher-home")) try handoff.goneHome() })
+})

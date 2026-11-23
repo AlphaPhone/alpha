@@ -1,20 +1,23 @@
-// spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"
+// spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"; spec/voice/listener.md, "Invocations are bound to the agent session the resident verified, and none is taken while no session is bound"; spec/voice/listener.md, "A pending power press is discarded, never kept, while the screen cannot start voice"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
-import { Machine, type Event, type Listener as ListenerState, type ListenerMode, type Origin, type Stop } from "../../gen/voice__listener.effect.vibe"
+import { ResidentControl, type ResidentSession } from "../platform/resident-control.vibe"
+import { Machine, screenFree, type Event, type Listener as ListenerState, type ListenerMode, type Origin, type Stop } from "../../gen/voice__listener.effect.vibe"
 import { newId, sessionKey } from "./ids.ts"
 import { InvocationReceipt, ListenerStatusReply, SettingsOpened } from "./native.schema.vibe"
 
-/** The listener as Alpha shows it: whether the image has one, what it is doing and whether it holds the microphone. */
+/** The listener as Alpha shows it: whether the image has one, what it is doing, whether it listens and holds the microphone, and the Sense bridge's own state. */
 export interface ListenerStatus {
   readonly available: boolean
   readonly mode: ListenerMode
   readonly consented: boolean
+  readonly listening: boolean
   readonly microphoneOpen: boolean
+  readonly state?: string
 }
 
-/** A Pause or Turn off answer: confirmed only when the listener saved it with the microphone closed. */
-export interface ListenerStopAnswer {
+/** A Pause or Turn off answer: the status it leaves, also as `status`, confirmed only when the listener saved it with the microphone closed. */
+export interface ListenerStopAnswer extends ListenerStatus {
   readonly confirmed: boolean
   readonly status: ListenerStatus
 }
@@ -44,9 +47,9 @@ export service Listener {
   turnOff(): ListenerStopAnswer!!
   /** Open the listener's own consent and settings screen. */
   openSettings(): boolean!!
-  /** Bind the signed-in session's opaque authority, or none, to the listener's invocation bridge. */
+  /** Bind a verified session's opaque authority, or none, to the listener's invocation bridge; the resident's session is bound by itself. */
   bindSession(authority: string | null): void!!
-  /** Take the pending invocation once; true when it starts a voice conversation. */
+  /** Take the pending invocation once; true when it starts a voice conversation. A screen that cannot start voice discards a pending power press instead. */
   takeInvocation(screen: InvocationScreen): boolean!!
 }
 
@@ -76,13 +79,19 @@ function originOf(invocation: string | undefined, assistant: boolean): Origin {
   return "AssistOnly"
 }
 
-const unavailable: ListenerStatus = { available: false, mode: "Unavailable", consented: false, microphoneOpen: false }
+const unavailable: ListenerStatus = { available: false, mode: "Unavailable", consented: false, listening: false, microphoneOpen: false }
+
+/** The opaque authority of a verified resident session: its owner, agent, generation and service launch, never a credential. */
+export function authorityOf(session: ResidentSession | undefined): string | null {
+  return session === undefined ? null : JSON.stringify([session.owner, session.agent, session.generation, session.epoch])
+}
 
 /** The listener service over the listener Machine it is given. */
 export const listenerService = Layer.effect(Listener, effect {
   const held = try Machine
   const native = try Native
   const build = try Build
+  const control = try ResidentControl
   const bindingId = newId()
   let generation = 0
   let boundKey: string | null = null
@@ -95,7 +104,7 @@ export const listenerService = Layer.effect(Listener, effect {
     const reply = Option.getOrUndefined(decodeStatus(raw))
     if (reply === undefined || !reply.available) return unavailable
     const mode = modeOf(reply.state)
-    return { available: mode !== "Unavailable", mode, consented: reply.consented === true, microphoneOpen: reply.microphoneOpen === true }
+    return { available: mode !== "Unavailable", mode, consented: reply.consented === true, listening: reply.listening === true, microphoneOpen: reply.microphoneOpen === true, ...(reply.state === undefined ? {} : { state: reply.state }) }
   }
 
   function confirmsStop(raw: unknown, stop: Stop): boolean {
@@ -138,8 +147,9 @@ export const listenerService = Layer.effect(Listener, effect {
     const before = try held.get()
     try send({ type: "beginStop", stop })
     if (!(try held.get()).busy) {
-      const shown: ListenerStatus = { available: before.image === "ListenerAdmitted", mode: before.mode, consented: true, microphoneOpen: before.microphoneOpen }
-      const refused: ListenerStopAnswer = { confirmed: false, status: shown }
+      const kept: ListenerStatus = { available: before.image === "ListenerAdmitted", mode: before.mode, consented: true, listening: before.mode === "ListeningOn",
+        microphoneOpen: before.microphoneOpen }
+      const refused: ListenerStopAnswer = { ...kept, confirmed: false, status: kept }
       return refused
     }
     const raw = native.invoke(SENSE, stop === "PauseListening" ? "pause" : "turnOff", {}) catch () => undefined
@@ -147,7 +157,8 @@ export const listenerService = Layer.effect(Listener, effect {
     const read = statusOf(raw)
     try send({ type: "stopAnswered", confirmed, mode: confirmed ? read.mode : before.mode })
     const after = try held.get()
-    const answer: ListenerStopAnswer = { confirmed, status: { ...read, available: true, mode: after.mode, microphoneOpen: after.microphoneOpen } }
+    const status: ListenerStatus = { ...read, available: true, mode: after.mode, listening: after.mode === "ListeningOn", microphoneOpen: after.microphoneOpen }
+    const answer: ListenerStopAnswer = { ...status, confirmed, status }
     return answer
   }
 
@@ -156,13 +167,24 @@ export const listenerService = Layer.effect(Listener, effect {
     const key = authority === null ? null : try (tryPromise(() => sessionKey(authority)) catch () => null)
     if (key === boundKey && generation > 0) return
     generation += 1
-    native.invoke(SENSE, "bindInvocationSession", { generation, bindingId, sessionKey: key }) catch () => undefined
-    boundKey = key
+    const answered = timeout(native.invoke(SENSE, "bindInvocationSession", { generation, bindingId, sessionKey: key }), STOP_DEADLINE) catch () => undefined
+    boundKey = answered === undefined ? null : key
+    try send({ type: "sessionBound", bound: boundKey !== null })
+  }
+
+  effect function followSession() {
+    try bindSession(authorityOf(try control.session()))
   }
 
   effect function takeInvocation(screen: InvocationScreen) {
     if (!(try admitted()) || boundKey === null) return false
-    const raw = native.invoke(SENSE, "takeInvocation", { generation, bindingId, sessionKey: boundKey }) catch () => undefined
+    const key = boundKey
+    if (!screenFree(screen.visible, screen.dialogOpen, screen.connectionPrompt, screen.voiceActive)) {
+      try send({ type: "powerDiscarded", visible: screen.visible, dialogOpen: screen.dialogOpen, connectionPrompt: screen.connectionPrompt, voiceActive: screen.voiceActive })
+      timeout(native.invoke(SENSE, "discardProtectedPowerInvocation", { generation, bindingId, sessionKey: key }), STOP_DEADLINE) catch () => undefined
+      return false
+    }
+    const raw = timeout(native.invoke(SENSE, "takeInvocation", { generation, bindingId, sessionKey: key }), STOP_DEADLINE) catch () => undefined
     const receipt = raw === undefined ? undefined : Option.getOrUndefined(decodeReceipt(raw))
     const origin = originOf(receipt?.invocation, receipt?.assistant === true)
     if (origin === "NothingPending") return false
@@ -171,7 +193,11 @@ export const listenerService = Layer.effect(Listener, effect {
     return out !== undefined && out.out.includes("StartVoice")
   }
 
-  fork.detached boot()
+  fork.detached effect {
+    try boot()
+    try followSession()
+    for try (const _ of control.changes) try followSession()
+  }
 
   return {
     changes: held.changes,

@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { Button, Dialog, DialogContent, DialogTitle } from "../components/ui/index.ts";
 
+/** One owner review: its title, its confirmation and what closing it does. */
 export interface ReviewDialogProps {
   /** Whether the review is open. */
   open: boolean;

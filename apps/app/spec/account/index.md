@@ -18,6 +18,7 @@ The build carries one deployment: the shipped Eliza Cloud, or Alpha Cloud when t
 - [Billing](./billing.md): plans, checkout, plan changes, funds, membership codes and referrals.
 - [Account sheet](./sheet.md): the account presentation, sign-out review and plan notice.
 - [Google](./google.md): the managed Google connection, its consent and its returns.
+- [AI provider](./provider.md): Cloud inference or the owner's own keys, saved in the native host.
 - [Agent access](./agentAccess.md): the owner's switches for agent writes through Google.
 - [Delegation](./delegation.md): the Cloud delegation for hosted results and its return.
 - [Dedicated setup](./dedicated.md): the test-mocks review of a dedicated Cloud agent.

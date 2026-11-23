@@ -7,7 +7,7 @@ const none = () => undefined;
 export const meta: ComponentMeta<MailListProps> = {
   args: {
     mailbox: inboxList, selection: notSelecting, readOnly: false, onOpen: none, onLoadMore: none, onRetry: none,
-    onToggle: none, onPickAll: none, onReview: none, onFinishSelecting: none,
+    onToggle: none, onPickAll: none, onReview: none, onFinishSelecting: none, canSwipeArchive: true, onSwipeArchive: none,
   },
   examples: {
     NewerMail: { mailbox: shiftedList },

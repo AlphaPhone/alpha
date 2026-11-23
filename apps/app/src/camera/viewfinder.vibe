@@ -1,13 +1,14 @@
-// spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/recorder.md, "Story: Keep every recording I make, within its limit"
+// spec/camera/viewfinder.md, "Story: Keep the viewfinder only while Camera is in front"; spec/camera/viewfinder.md, "Hiding the page stops the preview, and showing it again starts a fresh one"; spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/recorder.md, "Story: Keep every recording I make, within its limit"
 import {
-  Machine as ViewMachine, canAnswerMicNotice, canFlip, canRecord, canReserveShutter, canZoomTo, clampZoom,
+  Machine as ViewMachine, canAnswerMicNotice, canFlip, canRecord, canReserveShutter, canZoomTo, clampZoom, shutterWanted,
   type Camera, type Chat, type Event as ViewEvent, type Mode, type RecordStart,
 } from "../../gen/camera__viewfinder.effect.vibe"
 import { Machine as FocusMachine, type Event as FocusEvent } from "../../gen/camera__focus.effect.vibe"
 import { Machine as RecorderMachine, maxBytes, type Event as RecorderEvent } from "../../gen/camera__recorder.effect.vibe"
 import { CameraBridge, CameraFailed, RECORDING, type LensDirection } from "./bridge.vibe"
 import { photoReceiptId, positive, videoReceiptId } from "./bridge.schema.vibe"
-import { observeRecorder, onPreviewEnded } from "./browserCamera.ts"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { observeLandscape, observeRecorder, onPreviewEnded } from "./browserCamera.ts"
 import { cameraText } from "./messages.vibe"
 import { CameraNotices } from "./notices.vibe"
 import { PhotoStore } from "./photos.vibe"
@@ -40,6 +41,10 @@ export service Viewfinder {
   allow(): void!!
   resumed(): void!!
   volumeKey(): void!!
+  /** Follow what is in front of the owner: the page shown, the conversation's detent and any sheet or dialog. */
+  foreground(state: ForegroundState): void!!
+  /** One of Camera's own dialogs, such as a scan review, opened over the viewfinder or closed. */
+  dialog(open: boolean): void!!
   /** Wait until a starting preview settles. */
   settled(): Camera!!
   /** Run `task` with the shutter borrowed from the ready, idle preview of the current visit. */
@@ -53,7 +58,17 @@ export const CHAT_GRACE = "10 seconds"
 
 const lensOf = (c: Camera): LensDirection => c.lens === "FrontLens" ? "front" : "back"
 
-/** The viewfinder service over the camera bridge and the photo store. */
+/** The conversation detent the viewfinder reasons about, from the foreground's. */
+export function chatOf(state: ForegroundState): Chat {
+  return state.chat === "full" ? "ChatFull" : state.chat === "sheet" ? "ChatSheet" : "ChatHidden"
+}
+
+/** The page shows Alpha's own screen, unlocked: the only place Camera may run. */
+export function shownOf(state: ForegroundState): boolean {
+  return state.visible && state.screen === "home" && !state.locked
+}
+
+/** The viewfinder service over the camera bridge, the photo store and the foreground. */
 export const viewfinder = Layer.effect(Viewfinder, effect {
   const view = try ViewMachine
   const focus = try FocusMachine
@@ -61,10 +76,16 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
   const bridge = try CameraBridge
   const store = try PhotoStore
   const notices = try CameraNotices
+  const front = try Foreground
   const points = new Map<number, { x: number; y: number }>()
   let borrowed = false
   let ticking = false
+  let volumeArmed = false
   let graceFiber: Fiber.Fiber<void> | undefined
+  let zoomWanted: number | undefined
+  let shellModal = false
+  let ownDialog = false
+  let zooming = false
 
   effect function say(text: string) {
     try notices.say(text, false)
@@ -102,9 +123,15 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     if (after.countdown > 0 && !ticking) try forkDetach(countdown())
     if (before.recording === "RecordingActive" && after.recording === "RecordingFinishing") try forkDetach(finalize())
     if (before.recording !== "RecordingActive" && after.recording === "RecordingActive") try forkDetach(poll())
-    if (before.volumeKeys !== after.volumeKeys) bridge.setVolumeShutter(after.volumeKeys) catch () => undefined
     if (after.phase === "PreviewReady" && before.phase !== "PreviewReady" && after.photos === 0) try forkDetach(loadLast())
     if (after.chat !== before.chat || after.landscape !== before.landscape) try armGrace(after)
+    try armVolume(after.volumeKeys && shutterWanted(after))
+  }
+
+  effect function armVolume(wanted: boolean) {
+    if (wanted === volumeArmed) return
+    volumeArmed = wanted
+    bridge.setVolumeShutter(wanted) catch () => undefined
   }
 
   effect function armGrace(c: Camera) {
@@ -127,6 +154,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
       const longest = Math.max(10, Math.round((reply.maxZoom ?? 1) * 10))
       const ready = try send({ type: "previewReady", ticket, hasFlash: reply.hasFlash === true, widest, longest })
       if (ready === undefined && (try view.get()).phase === "PreviewOff") bridge.stopPreview() catch () => undefined
+      if (ready !== undefined) try send({ type: "sync" })
       return
     }
     const failure = Cause.squash(answer.cause)
@@ -234,10 +262,69 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     }
   }
 
+  effect function rearm() {
+    const now = try view.get()
+    if (now.notice !== "CameraNotice") return try send({ type: "sync" })
+    const read = bridge.checkAccess() catch () => undefined
+    const grant = read?.camera === "granted" ? "AccessGranted" : read === undefined ? "AccessUnreadable" : "AccessNotGranted"
+    try send({ type: "rearm", grant })
+    try send({ type: "sync" })
+  }
+
+  effect function covered() {
+    const open = shellModal || ownDialog
+    if ((try view.get()).modal !== open) try send({ type: "modalChanged", open })
+  }
+
+  effect function follow(state: ForegroundState) {
+    const before = try view.get()
+    const chat = chatOf(state), shown = shownOf(state)
+    shellModal = state.modal
+    try covered()
+    if (before.chat !== chat) try send(chat === "ChatHidden" ? { type: "closeChat" } : { type: "openChat", panel: chat })
+    if (before.onScreen !== shown) {
+      try send({ type: "screenChanged", shown })
+      if (shown) return try rearm()
+    }
+    try send({ type: "sync" })
+  }
+
+  effect function zoomLatest() {
+    zooming = true
+    try ensuring(effect {
+      while (zoomWanted !== undefined) {
+        const target = zoomWanted
+        zoomWanted = undefined
+        if (!canZoomTo(try view.get(), target)) continue
+        const ok = effect {
+          try bridge.setZoom(target / 10)
+          return true
+        } catch () => false
+        if (ok) try send({ type: "zoomTo", tenths: target })
+        else try say("Couldn’t zoom")
+      }
+    }, sync(() => {
+      zooming = false
+    }))
+  }
+
+  const first = try front.get()
+  if (first.view !== "camera") try send({ type: "leave" })
+  try follow(first)
+  try forkDetach(Stream.runForEach(front.changes, follow))
+  observeLandscape((landscape) => {
+    runFork(effect {
+      if ((try view.get()).landscape !== landscape) {
+        try send({ type: "rotate" })
+        try send({ type: "sync" })
+      }
+    })
+  })
+
   if (bridge.browser) {
     observeRecorder((event) => {
       const mapped: RecorderEvent | undefined =
-        event.type === "chunk" ? { type: "chunk", size: event.size } : event.type === "trackEnded" ? { type: "limitOrTrackEnded" }
+        event.type === "chunk" ? { type: "chunk", piece: event.size } : event.type === "trackEnded" ? { type: "limitOrTrackEnded" }
         : event.type === "stopped" ? { type: "recorderStopped" } : event.type === "error" ? { type: "recorderError" } : { type: "prefixRead", ok: event.ok }
       runFork(ignore(recorder.send(mapped)))
     })
@@ -318,13 +405,8 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     effect zoomTo(tenths: number) {
       const now = try view.get()
       if (!canZoomTo(now, tenths)) return
-      const target = clampZoom(Math.round(tenths), now)
-      const ok = effect {
-        try bridge.setZoom(target / 10)
-        return true
-      } catch () => false
-      if (ok) try send({ type: "zoomTo", tenths: target })
-      else try say("Couldn’t zoom")
+      zoomWanted = clampZoom(Math.round(tenths), now)
+      if (!zooming) try zoomLatest()
     },
     effect cycleFlash() {
       const after = try send({ type: "cycleFlash" })
@@ -359,20 +441,23 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     effect allow() {
       bridge.openPrivacySettings() catch effect () => { try say("Couldn’t open") }
     },
-    effect resumed() {
-      const now = try view.get()
-      if (now.notice !== "CameraNotice") return try send({ type: "sync" })
-      const read = bridge.checkAccess() catch () => undefined
-      const grant = read?.camera === "granted" ? "AccessGranted" : read === undefined ? "AccessUnreadable" : "AccessNotGranted"
-      try send({ type: "rearm", grant })
+    resumed: rearm,
+    foreground: follow,
+    effect dialog(open: boolean) {
+      ownDialog = open
+      try covered()
       try send({ type: "sync" })
     },
     effect volumeKey() {
-      try send({ type: "volumeKey" })
+      const pressed = try send({ type: "volumeKey" })
+      if (pressed === undefined) {
+        volumeArmed = false
+        bridge.setVolumeShutter(false) catch () => undefined
+      }
     },
     effect settled() {
-      while ((try view.get()).phase === "PreviewStarting") try sleep("50 millis")
-      return try view.get()
+      const next = try Stream.runHead(Stream.filter(view.changes, (c) => c.phase !== "PreviewStarting"))
+      return Option.isSome(next) ? next.value : try view.get()
     },
     effect borrow<A, E>(task: (epoch: number) => A!E) {
       const now = try view.get()

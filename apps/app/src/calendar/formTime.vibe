@@ -1,0 +1,67 @@
+// spec/calendar/editor.md, "Story: Set an event's time with controls that never produce an impossible range"
+import { durationFor, earlierStart, endAccepted, laterStart, longerEnd, shorterEnd } from "../../gen/calendar__editor.effect.vibe"
+import type { DraftFieldsRecord } from "./drafts.schema.vibe"
+import { civil, isoInstant } from "./time.ts"
+
+const MINUTE = 60_000
+const DAY_MINUTES = 1440
+
+/** A form's timed span as civil minutes: the start's day, its minute of that day, and the length in minutes; undefined for an all-day or unreadable form. */
+export interface FormSpan { readonly day: number; readonly start: number; readonly duration: number }
+
+function wallAt(day: number, minute: number): string {
+  return isoInstant((day * DAY_MINUTES + minute) * MINUTE).slice(0, 16)
+}
+
+/** The span a timed form shows, read from its wall-clock start and end. */
+export function formSpan(fields: DraftFieldsRecord): FormSpan | undefined {
+  if (fields.allDay) return undefined
+  const begin = civil(fields.start.length === 16 ? `${fields.start}:00` : fields.start)
+  const end = civil(fields.end.length === 16 ? `${fields.end}:00` : fields.end)
+  if (begin === undefined || end === undefined) return undefined
+  const minutes = Math.floor(begin / MINUTE)
+  const day = Math.floor(minutes / DAY_MINUTES)
+  const start = minutes - day * DAY_MINUTES
+  return { day, start, duration: Math.max(1, Math.floor((end - begin) / MINUTE)) }
+}
+
+function withSpan(fields: DraftFieldsRecord, span: FormSpan): DraftFieldsRecord {
+  return { ...fields, start: wallAt(span.day, span.start), end: wallAt(span.day, span.start + span.duration) }
+}
+
+/** The start fifteen minutes later or earlier, kept inside its day; the length stays. */
+export function nudgeStart(fields: DraftFieldsRecord, later: boolean): DraftFieldsRecord {
+  const span = formSpan(fields)
+  if (span === undefined) return fields
+  return withSpan(fields, { ...span, start: later ? laterStart(span.start) : earlierStart(span.start) })
+}
+
+/** The end fifteen minutes later, or earlier but never at or before the start. */
+export function nudgeEnd(fields: DraftFieldsRecord, longer: boolean): DraftFieldsRecord {
+  const span = formSpan(fields)
+  if (span === undefined) return fields
+  return withSpan(fields, { ...span, duration: longer ? longerEnd(span.duration) : shorterEnd(span.duration) })
+}
+
+/** A typed start: the event moves there and keeps its length. */
+export function moveStart(fields: DraftFieldsRecord, start: string): DraftFieldsRecord {
+  const span = formSpan(fields)
+  const moved = { ...fields, start }
+  const next = formSpan({ ...moved, end: start })
+  if (span === undefined || next === undefined) return moved
+  return withSpan(moved, { ...next, duration: span.duration })
+}
+
+/** A typed end: accepted only after the start; an end at or before it keeps the length the form had. */
+export function moveEnd(fields: DraftFieldsRecord, end: string): DraftFieldsRecord {
+  const span = formSpan(fields)
+  const typed = formSpan({ ...fields, end })
+  if (span === undefined || typed === undefined) return { ...fields, end }
+  const endAt = civil(end.length === 16 ? `${end}:00` : end)
+  const startAt = civil(fields.start.length === 16 ? `${fields.start}:00` : fields.start)
+  if (endAt === undefined || startAt === undefined) return { ...fields, end }
+  const startMinute = Math.floor(startAt / MINUTE)
+  const endMinute = Math.floor(endAt / MINUTE)
+  if (!endAccepted(startMinute, endMinute)) return withSpan(fields, span)
+  return withSpan(fields, { ...span, duration: durationFor(startMinute, span.duration, endMinute) })
+}

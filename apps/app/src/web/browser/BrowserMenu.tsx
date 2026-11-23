@@ -3,6 +3,7 @@ import { BookOpen, Bookmark, Download, ExternalLink, Eraser, KeyRound, Library, 
 import type { ReactNode } from "react";
 import type { Reading } from "../../../gen/browser__reading.ts";
 import { settled } from "../../../gen/browser__page.ts";
+import { mayClearSite } from "../../../gen/browser__site.ts";
 import { type Session, canOpenFind, curTab, full } from "../../../gen/browser__session.ts";
 import { Sheet, SheetContent } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
@@ -12,6 +13,7 @@ export type MenuAction =
   | "newTab" | "newPrivateTab" | "library" | "find" | "bookmark" | "share" | "readAloud" | "askAboutPage" | "readLocally"
   | "external" | "downloads" | "passwords" | "clearSite" | "clearData";
 
+/** The session and reading the menu offers its items from, and where a chosen item goes. */
 export interface BrowserMenuProps {
   session: Session;
   reading: Reading;
@@ -57,7 +59,7 @@ export function BrowserMenu({ session, reading, marked, onAction, onDismiss }: B
           {onDevice && <Item icon={<ExternalLink />} label="Open in another browser" disabled={!loaded || !tab.page.secure} onSelect={act("external")} />}
           {onDevice && <Item icon={<Download />} label="Downloads" onSelect={act("downloads")} />}
           <Item icon={<KeyRound />} label="Passwords" onSelect={act("passwords")} />
-          {onDevice && <Item icon={<Eraser />} label="Clear site data" disabled={!tab.page.committed || tab.page.failed || tab.page.url === ""} onSelect={act("clearSite")} />}
+          {onDevice && <Item icon={<Eraser />} label="Clear site data" disabled={!mayClearSite({ nativeHost: onDevice, committed: tab.page.committed, failed: tab.page.failed, hasHost: (URL.parse(tab.page.url)?.hostname ?? "") !== "" })} onSelect={act("clearSite")} />}
           <Item icon={<Trash2 />} label="Clear browsing data" destructive disabled={session.clearing} onSelect={act("clearData")} />
         </ul>
       </SheetContent>

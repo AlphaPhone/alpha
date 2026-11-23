@@ -20,6 +20,9 @@ export const homeTiles: TileFace[] = [
   { key: "alpha:settings", label: "Settings", icon: Settings },
 ];
 
+/** One Alpha app's tile. */
+export const notesTile: TileFace = { key: "alpha:notes", label: "Notes", icon: NotebookText };
+
 /** Two installed apps with the same name, told apart by their profile. */
 export const libraryEntries: TileFace[] = [
   { key: "org.fixture.clock", label: "Clock" },
@@ -47,13 +50,22 @@ export const quietDay: Overview = { ...overviewStart, mounted: true, now };
 
 /** A toast with Undo showing. */
 export const undoToast: Toasts = {
-  ...toastsStart, shown: { message: "Deleted Lunch", chars: 13, action: "undo-1", failure: false }, seq: 1, duration: 10000, readMin: 10000, delay: 10000,
+  ...toastsStart, shown: { message: "Deleted Lunch", chars: 13, undo: "undo-1", failure: false }, seq: 1, duration: 10000, readMin: 10000, delay: 10000,
 };
 
 /** The walkthrough at the camera step, after notifications and the microphone were allowed. */
 export const cameraStep: Permissions = {
-  ...permissionsStart, restored: true, signedIn: true, enabled: true, phase: "PhaseWalkthrough", progress: 2,
+  ...permissionsStart, restored: true, imageKnown: true, signedIn: true, foreground: true, phase: "PhaseWalkthrough", progress: 2,
   states: { ...permissionsStart.states, $PermNotifications: "AccessReady", $PermMicrophone: "AccessReady", $PermCamera: "AccessAsk", $PermLocation: "AccessAsk" } as Permissions["states"],
+};
+
+/** The camera step with its request unanswered for twenty seconds, so Skip is offered. */
+export const stalledStep: Permissions = { ...cameraStep, pending: 2, ticket: 1, generation: 1, stalled: true };
+
+/** A review from Settings of a native step Android already allowed: Android's settings page is offered. */
+export const reviewedStep: Permissions = {
+  ...cameraStep, native: true, keys: ["PermNotifications", "PermMicrophone", "PermCamera", "PermLocation", "PermCalendar", "PermPhotos", "PermFiles"],
+  target: 0, reopened: true, review: true, completed: true, progress: -1,
 };
 
 /** Gesture handlers that do nothing, for stories. */

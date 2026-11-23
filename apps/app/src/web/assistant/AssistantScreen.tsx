@@ -5,8 +5,9 @@ import type { ScreenProps } from "../app-screen.ts";
 import { Assistant } from "../../assistant/assistant.vibe";
 import { Button } from "../components/ui/index.ts";
 import { ChatPanel } from "./ChatPanel.tsx";
-import { run } from "./runtime.ts";
+import { run } from "./services.ts";
 
+/** The shell's screen props, and how the conversation opens another app. */
 export type AssistantScreenProps = ScreenProps & {
   /** Open another app from a card or a reply. */
   openApp?: (app: string, route?: string) => void;

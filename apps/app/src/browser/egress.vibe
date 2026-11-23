@@ -3,11 +3,11 @@ import { type EgressEffect, type Event, type Viewed, Machine, machine } from "..
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
 import { settled } from "../../gen/browser__page.effect.vibe"
 import { Foreground } from "../shell/foreground.vibe"
-import { Navigation } from "../shell/navigation.vibe"
 import { Toasts } from "../shell/toasts.vibe"
 import { copyText } from "./clipboard.ts"
 import { EGRESS_NOTICES, refusalText } from "./messages.ts"
 import { BrowserBookmarks } from "./bookmarks.vibe"
+import { PageMail } from "./ports.vibe"
 import { BrowserTabs } from "./session.vibe"
 import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
 
@@ -37,7 +37,7 @@ export const egressLayer = Layer.provide(Layer.effect(BrowserEgress, effect {
   const marks = try BrowserBookmarks
   const host = try TabHost
   const foreground = try Foreground
-  const apps = try Navigation
+  const mail = try PageMail
   const toasts = try Toasts
 
   effect function viewed() {
@@ -53,7 +53,8 @@ export const egressLayer = Layer.provide(Layer.effect(BrowserEgress, effect {
         try send({ type: "shareSettled", ok: !(shared instanceof BrowserCallFailed) })
       }
       when { tag: "ComposeEmail", let url, let title }: {
-        try apps.open("inbox", `compose?${new URLSearchParams({ subject: title || "Shared page", body: url })}`)
+        const refused = try mail.compose(title || "Shared page", url)
+        if (refused !== undefined) try toasts.show(refused)
       }
       when { tag: "CopyLink", let url }: {
         const copied = tryPromise(() => copyText(url)) catch () => false

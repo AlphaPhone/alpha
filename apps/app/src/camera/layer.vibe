@@ -20,6 +20,7 @@ import { cameraActions } from "./actions.vibe"
 import { agentCamera } from "./agentCapture.vibe"
 import { agentPhotos } from "./agentPhotos.vibe"
 import { cameraBridge } from "./bridge.vibe"
+import { cameraChat } from "./chat.vibe"
 import { browserPhotoStore } from "./browserPhotos.vibe"
 import { mediaEditor } from "./editor.vibe"
 import { photoLibrary } from "./library.vibe"
@@ -46,5 +47,5 @@ const camera = Layer.provideMerge(viewfinder, devices)
 const library = Layer.provideMerge(photoLibrary, camera)
 const agents = Layer.provideMerge(Layer.mergeAll(agentCamera, agentPhotos, mediaEditor, scanner, mediaReview), library)
 
-/** Every Camera and Photos service and Machine, needing only the platform's Native, Build and KeyValueStore. */
-export const layer = Layer.provideMerge(cameraActions, agents)
+/** Every Camera and Photos service and Machine, needing the platform's Native, Build and KeyValueStore and the shell's Foreground; Camera's handoff and call-fact ports refuse until another area fills them. */
+export const layer = Layer.provideMerge(Layer.mergeAll(cameraActions, cameraChat), agents)

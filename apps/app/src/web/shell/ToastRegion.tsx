@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { Toasts } from "../../../gen/shell__toasts.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 
+/** The toast region: the shown toast, where it lives and its hold, release and Undo. */
 export interface ToastRegionProps {
   toasts: Toasts;
   /** The topmost open modal hosts the toast instead of the page, so it is seen and announced above it. */
@@ -33,7 +34,7 @@ export function ToastRegion({ toasts, inDialog = false, onHold, onRelease, onAct
       {shown.message !== "" && (
         <div className="pointer-events-auto flex min-h-12 max-w-full items-center gap-3 rounded-xl bg-foreground py-2 pr-1 pl-4 text-background shadow-lg">
           <span className="min-w-0 flex-1 break-words">{shown.message}</span>
-          {shown.action !== "" && (
+          {shown.undo !== "" && (
             <button type="button" onClick={onAction} className={cn(focusRing, "min-h-10 shrink-0 rounded-full px-4 font-mono text-xs uppercase tracking-widest")}>
               Undo
             </button>
@@ -44,6 +45,7 @@ export function ToastRegion({ toasts, inDialog = false, onHold, onRelease, onAct
   );
 }
 
+/** The persistent notices listed until dismissed. */
 export interface NoticesSlotProps {
   notices: readonly string[];
   onDismiss: (message: string) => void;

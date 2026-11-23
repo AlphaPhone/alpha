@@ -5,6 +5,7 @@ import { Button } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 import { HOST_CHROME } from "./measure.ts";
 
+/** The session the toolbar reads, and the toolbar's page, address, tabs and menu controls. */
 export interface BrowserToolbarProps {
   session: Session;
   /** Back, forward, reload or stop on the selected tab's page. */
@@ -34,7 +35,7 @@ export function BrowserToolbar({ session, onCommand, onAddress, onTabs, onMenu }
       <button type="button" onClick={onAddress} aria-label={url ? `Address ${url.host}` : priv ? "New private tab" : "New tab"} className={cn(focusRing, "flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md bg-secondary px-3 text-left")}>
         {secure && <Lock aria-label="Secure connection" className="size-4 shrink-0 text-ok" />}
         {priv && <span className="font-mono text-xs uppercase text-primary">Private</span>}
-        <span className={cn("truncate", !url && "text-muted-foreground")}>{url?.host ?? (priv ? "New private tab" : "Search or address")}</span>
+        <span className={cn("truncate", !url && "text-muted-foreground")}>{url?.host ?? (priv ? "New private tab" : "New tab")}</span>
       </button>
       {loading
         ? <Button variant="ghost" size="icon" aria-label="Stop loading" disabled={!canRunCommand(session, "StopLoading")} onClick={() => onCommand("StopLoading")}><X aria-hidden /></Button>

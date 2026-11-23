@@ -162,6 +162,50 @@ public final class AlphaConnectionPlugin extends Plugin {
  @PluginMethod public void pauseNotificationCollection(PluginCall call) {
   submit(call,()->{try{NotificationAccess.pause(getContext(),true);call.resolve();}catch(Exception failure){call.reject("Notification collection could not be paused");}});
  }
+ /** Notes' kept slots and the Cloud delegation record: renderer-named slots only, never a native namespace. */
+ @PluginMethod public void secureRead(PluginCall call) {
+  submitStorage(call,()->{
+   try{String value=readCredentialSlot(RendererCredentialSlots.requireAllowed(call.getString("slot")));JSObject result=new JSObject();result.put("value",value==null?JSONObject.NULL:value);call.resolve(result);}
+   catch(Exception error){call.reject("Secure storage read failed");}
+  });
+ }
+ /** Compare-and-exchange is scoped to local drafts, kept records and pending device actions, never credential slots. */
+ @PluginMethod public void secureCompareExchange(PluginCall call) {
+  submitStorage(call,()->{
+   try {
+    String name=RendererCredentialSlots.requireAllowed(call.getString("slot"));
+    if(!RendererCredentialSlots.compareExchangeAllowed(name)||!call.getData().has("expectedValue")||!call.getData().has("value"))throw new IllegalArgumentException();
+    for(String field:new String[]{"expectedValue","value"})if(!call.getData().isNull(field)&&!(call.getData().get(field) instanceof String))throw new IllegalArgumentException();
+    String expected=call.getData().isNull("expectedValue")?null:call.getString("expectedValue"), value=call.getData().isNull("value")?null:call.getString("value");
+    JSObject result=new JSObject();
+    result.put("status",storage().compareExchangeCredentialSlot(name,expected,value)?"saved":"conflict");call.resolve(result);
+   }catch(AlphaCredentialStore.StorageFullException full){call.reject(STORAGE_FULL_MESSAGE,STORAGE_FULL);}
+   catch(Exception error){call.reject("Secure draft update failed");}
+  });
+ }
+ /** Opens an Eliza Cloud page (Google consent, delegation, plans) in the owner's browser; a CLI sign-in page settles once with its handoff. */
+ @PluginMethod public void openExternal(PluginCall call) {
+  try {
+   URI url = validatedUrl(call.getString("url"), false);
+   if (!ConnectionRoutes.externalHost(url.getScheme(), url.getHost(), url.getPort())) throw new IllegalArgumentException();
+   Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url.toASCIIString())); intent.addCategory(Intent.CATEGORY_BROWSABLE);
+   boolean cliLogin=ConnectionRoutes.externalCliLogin(url.getHost(),url.getPath());
+   if(cliLogin){
+    String id=required(call.getString("requestId"),256);
+    if(destroyed){call.reject("Connection closed");return;}
+    PendingRequests.Pending pending=requests.registerBrowser(id,settles(call));
+    if(pending==null){call.reject("Request already active");return;}
+    getActivity().runOnUiThread(()->{
+     if(destroyed){pending.cancel();requests.remove(id,pending);return;}
+     pending.launch(()->getActivity().startActivity(intent));
+     if(pending.settled())requests.remove(id,pending);
+    });
+   }else getActivity().runOnUiThread(() -> {
+    try { getActivity().startActivity(intent); call.resolve(); }
+    catch (RuntimeException error) { call.reject("Authentication browser unavailable"); }
+   });
+  } catch (Exception error) { call.reject("Unsupported authentication URL"); }
+ }
  private static URI validatedUrl(String text, boolean allowDevelopment) throws Exception {
   return ConnectionTransport.validatedUrl(text, allowDevelopment, false);
  }

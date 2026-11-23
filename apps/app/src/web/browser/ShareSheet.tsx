@@ -3,6 +3,7 @@ import { Copy, Mail, Share2 } from "lucide-react";
 import type { Session } from "../../../gen/browser__session.ts";
 import { ListRow, Sheet, SheetContent } from "../components/ui/index.ts";
 
+/** The session the share sheet belongs to, and its Share, email and copy actions. */
 export interface ShareSheetProps {
   session: Session;
   onShare: () => void;

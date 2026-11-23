@@ -2,11 +2,13 @@
 import type { SuggestionView } from "../../assistant/suggestion.vibe";
 import { Button, Card, CardFooter } from "../components/ui/index.ts";
 
+/** The suggestion review open now and the owner's answers to it. */
 export type SuggestionReviewProps = {
   /** The review open now, or none. */
   view?: SuggestionView;
   /** Insert exactly the wording shown. */
   onInsert: () => void;
+  /** Close the review without inserting. */
   onClose: () => void;
 };
 

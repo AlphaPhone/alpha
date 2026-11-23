@@ -1,0 +1,166 @@
+// spec/maps/guidance.md, "Story: Reroute the guidance I started only when my agent asks, from a fresh fix"; spec/maps/agentSurface.md, "Story: Let my agent bring Maps forward only when I can see it"; spec/maps/selectedRead.md, "Story: Let the agent see only what the Maps screen shows now"; spec/maps/delivery.md, "Story: Carry my agent's Maps requests to the phone once"; spec/maps/cards.md, "Story: Answer my agent's Maps question with one tap"
+import { assert, it } from "@effect/vitest"
+import { Machine as CardsMachine } from "../../gen/maps__cards.effect.vibe"
+import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
+import { Machine as DeliveryMachine } from "../../gen/maps__delivery.effect.vibe"
+import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
+import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
+import { Machine as SurfaceMachine } from "../../gen/maps__agentSurface.effect.vibe"
+import { MapsAgent } from "../../src/maps/agent.vibe"
+import { MapsContent } from "../../src/maps/content.vibe"
+import { MapsHandoff } from "../../src/maps/handoff.vibe"
+import { MapsSession } from "../../src/maps/layer.vibe"
+import { MapsNavigation } from "../../src/maps/navigation.vibe"
+import { MapsScreen } from "../../src/maps/screen.vibe"
+import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
+
+const open = { id: "alpha-osm", data: "OpenStreetMap" }
+const offer = (message: number) => ({ message, session: 1, conversation: 1, revision: 0 })
+const pierCard = {
+  kind: "place" as const, attribution: "© data",
+  place: { name: "Pier 39", latitude: pier.latitude, longitude: pier.longitude, provider: "alpha-osm", providerPlaceId: "p1", categories: [] },
+}
+
+/** Maps installed and a result for "pier" shown with its details. */
+effect function shownPier() {
+  const screen = try MapsScreen
+  const machine = try ScreenMachine
+  try (try MapsSession).open()
+  try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+  try screen.typeQuery("pier")
+  try screen.submitSearch()
+  try until(machine.changes, (s) => s.search === "Ready")
+  try screen.pickResult(0)
+  return try until(machine.changes, (s) => s.details === "Ready")
+}
+
+it.live("A reroute plans from a fresh fix and keeps the route when the fix is not good enough (spec/maps/guidance.md, \"Story: Reroute the guidance I started only when my agent asks, from a fresh fix\"; spec/maps/guidance.md, \"A reroute belongs to its session; a failed or late one keeps the current route\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    const navigation = try MapsNavigation
+    const guidance = try GuidanceMachine
+    const content = try MapsContent
+    try shownPier()
+    try screen.openDirections()
+    try screen.editOrigin("37.79550, -122.39370")
+    try screen.submitOrigin()
+    try until(machine.changes, (s) => s.route === "Ready")
+    try navigation.start()
+    const started = try until(guidance.changes, (g) => g.phase === "Guiding")
+    const early = navigation.reroute() catch (e) => e.message
+    try Queue.offer(h.fixes, fixAt(ferry))
+    try until(guidance.changes, (g) => g.fixUsable)
+    try navigation.reroute()
+    const rerouted = try until(guidance.changes, (g) => g.phase === "Guiding" && g.route !== started.route)
+    const routeId = (try content.get()).guidance?.route.id
+    try Queue.offer(h.fixes, fixAt(ferry, 300))
+    try until(guidance.changes, (g) => !g.fixUsable)
+    const coarse = navigation.reroute() catch (e) => e.message
+    const kept = try guidance.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { early, rerouted: [rerouted.session === started.session, rerouted.step, routeId], coarse, kept: kept.route === rerouted.route },
+      {
+        early: "The phone has no precise, up-to-date location, so it kept the current route.", rerouted: [true, 0, "detour"],
+        coarse: "The phone has no precise, up-to-date location, so it kept the current route.", kept: true,
+      },
+    ))
+  }
+})
+
+it.live("Maps is blocked by a ringing call and admitted over the launcher (spec/maps/agentSurface.md, \"Story: Let my agent bring Maps forward only when I can see it\"; spec/maps/agentSurface.md, \"Maps opens at most once per request, only over an unblocked launcher, and the answer waits for the open to commit or two seconds\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const surface = try SurfaceMachine
+    try (try MapsSession).open()
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, ringing: true, view: "phone" }))
+    const ringing = try until(surface.changes, (s) => s.blocked)
+    const refused = try surface.send({ type: "requestMaps" })
+    try SubscriptionRef.update(h.shell, (s) => ({ ...s, ringing: false, view: "maps" }))
+    const clear = try until(surface.changes, (s) => !s.blocked && s.view === "MapsView")
+    const admitted = try surface.send({ type: "requestMaps" })
+    try Effect.try(() => assert.deepStrictEqual(
+      { ringing: ringing.view, refused: refused.last, clear: clear.view, admitted: [admitted.last, admitted.opens] },
+      { ringing: "AppView", refused: "NotShown", clear: "MapsView", admitted: ["Admitted", 0] },
+    ))
+  }
+})
+
+it.live("The agent reads only the selection its approved card showed (spec/maps/selectedRead.md, \"Story: Let the agent see only what the Maps screen shows now\"; spec/maps/selectedRead.md, \"A read is approved only for the selection the card showed, and its result is uploaded only while that selection is still shown\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const agent = try MapsAgent
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    try shownPier()
+    try sleep("20 millis")
+    const reviewed = try agent.review()
+    const approved = try agent.approve()
+    const read = try agent.readSelected()
+    try agent.review()
+    try agent.approve()
+    try screen.pickResult(1)
+    try until(machine.changes, (s) => s.details === "Ready")
+    try sleep("20 millis")
+    const stale = try agent.readSelected()
+    try screen.closePlace()
+    try sleep("20 millis")
+    const search = try agent.review()
+    try Effect.try(() => assert.deepStrictEqual(
+      { reviewed, approved, place: read?.includes('"kind":"map-place"'), stale, search },
+      { reviewed: true, approved: true, place: true, stale: undefined, search: false },
+    ))
+  }
+})
+
+it.live("A redelivered navigation applies its effect once, and a lost claim applies nothing (spec/maps/delivery.md, \"Story: Carry my agent's Maps requests to the phone once\"; spec/maps/delivery.md, \"A navigation effect runs only under a returned claim, and a redelivery never runs it twice\")", () => effect {
+  const claimed = try harness(open, { claim: { claimId: "claim-1" } })
+  const applied = try Ref.make(0)
+  const once = try Effect.provide(effect {
+    const agent = try MapsAgent
+    try agent.deliver(1, 7, { viewId: "maps" }, Ref.update(applied, (n) => n + 1))
+    try agent.deliver(2, 7, { viewId: "maps" }, Ref.update(applied, (n) => n + 1))
+    return [try Ref.get(applied), claimed.residentCalls.filter((p) => p === "/api/views/interact-result").length, (try (try DeliveryMachine).get()).applied] as const
+  }, claimed.layer)
+  const lost = try harness(open, { claim: { claimId: "" } })
+  const unknown = try Effect.provide(effect {
+    const agent = try MapsAgent
+    try agent.deliver(1, 8, { viewId: "maps" }, Ref.update(applied, (n) => n + 1))
+    return [(try (try DeliveryMachine).get()).claimPhase, lost.residentCalls.filter((p) => p === "/api/views/interact-result").length] as const
+  }, lost.layer)
+  const total = try Ref.get(applied)
+  try Effect.try(() => assert.deepStrictEqual(
+    { once, unknown, total },
+    { once: [1, 2, [7]], unknown: ["ClaimUnknown", 0], total: 1 },
+  ))
+})
+
+it.live("One tap answers the newest question once, and a card's map opens once (spec/maps/cards.md, \"Story: Answer my agent's Maps question with one tap\"; spec/maps/cards.md, \"A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again\"; spec/maps/cards.md, \"Only the newest agent message offers its choice and its card, in the session and conversation that showed them\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const handoff = try MapsHandoff
+    const cards = try CardsMachine
+    const sent = try Ref.make(0)
+    const send = map(Ref.update(sent, (n) => n + 1), () => true)
+    try (try MapsSession).open()
+    try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+    try handoff.agentReply(true)
+    try handoff.answerChoice(offer(1), send)
+    try handoff.answerChoice(offer(1), send)
+    const answered = try Ref.get(sent)
+    try handoff.agentReply(true)
+    try handoff.setComposer({ busy: false, typing: false, recording: false, draft: true, editing: false, hidden: false, sheetOpen: false })
+    try handoff.answerChoice(offer(2), send)
+    const draft = try cards.get()
+    try handoff.openCard(pierCard, offer(1))
+    try handoff.openCard(pierCard, offer(2))
+    try handoff.openCard(pierCard, offer(2))
+    const shown = try until((try ScreenMachine).changes, (s) => s.choice === "AgentChoice")
+    const afterDraft = try Ref.get(sent)
+    try Effect.try(() => assert.deepStrictEqual(
+      { answered, afterDraft, notice: draft.notice, opened: h.opened.filter((a) => a === "maps").length, shown: shown.choice },
+      { answered: 1, afterDraft: 1, notice: "DraftOpen", opened: 1, shown: "AgentChoice" },
+    ))
+  }
+})

@@ -5,9 +5,9 @@ import { deviceZone, formatTime } from "../../calendar/time.ts";
 import type { AppId } from "../app-screen.ts";
 import { Card } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
-import { useHomeAgenda } from "./hooks.ts";
-import { run } from "./runtime.ts";
+import { useHomeAgenda, run } from "./hooks.ts";
 
+/** What Home passes its agenda card: how to open Calendar on the event it shows. */
 export type HomeAgendaCardProps = {
   /** Open an app at a route; tapping opens Calendar on the event shown. */
   open: (app: AppId, route?: string) => void;

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button, Sheet, SheetContent, Textarea } from "../components/ui/index.ts";
 
+/** The notification a question is about, exactly what will be shared, and the owner's answer. */
 export type QuestionSheetProps = {
   /** Which notification the question is about, such as "Alpha Phone notification". */
   name: string;

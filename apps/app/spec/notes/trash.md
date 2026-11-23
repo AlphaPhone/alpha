@@ -8,8 +8,8 @@ recording is erased on the device afterwards, with its own [cleanup](./cleanup.m
 
 The phone keeps no Trash of its own. The earlier device Trash, with its 30-day rule, held deleted notes of
 the collection the phone kept itself; that collection now arrives in the agent's Notes through its
-[import](./collection.md), so every deletion goes to this canonical Trash and nothing writes the device
-Trash any more.
+[import](./collection.md), so every deletion goes to this canonical Trash. The rows still in the earlier
+device Trash come into the canonical Trash once, and nothing writes the device Trash after that.
 
 ## Story: Recover a deleted note
 
@@ -49,6 +49,22 @@ pure val revisionValues = Set(0, 1, 2, 3)
 pure def alwaysRowsNonnegative(s: TrashView): bool = s.rows >= 0 and s.cleanupPending >= 0 and s.erasedTotal >= 0
 pure def alwaysIdleEmptyTrashIsClosed(s: TrashView): bool = (s.opened and s.rows == 0) implies s.busy != TrashIdle
 pure def alwaysAskingNeedsOpenTrash(s: TrashView): bool = (s.asking or s.confirm != NoConfirm) implies s.opened
+```
+
+### Every Trash dialog is named by the actions it offers and the note it reviews
+
+A screen reader hears what a dialog can do before it hears the note: a row's dialog is "Recover" with the
+three-day choice off and "Recover or delete" with it on, followed by the note's title, and an erase
+confirmation says whether it deletes that note or all of Recently deleted. A note without a title is named
+as a deleted note.
+
+```quint
+type TrashDialogName = RecoverOnlyName | RecoverOrDeleteName | DeleteOneName | DeleteAllName
+pure def askDialogName(retentionOn: bool): TrashDialogName = if (retentionOn) RecoverOrDeleteName else RecoverOnlyName
+pure def eraseDialogName(everything: bool): TrashDialogName = if (everything) DeleteAllName else DeleteOneName
+pure def lawRowDialogOffersDeleteOnlyWithTheChoice(retentionOn: bool): bool =
+  (askDialogName(retentionOn) == RecoverOrDeleteName) iff retentionOn
+pure def lawEraseDialogSaysItsScope(everything: bool): bool = (eraseDialogName(everything) == DeleteAllName) iff everything
 ```
 
 ### A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion
@@ -195,4 +211,36 @@ pure def lawRecordingCleanupFollowsErase(commit: EraseCommit, hasAudio: bool): b
   eraseOutcome(commit, hasAudio).cleanupPending iff (eraseOutcome(commit, hasAudio).erased and hasAudio)
 pure def sometimesErased(s: TrashView): bool = s.erasedTotal >= 1 and s.reportedSuccess
 pure def sometimesUnknownErase(s: TrashView): bool = not(s.storeReady)
+```
+
+## Story: Keep the notes I deleted before this version
+
+> As the owner, I want the notes still in the phone's earlier Recently deleted to stay recoverable after
+> the update, so that a note I deleted shortly before it is not lost.
+
+### An earlier device Trash row comes into the canonical Trash once, and the device slot clears only after every row is settled
+
+Once a collection is bound, every row of the earlier device Trash that its 30-day rule still kept is saved
+as one note under the creation identity of its deletion and then moved to the canonical Trash, so a
+second pass finds the same note and saves nothing again. Its title, words, checklist items, transcript
+lines, link and folder come along; its recording stays in the device's own recording trash. A row the
+30-day rule had already passed is settled without a note. The device slot is cleared only when every row
+is settled, so an interrupted pass resumes on the next binding; an unreadable slot is never cleared.
+
+```quint
+type LegacyTrashRow = { deletedAt: int, now: int, inCanonicalTrash: bool }
+pure val legacyRetention = 2592000000
+pure def legacyRowKept(row: LegacyTrashRow): bool = row.now - row.deletedAt < legacyRetention
+pure def legacyRowSettled(row: LegacyTrashRow): bool = not(legacyRowKept(row)) or row.inCanonicalTrash
+pure def legacySlotClears(settled: int, total: int): bool = total >= 0 and settled == total
+pure val rowValues = Set(
+  { deletedAt: 0, now: 2591999999, inCanonicalTrash: false },
+  { deletedAt: 0, now: 2591999999, inCanonicalTrash: true },
+  { deletedAt: 0, now: 2592000000, inCanonicalTrash: false })
+pure val settledValues = Set(0, 1, 2)
+pure val totalValues = Set(0, 1, 2)
+pure def lawPassedRowNeedsNoNote(row: LegacyTrashRow): bool = not(legacyRowKept(row)) implies legacyRowSettled(row)
+pure def lawKeptRowSettlesOnlyInTrash(row: LegacyTrashRow): bool =
+  (legacyRowKept(row) and not(row.inCanonicalTrash)) implies not(legacyRowSettled(row))
+pure def lawSlotWaitsForEveryRow(settled: int, total: int): bool = settled < total implies not(legacySlotClears(settled, total))
 ```

@@ -5,6 +5,7 @@ import type { PromptInput, Report } from "../../workflows/automations.vibe";
 import { Button, Input, Label, RadioGroup, RadioGroupItem, Sheet, SheetContent, Textarea } from "../components/ui/index.ts";
 import { reportWords } from "./words.ts";
 
+/** A prompt sheet: the prompt being changed, if any, and what its last save said. */
 export interface PromptSheetProps {
   open: boolean;
   /** The prompt being changed, or undefined for a new one. */

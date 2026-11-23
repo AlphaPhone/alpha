@@ -7,6 +7,7 @@ import { Button, Input, Label, Switch, Textarea } from "../components/ui/index.t
 import { ReviewDialog } from "./ReviewDialog.tsx";
 import { reportWords, scheduleText, scheduledTitle, when } from "./words.ts";
 
+/** What one automation shows and the changes it offers. */
 export interface AutomationDetailProps {
   row: Row;
   /** Whether a change may be held now: nothing is in flight or held for this owner. */
@@ -113,8 +114,13 @@ export function AutomationDetail({ row, canChange, history, report, onSwitch, on
           <div className="flex flex-col gap-3">
             <Label htmlFor="schedule-instructions">Instructions</Label>
             <Textarea id="schedule-instructions" value={instructions} onChange={(e) => setInstructions(e.target.value)} />
-            <Label htmlFor="schedule-time">Time</Label>
-            <Input id="schedule-time" type="time" step={60} value={time} onChange={(e) => setTime(e.target.value)} />
+            {row.schedule.startsWith("cron:") && (
+              <>
+                <Label htmlFor="schedule-time">Time</Label>
+                <Input id="schedule-time" type="time" step={60} value={time} onChange={(e) => setTime(e.target.value)} />
+                <p className="text-sm text-muted-foreground">The days and time zone stay as they are.</p>
+              </>
+            )}
           </div>
         )}
       </ReviewDialog>

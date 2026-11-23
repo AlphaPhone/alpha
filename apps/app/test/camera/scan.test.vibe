@@ -15,7 +15,6 @@ it.live("a scanned frame is kept only by Keep, under one identity until a defini
     "ElizaCamera.stopPreview": () => undefined,
     "ElizaCamera.setCaptureMode": () => undefined,
     "ElizaCamera.capturePhoto": () => ({ format: "jpeg", base64: "/9j/AA==", width: 1600, height: 1200 }),
-    "AlphaDevice.setVolumeShutter": () => undefined,
     "AlphaPhotos.list": () => ({ items: [], next: "" }),
     "AlphaPhotos.keepCapture": () => answers.shift() ?? { status: "failed" },
   })

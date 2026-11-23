@@ -1,0 +1,49 @@
+// spec/files/proposal.md, "Story: Review the actual files before anything changes"; spec/files/proposal.md, "Story: Carry out the change I approved, exactly"; spec/files/proposal.md, "Only filter and open bring Files forward, and they change nothing"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"
+import { decodeFilesOperation, describeFilesOperation, type FilesAgentOperation } from "@elizaos/plugin-files/contract"
+import { copy } from "../assistant/presentation.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { PRIVATE_APPS } from "../shell/assistantHost.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { FilesAgent, type AgentContext } from "./agent.vibe"
+
+function decoded(operation: unknown): FilesAgentOperation | undefined {
+  return Option.getOrUndefined(Effect.runSync(Effect.option(decodeFilesOperation(operation))))
+}
+
+/** The Files family of agent device operations for `DeviceExecutors`: each one reviewed against the files shown and run once by Files' own agent runner, and only the agent's host brings Files forward. */
+export const operationPorts = effect {
+  const files = try FilesAgent
+  const navigation = try Navigation
+
+  effect function context() {
+    const nav = try navigation.get()
+    const view: AgentContext["view"] = nav.app === "" ? (nav.library ? "other" : "home") : nav.app === "files" ? "files" : "other"
+    return { view, sensitive: PRIVATE_APPS.has(nav.app), foreground: !nav.hidden } satisfies AgentContext
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => decoded(operation) === undefined ? undefined : operation,
+    execute: async (operation) => {
+      const op = decoded(operation)
+      if (op === undefined) return { kind: "refused", code: "unsupported" }
+      const prepared = await runPromise(files.prepare(op, await runPromise(context())))
+      if (prepared.kind !== "ready") return { kind: "refused", code: prepared.kind === "notAvailable" ? "not_available" : "failed", result: prepared }
+      const done = await runPromise(files.run(prepared.op, await runPromise(context()), navigation.switchForAgent("files", "")))
+      return done.status === "succeeded" ? { kind: "applied", result: done } : { kind: "refused", code: "files_failed", result: done }
+    },
+    readBack: async () => ({ kind: "refused", code: "no_readback" }),
+    describe: (operation) => {
+      const op = decoded(operation)
+      if (op === undefined) return { title: "Action", detail: "" }
+      const described = describeFilesOperation(op)
+      return { title: described.title, detail: described.description }
+    },
+    classOf: (operation) => {
+      const op = decoded(operation)
+      return op !== undefined && (op.type === "files_open" || op.type === "files_filter") ? "FilesOpen" : "NotesRead"
+    },
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (_operation, result) => result === "Applied" ? "Done in Files." : copy.unconfirmed,
+  }
+  return ports
+}

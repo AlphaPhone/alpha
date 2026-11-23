@@ -38,8 +38,11 @@ pure val labelValues = Set("", "Work")
 ### A place is saved with a name and a valid identity; saving it again updates the same row
 
 A provider place is the same place when the provider and its id match; a
-place without one when its coordinates match exactly. The 201st place is
-refused: "Remove a saved place before adding another." A stored list that
+place without one when its coordinates match exactly. Saving says "Place saved
+on this device.", removing "Place removed from saved." and renaming "Saved
+place renamed."; a full list says "Saved places are full. Remove one before
+adding another." The 201st place is
+refused. A stored list that
 cannot be read is never written over, and a change is reported done only
 after the stored list reads back as written.
 
@@ -74,4 +77,23 @@ pure def canRemovePlace(s: SavedPlaces, id: int): bool = has(s, id)
 pure def removePlace(s: SavedPlaces, id: int): SavedPlaces = { ...s, items: s.items.select(i => i.id != id) }
 pure def sometimesRenamed(s: SavedPlaces): bool = s.items.some(i => i.label == "Work")
 pure def sometimesRemovedThenSaved(s: SavedPlaces): bool = s.nextId > s.items.length() and s.items.length() >= 1
+```
+
+### A saved provider place is used only with the open-data provider that served it
+
+A saved place of another provider, or of a Google provider, is shown under its
+name and can be removed, but is restricted as Google content is, and is never
+a starting point: choosing it clears the starting point and its route and
+sends nothing ("Enter a saved place or latitude, longitude as the starting
+point.").
+
+```quint
+pure def savedLocal(provider: str, serving: str, servingKind: ProviderKind): bool =
+  provider == "" or (provider == serving and servingKind == OpenProvider)
+pure val providerValues = Set("", "osm", "google")
+pure val servingValues = Set("", "osm")
+pure def lawAnotherProvidersPlaceIsRestricted(provider: str, serving: str, servingKind: ProviderKind): bool =
+  (provider != "" and provider != serving) implies not(savedLocal(provider, serving, servingKind))
+pure def lawAGoogleProvidersPlaceIsRestricted(provider: str, serving: str): bool =
+  provider != "" implies not(savedLocal(provider, serving, GoogleProvider))
 ```

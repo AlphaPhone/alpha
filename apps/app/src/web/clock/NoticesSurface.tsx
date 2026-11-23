@@ -22,6 +22,8 @@ import { Deletions } from "../../clock/deletions.vibe";
 import { Notifications } from "../../clock/notifications.vibe";
 import { ReminderTaps } from "../../clock/reminder-taps.vibe";
 import { WorkflowNotices } from "../../clock/workflow-notices.vibe";
+import { ClockRecovery } from "../../clock/recovery.vibe";
+import { saveText } from "../../clock/page.ts";
 import type { AppId } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
 import { DeletionUndo } from "./DeletionUndo.tsx";
@@ -35,6 +37,14 @@ const clock = (act: (a: ClockActions.Shape) => Effect.Effect<unknown>) => run(Ef
 const deletions = (act: (d: Deletions.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(Deletions), act));
 const shadeDo = (act: (n: Notifications.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(Notifications), act));
 
+const recover = (act: (r: ClockRecovery.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ClockRecovery), act));
+
+/** What the shell gives the notices surface: how to open an app at a route. */
+export type NoticesSurfaceProps = {
+  /** Opens an app at a route, as the shell does for any surface. */
+  readonly open: (app: AppId, route?: string) => void;
+};
+
 const WORKFLOW_REPORT: Readonly<Record<string, string>> = { OtherAccount: "This notice belongs to another account.", RunUnavailable: "That run isn’t available.", NotKept: "Not kept" };
 
 /**
@@ -42,7 +52,7 @@ const WORKFLOW_REPORT: Readonly<Record<string, string>> = { OtherAccount: "This 
  * notices and retained data. The browser build also offers its notification shade here.
  * @model spec/clock/notices.md
  */
-export function NoticesSurface(_props: { readonly open: (app: AppId, route?: string) => void }) {
+export function NoticesSurface(_props: NoticesSurfaceProps) {
   const { state: ringer = ringerInitial } = useRinger(runtime);
   const { state: alarms = alarmsInitial } = useAlarms(runtime);
   const { state: timers = timersInitial } = useTimers(runtime);
@@ -109,11 +119,11 @@ export function NoticesSurface(_props: { readonly open: (app: AppId, route?: str
           heading={retained.heading}
           devTools={notices.state?.mocks === true}
           recovery={recovery}
-          onClose={() => { void notices.send({ type: "closeRetained" }); }}
+          onClose={() => recover((r) => r.close())}
           onDownload={download}
           onAskReset={() => { void notices.send({ type: "askReset" }); }}
           onCancelReset={() => { void notices.send({ type: "cancelReset" }); }}
-          onConfirmReset={() => run(Effect.flatMap(Effect.service(ClockRecovery), (r) => r.reset()))}
+          onConfirmReset={() => recover((r) => r.reset())}
         />
       )}
     </div>

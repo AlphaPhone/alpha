@@ -1,4 +1,4 @@
-// spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/speech.md, "Story: Never have a secret read aloud"
+// spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/speech.md, "Story: Never have a secret read aloud"; spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"
 import type { MisroutedSpeech, SpeechAttemptFailed } from "@elizaos/plugin-local-inference/speech-route"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -19,6 +19,14 @@ export error SpeechInterrupted { reason: string; started: boolean }
 /** The channel's last stop was never confirmed; Alpha must restart before it speaks again. */
 export error SpeechNotStopped
 
+/** The resident session a page reading is reviewed and spoken under; the page text itself never leaves the phone. */
+export interface ReadingBinding {
+  readonly execution: "device"
+  readonly ownerId: string
+  readonly sessionId: string
+  readonly expiresAt: number
+}
+
 /** How a passage is spoken: queued behind the one playing, and told when its first audio starts. */
 export interface SpeakOptions {
   readonly queue?: boolean
@@ -35,6 +43,10 @@ export service Speech {
   speak(text: string, channel: Channel, options?: SpeakOptions): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
   /** Speak already planned reply pieces in order, telling `played` after each. */
   speakPieces(pieces: readonly string[], played: () => void!!): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  /** Play the page the owner reviewed from its one-use token, synthesized only on the phone, on the reading channel. */
+  speakReviewed(readingToken: string, binding: ReadingBinding): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  /** Speak a reading on `channel` with the phone's own voice only, whatever the route in use. */
+  speakOnPhone(text: string, channel: Channel): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
   /** Stop what `channel` is saying now. */
   stop(channel: Channel): void!!
   /** Whether voice may enter now, given an open recording. */
@@ -54,6 +66,7 @@ const decodePrepared = Schema.decodeUnknownOption(PreparedSpeech)
 const decodePlayback = Schema.decodeUnknownOption(PlaybackEvent)
 
 type Ending = { readonly event: (typeof PLAYBACK_EVENTS)[number] | "stopped"; readonly reason?: string }
+type PhoneCall = { readonly method: string; readonly args: object; readonly deviceOnly: boolean }
 
 function synthesis(route: Route, account: VoiceAccount, text: string, requestId: string, queue: boolean) {
   const replace = queue ? { replace: false } : {}
@@ -187,6 +200,54 @@ export const speechService = Layer.effect(Speech, effect {
     }
   }
 
+  effect function preparedOnPhone(call: PhoneCall, requestId: string) {
+    const raw = native.invoke("AlphaVoiceCloud", call.method, { ...call.args, requestId }) catch effect (error) => { throw new SpeechUnavailable({ route: "Device", cause: error }) }
+    const prepared = Option.getOrUndefined(decodePrepared(raw))
+    const execution = prepared?.execution
+    if (prepared === undefined || prepared.playbackId === "" || (call.deviceOnly ? execution !== "device" : execution !== undefined && execution !== "device")) {
+      throw new SpeechUnavailable({ route: "Device", cause: { code: "no-playback" } })
+    }
+    return prepared.playbackId
+  }
+
+  effect function playOnPhone(channel: Channel, call: PhoneCall) {
+    const stopSignal = stops.get(channel)
+    const requestId = newId()
+    let playbackId: string | undefined
+    const playing = effect {
+      const id = try preparedOnPhone(call, requestId)
+      playbackId = id
+      const ending = fork ended(id)
+      native.invoke("AlphaVoiceCloud", "play", { playbackId: id }) catch effect (error) => { throw new SpeechUnavailable({ route: "Device", cause: error }) }
+      return try join ending
+    }
+    const stopped = effect {
+      const reason = try (stopSignal === undefined ? never : Deferred.await(stopSignal))
+      const ending: Ending = { event: "stopped", reason }
+      return ending
+    }
+    try ensuring(effect {
+      const outcome = try.race [playing, stopped]
+      if (outcome.event !== "playbackEnded") throw new SpeechInterrupted({ reason: outcome.reason ?? outcome.event, started: playbackId !== undefined })
+    }, effect { retire(channel, requestId, playbackId) catch () => undefined })
+  }
+
+  effect function speakOnPhoneOnly(channel: Channel, calls: readonly PhoneCall[]) {
+    if (calls.length === 0) return
+    try admit(channel)
+    stops.set(channel, try Deferred.make<string>())
+    let started = false
+    timeout(effect {
+      for (const call of calls) {
+        try playOnPhone(channel, call)
+        started = true
+      }
+    }, PASSAGE_LIMIT) catch effect (error) => {
+      if (error._tag === "TimeoutError") throw new SpeechInterrupted({ reason: "timeout", started })
+      throw error
+    }
+  }
+
   return {
     changes: held.changes,
     get: () => held.get(),
@@ -197,6 +258,14 @@ export const speechService = Layer.effect(Speech, effect {
     },
     effect speakPieces(pieces: readonly string[], played: () => void!!) {
       try speakPlanned("Replies", pieces, true, () => sync(() => undefined), played)
+    },
+    effect speakReviewed(readingToken: string, binding: ReadingBinding) {
+      try speakOnPhoneOnly("Reading", [{ method: "synthesizeLocalBrowserReading", args: { ...binding, readingToken }, deviceOnly: true }])
+    },
+    effect speakOnPhone(text: string, channel: Channel) {
+      const plan = planReading(text)
+      if (plan.kind === "refused") throw new SpeechRefused({ reason: plan.reason, message: refusalMessage(plan.reason, false) })
+      try speakOnPhoneOnly(channel, plan.pieces.map((piece) => ({ method: "synthesizeLocal", args: { text: piece }, deviceOnly: false })))
     },
     effect stop(channel: Channel) {
       const signal = stops.get(channel)

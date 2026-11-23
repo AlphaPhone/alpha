@@ -9,6 +9,7 @@ const ERRORS: Readonly<Record<Picker["error"], string>> = {
   Unsupported: "Choose a supported photo or document.", ReadFailed: "The selection could not be read. Try again.", AccessNeeded: "Files access is needed first.",
 };
 
+/** The picker session another area opened and how the owner chooses, attaches or dismisses. */
 export type FilePickerSheetProps = {
   picker: Picker;
   /** Choose from the system document picker, or from this computer in the browser. */

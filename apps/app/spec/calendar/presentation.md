@@ -160,6 +160,30 @@ pure def showEvent(s: Presentation, id: str, source: EventSource, day: int): Pre
 pure def sometimesAgentEventOpen(s: Presentation): bool = s.openEvent != "" and s.openSource == AgentSource
 ```
 
+### The people list says Organizer or Alpha's word for each reply, never the provider's value
+
+Google's `needsAction`, `accepted`, `tentative` and `declined`, and an imported feed's lowercased
+`PARTSTAT`, are worded here. A reply Alpha has no word for reads as invited, and no reply shows
+nothing. The detail links only to a plain HTTPS address without credentials, and to Google's event
+page only for a Google event.
+
+```quint
+type ReplyWord = NoReplyWord | WordOrganizer | WordAwaiting | WordGoing | WordMaybe | WordDeclined | WordDelegated | WordInvited
+pure def replyWord(organizer: bool, status: str): ReplyWord =
+  if (organizer) WordOrganizer
+  else if (status == "") NoReplyWord
+  else if (status == "needsAction" or status == "needs-action") WordAwaiting
+  else if (status == "accepted") WordGoing
+  else if (status == "tentative") WordMaybe
+  else if (status == "declined") WordDeclined
+  else if (status == "delegated") WordDelegated
+  else WordInvited
+pure def lawOrganizerIsAlwaysNamed(status: str): bool = replyWord(true, status) == WordOrganizer
+pure def lawAnUnknownReplyIsInvited(status: str): bool =
+  (status != "" and status != "needsAction" and status != "needs-action" and status != "accepted" and status != "tentative"
+    and status != "declined" and status != "delegated") implies replyWord(false, status) == WordInvited
+```
+
 ### Closing an event returns to its day, and from the schedule to today
 
 ```quint
@@ -314,6 +338,46 @@ pure def alwaysRevokedSourcesHidden(s: Presentation): bool =
   (s.deviceRows implies s.deviceAccess) and (s.agentRows implies s.agentAccess)
 pure def sometimesPreferenceKeptAcrossOwners(s: Presentation): bool =
   s.hiddenAgentOwners.size() >= 1 and not(s.hiddenAgentOwners.contains(s.owner)) and s.agentRows
+```
+
+### While Calendar is in front it reads again once a minute, never hidden, during a read or a write, or without a session
+
+There is no Refresh button for a partly loaded Calendar: a read of the same window keeps the feed
+shown, so nothing flickers, and an empty day of a partly loaded window says it is updating.
+
+```quint
+pure def rereadDue(inFront: bool, calendarShown: bool, writing: bool, reading: bool, bound: bool): bool =
+  inFront and calendarShown and not(writing) and not(reading) and bound
+pure def lawNoRereadInTheBackground(calendarShown: bool, writing: bool, reading: bool, bound: bool): bool =
+  not(rereadDue(false, calendarShown, writing, reading, bound))
+pure def lawNoRereadWithoutASession(inFront: bool, calendarShown: bool, writing: bool, reading: bool): bool =
+  not(rereadDue(inFront, calendarShown, writing, reading, false))
+```
+
+### Without an agent session Calendar says Not connected and offers Settings, never a dead Connect
+
+A retry is offered only where reading again can change something.
+
+```quint
+type StatusAction = OfferSettings | OfferRetry | OfferNoAction
+pure def statusAction(connected: bool, failed: bool): StatusAction =
+  if (not(connected)) OfferSettings else if (failed) OfferRetry else OfferNoAction
+pure def lawDisconnectedNeverRetries(failed: bool): bool = statusAction(false, failed) == OfferSettings
+```
+
+## Story: Choose which calendars I see
+
+> As the owner, I want to hide my agent's calendar or my phone's calendars from Calendar and Home,
+> and have that choice kept for my account.
+
+### A hidden source's rows show neither in Calendar nor on Home, and Home never calls a hidden calendar empty
+
+```quint
+pure def rowShown(agentRow: bool, agentHidden: bool, deviceVisible: bool): bool =
+  if (agentRow) not(agentHidden) else deviceVisible
+pure def homeHidden(agentHidden: bool): bool = agentHidden
+pure def lawHiddenAgentRowsNeverShow(deviceVisible: bool): bool = not(rowShown(true, true, deviceVisible))
+pure def lawHiddenDeviceRowsNeverShow(agentHidden: bool): bool = not(rowShown(false, agentHidden, false))
 ```
 
 ## Story: Read the presentation of times

@@ -1,10 +1,17 @@
-// spec/workflows/digestSources.md, "Story: Let my digest read Google through Cloud only as I authorized"; spec/workflows/digestSources.md, "Story: Let my digest read my phone's Calendar and reminders only with my consent"; spec/workflows/digestSources.md, "Story: Choose exactly what a Google source reads"
-import { type Selection, Machine, stored, validSelection } from "../../gen/workflows__digestSources.effect.vibe"
+// spec/workflows/digestSources.md, "Story: Let my digest read Google through Cloud only as I authorized"; spec/workflows/digestSources.md, "Story: Let my digest read my phone's Calendar and reminders only with my consent"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/digestSources.md, "Story: Choose exactly what a Google source reads"
+import type { DigestLoop, DigestSource, HostedNativeSelection } from "@elizaos/plugin-workflow/digests"
+import {
+  type Impact, type PhoneSourceProblem, type RenewalAction, Machine, phoneSourceProblem, renewalAction, renewalArmed, revokeConfirmable, sourceRegistered, stored,
+  type Selection, validSelection,
+} from "../../gen/workflows__digestSources.effect.vibe"
+import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
+import { Navigation } from "../shell/navigation.vibe"
 import { WorkflowApi, decoded } from "./api.vibe"
+import { Digests } from "./digests.vibe"
 import { deviceZone, instant, newId, sha256Hex } from "./ids.ts"
-import { ConsentReply, DelegationRequest, SourceIdentity } from "./wire.schema.vibe"
+import { ConsentReply, DelegationRequest, PhoneCalendarList, ReadAccess, RenewalTapRecord, RevokeReply, SourceIdentity } from "./wire.schema.vibe"
 
 export const SOURCES_KEY = ownerKey("device", "workflows/digest-sources")
 
@@ -16,6 +23,36 @@ export interface PhoneScope {
   readonly maximumItems: number
   readonly expiresAt: number
 }
+
+/** One of the phone's calendars a phone source may read. */
+export interface PhoneCalendar { readonly id: string; readonly name: string; readonly account: string; readonly revision: string }
+
+/** The phone's calendars now, or why they could not be listed. */
+export type PhoneCalendars =
+  | { readonly status: "ready"; readonly calendars: ReadonlyArray<PhoneCalendar> }
+  | { readonly status: "permission-denied" | "unavailable" | "not-on-phone" }
+
+/** A phone source as the owner chose it in review. */
+export interface PhoneSourceChoice {
+  readonly name: string
+  readonly calendarIds: ReadonlyArray<string>
+  readonly reminders: boolean
+  readonly hours: number
+  /** The phone source this one renews, whose digests move to it. */
+  readonly renews?: string
+}
+
+/** What allowing a phone source did. */
+export type PhoneSourceOutcome = PhoneSourceProblem | "saved" | "refused" | "unconfirmed" | "busy"
+
+/** One saved source or digest that stops reading when Google access is removed. */
+export interface ImpactRow { readonly kind: "source" | "digest"; readonly id: string; readonly label: string }
+
+/** What removing Google access did: revoked, the list changed and needs review, or not confirmed. */
+export type RevokeOutcome = "revoked" | "changed" | "unconfirmed"
+
+/** What a renewal reminder tap did; `sourceId` names the source a renewal review opens for. */
+export type RenewalOutcome = { readonly action: RenewalAction; readonly sourceId?: string }
 
 /** A Google selection as the owner chose it. */
 export interface GoogleChoice {
@@ -29,7 +66,7 @@ export interface GoogleChoice {
   readonly calendarId?: string
 }
 
-/** Cloud read grants, the phone's consent and Google selections for digests. */
+/** Cloud read grants, the phone's consent and sources, renewal reminders and Google selections for digests. */
 export service DigestSourcesService {
   bind(): void!!
   foreground(front: boolean): void!!
@@ -39,19 +76,60 @@ export service DigestSourcesService {
   /** Approve the waiting grant request in review. */
   approveGrant(): boolean!!
   cancelGrant(): void!!
-  revokeGrant(grantId: string): boolean!!
+  /** The saved sources and digests that read through Google, as removing access would stop them. */
+  revokeImpact(): ReadonlyArray<ImpactRow>!!
+  /** Remove Google access after the owner reviewed `reviewed`; a changed list is not revoked. */
+  revokeGrant(reviewed: ReadonlyArray<ImpactRow>): RevokeOutcome!!
+  /** The phone's calendars a phone source may read, asking for read access first. */
+  phoneCalendars(): PhoneCalendars!!
   /** Ask the phone for consent to read the reviewed scope; whether it was given. */
   consent(scope: PhoneScope): boolean!!
+  /** Check, consent to and save a phone source, then move the digests of the source it renews onto it. */
+  allowPhoneSource(choice: PhoneSourceChoice): PhoneSourceOutcome!!
+  /** Withdraw the phone's consent for the saved phone source `sourceId`, then revoke it with the agent. */
   revokeConsent(sourceId: string): boolean!!
+  /** Arm a renewal reminder for each phone source an enabled digest reads, and clear the others. */
+  armRenewals(): void!!
+  /** Resolve a renewal reminder the owner tapped, on Android only. */
+  checkRenewal(live: boolean): RenewalOutcome!!
   /** Whether a Google selection reads only what it shows. */
   validGoogle(choice: GoogleChoice): boolean!!
+}
+
+const plugin = "AlphaHostedResults"
+
+function impactOf(rows: ReadonlyArray<ImpactRow>): Impact {
+  return { sources: rows.filter((r) => r.kind === "source").length, digests: rows.filter((r) => r.kind === "digest").length }
+}
+
+function sameRows(a: ReadonlyArray<ImpactRow>, b: ReadonlyArray<ImpactRow>): boolean {
+  const key = (rows: ReadonlyArray<ImpactRow>) => rows.map((r) => `${r.kind}:${r.id}`).sort().join("\n")
+  return revokeConfirmable(impactOf(a), impactOf(b)) && key(a) === key(b)
+}
+
+function nativeOf(source: DigestSource): HostedNativeSelection | undefined {
+  return source.live?.provider === "native" ? source.live : undefined
+}
+
+const selectionFields = ["provider", "ownerId", "agentId", "installationId", "enrollmentId", "sourceId", "revision"] as const
+
+function sameSelection(a: Readonly<Record<(typeof selectionFields)[number], string>>, b: HostedNativeSelection): boolean {
+  return selectionFields.every((field) => a[field] === b[field])
+}
+
+function boundEnabled(source: DigestSource, loops: ReadonlyArray<DigestLoop>): boolean {
+  return loops.some((l) => !l.removed && l.spec.enabled && l.spec.sourceId === source.id)
 }
 
 export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesService, effect {
   const held = try Machine
   const agent = try WorkflowApi
   const native = try Native
-  const delegation = try Ref.make({ state: "", sessionId: "" })
+  const build = try Build
+  const digests = try Digests
+  const android = build.info.variant !== "browser"
+  const delegation = try Ref.make({ state: "", sessionId: "", grantId: "" })
+  const offered = try Ref.make<ReadonlyArray<PhoneCalendar>>([])
 
   effect function sessionId() {
     const scope = try (agent.scope() catch () => undefined)
@@ -70,11 +148,77 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     return try decoded(DelegationRequest, route, try agent.request("POST", route, body))
   }
 
+  effect function identity(id: string) {
+    return try (effect { return try Schema.decodeUnknownEffect(SourceIdentity)(try native.invoke(plugin, "nativeSourceIdentity", { sessionId: id })) } catch () => undefined)
+  }
+
+  effect function impact() {
+    const { loops, sources } = try digests.catalog()
+    const google = sources.filter((s) => s.live?.provider === "google" && !s.revoked)
+    const rows: ImpactRow[] = google.map((s) => ({ kind: "source", id: s.id, label: s.label }))
+    for (const loop of loops.filter((l) => !l.removed && google.some((s) => s.id === l.spec.sourceId))) rows.push({ kind: "digest", id: loop.id, label: loop.name })
+    return rows
+  }
+
+  effect function grantConsent(scope: PhoneScope) {
+    try now()
+    const id = try sessionId()
+    const asked = try (held.send({ type: "askConsent", expiresAt: scope.expiresAt, calendar: scope.calendars.length > 0, reminders: scope.reminders }) catch () => undefined)
+    if (asked === undefined || id === "") return undefined
+    const expected = try identity(id)
+    if (expected === undefined) {
+      held.send({ type: "consentAnswered", approved: false }) catch () => undefined
+      return undefined
+    }
+    const reply = try (effect {
+      return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke(plugin, "nativeSourceConsent", {
+        sessionId: id, sourceId: scope.sourceId, expiresAt: new Date(scope.expiresAt).toISOString(), confirmed: true, expectedBinding: expected,
+        scope: { calendars: scope.calendars, reminders: scope.reminders, timeZone: deviceZone(), window: "owner_day_and_overdue_reminders",
+          maximumItems: Math.min(Math.max(scope.maximumItems, 1), 200), modelEgress: true },
+      }))
+    } catch () => undefined)
+    const approved = reply !== undefined && reply.revoked !== true && instant(reply.expiresAt) > 0
+    held.send({ type: "consentAnswered", approved }) catch () => undefined
+    return approved && (try held.get()).consent === "ConsentApproved" ? reply : undefined
+  }
+
+  effect function armRenewals() {
+    if (!android) return
+    const { loops, sources } = try digests.catalog()
+    for (const source of sources) {
+      const selection = nativeOf(source)
+      if (selection === undefined) continue
+      if (renewalArmed(true, boundEnabled(source, loops), source.revoked)) native.invoke(plugin, "scheduleSourceRenewal", { selection, expiresAt: instant(source.expiresAt) }) catch () => undefined
+      else native.invoke(plugin, "clearSourceRenewal", { selection }) catch () => undefined
+    }
+  }
+
+  effect function rebind(renews: string, sourceId: string) {
+    const { loops, sources } = try digests.catalog()
+    const saved = sources.find((s) => s.id === sourceId)
+    if (saved === undefined) return false
+    let all = true
+    for (const loop of loops.filter((l) => !l.removed && l.spec.sourceId === renews)) {
+      const moved = try (effect {
+        try agent.digestProtocol.mutate("loops", {
+          spec: { ...loop.spec, sourceId: saved.id, sourceRevision: saved.revision }, mutationId: newId(), confirmed: true, id: loop.id, expectedVersionId: loop.versionId,
+        })
+        return true
+      } catch () => false)
+      all = all && moved
+    }
+    const old = sources.find((s) => s.id === renews)
+    const selection = old === undefined ? undefined : nativeOf(old)
+    if (android && selection !== undefined) native.invoke(plugin, "clearSourceRenewal", { selection }) catch () => undefined
+    return all
+  }
+
   return {
     effect bind() {
       const id = try sessionId()
       if (id === "" || (try Ref.get(delegation)).sessionId === id) return
-      try Ref.set(delegation, { state: "", sessionId: id })
+      try Ref.set(delegation, { state: "", sessionId: id, grantId: "" })
+      try Ref.set(offered, [])
       const generation = (try held.get()).session + 1
       held.send({ type: "selectSession", session: generation }) catch () => undefined
     },
@@ -104,6 +248,7 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
       const { state } = try Ref.get(delegation)
       const request = try (delegate("complete", { state, confirmed: true }) catch () => undefined)
       const ok = request !== undefined && request.status === "complete" && request.grantId !== undefined
+      if (ok) try Ref.update(delegation, (d) => ({ ...d, grantId: request.grantId ?? "" }))
       held.send({ type: "completed", ok }) catch () => undefined
       return ok
     },
@@ -112,44 +257,91 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
       held.send({ type: "cancelRequest" }) catch () => undefined
       if (state !== "") delegate("cancel", { state, confirmed: true }) catch () => undefined
     },
-    effect revokeGrant(grantId: string) {
+    revokeImpact: impact,
+    effect revokeGrant(reviewed: ReadonlyArray<ImpactRow>) {
+      const { grantId } = try Ref.get(delegation)
+      if (grantId === "") return "unconfirmed" satisfies RevokeOutcome
+      try digests.poll(true)
+      if (!sameRows(reviewed, try impact())) return "changed" satisfies RevokeOutcome
       const answer = try (effect {
         const route = "/api/workflow/hosted/cloud-delegation/revoke"
-        const reply = try agent.request("POST", route, { grantId, confirmed: true })
-        return typeof reply === "object" && reply !== null && (reply as { remoteRevocation?: unknown }).remoteRevocation === "confirmed"
+        const reply = try decoded(RevokeReply, route, try agent.request("POST", route, { grantId, confirmed: true }))
+        return reply.remoteRevocation === "confirmed"
       } catch () => false)
       held.send({ type: "revokeGrant", confirmed: answer }) catch () => undefined
-      return answer
+      if (answer) try Ref.update(delegation, (d) => ({ ...d, grantId: "" }))
+      return answer ? "revoked" : "unconfirmed"
+    },
+    effect phoneCalendars() {
+      if (!android) return { status: "not-on-phone" } satisfies PhoneCalendars
+      const access = try (effect { return try Schema.decodeUnknownEffect(ReadAccess)(try native.invoke("AlphaCalendar", "requestWorkflowReadAccess", {})) } catch () => undefined)
+      if (access?.status !== "granted") return { status: "permission-denied" } satisfies PhoneCalendars
+      const list = try (effect {
+        return try Schema.decodeUnknownEffect(PhoneCalendarList)(try native.invoke("AlphaCalendar", "availabilitySources", { timeZone: deviceZone() }))
+      } catch () => undefined)
+      if (list === undefined || list.status !== "ready" || list.calendars === undefined) return { status: "unavailable" } satisfies PhoneCalendars
+      const calendars = list.calendars.slice(0, 256).map((c) => ({ id: c.id, name: c.name, account: c.account, revision: c.sourceRevision }))
+      try Ref.set(offered, calendars)
+      return { status: "ready", calendars } satisfies PhoneCalendars
     },
     effect consent(scope: PhoneScope) {
-      try now()
-      const id = try sessionId()
-      const asked = try (held.send({ type: "askConsent", expiresAt: scope.expiresAt, calendar: scope.calendars.length > 0, reminders: scope.reminders }) catch () => undefined)
-      if (asked === undefined || id === "") return false
-      const identity = try (effect { return try Schema.decodeUnknownEffect(SourceIdentity)(try native.invoke("AlphaHostedResults", "nativeSourceIdentity", { sessionId: id })) } catch () => undefined)
-      if (identity === undefined) {
-        held.send({ type: "consentAnswered", approved: false }) catch () => undefined
-        return false
+      return (try grantConsent(scope)) !== undefined
+    },
+    effect allowPhoneSource(choice: PhoneSourceChoice) {
+      const calendars = try Ref.get(offered)
+      const missing = choice.calendarIds.filter((id) => !calendars.some((c) => c.id === id)).length
+      const name = choice.name.trim()
+      const problem = phoneSourceProblem(name.length, choice.calendarIds.length, missing, choice.reminders, choice.hours)
+      if (problem !== "PhoneSourceReady") return problem
+      const reviewedAt = try Clock.currentTimeMillis
+      const sourceId = newId()
+      const expiresAt = reviewedAt + choice.hours * 3600000
+      const scope: PhoneScope = {
+        sourceId, reminders: choice.reminders, maximumItems: 200, expiresAt,
+        calendars: choice.calendarIds.map((id) => ({ id, revision: calendars.find((c) => c.id === id)?.revision ?? "" })),
       }
-      const reply = try (effect {
-        return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke("AlphaHostedResults", "nativeSourceConsent", {
-          sessionId: id, sourceId: scope.sourceId, expiresAt: new Date(scope.expiresAt).toISOString(), confirmed: true, expectedBinding: identity,
-          scope: { calendars: scope.calendars, reminders: scope.reminders, timeZone: deviceZone(), window: "owner_day_and_overdue_reminders",
-            maximumItems: Math.min(Math.max(scope.maximumItems, 1), 200), modelEgress: true },
-        }))
-      } catch () => undefined)
-      const approved = reply !== undefined && reply.revoked !== true && instant(reply.expiresAt) > 0
-      held.send({ type: "consentAnswered", approved }) catch () => undefined
-      return approved && (try held.get()).consent === "ConsentApproved"
+      const grant = try grantConsent(scope)
+      const exact = grant !== undefined && grant.sourceId === sourceId && grant.provider === "native"
+      if (!sourceRegistered(grant !== undefined, exact) || grant === undefined) return "refused" satisfies PhoneSourceOutcome
+      const reply = try digests.change({
+        path: "sources",
+        body: {
+          id: sourceId, kind: "tasks", label: name, observedAt: new Date(reviewedAt).toISOString(), expiresAt: new Date(expiresAt).toISOString(), confirmed: true,
+          live: { provider: "native", ownerId: grant.ownerId, agentId: grant.agentId, installationId: grant.installationId, enrollmentId: grant.enrollmentId, sourceId, revision: grant.revision },
+        },
+      })
+      if (reply === "busy") return "busy" satisfies PhoneSourceOutcome
+      if (reply !== "MutationSaved") return reply === "MutationUnconfirmed" ? "unconfirmed" : "refused"
+      if (choice.renews !== undefined && !(try rebind(choice.renews, sourceId))) return "unconfirmed" satisfies PhoneSourceOutcome
+      try armRenewals()
+      return "saved" satisfies PhoneSourceOutcome
     },
     effect revokeConsent(sourceId: string) {
       const id = try sessionId()
-      const identity = try (effect { return try Schema.decodeUnknownEffect(SourceIdentity)(try native.invoke("AlphaHostedResults", "nativeSourceIdentity", { sessionId: id })) } catch () => undefined)
-      if (identity === undefined) return false
-      const reply = try (effect { return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke("AlphaHostedResults", "nativeSourceConsent", { sessionId: id, sourceId, expectedBinding: identity, revoke: true, confirmed: true })) } catch () => undefined)
+      const { sources } = try digests.catalog()
+      const saved = sources.find((s) => s.id === sourceId)
+      const selection = saved === undefined ? undefined : nativeOf(saved)
+      if (selection === undefined || id === "") return false
+      const reply = try (effect { return try Schema.decodeUnknownEffect(ConsentReply)(try native.invoke(plugin, "nativeSourceConsent", { sessionId: id, sourceId: selection.sourceId, expectedBinding: selection, revoke: true, confirmed: true })) } catch () => undefined)
       if (reply?.revoked !== true) return false
       held.send({ type: "revokeConsent" }) catch () => undefined
-      return true
+      if (android) native.invoke(plugin, "clearSourceRenewal", { selection }) catch () => undefined
+      return (try digests.change({ path: "sources/revoke", body: { id: sourceId, confirmed: true } })) === "MutationSaved"
+    },
+    armRenewals,
+    effect checkRenewal(live: boolean) {
+      if (!android) return { action: renewalAction(false, "NoRenewalTap", false, live) } satisfies RenewalOutcome
+      const tap = try (effect { return try Schema.decodeUnknownEffect(RenewalTapRecord)(try native.invoke(plugin, "pendingSourceRenewal", {})) } catch () => ({}))
+      if (tap.token === undefined || tap.selection === undefined || tap.expiresAt === undefined) return { action: renewalAction(true, "NoRenewalTap", false, live) } satisfies RenewalOutcome
+      const { sources } = try digests.catalog()
+      const matched = sources.find((s) => {
+        const selection = nativeOf(s)
+        return !s.revoked && selection !== undefined && tap.selection !== undefined && sameSelection(tap.selection, selection) && instant(s.expiresAt) === tap.expiresAt
+      })
+      const action = renewalAction(true, matched === undefined ? "TapStale" : "TapMatches", tap.question === true, live)
+      const opens = action === "RenewalReview" || action === "RenewalQuestion"
+      if (opens) native.invoke(plugin, "settleSourceRenewal", { token: tap.token, discard: false }) catch () => undefined
+      return matched === undefined || !opens ? { action } : { action, sourceId: matched.id }
     },
     effect validGoogle(choice: GoogleChoice) {
       const selection: Selection = {
@@ -161,3 +353,23 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     },
   }
 }), stored(SOURCES_KEY))
+
+/** The route Workflows opens a renewal review of `sourceId` under. */
+export function renewalRoute(sourceId: string): string {
+  return `renew:${sourceId}`
+}
+
+/** Resolves each renewal reminder tap Android reports, opening Workflows at that source's renewal review, for as long as the layer lives. */
+export effect function followRenewals() {
+  const native = try Native
+  const sources = try DigestSourcesService
+  const navigation = try Navigation
+  if (!(try native.available(plugin))) return
+  try sources.armRenewals()
+  effect function check() {
+    const outcome = try sources.checkRenewal(true)
+    if (outcome.sourceId !== undefined) try navigation.open("workflows", renewalRoute(outcome.sourceId))
+  }
+  try check()
+  Stream.runForEach(native.listen(plugin, "renewSource"), () => check()) catch () => undefined
+}

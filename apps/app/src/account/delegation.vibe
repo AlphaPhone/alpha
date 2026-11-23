@@ -1,4 +1,4 @@
-// spec/account/delegation.md, "Story: Let Cloud run my hosted results"
+// spec/account/delegation.md, "Story: Let Cloud run my hosted results"; spec/account/delegation.md, "Removing the grant is reviewed with what reads through it, and only a pending disconnect is retried as it is"
 import {
   type CloudSide, type Delegation, type DelegationEffect, type Retained,
   Machine as DelegationMachine, machine as delegationMachine
@@ -6,40 +6,8 @@ import {
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { delegationSlot, freshKey } from "./deployment.ts"
+import { CallbackSlot, PendingRecord, Revocations, SecureValue, Started, Status, SwapAnswer } from "./delegation.schema.vibe"
 import { CloudSession, ownerOf } from "./session.vibe"
-
-/** A pending authorization as the secure slot keeps it; the code arrives only with the return. */
-schema PendingRecord {
-  state: string
-  authUrl: string
-  expiresAt: string
-  phase: "waiting" | "finishing"
-  code?: string
-}
-
-/** The resident's start answer. */
-schema Started {
-  authUrl: string
-  expiresAt: string
-}
-
-/** Cloud's state for an authorization. */
-schema Status {
-  status: "waiting" | "finishing" | "complete" | "failed"
-  grantId?: string
-}
-
-/** The return the native shell keeps. */
-schema Callback {
-  state: string
-  code?: string
-  error?: string
-}
-
-/** The grants whose revocation has not finished. */
-schema Revocations {
-  grants: Array<{ grantId: string; expiresAt: string }>
-}
 
 /** What the panel shows beside the machine's state. */
 export interface DelegationDetails {
@@ -58,7 +26,8 @@ export service CloudDelegation {
   start(email: boolean, calendar: boolean): void!!
   checkStatus(): void!!
   cancel(): void!!
-  revoke(grantId: string): void!!
+  /** Retry the Cloud disconnect of a grant whose revocation is pending; removing a live grant goes through the digest sources' review. */
+  retryDisconnect(grantId: string): void!!
 }
 
 const cloudSides = { waiting: "CloudWaiting", finishing: "CloudFinishing", complete: "CloudComplete", failed: "CloudFailed" } as const satisfies Record<string, CloudSide>
@@ -71,6 +40,8 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
   const session = try CloudSession
   const details = try SubscriptionRef.make<DelegationDetails>({ grantId: undefined, pendingRevocations: [], email: true, calendar: true })
   const slot = try Ref.make("")
+  const scope = try Scope.Scope
+  const watched = try Ref.make("")
 
   effect function call(path: string, body: unknown) {
     const answer = try resident.json("POST", `/api/workflow/hosted/cloud-delegation/${path}`, body)
@@ -80,18 +51,40 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
   effect function readRecord() {
     const key = try Ref.get(slot)
     if (key === "") return undefined
-    const raw = try native.invoke("AlphaConnection", "secureRead", { slot: key })
-    const value = typeof raw === "object" && raw !== null ? (raw as { value?: unknown }).value : undefined
-    if (typeof value !== "string") return undefined
-    return try Schema.decodeUnknownEffect(PendingRecord)(try Effect.try(() => JSON.parse(value) as unknown))
+    const read = try Schema.decodeUnknownEffect(SecureValue)(try native.invoke("AlphaConnection", "secureRead", { slot: key }))
+    const value = read.value
+    if (value === undefined) return undefined
+    const record = try Schema.decodeUnknownEffect(PendingRecord)(try Effect.try(() => JSON.parse(value) as unknown))
+    try watchDeadline(record)
+    return record
   }
 
   effect function swapRecord(expected: PendingRecord | undefined, next: PendingRecord | undefined) {
     const key = try Ref.get(slot)
-    const answer = try native.invoke("AlphaConnection", "secureCompareExchange", {
+    const answer = try Schema.decodeUnknownEffect(SwapAnswer)(try native.invoke("AlphaConnection", "secureCompareExchange", {
       slot: key, expectedValue: expected === undefined ? null : JSON.stringify(expected), value: next === undefined ? null : JSON.stringify(next)
-    })
-    return typeof answer === "object" && answer !== null && (answer as { status?: unknown }).status === "saved"
+    }))
+    return answer.status === "saved"
+  }
+
+  effect function readCallback() {
+    const slotted = try Schema.decodeUnknownEffect(CallbackSlot)(try native.invoke("AlphaConnection", "readDelegationCallback"))
+    return slotted.callback
+  }
+
+  effect function deadlineAt(record: PendingRecord, owner: number) {
+    const now = try Clock.currentTimeMillis
+    const at = Date.parse(record.expiresAt)
+    if (Number.isFinite(at) && at > now) try sleep(Duration.millis(at - now))
+    const d = try machine.get()
+    if (d.owner === owner && d.record !== "NoRecord" && !d.recordExpired) try send({ type: "deadlinePasses" })
+  }
+
+  effect function watchDeadline(record: PendingRecord) {
+    if ((try Ref.get(watched)) === record.state) return
+    try Ref.set(watched, record.state)
+    const owner = (try machine.get()).owner
+    fork.in(scope) deadlineAt(record, owner)
   }
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
@@ -126,15 +119,15 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
           const page = started === undefined || !URL.canParse(started.authUrl) ? undefined : new URL(started.authUrl)
           const valid = page !== undefined && page.protocol === "https:" && !page.username && !page.password && page.pathname === "/app-auth/authorize" && state !== null && /^[-\w]{43}$/.test(state)
           if (valid && started !== undefined && state !== null) {
-            const saved = swapRecord(undefined, { state, authUrl: started.authUrl, expiresAt: started.expiresAt, phase: "waiting" }) catch () => false
+            const record: PendingRecord = { state, authUrl: started.authUrl, expiresAt: started.expiresAt, phase: "waiting" }
+            const saved = swapRecord(undefined, record) catch () => false
+            if (saved) try watchDeadline(record)
             if (saved) native.invoke("AlphaConnection", "openExternal", { url: started.authUrl, requestId: freshKey() }) catch () => undefined
           }
           try send({ type: "startEnds" })
         };
         when "ReadReturn": {
-          const raw = native.invoke("AlphaConnection", "readDelegationCallback") catch () => undefined
-          const value = typeof raw === "object" && raw !== null ? (raw as { callback?: unknown }).callback : undefined
-          const callback = value === undefined || value === null ? undefined : (Schema.decodeUnknownEffect(Callback)(value) catch () => undefined)
+          const callback = readCallback() catch () => undefined
           let after: CloudSide = "CloudWaiting"
           if (callback !== undefined && record !== undefined && record.state === callback.state && callback.code !== undefined && Date.parse(record.expiresAt) > (try Clock.currentTimeMillis)) {
             const next = { ...record, phase: "finishing" as const, code: callback.code }
@@ -197,9 +190,7 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
   effect function followReturns() {
     for try (const _ of native.listen("AlphaConnection", "cloudDelegationCallback")) {
       const record = readRecord() catch () => undefined
-      const raw = native.invoke("AlphaConnection", "readDelegationCallback") catch () => undefined
-      const value = typeof raw === "object" && raw !== null ? (raw as { callback?: unknown }).callback : undefined
-      const callback = value === undefined || value === null ? undefined : (Schema.decodeUnknownEffect(Callback)(value) catch () => undefined)
+      const callback = readCallback() catch () => undefined
       if (callback === undefined) continue
       const kind: Retained = record === undefined || record.state !== callback.state ? "OtherReturn" : callback.error !== undefined ? "DenialReturn" : callback.code === undefined ? "EmptyReturn" : "CodeReturn"
       try send({ type: "nativeReturn", kind })
@@ -208,7 +199,7 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
 
   return {
     changes: machine.changes,
-    details: details.changes,
+    details: SubscriptionRef.changes(details),
     effect run() { try.all [ignore(followSession()), ignore(followReturns())] },
     effect start(email: boolean, calendar: boolean) {
       if (!email && !calendar) return
@@ -217,7 +208,8 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
     },
     effect checkStatus() { try send({ type: "checkStatus" }) },
     effect cancel() { try send({ type: "cancelTap" }) },
-    effect revoke(grantId: string) {
+    effect retryDisconnect(grantId: string) {
+      if (!(try SubscriptionRef.get(details)).pendingRevocations.includes(grantId)) return
       call("revoke", { grantId, confirmed: true }) catch () => undefined
       try refreshRevocations()
     }

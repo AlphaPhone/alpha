@@ -1,5 +1,6 @@
-// spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""
+// spec/calendar/home.md, "Story: See what is next on Home, and trust \"nothing planned\""; spec/calendar/presentation.md, "A hidden source's rows show neither in Calendar nor on Home, and Home never calls a hidden calendar empty"
 import { type HomeAgendaState, confirmedEmpty, coversPeriods, homeAgenda, homeReadable, periodRank, ranksBefore, stillToCome, tapRereads } from "../../gen/calendar__home.effect.vibe"
+import { Machine as PresentationMachine, homeHidden } from "../../gen/calendar__presentation.effect.vibe"
 import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
 import { AgentCalendar, type AgentView } from "./agent.vibe"
 import type { EventRecord } from "./feed.schema.vibe"
@@ -85,22 +86,28 @@ export function homeCard(view: AgentView, hidden: ReadonlySet<string>, now: numb
   }
 }
 
-/** The Home agenda service over the agent Calendar and the owner's hidden sources. */
-export function homeLayer(hiddenSources: () => ReadonlySet<string>) {
-  return Layer.effect(HomeAgenda, effect {
-    const agent = try AgentCalendar
-    effect function card(view: AgentView) {
-      const now = try Clock.currentTimeMillis
-      return homeCard(view, hiddenSources(), now)
-    }
-    return {
-      cards: Stream.mapEffect(agent.changes, card),
-      effect current() { return try card(try agent.view()) },
-      effect tapped() {
-        const view = try agent.view()
-        const shown = try card(view)
-        if (shown.rereads && view.window !== undefined) try agent.refresh(view.window)
-      },
-    }
-  })
-}
+/** Home's card while the owner hid the agent's calendar: quiet, never an empty day. */
+const HIDDEN_CARD: HomeAgendaCard = { state: "HomeQuiet", title: "Calendar", begin: undefined, end: undefined, allDay: false, video: false, route: undefined, day: 0, rereads: false }
+
+/** The Home agenda service over the agent Calendar and the source choice the owner made in Calendar. */
+export const homeLayer = Layer.effect(HomeAgenda, effect {
+  const agent = try AgentCalendar
+  const presentation = try PresentationMachine
+  effect function card(view: AgentView) {
+    const now = try Clock.currentTimeMillis
+    const shown = try presentation.get()
+    if (homeHidden(shown.owner !== "" && shown.hiddenAgentOwners.includes(shown.owner))) return HIDDEN_CARD
+    return homeCard(view, new Set<string>(), now)
+  }
+  effect function latest() { return try card(try agent.view()) }
+  const ticks = Stream.merge(Stream.map(agent.changes, () => undefined), Stream.map(presentation.changes, () => undefined))
+  return {
+    cards: Stream.mapEffect(ticks, () => latest()),
+    effect current() { return try latest() },
+    effect tapped() {
+      const view = try agent.view()
+      const shown = try card(view)
+      if (shown.rereads && view.window !== undefined) try agent.refresh(view.window)
+    },
+  }
+})

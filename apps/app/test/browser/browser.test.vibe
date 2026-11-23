@@ -1,71 +1,12 @@
-// The Browser shell over a fake native tab host: the device's WebViews cannot run here, so the plugin is faked once, at the Native boundary.
+// spec/browser/session.md, "Story: Browse in tabs"; spec/browser/session.md, "Story: Keep my normal tabs and history across restarts"; spec/browser/session.md, "Story: Clear my browsing data"; spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Find text in a page"
 import { assert, it } from "@effect/vitest"
-import { Build } from "../../src/platform/build.vibe"
-import { Native, NativeFailed } from "../../src/platform/native.vibe"
-import { Cloud } from "../../src/platform/cloud.vibe"
-import { Navigation } from "../../src/shell/navigation.vibe"
-import { Toasts } from "../../src/shell/toasts.vibe"
-import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
-import { AssistantDraft } from "../../src/assistant/draft.vibe"
-import { ReadingVoice } from "../../src/voice/reading.vibe"
-import { layer } from "../../src/browser/layer.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
 import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { BrowserReviews } from "../../src/browser/reviews.vibe"
 import { BrowserEgress } from "../../src/browser/egress.vibe"
 import { typedAddress } from "../../src/browser/address.ts"
 import { snapshotOf } from "../../gen/browser__session.effect.vibe"
-
-interface Call { readonly method: string; readonly args: Record<string, unknown> }
-
-const shownBrowser: ForegroundState = { visible: true, locked: false, screen: "home", view: "browser", shade: false, chat: "closed", modal: false }
-
-/** A tab host that answers every call, records it, and sends the events a test publishes. */
-effect function fakeHost(answers: Record<string, (args: Record<string, unknown>) => unknown> = {}) {
-  const calls = try Ref.make<Call[]>([])
-  const events = try PubSub.unbounded<{ name: string; event: unknown }>()
-  const opened = try Ref.make<string[]>([])
-  const toasts = try Ref.make<string[]>([])
-  const foreground = try SubscriptionRef.make(shownBrowser)
-  const native = Layer.succeed(Native, {
-    available: () => succeed(true),
-    effect invoke(_plugin: string, method: string, args?: unknown) {
-      const given = (args ?? {}) as Record<string, unknown>
-      try Ref.update(calls, (all) => [...all, { method, args: given }])
-      const answer = answers[method]
-      if (answer === undefined) return method === "bookmarks" || method === "setBookmark" ? { urls: [] } : method === "browsingState" ? { history: [], tabs: [], cur: "" } : {}
-      const result = answer(given)
-      if (result instanceof Error) throw new NativeFailed({ plugin: "AlphaBrowser", method, message: result.message })
-      return result
-    },
-    listen: (_plugin: string, name: string) => Stream.map(Stream.filter(Stream.fromPubSub(events), (e) => e.name === name), (e) => e.event),
-  })
-  const platform = Layer.mergeAll(
-    native,
-    Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks: true } }),
-    Layer.succeed(Cloud, { base: "https://cloud.test", json: () => succeed({ connected: true }) }),
-    Layer.succeed(Navigation, { open: (app: string, route?: string) => Ref.update(opened, (all) => [...all, route === undefined ? app : `${app}:${route}`]) }),
-    Layer.succeed(Toasts, { show: (text: string) => Ref.update(toasts, (all) => [...all, text]) }),
-    Layer.succeed(Foreground, { changes: SubscriptionRef.changes(foreground), get: () => SubscriptionRef.get(foreground) }),
-    Layer.succeed(AssistantDraft, { askAbout: () => succeed(undefined) }),
-    Layer.succeed(ReadingVoice, { binding: () => succeed(undefined), ready: () => succeed(false), speakToken: () => succeed(undefined), speakText: () => succeed(undefined), stop: () => succeed(undefined) }),
-  )
-  return { calls, events, opened, toasts, foreground, live: Layer.provide(layer, platform) }
-}
-
-effect function callsTo(calls: Ref.Ref<Call[]>, method: string) {
-  return (try Ref.get(calls)).filter((c) => c.method === method)
-}
-
-effect function report(events: PubSub.PubSub<{ name: string; event: unknown }>, session: string, event: Record<string, unknown>) {
-  try PubSub.publish(events, { name: "stateChanged", event: { session, ...event } })
-  try sleep("20 millis")
-}
-
-effect function settledTabs(tabs: BrowserTabs.Shape) {
-  try timeout(Stream.runHead(Stream.filter(tabs.changes, (s) => s.host !== "UnknownHost" && s.hydration !== "Reading" && s.hydration !== "Unread")), "2 seconds")
-  return try tabs.get()
-}
+import { callsTo, fakeHost, report, settledTabs, shownBrowser } from "./fakes.vibe"
 
 // spec/browser/session.md, "Story: Browse in tabs"
 it.live("browse in tabs: a typed address loads in its own WebView, only a normal tab's page enters history, and eight tabs are the limit", () => effect {
@@ -118,7 +59,7 @@ it.live("browse in tabs: a typed address loads in its own WebView, only a normal
 // spec/browser/session.md, "Story: Keep my normal tabs and history across restarts"; spec/browser/persistence.md, "Nothing is written until the saved record was read or cleared, and then the current snapshot counts as written"
 it.live("restore saved tabs into an untouched launch, and never write over a record that could not be read", () => effect {
   const saved = { history: ["https://example.test/"], tabs: [{ id: "bsaved", url: "https://example.test/", title: "Example" }], cur: "bsaved" }
-  const restored = try fakeHost({ browsingState: () => saved })
+  const restored = try fakeHost({ answers: { browsingState: () => saved } })
   try scoped(effect {
     provide restored.live {
       const state = try settledTabs(try BrowserTabs)
@@ -128,7 +69,7 @@ it.live("restore saved tabs into an untouched launch, and never write over a rec
       ))
     }
   })
-  const unreadable = try fakeHost({ browsingState: () => new Error("Saved tabs and history could not be read. They were not changed.") })
+  const unreadable = try fakeHost({ answers: { browsingState: () => new Error("Saved tabs and history could not be read. They were not changed.") } })
   try scoped(effect {
     provide unreadable.live {
       const tabs = try BrowserTabs
@@ -145,7 +86,7 @@ it.live("restore saved tabs into an untouched launch, and never write over a rec
 
 // spec/browser/session.md, "Story: Clear my browsing data"; spec/browser/reviews.md, "Story: Confirm only what I can see"
 it.live("clear browsing data only after the owner confirms it on the unlocked phone, keeping private tabs", () => effect {
-  const fake = try fakeHost({ clearBrowsingData: () => ({ closed: [] }) })
+  const fake = try fakeHost({ answers: { clearBrowsingData: () => ({ closed: [] }) } })
   try scoped(effect {
     provide fake.live {
       const tabs = try BrowserTabs
@@ -224,6 +165,27 @@ it.live("find searches only the tab that still shows the bar, and a page egress 
       try Effect.try(() => assert.deepStrictEqual(
         { searches: (try callsTo(fake.calls, "find")).map((c) => c.args.query), found: [found.count, found.index], copyRefused: (try Ref.get(fake.toasts)).includes("Load the current page before copying its link.") },
         { searches: ["milk"], found: [3, 1], copyRefused: true },
+      ))
+    }
+  })
+})
+
+// spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
+it.live("a view command whose native receipt names another tab or session is not reported dispatched, and is never sent again", () => effect {
+  const fake = try fakeHost({ answers: { command: () => ({ session: "another-session", id: "b-other" }) } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const opened = try agent.openApproved("https://example.test/", false)
+      try report(fake.events, session, { id: opened.tab, sequence: 1, navigation: "7", url: "https://example.test/", committed: true, canBack: true })
+      try opened.present
+      const answer = try agent.command({ subaction: "back" }, try agent.selection())
+      try Effect.try(() => assert.deepStrictEqual(
+        { ok: answer.ok, code: answer.ok ? "" : answer.code, sent: (try callsTo(fake.calls, "command")).length },
+        { ok: false, code: "UNAVAILABLE", sent: 1 },
       ))
     }
   })

@@ -76,16 +76,16 @@ export const noticesLive = Layer.effect(Notices, effect {
       timer = undefined
       if (state.shown.message !== "" && !state.held && state.delay > 0) timer = fork.in(scope) expireLater(machine, state.seq, state.delay)
       for (const id of [...actions.keys()]) {
-        if (state.shown.action !== id && !state.queued.some((t) => t.action === id)) actions.delete(id)
+        if (state.shown.undo !== id && !state.queued.some((t) => t.undo === id)) actions.delete(id)
       }
     }
   })
   const send = (event: ToastsEvent) => sendTo(machine, event)
   return {
     effect show(message: string, options?: ToastOptions) {
-      const action = options?.undo === undefined ? "" : `undo-${++made}`
-      if (options?.undo !== undefined) actions.set(action, options.undo)
-      try send({ type: "showToast", message, chars: message.length, action, failure: options?.failure === true && action === "" })
+      const undo = options?.undo === undefined ? "" : `undo-${++made}`
+      if (options?.undo !== undefined) actions.set(undo, options.undo)
+      try send({ type: "showToast", message, chars: message.length, undo, failure: options?.failure === true && undo === "" })
     },
     effect persist(message: string) { try send({ type: "persist", message, chars: message.length }) },
     effect dismiss(message: string) { try send({ type: "dismiss", message }) },
@@ -93,9 +93,9 @@ export const noticesLive = Layer.effect(Notices, effect {
     effect release() { try send({ type: "resume" }) },
     effect takeAction() {
       const state: Toasts = try machine.get()
-      const undo = actions.get(state.shown.action)
+      const undo = actions.get(state.shown.undo)
       if (!(try send({ type: "takeAction", seq: state.seq }))) return
-      actions.delete(state.shown.action)
+      actions.delete(state.shown.undo)
       if (undo !== undefined) try undo()
     },
     send,

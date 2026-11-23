@@ -7,8 +7,6 @@ import { machine as suggestionsMachine } from "../../gen/inbox__suggestions.effe
 import { machine as noticesMachine } from "../../gen/inbox__notices.effect.vibe"
 import { stored as storedDrafts } from "../../gen/inbox__drafts.effect.vibe"
 import { stored as storedJournal } from "../../gen/inbox__operations.effect.vibe"
-import { stored as storedCards } from "../../gen/inbox__agentDrafts.effect.vibe"
-import { stored as storedDigest } from "../../gen/inbox__digest.effect.vibe"
 import { keys, mailStore } from "./store.vibe"
 import { layer as gmail } from "./gmail.vibe"
 import { layer as saved } from "./saved.vibe"
@@ -19,8 +17,7 @@ import { layer as operations } from "./operations.vibe"
 import { layer as composer } from "./composer.vibe"
 import { layer as selection } from "./selection.vibe"
 import { layer as notices } from "./notices.vibe"
-import { layer as digest } from "./digest.vibe"
-import { layer as agentEmails } from "./agentEmails.vibe"
+import { mailSenderFill } from "./handoffs.vibe"
 import { layer as suggestions } from "./suggestions.vibe"
 
 export { Gmail } from "./gmail.vibe"
@@ -29,27 +26,25 @@ export { InboxAccounts } from "./accounts.vibe"
 export { Reader } from "./reader.vibe"
 export { Mailbox } from "./mailbox.vibe"
 export { MailOperations } from "./operations.vibe"
-export { Composer } from "./composer.vibe"
+export { MailComposer } from "./composer.vibe"
 export { MailSelection } from "./selection.vibe"
 export { MailNoticesShell } from "./notices.vibe"
-export { DigestResults } from "./digest.vibe"
-export { AgentEmails } from "./agentEmails.vibe"
-export { Suggestions } from "./suggestions.vibe"
+export { MailSuggestions } from "./suggestions.vibe"
 export { emailShareTarget } from "./shareTarget.vibe"
+export { assistantEmailSender, cameraEmailTarget, mailSenderFill } from "./handoffs.vibe"
 
-/** The Inbox's machines: memory for what is read, the phone's mail store for drafts, operations and agent emails. */
+/** The Inbox's machines: memory for what is read, the phone's mail store for drafts and operations. */
 export const machines = Layer.mergeAll(
   accountsMachine(), mailboxMachine(), readerMachine(), selectionMachine(), suggestionsMachine(), noticesMachine(),
-  Layer.provide(Layer.mergeAll(storedDrafts(keys.drafts), storedJournal(keys.operations), storedCards(keys.agentEmails)), mailStore),
-  storedDigest(keys.digest)
+  Layer.provide(Layer.mergeAll(storedDrafts(keys.drafts), storedJournal(keys.operations)), mailStore)
 )
 
 /**
  * Every Inbox service, over the platform's Native, Resident, Cloud, Build and KeyValueStore, the account area's
- * CloudSession and GoogleAccounts, the shell's Navigation, the assistant's Assistant, the browser's BrowserAgent, files' FilePicker and settings' Preferences.
+ * CloudSession and GoogleAccounts, the shell's Navigation, Overview and ShellMail (which the layer fills with Inbox's send of chat-reviewed email), the assistant's Assistant, the browser's BrowserAgent, files' FilePicker and settings' Preferences.
  */
 export const layer = Layer.provideMerge(
-  Layer.mergeAll(selection, notices, digest, agentEmails, suggestions),
+  Layer.mergeAll(selection, notices, suggestions, mailSenderFill),
   Layer.provideMerge(composer,
     Layer.provideMerge(operations,
       Layer.provideMerge(mailbox,

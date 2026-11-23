@@ -13,7 +13,7 @@ While a modal dialog is open the toast is copied into that dialog's own live reg
 topmost one only, so it is seen and announced above the dialog; its Undo runs the page's Undo.
 
 ```quint
-type Toast = { message: str, chars: int, action: str, failure: bool }
+type Toast = { message: str, chars: int, undo: str, failure: bool }
 type LauncherRead = ReadIdle | ReadLoading | ReadReady | ReadFailed
 type NoticeSurface = NoticeHome | NoticeLibrary | NoticeApp | NoticeEditing
 type Toasts = {
@@ -22,7 +22,7 @@ type Toasts = {
   queued: List[Toast], notices: List[str],
   seenStatus: LauncherRead, seenError: str, seenReads: int, launchReported: bool, lastSurface: NoticeSurface
 }
-pure val NoToast: Toast = { message: "", chars: 0, action: "", failure: false }
+pure val NoToast: Toast = { message: "", chars: 0, undo: "", failure: false }
 pure val initial: Toasts = {
   scale: 100, latest: 0, pending: Set(),
   shown: NoToast, seq: 0, duration: 0, readMin: 0, held: false, delay: 0,
@@ -32,7 +32,7 @@ pure val initial: Toasts = {
 pure val QueueLimit = 3
 pure val messageValues = Set("Saved", "Couldn't share. Try again.", "Deleted Lunch")
 pure val charsValues = Set(5, 26, 191)
-pure val actionValues = Set("", "undo-1")
+pure val undoValues = Set("", "undo-1")
 pure val scaleValues = Set(0, 100, 150, 600)
 pure val idValues = Set(1, 2, 3)
 pure val readsValues = Set(0, 1, 2)
@@ -52,13 +52,13 @@ A passive toast with another passive one waiting yields after its short reading 
 or a failure keeps its whole time. A later change of the scale changes only later toasts.
 
 ```quint
-pure def base(t: Toast): int = if (t.action != "") 10000 else 1900
+pure def base(t: Toast): int = if (t.undo != "") 10000 else 1900
 pure def reading(t: Toast): int = if (t.chars * 50 + 500 > 12000) 12000 else t.chars * 50 + 500
 pure def durationOf(t: Toast, scale: int): int = (if (base(t) > reading(t)) base(t) else reading(t)) * scale / 100
 pure def readMinOf(t: Toast, scale: int): int =
-  if (t.action != "" or t.failure) durationOf(t, scale)
+  if (t.undo != "" or t.failure) durationOf(t, scale)
   else (if (durationOf(t, scale) < 1900 * scale / 100) durationOf(t, scale) else 1900 * scale / 100)
-pure def passive(t: Toast): bool = t.message != "" and t.action == "" and not(t.failure)
+pure def passive(t: Toast): bool = t.message != "" and t.undo == "" and not(t.failure)
 pure def armed(s: Toasts): int = if (passive(s.shown) and s.queued.length() > 0) s.readMin else s.duration
 pure def presenting(t: Toast, s: Toasts): Toasts = {
   val shown = { ...s, shown: t, seq: s.seq + 1, duration: durationOf(t, s.scale), readMin: readMinOf(t, s.scale) }
@@ -68,10 +68,10 @@ pure def alwaysAToastKeepsItsTimer(s: Toasts): bool =
   if (s.shown.message == "") (s.duration == 0 and s.readMin == 0 and s.delay == 0 and not(s.held))
   else (s.readMin <= s.duration and s.readMin >= 0 and s.delay == (if (s.held) 0 else armed(s)))
 pure def alwaysTheScaleIsAtLeastOne(s: Toasts): bool = s.scale >= 100 and s.pending.forall(id => id >= 1 and id <= s.latest)
-pure val tValues = Set(NoToast, { message: "Saved", chars: 5, action: "", failure: false },
-  { message: "Deleted Lunch", chars: 13, action: "undo-1", failure: false })
+pure val tValues = Set(NoToast, { message: "Saved", chars: 5, undo: "", failure: false },
+  { message: "Deleted Lunch", chars: 13, undo: "undo-1", failure: false })
 pure def lawUndoIsNeverShortened(t: Toast, scale: int): bool =
-  (t.action != "" and scale >= 100) implies (durationOf(t, scale) >= 10000 and readMinOf(t, scale) == durationOf(t, scale))
+  (t.undo != "" and scale >= 100) implies (durationOf(t, scale) >= 10000 and readMinOf(t, scale) == durationOf(t, scale))
 ```
 
 ### The newest timeout reading wins, and a failed reading keeps the last good one
@@ -93,7 +93,7 @@ toast identical to the one it would wait behind is not queued again. At most thr
 overflow the oldest of the lowest rank (passive, then Undo, then failure) goes.
 
 ```quint
-pure def rank(t: Toast): int = if (t.failure) 2 else if (t.action != "") 1 else 0
+pure def rank(t: Toast): int = if (t.failure) 2 else if (t.undo != "") 1 else 0
 pure def lowest(q: List[Toast]): int = q.foldl(2, (a, t) => if (rank(t) < a) rank(t) else a)
 pure def dropAt(q: List[Toast]): int =
   q.foldl({ at: 0, found: -1 }, (c, t) => { at: c.at + 1, found: if (c.found < 0 and rank(t) == lowest(q)) c.at else c.found }).found
@@ -102,20 +102,20 @@ pure def toasted(t: Toast, s: Toasts): Toasts = {
   val shownPassive = passive(s.shown)
   if (s.shown.message != "" and not(shownPassive and rank(t) > 0)) {
     val tail = s.queued.nthOr(s.queued.length() - 1, s.shown)
-    val repeated = t.action == "" and tail == t
+    val repeated = t.undo == "" and tail == t
     val passiveTail = s.queued.length() > 0 and rank(tail) == 0 and rank(t) == 0
     val waiting = { ...s, queued: if (passiveTail) s.queued.removeAt(s.queued.length() - 1).append(t) else capped(s.queued.append(t)) }
     if (repeated) s else { ...waiting, delay: if (s.held or not(shownPassive)) s.delay else armed(waiting) }
   } else presenting(t, s)
 }
-pure def canShowToast(s: Toasts, message: str, chars: int, action: str, failure: bool): bool =
-  message != "" and chars >= 0 and not(action != "" and failure)
-pure def showToast(s: Toasts, message: str, chars: int, action: str, failure: bool): Toasts =
-  toasted({ message: message, chars: chars, action: action, failure: failure }, s)
+pure def canShowToast(s: Toasts, message: str, chars: int, undo: str, failure: bool): bool =
+  message != "" and chars >= 0 and not(undo != "" and failure)
+pure def showToast(s: Toasts, message: str, chars: int, undo: str, failure: bool): Toasts =
+  toasted({ message: message, chars: chars, undo: undo, failure: failure }, s)
 pure def alwaysTheQueueIsBounded(s: Toasts): bool =
-  s.queued.length() <= QueueLimit and s.queued.every(t => t.message != "" and not(t.action != "" and t.failure)) and
-  not(s.shown.action != "" and s.shown.failure)
-pure def sometimesQueuedBehindUndo(s: Toasts): bool = s.queued.length() > 0 and s.shown.action != "" and not(s.held)
+  s.queued.length() <= QueueLimit and s.queued.every(t => t.message != "" and not(t.undo != "" and t.failure)) and
+  not(s.shown.undo != "" and s.shown.failure)
+pure def sometimesQueuedBehindUndo(s: Toasts): bool = s.queued.length() > 0 and s.shown.undo != "" and not(s.held)
 pure def sometimesQueuedBehindFailure(s: Toasts): bool = s.queued.length() > 0 and s.shown.failure
 pure def sometimesFullQueue(s: Toasts): bool = s.queued.length() == QueueLimit
 ```
@@ -130,7 +130,7 @@ pure def closed(queue: List[Toast], s: Toasts): Toasts =
   else presenting(queue.nthOr(0, NoToast), { ...s, queued: queue.tail(), held: false })
 pure def canExpire(s: Toasts, seq: int): bool = s.shown.message != "" and not(s.held) and seq == s.seq
 pure def expire(s: Toasts, seq: int): Toasts = closed(s.queued, s)
-pure def canTakeAction(s: Toasts, seq: int): bool = s.shown.action != "" and seq == s.seq
+pure def canTakeAction(s: Toasts, seq: int): bool = s.shown.undo != "" and seq == s.seq
 pure def takeAction(s: Toasts, seq: int): Toasts = closed(s.queued, s)
 pure def canHold(s: Toasts): bool = s.shown.message != "" and not(s.held)
 pure def hold(s: Toasts): Toasts = { ...s, held: true, delay: 0 }
@@ -148,7 +148,7 @@ pure def canPersist(s: Toasts, message: str, chars: int): bool = message != "" a
 pure def persist(s: Toasts, message: str, chars: int): Toasts = {
   val listed = if (s.notices.includes(message)) s.notices
     else if (s.notices.length() == QueueLimit) s.notices.tail().append(message) else s.notices.append(message)
-  toasted({ message: message, chars: chars, action: "", failure: true }, { ...s, notices: listed })
+  toasted({ message: message, chars: chars, undo: "", failure: true }, { ...s, notices: listed })
 }
 pure def canDismiss(s: Toasts, message: str): bool = s.notices.includes(message)
 pure def dismiss(s: Toasts, message: str): Toasts = { ...s, notices: s.notices.select(m => m != message) }
@@ -176,8 +176,8 @@ pure def reportLauncher(s: Toasts, surface: NoticeSurface, status: LauncherRead,
     not(afterLaunch) and missingFavorite
   val seen = { ...s, seenStatus: status, seenError: error, seenReads: reads, lastSurface: surface,
     launchReported: errorToast or (not(read) and s.launchReported) }
-  if (errorToast) toasted({ message: error, chars: errorChars, action: "", failure: true }, seen)
-  else if (inventoryToast) toasted({ message: "Couldn't load your apps", chars: 23, action: "", failure: true }, seen)
+  if (errorToast) toasted({ message: error, chars: errorChars, undo: "", failure: true }, seen)
+  else if (inventoryToast) toasted({ message: "Couldn't load your apps", chars: 23, undo: "", failure: true }, seen)
   else seen
 }
 pure def stepOnlyHomeReportsTheLauncher(before: Toasts, via: str, after: Toasts): bool =

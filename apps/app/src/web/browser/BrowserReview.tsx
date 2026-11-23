@@ -2,6 +2,7 @@
 import type { OpenReview, ReviewKind, Reviews } from "../../../gen/browser__reviews.ts";
 import { Button, Dialog, DialogContent, DialogTitle } from "../components/ui/index.ts";
 
+/** The open Browser confirmations and the owner's answer to the newest one. */
 export interface BrowserReviewProps {
   reviews: Reviews;
   onApprove: (id: string) => void;
@@ -12,7 +13,6 @@ const WORDS: Readonly<Record<ReviewKind, (detail: string) => { title: string; bo
   ClearBrowsingData: (detail) => ({ title: "Clear browsing data?", body: `Clears ${detail}.`, confirm: "Clear data", destructive: true }),
   ClearSiteData: (detail) => ({ title: `Clear data for ${detail}?`, body: `Signs you out of ${detail}.`, confirm: "Clear data", destructive: true }),
   LeavePrivate: (detail) => ({ title: "Leave private browsing?", body: `Open ${URL.parse(detail)?.hostname ?? detail} in another browser? It can keep the address and use its own accounts.\n${detail}`, confirm: "Choose browser", destructive: false }),
-  OpenAppLink: (detail) => ({ title: "Open another app?", body: `This private page wants to open ${detail}.`, confirm: "Open", destructive: false }),
   BrowserControl: (detail) => ({ title: detail.split("\n")[0] ?? "Browser", body: detail.split("\n").slice(1).join("\n").trim(), confirm: "Confirm", destructive: false }),
 };
 

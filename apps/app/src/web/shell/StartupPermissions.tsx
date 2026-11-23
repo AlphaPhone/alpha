@@ -1,7 +1,7 @@
 // spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"
 import { Bell, CalendarDays, Camera, Check, Folder, Images, MapPin, Mic, type LucideIcon } from "lucide-react";
 import type { Access, Perm, Permissions } from "../../../gen/shell__permissions.ts";
-import { accessOf, keyAt, selected } from "../../../gen/shell__permissions.ts";
+import { accessOf, keyAt, offersSettings, panelShown, selected, skippable, stepCount } from "../../../gen/shell__permissions.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Spinner } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -19,13 +19,17 @@ const WORDS: Readonly<Record<Access, string>> = {
   AccessChecking: "Checking", AccessAsk: "Ask", AccessSettings: "Off", AccessReady: "Allowed", AccessUnavailable: "Couldn’t check",
 };
 
+/** The walkthrough panel's state and the owner's choices on it. */
 export interface StartupPermissionsProps {
+  /** The walkthrough machine's state; a request is in flight while `pending` names a step. */
   walkthrough: Permissions;
-  /** The step's request or Settings handoff is in flight. */
-  busy?: boolean;
+  /** Allow on the current step, or Android's settings page for it. */
   onAllow: () => void;
+  /** Moves past the current step; `skip` moves on without its access. */
   onNext: (skip: boolean) => void;
+  /** Done on the Ready card. */
   onFinish: () => void;
+  /** Leaves a review opened from Settings. */
   onClose: () => void;
 }
 
@@ -33,8 +37,9 @@ export interface StartupPermissionsProps {
  * The access walkthrough: each permission's real state, Allow on the current step, and Ready at the end.
  * @model spec/shell/permissions.md
  */
-export function StartupPermissions({ walkthrough, busy = false, onAllow, onNext, onFinish, onClose }: StartupPermissionsProps) {
-  const open = walkthrough.phase === "PhaseWalkthrough" || walkthrough.phase === "PhaseReady";
+export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onClose }: StartupPermissionsProps) {
+  const open = panelShown(walkthrough);
+  const busy = walkthrough.pending >= 0;
   if (walkthrough.phase === "PhaseReady") {
     return (
       <Dialog open={open} onOpenChange={(next) => { if (!next) onFinish(); }}>
@@ -50,10 +55,13 @@ export function StartupPermissions({ walkthrough, busy = false, onAllow, onNext,
   const current = selected(walkthrough);
   const state = accessOf(walkthrough, current);
   const review = walkthrough.target >= 0;
+  const count = stepCount(walkthrough);
+  const settings = offersSettings(walkthrough);
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && review) onClose(); }}>
       <DialogContent closeLabel={review ? "Close" : "Not now"} className="grid max-h-[calc(var(--alpha-free-height,100dvh)-2rem)] grid-cols-1 overflow-y-auto">
         <DialogTitle className="font-serif text-3xl">Access</DialogTitle>
+        {count > 0 && <p role="status" className="font-mono text-xs uppercase tracking-widest text-muted-foreground">Step {count} of {walkthrough.keys.length}</p>}
         <ol className="flex flex-col">
           {walkthrough.keys.map((key, index) => {
             const detail = DETAILS[key];
@@ -79,14 +87,14 @@ export function StartupPermissions({ walkthrough, busy = false, onAllow, onNext,
           {review ? (
             <Button variant="ghost" onClick={onClose}>Done</Button>
           ) : (
-            <Button variant="ghost" disabled={busy || state === "AccessChecking"} onClick={() => onNext(true)}>Not now</Button>
+            <Button variant="ghost" disabled={!skippable(walkthrough)} onClick={() => onNext(true)}>Skip</Button>
           )}
-          {state === "AccessReady" ? (
+          {state === "AccessReady" && !settings ? (
             !review && <Button onClick={() => onNext(false)}>Continue</Button>
           ) : (
-            <Button loading={busy} disabled={state === "AccessChecking" || state === "AccessUnavailable"} onClick={onAllow}
-              aria-label={`${state === "AccessSettings" ? "Open settings for" : "Allow"} ${DETAILS[keyAt(walkthrough, current)].title}`}>
-              {state === "AccessSettings" ? "Open settings" : "Allow"}
+            <Button loading={busy} disabled={busy || state === "AccessChecking" || state === "AccessUnavailable"} onClick={onAllow}
+              aria-label={`${settings ? "Open settings for" : "Allow"} ${DETAILS[keyAt(walkthrough, current)].title}`}>
+              {settings ? "Open settings" : "Allow"}
             </Button>
           )}
         </div>

@@ -153,3 +153,31 @@ pure def itemMark(done: bool, looksMarked: bool): ItemMark = if (done) CheckedMa
 pure def readsBackDone(mark: ItemMark): bool = mark == CheckedMark
 pure def lawChecklistRoundTrips(done: bool, looksMarked: bool): bool = readsBackDone(itemMark(done, looksMarked)) == done
 ```
+
+## Story: Edit a checklist row by row
+
+> As the owner, I want removing one item to leave every other item where it was, and every item and its
+> controls to have a name my screen reader can say, even when the item is blank.
+
+### Each checklist row keeps its own place and a name a screen reader can say
+
+A row keeps the place it was given while the checklist is open, also across a new note's first save, so
+removing one item never hands its row, text field or focus to the item below; the saved items carry no
+new field for it. A row with text names its tick box and its Remove button after that text; a blank or
+whitespace-only row names them by its position.
+
+```quint
+type ChecklistRows = { keys: List[int], nextKey: int }
+type ItemName = NamedByText | NamedByPosition
+pure def rowAdded(checklist: ChecklistRows): ChecklistRows = { keys: checklist.keys.append(checklist.nextKey), nextKey: checklist.nextKey + 1 }
+pure def rowRemoved(checklist: ChecklistRows, at: int): ChecklistRows = { ...checklist, keys: checklist.keys.removeAt(at) }
+pure def itemName(blank: bool): ItemName = if (blank) NamedByPosition else NamedByText
+pure val checklistValues = Set({ keys: List(), nextKey: 0 }, { keys: List(0, 1, 2), nextKey: 3 }, { keys: List(4, 7), nextKey: 8 })
+pure val atValues = Set(-1, 0, 1, 2, 3)
+pure def lawRemovalKeepsTheRowsBelow(checklist: ChecklistRows, at: int): bool =
+  (at >= 0 and at < checklist.keys.length()) implies rowRemoved(checklist, at).keys.nthOr(at, -1) == checklist.keys.nthOr(at + 1, -1)
+pure def lawAddedRowGetsAFreshPlace(checklist: ChecklistRows): bool =
+  checklist.keys.every(k => k < checklist.nextKey) implies
+    (not(checklist.keys.includes(checklist.nextKey)) and rowAdded(checklist).keys.every(k => k < rowAdded(checklist).nextKey))
+pure def lawBlankRowIsNamedByPosition(blank: bool): bool = (itemName(blank) == NamedByPosition) iff blank
+```

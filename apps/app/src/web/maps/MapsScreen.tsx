@@ -1,8 +1,9 @@
-// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/guidance.md, "Story: Guide me along the route I started"; spec/maps/plane.md, "Story: See the map for what I am looking at"; spec/maps/eventReturn.md, "Story: Go back to the event whose place I opened"
+// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/screen.md, "A place outside every region the provider covers keeps its coordinates and says so"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/guidance.md, "Story: Guide me along the route I started"; spec/maps/plane.md, "Story: See the map for what I am looking at"; spec/maps/eventReturn.md, "Story: Go back to the event whose place I opened"
 import { Effect } from "effect";
 import { CalendarDays, LocateFixed, RotateCw } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useMachine as useGuidance } from "../../../gen/maps__guidance.react.ts";
+import { useMachine as useLocator } from "../../../gen/maps__location.react.ts";
 import { useMachine as usePlane } from "../../../gen/maps__plane.react.ts";
 import { useMachine as useReturn } from "../../../gen/maps__eventReturn.react.ts";
 import { offered as returnOffered } from "../../../gen/maps__eventReturn.ts";
@@ -12,7 +13,8 @@ import { canBack, mode, initial as screenStart } from "../../../gen/maps__screen
 import { useMachine as useScreen } from "../../../gen/maps__screen.react.ts";
 import { maySpeak, restricted } from "../../../gen/maps__vocabulary.ts";
 import { basemapFor } from "../../../gen/maps__plane.ts";
-import { offered } from "../../maps/screen.vibe";
+import { offered, outsideShown, savedFor } from "../../maps/screen.vibe";
+import { Build } from "../../platform/build.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
 import { DirectionsSheet } from "./DirectionsSheet.tsx";
@@ -22,7 +24,8 @@ import { NavigationView } from "./NavigationView.tsx";
 import { PlaceSheet } from "./PlaceSheet.tsx";
 import { ResultsSheet } from "./ResultsSheet.tsx";
 import { SearchBar } from "./SearchBar.tsx";
-import { act, ask, mapsRuntime, useMapsContent } from "./runtime.ts";
+import { act, ask, useMapsContent } from "./actions.ts";
+import { runtime } from "./runtime.ts";
 
 /**
  * The Maps app: the map, search, the place sheet, directions and guidance.
@@ -30,12 +33,14 @@ import { act, ask, mapsRuntime, useMapsContent } from "./runtime.ts";
  * @design design.md
  */
 export function MapsScreen({ route, onClose }: ScreenProps) {
-  const screen = useScreen(mapsRuntime).state ?? screenStart;
-  const guidance = useGuidance(mapsRuntime).state;
-  const plane = usePlane(mapsRuntime).state;
-  const saved = useSaved(mapsRuntime).state?.items ?? [];
-  const eventReturn = useReturn(mapsRuntime).state;
+  const screen = useScreen(runtime).state ?? screenStart;
+  const guidance = useGuidance(runtime).state;
+  const plane = usePlane(runtime).state;
+  const saved = useSaved(runtime).state?.items ?? [];
+  const eventReturn = useReturn(runtime).state;
+  const locator = useLocator(runtime).state;
   const c = useMapsContent();
+  const [aosp] = useState(() => runtime.runSync(Build.use((b) => Effect.succeed(b.info.variant === "aosp"))));
 
   const opened = useCallback((node: HTMLElement | null) => {
     if (!node) return;
@@ -54,7 +59,9 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
   const routes = c.routes.run === screen.routeRun ? c.routes.routes : [];
   const results = c.results.run === screen.queryRun ? c.results.places : [];
   const candidates = c.originResults.run === screen.originRun ? c.originResults.places : [];
-  const savedShown = shown?.savedId !== undefined && saved.some((i) => i.id === shown.savedId);
+  const savedShown = savedFor(shown, saved) !== undefined;
+  const status = c.message || (shown && outsideShown(c) ? "This location is outside Cloud Maps coverage. Its coordinates are retained." : "")
+    || (plane?.state === "PlaneFailed" ? "Map rendering is unavailable. Retry the map, or use coordinates and saved places." : "");
   const pins: MapPin[] = view === "OriginMode" ? candidates.map((p, i) => ({ id: `o${i}`, label: p.name, coordinate: p.coordinate }))
     : view === "ResultsMode" ? results.map((p, i) => ({ id: `r${i}`, label: p.name, coordinate: p.coordinate }))
     : shown ? [{ id: "shown", label: shown.label, coordinate: shown.coordinate }] : [];
@@ -70,27 +77,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
 
   return (
     <main ref={opened} aria-label="Maps" className="relative flex size-full flex-col bg-background">
-      <span ref={mountPlane} hidden />
-      <div className="absolute inset-0">
-        {plane?.built && (
-          <MapPlane
-            basemap={basemap} generation={plane.generation} tileSize={coverage?.tiles?.tileSize} maxZoom={coverage?.tiles?.maxZoom}
-            pins={pins} selection={shown?.coordinate} label={label}
-            position={c.position ? { coordinate: c.position.coordinate, accuracyMeters: c.position.accuracyMeters, headingDegrees: c.position.headingDegrees } : undefined}
-            route={guiding ? c.guidance?.route.geometry : view === "DirectionsMode" ? routes[screen.chosen]?.geometry : undefined}
-            follow={guiding && guidance.follow && c.guidance?.fix !== undefined}
-            onPin={(id) => act((s) => id.startsWith("r") ? s.screen.pickResult(Number(id.slice(1))) : id.startsWith("o") ? s.screen.chooseOrigin(Number(id.slice(1))) : s.screen.closePlace())}
-            onLongPress={(coordinate) => { if (!guiding) act((s) => s.screen.dropPin(coordinate)); }}
-            onPressStart={(coordinate, x, y) => { if (!guiding) act((s) => s.plane.pressStarted(coordinate, x, y)); }}
-            onPressMove={(x, y) => act((s) => s.plane.pressMoved(x, y))} onPressEnd={() => act((s) => s.plane.pressEnded())}
-            onInteraction={() => { if (guiding) act((s) => s.navigation.stopFollowing()); }}
-            onSettled={(center, zoom, width, height) => act((s) => Effect.andThen(s.screen.setViewport(center, zoom), s.plane.settled(center, zoom, width, height)))}
-            onState={(generation, outcome) => act((s) => s.plane.report(generation, outcome))}
-          />
-        )}
-      </div>
-
-      <div className="relative flex flex-col gap-2 p-3">
+      <div className="pointer-events-none relative z-10 flex flex-col gap-2 p-3 *:pointer-events-auto">
         {guiding && guidance && c.guidance ? (
           <NavigationView guidance={guidance} content={c.guidance} voiceOn={c.voiceOn} voiceAllowed={maySpeak(c.guidance.kind)} now={Date.now()}
             onEnd={() => act((s) => s.navigation.end())} onRecenter={() => act((s) => s.navigation.recenter())} onVoice={() => act((s) => s.navigation.toggleVoice())} />
@@ -99,7 +86,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
             onType={(text) => act((s) => s.screen.typeQuery(text))} onSubmit={() => act((s) => s.screen.submitSearch())}
             onClear={() => act((s) => s.screen.clearQuery())} onLead={() => (canBack(screen) ? back() : onClose())} />
         )}
-        {c.message && <p role="status" className="self-start rounded-xl bg-card px-3 py-1 text-sm shadow-sm">{c.message}</p>}
+        {status && <p role="status" className="self-start rounded-xl bg-card px-3 py-1 text-sm shadow-sm">{status}</p>}
         {eventReturn && returnOffered(eventReturn) && !guiding && (
           <Button variant="secondary" size="sm" className="self-start" onClick={() => act((s) => s.handoff.returnToEvent())}><CalendarDays aria-hidden />Back to event</Button>
         )}
@@ -109,12 +96,13 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
         {!coverage && c.message && <Button variant="secondary" size="sm" className="self-start" onClick={() => act((s) => s.session.retry())}>Retry</Button>}
       </div>
 
-      <div className="relative mt-auto flex flex-col gap-2 p-3">
+      <div className="pointer-events-none relative z-10 mt-auto flex flex-col gap-2 p-3 *:pointer-events-auto">
         <div className="flex items-end justify-between">
           {plane && (
             <MapCredits credits={creditsFor(basemap)} copyright={c.copyright} attribution={coverage?.attribution ?? "OpenFreeMap · © OpenMapTiles · Data from OpenStreetMap"}
               recipients={coverage?.recipients ?? []} open={plane.infoOpen} onOpen={() => act((s) => s.plane.openInfo())} onClose={() => act((s) => s.plane.closeInfo())}
-              onCoordinates={() => act((s) => Effect.andThen(s.plane.closeInfo(), s.screen.clearQuery()))} />
+              onCoordinates={() => act((s) => Effect.andThen(s.plane.closeInfo(), s.screen.enterCoordinates()))}
+              locationDenied={locator?.failure === "Denied"} onLocationSettings={() => act((s) => s.handoff.openSettings())} />
           )}
           {!guiding && view !== "DirectionsMode" && (
             <Button variant="secondary" size="icon" aria-label="My location" loading={screen.locating} onClick={() => act((s) => s.screen.locate())}><LocateFixed aria-hidden /></Button>
@@ -129,10 +117,10 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
             )}
             {view === "PlaceMode" && shown && (
               <PlaceSheet shown={shown} details={screen.details} restricted={restricted(shown.kind)} saved={savedShown}
-                canDirections={screen.details === "Ready" && offered(c, screen.travel)} canCall
+                canDirections={screen.details === "Ready" && offered(c, screen.travel)} canCall={aosp}
                 onDirections={() => act((s) => s.screen.openDirections())}
-                onToggleSaved={(name) => act((s) => savedShown && shown.savedId !== undefined ? s.saved.remove(shown.savedId) : s.saved.save(shown, name))}
-                onRename={(name) => act((s) => shown.savedId !== undefined ? s.saved.rename(shown.savedId, name) : s.screen.dropPin(shown.coordinate, name))}
+                onToggleSaved={(name) => act((s) => s.screen.toggleSaved(name))}
+                onRename={(name) => act((s) => s.screen.renamePlace(name))}
                 onShare={() => act((s) => s.handoff.sharePlace(shown))} onCall={(phone) => act((s) => s.handoff.call(phone))}
                 onCopy={(phone) => act((s) => s.handoff.copyNumber(phone))} onWebsite={(url) => act((s) => s.handoff.openWebsite(url))}
                 onClose={() => act((s) => s.screen.closePlace())} />
@@ -151,6 +139,25 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
                 onClose={back} />
             )}
           </div>
+        )}
+      </div>
+      <span ref={mountPlane} hidden />
+      <div className="absolute inset-0 z-0">
+        {plane?.built && (
+          <MapPlane
+            basemap={basemap} generation={plane.generation} tileSize={coverage?.tiles?.tileSize} maxZoom={coverage?.tiles?.maxZoom}
+            pins={pins} selection={shown?.coordinate ?? (view === "BaseMode" ? c.centerOn : undefined)} label={label}
+            position={c.position ? { coordinate: c.position.coordinate, accuracyMeters: c.position.accuracyMeters, headingDegrees: c.position.headingDegrees } : undefined}
+            route={guiding ? c.guidance?.route.geometry : view === "DirectionsMode" ? routes[screen.chosen]?.geometry : undefined}
+            follow={guiding && guidance.follow && c.guidance?.fix !== undefined}
+            onPin={(id) => act((s) => id.startsWith("r") ? s.screen.pickResult(Number(id.slice(1))) : id.startsWith("o") ? s.screen.chooseOrigin(Number(id.slice(1))) : s.screen.closePlace())}
+            onLongPress={(coordinate) => { if (!guiding) act((s) => s.screen.dropPin(coordinate)); }}
+            onPressStart={(coordinate, x, y) => { if (!guiding) act((s) => s.plane.pressStarted(coordinate, x, y)); }}
+            onPressMove={(x, y) => act((s) => s.plane.pressMoved(x, y))} onPressEnd={() => act((s) => s.plane.pressEnded())}
+            onInteraction={() => { if (guiding) act((s) => s.navigation.stopFollowing()); }}
+            onSettled={(center, zoom, width, height) => act((s) => Effect.andThen(s.screen.setViewport(center, zoom), s.plane.settled(center, zoom, width, height)))}
+            onState={(generation, outcome) => act((s) => s.plane.report(generation, outcome))}
+          />
         )}
       </div>
     </main>

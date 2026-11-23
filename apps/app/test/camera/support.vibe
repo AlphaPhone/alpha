@@ -2,7 +2,9 @@
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
+import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
 import { layer } from "../../src/camera/layer.vibe"
+import { CameraHandoffs } from "../../src/camera/ports.vibe"
 
 /** One plugin method's answer: a value, or a rejection with a plugin code. */
 export type Answer = unknown | { readonly reject: string; readonly message?: string }
@@ -38,12 +40,27 @@ export function fakeNative(device: Phone) {
   })
 }
 
-/** Every Camera service over a test phone, in-memory storage and a launcher build with test mocks. */
+/** Alpha's page in front, unlocked, on Home with the conversation closed. */
+export const onHome: ForegroundState = { visible: true, locked: false, screen: "home", view: "", shade: false, chat: "closed", modal: false }
+
+/** A foreground that stays as `state`; a test moves it through `Viewfinder.foreground`. */
+export function fakeForeground(state: ForegroundState = onHome) {
+  return Layer.succeed(Foreground, { changes: Stream.make(state), get: () => succeed(state) })
+}
+
+/** Every Camera service over a test phone, in-memory storage, a quiet foreground and a launcher build with test mocks. */
 export function cameraOver(device: Phone, variant: "launcher" | "aosp" | "browser" = "launcher") {
+  return cameraWith(device, {}, variant)
+}
+
+/** Every Camera service with some of Camera's handoffs filled in, as the areas that receive them would. */
+export function cameraWith(device: Phone, handoffs: Partial<CameraHandoffs.Shape>, variant: "launcher" | "aosp" | "browser" = "launcher") {
   const platform = Layer.mergeAll(
     fakeNative(device),
     Layer.succeed(Build, { info: { version: "0.1.0", variant, testMocks: true } }),
     KeyValueStore.layerMemory,
+    fakeForeground(),
+    Layer.succeed(CameraHandoffs, { ...CameraHandoffs.defaultValue(), ...handoffs }),
   )
   return Layer.provide(layer, platform)
 }

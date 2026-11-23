@@ -1,4 +1,4 @@
-// spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"; spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"; spec/telephony/callBar.md, "An ended call's bar holds its place for a moment and takes no taps"; spec/telephony/drafts.md, "Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation"
+// spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"; spec/telephony/voicemail.md, "Playing marks a voicemail heard, and nothing plays during a call or behind the lock"; spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/phone.md, "Dial hands one number at a time to Telecom, and only from the showing it started in"; spec/telephony/callBar.md, "The bar is about the call that needs me first: a ringing call, then the connected one"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/contacts.md, "A write holds the gate while it runs, and a lost answer blocks every write until an explicit read that began after it"; spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"; spec/telephony/callBar.md, "An ended call's bar holds its place for a moment and takes no taps"; spec/telephony/drafts.md, "Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -45,3 +45,54 @@ const draftsNeedSend = extract(({ document }) => {
 
 /** Alpha's draft always shows its own Send: it waits for the owner's tap and is never sent otherwise (AC-14). */
 export const telephonyAlphaDraftWaitsForSend = always(() => draftsNeedSend.current);
+
+const liveCall = (document: Document) => document.querySelector('[role="status"] button[aria-label^="Return to call"]') !== null;
+
+const noPlayDuringCall = extract(({ document }) => {
+  if (!liveCall(document)) return true;
+  const play = document.querySelector<HTMLButtonElement>('section[aria-label="Phone"] button[aria-label="Play"]');
+  return !play || play.disabled;
+});
+
+/** While a call is live, no voicemail can be started (the call pauses playback, and Play waits for the call to end). */
+export const telephonyNoVoicemailPlaysDuringACall = always(() => noPlayDuringCall.current);
+
+const keypadBounded = extract(({ document }) => {
+  const field = document.querySelector('section[aria-label="Phone"] output[aria-label="Number"]');
+  const digits = (field?.textContent ?? "").replace(/[^0-9*#+]/g, "");
+  return digits.length <= 40 && digits.indexOf("+") <= 0 && digits.lastIndexOf("+") <= 0;
+});
+
+/** The keypad holds at most 40 characters, with a + only in front. */
+export const telephonyKeypadNumberIsBounded = always(() => keypadBounded.current);
+
+const safeLinks = extract(({ document }) => [...document.querySelectorAll<HTMLAnchorElement>("[data-alpha-messages-thread] a")]
+  .every((a) => /^https?:\/\//i.test(a.getAttribute("href") ?? "") && !/^[a-z]+:\/\/[^/]*@/i.test(a.getAttribute("href") ?? "")));
+
+/** A link in a conversation is only a credential-free http(s) address, opened by the owner's tap. */
+export const telephonyMessageLinksAreSafe = always(() => safeLinks.current);
+
+const oneCallBar = extract(({ document }) => document.querySelectorAll('[role="status"] button[aria-label^="Return to call"]').length <= 1);
+
+/** The bar shows one call, the one that needs the owner first. */
+export const telephonyOneCallBar = always(() => oneCallBar.current);
+
+const confirmedDeletes = extract(({ document }) => {
+  const messages = [...document.querySelectorAll('[role="alertdialog"][aria-label="Delete this message?"]')].length <= 1;
+  const voicemail = document.querySelectorAll('[role="alertdialog"][aria-label="Delete this voicemail?"]').length <= 1;
+  return messages && voicemail;
+});
+
+/** At most one delete confirmation is open at a time, so a confirmed delete names exactly one record. */
+export const telephonyOneDeleteConfirmationAtATime = always(() => confirmedDeletes.current);
+
+const editingHeldWhileUnknown = extract(({ document }) => {
+  const contacts = document.querySelector('section[aria-label="Contacts"]');
+  if (!contacts || !/Outcome unknown/.test(contacts.textContent ?? "")) return true;
+  const add = contacts.querySelector<HTMLButtonElement>('button[aria-label="Add a contact"]');
+  const edit = [...contacts.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Edit");
+  return (!add || add.disabled) && (!edit || edit.disabled);
+});
+
+/** After a contact write the phone could not confirm, no new contact or edit can start until an explicit read. */
+export const telephonyUnknownWriteHoldsContactWrites = always(() => editingHeldWhileUnknown.current);

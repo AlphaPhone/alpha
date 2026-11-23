@@ -1,6 +1,7 @@
 // spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"; spec/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"
+import { actionJournalPlugin, createDeferredDeletions, type DeferredDeletionsClient } from "@elizaos/os/bridges/action-journal"
 import { rejectionCode } from "@elizaos/os/bridges/bridge"
-import { addressBookPlugin, createAddressBookClient, type AddressBookClient } from "@elizaos/os/bridges/contacts"
+import { addressBookPlugin, createAddressBookClient, createContactNames, type AddressBookClient, type ContactNamesClient, type NameSurface } from "@elizaos/os/bridges/contacts"
 import { messagesClient, messagesPlugin, type MessagesClient } from "@elizaos/os/bridges/messages"
 import { phoneClient, telephonyPlugin, type PhoneClient } from "@elizaos/os/bridges/phone"
 import { telephonyOffered, type BuildVariant } from "../../gen/telephony__common.effect.vibe"
@@ -9,8 +10,10 @@ import { Native } from "../platform/native.vibe"
 
 /** The native plugin the Alpha image registers only for a verified system install. */
 export const TELEPHONY_PLUGIN = "AlphaTelephony"
-/** The image's address book plugin. */
+/** The image's address book plugin, which also resolves display-only names for numbers on screen. */
 export const CONTACTS_PLUGIN = "AlphaContacts"
+/** The upstream journal that holds reviewed sends and the deletion window. */
+export const JOURNAL_PLUGIN = "ElizaActionJournal"
 /** Telecom's call-state reading for the emergency gate. */
 export const CALL_STATE_PLUGIN = "AlphaCallState"
 /** The calls Alpha's in-call service holds, with Return and End. */
@@ -26,6 +29,10 @@ export interface TelephonyClients {
   readonly phone: PhoneClient
   readonly messages: MessagesClient
   readonly contacts: AddressBookClient
+  /** Display-only names for the numbers a surface shows. */
+  readonly names: ContactNamesClient
+  /** The deletion window's pending deletions, Undo and dismissal. */
+  readonly deletions: DeferredDeletionsClient
 }
 
 /** Whether the image offers telephony here, and the clients that reach it. */
@@ -34,11 +41,20 @@ export service TelephonyBridges {
   clients(): TelephonyClients!TelephonyUnavailable
 }
 
-/** Contact names for numbers on screen, for display only: never agent context; a failed lookup names nobody. */
-export effect function displayNames(call: BridgeCaller, numbers: readonly string[]) {
-  const wanted = [...new Set(numbers.filter((n) => n !== ""))]
+/** The most numbers one name lookup carries. */
+export const NAMES_MAX = 50
+
+/** Contact names for numbers on `surface`, for display only: never agent context; a failed or dropped lookup names nobody. */
+export effect function displayNames(call: BridgeCaller, surface: NameSurface, numbers: readonly string[]) {
+  const wanted = [...new Set(numbers.filter((n) => n !== ""))].slice(0, NAMES_MAX)
   if (wanted.length === 0) return {} as Readonly<Record<string, string>>
-  return try (call("resolveDisplayNames", (c) => c.phone.resolveDisplayNames(wanted)) catch () => ({}) as Readonly<Record<string, string>>)
+  const found = try (call("resolveNames", (c) => c.names.resolve({ surface, numbers: wanted })) catch () => [])
+  return Object.fromEntries(found.flatMap((row) => row.name === null ? [] : [[row.number, row.name as string]])) as Readonly<Record<string, string>>
+}
+
+/** The surface left the screen: a lookup still in flight for it is dropped. */
+export effect function closeNames(call: BridgeCaller, surface: NameSurface) {
+  try (call("closeNames", (c) => c.names.close(surface)) catch () => undefined)
 }
 
 /** The spec's build variant for the platform's. */
@@ -77,11 +93,14 @@ export const bridgesLayer = Layer.effect(TelephonyBridges, effect {
   const native = try Native
   const registered = try native.available(TELEPHONY_PLUGIN)
   const offered = telephonyOffered(variantOf(build.info), registered)
+  const journal = actionJournalPlugin(JOURNAL_PLUGIN)
   const clients: TelephonyClients | undefined = offered
     ? {
-        phone: phoneClient(telephonyPlugin(TELEPHONY_PLUGIN)),
-        messages: messagesClient(messagesPlugin(TELEPHONY_PLUGIN)),
-        contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(CONTACTS_PLUGIN) }),
+        phone: phoneClient(telephonyPlugin(TELEPHONY_PLUGIN), journal),
+        messages: messagesClient(messagesPlugin(TELEPHONY_PLUGIN), journal),
+        contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(CONTACTS_PLUGIN), journal }),
+        names: createContactNames(addressBookPlugin(CONTACTS_PLUGIN)),
+        deletions: createDeferredDeletions(journal),
       }
     : undefined
   return {

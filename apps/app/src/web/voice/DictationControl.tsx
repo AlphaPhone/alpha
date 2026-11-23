@@ -2,40 +2,18 @@
 import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
 import { useMachine } from "../../../gen/voice__dictation.react.ts";
+import { useMachine as useCapture } from "../../../gen/voice__capture.react.ts";
+import { deniedSettingsOffered, initial as micInitial } from "../../../gen/voice__capture.ts";
 import { Microphone } from "../../voice/capture.vibe";
 import { Dictation, type DictationTarget } from "../../voice/dictation.vibe";
 import { DictationButton } from "./DictationButton.tsx";
 import { levelStore } from "./levels.ts";
-import { readVoice, runVoice, useVoiceRuntime, type VoiceRuntime } from "./runtime.tsx";
+import { runtime } from "./runtime.ts";
 
+/** The draft a mounted dictation control fills. */
 export interface DictationControlProps {
   /** The draft the words go into; its area keeps it and sends it. */
   target: DictationTarget;
-}
-
-function Connected({ runtime, target }: { runtime: VoiceRuntime; target: DictationTarget }) {
-  const { state } = useMachine(runtime);
-  const store = levelStore(runtime);
-  const levels = useSyncExternalStore(store.subscribe, store.get);
-  const dictation = Effect.service(Dictation);
-  const ours = readVoice(runtime, Effect.flatMap(dictation, (d) => d.targetId())) === target.id;
-  const route = readVoice(runtime, Effect.flatMap(dictation, (d) => d.route()));
-  const native = readVoice(runtime, Effect.flatMap(Effect.service(Microphone), (m) => m.native()));
-  const use = (work: (d: Dictation.Shape) => Effect.Effect<void>) => () => runVoice(runtime, Effect.flatMap(dictation, work));
-  return (
-    <DictationButton
-      dictation={ours ? state : undefined}
-      route={route}
-      native={native}
-      levels={levels}
-      onStart={use((d) => Effect.andThen(ours ? Effect.void : d.into(target), d.start()))}
-      onStop={use((d) => d.stop())}
-      onRetry={use((d) => d.retry())}
-      onDiscard={use((d) => d.discard())}
-      onCancel={use((d) => d.cancel())}
-      onOpenSettings={() => runVoice(runtime, Effect.flatMap(Effect.service(Microphone), (m) => m.openAppSettings()))}
-    />
-  );
 }
 
 /**
@@ -43,6 +21,27 @@ function Connected({ runtime, target }: { runtime: VoiceRuntime; target: Dictati
  * @model spec/voice/dictation.md
  */
 export function DictationControl({ target }: DictationControlProps) {
-  const runtime = useVoiceRuntime();
-  return runtime === undefined ? null : <Connected runtime={runtime} target={target} />;
+  const { state } = useMachine(runtime);
+  const { state: mic = micInitial } = useCapture(runtime);
+  const levels = useSyncExternalStore(levelStore.subscribe, levelStore.get);
+  const dictation = Effect.service(Dictation);
+  const ours = runtime.runSync(Effect.flatMap(dictation, (d) => d.targetId())) === target.id;
+  const route = runtime.runSync(Effect.flatMap(dictation, (d) => d.route()));
+  const native = runtime.runSync(Effect.flatMap(Effect.service(Microphone), (m) => m.native()));
+  const use = (work: (d: Dictation.Shape) => Effect.Effect<void>) => () => { runtime.runFork(Effect.flatMap(dictation, work)); };
+  return (
+    <DictationButton
+      dictation={ours ? state : undefined}
+      route={route}
+      native={native}
+      levels={levels}
+      microphoneDenied={deniedSettingsOffered(true, mic)}
+      onStart={use((d) => Effect.andThen(ours ? Effect.void : d.into(target), d.start()))}
+      onStop={use((d) => d.stop())}
+      onRetry={use((d) => d.retry())}
+      onDiscard={use((d) => d.discard())}
+      onCancel={use((d) => d.cancel())}
+      onOpenSettings={() => { runtime.runFork(Effect.flatMap(Effect.service(Microphone), (m) => m.openAppSettings())); }}
+    />
+  );
 }

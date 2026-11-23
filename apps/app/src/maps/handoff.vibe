@@ -1,4 +1,4 @@
-// spec/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries"; spec/maps/cards.md, "Only the newest agent message offers its choice and its card, in the session and conversation that showed them"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"; spec/maps/eventReturn.md, "One check per tap, and only its reply for the current origin returns, once"; spec/maps/notificationOpen.md, "A read starts only when Maps can be shown and none is in flight, and opens Maps at most once per tap"
+// spec/maps/cards.md, "A card's Map button runs one flow, chosen from what the card carries"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/cards.md, "Only the newest agent message offers its choice and its card, in the session and conversation that showed them"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"; spec/maps/eventReturn.md, "One check per tap, and only its reply for the current origin returns, once"; spec/maps/notificationOpen.md, "A read starts only when Maps can be shown and none is in flight, and opens Maps at most once per tap"
 import type { MapsCard, MapsCardPlace } from "@elizaos/plugin-maps/cards"
 import type { Place } from "@elizaos/plugin-maps/client/contracts"
 import { type CardFacts, type Composer, Machine as CardsMachine, flowOf, searchZoom } from "../../gen/maps__cards.effect.vibe"
@@ -6,6 +6,8 @@ import { Machine as ReturnMachine, offered, type ReturnReply } from "../../gen/m
 import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
 import { restricted } from "../../gen/maps__vocabulary.effect.vibe"
 import { AgentCalendar } from "../calendar/agent.vibe"
+import { callOffered } from "../../gen/maps__screen.ts"
+import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { modelTravel, MapsProvider } from "./cloud.vibe"
 import { MapsContent, type Shown } from "./content.vibe"
@@ -89,6 +91,7 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
   const provider = try MapsProvider
   const location = try MapsLocation
   const calendar = try AgentCalendar
+  const aosp = (try Build).info.variant === "aosp"
 
   /** A device event is still there with the same id and start; a canonical one is checked by Calendar for the same owner and revision. */
   effect function checkEvent(origin: EventOrigin) {
@@ -250,11 +253,14 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
       ].join("\n"))
     },
     effect copyNumber(phone: string) {
+      const shown = (try content.get()).shown
+      if (shown && restricted(shown.kind)) throw failure("unsupported", "Google Maps results cannot be copied from this phone.")
       native.invoke("AlphaDevice", "copyText", { text: phone }) catch effect () => { throw failure("unavailable", "Couldn’t copy") }
+      try content.update((c) => ({ ...c, message: "Number copied" }))
     },
     effect call(phone: string) {
       const dial = phone.replace(/[() .-]/g, "")
-      if (/^\+?[0-9]+$/.test(dial)) try shell.open("phone", `dial?number=${encodeURIComponent(dial)}`)
+      if (callOffered(/^\+?[0-9]+$/.test(dial), aosp)) try shell.open("phone", `dial?number=${encodeURIComponent(dial)}`)
     },
     effect openWebsite(url: string) {
       const valid = /^https?:\/\/[^\s/@]+(\/\S*)?$/i.test(url)

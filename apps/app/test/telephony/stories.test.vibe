@@ -1,0 +1,716 @@
+// spec/telephony/common.md; spec/telephony/phone.md; spec/telephony/voicemail.md; spec/telephony/messages.md; spec/telephony/drafts.md; spec/telephony/contacts.md; spec/telephony/comms.md; spec/telephony/actions.md; spec/telephony/attention.md; spec/telephony/callBar.md
+import { assert, it } from "@effect/vitest"
+import { Machine as ActionsMachine } from "../../gen/telephony__actions.effect.vibe"
+import { Machine as AttentionMachine, messagesCard, phoneCard } from "../../gen/telephony__attention.effect.vibe"
+import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
+import { Machine as CommsMachine, endPlace, leftSlot } from "../../gen/telephony__comms.effect.vibe"
+import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
+import { Machine as DraftsMachine, slotOf } from "../../gen/telephony__drafts.effect.vibe"
+import { Machine as MessagesMachine } from "../../gen/telephony__messages.effect.vibe"
+import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { Machine as VoicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
+import { TelephonyActions } from "../../src/telephony/actions.vibe"
+import { HomeAttention } from "../../src/telephony/attention.vibe"
+import { bridgesLayer, TelephonyBridges } from "../../src/telephony/bridges.vibe"
+import { CallWatch } from "../../src/telephony/call-bar.vibe"
+import { CommsStage } from "../../src/telephony/comms.vibe"
+import { ContactsView } from "../../src/telephony/contacts.vibe"
+import { DraftSends } from "../../src/telephony/drafts.vibe"
+import { ListAsk } from "../../src/telephony/list-ask.vibe"
+import { MessagesView } from "../../src/telephony/messages.vibe"
+import { PhoneView, placeOwnerCall } from "../../src/telephony/phone.vibe"
+import { phoneRouteOf, messagesRouteOf } from "../../src/telephony/routes.vibe"
+import { VoicemailView } from "../../src/telephony/voicemail.vibe"
+import { fakePhone, until } from "./fakes.vibe"
+
+const quiet = <A, E>(program: A!E) => program catch () => "Rejected" as const
+
+it.live("Use Phone, Messages and Contacts only on the Alpha image (spec/telephony/common.md, \"Story: Use Phone, Messages and Contacts only on the Alpha image\")", () => effect {
+  // spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"
+  const offered = effect function (variant: "aosp" | "launcher" | "browser") {
+    const fake = fakePhone(variant)
+    return try Effect.provide(effect { return (try TelephonyBridges).offered }, Layer.provide(bridgesLayer, fake.platform))
+  }
+  const launcher = fakePhone("launcher")
+  const capabilities = try Effect.provide(effect { return try (try TelephonyActions).capabilities() }, launcher.layer)
+  const aosp = try offered("aosp")
+  const onLauncher = try offered("launcher")
+  const browser = try offered("browser")
+  try Effect.try(() => assert.deepStrictEqual(
+    { aosp, launcher: onLauncher, browser, capabilities, native: launcher.calls.length },
+    { aosp: true, launcher: false, browser: false, capabilities: [], native: 0 },
+  ))
+})
+
+it.live("Alpha drafts and proposes, I send, call and approve (spec/telephony/common.md, \"Story: Alpha drafts and proposes, I send, call and approve\")", () => effect {
+  // spec/telephony/common.md, "Every change names who asked for it: the owner, Alpha or the device"
+  const fake = fakePhone()
+  provide fake.layer {
+    const sends = try DraftSends
+    const drafts = try DraftsMachine
+    const comms = try CommsMachine
+    const stage = try CommsStage
+    const placed = try sends.placeAlphaDraft("thread:1", ["4155550100"], "Running late")
+    const alphaSend = try quiet(drafts.send({ type: "sendStarted", thread: "thread:1", operationId: "op9", kind: "SmsSend", sim: 7 }, "Alpha"))
+    const proposed = try stage.propose("p1", "CallProposal", true, "")
+    const alphaApproves = try quiet(comms.send({ type: "proposalApproved", proposalId: "p1" }, "Alpha"))
+    const ownerApproves = try quiet(comms.send({ type: "proposalApproved", proposalId: "p1" }, "Owner"))
+    try Effect.try(() => assert.deepStrictEqual(
+      { placed, alphaSend, proposed, alphaApproves, approved: ownerApproves === "Rejected" ? -1 : ownerApproves.approved, sent: fake.sent() },
+      { placed: "drafted", alphaSend: "Rejected", proposed: true, alphaApproves: "Rejected", approved: 1, sent: 0 },
+    ))
+  }
+})
+
+it.live("Never act during an emergency call (spec/telephony/common.md, \"Story: Never act during an emergency call\")", () => effect {
+  // spec/telephony/common.md, "A call, text, dial handoff or contact write runs only on a fresh reading that rules out an emergency call"
+  const fake = fakePhone()
+  provide fake.layer {
+    const watch = try CallWatch
+    const ordinary = try watch.allowed()
+    try sync(() => { fake.world.callState = { inCall: true, emergency: null, emergencyLive: false, watching: true } })
+    const unknownKind = try watch.allowed()
+    try sync(() => { fake.world.callState = "not a reading" })
+    const unreadable = try watch.allowed()
+    try sync(() => { fake.world.callState = { inCall: true, emergency: false, emergencyLive: true, watching: true } })
+    const claimed = try watch.allowed()
+    try Effect.try(() => assert.deepStrictEqual({ ordinary, unknownKind, unreadable, claimed }, { ordinary: true, unknownKind: false, unreadable: false, claimed: false }))
+  }
+})
+
+it.live("Filter a list from the bar (spec/telephony/common.md, \"Story: Filter a list from the bar\")", () => effect {
+  // spec/telephony/common.md, "Typing filters locally; Alpha's filter shows a chip and survives an emptied field"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try PhoneView
+    const phone = try PhoneMachine
+    const ask = try ListAsk
+    try sync(() => { fake.world.callLog = "granted" })
+    const visit = fork view.visit()
+    try until(phone.changes, (p) => p.recents.length === 1)
+    const requests = fake.calls.length
+    try phone.send({ type: "queryTyped", typed: "415" })
+    const typed = (try phone.get()).listQuery
+    const line = try ask.ask("phone", "calls from Maya?")
+    try phone.send({ type: "queryTyped", typed: "" })
+    const kept = (try phone.get()).listQuery
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { typed, line, kept, noRequest: fake.calls.slice(requests).every((c) => !c.startsWith("recentCalls")) },
+      { typed: { tag: "OwnerQuery", typed: "415" }, line: "One call with Maya.", kept: { tag: "AlphaQuery", query: "Maya Chen", label: "Maya Chen" }, noRequest: true },
+    ))
+  }
+})
+
+it.live("Be told what became of a call I asked for (spec/telephony/common.md, \"Story: Be told what became of a call I asked for\")", () => effect {
+  // spec/telephony/common.md, "A call is reported started only when Telecom accepted it, and a lost answer is never \"not called\""
+  const fake = fakePhone()
+  provide fake.layer {
+    try sync(() => { fake.world.placeStatus = "CallPlaced" })
+    const placed = try placeOwnerCall("4155550100")
+    try sync(() => { fake.world.placeStatus = "CallEmergencyHandoff" })
+    const emergency = try placeOwnerCall("911")
+    try sync(() => { fake.world.placeStatus = "CallRoleRequired" })
+    const handedOff = try placeOwnerCall("4155550100")
+    try sync(() => { fake.world.placeStatus = undefined })
+    const lost = try placeOwnerCall("4155550100")
+    try Effect.try(() => assert.deepStrictEqual(
+      { placed, emergency, handedOff, lost },
+      { placed: "CallStarted", emergency: "EmergencyOpened", handedOff: "DialerOpened", lost: "CallUnconfirmed" },
+    ))
+  }
+})
+
+it.live("Know when a call may be an emergency call (spec/telephony/callBar.md, \"Story: Know when a call may be an emergency call\")", () => effect {
+  // spec/telephony/callBar.md, "The bar keeps Telecom's latest call-state reading for the emergency gate"
+  const fake = fakePhone()
+  provide fake.layer {
+    const watch = try CallWatch
+    const bar = try CallBarMachine
+    try sync(() => {
+      fake.world.ongoing = { calls: [{ id: "c1", state: "active", connectedAt: 1000 }] }
+      fake.world.callState = { inCall: true, emergency: true, emergencyLive: true, watching: true }
+    })
+    try watch.eligible(true)
+    try watch.refresh()
+    const state = try bar.get()
+    const live = try watch.live()
+    try Effect.try(() => assert.deepStrictEqual(
+      { reading: state.reading, live },
+      { reading: { inCall: "KnownYes", emergency: "KnownYes" }, live: true },
+    ))
+  }
+})
+
+it.live("Read my recent calls while Phone is open (spec/telephony/phone.md, \"Story: Read my recent calls while Phone is open\")", () => effect {
+  // spec/telephony/phone.md, "Showing Phone starts a read, and leaving it forgets the rows, the field and the notice"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try PhoneView
+    const phone = try PhoneMachine
+    try sync(() => { fake.world.callLog = "granted" })
+    const visit = fork view.visit()
+    try until(phone.changes, (p) => p.recents.length === 1)
+    try fake.setFront({ locked: true })
+    const locked = try until(phone.changes, (p) => !p.shown)
+    try fake.setFront({ locked: false })
+    try until(phone.changes, (p) => p.recents.length === 1)
+    try Fiber.interrupt(visit)
+    const left = try phone.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { locked: Option.map(locked, (p) => p.recents.length), left: [left.shown, left.recents.length], reads: fake.calls.filter((c) => c === "recentCalls").length },
+      { locked: Option.some(0), left: [false, 0], reads: 2 },
+    ))
+  }
+})
+
+it.live("Move between Recents, Keypad, Voicemail and Contacts (spec/telephony/phone.md, \"Story: Move between Recents, Keypad, Voicemail and Contacts\")", () => effect {
+  // spec/telephony/phone.md, "The Voicemail tab exists only while the carrier's visual voicemail is ready"
+  const fake = fakePhone()
+  provide fake.layer {
+    const phone = try PhoneMachine
+    const phoneView = try PhoneView
+    const voicemailView = try VoicemailView
+    const first = fork phoneView.visit("voicemail")
+    try until(phone.changes, (p) => p.shown && !p.reading)
+    const firstVoicemail = fork voicemailView.visit()
+    try until(phone.changes, (p) => p.shown && !p.reading)
+    const unsupported = (try phone.get()).tab
+    try Fiber.interrupt(firstVoicemail)
+    try Fiber.interrupt(first)
+    try sync(() => { fake.world.carrier = "CarrierReady" })
+    const again = fork phoneView.visit()
+    try until(phone.changes, (p) => p.shown && !p.reading)
+    const againVoicemail = fork voicemailView.visit()
+    try until(phone.changes, (p) => p.voicemailReady)
+    const chosen = try quiet(phone.send({ type: "tabChosen", tab: "VoicemailTab" }))
+    try Fiber.interrupt(againVoicemail)
+    try Fiber.interrupt(again)
+    try Effect.try(() => assert.deepStrictEqual(
+      { unsupported, chosen: chosen === "Rejected" ? chosen : chosen.tab, badRoute: phoneRouteOf("keypad:415abc").tag },
+      { unsupported: "RecentsTab", chosen: "VoicemailTab", badRoute: "NoRoute" },
+    ))
+  }
+})
+
+it.live("Find a call from the bar (spec/telephony/phone.md, \"Story: Find a call from the bar\")", () => effect {
+  // spec/telephony/phone.md, "The bar's query filters Recents on the phone, and Alpha's filter returns to Recents"
+  const fake = fakePhone()
+  provide fake.layer {
+    const phone = try PhoneMachine
+    const ask = try ListAsk
+    try sync(() => { fake.world.callLog = "granted" })
+    const visit = fork (try PhoneView).visit("keypad:4155550100")
+    try until(phone.changes, (p) => p.recents.length === 1)
+    const keypad = (try phone.get()).tab
+    const notAboutCalls = try ask.ask("phone", "what's the weather")
+    try ask.ask("phone", "did Maya call?")
+    const filtered = try phone.get()
+    try phone.send({ type: "queryCleared" })
+    const cleared = (try phone.get()).listQuery
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { keypad, notAboutCalls, tab: filtered.tab, chip: filtered.listQuery.tag, cleared, dialed: fake.calls.includes("placeCall") },
+      { keypad: "KeypadTab", notAboutCalls: null, tab: "RecentsTab", chip: "AlphaQuery", cleared: { tag: "NoQuery" }, dialed: false },
+    ))
+  }
+})
+
+it.live("See my voicemail only when my carrier offers it (spec/telephony/voicemail.md, \"Story: See my voicemail only when my carrier offers it\")", () => effect {
+  // spec/telephony/voicemail.md, "Rows exist only for a ready carrier, and a failed read is never an empty list"
+  const fake = fakePhone()
+  provide fake.layer {
+    const voicemail = try VoicemailMachine
+    try sync(() => { fake.world.voicemails = [{ id: "v1", number: "4155550100", cachedName: "Maya Chen", date: 1, durationSeconds: 24, heard: false, audio: "AudioOnPhone", carrierTranscript: null }] })
+    const visit = fork (try VoicemailView).visit()
+    const unsupported = try until(voicemail.changes, (v) => v.carrier === "CarrierUnsupported")
+    try Fiber.interrupt(visit)
+    try sync(() => { fake.world.carrier = "CarrierReady" })
+    const again = fork (try VoicemailView).visit()
+    const ready = try until(voicemail.changes, (v) => v.rows.length === 1)
+    try Fiber.interrupt(again)
+    try Effect.try(() => assert.deepStrictEqual(
+      { unsupported: Option.map(unsupported, (v) => v.rows.length), ready: Option.map(ready, (v) => v.rows[0]!.title) },
+      { unsupported: Option.some(0), ready: Option.some("Maya Chen") },
+    ))
+  }
+})
+
+it.live("Hear a voicemail (spec/telephony/voicemail.md, \"Story: Hear a voicemail\")", () => effect {
+  // spec/telephony/voicemail.md, "A transcript is made on this phone or not at all"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try VoicemailView
+    const voicemail = try VoicemailMachine
+    try sync(() => {
+      fake.world.carrier = "CarrierReady"
+      fake.world.voicemails = [{ id: "v1", number: "4155550100", cachedName: "Maya Chen", date: 1, durationSeconds: 24, heard: false, audio: "AudioOnPhone", carrierTranscript: null }]
+    })
+    const visit = fork view.visit()
+    try until(voicemail.changes, (v) => v.rows.length === 1)
+    try view.open("v1")
+    const heard = try voicemail.get()
+    // spec/telephony/voicemail.md, "Playing marks a voicemail heard, and nothing plays during a call or behind the lock"
+    try view.play()
+    const playing = try voicemail.get()
+    try voicemail.send({ type: "callChanged", inCall: true })
+    const duringCall = try voicemail.get()
+    try Fiber.interrupt(visit)
+    const forgotten = (try view.wav()) === undefined
+    try Effect.try(() => assert.deepStrictEqual(
+      { transcript: [heard.opened.transcript, heard.opened.engine, heard.opened.words], playing: [playing.opened.playback, playing.opened.heard],
+        duringCall: duringCall.opened.playback, marked: fake.calls.includes("markVoicemailHeard"), wav: forgotten },
+      { transcript: ["TranscriptDone", "DeviceEngine", "Call me back"], playing: ["Playing", true], duringCall: "Paused", marked: true, wav: true },
+    ))
+  }
+})
+
+it.live("Delete one voicemail I chose (spec/telephony/voicemail.md, \"Story: Delete one voicemail I chose\")", () => effect {
+  // spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try VoicemailView
+    const voicemail = try VoicemailMachine
+    try sync(() => {
+      fake.world.carrier = "CarrierReady"
+      fake.world.voicemails = [{ id: "v1", number: "4155550100", cachedName: null, date: 1, durationSeconds: 24, heard: true, audio: "AudioOnPhone", carrierTranscript: "See you at five" }]
+    })
+    const visit = fork view.visit()
+    try until(voicemail.changes, (v) => v.rows.length === 1)
+    try view.open("v1")
+    try view.confirmDelete()
+    const unconfirmed = fake.calls.includes("deleteVoicemail")
+    try voicemail.send({ type: "deleteAsked" })
+    try view.confirmDelete()
+    const after = try voicemail.get()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { unconfirmed, rows: after.rows.length, open: after.opened.openId, deletes: fake.calls.filter((c) => c === "deleteVoicemail").length },
+      { unconfirmed: false, rows: 0, open: "", deletes: 1 },
+    ))
+  }
+})
+
+it.live("Read my conversations while Messages is open (spec/telephony/messages.md, \"Story: Read my conversations while Messages is open\")", () => effect {
+  // spec/telephony/messages.md, "Rows exist only while Messages is in front with SMS read access, and a failed read shows none"
+  const fake = fakePhone()
+  provide fake.layer {
+    const messages = try MessagesMachine
+    const visit = fork (try MessagesView).visit()
+    const listed = try until(messages.changes, (m) => m.threads.length === 1)
+    try fake.setFront({ visible: false })
+    const hidden = try until(messages.changes, (m) => !m.shown)
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { listed: Option.map(listed, (m) => m.threads[0]!.snippet), hidden: Option.map(hidden, (m) => m.threads.length) },
+      { listed: Option.some("See you at five"), hidden: Option.some(0) },
+    ))
+  }
+})
+
+it.live("Open a conversation (spec/telephony/messages.md, \"Story: Open a conversation\")", () => effect {
+  // spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try MessagesView
+    const messages = try MessagesMachine
+    const visit = fork view.visit("thread:thread:1")
+    const opened = try until(messages.changes, (m) => m.rows.length > 0)
+    // spec/telephony/messages.md, "Call in a one-person conversation's header calls its one number and keeps the draft"
+    try sync(() => { fake.world.placeStatus = "CallPlaced" })
+    const called = try view.callThread()
+    try view.closeThread()
+    const back = (try messages.get()).view.tag
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { rows: Option.map(opened, (m) => m.rows.map((r) => r.id)), selected: Option.map(opened, (m) => m.view), called, back,
+        markedRead: fake.calls.includes("markThreadRead"), lookalike: messagesRouteOf("thread:12").tag },
+      { rows: Option.some(["sms:1"]), selected: Option.some({ tag: "InThread", threadId: "thread:1", addresses: ["4155550100"] }), called: "CallStarted",
+        back: "ThreadList", markedRead: true, lookalike: "NoRoute" },
+    ))
+  }
+})
+
+it.live("Open the conversation a new-message notice names, only while the composer is idle (spec/telephony/messages.md, \"Story: Open a conversation\")", () => effect {
+  // spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try MessagesView
+    const messages = try MessagesMachine
+    const drafts = try DraftsMachine
+    try sync(() => { fake.world.notice = { threadId: "thread:1", token: "42" } })
+    const visit = fork view.visit("compose:4155550111")
+    try until(messages.changes, (m) => m.view.tag === "Composing")
+    try until(drafts.changes, (d) => slotOf(d.slots, "new").recipients.length === 1)
+    try view.openNotice()
+    const busy = (try messages.get()).view.tag
+    try drafts.send({ type: "recipientsChanged", thread: "new", recipients: [] }, "Owner")
+    try view.openNotice()
+    const idle = (try messages.get()).view
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { busy, idle: idle.tag === "InThread" ? idle.threadId : idle.tag, acknowledged: fake.calls.filter((c) => c === "AlphaTelephony.acknowledgeSmsNotice").length },
+      { busy: "Composing", idle: "thread:1", acknowledged: 1 },
+    ))
+  }
+})
+
+it.live("Start a new message (spec/telephony/messages.md, \"Story: Start a new message\")", () => effect {
+  // spec/telephony/messages.md, "The recipient picker reads contacts only while a new message is open, and answers only its latest query"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try MessagesView
+    const messages = try MessagesMachine
+    const drafts = try DraftsMachine
+    const visit = fork view.visit()
+    try until(messages.changes, (m) => m.threads.length === 1)
+    try messages.send({ type: "composeOpened" })
+    try view.pickerQuery("maya")
+    const picker = (try messages.get()).picker
+    try view.pick("7:4155550100")
+    const recipients = slotOf((try drafts.get()).slots, "new").recipients
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { choices: picker.tag === "PickerOpen" ? picker.choices.map((c) => c.number) : [], recipients, closed: fake.calls.includes("contacts.close") },
+      { choices: ["4155550100"], recipients: ["4155550100"], closed: true },
+    ))
+  }
+})
+
+it.live("Find a conversation (spec/telephony/messages.md, \"Story: Find a conversation\")", () => effect {
+  // spec/telephony/messages.md, "The list filters over each conversation's title and snippet with no request"
+  const fake = fakePhone()
+  provide fake.layer {
+    const messages = try MessagesMachine
+    const ask = try ListAsk
+    const visit = fork (try MessagesView).visit()
+    try until(messages.changes, (m) => m.threads.length === 1)
+    const reads = fake.calls.filter((c) => c === "threadPage").length
+    const none = try ask.ask("messages", "find texts about rent")
+    const one = try ask.ask("messages", "find texts about five")
+    const query = (try messages.get()).listQuery
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { none, one, query, noRead: fake.calls.filter((c) => c === "threadPage").length === reads },
+      { none: "No texts match “rent”.", one: "One conversation.", query: { tag: "AlphaQuery", query: "five", label: "five" }, noRead: true },
+    ))
+  }
+})
+
+it.live("Copy or delete one message (spec/telephony/messages.md, \"Story: Copy or delete one message\")", () => effect {
+  // spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try MessagesView
+    const messages = try MessagesMachine
+    const visit = fork view.visit("thread:thread:1")
+    try until(messages.changes, (m) => m.rows.length === 1)
+    try view.deleteConfirmed()
+    const unconfirmed = fake.calls.includes("deleteMessage")
+    try messages.send({ type: "menuOpened", rowId: "sms:1" })
+    try messages.send({ type: "deleteAsked" })
+    try view.deleteConfirmed()
+    const after = try messages.get()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { unconfirmed, rows: after.rows.map((r) => r.id), deletes: fake.calls.filter((c) => c === "deleteMessage").length, other: fake.world.messages.map((m) => m.id) },
+      { unconfirmed: false, rows: [], deletes: 1, other: ["sms:9"] },
+    ))
+  }
+})
+
+it.live("See my send at once and then as the phone recorded it (spec/telephony/messages.md, \"Story: See my send at once and then as the phone recorded it\")", () => effect {
+  // spec/telephony/messages.md, "A local bubble lasts until the provider lists its row, the send is refused, or the visit ends"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try MessagesView
+    const messages = try MessagesMachine
+    const drafts = try DraftsMachine
+    const sends = try DraftSends
+    try sync(() => { fake.world.smsAnswer = async () => ({ kind: "sms-send", operationId: "x", subscriptionId: 7, bindingHash: "", status: "sent", parts: [], createdAt: 20 }) })
+    const visit = fork view.visit("thread:thread:1")
+    try until(messages.changes, (m) => m.rows.length === 1)
+    try drafts.send({ type: "ownerTyped", thread: "thread:1", recipients: ["4155550100"], text: "On my way" }, "Owner")
+    try sends.send("thread:1")
+    const bubble = (try messages.get()).outgoing.map((o) => [o.body, o.progress])
+    try sync(() => { fake.world.messages = [...fake.world.messages, { id: "sms:2", kind: "sms", threadId: "thread:1", direction: "outgoing", status: "complete", deliveryReport: "none", date: 20, body: "On my way", attachments: 0 }] })
+    try view.refresh(false)
+    const settled = try messages.get()
+    const cleared = slotOf((try drafts.get()).slots, "thread:1").text
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { bubble, settled: [settled.outgoing.length, settled.rows.filter((r) => r.body === "On my way").length], cleared },
+      { bubble: [["On my way", "Confirmed"]], settled: [0, 1], cleared: "" },
+    ))
+  }
+})
+
+it.live("Write to someone, in my own words or Alpha's (spec/telephony/drafts.md, \"Story: Write to someone, in my own words or Alpha's\")", () => effect {
+  // spec/telephony/drafts.md, "Edit makes Alpha's draft the owner's text, and Don't send restores what it replaced"
+  const fake = fakePhone()
+  provide fake.layer {
+    const drafts = try DraftsMachine
+    const sends = try DraftSends
+    const thread = "thread:1"
+    try drafts.send({ type: "ownerTyped", thread, recipients: ["4155550100"], text: "On my" }, "Owner")
+    try sends.placeAlphaDraft(thread, ["4155550100"], "Running late")
+    try drafts.send({ type: "undone", thread }, "Owner")
+    const undone = slotOf((try drafts.get()).slots, thread)
+    try sends.placeAlphaDraft(thread, ["4155550100"], "Running late")
+    try drafts.send({ type: "adopted", thread }, "Owner")
+    const adopted = slotOf((try drafts.get()).slots, thread)
+    try Effect.try(() => assert.deepStrictEqual(
+      { undone: [undone.text, undone.author], adopted: [adopted.text, adopted.author, adopted.undo.tag], sent: fake.sent() },
+      { undone: ["On my", "ByOwner"], adopted: ["Running late", "ByOwner", "NoUndo"], sent: 0 },
+    ))
+  }
+})
+
+it.live("Send a picture message (spec/telephony/drafts.md, \"Story: Send a picture message\")", () => effect {
+  // spec/telephony/drafts.md, "A slot holds at most five JPEG, PNG or GIF pictures within the MMS size, and only the owner attaches them"
+  const fake = fakePhone()
+  provide fake.layer {
+    const sends = try DraftSends
+    const drafts = try DraftsMachine
+    const thread = "thread:1"
+    try drafts.send({ type: "ownerTyped", thread, recipients: ["4155550100"], text: "" }, "Owner")
+    const webp = try sends.addPicture(thread, "image/webp", new Uint8Array(10))
+    const huge = try sends.addPicture(thread, "image/jpeg", new Uint8Array(1024 * 1024 + 1))
+    const added: string[] = []
+    for (let i = 0; i < 6; i++) added.push(try sends.addPicture(thread, "image/png", new Uint8Array(100)))
+    const pictures = slotOf((try drafts.get()).slots, thread).pictures.length
+    const problem = try sends.send(thread)
+    try Effect.try(() => assert.deepStrictEqual(
+      { webp, huge, added, pictures, problem, mms: fake.calls.includes("sendMms") },
+      { webp: "unsupported", huge: "too-large", added: ["added", "added", "added", "added", "added", "too-many"], pictures: 5, problem: undefined, mms: true },
+    ))
+  }
+})
+
+it.live("Keep what I was asking Alpha (spec/telephony/drafts.md, \"Story: Keep what I was asking Alpha\")", () => effect {
+  // spec/telephony/drafts.md, "Each subject keeps one request to Alpha, separate from its draft slot"
+  const fake = fakePhone()
+  provide fake.layer {
+    const drafts = try DraftsMachine
+    try drafts.send({ type: "ownerTyped", thread: "thread:1", recipients: ["4155550100"], text: "See you" }, "Owner")
+    try drafts.send({ type: "requestTyped", subject: "messages:thread:thread:1", request: "summarize this" }, "Owner")
+    try drafts.send({ type: "requestTyped", subject: "contacts:contact:7", request: "add her email" }, "Owner")
+    try drafts.send({ type: "requestSent", subject: "contacts:contact:7" }, "Owner")
+    const kept = try drafts.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { requests: kept.requests, slot: slotOf(kept.slots, "thread:1").text, sent: fake.sent() },
+      { requests: [{ subject: "messages:thread:thread:1", request: "summarize this" }], slot: "See you", sent: 0 },
+    ))
+  }
+})
+
+it.live("Read my contacts only while I am looking at them (spec/telephony/contacts.md, \"Story: Read my contacts only while I am looking at them\")", () => effect {
+  // spec/telephony/contacts.md, "A read starts only in the open view, and only the latest read publishes"
+  const fake = fakePhone()
+  provide fake.layer {
+    const contacts = try ContactsMachine
+    const visit = fork (try ContactsView).visit()
+    const listed = try until(contacts.changes, (c) => c.rows.length === 1 && !c.loading)
+    try fake.setFront({ locked: true })
+    const locked = try until(contacts.changes, (c) => !c.shown)
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { listed: Option.map(listed, (c) => c.rows[0]!.title), locked: Option.map(locked, (c) => c.rows.length), closed: fake.calls.includes("contacts.close") },
+      { listed: Option.some("Maya Chen"), locked: Option.some(0), closed: true },
+    ))
+  }
+})
+
+it.live("Let Alpha show me matching contacts (spec/telephony/contacts.md, \"Story: Let Alpha show me matching contacts\")", () => effect {
+  // spec/telephony/contacts.md, "Alpha's filter is the provider's own query on this phone, closes an open contact and shows a clearable chip"
+  const fake = fakePhone()
+  provide fake.layer {
+    const view = try ContactsView
+    const contacts = try ContactsMachine
+    const visit = fork view.visit("filter:maya")
+    const filtered = try until(contacts.changes, (c) => c.chip !== "" && !c.loading)
+    try view.clearChip()
+    const cleared = try contacts.get()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { chip: Option.map(filtered, (c) => [c.chip, c.rows.length]), cleared: [cleared.chip, cleared.query], query: fake.calls.includes("list:maya") },
+      { chip: Option.some(["maya", 1]), cleared: ["", ""], query: true },
+    ))
+  }
+})
+
+it.live("Address the person or Alpha from one bar (spec/telephony/comms.md, \"Story: Address the person or Alpha from one bar\")", () => effect {
+  // spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"
+  const fake = fakePhone()
+  provide fake.layer {
+    const comms = try CommsMachine
+    try comms.send({ type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: "messages:thread:thread:1" }, "Owner")
+    const closed = try comms.get()
+    try comms.send({ type: "alphaOpened" }, "Owner")
+    const open = try comms.get()
+    const byAlpha = try quiet(comms.send({ type: "chatClosed" }, "Alpha"))
+    try comms.send({ type: "chatClosed" }, "Owner")
+    const back = (try comms.get()).target
+    try Effect.try(() => assert.deepStrictEqual(
+      { closed: [closed.target, leftSlot(closed)], open: [open.target, leftSlot(open)], byAlpha, back },
+      { closed: ["PersonTarget", "AlphaButton"], open: ["AlphaTarget", "AvatarSlot"], byAlpha: "Rejected", back: "PersonTarget" },
+    ))
+  }
+})
+
+it.live("See what Alpha is acting on (spec/telephony/comms.md, \"Story: See what Alpha is acting on\")", () => effect {
+  // spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"
+  const fake = fakePhone()
+  provide fake.layer {
+    const comms = try CommsMachine
+    try comms.send({ type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: "messages:list:" }, "Owner")
+    try comms.send({ type: "alphaOpened" }, "Owner")
+    try comms.send({ type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: "messages:thread:thread:1" }, "Owner")
+    const moved = try comms.get()
+    try comms.send({ type: "stageReturned" }, "Owner")
+    const returned = try comms.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      { moved: [moved.height, moved.stage.length], returned: [returned.key, returned.height, returned.stage.length] },
+      { moved: ["SheetOpen", 1], returned: ["messages:list:", "SheetOpen", 0] },
+    ))
+  }
+})
+
+it.live("Never lose End (spec/telephony/comms.md, \"Story: Never lose End\")", () => effect {
+  // spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"
+  const fake = fakePhone()
+  provide fake.layer {
+    const comms = try CommsMachine
+    const stage = try CommsStage
+    const bar = try CallBarMachine
+    const following = fork stage.follow()
+    try bar.send({ type: "eligibilityChanged", eligible: true })
+    try bar.send({ type: "callsReported", calls: [{ id: "c1", phase: "Active", connectedAt: 1000 }], wellFormed: true })
+    try until(comms.changes, (c) => c.callLive)
+    const places: string[] = [endPlace(try comms.get())]
+    try comms.send({ type: "alphaOpened" }, "Owner")
+    places.push(endPlace(try comms.get()))
+    try comms.send({ type: "heightChanged", height: "SheetFull" }, "Owner")
+    places.push(endPlace(try comms.get()))
+    try comms.send({ type: "voiceChanged", on: true }, "Owner")
+    places.push(endPlace(try comms.get()))
+    try Fiber.interrupt(following)
+    try Effect.try(() => assert.deepStrictEqual(places, ["EndBesideBar", "EndInCard", "EndInStrip", "EndOnVoicePanel"]))
+  }
+})
+
+it.live("Answer, decline or screen a call while I talk to Alpha (spec/telephony/comms.md, \"Story: Answer, decline or screen a call while I talk to Alpha\")", () => effect {
+  // spec/telephony/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"
+  const fake = fakePhone()
+  provide fake.layer {
+    const comms = try CommsMachine
+    const stage = try CommsStage
+    const bar = try CallBarMachine
+    const following = fork stage.follow()
+    try comms.send({ type: "alphaOpened" }, "Owner")
+    try bar.send({ type: "eligibilityChanged", eligible: true })
+    try bar.send({ type: "callsReported", calls: [{ id: "c9", phase: "Ringing", connectedAt: 0 }], wellFormed: true })
+    try until(comms.changes, (c) => c.ring === "c9")
+    const screened = try stage.propose("p1", "ScreenProposal", true, "c9")
+    try bar.send({ type: "callsReported", calls: [], wellFormed: true })
+    const ended = try until(comms.changes, (c) => c.ring === "")
+    try Fiber.interrupt(following)
+    try Effect.try(() => assert.deepStrictEqual(
+      { screened, retired: Option.map(ended, (c) => [c.proposal.tag, c.past.map((p) => p.pastId)]) },
+      { screened: true, retired: Option.some(["NoProposal", ["p1"]]) },
+    ))
+  }
+})
+
+it.live("Approve what Alpha proposes, one thing at a time (spec/telephony/comms.md, \"Story: Approve what Alpha proposes, one thing at a time\")", () => effect {
+  // spec/telephony/comms.md, "A new proposal replaces the open one, and a replaced or ignored proposal never acts"
+  const fake = fakePhone()
+  provide fake.layer {
+    const comms = try CommsMachine
+    const stage = try CommsStage
+    try stage.propose("p1", "CallProposal", true, "")
+    try stage.propose("p2", "OtherProposal", false, "")
+    const replacedApproval = try quiet(comms.send({ type: "proposalApproved", proposalId: "p1" }, "Owner"))
+    const again = try stage.propose("p1", "CallProposal", true, "")
+    try comms.send({ type: "proposalApproved", proposalId: "p2" }, "Owner")
+    const twice = try quiet(comms.send({ type: "proposalApproved", proposalId: "p2" }, "Owner"))
+    const approved = (try comms.get()).approved
+    try Effect.try(() => assert.deepStrictEqual(
+      { replacedApproval, again, twice, approved, placed: fake.calls.includes("placeCall") },
+      { replacedApproval: "Rejected", again: false, twice: "Rejected", approved: 1, placed: false },
+    ))
+  }
+})
+
+it.live("Hear what Alpha knows when I open it (spec/telephony/comms.md, \"Story: Hear what Alpha knows when I open it\")", () => effect {
+  // spec/telephony/comms.md, "A subject is briefed once, only with the chat open, and never from fixtures in production"
+  const fake = fakePhone()
+  provide fake.layer {
+    const comms = try CommsMachine
+    const stage = try CommsStage
+    const phone = try PhoneMachine
+    try sync(() => { fake.world.callLog = "granted" })
+    const visit = fork (try PhoneView).visit()
+    try until(phone.changes, (p) => p.recents.length === 1)
+    try comms.send({ type: "subjectShown", app: "PhoneApp", subject: "RecentsSubject", key: "phone:recents:" }, "Owner")
+    const closedChat = try stage.briefing()
+    try comms.send({ type: "alphaOpened" }, "Owner")
+    const first = try stage.briefing()
+    const second = try stage.briefing()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { closedChat, first: first === null ? null : first.missed.map((m) => m.title), second },
+      { closedChat: null, first: ["Maya Chen"], second: null },
+    ))
+  }
+})
+
+it.live("Nothing acts over an emergency call (spec/telephony/actions.md, \"Story: Nothing acts over an emergency call\")", () => effect {
+  // spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"
+  const fake = fakePhone()
+  provide fake.layer {
+    const actions = try TelephonyActions
+    try sync(() => { fake.world.callState = { inCall: true, emergency: null, emergencyLive: false, watching: true } })
+    const text = try actions.run({ type: "sms_send", recipients: ["4155550100"], body: "On my way", subscriptionId: 7 }, "op-e1", { text: "text 415-555-0100 on my way" })
+    const call = try actions.run({ type: "phone_call", target: { kind: "number", number: "4155550100" } }, "op-e2", { text: "call 415-555-0100" })
+    try Effect.try(() => assert.deepStrictEqual(
+      { text: text.settled, call: call.settled, sent: fake.sent(), placed: fake.calls.includes("placeCall") },
+      { text: "Refused", call: "Refused", sent: 0, placed: false },
+    ))
+  }
+})
+
+it.live("Be told exactly what happened (spec/telephony/actions.md, \"Story: Be told exactly what happened\")", () => effect {
+  // spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"
+  const fake = fakePhone()
+  provide fake.layer {
+    const actions = try TelephonyActions
+    const machine = try ActionsMachine
+    const lost = try actions.run({ type: "sms_send", recipients: ["4155550100"], body: "On my way", subscriptionId: 7 }, "op-r1", { text: "text 415-555-0100 on my way" })
+    // spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"
+    const keypad = try actions.run({ type: "phone_keypad", number: "4155550100" }, "op-r2", { text: "open the keypad with 415-555-0100" })
+    const dispatches = (try machine.get()).dispatches
+    try Effect.try(() => assert.deepStrictEqual(
+      { lost: lost.settled, keypad: [keypad.settled, keypad.present], dialed: fake.calls.includes("placeCall") || fake.calls.includes("dial"), dispatches },
+      { lost: "Unconfirmed", keypad: ["Applied", { app: "phone", route: "keypad:4155550100" }], dialed: false, dispatches: 1 },
+    ))
+  }
+})
+
+it.live("See what is new from Home (spec/telephony/attention.md, \"Story: See what is new from Home\")", () => effect {
+  // spec/telephony/attention.md, "A card exists only for a source that was read and has something new"
+  const fake = fakePhone()
+  provide fake.layer {
+    const attention = try AttentionMachine
+    try sync(() => { fake.world.callLog = "granted" })
+    const visit = fork (try HomeAttention).visit()
+    const read = try until(attention.changes, (a) => a.threadsRead && a.callsRead)
+    try fake.setFront({ visible: false })
+    const hidden = try until(attention.changes, (a) => !a.homeShown)
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { messages: Option.map(read, messagesCard), phone: Option.map(read, phoneCard), hidden: Option.map(hidden, messagesCard) },
+      { messages: Option.some(true), phone: Option.some(true), hidden: Option.some(false) },
+    ))
+  }
+})

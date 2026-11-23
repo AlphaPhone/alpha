@@ -72,8 +72,8 @@ export schema SettingsOpened { readonly opened: boolean }
 /** The resident's end-of-turn answer. */
 export schema EndOfTurnScore { readonly available: boolean; readonly complete?: boolean }
 
-/** The action a voice reply reports, by kind, as the resident labels it. */
-export schema ReplyActionLabel { readonly kind: "none" | "email-draft" | "email-failed" | "other"; readonly validatedCard?: boolean; readonly verbatimAsked?: boolean }
+/** The label of the last action a voice turn ran, as the resident answers it: the action's name, whether the reply carries a validated card, and whether the owner asked for exact wording. */
+export schema ReplyActionLabel { readonly kind: string; readonly validatedCard: boolean; readonly verbatimAsked: boolean }
 
 /** The resident's answer to a voice turn. */
 export schema VoiceTurnReply { readonly messageId: string; readonly text: string; readonly awaitingReview?: boolean; readonly action?: ReplyActionLabel }

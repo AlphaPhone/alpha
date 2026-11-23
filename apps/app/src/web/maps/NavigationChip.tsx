@@ -5,8 +5,10 @@ import { guidanceDuration } from "../../maps/geometry.vibe";
 import { bannerOf } from "../../maps/navigation.vibe";
 import type { AppId } from "../app-screen.ts";
 import { cn, focusRing } from "../lib/cn.ts";
-import { mapsRuntime, useMapsContent } from "./runtime.ts";
+import { useMapsContent } from "./actions.ts";
+import { runtime } from "./runtime.ts";
 
+/** How the chip brings Maps back to the front. */
 export type NavigationChipProps = {
   readonly open: (app: AppId, route?: string) => void;
 };
@@ -16,7 +18,7 @@ export type NavigationChipProps = {
  * @model spec/maps/guidance.md
  */
 export function NavigationChip({ open }: NavigationChipProps) {
-  const { state } = useMachine(mapsRuntime);
+  const { state } = useMachine(runtime);
   const content = useMapsContent();
   const g = content.guidance;
   if (!state || state.phase === "NotGuiding" || !g) return null;

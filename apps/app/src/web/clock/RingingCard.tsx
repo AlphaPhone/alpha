@@ -6,6 +6,7 @@ import type { Ringer } from "../../../gen/clock__ringer.ts";
 import { Button, Card } from "../components/ui/index.ts";
 import { wall } from "./text.ts";
 
+/** The ringer and what rings now, and the owner's Silence, Snooze, Dismiss and Stop. */
 export type RingingCardProps = {
   /** The page's ringer: whether it holds the lock and sounds. */
   ringer: Ringer;

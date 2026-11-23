@@ -3,7 +3,8 @@
 What Settings shows about the phone: one read of Android's facts at a time, fenced by its
 generation; the text size the device holds; Alpha's roles; and the handoffs to Android's own pages.
 On the launcher and the image these come from `AlphaDevice`, `ElizaSystem`, `AlphaNotifications`,
-`AlphaPhotos` and `AlphaFiles`; in a browser, from the browser's own permission answers.
+`AlphaPhotos`, `AlphaPhotoLibrary`, `AlphaFiles` and Files' storage reading; in a browser, from the
+browser's own permission answers.
 
 ## Story: Read my phone's state truthfully
 
@@ -25,7 +26,7 @@ type Handoff = HandoffIdle | HandoffOpening | HandoffOpened({ specific: bool }) 
 type Facts = {
   read: DeviceRead, generation: int, shown: int, visible: bool, resumedUnread: bool,
   scaleIssued: int, scaleSeen: int, scaleFailed: int, scaleHeld: int, scalePending: bool,
-  roleAsking: bool, handoff: Handoff,
+  roleAsking: bool, roleRefused: bool, handoff: Handoff, handoffPage: SettingsPage, shade: ShadeAnswer,
 }
 pure val unread: DeviceRead = {
   wifi: Unknown, bluetooth: Unknown, airplane: Unknown, location: Unknown, dnd: Unknown, brightnessAuto: Unknown,
@@ -35,7 +36,8 @@ pure val unread: DeviceRead = {
 }
 pure val initial: Facts = {
   read: unread, generation: 0, shown: 0, visible: false, resumedUnread: false,
-  scaleIssued: 0, scaleSeen: 0, scaleFailed: 0, scaleHeld: 0, scalePending: false, roleAsking: false, handoff: HandoffIdle,
+  scaleIssued: 0, scaleSeen: 0, scaleFailed: 0, scaleHeld: 0, scalePending: false, roleAsking: false, roleRefused: false,
+  handoff: HandoffIdle, handoffPage: PageHome, shade: ShadeNotAsked,
 }
 pure val readValues = Set(unread).union(Set({ ...unread, wifi: On, home: NotHeldByAlpha, launcher: true, textScale: 115, versionCode: 7 }))
 pure val tokenValues = Set(1, 2, 3)
@@ -70,7 +72,8 @@ pure def sometimesUnreadBehindAnotherView(f: Facts): bool = f.resumedUnread
 
 The device applies requests in the order they were issued; their answers arrive in any order. An
 older answer is held while a newer request is in flight, and shown once the newest fails, because it
-is then the size the device holds. The sizes are 75, 100, 115, 130 and 150 percent.
+is then the size the device holds. The sizes are 75, 100, 115, 130 and 150 percent. A failed newest
+request says the size could not be saved, and Settings reads the device again.
 
 ```quint
 pure val textScales = Set(75, 100, 115, 130, 150)
@@ -90,6 +93,17 @@ pure def scaleFailedNewest(f: Facts): Facts =
 pure def alwaysTheShownSizeIsOneTheDeviceTakes(f: Facts): bool = textScales.contains(f.read.textScale)
 pure def alwaysAnswersFollowRequests(f: Facts): bool = f.scaleSeen <= f.scaleIssued and f.scaleFailed <= f.scaleIssued
 pure def sometimesAnOlderSizeHeld(f: Facts): bool = f.scaleHeld > 0
+pure def scaleNotSaved(f: Facts): bool = f.scaleIssued >= 1 and f.scaleFailed == f.scaleIssued
+```
+
+### In a browser, each permission is the browser's own answer
+
+The camera, microphone, location and notifications are what the browser's permission answers say;
+photos and files there are always the ones the owner picks, which is partial access.
+
+```quint
+pure def pickedOnly(inBrowser: bool, access: Access): Access = if (inBrowser) Partial else access
+pure def lawABrowserPickIsPartial(access: Access): bool = pickedOnly(true, access) == Partial
 ```
 
 ## Story: Make Alpha my Home app
@@ -100,14 +114,14 @@ pure def sometimesAnOlderSizeHeld(f: Facts): bool = f.scaleHeld > 0
 ### Set as Home is offered only to a launcher build that Android reports does not hold the role
 
 Android shows its own role dialog; whether Alpha holds the role is read back afterwards, never
-assumed from the dialog's answer.
+assumed from the dialog's answer. A request Android refused says nothing changed.
 
 ```quint
 pure def canAskHome(f: Facts): bool =
   f.read.launcher and not(f.roleAsking) and (f.read.home == NotHeldByAlpha or f.read.home == HeldElsewhere)
-pure def askHome(f: Facts): Facts = { ...f, roleAsking: true }
-pure def canHomeAnswered(f: Facts): bool = f.roleAsking
-pure def homeAnswered(f: Facts): Facts = beginRead({ ...f, roleAsking: false })
+pure def askHome(f: Facts): Facts = { ...f, roleAsking: true, roleRefused: false }
+pure def canHomeAnswered(f: Facts, refused: bool): bool = f.roleAsking
+pure def homeAnswered(f: Facts, refused: bool): Facts = beginRead({ ...f, roleAsking: false, roleRefused: refused })
 pure def stepARoleIsHeldOnlyByARead(before: Facts, via: str, after: Facts): bool =
   (via == "askHome" or via == "homeAnswered") implies after.read.home == before.read.home
 pure def sometimesAskingForHome(f: Facts): bool = f.roleAsking
@@ -121,11 +135,13 @@ pure def sometimesAskingForHome(f: Facts): bool = f.roleAsking
 
 ### One handoff runs at a time, and its answer names whether the specific page opened
 
-A repeated tap while Android is opening a page is ignored.
+A repeated tap while Android is opening a page is ignored. A page Android could not open says it is
+unavailable. Alpha's App info, Android's all-files access page and its photo library dialog are
+handoffs too, and Settings reads the device again after the last two answer.
 
 ```quint
-pure def canBeginHandoff(f: Facts): bool = f.handoff != HandoffOpening
-pure def beginHandoff(f: Facts): Facts = { ...f, handoff: HandoffOpening }
+pure def canBeginHandoff(f: Facts, page: SettingsPage): bool = f.handoff != HandoffOpening
+pure def beginHandoff(f: Facts, page: SettingsPage): Facts = { ...f, handoff: HandoffOpening, handoffPage: page }
 pure def canHandoffAnswered(f: Facts, opened: bool, specific: bool): bool = f.handoff == HandoffOpening
 pure def handoffAnswered(f: Facts, opened: bool, specific: bool): Facts =
   { ...f, handoff: if (opened) HandoffOpened({ specific: specific }) else HandoffRefused }
@@ -137,24 +153,31 @@ pure def sometimesABroaderPage(f: Facts): bool = f.handoff == HandoffOpened({ sp
 ```quint
 type SettingsPage = PageWifi | PageBluetooth | PageMobile | PageAirplane | PageLocation | PageDisplay | PageSound
   | PageBattery | PageAbout | PageDeveloper | PageNotifications | PagePrivacy | PageDefaultApps | PageDnd | PageHome
+  | PageAppInfo | PageFilesAccess | PagePhotoAccess
 type BroaderNotice = NoBroader | NetworkPage | PriorityPage | RelatedPage
 pure def broaderNotice(page: SettingsPage, specific: bool): BroaderNotice =
   if (specific) NoBroader else if (page == PageAirplane or page == PageMobile) NetworkPage
   else if (page == PageDnd) PriorityPage else RelatedPage
 pure def lawASpecificPageNeedsNoNotice(page: SettingsPage): bool = broaderNotice(page, true) == NoBroader
+pure def lawEveryBroaderPageHasANotice(page: SettingsPage): bool = broaderNotice(page, false) != NoBroader
 ```
 
 ### The shade opens only from a focused launcher that holds the status bar permission
 
-Otherwise Settings says which of those Android reported missing.
+Otherwise Settings says which of those Android reported missing, until the next tap.
 
 ```quint
-type ShadeAnswer = ShadeOpened | ShadeStandalone | ShadePermissionMissing | ShadeUnsupported | ShadeNotInFront
+type ShadeAnswer = ShadeNotAsked | ShadeOpened | ShadeStandalone | ShadePermissionMissing | ShadeUnsupported | ShadeNotInFront
+pure def canShadeAnswered(f: Facts, answer: ShadeAnswer): bool = answer != ShadeNotAsked
+pure def shadeAnswered(f: Facts, answer: ShadeAnswer): Facts = { ...f, shade: answer }
 pure def shadeOpened(answer: ShadeAnswer): bool = answer == ShadeOpened
 pure def lawOnlyAnOpenedShadeCounts(answer: ShadeAnswer): bool = shadeOpened(answer) iff answer == ShadeOpened
 ```
 
 ### Storage use is shown only as a used and a total Android reported, used never above total
+
+The primary volume Files reads is the source; the launcher's own snapshot is used where Files has
+no volume to report.
 
 ```quint
 pure def storageKnown(read: DeviceRead): bool =

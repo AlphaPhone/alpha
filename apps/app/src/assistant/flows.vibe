@@ -4,11 +4,9 @@ import { moveFirstDraft } from "./first-send.vibe"
 import { Machine as DecisionMachine, machine as decisionMachine, initial as decisionStart, type Decision } from "../../gen/assistant__decision.effect.vibe"
 import { Machine as EmailMachine, machine as emailMachine, sendable, type EmailCard, type SendAnswer } from "../../gen/assistant__emailCard.effect.vibe"
 import { Machine as AskMachine, machine as askMachine, type AskKind, type AskReply } from "../../gen/assistant__noticeQuestion.effect.vibe"
-import { Native } from "../platform/native.vibe"
-import { Resident } from "../platform/resident.vibe"
 import { Assistant } from "./assistant.vibe"
 import { AssistantHost } from "./host.vibe"
-import { ask } from "./transport.vibe"
+import { AssistantEmail, OwnNotices, WorkflowStepDecisions } from "./ports.vibe"
 
 effect function holdDecision(start: Decision) { provide decisionMachine(start) { return try DecisionMachine } }
 effect function holdEmail(start: EmailCard) { provide emailMachine(start) { return try EmailMachine } }
@@ -26,21 +24,21 @@ export service AssistantFlows {
   sendEmail(cardId: string, card: EmailCard, draft: { readonly to: string; readonly subject: string; readonly body: string }): EmailCard!!
   /** Decline an email card; nothing is sent. */
   declineEmail(cardId: string, card: EmailCard): EmailCard!!
-  /** Ask the assistant about one of Alpha's notifications; true when the question was composed into the composer. */
-  askAboutNotice(noticeId: string, kind: AskKind, question: string): boolean!!
+  /** Ask the assistant about one of Alpha's notifications at the revision the owner saw; true when the question was composed into the composer. */
+  askAboutNotice(noticeId: string, revision: string, kind: AskKind, question: string): boolean!!
 }
 
-/** The flows over their machines, the resident and Android. */
+/** The flows over their machines, and the Inbox, Clock and Workflows ports. */
 export const flowsLayer = Layer.effect(AssistantFlows, effect {
   const drafts = try DraftsMachine
-  const resident = try Resident
-  const native = try Native
   const host = try AssistantHost
   const assistant = try Assistant
+  const mail = try AssistantEmail
+  const notices = try OwnNotices
+  const steps = try WorkflowStepDecisions
   const decisions = new Map<string, DecisionMachine.Shape>()
   const emails = new Map<string, EmailMachine.Shape>()
   const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
-  const run = <A, E>(work: Effect.Effect<A, E, Resident>) => Effect.provideService(work, Resident, resident)
   effect function emailFor(cardId: string, card: EmailCard) {
     const known = emails.get(cardId)
     if (known !== undefined) return known
@@ -57,10 +55,11 @@ export const flowsLayer = Layer.effect(AssistantFlows, effect {
       if (!(try quiet(machine.send({ type: "decideTap", approved })))) return before
       const after = try machine.get()
       if (!after.wire) return after
-      const answered = run(ask("POST", `/api/workflows/runs/${encodeURIComponent(runId)}/approval`, { approved })) catch () => undefined
-      if (answered === undefined) {
+      const answered = try steps.decide(runId, approved)
+      if (answered !== "recorded") {
         try quiet(machine.send({ type: "requestLost" }))
         try quiet(machine.send({ type: "unknownReply" }))
+        if (answered === "unavailable") try host.toast("Workflows isn’t available. Nothing was decided.")
       } else {
         try quiet(machine.send({ type: "serverRecord" }))
         if (!(try quiet(machine.send({ type: "successReply" })))) try quiet(machine.send({ type: "unknownReply" }))
@@ -77,7 +76,7 @@ export const flowsLayer = Layer.effect(AssistantFlows, effect {
       const machine = try emailFor(cardId, card)
       if (!sendable(try machine.get()) || !(try quiet(machine.send({ type: "sendEmail" })))) return try machine.get()
       const state = try machine.get()
-      const said: SendAnswer = try host.sendEmail({ ...draft, requestId: `${cardId}:${state.version}` })
+      const said: SendAnswer = try mail.send({ ...draft, requestId: `${cardId}:${state.version}` })
       try quiet(machine.send({ type: "answer", said }))
       return try machine.get()
     },
@@ -86,7 +85,7 @@ export const flowsLayer = Layer.effect(AssistantFlows, effect {
       try quiet(machine.send({ type: "decline" }))
       return try machine.get()
     },
-    askAboutNotice: (noticeId: string, kind: AskKind, question: string) => effect {
+    askAboutNotice: (noticeId: string, revision: string, kind: AskKind, question: string) => effect {
       const asking = try holdAsk()
       const exposure = (try host.screen()).exposure
       try quiet(asking.send({ type: "sensitivityChanges", value: exposure.locked || exposure.privateView }))
@@ -94,12 +93,13 @@ export const flowsLayer = Layer.effect(AssistantFlows, effect {
       if ((try asking.get()).phase !== "AskReview") return false
       try quiet(asking.send({ type: "submit", edit: question.trim() === "" ? "EmptyEdit" : "ValidEdit" }))
       if ((try asking.get()).phase !== "AskRecheck") return false
-      const listed = native.invoke("AlphaNotifications", "ownNotice", { id: noticeId }) catch () => undefined
-      const reply: AskReply = typeof listed === "object" && listed !== null && (listed as { readonly id?: unknown }).id === noticeId ? "ExactNotice" : "MissingNotice"
+      try quiet(asking.send({ type: "composerChanges", value: !(try assistant.holdingDraft()) }))
+      const listed = try notices.current(noticeId)
+      const reply: AskReply = listed === undefined || listed.id !== noticeId ? "MissingNotice" : listed.revision !== revision ? "TokenChanged" : "ExactNotice"
       try quiet(asking.send({ type: "recheck", reply }))
       if ((try asking.get()).phase !== "AskConsume") return false
-      const consumed = native.invoke("AlphaNotifications", "consumeOwnNotice", { id: noticeId }) catch () => undefined
-      try quiet(asking.send({ type: "settleConsume", ok: consumed !== undefined }))
+      const consumed = try notices.consume(noticeId)
+      try quiet(asking.send({ type: "settleConsume", ok: consumed }))
       if ((try asking.get()).composed !== 1) return false
       try assistant.openWith(question)
       return true

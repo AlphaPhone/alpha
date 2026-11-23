@@ -5,6 +5,7 @@ import { statusWord } from "../../../gen/workflows__vocabulary.ts";
 import { Alert, Button, EmptyState, ListRow, Spinner } from "../components/ui/index.ts";
 import { outcomeUnknown, scheduleText, scheduledTitle, statusText } from "./words.ts";
 
+/** The Workflows list as the Automations machine holds it, and what it offers. */
 export interface AutomationListProps {
   /** The list as the Automations Machine holds it. */
   list: Automations;

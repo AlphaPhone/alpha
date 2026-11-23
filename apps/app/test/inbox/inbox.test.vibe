@@ -6,11 +6,14 @@ import { fakeCloud, fakeNative, fakeResident, buildInfo } from "../../src/platfo
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { CloudSession, GoogleAccounts } from "../../src/account/layer.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
+import { Overview } from "../../src/shell/overview.vibe"
+import { ShellMail } from "../../src/shell/ports.vibe"
+import { ResidentControl } from "../../src/platform/resident-control.vibe"
 import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { FilePicker } from "../../src/files/picker.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
-import { layer as inbox, InboxAccounts, Mailbox, Composer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
+import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
 
 const grantA = "grant-a"
 const grantB = "grant-b"
@@ -62,6 +65,9 @@ function neighbors(rows = [{ connectionId: grantA, grantId: grantA, email: "ann@
     Layer.succeed(CloudSession, { changes: Stream.make(session), notices: Stream.empty, current: () => succeed(session), owner: () => succeed(1), ownerKey: (key: string) => succeed(`alpha/1/${key}`), run: () => Effect.void, adopt: () => Effect.void, attempt: () => Effect.void, signOut: () => succeed(true), rejected: () => Effect.void, admit: () => Effect.void } as unknown as CloudSession.Shape),
     Layer.succeed(GoogleAccounts, { changes: Stream.empty, accounts: Stream.make(rows), list: () => succeed(rows), run: () => Effect.void, open: () => Effect.void, close: () => Effect.void, reload: () => Effect.void, connect: () => Effect.void, connectCalendar: () => Effect.void, allowCalendar: () => Effect.void, cancel: () => Effect.void, disconnect: () => Effect.void, showCache: () => Effect.void, prepareReview: () => Effect.void } as unknown as GoogleAccounts.Shape),
     Layer.succeed(Navigation, { open: (app: string) => sync(() => { opened.push(app); return true }) } as unknown as Navigation.Shape),
+    Layer.succeed(Overview, { reportAttention: () => Effect.void } as unknown as Overview.Shape),
+    Layer.succeed(ShellMail, { send: () => succeed("Unsent" as const), fill: () => Effect.void } as unknown as ShellMail.Shape),
+    Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, recovered: () => Effect.void } as unknown as ResidentControl.Shape),
     Layer.succeed(BrowserAgent, { openApproved: () => succeed({ tab: "t", present: Effect.void }) } as unknown as BrowserAgent.Shape),
     Layer.succeed(FilePicker, { choose: () => succeed([]) } as unknown as FilePicker.Shape),
     Layer.succeed(Preferences, { loadsMailImages: () => succeed(false) } as unknown as Preferences.Shape),
@@ -104,13 +110,13 @@ it.live("Read my mailbox page by page, and see when it changed while paging", ()
   }
 })
 
-// spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
+// spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "Send of the email on screen continues its open operation, and an unresolved one blocks another"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
 it.live("Send an email once as reviewed, and recover its outcome after a lost answer", () => effect {
   const calls: Calls = []
   const review = { kind: "send", from: "ann@example.com", to: ["bo@example.com"], cc: [], bcc: [], subject: "Friday", mode: "compose", bodyText: "Noon works.", attachments: [], forwardedAttachments: [] }
   const digest = try sha256Hex(JSON.stringify(review))
   provide app(gmailCloud(calls, { loseDispatch: true, review, digest })) {
-    const composer = try Composer
+    const composer = try MailComposer
     const operations = try MailOperations
     const mailbox = try Mailbox
     try settle(mailbox.changes, (m) => m.phase === "ListReady")
@@ -127,7 +133,7 @@ it.live("Send an email once as reviewed, and recover its outcome after a lost an
     try Effect.try(() => assert.deepStrictEqual({
       lost, again, recovered, dispatches: calls.filter((c) => c === "dispatch").length, openDraftCleared: after.open.id === "",
     }, {
-      lost: "Uncertain", again: "Uncertain", recovered: "Sent", dispatches: 1, openDraftCleared: true,
+      lost: "Uncertain", again: "Sent", recovered: "SentBefore", dispatches: 1, openDraftCleared: true,
     }))
   }
 })
@@ -137,7 +143,7 @@ it.live("A draft stays with the account it was written from across a switch", ()
   const calls: Calls = []
   provide app(gmailCloud(calls)) {
     const accounts = try InboxAccounts
-    const composer = try Composer
+    const composer = try MailComposer
     const mailbox = try Mailbox
     try settle(mailbox.changes, (m) => m.phase === "ListReady")
     try composer.compose({ toList: ["bo@example.com"], subject: "Plan", body: "Draft text", files: [] })

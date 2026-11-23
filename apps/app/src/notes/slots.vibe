@@ -13,6 +13,7 @@ export const slots = {
   draft: "notes-canonical-draft:v1:device",
   folders: "notes-folders:v1:device",
   origins: "note-origins:v1:device",
+  legacyTrash: "notes-trash:v1:device",
 } as const
 
 /** One slot's raw value: the Keystore slot on Android, the WebView's private storage elsewhere. */

@@ -7,6 +7,7 @@ import type { NoteJson } from "@elizaos/plugin-notes/types"
 import {
   type ReceiptStatus, type RestoreResult, folderCreateReceipt, moveReceipt, recordStartReceipt, recordStopReceipt, restoreReceipt,
 } from "../../gen/notes__organize.effect.vibe"
+import { recordNoteRevision } from "@elizaos/plugin-notes/client"
 import { NotesCollection } from "./collection.vibe"
 import { NotesEditor } from "./editor.vibe"
 import { NotesFolders } from "./folders.vibe"
@@ -79,14 +80,16 @@ export const organizeLayer = Layer.effect(NotesOrganize, effect {
       const folder = operation.folder === null ? null : try (folders.findByName(operation.folder) catch () => undefined)
       const current = try collection.current()
       const note = current?.snapshot.notes.find((item) => item.id === operation.target.noteId)
-      const targetCurrent = current !== undefined && String(current.snapshot.revision) === operation.target.revision
+      let reviewed = ""
+      if (note !== undefined) reviewed = try (tryPromise(() => recordNoteRevision(note)) catch () => "")
+      const targetCurrent = current !== undefined && reviewed !== "" && reviewed === operation.target.revision
       const folderId = folder === null ? "" : folder?.id ?? ""
       const already = note !== undefined && ((note.format?.data.folderId as NoteJson | undefined) ?? "") === folderId
       const found = folder !== undefined
       const where = operation.folder === null ? "no folder" : `“${operation.folder}”`
       if (!found || !targetCurrent || note === undefined || already) {
         const status = moveReceipt(found, targetCurrent, note !== undefined, already, false)
-        return { status: statusOf(status), summary: !found ? `No folder “${operation.folder ?? ""}”` : !targetCurrent ? "Note changed" : note === undefined ? "Note gone" : `The note is already in ${where}.` }
+        return { status: statusOf(status), summary: !found ? `No folder “${operation.folder ?? ""}”` : note === undefined ? "Note gone" : !targetCurrent ? "Note changed" : `The note is already in ${where}.` }
       }
       const data: Record<string, NoteJson> = { ...(note.format?.data ?? {}) }
       if (folderId === "") delete data.folderId

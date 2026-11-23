@@ -2,9 +2,9 @@
 import { Native } from "../platform/native.vibe"
 import * as N from "./native.schema.vibe"
 
-/** The files bridge, the selected-documents registry, the attachment reader and the system picker. */
-export const FILES_PLUGIN = "ElizaFiles"
-export const DOCUMENTS_PLUGIN = "SelectedDocuments"
+/** The files bridge, the selected-documents registry and system picker (on DailyApps), and the attachment reader, as src/platform/native-plugins.ts names them. */
+export const FILES_PLUGIN = "AlphaFiles"
+export const DOCUMENTS_PLUGIN = "DailyApps"
 export const ATTACHMENTS_PLUGIN = "AlphaMailAttachments"
 export const PICKER_PLUGIN = "DailyApps"
 
