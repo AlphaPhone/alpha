@@ -19,5 +19,9 @@
   "include": ["src", "test", "gen/*.ts", "gen/*.vibe"],
   // A story's metadata imports its type from the tool, outside rootDir; the stories read it (`pnpm stories`).
   "exclude": ["src/**/*.meta.tsx"],
-  "vibe": { "sidecarDir": ".vibe/declarations" }
+  "vibe": {
+    "sidecarDir": ".vibe/declarations",
+    // Generated renderer models use Effect's pinned persistence API.
+    "severities": { "EK38130": "suggestion" }
+  }
 }
