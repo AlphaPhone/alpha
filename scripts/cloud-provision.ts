@@ -116,8 +116,8 @@ async function createAndRead<T>(create: () => Promise<RecordValue>, read: () => 
 }
 
 /** Scope every read and mutation to the same reviewed Cloudflare account. Dry runs do not create resources. */
-export async function reconcileCloudResources({ids, sibling, apiHost, databaseUrl, accountId, token, create = false, fetcher = fetch}: {
-  ids: CloudResources; sibling: CloudResources; apiHost: string; databaseUrl?: string;
+export async function reconcileCloudResources({ids, sibling, apiHost, webHost, databaseUrl, accountId, token, create = false, fetcher = fetch}: {
+  ids: CloudResources; sibling: CloudResources; apiHost: string; webHost: string; databaseUrl?: string;
   accountId?: string; token?: string; create?: boolean; fetcher?: typeof fetch;
 }): Promise<CloudResources> {
   const recordedAccount = configuredId(ids.accountId, 'Cloudflare account');
@@ -126,8 +126,12 @@ export async function reconcileCloudResources({ids, sibling, apiHost, databaseUr
     throw new Error('CLOUDFLARE_ACCOUNT_ID must identify the selected Alpha Cloud account');
   }
   if (!token?.trim()) throw new Error('CLOUDFLARE_API_TOKEN is required to verify Alpha Cloud resources');
-  if (ids.workerName === sibling.workerName || ids.r2Bucket === sibling.r2Bucket || ids.blobHost === sibling.blobHost || apiHost === ids.blobHost || apiHost === sibling.blobHost) {
+  if (ids.workerName === sibling.workerName || ids.r2Bucket === sibling.r2Bucket ||
+    new Set([apiHost, webHost, ids.blobHost, sibling.blobHost]).size !== 4) {
     throw new Error('Alpha Cloud resource names must be distinct');
+  }
+  for (const host of [apiHost, webHost, ids.blobHost]) {
+    if (host !== ids.zone && !host.endsWith('.' + ids.zone)) throw new Error(`${host} is not in zone ${ids.zone}`);
   }
   const kvId = configuredId(ids.kvNamespaceId, 'KV namespace');
   const hyperdriveId = configuredId(ids.hyperdriveId, 'Hyperdrive');
@@ -146,6 +150,7 @@ export async function reconcileCloudResources({ids, sibling, apiHost, databaseUr
   const readKv = async () => namedResource(await list(api, `${kvPath}?order=title&direction=asc`, 'KV lookup'), 'title', kvName, kvId, sibling.kvNamespaceId, 'KV namespace');
   const readHyper = async () => {
     const entry = namedResource(await list(api, hyperPath, 'Hyperdrive lookup'), 'name', hyperName, hyperdriveId, sibling.hyperdriveId, 'Hyperdrive');
+    if (entry && record(entry.caching).disabled !== true) throw new Error('Hyperdrive query caching must be disabled for Alpha Cloud accounts');
     if (entry && origin) {
       const observed = record(entry.origin);
       if (!['postgres', 'postgresql'].some(scheme => observed.scheme === scheme) || observed.host !== origin.host ||
@@ -166,34 +171,56 @@ export async function reconcileCloudResources({ids, sibling, apiHost, databaseUr
     if (bucket.name !== ids.r2Bucket) throw new Error('R2 readback does not match the configured bucket name');
     return bucket;
   };
-  const readDns = async (host: string) => {
+  const routeComment = 'Alpha Cloud Worker route';
+  const readAddressRecords = async (host: string) => {
     const rows = await list(api, `${dnsPath}?${new URLSearchParams({'name.exact': host})}`, 'DNS lookup');
     if (rows.some(row => row.name !== host || typeof row.type !== 'string')) throw new Error(`Unexpected DNS lookup result for ${host}`);
-    const routes = rows.filter(row => row.type === 'A' || row.type === 'AAAA' || row.type === 'CNAME');
+    return rows.filter(row => row.type === 'A' || row.type === 'AAAA' || row.type === 'CNAME' || row.type === 'Worker');
+  };
+  const isPlaceholderDns = (row: RecordValue) =>
+    row.type === 'AAAA' && row.content === '100::' && row.proxied === true && provisionedId(row.id);
+  const readBlobDns = async () => {
+    const routes = await readAddressRecords(ids.blobHost);
     if (!routes.length) return undefined;
     const [row] = routes;
-    if (routes.length !== 1 || row.type !== 'AAAA' || row.content !== '100::' || row.proxied !== true || !provisionedId(row.id)) {
-      throw new Error(`Conflicting DNS record for ${host}. Expected one proxied AAAA record for 100::`);
+    if (routes.length !== 1 || !isPlaceholderDns(row)) {
+      throw new Error(`Conflicting DNS record for ${ids.blobHost}. Expected one proxied AAAA record for 100::`);
     }
     return row;
   };
+  const verifyCustomDomain = async (host: string, worker: string) => {
+    const query = new URLSearchParams({hostname: host, zone_id: String(zone.id)});
+    const domains = await list(api, `${accountPath}/workers/domains?${query}`, 'Worker domain lookup');
+    if (domains.length) {
+      const [domain] = domains;
+      if (domains.length !== 1 || domain.hostname !== host || domain.zone_id !== zone.id ||
+        domain.service !== worker || domain.environment !== 'production' || !provisionedId(domain.id)) {
+        throw new Error(`Conflicting Worker custom domain for ${host}`);
+      }
+      // Cloudflare manages DNS for an attached custom domain. Its domain record confirms ownership.
+      return;
+    }
+    const routes = await readAddressRecords(host);
+    const [row] = routes;
+    // Older provisioning created this exact API placeholder before Wrangler attached the domain.
+    const previousAlphaPlaceholder = host === apiHost && routes.length === 1 && isPlaceholderDns(row) && row.comment === routeComment;
+    if (routes.length && !previousAlphaPlaceholder) throw new Error(`Conflicting DNS record for ${host}. Expected an unused Worker custom domain`);
+  };
 
   // Refuse all known mismatches before making any changes. A retry discovers previous successful creates by name.
-  const hosts = [apiHost, ids.blobHost];
-  const [kv, hyper, bucket, dns] = await Promise.all([
-    readKv(), readHyper(), readBucket(), Promise.all(hosts.map(readDns)),
+  const [kv, hyper, bucket, blobDns] = await Promise.all([
+    readKv(), readHyper(), readBucket(), readBlobDns(),
+    verifyCustomDomain(apiHost, ids.workerName), verifyCustomDomain(webHost, ids.workerName + '-edge'),
   ]);
   if (!create) {
-    if (!kv || !hyper || !bucket || dns.some(row => !row)) throw new Error('Alpha Cloud resources are missing. Run provision before deploy');
+    if (!kv || !hyper || !bucket || !blobDns) throw new Error('Alpha Cloud resources are missing. Run provision before deploy');
     return {...ids, accountId: account};
   }
   const finalKv = kv ?? await createAndRead(() => api(kvPath, 'KV create', {title: kvName}), readKv, 'KV namespace', 'id', 10014);
-  const finalHyper = hyper ?? await createAndRead(() => api(hyperPath, 'Hyperdrive create', {name: hyperName, origin}), readHyper, 'Hyperdrive', 'id');
+  const finalHyper = hyper ?? await createAndRead(() => api(hyperPath, 'Hyperdrive create', {name: hyperName, origin, caching: {disabled: true}}), readHyper, 'Hyperdrive', 'id');
   if (!bucket) await createAndRead(() => api(bucketsPath, 'R2 create', {name: ids.r2Bucket}), readBucket, 'R2 bucket', 'name');
-  for (const [index, host] of hosts.entries()) {
-    if (!dns[index]) await createAndRead(() => api(dnsPath, 'DNS create', {type: 'AAAA', name: host, content: '100::', proxied: true,
-      comment: 'Alpha Cloud Worker route'}), () => readDns(host), 'DNS record', 'id');
-  }
+  if (!blobDns) await createAndRead(() => api(dnsPath, 'DNS create', {type: 'AAAA', name: ids.blobHost, content: '100::', proxied: true,
+    comment: routeComment}), readBlobDns, 'DNS record', 'id');
   return {...ids, accountId: account, kvNamespaceId: finalKv.id, hyperdriveId: finalHyper.id};
 }
 

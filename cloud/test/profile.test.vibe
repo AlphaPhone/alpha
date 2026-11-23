@@ -10,12 +10,12 @@ describe("Alpha Cloud deployment profile", () => {
     // spec/cloud/deployment.md, "A profile is accepted only when its two environments share no origin or database, production uses no loopback adapter, and each environment offers a sign-in method and complete documents"
     const profile = try alphaProfile(operatorInputs)
     const production = profile.environments.production
-    try check(() => assert.strictEqual(production.api, "https://api.alphacompute.cc"))
-    try check(() => assert.strictEqual(production.web, "https://cloud.alphacompute.cc"))
-    try check(() => assert.strictEqual(profile.environments.staging.api, "https://api-staging.alphacompute.cc"))
+    try check(() => assert.strictEqual(production.api, "https://api.alphaphone.dev"))
+    try check(() => assert.strictEqual(production.web, "https://cloud.alphaphone.dev"))
+    try check(() => assert.strictEqual(profile.environments.staging.api, "https://api-staging.alphaphone.dev"))
     try check(() => assert.strictEqual(production.entitlementAudience, "ai.alphacompute.alphaphone"))
     try check(() => assert.deepStrictEqual([...production.capabilities], ["inference", "speech", "maps", "managedGoogle", "billing"]))
-    try check(() => assert.deepStrictEqual([...production.firstPartyOrigins], ["https://cloud.alphacompute.cc"]))
+    try check(() => assert.deepStrictEqual([...production.firstPartyOrigins], ["https://cloud.alphaphone.dev"]))
     try check(() => assert.strictEqual(production.inference?.models[0]?.id, "qwen-3.8-27b"))
     try check(() => assert.strictEqual(production.inference?.models[0]?.defaultMaxTokens, 40960))
     try check(() => assert.strictEqual(profile.environments.staging.inference?.models[0]?.defaultMaxTokens, 40960))

@@ -16,12 +16,6 @@ export interface CloudResources {
 /** A resource id is missing, still a placeholder, or a host lies outside the zone. */
 export error RenderRefused { problem: string }
 
-/** The secrets the API Worker reads from Wrangler's secret store, never from a rendered file. */
-export const apiWorkerSecrets: ReadonlyArray<string> = [
-  "EMAIL_CODE_SECRET", "RESEND_API_KEY", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY",
-  "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "INFERENCE_API_KEY", "CARTESIA_API_KEY",
-]
-
 /** Hosts of a deployed Eliza Cloud; a rendered Alpha Cloud configuration that names one is a leaked dependency. */
 export const elizaHost = /(?:^|[^a-z0-9-])((?:[a-z0-9-]+\.)*(?:eliza\.app|elizacloud\.ai))(?![a-z0-9.-])/i
 
