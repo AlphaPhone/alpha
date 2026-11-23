@@ -173,6 +173,17 @@ pure def lawAnExistingSelectionIsKept(observed: bool, onNotes: bool): bool =
   not(namesNotesSelection(observed, onNotes, true))
 ```
 
+### An observed turn on an enrolled phone can carry the owner's Notes folder names to its compared agent
+
+The turn sends the folder IDs and names so a request can name its destination.
+An unreadable list sends nothing. The request carries no other folder fields.
+
+```quint
+pure def sendsNoteFolders(observed: bool, compared: bool, enrolled: bool): bool = observed and compared and enrolled
+pure def lawAHiddenScreenSendsNoNoteFolders(compared: bool, enrolled: bool): bool = not(sendsNoteFolders(false, compared, enrolled))
+pure def lawAChatOnlySessionSendsNoNoteFolders(observed: bool, compared: bool): bool = not(sendsNoteFolders(observed, compared, false))
+```
+
 ## Story: Let my agent read the page I have open in Browser
 
 > As the owner, when I ask about the page I have open in Browser, I want my

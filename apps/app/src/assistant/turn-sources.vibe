@@ -1,9 +1,11 @@
 // spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
 import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
+import { NOTE_FOLDERS_METADATA_KEY, readNoteFolders } from "@elizaos/plugin-notes/organize"
 import { AgentCalendar } from "../calendar/agent.vibe"
 import { DeviceCalendar } from "../calendar/device.vibe"
 import { calendarDayObservation } from "../calendar/observation.vibe"
 import { NotesEditor } from "../notes/editor.vibe"
+import { NotesFolders } from "../notes/folders.vibe"
 import { NotesListFilter } from "../notes/listFilter.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 import { TurnSources } from "./ports.vibe"
@@ -12,6 +14,7 @@ import { TurnSources } from "./ports.vibe"
 export const turnSourcesLive = Layer.effect(TurnSources, effect {
   const notes = try NotesListFilter
   const editor = try NotesEditor
+  const folders = try NotesFolders
   const foreground = try Foreground
   const presentation = try PresentationMachine
   const agent = try AgentCalendar
@@ -23,6 +26,10 @@ export const turnSourcesLive = Layer.effect(TurnSources, effect {
     effect notesSelection() {
       const open = try editor.selection()
       return open ?? (try notes.context())
+    },
+    effect noteFolders() {
+      const listed = folders.list() catch () => undefined
+      return listed === undefined ? undefined : readNoteFolders({ [NOTE_FOLDERS_METADATA_KEY]: listed })
     },
     preferReview: (reviewFirst: boolean) => notes.prefer(reviewFirst),
   }
