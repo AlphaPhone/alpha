@@ -70,13 +70,32 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **Clock:** the workflow notice tap calls `flows.askAboutNotice(id, revision, …)` (`src/clock/notifications.vibe`); it should build its question with the assistant's `workflowStepSource(notice, workflow, step, excerpt)` (`src/assistant/draft.vibe`). The clock area has no listener yet for the new native `remindersChanged`, `notificationsChanged` and `mirrorChanged` events.
 - **Workflows:** `src/workflows/notices.vibe` should call `DeviceReview.workflowStep(runId, stepId)` in its Executing phase, so an admitted phone step actually runs. `WorkflowCalendar` (`src/workflows/calendarRanges.vibe`) has no screen consumer; the simulator still uses the pure range helpers. The `post_notification` bindingHash omits the proposal digest, because `ExecutorCall` carries none.
 - **Notes:** `create_note` still treats "Workflows in front" as a workflow run. Notes sits before the assistant in the runtime order, so it needs a port, filled by the shell from `DeviceReview.callFacts(call).workflow`. `NotesListFilter.negotiate` and `filesCapabilities` can read the advertised names once the shell fills `AdvertisedCapabilities`.
-- **Maps:** `src/maps/failure.vibe` could use account's `limitOfRefusal` instead of reading `resetAt` itself.
 - **Calendar:** `surfacesBack()` in `src/web/calendar/index.tsx` is no longer used and can be dropped. A device-calendar event saved from a note is not back-linked, because Calendar's new-event form always writes to the agent calendar. `linkedProviderEvents` mapped-copy suppression is not wired (legacy did not use it either).
 
 ## Voice
 
 - The relay's listener registration is forked with one `yieldNow` before `startCloudSpeech`; upstream awaits a real registration, so an event posted at the very first moment could be missed.
 - Pass the capability header to `Resident.stream` in `src/voice/conversation.vibe` as the assistant does through `AdvertisedCapabilities`.
+
+## Browser, Maps and Settings (area audit, still open)
+
+- Browser: a switch or close whose words match several tabs always refuses ("More than one tab matches"): `src/browser/operations.vibe` passes `() => succeed(null)` as the owner's pick, and no card lists the matching tabs for the owner to choose (legacy `browserTabNeedsChoice`). Needs a rule in `spec/browser/session.md` and a choice port the assistant's review card fills.
+- Browser: chat page history is bound to the tab selected when the executor runs, not the tab the request was made on, because `ExecutorCall` carries no observation and `BrowserCallFacts` exposes only `reviewed`/`ownerText`. The assistant must record the turn's selected tab and revision and hand it to `BrowserCallFacts.of(call)`.
+- Browser: an approved open or control brings Browser forward (`agentPresent`, then `ShowBrowser`) without checking that the foreground the request was made from is still current; `spec/browser/agent.md`'s open model (`propose`, `openDirect`, `openReviewed`, `journalFinished`, `receiptSent`) is never driven, and `BrowserAgent.prefer` has no caller (the review gate itself runs in `src/assistant/views.vibe`). Drive the model from `src/browser/operations.vibe`, or retire its unused half.
+- Browser (browser build): bookmarks are not re-read when another tab changes the bookmark document (`spec/browser/bookmarks.md`, "a changed bookmark document each ask for one refresh"); the web `TabHost` needs a storage-change stream feeding `marks.refresh(true)`.
+- Browser: no test drives `BrowserAgent.control` for switch, named close, new tab, find or history (legacy `test/browser-chat-controls.test.mjs` had 25 cases), and there are no `browser__*` or `maps__*` conformance drivers.
+- Maps: Share skips Alpha's share panel (Android share, Email draft in Inbox, Copy link); `src/maps/handoff.vibe` calls `AlphaDevice.shareText` directly, and no rule in `spec/maps` covers sharing.
+- Maps: recent searches are implemented (`src/maps/screen.vibe`, `ResultsSheet`) but have no rule in `spec/maps/screen.md`.
+- Maps: non-Google credits are plain text though `spec/maps/plane.md` says they keep their credit links (`src/web/maps/MapCredits.tsx`); the world style's resources are not pinned to its origin with a `transformRequest` as legacy did.
+- Maps: the place camera centres above a fixed sheet height; legacy measured the open sheets (`selectionPadding`).
+- Settings: `spec/settings/native.md` describes Java and release tooling that nothing calls (no `gen/settings__native` import, no JVM driver); the legacy native update and reset models with Java trace harnesses are still in `specs/quint`. There are no `settings__*`/`account__*` conformance drivers and no `.proof.dfy` in either area (legacy proved `updateCheckDue`, `updateIdle`, `settingsPage`, `settingsNavigationRows`).
+- Settings: eight rules have a Quint block with no invariant, law or witness: `appearance.md` "A new phone is light…"; `facts.md` "A read of the device…"; `index.md` "Settings has a root…" and "Privacy's Access setup…"; `network.md` "The Internet panel…"; `preferences.md` "A new phone lets Alpha…"; `privacy.md` "A status read is shown only…"; `updates.md` "Android reports whether automatic installs are allowed…".
+- Settings: nothing captures a reconnect of the resident across a cancelled update (legacy `captureAppUpdateReconnect`), and the activation screen does not freeze Back and Home or toast "Finish your changes, then try updating again." when the page refused.
+- Settings: `AlphaDevice.installUpdate` opening Android's install-source settings (manual install without permission) also resolves with no status, which now reads as Accepted; native should answer `permission-required` there.
+- Account: a saved key that cannot reach Cloud at the first start after the cutover shows the required sign-in page until Cloud names its account (now retried after one minute, doubling to fifteen); legacy showed Home with the saved sign-in. The session needs the account's ids, which only `/api/v1/user` gives.
+- Account: Android Back on the required page's code step reaches the shell under the page (the overlay surface has no `back`); the on-screen Back works.
+- Account: `scripts/cloud-readiness.ts` (per-method gates, `registration` printout) has no counterpart beside `scripts/cloud-worker.ts smoke`, and `test/cloud-{worker,deployment,email-resend,email-deployment,candidate-deployment,sdk-routing}.test.mjs` import modules that no longer exist.
+- Account: the OWNER custody item above understates its effect: with Cloud requests through upstream `ElizaCloud` and Alpha's key in `AlphaCredentialStore`, `GET /api/v1/user` is refused as signed out, so no sign-in is adopted and the required page returns at every start. `CloudRequests.Custody` is a record over the concrete `DeviceCredentialStore`, so a bridge must mirror Alpha's key into that store (or Alpha must sign in through `ElizaSignIn`).
 
 ## Account
 
@@ -184,7 +203,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - `workflowPresentationCapabilities` on AlphaNotifications is inherited from upstream NotificationsHostPlugin; confirm it exists at the pin, or phones register workflowProtocol 1, not 5;
   - owner-route-parity's reference reading.
 - **No tests:** no camera test covers a chat that stays open during the reveal.
-- **No meta file:** MapsScreen, MapPlane and the runtime-bound telephony screens (PhoneScreen, MessagesScreen, ContactsScreen, CallBar, UndoNotice, ReviewRows, PhoneInfoPanel) have no `.meta.tsx`.
+- **No meta file:** MapsScreen, MapPlane, NavigationChip, BrowserScreen, AccountScreen, SignInHost, Settings' DeveloperPage and Rows, and the runtime-bound telephony screens (PhoneScreen, MessagesScreen, ContactsScreen, CallBar, UndoNotice, ReviewRows, PhoneInfoPanel) have no `.meta.tsx`.
 
 ## After merging develop through #1449 (#1422 retirement)
 
@@ -201,10 +220,7 @@ develop eliza pins `7a124190a1`, `9222a9e3c6` and `ca435030bc` are legacy-develo
 vibestack-dp; whether their agent-side fixes (eliza#40213, #40234, #40265, #40290) are ported to
 vibestack-dp is an upstream question.
 
-- **Browser (#1453):**
-  - "close every tab" from outside a private tab: the receipt counts the tabs it closed and says private tabs were left open (not "Closed all tabs."); the card adds how many private tabs stay open; with only private tabs open the notice says so instead of "No tabs are open to close." No private title or site reaches the agent or the card;
-  - the close-all listing binds each tab's id, address and private flag plus the count of private tabs kept, not titles, so a tab that only retitles itself no longer refuses an approved close-all (`spec/browser/session.md`, `listedOf`/`listingCurrent` still compare titles);
-  - a switch, closing the showing tab and page history run after the receipt; when that presentation is skipped (screen off, context or session changed, request no longer current, or it threw) the owner gets a correction notice instead of an unretracted success claim.
+- **Browser (#1453):** a switch, closing the showing tab and page history run after the receipt; when that presentation is skipped (screen off, context or session changed, request no longer current, or it threw) the owner gets a correction notice instead of an unretracted success claim. `OperationPorts.present` returns nothing and `src/assistant/review.vibe` says no correction, so this needs the assistant to take a presentation outcome. (The close-all counts, the kept private tabs and the retitle-tolerant listing of #1453 are ported.)
 - **Browser (#1455):** a turn should rarely wait on a page read. Browser captures the shown page once it settles after loading (700 ms) and again when the assistant opens over it (no more than once per 5 s, and not when a capture younger than 20 s holds), keeps one capture per tab and revision in memory for at most 10 minutes, and a turn waits at most 250 ms for a fresher read before sending the capture; it waits the full 1.2 s only when it has none. No capture is taken or kept with Browser page for Alpha off, private tabs are never read, and the browser build does not capture ahead. `spec/browser/pageContext.md` still says every message reads the page itself. The turn's fresh status read starts beside the position and page reads, and the device preferences and Notes folder names start at the beginning of the send.
 - **Assistant / Telephony / Voice (#1453):**
   - a chat turn holds the view steps its own request performs (a directly requested keypad, filtered Contacts list or draft in another Messages conversation) and runs them once its reply and its own navigation are delivered; a typed turn runs them in place, a voice turn carries the conversation to each step's view through the session's navigation hold, as a spoken VIEWS move does; failed and cancelled turns release their steps;

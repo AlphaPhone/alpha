@@ -1,7 +1,7 @@
 // spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "A new account, and an earlier sign-in left unconfirmed, are told for the sign-in that reported them"; spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish"; spec/account/session.md, "Story: Use Cloud only for managed services"
 import {
   type Account, type IncompleteCode, type RouteKind, type Session, type SessionEffect,
-  Machine as SessionMachine, isSignedIn, routeAdmitted, stored as storedSession
+  Machine as SessionMachine, isSignedIn, restoreRetryMs, routeAdmitted, stored as storedSession
 } from "../../gen/account__session.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
@@ -137,6 +137,24 @@ export const sessionService = Layer.effect(CloudSession, effect {
       : { type: "restore", account: read.account, confirmed: false })
   }
 
+  /** A saved key whose account Cloud could not name at startup: asked again after one minute, doubling to fifteen. */
+  effect function restoreLater() {
+    let tries = 0
+    while (true) {
+      tries = tries + 1
+      try sleep(Duration.millis(restoreRetryMs(tries)))
+      const s = try machine.get()
+      if (isSignedIn(s.phase)) return
+      if ((readIdentity(native, environment) catch () => undefined) === undefined) return
+      if (s.holder !== "Free") continue
+      const read = try readAccount(native, cloud, environment)
+      if (read !== undefined) {
+        try send({ type: "restore", account: read.account, confirmed: read.confirmed })
+        return
+      }
+    }
+  }
+
   effect function renewalCheck() {
     const answer = effect {
       return try Schema.decodeUnknownEffect(Renewal)(try native.invoke(plugin, "renewSignIn", { environment }))
@@ -175,11 +193,14 @@ export const sessionService = Layer.effect(CloudSession, effect {
     effect run() {
       try send({ type: "load", deployment, environment: cloudEnvironment, testMocks: build.info.testMocks, preview: cloudResidentPreview(build.info.variant !== "browser") })
       const s = try machine.get()
+      let unnamed = false
       if (!isSignedIn(s.phase) && (try native.available(plugin))) {
         const read = try readAccount(native, cloud, environment)
         if (read !== undefined) try send({ type: "restore", account: read.account, confirmed: read.confirmed })
+        else unnamed = (readIdentity(native, environment) catch () => undefined) !== undefined
       }
       try send({ type: "startupSettles" })
+      if (unnamed) fork.detached restoreLater()
       try ensureResident(resident)
       try renewalCheck()
       try.all [
