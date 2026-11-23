@@ -1473,17 +1473,21 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const present=await approvedBrowserOpen<BrowserPresentation|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,proposalId:journalIdentity?.proposalId,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true, 'newTab' in operation && operation.newTab === true));
       // Runs once: shown, or skipped with the owner told what the receipt said that did not happen.
       let presented=false;
-      const show=(ready:()=>boolean)=>{
+      const show=(ready:()=>boolean,detent?:string)=>{
         if(presented)return;presented=true;
-        if(!browserControl){if(ready())present?.();return;}
-        runBrowserPresentation(operation,present,ready,text=>{if(this.live)this.agentSay(text,{type:'generic',icon:'info',title:text,sub:'',systemNotice:true,done:true});});
+        if(!browserControl){if(ready())present?.(detent);return;}
+        runBrowserPresentation(operation,present,ready,text=>{if(this.live)this.agentSay(text,{type:'generic',icon:'info',title:text,sub:'',systemNotice:true,done:true});},detent);
       };
       // Only a chat request a view change would cancel holds Browser back; a background workflow
       // generation does not (afterRequestSettles runs the step at once during one).
       const ready=()=>this.live&&!document.hidden&&!alphaClient.requestHoldsViews()&&connectionController.getSnapshot().session===browserSession&&alphaClient.followsTurnContext(expectedContext);
       return { status: 'succeeded', summary: browserControl?browserControlSummary(operation,present?.closed):browserNavigationSummary(operation.url),
-        // A directly requested open runs inside the chat request that still carries its reply.
-        presentBrowser:()=>alphaClient.afterRequestSettles(()=>show(ready)),
+        // A structured view step lets the voice session own the switch, after the action receipt.
+        presentBrowser:()=>alphaClient.afterRequestSettles({
+          view:'browser',
+          current:()=>{if(!ready()){show(()=>false);throw Error('Browser presentation is no longer current.');}},
+          show:detent=>show(ready,detent),
+        }),
         presentBrowserSkipped:()=>show(()=>false) };
     });
     context(this);

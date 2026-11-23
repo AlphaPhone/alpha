@@ -77,9 +77,9 @@ export function browserControlNotDone(operation: BrowserControlOperation): strin
  * marked `deferred` carries a change its receipt already reported; when that change did not run, not
  * ready, refused or thrown, `say` gives the owner the correction.
  */
-export function runBrowserPresentation(operation: BrowserControlOperation, present: ((() => boolean | void) & {deferred?: true}) | undefined, ready: () => boolean, say: (text: string) => void): void {
+export function runBrowserPresentation(operation: BrowserControlOperation, present: (((detent?: string) => boolean | void) & {deferred?: true}) | undefined, ready: () => boolean, say: (text: string) => void, detent?: string): void {
   let ran = false;
-  try { ran = ready() && present?.() !== false; } catch { ran = false; }
+  try { ran = ready() && present?.(detent) !== false; } catch { ran = false; }
   if (!ran && present?.deferred) say(browserControlNotDone(operation));
 }
 function legacyBrowserNavigationSummary(url: string): string {
