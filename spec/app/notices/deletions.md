@@ -255,13 +255,15 @@ pure val fair_conceal = "weak"
 
 A deletion is unsettled while it is being written, in its window and not
 paused, being undone or dismissed, offered for Undo, or sent without an
-answer. Picking up any other would change nothing.
+answer. Picking up any other would change nothing. The pickup comes first
+when the phone starts again, so a further restart finds nothing of the last
+one left to pick up.
 
 ```quint
 pure def unsettled(x: X::Deletion): bool =
   x.writing or (x.window.holding == U::Held and not(x.paused)) or x.undoing or x.dismissing or x.offered or x.attempt.outcome == A::Sent
 
-pure def canRestart(d: Deletions): bool = d.numbers.size() > 0
+pure def canRestart(d: Deletions): bool = d.numbers.size() > 0 and d.interrupted.size() == 0
 
 pure def restart(d: Deletions): Deletions =
   { ...d, interrupted: d.numbers.filter(n => unsettled(held(d, n))), status: { ...d.status, status: R::Idle } }
