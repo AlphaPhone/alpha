@@ -32,7 +32,7 @@ export type SheetContentProps = ComponentProps<typeof DialogPrimitive.Content> &
 export function SheetContent({ className, side, title, hideTitle, children, ...props }: SheetContentProps) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim/18 dark:bg-scrim/55" />
       <DialogPrimitive.Content className={cn(sheetVariants({ side }), className)} {...props}>
         <div aria-hidden className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-border" />
         <DialogPrimitive.Title className={cn("px-5 font-serif text-2xl", hideTitle && "sr-only")}>{title}</DialogPrimitive.Title>

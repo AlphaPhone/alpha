@@ -89,9 +89,7 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
     if (support.tag === "SamePeer") support = comparePeer(support, try status())
     try Ref.set(learned, { connection, support })
     const sends = support.tag === "SamePeer"
-    // The Browser page is one of the agent's optional turn fields (upstream spec/agent/conversation/turnContext.md), so the
-    // peer compared for this turn declares it exactly as it takes the other optional fields.
-    return { optionalFields: sends, takesLocation: sends, browserPage: sends } satisfies PeerFacts
+    return { optionalFields: sends, takesLocation: sends } satisfies PeerFacts
   }
 
   fork.scoped (effect {

@@ -12,7 +12,7 @@ export interface UpdateActivationProps {
 export function UpdateActivation({ updates, onContinue }: UpdateActivationProps) {
   if (updates.activation !== "Preparing" && updates.activation !== "Paused" && updates.activation !== "Continuing") return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label="Alpha update" className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-scrim">
+    <div role="dialog" aria-modal="true" aria-label="Alpha update" className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-scrim/18 dark:bg-scrim/55">
       <div className="flex flex-col items-center gap-3 rounded-xl bg-card p-6">
         <span role="status" className="inline-flex items-center gap-2"><Spinner size="sm" aria-hidden />Updating Alpha</span>
         {updates.canContinue && <Button onClick={onContinue}>Continue</Button>}
