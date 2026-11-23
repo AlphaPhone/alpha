@@ -1,6 +1,7 @@
 // spec/calendar/index.md
-// Every Calendar service, over the platform's Native, Resident, Build and KeyValueStore, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground.
+// Every Calendar service, over the platform's Native, Resident, Build and KeyValueStore, Account's AccountBindings and GoogleAccounts, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground.
 import { Machine as PresentationMachine, stored as presentationStored } from "../../gen/calendar__presentation.effect.vibe"
+import { homeReads } from "../../gen/calendar__home.effect.vibe"
 import { machine as agentMachine } from "../../gen/calendar__agent.effect.vibe"
 import { machine as deviceMachine } from "../../gen/calendar__device.effect.vibe"
 import { machine as selectionMachine } from "../../gen/calendar__selection.effect.vibe"
@@ -8,20 +9,23 @@ import { machine as draftMachine } from "../../gen/calendar__drafts.effect.vibe"
 import { machine as heldMachine } from "../../gen/calendar__deletions.effect.vibe"
 import { machine as reviewMachine } from "../../gen/calendar__approvals.effect.vibe"
 import { machine as actionMachine } from "../../gen/calendar__deviceActions.effect.vibe"
+import { machine as linkMachine } from "../../gen/calendar__googleLink.effect.vibe"
 import { AccountBindings } from "../account/bindings.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
-import { type AgentBinding, agentLayer } from "./agent.vibe"
+import { AgentCalendar, type AgentBinding, agentLayer } from "./agent.vibe"
 import { approvalsLayer } from "./approvals.vibe"
-import { bindCalendar, enterCalendar, hideCalendar, leaveCalendar } from "./binding.vibe"
+import { bindCalendar, currentWindow, enterCalendar, hideCalendar, leaveCalendar } from "./binding.vibe"
 import { deletionsLayer } from "./deletions.vibe"
 import { deviceLayer } from "./device.vibe"
 import { draftsLayer } from "./drafts.vibe"
 import { handoffLayer } from "./handoffs.vibe"
 import { homeLayer } from "./home.vibe"
+import { linkLayer } from "./link.vibe"
 import { requestsLayer } from "./requests.vibe"
 
 export { AgentCalendar } from "./agent.vibe"
+export { CalendarLink } from "./link.vibe"
 export { CalendarHandoff, type CalendarScan } from "./handoffs.vibe"
 export { calendarCapabilities, operationPorts } from "./operations.vibe"
 export { CalendarMaps, type CalendarEventOrigin } from "./ports.vibe"
@@ -42,9 +46,13 @@ export const services = Layer.mergeAll(
   Layer.provideMerge(requestsLayer, actionMachine()),
 )
 
-/** Calendar follows the account's agent binding, bound at once and rebound whenever its owner, agent, generation or usability changes. */
+/** Calendar's link to Google, over the agent Calendar, the drafts and the account area's Google accounts. */
+const link = Layer.provide(linkLayer, Layer.mergeAll(linkMachine(), services))
+
+/** Calendar follows the account's agent binding, bound at once and rebound whenever its owner, agent, generation or usability changes; a usable binding reads the current window, so Home has its agenda before Calendar opens. */
 const followAccount = Layer.effectDiscard(effect {
   const bindings = try AccountBindings
+  const agent = try AgentCalendar
   let bound = ""
   effect function follow(binding: AgentBinding) {
     const key = JSON.stringify([binding.owner, binding.session, binding.agentId, binding.usable])
@@ -52,15 +60,20 @@ const followAccount = Layer.effectDiscard(effect {
     bound = key
     const usable = binding.usable && binding.owner !== ""
     try bindCalendar(usable ? { ...binding, usable } : { owner: "", session: 0, agentId: "", usable: false })
+    if (homeReads(usable, false, true, true, binding.owner !== "")) {
+      const window = try currentWindow()
+      try fork.scoped agent.refresh(window)
+    }
   }
   try follow(try bindings.agentNow())
   try fork.scoped Stream.runForEach(bindings.agent, (binding) => follow(binding))
 })
 
-/** Calendar follows what is in front: entering it, leaving it, and the page hidden or locked, which also sends a waiting deletion and closes the editor. */
+/** Calendar follows what is in front: entering it, leaving it, and the page hidden or locked, which also sends a waiting deletion and closes the editor; the page coming back reads the current window again for Home. */
 const followForeground = Layer.effectDiscard(effect {
   const foreground = try Foreground
   const machine = try PresentationMachine
+  const agent = try AgentCalendar
   let shown = (try machine.get()).active
   let away = false
   effect function follow(state: ForegroundState) {
@@ -68,6 +81,13 @@ const followForeground = Layer.effectDiscard(effect {
     if (hidden !== away) {
       away = hidden
       if (hidden) try hideCalendar()
+      else {
+        const bound = (try agent.view()).state
+        if (homeReads(bound.portOwner !== "", true, true, false, bound.portOwner !== "")) {
+          const window = try currentWindow()
+          try fork.scoped agent.refresh(window)
+        }
+      }
     }
     const front = !hidden && state.view === "calendar"
     if (front === shown) return
@@ -80,4 +100,4 @@ const followForeground = Layer.effectDiscard(effect {
 })
 
 /** Every Calendar service, bound to the account's agent binding and following the foreground, with the hand-over of note and scan drafts; it needs the platform, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground. */
-export const layer = Layer.provideMerge(Layer.mergeAll(followAccount, followForeground, handoffLayer), services)
+export const layer = Layer.provideMerge(Layer.mergeAll(followAccount, followForeground, handoffLayer, link), services)

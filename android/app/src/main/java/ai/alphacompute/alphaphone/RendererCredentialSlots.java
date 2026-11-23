@@ -53,7 +53,7 @@ final class RendererCredentialSlots {
  };
  /** Slots only this version's app view names: Notes' canonical draft, the Inbox's device-wide stored machines and the account's delegation record. */
  private static final Object[][] APP_EXCHANGEABLE = {
-  {"notes-canonical-draft:v1:device", 32 * MIB}, {"device:alpha/device/inbox/[a-z/-]{1,64}", 8 * MIB},
+  {"notes-canonical-draft:v1:device", 32 * MIB}, {"device:alpha/device/inbox/[a-z/-]{1,64}(~held)?", 8 * MIB},
   // The account's in-flight Cloud delegation record; os refuses any name under cloud-delegation.
   {"account-delegation:v1:[a-f0-9]{64}", 256 * KIB}
  };

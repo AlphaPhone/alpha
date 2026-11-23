@@ -7,6 +7,7 @@ import { initial as heldInitial } from "../../../gen/calendar__deletions.ts";
 import { initial as draftInitial } from "../../../gen/calendar__drafts.ts";
 import { initial as actionInitial } from "../../../gen/calendar__deviceActions.ts";
 import { initial as writesInitial } from "../../../gen/calendar__device.ts";
+import { initial as linkInitial } from "../../../gen/calendar__googleLink.ts";
 import { AgentCalendar, type AgentView } from "../../calendar/agent.vibe";
 import { ApprovalReviews, type ApprovalSheet } from "../../calendar/approvals.vibe";
 import { whileVisible } from "../../calendar/binding.vibe";
@@ -14,12 +15,13 @@ import { HeldDeletions } from "../../calendar/deletions.vibe";
 import { DeviceCalendar, type DeviceRead } from "../../calendar/device.vibe";
 import { CalendarDrafts } from "../../calendar/drafts.vibe";
 import { HomeAgenda, type HomeAgendaCard } from "../../calendar/home.vibe";
+import { CalendarLink, type CalendarLinkView } from "../../calendar/link.vibe";
 import { AgentRequests, type RequestSheet } from "../../calendar/requests.vibe";
 import { openRoute } from "../../calendar/screen.vibe";
 import { useServiceStream } from "../shell/services.ts";
 
 const keys = {
-  writes: {}, agent: {}, device: {}, drafts: {}, held: {}, approval: {}, requests: {}, actions: {}, home: {},
+  writes: {}, agent: {}, device: {}, drafts: {}, held: {}, approval: {}, requests: {}, actions: {}, home: {}, link: {},
 };
 
 const agentView: AgentView = { state: agentInitial, feed: undefined, calendars: [], upcoming: undefined, savedAt: undefined, window: undefined };
@@ -64,6 +66,12 @@ export function useDeviceAction() {
 export function useHomeAgenda(): HomeAgendaCard {
   return useServiceStream(keys.home, HomeAgenda.use((service) => Effect.succeed(service.cards)),
     { state: "HomeQuiet", title: "Calendar", begin: undefined, end: undefined, allDay: false, video: false, route: undefined, day: 0, rereads: false });
+}
+
+/** Calendar's Google Calendar row and link setup. */
+export function useCalendarLink(): CalendarLinkView {
+  return useServiceStream(keys.link, CalendarLink.use((service) => Effect.succeed(service.changes)),
+    { row: "RowNotConnected", link: linkInitial, destination: "", held: 0, running: false, pause: undefined });
 }
 
 /** The device calendar writes: the form, the write in flight and the event an unconfirmed write holds. */

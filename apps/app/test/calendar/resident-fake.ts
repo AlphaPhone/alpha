@@ -14,6 +14,11 @@ export class CalendarAgentFake {
   resolved: { id: string; body: unknown }[] = [];
   writes: { method: string; path: string; body: unknown }[] = [];
   refuseReads = false;
+  /** The linked-sync control, its writable Google calendars and the linked events, as upstream's sync-control routes keep them. */
+  control = { revision: 0, paused: true, destination: null as { connectorAccountId: string; providerCalendarId: string } | null, pendingDispatch: null, conflicts: 0 };
+  candidates: { connectorAccountId: string; providerCalendarId: string; side: "owner"; accessRole: string; primary: boolean; accountEmail: string | null }[] = [];
+  links: { linkId: string; localEventId: string; destination: { connectorAccountId: string; providerCalendarId: string } | null; providerEventId: string | null; handoffKey: string; localOnly: boolean; staged: boolean; state: string }[] = [];
+  controlWrites: string[] = [];
 
   private event(record: FakeEvent) {
     return {
@@ -67,6 +72,20 @@ export class CalendarAgentFake {
       Object.assign(target, { title: (body as { title?: string }).title ?? target.title, etag: `${target.etag}+` });
       return { status: 200, data: { event: this.event(target), receipt: { operation: "update", source: this.sourceKey(), eventId: target.id, providerVersion: target.etag, event: this.event(target), target: this.event(target), acceptedAt: target.startAt } } };
     }
+    if (url.pathname === "/api/lifeops/calendar/sync-control" && method === "GET") return { status: 200, data: { ...this.control } };
+    if (url.pathname === "/api/lifeops/calendar/sync-control" && method === "POST") {
+      const request = body as { operation: string; expectedRevision: number; destination?: { connectorAccountId: string; providerCalendarId: string } | null };
+      if (request.expectedRevision !== this.control.revision) throw Object.assign(new Error("changed"), { status: 409 });
+      this.controlWrites.push(request.operation);
+      const destination = request.operation === "select" ? request.destination ?? null : this.control.destination;
+      this.control = { ...this.control, revision: this.control.revision + 1, destination,
+        paused: request.operation === "resume" ? false : request.operation === "pause" ? true : this.control.paused };
+      return { status: 200, data: { ...this.control, receipt: { id: `r-${this.control.revision}`, operationKey: "k", committedAt: "2026-11-23T00:00:00Z", revision: this.control.revision, replayed: false } } };
+    }
+    if (url.pathname === "/api/lifeops/calendar/sync-control/destinations") {
+      return { status: 200, data: { revision: this.control.revision, choice: "SelectPrimary", destination: this.control.destination, candidates: this.candidates } };
+    }
+    if (url.pathname === "/api/lifeops/calendar/links") return { status: 200, data: { links: this.links } };
     if (url.pathname === "/api/approvals") return { status: 200, data: { approvals: this.approvals } };
     const resolve = /^\/api\/approvals\/(.+)\/resolve$/.exec(url.pathname);
     if (resolve) {

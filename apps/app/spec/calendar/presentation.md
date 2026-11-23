@@ -359,6 +359,17 @@ pure def lawNoRereadWithoutASession(inFront: bool, calendarShown: bool, writing:
   not(rereadDue(inFront, calendarShown, writing, reading, false))
 ```
 
+### A committed Calendar change in a reply reads the window again once
+
+When a reply's committed action results changed a Calendar event (a create, change or deletion
+from chat, or an approved request), Calendar reads the window it shows once, whether or not it is
+in front, so the open Calendar and Home follow at once rather than on the next minute's read.
+
+```quint
+pure def replyRereads(calendarChanged: bool, bound: bool): bool = calendarChanged and bound
+pure def lawAnUnchangedReplyReadsNothing(bound: bool): bool = not(replyRereads(false, bound))
+```
+
 ### Without an agent session Calendar says Not connected and offers Settings, never a dead Connect
 
 A retry is offered only where reading again can change something.

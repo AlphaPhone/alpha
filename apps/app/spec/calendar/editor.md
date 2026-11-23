@@ -118,6 +118,17 @@ pure def lawManagedSeriesWritesOneOccurrence(scope: RecurrenceScope): bool =
   managedScopeAllowed(true, scope) implies scope != EntireSeries and scope != ThisAndFollowing
 ```
 
+### A new event goes to the calendar chosen in the form: the agent's own calendar, or a writable calendar on this phone
+
+The form opens on the agent's own calendar; choosing a calendar on this phone sends the event
+through the phone's own guarded create, which never makes it twice.
+
+```quint
+type NewEventTarget = AgentOwnCalendar | PhoneCalendar
+pure def newEventTarget(phoneChosen: bool): NewEventTarget = if (phoneChosen) PhoneCalendar else AgentOwnCalendar
+pure def lawTheFormDefaultsToTheAgentCalendar(phoneChosen: bool): bool = not(phoneChosen) implies newEventTarget(phoneChosen) == AgentOwnCalendar
+```
+
 ### Guests, alerts and meeting rooms go to Android Calendar; zones, all-day and repeats use the direct save
 
 On the phone a new event with guests, an alert or a video room opens Android Calendar's insert
@@ -136,9 +147,15 @@ pure def lawExistingOptionsEventUsesTheEditor(hasGuests: bool, hasAlert: bool, h
 
 ### The agent's own calendar holds no repeats, alerts or video rooms
 
+The agent's change of an existing event carries no repeat either, so the form offers no repeat
+choice for an agent Calendar event, and a changed repeat is refused before anything is sent rather
+than reported saved unchanged.
+
 ```quint
 pure def agentCalendarAccepts(isAgentCalendar: bool, repeats: bool, hasAlert: bool, hasVideo: bool): bool =
   not(isAgentCalendar) or not(repeats or hasAlert or hasVideo)
+pure def agentRepeatSendable(isNew: bool, changesRepeat: bool): bool = not(changesRepeat)
+pure def lawARepeatChangeIsNeverSentToTheAgent(isNew: bool): bool = not(agentRepeatSendable(isNew, true))
 ```
 
 ### Guests need an email each, and existing guests without one cannot be changed here

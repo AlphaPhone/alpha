@@ -1,0 +1,36 @@
+// spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
+// What a reply had already done, read from its own untrusted action results, for the cut-off label.
+
+/** One effect receipt of an action result, as far as the cut-off label reads it. */
+schema TurnReceipt {
+  receiptId?: string
+  outcome: string
+  resource: { kind: string }
+  commit?: { kind: string }
+  artifacts?: ReadonlyArray<{ kind: string }>
+  rollback?: { revertedReceiptIds: ReadonlyArray<string> }
+}
+
+/** One action result's receipts, before each is read. */
+schema TurnActionResult {
+  effectReceipts?: ReadonlyArray<unknown>
+}
+
+/** The code upstream gives a turn interrupted after an effect was committed. */
+export const interruptedAfterEffect = "TURN_INTERRUPTED_AFTER_EFFECT"
+
+/**
+ * The reply's committed effects: receipts applied and not rolled back, and of them those that only queued a Calendar change for the
+ * owner's approval (an approval request the provider did not accept at once with its changed event named).
+ */
+export function turnEffects(results: ReadonlyArray<unknown>): { readonly applied: number; readonly approvals: number } {
+  const receipts = results.flatMap((result) => {
+    const read = Schema.decodeUnknownOption(TurnActionResult)(result)
+    return Option.isNone(read) ? [] : (read.value.effectReceipts ?? []).flatMap((receipt) => Option.toArray(Schema.decodeUnknownOption(TurnReceipt)(receipt)))
+  })
+  const reverted = new Set(receipts.flatMap((receipt) => receipt.outcome === "rolled_back" ? receipt.rollback?.revertedReceiptIds ?? [] : []))
+  const active = receipts.filter((receipt) => receipt.outcome === "applied" && !(receipt.receiptId !== undefined && reverted.has(receipt.receiptId)))
+  const queued = active.filter((receipt) => receipt.resource.kind === "calendar.approval_request"
+    && !(receipt.commit?.kind === "provider_accepted" && (receipt.artifacts ?? []).some((artifact) => artifact.kind === "calendar.event")))
+  return { applied: active.length, approvals: queued.length }
+}

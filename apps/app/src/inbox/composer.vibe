@@ -11,10 +11,11 @@ import type { DraftRow, Mailbox as MailboxState } from "../../gen/inbox__mailbox
 import type { Reader as ReaderState } from "../../gen/inbox__reader.ts"
 import { InboxAccounts, mailOwnerKey } from "./accounts.vibe"
 import { Gmail } from "./gmail.vibe"
-import { MailOperations, type OperationOutcome } from "./operations.vibe"
+import { MailOperations, type OperationOutcome, composerRef } from "./operations.vibe"
 import { FilePicker } from "../files/picker.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { AppLifecycle } from "../platform/lifecycle.vibe"
+import { Notices } from "../shell/notices.vibe"
 import { checkMailFile, isRefusal, supportedMimeTypes, type FileRefusal } from "./files.ts"
 import { addressKey, forwardBody, forwardSubject, jsonBytes, literalMailAddress, oneLineSubject, replySubject } from "./text.ts"
 import { newId } from "../platform/ids.ts"
@@ -40,17 +41,17 @@ export service MailComposer {
   /** The selected account's drafts. */
   mine(): AccountDrafts!!
   /** Starts a new email, setting the open one aside first. */
-  compose(prefill?: Prefill): ComposerRefusal | undefined!!
+  compose(prefill?: Prefill): (ComposerRefusal | undefined)!!
   /** Replies to, replies to all of, or forwards the open message. */
-  reply(mode: "ReplyMode" | "ReplyAllMode" | "ForwardMode"): ComposerRefusal | string | undefined!!
+  reply(mode: "ReplyMode" | "ReplyAllMode" | "ForwardMode"): (ComposerRefusal | string | undefined)!!
   /** One edit of the open draft as typed; edits are written coalesced. */
   edit(fields: DraftFields, pendingTo: string): void!!
   /** Writes the waiting edit now. */
-  flush(): ComposerRefusal | undefined!!
+  flush(): (ComposerRefusal | undefined)!!
   /** Adds a picked file to the open draft after checking its bytes and the account's policy. */
-  attach(file: PickedFile): ComposerRefusal | Admission | undefined!!
+  attach(file: PickedFile): (ComposerRefusal | Admission | undefined)!!
   /** Lets the owner choose files through Files' picker and attaches each, stopping at the first refusal. */
-  pickAndAttach(): ComposerRefusal | Admission | undefined!!
+  pickAndAttach(): (ComposerRefusal | Admission | undefined)!!
   /** Back while the composer shows: sets the open draft aside to Drafts; not taken while the composer is hidden. */
   back(): ComposerBack!!
   /** Hides the composer, keeping the draft open, as leaving the Inbox does; false when it was not showing. */
@@ -58,17 +59,17 @@ export service MailComposer {
   /** Shows the open draft again. */
   resume(): void!!
   /** Opens a shelved draft; an earlier version of a sent email needs `confirmed`. */
-  openShelved(id: string, confirmed: boolean): ComposerRefusal | undefined!!
+  openShelved(id: string, confirmed: boolean): (ComposerRefusal | undefined)!!
   /** Deletes exactly the selected versions of shelved drafts. */
   deleteShelved(picks: DraftPick[]): boolean!!
   /** Moves the open new email to another account and selects it. */
-  transfer(grant: string): ComposerRefusal | undefined!!
+  transfer(grant: string): (ComposerRefusal | undefined)!!
   /** Opens a Gmail draft here, or says it stays in Gmail. */
-  openGmailDraft(row: DraftRow, confirmed: boolean): ComposerRefusal | undefined!!
+  openGmailDraft(row: DraftRow, confirmed: boolean): (ComposerRefusal | undefined)!!
   /** Sends the open draft once. */
-  send(): OperationOutcome | ComposerRefusal!!
+  send(): (OperationOutcome | ComposerRefusal)!!
   /** Saves the open draft to Gmail after review. */
-  saveToGmail(): OperationOutcome | ComposerRefusal | undefined!!
+  saveToGmail(): (OperationOutcome | ComposerRefusal | undefined)!!
   /** A file from Files or Photos, read twice with the same bytes, starts a new email for the account `token` names. */
   shareFile(first: PickedFile, again: PickedFile, token: string): HandoffOutcome!!
   /** The token of the account a share or suggestion is reviewed for. */
@@ -110,6 +111,7 @@ export const layer = Layer.effect(MailComposer, effect {
   const timer = try Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined)
   const conflict = try Ref.make(false)
   const writing = try Semaphore.make(1)
+  const notices = try Effect.serviceOption(Notices)
 
   effect function send(event: DraftsEvent) {
     return machine.send(event) catch () => undefined
@@ -129,7 +131,8 @@ export const layer = Layer.effect(MailComposer, effect {
       const next = { ...open, fields: w.fields, pendingTo: w.pendingTo }
       const done = try send({ type: "edit", id: open.id, revision: open.revision, edits: w.fields, pendingTo: w.pendingTo, bytes: jsonBytes(next) })
       if (done === undefined) {
-        try Ref.set(conflict, true)
+        const already = try Ref.getAndSet(conflict, true)
+        if (!already && Option.isSome(notices)) try notices.value.show("The saved draft changed. Reload it before continuing; your last edit was not kept.")
         return "changed"
       }
       return undefined
@@ -342,7 +345,11 @@ export const layer = Layer.effect(MailComposer, effect {
       const open = (try mine()).open
       if (!hasDraft(open)) return "not-ready"
       if (open.pendingTo !== "" || ![...open.fields.toList, ...open.fields.ccList, ...open.fields.bccList].every(literalMailAddress)) return "unclear-recipient"
-      return try operations.sendDraft(open)
+      return try operations.sendDraft(open, undefined, effect {
+        try flush()
+        const now = (try mine()).open
+        return hasDraft(now) ? composerRef(now) : undefined
+      })
     },
     effect saveToGmail() {
       const refusal = try flush()

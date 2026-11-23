@@ -134,12 +134,6 @@ pure def approvalStatus(found: bool, verified: bool, approval: ApprovalState): A
 pure def lawUnverifiedIsNeverAwaiting(approval: ApprovalState): bool = approvalStatus(true, false, approval) != StatusAwaiting
 ```
 
-### A reply cut off while a request waits says it needs approval, never done
-
-```quint
-pure def replyCutOffNeedsApproval(cutOff: bool, requestQueued: bool): bool = cutOff and requestQueued
-```
-
 ### A request is complete only with its known fields, a verified current target and a valid time
 
 A change or cancellation is verified only when exactly one calendar and one event match the

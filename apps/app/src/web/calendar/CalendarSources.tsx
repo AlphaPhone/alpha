@@ -1,5 +1,6 @@
-// spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Revoked access hides a source at once; hiding the agent calendar is a preference of that account"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"
+// spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Revoked access hides a source at once; hiding the agent calendar is a preference of that account"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/calendar/googleLink.md, "Story: See whether my agent's Calendar reaches Google"
 import { Sheet, SheetContent, Switch } from "../components/ui/index.ts";
+import { GoogleCalendarLink, type GoogleCalendarLinkProps } from "./GoogleCalendarLink.tsx";
 
 /** Which sources Calendar shows, whether each may be read, and the switches that change them. */
 export type CalendarSourcesProps = {
@@ -15,13 +16,15 @@ export type CalendarSourcesProps = {
   onAgent: (shown: boolean) => void;
   onDevice: () => void;
   onClose: () => void;
+  /** The Google Calendar row, shown while an owner is signed in. */
+  google?: GoogleCalendarLinkProps;
 };
 
 /**
  * "Calendars": show or hide the agent's calendar for this account, and the phone's calendars, on Calendar and Home.
  * @model spec/calendar/presentation.md
  */
-export function CalendarSources({ open, agentShown, deviceShown, agentAccess, deviceAccess, onAgent, onDevice, onClose }: CalendarSourcesProps) {
+export function CalendarSources({ open, agentShown, deviceShown, agentAccess, deviceAccess, onAgent, onDevice, onClose, google }: CalendarSourcesProps) {
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
       <SheetContent side="bottom" title="Calendars">
@@ -40,6 +43,7 @@ export function CalendarSources({ open, agentShown, deviceShown, agentAccess, de
             </span>
             <Switch aria-label="Show phone calendars" checked={deviceAccess && deviceShown} disabled={!deviceAccess} onCheckedChange={() => onDevice()} />
           </label>
+          {google !== undefined && <GoogleCalendarLink {...google} />}
         </div>
       </SheetContent>
     </Sheet>

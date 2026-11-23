@@ -119,11 +119,18 @@ function targetOf(selected: SelectedObject | undefined): Target | undefined {
 function when(fields: Fields): string {
   const start = Date.parse(fields.start)
   const end = Date.parse(fields.end)
-  return Number.isFinite(start) && Number.isFinite(end) ? `${formatDateTime(start, fields.timeZone, true)} – ${formatDateTime(end, fields.timeZone, true)}` : ""
+  return Number.isFinite(start) && Number.isFinite(end) ? `${formatDateTime(start, fields.timeZone, true)} – ${formatDateTime(end, fields.timeZone, true)} (${fields.timeZone})` : ""
 }
 
-function detailOf(fields: Fields): string {
-  return [fields.title, when(fields), fields.location].filter((line) => line.trim() !== "").join("\n")
+/** Where a reviewed change lands and who hears of it, as the legacy card said it. */
+type Reach = "phone" | "chosen" | "open"
+
+function detailOf(fields: Fields, reach: Reach): string {
+  const calendar = reach === "phone" ? "Calendar: the calendar kept on this phone. No account calendar is changed."
+    : reach === "chosen" ? "Calendar: the calendar you chose." : "Calendar: the calendar of the event you have open."
+  const attendees = reach === "open" ? "Attendees: existing attendees are kept." : "Attendees: none. No invitations are sent."
+  return [fields.title, when(fields), fields.location === "" ? "" : `Location: ${fields.location}`, calendar, attendees,
+    fields.description.trim() === "" ? "" : `Description: ${fields.description.trim()}`].filter((line) => line.trim() !== "").join("\n")
 }
 
 function isRead(op: Wire): boolean {
@@ -133,11 +140,11 @@ function isRead(op: Wire): boolean {
 /** How the card names one Calendar operation, and where the owner reviews it. */
 export function describeCalendarOperation(op: Wire): { readonly title: string; readonly detail: string; readonly destination?: "home" | "notes" | "calendar" } {
   switch (op.type) {
-    case "calendar_create_local": return { title: "Add an event to this phone’s calendar", detail: detailOf(op.fields) }
+    case "calendar_create_local": return { title: "Add an event to this phone’s calendar", detail: detailOf(op.fields, "phone") }
     case "calendar_read_next": return { title: "Share your next Calendar event", detail: "The phone reads its own calendar and shows you the event before it is shared." }
-    case "calendar_create": return { title: "Add an event to the calendar you chose", detail: detailOf(op.fields), destination: "calendar" }
+    case "calendar_create": return { title: "Add an event to the calendar you chose", detail: detailOf(op.fields, "chosen"), destination: "calendar" }
     case "calendar_read_selected": return { title: "Share the event you have open", detail: "Only the open event is shared, after you review it.", destination: "calendar" }
-    case "calendar_update": return { title: "Change the event you have open", detail: detailOf(op.fields), destination: "calendar" }
+    case "calendar_update": return { title: "Change the event you have open", detail: detailOf(op.fields, "open"), destination: "calendar" }
     case "calendar_delete": return { title: "Delete the event you have open", detail: "You can undo the deletion for 10 seconds.", destination: "calendar" }
     case "calendar_availability": {
       const start = Date.parse(op.start)
@@ -158,7 +165,7 @@ export function describeCalendarOperation(op: Wire): { readonly title: string; r
       ? { title: `Share “${op.name}”`, detail: "Choose the matching event, then review what to share. Nothing changes yet.", destination: "calendar" }
       : op.action === "delete"
         ? { title: `Delete “${op.name}”`, detail: "Open the matching event in Calendar to review this deletion.", destination: "calendar" }
-        : { title: `Change “${op.name}”`, detail: detailOf(op.fields), destination: "calendar" }
+        : { title: `Change “${op.name}”`, detail: detailOf(op.fields, "open"), destination: "calendar" }
   }
 }
 

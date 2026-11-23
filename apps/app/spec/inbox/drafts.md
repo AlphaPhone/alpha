@@ -394,8 +394,9 @@ storage), under the same account key of environment, user, organization and Gmai
 composer binds to an account, each of those drafts that holds anything the owner wrote is put on
 that account's shelf under its own id, with its recipients, half-typed address, subject, body,
 attachments checked again as files, forwarded originals, reply, Gmail draft reference and its mark
-as an earlier version of a sent email. The recovery copy is newer than the saved draft with the same
-id and replaces it. A draft already open or shelved is kept, so a second pass adds nothing. Only
+as an earlier version of a sent email. The recovery copy replaces the saved draft with the same id
+only when its edits were typed over that saved revision; a saved draft saved again after the copy's
+base is newer, keeps its place, and the stale copy is dropped. A draft already open or shelved is kept, so a second pass adds nothing. Only
 the account bound now receives drafts, a full shelf takes none, and the previous slots are cleared
 only once every meaningful draft is kept, so an interrupted pass resumes on the next binding; an
 unreadable slot is never cleared. On the phone, each previous slot is first moved out of the earlier

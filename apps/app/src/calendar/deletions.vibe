@@ -2,6 +2,7 @@
 import { type DeferredDeletes as HeldState, type Event as HeldEvent, type HideScope, Machine as HeldMachine, hides } from "../../gen/calendar__deletions.effect.vibe"
 import { deleteUndoMs } from "@elizaos/os/bridges/deletion-window"
 import type { CalendarDeleteRequest } from "@elizaos/plugin-calendar/client"
+import { Notices } from "../shell/notices.vibe"
 
 /** A write scope of a repeating event, as upstream series scope names it. */
 export type CalendarWriteScope = NonNullable<CalendarDeleteRequest["recurrenceScope"]>
@@ -19,6 +20,8 @@ export interface HeldRequest {
   /** The scope the owner chose and the deletion sends: one occurrence, this and following, the whole series, or a single event. */
   readonly scope: CalendarWriteScope | "event"
   readonly send: Effect.Effect<boolean>
+  /** The event's version when the owner confirmed; a read that lists it at another version shows it again, as a sent decline does. */
+  readonly revision?: string
 }
 
 /** Which rows a scope hides while its deletion waits or is in flight. */
@@ -43,8 +46,8 @@ export service HeldDeletions {
   leave(): void!!
   /** Another account or session: a waiting deletion is dropped unsent. */
   retire(): void!!
-  /** A read: a sent deletion stops hiding once its row is gone or changed. */
-  readBack(rows: readonly HeldRow[], unchanged: (target: string) => boolean): void!!
+  /** A read: a sent deletion stops hiding once its row is gone or changed from the version confirmed. */
+  readBack(rows: readonly HeldRow[], unchanged: (target: string, revision: string) => boolean): void!!
   hidden(row: HeldRow): boolean!!
 }
 
@@ -53,15 +56,23 @@ export const deletionsLayer = Layer.effect(HeldDeletions, effect {
   const machine = try HeldMachine
   const requests = try Ref.make<Map<number, HeldRequest>>(new Map())
   const shown = try Ref.make<Set<number>>(new Set())
+  const notices = try Effect.serviceOption(Notices)
 
   effect function send(event: HeldEvent) { return machine.send(event) catch () => undefined }
+
+  effect function notDeleted(request: HeldRequest) {
+    if (Option.isSome(notices)) try notices.value.show(request.decline ? "Invitation not declined" : "Event not deleted")
+  }
 
   effect function dispatch(id: number) {
     const request = (try Ref.get(requests)).get(id)
     if (request === undefined) return
     const ok = request.send catch () => false
     try send(ok ? { type: "sendSucceeded", id } : { type: "sendFailed", id })
-    if (!ok) try Ref.update(requests, (all) => { const next = new Map(all); next.delete(id); return next })
+    if (!ok) {
+      try Ref.update(requests, (all) => { const next = new Map(all); next.delete(id); return next })
+      try notDeleted(request)
+    }
   }
 
   effect function sendingIds(before: HeldState, after: HeldState) {
@@ -120,14 +131,19 @@ export const deletionsLayer = Layer.effect(HeldDeletions, effect {
       const after = try send({ type: "retire" })
       if (after === undefined) return
       const dropped = before.held.filter((held) => held.phase === "Waiting").map((held) => held.id)
-      try Ref.update(requests, (all) => new Map([...all].filter(([id]) => !dropped.includes(id))))
+      const all = try Ref.get(requests)
+      for (const id of dropped) {
+        const request = all.get(id)
+        if (request !== undefined) try notDeleted(request)
+      }
+      try Ref.update(requests, (kept) => new Map([...kept].filter(([id]) => !dropped.includes(id))))
     },
-    effect readBack(rows: readonly HeldRow[], unchanged: (target: string) => boolean) {
+    effect readBack(rows: readonly HeldRow[], unchanged: (target: string, revision: string) => boolean) {
       const state = try machine.get()
       const all = try Ref.get(requests)
       for (const held of state.held.filter((entry) => entry.phase === "Sent")) {
         const request = all.get(held.id)
-        const listed = request !== undefined && rows.some((candidate) => candidate.id === held.target) && unchanged(held.target)
+        const listed = request !== undefined && rows.some((candidate) => candidate.id === held.target) && unchanged(held.target, request.revision ?? "")
         try send({ type: "readBack", target: held.target, listedUnchanged: listed })
       }
     },

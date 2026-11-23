@@ -5,6 +5,7 @@ import { CameraComposer, MapsChatCards, MapsRelay, ReplyChanges } from "../../as
 import { CameraChat, type ChatMessage } from "../../camera/chat.vibe"
 import { PageMail } from "../../browser/ports.vibe"
 import { CalendarMaps, type CalendarEventOrigin } from "../../calendar/ports.vibe"
+import { calendarFollowsReplies } from "../../calendar/binding.vibe"
 import { ownNotices } from "../../clock/notifications.vibe"
 import { FileShareTargets } from "../../files/share.vibe"
 import { assistantEmail } from "../../inbox/handoffs.vibe"
@@ -119,7 +120,7 @@ export const fillsLive = Layer.effectDiscard(effect {
   const cameraComposer: CameraComposer.Shape = { intercept: (message: ChatMessage) => camera.intercept(message) }
   try sync(() => fillCell(cells, cells.cameraComposer, cameraComposer))
 
-  const changes = try replyChangesBuilt()
+  const changes = try calendarFollowsReplies(try replyChangesBuilt())
   try sync(() => fillCell(cells, cells.replyChanges, changes))
 
   const capabilities = try deviceCapabilities

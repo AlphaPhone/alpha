@@ -1,7 +1,7 @@
 // spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"; spec/inbox/operations.md, "Swiping a listed message left reviews its archive at its current revision, and swiping right changes nothing"; spec/inbox/operations.md, "Send of the email on screen continues its open operation, and an unresolved one blocks another"; spec/inbox/operations.md, "Sent is said once, by the step that first learns of the success, and an unresolved send opens its receipt"; spec/inbox/operations.md, "Story: Clean up after a send, and say Sent once"; spec/inbox/drafts.md, "A confirmed send removes only the exact copy that was sent and marks other versions as earlier"
 import {
   type Event as JournalEvent, type Journal, type OpKind, type Proposal, type ComposedMail, type ComposerRef, type SendSource, type OperationRecord, type Receipt,
-  Machine as JournalMachine, recordOf, noRecord, sendStep, swipeArchives, swipeDistance, cleanupReady, undoable, undoKind, mayContinueDraft, mayDeleteGmailDraft, isLabelKind, notStarted
+  Machine as JournalMachine, recordOf, noRecord, sendStep, clearable, swipeArchives, swipeDistance, cleanupReady, undoable, undoKind, mayContinueDraft, mayDeleteGmailDraft, isLabelKind, notStarted
 } from "../../gen/inbox__operations.effect.vibe"
 import { type Event as DraftsEvent, type DraftFields, type Draft, type Mode, Machine as DraftsMachine, continuedDraft } from "../../gen/inbox__drafts.effect.vibe"
 import { InboxAccounts } from "./accounts.vibe"
@@ -35,19 +35,22 @@ export service MailOperations {
   readonly changes: Stream.Stream<Journal>
   get(): Journal!!
   /** The selected account's operation, if any. */
-  current(): OperationRecord | undefined!!
+  current(): (OperationRecord | undefined)!!
   /** Records a proposal and asks Gmail to review it; a send or Gmail draft save names the composer's draft. */
-  prepare(kind: OpKind, proposal: Proposal, composer: ComposerRef, source: SendSource, requestId?: string): OperationOutcome | undefined!!
+  prepare(kind: OpKind, proposal: Proposal, composer: ComposerRef, source: SendSource, requestId?: string): (OperationOutcome | undefined)!!
   /** Confirms the reviewed operation and dispatches it once. */
   confirm(shown: ComposerRef): OperationOutcome!!
-  /** Sends the open draft in one step: review, confirm and dispatch, under one request id. */
-  sendDraft(draft: Draft, requestId?: string): OperationOutcome!!
+  /**
+   * Sends the open draft in one step: review, confirm and dispatch, under one request id. `shownNow` reads what the composer
+   * shows once Gmail's review is back; an email edited or replaced meanwhile has its review discarded and is not sent.
+   */
+  sendDraft(draft: Draft, requestId?: string, shownNow?: (ComposerRef | undefined)!!): OperationOutcome!!
   /** Saves the open draft to Gmail as a new or replacing Gmail draft, after review. */
-  saveGmailDraft(draft: Draft): OperationOutcome | undefined!!
+  saveGmailDraft(draft: Draft): (OperationOutcome | undefined)!!
   /** Reads the operation's receipt again; it never dispatches. */
-  refresh(): OperationOutcome | undefined!!
+  refresh(): (OperationOutcome | undefined)!!
   /** Prepares again under the same request id after a review that did not match, or reads the receipt. */
-  retry(): OperationOutcome | undefined!!
+  retry(): (OperationOutcome | undefined)!!
   /** Discards an operation Gmail reports as not started, after the owner was warned. */
   abandon(): boolean!!
   /** Cancels an unsent review or closes a settled receipt. */
@@ -55,18 +58,25 @@ export service MailOperations {
   /** Discards an unsent review the composer no longer shows. */
   discardStale(shown: ComposerRef): boolean!!
   /** Reviews the archive of a listed message at the revision read for it now, as a swipe left asks. */
-  archiveListed(messageId: string): OperationOutcome | undefined!!
+  archiveListed(messageId: string): (OperationOutcome | undefined)!!
   /** Undoes a confirmed archive or Trash. */
-  undo(): OperationOutcome | undefined!!
+  undo(): (OperationOutcome | undefined)!!
   /** Reviews the permanent deletion of the Gmail draft the operation saved or sent from. */
-  deleteGmailDraft(): OperationOutcome | undefined!!
+  deleteGmailDraft(): (OperationOutcome | undefined)!!
   /** Opens the Gmail draft the operation saved in the composer, with its reviewed intent. */
-  continueDraft(): "opened" | "changed" | "busy" | "unavailable"!!
+  continueDraft(): ("opened" | "changed" | "busy" | "unavailable")!!
+}
+
+/** Whether the operation journal is the one kept in the phone's mail store, or only a copy in memory because the kept one could not be read or set apart. */
+export service JournalKept {
+  readonly kept: boolean
+  static readonly defaultValue = () => ({ kept: true })
 }
 
 /** The operation shell over the journal, Gmail, the drafts and the list. */
 export const layer = Layer.effect(MailOperations, effect {
   const machine = try JournalMachine
+  const journalKept = (try JournalKept).kept
   const drafts = try DraftsMachine
   const accounts = try InboxAccounts
   const gmail = try Gmail
@@ -137,6 +147,8 @@ export const layer = Layer.effect(MailOperations, effect {
 
   effect function prepare(kind: OpKind, proposal: Proposal, composer: ComposerRef, source: SendSource, requestId?: string) {
     const id = requestId ?? newId()
+    const held = try record()
+    if (held !== undefined && held.phase === "Observed" && !held.sourceHeld && clearable(held)) try send({ type: "clear", requestId: held.requestId })
     const bytes = jsonBytes(wireProposal(kind, proposal))
     const started = try send({ type: "prepare", requestId: id, kind, proposal, composer, source, bytes })
     if (started === undefined) return "Refused"
@@ -145,7 +157,7 @@ export const layer = Layer.effect(MailOperations, effect {
 
   effect function confirm(shown: ComposerRef): OperationOutcome {
     const r = try record()
-    if (r === undefined) return "Refused"
+    if (r === undefined || !journalKept) return "Refused"
     const confirmed = try send({ type: "confirm", requestId: r.requestId, shown })
     if (confirmed === undefined) return "Refused"
     const account = try grant()
@@ -176,19 +188,25 @@ export const layer = Layer.effect(MailOperations, effect {
 
   fork.scoped (effect {
     let bound = ""
+    let grants = ""
     let withdrawals = 0
     for try (const a of accounts.changes) {
       const key = try accounts.selectedKey()
-      if (key !== bound) {
+      const granted = JSON.stringify(a.rows.find((row) => row.id === a.selected)?.capabilities ?? [])
+      const rebound = key !== bound
+      if (rebound) {
         bound = key
         try send({ type: "bind", owner: key })
-        if (key !== "" && a.phase === "Checked" && !a.fromDisk) {
-          const caps = gmail.capabilities(a.selected) catch () => undefined
-          if (caps === undefined) try send({ type: "capabilitiesFailed", owner: key })
-          else try send({ type: "capabilitiesRead", owner: key, capabilities: caps })
-          const restored = try record()
-          if (restored !== undefined && (restored.sourceHeld || restored.phase === "Dispatching")) try refresh()
-        }
+      }
+      const checked = key !== "" && a.phase === "Checked" && !a.fromDisk
+      const unknown = !(try machine.get()).capabilities.known
+      if (checked && (rebound || unknown || granted !== grants)) {
+        grants = granted
+        const caps = gmail.capabilities(a.selected) catch () => undefined
+        if (caps === undefined) try send({ type: "capabilitiesFailed", owner: key })
+        else try send({ type: "capabilitiesRead", owner: key, capabilities: caps })
+        const restored = try record()
+        if (rebound && restored !== undefined && (restored.sourceHeld || restored.phase === "Dispatching")) try refresh()
       }
       if (a.withdrawals !== withdrawals) {
         withdrawals = a.withdrawals
@@ -203,16 +221,25 @@ export const layer = Layer.effect(MailOperations, effect {
     current: record,
     prepare,
     confirm,
-    effect sendDraft(draft: Draft, requestId?: string) {
+    effect sendDraft(draft: Draft, requestId?: string, shownNow?: (ComposerRef | undefined)!!) {
       const shown = composerRef(draft)
+      effect function confirmShown(): OperationOutcome {
+        const now = shownNow === undefined ? shown : try shownNow
+        if (now !== undefined && (now.draftId !== shown.draftId || now.content !== shown.content)) {
+          const r = try record()
+          if (r !== undefined) try send({ type: "discardStale", requestId: r.requestId, shown: now })
+          return "Discarded"
+        }
+        return try confirm(now ?? shown)
+      }
       const existing = try record()
       switch (sendStep(existing !== undefined, existing ?? noRecord, shown)) {
         case "AlreadySent": return "SentBefore"
-        case "ConfirmOpen": return try confirm(shown)
+        case "ConfirmOpen": return try confirmShown()
         case "ReviewOpen": {
           const reviewedNow = try review(existing!.requestId)
           const r = try record()
-          return r !== undefined && r.phase === "Reviewing" ? try confirm(shown) : reviewedNow ?? "Unsent"
+          return r !== undefined && r.phase === "Reviewing" ? try confirmShown() : reviewedNow ?? "Unsent"
         }
         case "ReadReceipt": return existing!.composer.content === shown.content && existing!.composer.draftId === shown.draftId ? (try refresh()) ?? "Uncertain" : "Uncertain"
         case "ShowReview": return "AwaitingReview"
@@ -226,7 +253,7 @@ export const layer = Layer.effect(MailOperations, effect {
       if (prepared !== undefined && prepared !== "Refused" && prepared !== "Unsent") return prepared
       const r = try record()
       if (r === undefined || r.phase !== "Reviewing") return prepared ?? "Unsent"
-      return try confirm(shown)
+      return try confirmShown()
     },
     effect saveGmailDraft(draft: Draft) {
       const replacing = draft.provider.draftId !== ""

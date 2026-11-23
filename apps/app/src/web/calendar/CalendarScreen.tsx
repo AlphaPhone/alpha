@@ -6,6 +6,7 @@ import { useMachine } from "../../../gen/calendar__presentation.react.ts";
 import { type CalendarView, type Event as PresentationEvent, dayEmptiness, initial, rowShown, statusAction } from "../../../gen/calendar__presentation.ts";
 import type { RecurrenceScope } from "../../../gen/calendar__editor.ts";
 import { readCalendar } from "../../calendar/binding.vibe";
+import { CalendarLink } from "../../calendar/link.vibe";
 import { CalendarDrafts } from "../../calendar/drafts.vibe";
 import type { DraftFieldsRecord } from "../../calendar/drafts.schema.vibe";
 import { type CalendarRow, agentEventKey, eventSourceKey } from "../../calendar/model.vibe";
@@ -16,7 +17,6 @@ import {
 import type { OriginView } from "../../notes/origins.vibe";
 import { newId } from "../../platform/ids.ts";
 import { deviceZone, formatLongDate, midnightAfter } from "../../calendar/time.ts";
-import { Navigation } from "../../shell/navigation.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button, Input, Tabs, TabsList, TabsTrigger } from "../components/ui/index.ts";
 import { CalendarSources } from "./CalendarSources.tsx";
@@ -26,7 +26,7 @@ import { EventEditor } from "./EventEditor.tsx";
 import { MonthGrid } from "./MonthGrid.tsx";
 import { ScheduleList } from "./ScheduleList.tsx";
 import { Timeline } from "./Timeline.tsx";
-import { useAgentView, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
+import { useAgentView, useCalendarLink, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
 import { perform } from "../shell/services.ts";
 import { calendarRows, coveredRange, listGroups, visibleDays } from "./layout.ts";
 import { runtime } from "./runtime.ts";
@@ -67,6 +67,8 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
   const held = useHeld();
   const draft = useDraft();
   const writes = useDeviceWrites();
+  const link = useCalendarLink();
+  const linkDo = (act: (service: CalendarLink.Shape) => Effect.Effect<void>) => void perform(CalendarLink.use(act));
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<{ fields: DraftFieldsRecord; row: CalendarRow | undefined; owner: string } | undefined>(undefined);
   const [problem, setProblem] = useState("");
@@ -136,7 +138,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
         <div role="status" className="flex items-center justify-between gap-2 px-4 py-1 text-sm text-muted-foreground">
           <span>{[status, device.status === "limited" ? "2,000 max" : device.status === "failed" ? "Couldn’t load device calendars" : ""].filter(Boolean).join(" · ")}</span>
           {action === "OfferSettings" && (
-            <Button variant="outline" size="sm" aria-label="Open Calendar settings" onClick={() => void perform(Navigation.use((navigation) => navigation.open("account", "google")))}><Settings aria-hidden />Settings</Button>
+            <Button variant="outline" size="sm" aria-label="Open Calendar settings" onClick={() => linkDo((service) => service.connect())}><Settings aria-hidden />Settings</Button>
           )}
           {action === "OfferRetry" && (
             <Button variant="ghost" size="icon" aria-label="Retry calendar and reminders" onClick={() => void perform(readCalendar(true, false))}><RefreshCw /></Button>
@@ -165,7 +167,9 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
           onOpen={showRow} onPickDay={(day) => go({ type: "chooseDay", day }, true)} />
       )}
       <CalendarSources open={p.sourcesSheet} agentShown={!agentHidden} deviceShown={p.deviceVisible} agentAccess={p.agentAccess && p.owner !== ""} deviceAccess={p.deviceAccess}
-        onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => void perform(closeSources())} />
+        onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => void perform(closeSources())}
+        {...(p.owner === "" ? {} : { google: { ...link, onLink: () => linkDo((service) => service.link()), onCancel: () => linkDo((service) => service.cancel()),
+          onConnect: () => linkDo((service) => service.connect()), onDisconnect: () => linkDo((service) => service.disconnect()) } })} />
       <DatePicker open={p.datePicker} rows={rows} day={p.day} month={p.month} zone={zone} now={now}
         onMonth={(month) => go({ type: "chooseMonth", month }, true)} onPickDay={(day) => { go({ type: "chooseDay", day }, true); }} onClose={() => go({ type: "closeDatePicker" })} />
       {p.form === "NoForm" && (
@@ -179,7 +183,10 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
           onClose={() => void perform(closeRow())} />
       )}
       {p.form !== "NoForm" && shown !== undefined && (
-        <EventEditor fields={shown.fields} draft={draft} recurring={shown.row?.recurring === true} timingLocked={rowTimingLocked(shown.row)} deviceZone={zone}
+        <EventEditor fields={shown.fields} draft={draft} recurring={shown.row?.recurring === true} repeats={shown.row?.source === "device"}
+          calendars={shown.row === undefined ? [{ value: "local", label: "Agent Calendar" },
+            ...device.calendars.filter((calendar) => calendar.writable).map((calendar) => ({ value: `native:${calendar.id}`, label: calendar.account === "" ? calendar.name : `${calendar.name} · ${calendar.account}` }))] : []}
+          timingLocked={rowTimingLocked(shown.row)} deviceZone={zone}
           loading={agent.state.read.id !== 0} otherAccount={shown.owner !== agent.state.owner}
           eventChanged={shown.row !== undefined && rows.find((row) => row.id === shown.row?.id)?.revision !== shown.row.revision} problem={problem}
           onEdit={(fields) => void perform(CalendarDrafts.use((drafts) => drafts.edit(fields)))}
