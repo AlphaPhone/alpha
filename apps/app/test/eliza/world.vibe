@@ -4,7 +4,7 @@ import { agentAt } from "../../src/platform/agent.vibe"
 import { cloudAt } from "../../src/platform/cloud.vibe"
 import { type Platform, pagePlatform } from "../../src/platform/platform.vibe"
 
-/** Where the services of services.ts answer: the agent with this launch's token, and the cloud's loopback origin with the owner's device key. */
+/** Where the services of `@repo/eliza-harness/services` answer: the agent with this launch's token, and the cloud's loopback origin with the owner's device key. */
 export interface Running {
   readonly agent: { readonly origin: string; readonly token: string }
   readonly cloud: { readonly local: string }

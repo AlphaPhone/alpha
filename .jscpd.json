@@ -1,7 +1,7 @@
 {
   "format": ["typescript", "tsx", "javascript", "css"],
   "formatsExts": { "typescript": ["ts", "mts", "vibe", "vibex"] },
-  "ignore": ["legacy/**", "vibestack/examples/**", "**/test/fixtures/**"],
+  "ignore": ["legacy/**", "vibestack/examples/**", "**/test/fixtures/**", "**/dist/**", "**/node_modules/**"],
   "threshold": 0,
   "reporters": ["console"]
 }

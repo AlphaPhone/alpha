@@ -4,7 +4,7 @@
 //   ignore **/test/fixtures/**              inputs the tools' tests read as text, never imported
 //   ignoreIssues server.vibe exports        AGENTS is used in its own file, in a body ignoreExportsUsedInFile cannot see
 //   root lemmascript                        run as an executable by vibestack/prove.ts
-//   apps openssl                            the system's own, run by apps/app/test/eliza/services.ts for the local cloud's certificate
+//   eliza-harness openssl                   the system's own, run by packages/eliza-harness/src/services.ts for the local cloud's certificate
 //   apps entry test/drivers, *.schema, *.contract  none yet in apps/app: an area that writes one needs no change here
 //   root @vitest/browser                    loaded by Vitest's browser mode, beside @vitest/browser-playwright
 //   root @repo/design-system                read as files by vibestack/design/test/design.test.ts
@@ -62,6 +62,30 @@ export default {
         "typescript-eslint"
       ]
     },
+    "packages/eliza-harness": {
+      "entry": [
+        "src/no-bun.vibe",
+        "src/pinned.vibe",
+        "test/**/*.test.{ts,vibe}"
+      ],
+      "project": [
+        "src/**/*.{ts,vibe,vibex}",
+        "test/**/*.{ts,vibe,vibex}"
+      ],
+      "ignoreBinaries": [
+        "openssl"
+      ]
+    },
+    "packages/deployment": {
+      "entry": [
+        "src/deployment.vibe",
+        "test/**/*.test.{ts,vibe}"
+      ],
+      "project": [
+        "src/**/*.{ts,vibe,vibex}",
+        "test/**/*.{ts,vibe,vibex}"
+      ]
+    },
     "vibestack/studio": {
       "entry": [
         "src/main.vibe",
@@ -88,9 +112,6 @@ export default {
       ],
       "ignoreDependencies": [
         "tailwindcss"
-      ],
-      "ignoreBinaries": [
-        "openssl"
       ]
     }
   }
