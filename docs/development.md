@@ -897,3 +897,13 @@ develop merges since `17e742d454`, among them photo card reviews
 ([eliza#40090](https://github.com/elizaOS/eliza/pull/40090)) and scoped native
 password approval ([eliza#40088](https://github.com/elizaOS/eliza/pull/40088)).
 No model turn, APK or Pixel run is proven by the pin.
+
+The next pin, `6b98cd261a708a559fd39fda0697f1ca45f38b08`, is the develop merge of
+[eliza#40193](https://github.com/elizaOS/eliza/pull/40193): an agent
+`browser_navigate` may open an exact link of the Browser page the request
+carried, which the phone keeps on its review card (see
+[browser-page-context.md](browser-page-context.md)). It also brings the develop
+merges since `fe5c02faed`, among them the Browser address copy
+([eliza#40106](https://github.com/elizaOS/eliza/pull/40106)) and coarse position
+areas ([eliza#40190](https://github.com/elizaOS/eliza/pull/40190)). No model turn,
+APK or Pixel run is proven by the pin.
