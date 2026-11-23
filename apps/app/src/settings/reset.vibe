@@ -34,11 +34,11 @@ export const reset = Layer.effect(Reset, effect {
   const native = try Native
   return {
     review: () => Effect.provideService(effect {
-      const begun = try (held.send({ type: "openReview" }) catch () => undefined)
+      const begun = (held.send({ type: "openReview" }) catch () => undefined)
       if (begun === undefined) return "AlreadyOpen" as Notice
       const answer = try attempt(call("AlphaReset", "review", ResetAnswer))
       const notice = answer === undefined ? "Unconfirmed" : resetNotice(answer.status, answer.message)
-      try (held.send({ type: "reviewAnswered", notice }) catch () => undefined)
+      held.send({ type: "reviewAnswered", notice }) catch () => undefined
       return notice
     }, Native, native),
   }

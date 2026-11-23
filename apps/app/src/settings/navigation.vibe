@@ -77,7 +77,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
   }
 
   effect function open(page: Page) {
-    const opened = try (held.send({ type: "open", page }) catch () => undefined)
+    const opened = (held.send({ type: "open", page }) catch () => undefined)
     if (opened !== undefined) try entered(page)
   }
 
@@ -91,7 +91,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
       if (forward === "ToWorkflows") { try navigation.open("workflows"); return }
       const section = sectionOf(route.toLowerCase())
       if (section === "Root") return
-      const opened = try (held.send({ type: "openSection", page: section }) catch () => undefined)
+      const opened = (held.send({ type: "openSection", page: section }) catch () => undefined)
       if (opened !== undefined) try entered(section)
     },
     open,
@@ -100,13 +100,13 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
       const before = try held.get()
       if (before.page === "Passwords" && (try vault.back())) return true
       if (before.page === "Problems" && (try diagnostics.back())) return true
-      const after = try (held.send({ type: "back" }) catch () => undefined)
+      const after = (held.send({ type: "back" }) catch () => undefined)
       if (after === undefined) return false
       if (before.page === "Passwords") try vault.leave()
       return true
     },
     effect openLicence(index: number) {
-      try (held.send({ type: "openLicence", index }) catch () => undefined)
+      held.send({ type: "openLicence", index }) catch () => undefined
     },
     effect openApp(app: AppRow) {
       const page = appPage(app, onPhone)
@@ -124,7 +124,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
     },
     effect leave() {
       const before = try held.get()
-      try (held.send({ type: "leave" }) catch () => undefined)
+      held.send({ type: "leave" }) catch () => undefined
       if (before.page === "Passwords") try vault.leave()
     },
     effect accessSetup() {

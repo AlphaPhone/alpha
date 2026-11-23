@@ -45,7 +45,7 @@ function android(answers: Record<string, Answer>) {
       calls.push({ name, args })
       if (!Object.hasOwn(answers, name)) throw new NativeUnavailable({ plugin, method })
       const answer = answers[name]
-      const value = typeof answer === "function" ? answer(args) : answer
+      const value = typeof answer === "function" ? try Effect.orDie(Effect.try(() => answer(args))) : answer
       if (value instanceof Error) throw new NativeFailed({ plugin, method, message: value.message })
       return value
     },
@@ -277,8 +277,9 @@ it.effect("Go to Android's own page (spec/settings/facts.md, \"Story: Go to Andr
     const shade = try facts.openShade()
     try facts.openPage("PageAppInfo")
     const appInfo = (try machine.get()).handoff
+    const got1 = try machine.get()
     try Effect.try(() => assert.deepStrictEqual(
-      { dnd: [dnd.handoff, dnd.handoffPage], home, shade: [shade, (try machine.get()).shade], appInfo, opened: calls.filter((c) => c.name.includes("pen")).map((c) => [c.name, c.args]) },
+      { dnd: [dnd.handoff, dnd.handoffPage], home, shade: [shade, got1.shade], appInfo, opened: calls.filter((c) => c.name.includes("pen")).map((c) => [c.name, c.args]) },
       {
         dnd: [{ tag: "HandoffOpened", specific: false }, "PageDnd"], home: { tag: "HandoffOpened", specific: true },
         shade: ["ShadePermissionMissing", "ShadePermissionMissing"], appInfo: { tag: "HandoffRefused" },
@@ -304,7 +305,8 @@ it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md
   const upgraded = try effect {
     provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, JSON.stringify(older)) }), memoryStore), build())) {
       const p = try Preferences
-      const saved = JSON.parse((try (try KeyValueStore.KeyValueStore).get(PREFERENCES_KEY)) ?? "null")
+      const raw = (try (try KeyValueStore.KeyValueStore).get(PREFERENCES_KEY)) ?? "null"
+      const saved = try Effect.orDie(Effect.try(() => JSON.parse(raw)))
       return [(try p.current()).readable, try p.sharesBrowserPage(), try p.sharesLocation(), try p.asksBeforeActions(), try p.loadsMailImages(), saved?.browserPage, saved?.agentLocation]
     }
   }
@@ -318,7 +320,7 @@ it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md
   const damaged = try effect {
     provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, "{not json") }), memoryStore), build())) {
       const p = try Preferences
-      const locked = try (p.set("MailImages", false) catch (e) => e._tag)
+      const locked = (p.set("MailImages", false) catch (e) => e._tag)
       const before = [try p.asksBeforeActions(), try p.sharesLocation(), try p.sharesBrowserPage(), locked]
       try p.reset()
       return [...before, try p.sharesLocation(), try p.sharesBrowserPage(), (try p.current()).readable]
@@ -535,7 +537,8 @@ it.effect("Erase Alpha's data on purpose (spec/settings/reset.md, \"Story: Erase
     const unknown = try r.review()
     answer = new Error("bridge closed")
     const refused = try r.review()
-    try Effect.try(() => assert.deepStrictEqual([cancelled, unknown, refused, (try (try ResetMachine).get()).open], ["NoNotice", "Unconfirmed", "Unconfirmed", false]))
+    const got2 = try (try ResetMachine).get()
+    try Effect.try(() => assert.deepStrictEqual([cancelled, unknown, refused, got2.open], ["NoNotice", "Unconfirmed", "Unconfirmed", false]))
   }
 })
 
@@ -593,8 +596,8 @@ it.effect("Delete or reset only on purpose (spec/settings/passwords.md, \"Story:
     try v.run("Removing", "a")
     const removed = calls.find((c) => c.name === "ElizaPasswords.remove")?.args
     // spec/settings/passwords.md, "A damaged vault offers only a reset, which needs a review and then Android's authentication"
-    try (held.send({ type: "beginTask", task: "Editing", id: "" }) catch () => undefined)
-    try (held.send({ type: "taskAnswered", visit: (try held.get()).visit, answer: "KeyInvalidated" }) catch () => undefined)
+    held.send({ type: "beginTask", task: "Editing", id: "" }) catch () => undefined
+    held.send({ type: "taskAnswered", visit: (try held.get()).visit, answer: "KeyInvalidated" }) catch () => undefined
     const damaged = (try held.get()).phase
     try v.run("Resetting", "")
     const unasked = calls.some((c) => c.name === "ElizaPasswords.reset")

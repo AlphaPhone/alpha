@@ -24,11 +24,14 @@ it.live("Read aloud speaks the one token the host returned for the shown page, a
         try reading.readAloud()
         try sleep("50 millis")
         const asked = try callsTo(fake.calls, "reviewReading")
+        const got1 = try Ref.get(fake.spoken)
+        const got2 = try callsTo(fake.calls, "cancelReading")
+        const got3 = try Ref.get(fake.toasts)
         try Effect.try(() => assert.deepStrictEqual({
           asked: asked.map((c) => [c.args.id, c.args.url, c.args.navigation, c.args.route]),
-          spoken: try Ref.get(fake.spoken),
-          cancelled: (try callsTo(fake.calls, "cancelReading")).length,
-          failed: (try Ref.get(fake.toasts)).includes("Alpha couldn’t read this page aloud. Try again."),
+          spoken: got1,
+          cancelled: got2.length,
+          failed: got3.includes("Alpha couldn’t read this page aloud. Try again."),
         }, {
           asked: [[id, "https://example.test/story", "3", "on-device"]],
           spoken: ["token-1"],
@@ -52,10 +55,13 @@ it.live("the assistant opening before the reading is asked for ends it, and noth
       try readingIdle(reading)
       const asking = fork reading.readAloud()
       try sleep("20 millis")
-      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, chat: "sheet" })
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, chat: "sheet" as const })
       try join asking
+      const got4 = try callsTo(fake.calls, "reviewReading")
+      const got5 = try Ref.get(fake.spoken)
+      const got6 = try callsTo(fake.calls, "cancelReading")
       try Effect.try(() => assert.deepStrictEqual(
-        { asked: (try callsTo(fake.calls, "reviewReading")).length, spoken: (try Ref.get(fake.spoken)).length, cancelled: (try callsTo(fake.calls, "cancelReading")).length > 0 },
+        { asked: got4.length, spoken: got5.length, cancelled: got6.length > 0 },
         { asked: 0, spoken: 0, cancelled: true },
       ))
     }
@@ -79,11 +85,16 @@ it.live("a device without isolated reading or without a voice asks the host for 
       }
     })
   }
+  const got7 = try callsTo(unsupported.calls, "reviewReading")
+  const got8 = try callsTo(voiceless.calls, "reviewReading")
+  const got9 = try callsTo(unsupported.calls, "readingSupport")
+  const got10 = try Ref.get(unsupported.toasts)
+  const got11 = try Ref.get(voiceless.toasts)
   try Effect.try(() => assert.deepStrictEqual({
-    asked: (try callsTo(unsupported.calls, "reviewReading")).length + (try callsTo(voiceless.calls, "reviewReading")).length,
-    supportQueries: (try callsTo(unsupported.calls, "readingSupport")).length,
-    unsupported: (try Ref.get(unsupported.toasts)).at(-1),
-    voiceless: (try Ref.get(voiceless.toasts)).at(-1),
+    asked: got7.length + got8.length,
+    supportQueries: got9.length,
+    unsupported: got10.at(-1),
+    voiceless: got11.at(-1),
   }, {
     asked: 0,
     supportQueries: 1,
@@ -140,8 +151,9 @@ it.live("a sign-in page's local reading review is refused for good: no text is t
       try reading.editLocal("Read this instead")
       try reading.readLocal()
       const now = try timeout(Stream.runHead(reading.changes), "1 second")
+      const got12 = try Ref.get(fake.spoken)
       try Effect.try(() => assert.deepStrictEqual(
-        { blocked: Option.getOrUndefined(now)?.blocked, text: Option.getOrUndefined(now)?.text, spoken: (try Ref.get(fake.spoken)).length },
+        { blocked: Option.getOrUndefined(now)?.blocked, text: Option.getOrUndefined(now)?.text, spoken: got12.length },
         { blocked: true, text: "", spoken: 0 },
       ))
     }

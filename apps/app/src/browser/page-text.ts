@@ -16,7 +16,7 @@ const CREDENTIAL_FIELD = /(?:^|[^a-z0-9])(?:otp|totp|mfa|2fa)(?:$|[^a-z0-9])|pas
 const REMOVED = "script,style,noscript,template,nav,header,footer,form,input,select,textarea,button,iframe,svg,[hidden],[aria-hidden=true]";
 const BLOCK = /^(?:P|DIV|SECTION|ARTICLE|MAIN|H[1-6]|LI|UL|OL|BR|TR|TD|TH|BLOCKQUOTE|PRE)$/;
 
-/** An address that must not be read: not HTTP(S), credentials, a password service, or a route naming sign-in, account or token material. */
+/** An address that must not be read: not HTTP(S), credentials, a password service, or a route naming sign-in, account or token material. @throws {never} */
 export function sensitiveAddress(address: string): boolean {
   if (address.length > 8192) return true;
   const url = URL.parse(address);

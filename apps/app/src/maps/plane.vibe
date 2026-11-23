@@ -2,7 +2,7 @@
 import { type Basemap, type MapPlane, Machine as PlaneMachine, basemapFor, type PlaneState } from "../../gen/maps__plane.effect.vibe"
 import { type Guidance, Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
-import { mode, type Screen } from "../../gen/maps__screen.ts"
+import { mode, type Screen } from "../../gen/maps__screen.effect.vibe"
 import { MapsProvider, type MapsTile } from "./cloud.vibe"
 import { MapsContent, type MapsContentState } from "./content.vibe"
 import { MapsScreen } from "./screen.vibe"

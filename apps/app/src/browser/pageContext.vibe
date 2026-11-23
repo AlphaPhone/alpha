@@ -40,7 +40,7 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
   const foreground = try Foreground
   const preferences = try Preferences
   const links = try Ref.make<readonly string[]>([])
-  const step = (event: Event) => reads.send(event) catch () => undefined
+  const step = effect (event: Event) => reads.send(event) catch () => undefined
 
   effect function read(tab: string, url: string, navigation: string) {
     if (host.onDevice) {
@@ -92,7 +92,8 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     }
     const after = try tabs.get()
     const capturedAt = try Clock.currentTimeMillis
-    const page = answer === undefined ? undefined : boundPage(answer, { tabId: selected.id, revision: selected.revision, capturedAt, address, title: tab.page.title })
+    const base = { tabId: selected.id, revision: selected.revision, capturedAt, address, title: tab.page.title }
+    const page = answer === undefined ? undefined : (Effect.try(() => boundPage(answer, base)) catch () => undefined)
     const withheld: Withheld = page?.withheld === undefined ? "NotWithheld" : withheldOf[page.withheld]
     const settledRead = try step({ type: "answered", turn, tab: after.cur, revision: curTab(after).revision, valid: page !== undefined, withheld })
     if (settledRead?.stage !== "Answered" || page === undefined) return undefined

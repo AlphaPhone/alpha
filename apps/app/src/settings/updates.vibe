@@ -42,50 +42,51 @@ export service Updates {
 /** Updates over the updates Machine, started from the saved feed. */
 export const updates = Layer.unwrap(effect {
   const store = try KeyValueStore.KeyValueStore
-  const raw = try (store.get(UPDATE_KEY) catch () => undefined)
-  const parsed = raw === undefined ? undefined : do { try { JSON.parse(raw) as unknown } catch { undefined } }
+  const raw = (store.get(UPDATE_KEY) catch () => undefined)
+  const parsed = raw === undefined ? undefined : (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
   const saved = Option.getOrUndefined(Schema.decodeUnknownOption(SavedFeed)(parsed))
   const service = Layer.effect(Updates, effect {
     const held = try Machine
     const native = try Native
     const activity = try Activity
-    const native_ = (try Build).info.variant !== "browser"
+    const buildInfo = (try Build).info
+    const native_ = buildInfo.variant !== "browser"
     let feed: { checkedAt: number; feed: unknown; digest?: string } = saved ?? { checkedAt: -1, feed: null }
     let activationIds: { activationId: string; bridgeId: string } | undefined
     const within = <A, E>(program: A!E!Native) => Effect.provideService(program, Native, native)
 
     effect function installed() {
       const [snapshot, build] = try.all [attempt(call("AlphaDevice", "snapshot", DeviceSnapshot)), attempt(call("ElizaSystem", "getBuildInfo", SystemBuild))]
-      if (snapshot?.appAutomaticUpdates !== undefined) try (held.send({ type: "permissionRead", permission: PERMISSION[snapshot.appAutomaticUpdates] }) catch () => undefined)
+      if (snapshot?.appAutomaticUpdates !== undefined) (held.send({ type: "permissionRead", permission: PERMISSION[snapshot.appAutomaticUpdates] }) catch () => undefined)
       return { versionCode: snapshot?.appVersionCode ?? Number.MAX_SAFE_INTEGER, launcher: build?.launcher === true, signerSha256: snapshot?.appSigner ?? "" }
     }
 
     effect function keep(next: typeof feed) {
       feed = next
-      try (store.set(UPDATE_KEY, JSON.stringify(next)) catch () => undefined)
+      store.set(UPDATE_KEY, JSON.stringify(next)) catch () => undefined
     }
 
     /** One check: false only when the feed could not be read. */
     effect function check(manual: boolean) {
       if (!native_) return true
-      const begun = try (held.send({ type: "beginCheck", manual }) catch () => undefined)
+      const begun = (held.send({ type: "beginCheck", manual }) catch () => undefined)
       if (begun === undefined) return true
       const now = try Clock.currentTimeMillis
       if (!manual && !checkDue(feed.checkedAt, now) && (feed.feed === null || isDigest(feed.digest))) {
         const offered = offerFor(feed.feed, try installed())
-        try (held.send({ type: "checkAnswered", now: feed.checkedAt, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined)
+        held.send({ type: "checkAnswered", now: feed.checkedAt, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined
         return true
       }
       const reply = try attempt(call("AlphaDevice", "checkForUpdate", UpdateCheck))
       const kept = reply === undefined ? undefined : reply.manifest === undefined && reply.manifestSha256 === undefined ? null : typeof reply.manifest === "string" ? completeFeed(reply.manifest) : undefined
       if (kept === undefined || (reply?.manifestSha256 !== undefined && !isDigest(reply.manifestSha256))) {
         try keep({ checkedAt: feed.checkedAt, feed: feed.feed })
-        try (held.send({ type: "checkFailed" }) catch () => undefined)
+        held.send({ type: "checkFailed" }) catch () => undefined
         return false
       }
       try keep({ checkedAt: now, feed: kept, ...(isDigest(reply?.manifestSha256) ? { digest: reply.manifestSha256 } : {}) })
       const offered = offerFor(kept, try installed())
-      try (held.send({ type: "checkAnswered", now, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined)
+      held.send({ type: "checkAnswered", now, offer: offered?.versionCode ?? 0, versionName: offered?.versionName ?? "", bound: isDigest(feed.digest) }) catch () => undefined
       return true
     }
 
@@ -94,7 +95,7 @@ export const updates = Layer.unwrap(effect {
       const offer = offerFor(feed.feed, mine)
       if (offer === undefined || (automatic && !isDigest(feed.digest))) {
         // No offer to install still answers the attempt, so the updater returns to idle and the next tap or poll retries.
-        try (held.send({ type: "installAnswered", answer: "OfferUnavailable" }) catch () => undefined)
+        held.send({ type: "installAnswered", answer: "OfferUnavailable" }) catch () => undefined
         return "OfferUnavailable" as InstallAnswer
       }
       const reply = try attempt(call("AlphaDevice", "installUpdate", InstallReply, {
@@ -107,7 +108,7 @@ export const updates = Layer.unwrap(effect {
       if (answer === "OfferWithdrawn" || (answer === "OfferChanged" && typeof reply?.manifest === "string" && completeFeed(reply.manifest) !== undefined)) try keep({ checkedAt: -1, feed: null })
       else if (answer === "OfferUnavailable" || answer === "OfferChanged") try keep({ checkedAt: feed.checkedAt, feed: feed.feed })
       const settled: InstallAnswer = answer === "OfferChanged" && feed.feed === null ? "OfferWithdrawn" : answer
-      try (held.send({ type: "installAnswered", answer: settled }) catch () => undefined)
+      held.send({ type: "installAnswered", answer: settled }) catch () => undefined
       return settled
     }
 
@@ -117,10 +118,10 @@ export const updates = Layer.unwrap(effect {
       if (state === undefined) return
       const activation: Activation = state.pending === true ? (state.phase === "paused" ? "Paused" : "Preparing") : state.outcome !== undefined || state.idle === true ? "Ended" : "NoActivation"
       if (state.activationId !== undefined && state.bridgeId !== undefined) activationIds = { activationId: state.activationId, bridgeId: state.bridgeId }
-      const read = try (held.send({ type: "activationRead", activation, canContinue: state.canContinue === true }) catch () => undefined)
+      const read = (held.send({ type: "activationRead", activation, canContinue: state.canContinue === true }) catch () => undefined)
       if (read === undefined || activation !== "Preparing" || read.acknowledged || activationIds === undefined) return
       const ready = activationReady(try activity.updateIdleFacts(), state.automatic === true) && (try keepDrafts())
-      try (held.send({ type: "acknowledge", ready }) catch () => undefined)
+      held.send({ type: "acknowledge", ready }) catch () => undefined
       try attempt(native.invoke("AlphaDevice", "activateUpdate", { ...activationIds, ready, ...(ready ? { resumeEligible: true } : {}) }))
     }
 
@@ -128,7 +129,7 @@ export const updates = Layer.unwrap(effect {
       offer: () => within(effect { return offerFor(feed.feed, try installed()) }),
       check: (manual: boolean) => within(Effect.asVoid(check(manual))),
       install: () => within(effect {
-        const begun = try (held.send({ type: "install" }) catch () => undefined)
+        const begun = (held.send({ type: "install" }) catch () => undefined)
         if (begun !== undefined) try install(false)
       }),
       allowAutomatic: () => within(effect {
@@ -136,15 +137,15 @@ export const updates = Layer.unwrap(effect {
         return opened?.status === "opened"
       }),
       poll: () => within(effect {
-        if (!native_ || (try Build).info.testMocks) return
+        if (!native_ || buildInfo.testMocks) return
         const now = try Clock.currentTimeMillis
         if ((try held.get()).wakeAt > now) return
         const read = try check(false)
         const state = try attempt(call("AlphaDevice", "updateState", UpdateState))
-        if (state?.pending === true) try (held.send({ type: "activationRead", activation: state.phase === "paused" ? "Paused" : "Preparing", canContinue: state.canContinue === true }) catch () => undefined)
+        if (state?.pending === true) (held.send({ type: "activationRead", activation: state.phase === "paused" ? "Paused" : "Preparing", canContinue: state.canContinue === true }) catch () => undefined)
         const before = try held.get()
         const idle = updateIdle(try activity.updateIdleFacts())
-        const polled = try (held.send({ type: "poll", now, idle }) catch () => undefined)
+        const polled = (held.send({ type: "poll", now, idle }) catch () => undefined)
         // An install that was due but found the phone busy, or Android starting, is a failed poll and retries soon.
         const due = !before.pending && before.offer > before.installed && before.bound && (before.permission === "AutomaticAllowed" || before.permission === "AndroidStarting")
         const end: PollEnd = !read ? "PollCheckFailed"
@@ -152,13 +153,13 @@ export const updates = Layer.unwrap(effect {
           : due && (!idle || before.permission === "AndroidStarting") ? "PollBusy"
           : before.permission === "PermissionRequired" || before.permission === "AutomaticUnsupported" ? "PollNeedsOwner"
           : "PollNothingDue"
-        try (held.send({ type: "pollFinished", now: try Clock.currentTimeMillis, failed: pollFailedOf(end) }) catch () => undefined)
+        held.send({ type: "pollFinished", now: try Clock.currentTimeMillis, failed: pollFailedOf(end) }) catch () => undefined
       }),
-      setActive: (active: boolean) => effect { try (held.send({ type: "setActive", active }) catch () => undefined) },
+      setActive: (active: boolean) => effect { (held.send({ type: "setActive", active }) catch () => undefined) },
       watchActivation: (keepDrafts: () => boolean!!) => within(readActivation(keepDrafts)),
       following: () => effect { return followsActivation(try held.get()) },
       continueInstall: () => within(effect {
-        const begun = try (held.send({ type: "continueInstall" }) catch () => undefined)
+        const begun = (held.send({ type: "continueInstall" }) catch () => undefined)
         if (begun !== undefined && activationIds !== undefined) try attempt(native.invoke("AlphaDevice", "continueUpdate", activationIds))
       }),
     }
@@ -192,15 +193,19 @@ export const schedule = Layer.effectDiscard(effect {
       if (try service.following()) try service.watchActivation(() => activity.keepDrafts())
     }
   })
-  try fork.scoped (effect {
-    for try (const _ready of native.listen("AlphaDevice", "alphaUpdateReady")) {
-      try service.watchActivation(() => activity.keepDrafts())
-    }
-  } catch () => undefined)
-  try fork.scoped (effect {
-    for try (const _settled of native.listen("AlphaDevice", "alphaUpdateSettled")) {
-      try service.watchActivation(() => activity.keepDrafts())
-    }
-  } catch () => undefined)
+  try fork.scoped effect {
+    effect {
+      for try (const _ready of native.listen("AlphaDevice", "alphaUpdateReady")) {
+        try service.watchActivation(() => activity.keepDrafts())
+      }
+    } catch () => undefined
+  }
+  try fork.scoped effect {
+    effect {
+      for try (const _settled of native.listen("AlphaDevice", "alphaUpdateSettled")) {
+        try service.watchActivation(() => activity.keepDrafts())
+      }
+    } catch () => undefined
+  }
 })
 

@@ -21,21 +21,21 @@ export service Appearance {
 
 effect function readSaved() {
   const store = try KeyValueStore.KeyValueStore
-  const raw = try (store.get(APPEARANCE_KEY) catch () => undefined)
+  const raw = (store.get(APPEARANCE_KEY) catch () => undefined)
   if (raw === undefined) return undefined
-  const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
-  return try (Schema.decodeUnknownEffect(SavedAppearance)(value) catch () => undefined)
+  const value = (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
+  return (Schema.decodeUnknownEffect(SavedAppearance)(value) catch () => undefined)
 }
 
 /** The theme the previous Alpha chose, taken once and saved as this version's own when this version has saved none. */
 effect function adoptPreviousTheme() {
   const store = try KeyValueStore.KeyValueStore
-  const raw = try (store.get(APPEARANCE_KEY) catch () => null)
+  const raw = (store.get(APPEARANCE_KEY) catch () => null)
   if (raw !== undefined) return undefined
   const theme = previousTheme()
   if (theme === undefined) return undefined
   const kept = { choice: previousChoice(theme === "dark" ? "PreviousDark" : theme === "system" ? "PreviousSystem" : "PreviousLight"), legible: false }
-  try (store.set(APPEARANCE_KEY, JSON.stringify(kept)) catch () => undefined)
+  store.set(APPEARANCE_KEY, JSON.stringify(kept)) catch () => undefined
   return kept
 }
 
@@ -52,21 +52,21 @@ export const appearance = Layer.unwrap(effect {
     const store = try KeyValueStore.KeyValueStore
     effect function keep() {
       const { choice, legible } = try held.get()
-      const written = try (store.set(APPEARANCE_KEY, JSON.stringify({ choice, legible })) catch () => false)
-      try (held.send({ type: written === false ? "saveFailed" : "saved" }) catch () => undefined)
+      const written = (store.set(APPEARANCE_KEY, JSON.stringify({ choice, legible })) catch () => false)
+      held.send({ type: written === false ? "saveFailed" : "saved" }) catch () => undefined
     }
     return {
       effect choose(choice: Choice) {
-        try (held.send({ type: "choose", choice }) catch () => undefined)
+        held.send({ type: "choose", choice }) catch () => undefined
         try keep()
       },
       effect setLegible(on: boolean) {
-        try (held.send({ type: "setLegible", on }) catch () => undefined)
+        held.send({ type: "setLegible", on }) catch () => undefined
         try keep()
       },
       effect reload() {
-        const next = try readSaved()
-        if (next !== undefined) try (held.send({ type: "restored", choice: next.choice, legible: next.legible }) catch () => undefined)
+        const next = try Effect.provideService(readSaved(), KeyValueStore.KeyValueStore, store)
+        if (next !== undefined) held.send({ type: "restored", choice: next.choice, legible: next.legible }) catch () => undefined
       },
     }
   })
@@ -81,7 +81,7 @@ export const appearanceFollow = Layer.effectDiscard(effect {
   const browser = (try Build).info.variant === "browser"
   try fork.scoped (effect {
     for try (const dark of schemeChanges()) {
-      try (held.send({ type: "systemChanged", systemDark: dark }) catch () => undefined)
+      held.send({ type: "systemChanged", systemDark: dark }) catch () => undefined
     }
   })
   if (browser) {

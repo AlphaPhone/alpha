@@ -24,13 +24,13 @@ export schema SignInAnswer {
   attemptId?: string
   credentialId?: string
   method?: "totp" | "sms" | "passkey"
-  accountCreated?: unknown
+  accountCreated?: Schema.Unknown
   previousSignIn?: "revoked" | "unconfirmed"
 }
 
 /** The retained `signInCompleted` event: what the host said of a sign-in that finished while no call waited. */
 export schema Completed {
-  accountCreated?: unknown
+  accountCreated?: Schema.Unknown
   previousSignIn?: "revoked" | "unconfirmed"
 }
 

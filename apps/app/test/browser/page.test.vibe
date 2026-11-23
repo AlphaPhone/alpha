@@ -15,12 +15,13 @@ it.live("what the owner types opens the site it names, searches plain words, and
         try tabs.enter(text)
       }
       const navigated = (try callsTo(fake.calls, "navigate")).map((c) => String(c.args.url))
+      const got1 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
         address: navigated[0],
         searches: navigated.slice(1, 3).map((url) => URL.parse(url)?.searchParams.get("q")),
         credentialsSearched: navigated.some((url) => url.includes("evil.test") || url.includes("pw")),
         upgraded: navigated[3],
-        refused: (try Ref.get(fake.toasts)).includes("Enter search words or a valid HTTP or HTTPS address without a username or password."),
+        refused: got1.includes("Enter search words or a valid HTTP or HTTPS address without a username or password."),
       }, {
         address: "https://example.test/news",
         searches: ["bread recipes", "me@home"],
@@ -44,10 +45,11 @@ it.live("a link tapped in another app opens in a new tab, and text that is not a
       try tabs.openLink("https://ann:pw@evil.test/")
       try sleep("20 millis")
       const after = try tabs.get()
+      const got2 = try callsTo(fake.calls, "navigate")
       try Effect.try(() => assert.deepStrictEqual({
         tabs: after.tabs.length,
         selectedNew: after.cur !== started.cur,
-        navigated: (try callsTo(fake.calls, "navigate")).map((c) => c.args.url),
+        navigated: got2.map((c) => c.args.url),
       }, { tabs: 2, selectedNew: true, navigated: ["https://example.test/article"] }))
     }
   })
@@ -67,8 +69,9 @@ it.live("a tab shows the native host's latest report for it: a late report, anot
       try report(fake.events, "another-session", { id, sequence: 9, navigation: "9", url: "https://forged.test/", committed: true })
       try report(fake.events, session, { id, sequence: 6, navigation: "2", url: "https://example.test/second", committed: true, private: false })
       const tab = (try tabs.get()).tabs.find((t) => t.id === id)
+      const got3 = try tabs.get()
       try Effect.try(() => assert.deepStrictEqual(
-        { url: tab?.page.url, sequence: tab?.page.sequence, profile: tab?.profile, visits: (try tabs.get()).visits.length },
+        { url: tab?.page.url, sequence: tab?.page.sequence, profile: tab?.profile, visits: got3.visits.length },
         { url: "https://example.test/second", sequence: 6, profile: "Private", visits: 0 },
       ))
     }
@@ -101,10 +104,12 @@ it.live("Back closes Browser's layers one at a time, then goes back in the page,
       try tabs.dispatch({ type: "startEditing" })
       try tabs.dispatch({ type: "toggleMenu" })
       const layered = (try tabs.get()).layers
+      const got4 = try callsTo(fake.calls, "command")
+      const got5 = try callsTo(fake.calls, "clearFind")
       try Effect.try(() => assert.deepStrictEqual({
         taken, covered,
-        commands: (try callsTo(fake.calls, "command")).map((c) => [c.args.command, c.args.navigation]),
-        cleared: (try callsTo(fake.calls, "clearFind")).length,
+        commands: got4.map((c) => [c.args.command, c.args.navigation]),
+        cleared: got5.length,
         editingUnderMenu: layered.editing && layered.menu,
       }, {
         taken: [true, true, true, false],

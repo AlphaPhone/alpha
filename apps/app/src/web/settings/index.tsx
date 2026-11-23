@@ -44,8 +44,9 @@ import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
 import { now, perform } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
+import { testMocksBuilt } from "../../platform/build-flags.ts";
 
-const mocks = __ALPHA_TEST_MOCKS__;
+const mocks = testMocksBuilt;
 
 const pages = <A,>(use: (p: SettingsPages.Shape) => Effect.Effect<A>) => perform(Effect.flatMap(Effect.service(SettingsPages), use));
 

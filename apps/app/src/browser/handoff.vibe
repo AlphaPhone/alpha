@@ -47,7 +47,7 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
     return shownOf(try tabs.get(), browserShown(try foreground.get()))
   }
 
-  effect function perform(out: HandoffEffect) {
+  effect function perform(out: HandoffEffect): void!! {
     match (out) {
       when { tag: "AskLeavePrivate", let url }: try effect {
         const approved = try reviews.confirm("external-browser", "LeavePrivate", url)
@@ -62,7 +62,7 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
     }
   }
 
-  effect function send(event: Event) {
+  effect function send(event: Event): void!! {
     const change = handoff.send(event) catch () => undefined
     if (change !== undefined) for (const out of change.out) try perform(out)
   }

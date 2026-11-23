@@ -1,6 +1,6 @@
 // spec/maps/screen.md, "The screen holds the search, the chosen place, the starting point and the route request"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"
 import type { Offer, ProviderKind } from "../../gen/maps__vocabulary.ts"
-import { maxRecent, recentRemembered } from "../../gen/maps__screen.ts"
+import { maxRecent, recentRemembered } from "../../gen/maps__screen.effect.vibe"
 import type { Position } from "./geometry.vibe"
 import type { Coordinate, EventOrigin, Place, Recipient, Route } from "./maps.schema.vibe"
 

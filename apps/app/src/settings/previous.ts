@@ -47,7 +47,7 @@ export async function previousDeviceChoices(): Promise<string | null | undefined
   }
 }
 
-/** The theme the previous Alpha kept: "dark", "system", "light", or undefined when it kept none or none can be read. */
+/** The theme the previous Alpha kept: "dark", "system", "light", or undefined when it kept none or none can be read. @throws {never} */
 export function previousTheme(): string | undefined {
   try { return globalThis.localStorage?.getItem(PREVIOUS_APPEARANCE) ?? undefined; } catch { return undefined; }
 }

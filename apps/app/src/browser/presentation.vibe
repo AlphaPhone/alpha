@@ -32,7 +32,7 @@ export const presenterLayer = Layer.provide(Layer.effect(BrowserPresenter, effec
   const toasts = try Toasts
   const lastFailure = try Ref.make("")
 
-  effect function perform(out: PresentEffect) {
+  effect function perform(out: PresentEffect): void!! {
     match (out) {
       when { tag: "Present", let request }: try effect {
         const shown = host.call("present", payloadOf(request)) catch (error) => error
@@ -43,7 +43,7 @@ export const presenterLayer = Layer.provide(Layer.effect(BrowserPresenter, effec
     }
   }
 
-  effect function send(event: Event) {
+  effect function send(event: Event): void!! {
     const change = presenter.send(event) catch () => undefined
     if (change === undefined) return
     if ("out" in change) for (const out of change.out) try perform(out)
