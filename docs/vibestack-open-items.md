@@ -209,7 +209,6 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - the Photos grid is not virtualised, pages by a "Show more" button and keeps every thumbnail in Machine state;
   - scan drafts are one base64 `localStorage` value (`alpha/camera/scan-draft/v1`) instead of upstream's IndexedDB `createScanDraftStore`; a failed write says "Another draft is saved…", and legacy drafts are not adopted. After a restart a stored draft cannot be deleted or resumed, and Close never asks Keep or Discard;
   - scan re-implements `@elizaos/plugin-files` documents locally (`scanWork.ts`, `scanText.ts`): OCR and export failures say only "Scan failed"/"PDF failed", and the scanned-event suggestion lost zone, weekday and numeric-date handling and its disclosures;
-  - the crop area cannot be dragged, resized or reset (`dragCrop` has no pointer caller);
   - the focus target is never drawn, and browser focus points are not mapped through mirror and zoom;
   - saved-copy recovery runs only when the next editor opens (`MediaEditor.recover` has no UI caller);
   - browser build only: the whole photo library is one `localStorage` value; recordings ignore zoom and the front mirror, and every microphone failure reads as denied; no image import into Photos and no local save; the flash cycles Off/Auto/On with no torch read-back and the front lens zooms to 8×;
