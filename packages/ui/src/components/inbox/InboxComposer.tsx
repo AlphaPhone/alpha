@@ -119,16 +119,18 @@ export function InboxComposer({
           {notice ? <InboxNotice kind={notice} onAction={onNoticeAction} /> : null}
           {outcome ? <InboxSendOutcome {...outcome} /> : null}
           {clash && onRestoreMine && onUseSaved ? <InboxDraftClash onRestoreMine={onRestoreMine} onUseSaved={onUseSaved} /> : null}
-          <InboxFromField accounts={accounts} value={from} onChange={onFromChange} />
-          <InboxRecipientField label="To" {...to} />
-          {showMore ? (
-            <>
-              <InboxRecipientField label="Cc" {...cc} />
-              <InboxRecipientField label="Bcc" {...bcc} />
-            </>
-          ) : (
-            <Button variant="ghost" size="sm" className="self-start" onClick={() => setMore(true)}>Cc, Bcc</Button>
-          )}
+          <div className="flex flex-col">
+            <InboxFromField accounts={accounts} value={from} onChange={onFromChange} />
+            <InboxRecipientField label="To" {...to} />
+            {showMore ? (
+              <>
+                <InboxRecipientField label="Cc" {...cc} />
+                <InboxRecipientField label="Bcc" {...bcc} />
+              </>
+            ) : (
+              <Button variant="ghost" size="sm" className="self-start" onClick={() => setMore(true)}>Cc, Bcc</Button>
+            )}
+          </div>
           <Input aria-label="Subject" placeholder="Subject" value={subject} onChange={(event) => onSubjectChange(event.target.value)} />
           <Textarea aria-label="Message" value={text} onChange={(event) => onTextChange(event.target.value)} className="min-h-40" />
           {attachments.length > 0 || onAttach ? (
