@@ -198,7 +198,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - the comms stage does not follow the real chat sheet: `heightChanged` and `voiceChanged` have no sender, so the full-sheet strip (AC-04) and End in the card, strip and voice panel are never reached;
   - dictation in the bar and hold-Alpha-to-talk (AC-12): no screen passes `onDictate`;
   - the "Sent to <name>" quiet note after a send (AC-15) is missing;
-  - SIM choice and the system-messaging handoff: `simChosen` has no UI sender and `DraftSends.handoff` no caller, so a two-SIM phone with no default SMS SIM ends `sim-required`;
+  - the system-messaging handoff: `DraftSends.handoff` has no caller, and incomplete rows say "Use the system messaging app" with no action (SIM choice is offered beside the bar now);
   - missing contact write access answers unavailable instead of asking for it;
   - an approved text is not watched after "submitted" (`SMS_SETTLE` covers only the owner's sends);
   - ring, "Screen it" and the in-app incoming call card exist only as model.

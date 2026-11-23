@@ -65,7 +65,9 @@ pure val requestValues = Set("", "Say I'll be late")
 
 Typing takes the slot over from Alpha's draft. Any edit (text, recipients, SIM, pictures) makes a
 different message, so the operation bound to the old one is released and the next Send reviews the
-new one under a new ID.
+new one under a new ID. When a send needs a SIM because the phone has no default SMS SIM, the
+owner picks one of the phone's SIMs beside the bar; the pick is the SIM edit, and the next Send
+goes from it.
 
 ```quint
 pure def canOwnerTyped(d: Drafts, thread: str, by: Actor): bool = ownerOnly(by) and slotOf(d.slots, thread).outcome != Sending

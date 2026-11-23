@@ -42,7 +42,12 @@ export service DraftSends {
   addPicture(thread: string, contentType: string, bytes: Uint8Array): ("added" | "too-many" | "unsupported" | "too-large")!!
   /** Take a picture off the draft. */
   removePicture(thread: string, pictureName: string): void!!
+  /** The SIMs a text may go from, for the owner's choice when no default SMS SIM is set; empty when the status is unread. */
+  sims(): readonly SimChoice[]!!
 }
+
+/** One SIM the owner may send a text from. */
+export interface SimChoice { readonly id: number; readonly label: string }
 
 const ACCEPTED: readonly string[] = ["submitted", "sent", "delivered"]
 const RECEIPTS: Record<SmsSendStatus, Receipt> = {
@@ -204,6 +209,12 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
       try (store.set(try keyOf(thread, pictureName), bytes) catch () => undefined)
       const added = try tell({ type: "pictureAdded", thread, picture: { pictureName, contentType, bytes: bytes.length } }, "Owner")
       return added === undefined ? "too-many" : "added"
+    },
+    effect sims() {
+      const current = try status()
+      return (current?.subscriptions ?? []).map((sim) => ({
+        id: sim.id, label: [sim.displayName, sim.carrierName].filter((part) => part !== "").join(" · ") || `SIM ${sim.slot + 1}`,
+      }) satisfies SimChoice)
     },
     effect removePicture(thread: string, pictureName: string) {
       if ((try tell({ type: "pictureRemoved", thread, pictureName }, "Owner")) !== undefined)
