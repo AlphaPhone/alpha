@@ -18,8 +18,9 @@ device Trash come into the canonical Trash once, and nothing writes the device T
 
 ### Recently deleted opens while it has rows, one action runs at a time, and it closes once empty
 
-Opening Recently deleted leaves the open note as Back does and reads Trash again. Tapping a row offers
-Recover or, with the three-day choice, Delete now. Only one restore or erase runs at a time. Recently
+Opening Recently deleted leaves the open note as Back does and reads Trash again. Each row, and the
+dialog a tap opens, says when its note was deleted. Tapping a row offers Recover or, with the three-day
+choice, Delete now. Only one restore or erase runs at a time. Recently
 deleted closes by itself once it has no rows and nothing runs.
 
 ```quint

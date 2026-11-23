@@ -61,7 +61,7 @@ export const NOT_SENT_CODE = "ALPHA_NOT_SENT"
 
 /** Decode an answer of `path` with `schema`, or fail with Unrecognized. */
 export effect function decoded<A>(schema: Schema.Codec<A>, path: string, value: unknown) {
-  return try (Schema.decodeUnknownEffect(schema)(value) catch effect () => { throw new Unrecognized({ path }) })
+  return (Schema.decodeUnknownEffect(schema)(value) catch effect () => { throw new Unrecognized({ path }) })
 }
 
 /** WorkflowApi over the resident's local API. */
@@ -69,13 +69,13 @@ export const api = Layer.effect(WorkflowApi, effect {
   const resident = try Resident
   effect function request(method: HttpMethod, path: string, body?: unknown) {
     if (!sendable(familyOf(path), methodOf(method), body !== undefined)) throw new NotSent({ path })
-    const answer = try (resident.json(method, path, body) catch effect (error) => match (error) {
+    const answer = (resident.json(method, path, body) catch effect (error) => match (error) {
       when ResidentRefused: throw new AgentRefused({ status: error.status, code: error.code });
       when ResidentUnavailable: throw new AgentUnavailable({ state: error.state });
     })
     return answer.data
   }
-  const transport: WorkflowRequest = (path: string, body: unknown) => request(body === undefined ? "GET" : "POST", path, body) catch effect (error) => match (error) {
+  const transport: WorkflowRequest = effect (path: string, body: unknown) => request(body === undefined ? "GET" : "POST", path, body) catch effect (error) => match (error) {
     when NotSent: throw workflowHttpError(0, { code: NOT_SENT_CODE });
     when AgentRefused: throw workflowHttpError(error.status, error.code === undefined ? {} : { code: error.code });
     when AgentUnavailable: throw workflowHttpError(0, {});
@@ -85,7 +85,7 @@ export const api = Layer.effect(WorkflowApi, effect {
     workflow: workflowClient(transport),
     digestProtocol: hostedDigestProtocol(transport),
     effect scope() {
-      const me = try (request("GET", "/api/auth/me") catch effect (error) => match (error) {
+      const me = (request("GET", "/api/auth/me") catch effect (error) => match (error) {
         when NotSent: throw new Unrecognized({ path: error.path });
         default: throw error;
       })

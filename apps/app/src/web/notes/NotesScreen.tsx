@@ -26,6 +26,7 @@ import { type DocumentReceipt, NotesShare, type ShareChannel } from "../../notes
 import { NotesSources } from "../../notes/sources.vibe";
 import { NotesTrash, type TrashNotice, type TrashRow } from "../../notes/trash.vibe";
 import { copyText } from "../../notes/platform.ts";
+import { draftCopyText } from "../../notes/share.vibe";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 import { useLayer } from "../shell/useLayer.ts";
 import { FoldersSheet } from "./FoldersSheet.tsx";
@@ -209,12 +210,12 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
             canCopy={copyDraftAllowed(editor.review || state.phase === "Review", dirty(editor), true, true, true) && draft !== undefined}
             onDiscard={() => void call(NotesEditor, (service) => service.discard())}
             onRetry={() => void call(NotesEditor, (service) => service.retry()).then((said) => tell(said === "changed-elsewhere" ? "Changed elsewhere" : said === "deleted" ? "Note was deleted" : said === "not-saved" ? "Not saved" : ""))}
-            onCopy={() => { if (draft) void copyText([draft.title, draft.body].filter(Boolean).join("\n")).then(() => tell("Draft copied."), () => tell("Draft could not be copied.")); }} />
+            onCopy={() => { if (draft) void copyText(draftCopyText(draft)).then(() => tell("Draft copied."), () => tell("Draft could not be copied.")); }} />
         )}
         {kept !== undefined && (
           <NotesReviewBar status="Kept draft" dirty canRetry={false} canCopy
             onDiscard={() => void call(NotesEditor, (service) => service.discard())}
-            onCopy={() => void copyText([kept.title, kept.body].filter(Boolean).join("\n")).then(() => tell("Draft copied."), () => tell("Draft could not be copied."))} />
+            onCopy={() => void copyText(draftCopyText(kept)).then(() => tell("Draft copied."), () => tell("Draft could not be copied."))} />
         )}
         {body}
         <FoldersSheet open={foldersLayer.open} folders={folders} {...(folder === undefined ? {} : { selected: folder })} onOpenChange={(open) => { if (!open) foldersLayer.hide(); }}

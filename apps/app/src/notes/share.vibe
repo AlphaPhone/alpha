@@ -1,6 +1,6 @@
 // spec/notes/share.md, "Story: Share the note I have open"; spec/notes/share.md, "A share acts on the open note's snapshot, only while it is still the same note"; spec/notes/share.md, "The export text is the note's own words by kind, and a voice note says its audio is not included"; spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"
 import { noteShareText } from "@elizaos/plugin-notes/format"
-import type { StickyNote } from "@elizaos/plugin-notes/types"
+import type { NoteFormat, StickyNote } from "@elizaos/plugin-notes/types"
 import { type Event as TransferEvent, Machine as TransferMachine, machine as transferMachine, shareAllowed, textExportFits, type Transfer } from "../../gen/notes__share.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
@@ -28,6 +28,12 @@ export service NotesShare {
   visibility(): void!!
 }
 
+/** The text Copy draft puts on the clipboard: the draft as a note would share it, so a checklist copies its items and their ticks (legacy `noteShareText`). */
+export function draftCopyText(draft: { readonly title: string; readonly body: string; readonly format?: NoteFormat }): string {
+  const note: StickyNote = { id: "draft", title: draft.title, body: draft.body, color: "yellow", createdAt: "", updatedAt: "", ...(draft.format === undefined ? {} : { format: draft.format }) }
+  return noteShareText(note).text
+}
+
 function shareable(note: StickyNote): { title: string; text: string } | undefined {
   const kind = note.format?.kind ?? "text"
   return kind === "text" || kind === "list" || kind === "voice" || kind === "link" ? noteShareText(note) : undefined
@@ -42,7 +48,7 @@ const make = effect {
   const receipts = try PubSub.unbounded<DocumentReceipt>()
 
   effect function send(event: TransferEvent): (Transfer | undefined)!! {
-    return try (machine.send(event) catch () => undefined)
+    return (machine.send(event) catch () => undefined)
   }
 
   effect function deliver(before: Transfer, after: Transfer | undefined, notice: ShareNotice | "imported"): void!! {
@@ -64,13 +70,15 @@ const make = effect {
     const begun = try send({ type: "chooseTransfer", kind: "ExportText", testMocks: build.info.testMocks })
     if (begun === undefined) return "unavailable"
     if (begun.refusedBusy > before.refusedBusy) return "busy"
-    const size = utf8Size(text)
-    const result = !textExportFits(size.bytes, size.valid) ? "too-large"
+    const size = try Effect.orDie(Effect.try(() => utf8Size(text)))
+    const exported = effect {
+      const answer = try decodeDocumentResult(try native.invoke("AlphaNoteDocuments", "exportText", { title, text }))
+      const said: ShareNotice = answer.status === "exported" ? "saved" : answer.status === "requested" ? "requested" : answer.status === "cancelled" ? "cancelled" : "failed"
+      return said
+    }
+    const result: ShareNotice = !textExportFits(size.bytes, size.valid) ? "too-large"
       : !(try native.available("AlphaNoteDocuments")) ? "unavailable"
-      : try (effect {
-        const answer = try decodeDocumentResult(try native.invoke("AlphaNoteDocuments", "exportText", { title, text }))
-        return answer.status === "exported" ? "saved" : answer.status === "requested" ? "requested" : answer.status === "cancelled" ? "cancelled" : "failed"
-      } catch () => "failed")
+      : exported catch (): ShareNotice => "failed"
     const settledBefore = try machine.get()
     const after = try send({ type: "transferSettled", result: result === "failed" ? "TransferThrew" : result === "saved" || result === "requested" ? "TransferDone" : "TransferRefused", stored: false })
     try deliver(settledBefore, after, result)
@@ -86,12 +94,12 @@ const make = effect {
       if (fresh === undefined || !shareAllowed(true, JSON.stringify(fresh) === snapshot, pageVisible())) return "changed"
       const { title, text } = fresh
       if (channel === "copy") {
-        const copied = try (effect { try tryPromise(() => copyText(text)); return true } catch () => false)
+        const copied = (effect { try tryPromise(() => copyText(text)); return true } catch () => false)
         return copied ? "copied" : "failed"
       }
       if (channel === "email") { try handoff.request({ kind: "email-draft", subject: title, body: text }); return "drafted" }
       if (channel === "save") return try exportText(title, text)
-      const shared = try (tryPromise(() => shareText(title, text)) catch () => "failed" as const)
+      const shared = (tryPromise(() => shareText(title, text)) catch () => "failed" as const)
       return shared === "shared" ? "shared" : shared === "cancelled" ? "cancelled" : shared === "unavailable" ? "unavailable" : "failed"
     },
     effect importText() {
@@ -100,10 +108,10 @@ const make = effect {
       const begun = try send({ type: "chooseTransfer", kind: "ImportText", testMocks: true })
       if (begun === undefined) return "unavailable"
       if (begun.refusedBusy > before.refusedBusy) return "busy"
-      const answer = try (effect { return try decodeDocumentResult(try native.invoke("AlphaNoteDocuments", "importText")) } catch () => undefined)
+      const answer = (effect { return try decodeDocumentResult(try native.invoke("AlphaNoteDocuments", "importText")) } catch () => undefined)
       const read = answer?.status === "read" && typeof answer.text === "string"
       const title = (answer?.name ?? "Imported note").replace(/\.(txt|md|markdown)$/i, "").slice(0, 200)
-      const created = read ? try (collection.interact("create-note", { content: `${title}\n${answer?.text ?? ""}`, creationId: `import-${randomId()}`, color: "yellow" }) catch () => undefined) : undefined
+      const created = read ? (collection.interact("create-note", { content: `${title}\n${answer?.text ?? ""}`, creationId: `import-${randomId()}`, color: "yellow" }) catch () => undefined) : undefined
       const settledBefore = try machine.get()
       const after = try send({ type: "transferSettled", result: answer === undefined ? "TransferThrew" : read ? "TransferDone" : "TransferRefused", stored: created !== undefined })
       const notice = created !== undefined ? "imported" : answer === undefined ? "failed" : answer.status === "cancelled" ? "cancelled" : "failed"

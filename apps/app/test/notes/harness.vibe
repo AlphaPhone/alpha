@@ -81,10 +81,10 @@ export const notesOver = (agent: NotesAgentFake, device: DeviceFake, shown?: Sub
 /** The first snapshot of the bound collection. */
 export effect function bound() {
   const collection = try NotesCollection
-  return try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => owned !== undefined)), "5 seconds")
+  return Option.getOrUndefined(try timeout(Stream.runHead(Stream.filter(collection.snapshots, (owned) => owned !== undefined)), "5 seconds"))
 }
 
 /** Wait until a stream of states reaches one the test is waiting for. */
 export effect function until<A>(changes: Stream.Stream<A>, ok: (value: A) => boolean) {
-  return try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds")
+  return Option.getOrUndefined(try timeout(Stream.runHead(Stream.filter(changes, ok)), "5 seconds"))
 }

@@ -57,7 +57,7 @@ export const organizeLayer = Layer.effect(NotesOrganize, effect {
         : stopped === "none" ? "No voice note is recording." : "Not saved" }
     }
     if (operation.type === "notes_filter") {
-      const folder = operation.folder === undefined ? undefined : try (folders.findByName(operation.folder) catch () => undefined)
+      const folder = operation.folder === undefined ? undefined : (folders.findByName(operation.folder) catch () => undefined)
       if (operation.folder !== undefined && folder === undefined) return { status: "failed", summary: `No folder “${operation.folder}”` }
       try handoff.request({ kind: "open-notes", filter: {
         ...(operation.text === undefined ? {} : { text: operation.text }), ...(operation.kind === undefined ? {} : { kind: operation.kind }),
@@ -70,18 +70,18 @@ export const organizeLayer = Layer.effect(NotesOrganize, effect {
       return { status: ran, summary: ran === "succeeded" ? "Filtered" : ran === "failed" ? "Notes changed" : "Unconfirmed" }
     }
     if (operation.type === "notes_folder_create") {
-      const existed = (try (folders.findByName(operation.name) catch () => undefined)) !== undefined
-      const made = existed ? undefined : try (folders.create(operation.name) catch () => undefined)
-      const readBack = existed || (made !== undefined && (try (folders.findByName(operation.name) catch () => undefined)) !== undefined)
+      const existed = ((folders.findByName(operation.name) catch () => undefined)) !== undefined
+      const made = existed ? undefined : (folders.create(operation.name) catch () => undefined)
+      const readBack = existed || (made !== undefined && ((folders.findByName(operation.name) catch () => undefined)) !== undefined)
       const status = folderCreateReceipt(existed, existed || made !== undefined, readBack)
       return { status: statusOf(status), summary: existed ? `“${operation.name}” exists` : status === "ReceiptSucceeded" ? `Created “${operation.name}”` : status === "ReceiptFailed" ? "Not created" : "Unconfirmed" }
     }
     if (operation.type === "notes_move") {
-      const folder = operation.folder === null ? null : try (folders.findByName(operation.folder) catch () => undefined)
+      const folder = operation.folder === null ? null : (folders.findByName(operation.folder) catch () => undefined)
       const current = try collection.current()
       const note = current?.snapshot.notes.find((item) => item.id === operation.target.noteId)
       let reviewed = ""
-      if (note !== undefined) reviewed = try (tryPromise(() => recordNoteRevision(note)) catch () => "")
+      if (note !== undefined) reviewed = (tryPromise(() => recordNoteRevision(note)) catch () => "")
       const targetCurrent = current !== undefined && reviewed !== "" && reviewed === operation.target.revision
       const folderId = folder === null ? "" : folder?.id ?? ""
       const already = note !== undefined && ((note.format?.data.folderId as NoteJson | undefined) ?? "") === folderId
@@ -94,7 +94,7 @@ export const organizeLayer = Layer.effect(NotesOrganize, effect {
       const data: Record<string, NoteJson> = { ...(note.format?.data ?? {}) }
       if (folderId === "") delete data.folderId
       else data.folderId = folderId
-      const reply = try (collection.interact("update-note", { id: note.id, expectedRevision: current.snapshot.revision, format: { kind: note.format?.kind ?? "text", data } }) catch () => undefined)
+      const reply = (collection.interact("update-note", { id: note.id, expectedRevision: current.snapshot.revision, format: { kind: note.format?.kind ?? "text", data } }) catch () => undefined)
       const status = moveReceipt(true, true, true, false, reply?.target?.id === note.id)
       return { status: statusOf(status), summary: status === "ReceiptSucceeded" ? `Moved the note to ${where}.` : "Unconfirmed" }
     }
@@ -111,7 +111,7 @@ export const organizeLayer = Layer.effect(NotesOrganize, effect {
   return {
     capabilities: () => succeed(capabilityList),
     effect admit(input: unknown, context: NotesDeviceContext, ownMessage: boolean, workflow: boolean, reviewFirst: boolean) {
-      const operation = try (decodeNotesOrganizeOperation(input) catch () => undefined)
+      const operation = (decodeNotesOrganizeOperation(input) catch () => undefined)
       if (operation === undefined || !notesOrganizeOffered(operation.type, capabilityList) || !notesOrganizeContextAllowed(context, operation.type)) return undefined
       if (operation.type === "notes_list_filter") {
         const admission = try filter.propose({ ...(operation.text === undefined ? {} : { text: operation.text }), ...(operation.kind === undefined ? {} : { kind: operation.kind }) }, ownMessage, workflow)

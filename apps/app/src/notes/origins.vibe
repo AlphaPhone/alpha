@@ -5,7 +5,7 @@ import { NotesCollection } from "./collection.vibe"
 import type { NotesFilter } from "./list.vibe"
 import { decodeOrigins, type OriginIndex } from "./notes.schema.vibe"
 import { sha256Hex } from "./platform.ts"
-import { compareExchangeSlot, readSlot, slots } from "./slots.vibe"
+import { type SlotAccess, slotAccess, slots } from "./slots.vibe"
 
 /** What Notes asks the shell to open in another app; nothing is saved or sent by the request itself. */
 export type NotesRequest =
@@ -71,7 +71,7 @@ const legacyKey = /^(event|reminder):(.{1,256})$/s
  * by the key's digest, as Calendar does.
  */
 effect function legacyLinks(raw: string): (Links | undefined)!! {
-  const parsed: unknown = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
+  const parsed: unknown = (Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined)
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined
   const document = parsed as { readonly version?: unknown; readonly links?: unknown }
   if (document.version !== 1 || Object.keys(document).some((key) => key !== "version" && key !== "links")) return undefined
@@ -87,17 +87,17 @@ effect function legacyLinks(raw: string): (Links | undefined)!! {
     if (match === null || link === undefined || typeof savedAt !== "number" || !Number.isSafeInteger(savedAt) || savedAt < 0) return undefined
     const kind = match[1] === "event" ? "event" as const : "reminder" as const
     const id = match[2]
-    const recordId = kind === "event" ? `agent-event:${try (tryPromise(() => sha256Hex(id)) catch () => "")}` : id
+    const recordId = kind === "event" ? `agent-event:${(tryPromise(() => sha256Hex(id)) catch () => "")}` : id
     if (recordId === "agent-event:" || recordId.length > 200) return undefined
     links.push({ kind, recordId, link, linkedAt: savedAt })
   }
   return links
 }
 
-effect function index(): StoredIndex!! {
-  const raw = try (readSlot(slots.origins) catch () => undefined)
+effect function index(access: SlotAccess): StoredIndex!! {
+  const raw = access.read(slots.origins) catch () => undefined
   if (raw === undefined) return { raw, links: [], readable: true }
-  const decoded = try (decodeOrigins(raw) catch () => undefined)
+  const decoded = (decodeOrigins(raw) catch () => undefined)
   if (decoded !== undefined) return { raw, links: decoded.links, readable: true }
   const earlier = try legacyLinks(raw)
   return earlier === undefined ? { raw, links: [], readable: false } : { raw, links: earlier, readable: true }
@@ -115,26 +115,27 @@ export function keepFirst(links: Links, added: Links[number]): Links {
 
 /** The origin links over the device's origin slot. */
 export const originsLayer = Layer.effect(NotesOrigins, effect {
+  const access = try slotAccess()
   const collection = try NotesCollection
   const handoff = try NotesHandoff
 
   effect function find(kind: "reminder" | "event", recordId: string): (NoteLink | undefined)!! {
-    const stored = (try index()).links.find((row) => row.kind === kind && row.recordId === recordId)
+    const stored = (try index(access)).links.find((row) => row.kind === kind && row.recordId === recordId)
     return stored === undefined ? undefined : noteLinkOf(stored.link)
   }
 
   effect function edit(update: (links: Links) => Links): boolean!! {
-    const before = try index()
+    const before = try index(access)
     if (!before.readable) return false
     const next: OriginIndex = { version: 1, links: update(before.links) }
-    return try (compareExchangeSlot(slots.origins, before.raw, JSON.stringify(next)) catch () => false)
+    return access.compareExchange(slots.origins, before.raw, JSON.stringify(next)) catch () => false
   }
 
   return {
     effect scheduleDraft(noteId: string, kind: NoteScheduleKind) {
       const note = (try collection.current())?.snapshot.notes.find((item) => item.id === noteId)
       if (note === undefined) return "invalid"
-      const result = try (tryPromise(() => noteScheduleDraft(note, kind)) catch () => undefined)
+      const result = (tryPromise(() => noteScheduleDraft(note, kind)) catch () => undefined)
       if (result === undefined) return "invalid"
       if (result.status !== "ready") return result.status
       try handoff.request({ kind: "calendar-draft", draft: result.draft })
@@ -170,7 +171,7 @@ export const originsLayer = Layer.effect(NotesOrigins, effect {
       if (resolved.status !== "found") return "gone"
       const note = current.snapshot.notes.find((item) => item.id === resolved.note.id)
       if (note === undefined) return "gone"
-      const revision = try (tryPromise(() => recordNoteRevision(note)) catch () => "")
+      const revision = (tryPromise(() => recordNoteRevision(note)) catch () => "")
       const linkRevision = "revision" in link && typeof link.revision === "string" ? link.revision : ""
       try handoff.request({ kind: "open-notes", noteId: note.id })
       return originOpensEdited(originResolution(true, true), revision === linkRevision) ? "edited" : "opened"

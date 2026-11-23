@@ -8,7 +8,7 @@ import { ownerKey } from "../platform/storage.vibe"
 import { AgentRefused, AgentUnavailable, NotSent, Unrecognized, WorkflowApi, decoded } from "./api.vibe"
 import { deviceZone, instant, sameLocalDay } from "./ids.ts"
 import {
-  AutomationList, DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ReminderList, ScheduledTaskList,
+  DefinitionList, DefinitionReply, Deleted, ExecuteReply, FireReply, ReminderList, ScheduledTaskList, TriggerList,
   type ScheduledTaskRecord, type TaskTrigger, TaskReply, TriggerReply, TriggerRuns,
 } from "./wire.schema.vibe"
 
@@ -130,7 +130,7 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
   const agent = try WorkflowApi
 
   effect function bind() {
-    const scope = try (agent.scope() catch () => undefined)
+    const scope = (agent.scope() catch () => undefined)
     if (scope === undefined) return undefined
     const owner = `${scope.origin}|${scope.ownerId}|${scope.agentId}`
     held.send({ type: "bindOwner", owner }) catch () => undefined
@@ -140,13 +140,22 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
   effect function read(source: Source) {
     switch (source) {
       case "AutomationSource": {
-        const list = try decoded(AutomationList, "/api/automations", try agent.request("GET", "/api/automations"))
-        const rows: Row[] = list.automations.map((a) => ({
-          key: a.id, id: a.id, target: a.type === "workflow" ? (a.workflowId ?? a.id) : (a.triggerId ?? a.id),
-          kind: a.type === "workflow" ? "WorkflowRow" : "PromptRow", enabled: a.enabled, status: a.status ?? "",
-          title: a.title, description: a.description ?? "", schedule: a.type === "workflow" ? "workflow" : "prompt", system: a.system === true,
-        }))
-        return { rows, partial: list.workflowFetchError !== undefined || (list.executionFetchErrors?.length ?? 0) > 0 }
+        // The agent lists workflows (`/api/workflow/workflows`) and prompts (`/api/triggers`) on their own routes; a list that read
+        // only one of them is partial, and only when neither reads does the source fail with the prompts' refusal.
+        const workflows = agent.workflow.list() catch () => undefined
+        const readPrompts = effect { return (try decoded(TriggerList, "/api/triggers", try agent.request("GET", "/api/triggers"))).triggers }
+        const prompts = workflows === undefined ? try readPrompts : readPrompts catch () => undefined
+        const rows: Row[] = [
+          ...(workflows ?? []).filter((w) => !w.removed).map((w): Row => ({
+            key: w.id, id: w.id, target: w.id, kind: "WorkflowRow", enabled: w.active, status: w.active ? "active" : "paused",
+            title: w.name, description: w.description, schedule: "workflow", system: false,
+          })),
+          ...(prompts ?? []).map((t): Row => ({
+            key: `trigger:${t.id}`, id: t.id, target: t.id, kind: "PromptRow", enabled: t.enabled, status: "",
+            title: t.displayName, description: t.instructions, schedule: "prompt", system: false,
+          })),
+        ]
+        return { rows, partial: workflows === undefined || prompts === undefined }
       }
       case "ScheduleSource": {
         const list = try decoded(ScheduledTaskList, "/api/scheduled-tasks", try agent.request("GET", "/api/scheduled-tasks?ownerVisibleOnly=1"))
@@ -178,7 +187,7 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
   }
 
   effect function refreshSource(source: Source) {
-    const outcome = try (effect {
+    const outcome = (effect {
       const { rows, partial } = try read(source)
       return { read: readOf(200), rows, partial }
     } catch (error) => ({ read: match (error) {
@@ -199,10 +208,10 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
 
   /** Hold the change, send it, settle it with the agent's answer, then read the list again. */
   effect function settle(kind: ChangeKind, key: string, target: boolean, send: Report!(NotSent | AgentRefused | AgentUnavailable | Unrecognized)) {
-    const accepted = try (held.send({ type: "change", kind, key, target }) catch () => undefined)
+    const accepted = (held.send({ type: "change", kind, key, target }) catch () => undefined)
     if (accepted === undefined) return { answer: "busy" } satisfies Report
     const id = (try held.get()).minted
-    const report = try (send catch (error) => reportOf(answerOf(error), match (error) { when NotSent: "not-sent"; default: undefined; }))
+    const report = (send catch (error) => reportOf(answerOf(error), match (error) { when NotSent: "not-sent"; default: undefined; }))
     const answer: Answer = report.answer === "applied" ? "AnswerApplied" : report.answer === "refused" ? "AnswerRefused" : "AnswerUnknown"
     held.send({ type: "answered", id, answer }) catch () => undefined
     try refresh()
@@ -216,12 +225,12 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
 
   effect function enablePrompt(id: string, on: boolean) {
     const path = `/api/triggers/${id}`
-    const sent = try (effect {
+    const sent = (effect {
       const reply = try decoded(TriggerReply, path, try agent.request("PUT", path, { enabled: on }))
       return { status: 200, confirmed: reply.trigger.id === id && reply.trigger.enabled === on, failure: undefined }
     } catch (error) => ({ status: match (error) { when AgentRefused: error.status; default: 0; }, confirmed: false, failure: error }))
     if (sent.failure === undefined) return sent.confirmed ? reportOf("AnswerApplied") : reportOf("AnswerUnknown", "not-confirmed")
-    const reread = try (readTrigger(id) catch () => undefined)
+    const reread = (readTrigger(id) catch () => undefined)
     const outcome = enableOutcome(on, sent.status, reread === undefined || reread.id !== id ? "RereadFailed" : reread.enabled ? "RereadOn" : "RereadPaused")
     if (outcome === "EnableLanded") return reportOf("AnswerApplied")
     if (outcome === "EnableRefusedAtLimit") return reportOf("AnswerRefused", "limit")

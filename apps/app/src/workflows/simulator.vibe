@@ -53,9 +53,9 @@ export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
   }
 
   effect function readList<A>(key: string) {
-    const raw = try (store.get(key) catch () => undefined)
+    const raw = (store.get(key) catch () => undefined)
     if (raw === undefined) return [] as A[]
-    const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => [])
+    const value = (Effect.try(() => JSON.parse(raw) as unknown) catch () => [])
     return Array.isArray(value) ? value as A[] : []
   }
 
@@ -68,7 +68,7 @@ export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
       if (!receiptMatches(saved !== undefined, saved?.text === text, saved?.recipient === recipient)) throw new SimulatedRefusal({ reason: "receipt" })
       if (saved !== undefined) return saved
       const next = { id, destination, recipient, text }
-      try (store.set(sendsKey, JSON.stringify([...sends, next].slice(-500))) catch effect () => { throw new SimulatedRefusal({ reason: "receipt" }) })
+      store.set(sendsKey, JSON.stringify([...sends, next].slice(-500))) catch effect () => { throw new SimulatedRefusal({ reason: "receipt" }) }
       return next
     },
     effect urgency(input: string, answer: string | undefined, review: boolean | undefined) {
@@ -78,7 +78,7 @@ export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
         if (review === undefined) throw new SimulatedRefusal({ reason: "urgency" })
         return { urgent: review, reason: review ? "Marked urgent in development review." : "Marked not urgent in development review.", source: "development-review" } satisfies Urgency
       }
-      const value = try (Effect.try(() => JSON.parse(answer) as unknown) catch () => undefined)
+      const value = (Effect.try(() => JSON.parse(answer) as unknown) catch () => undefined)
       const record = typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}
       const exact = Object.keys(record).sort().join(",") === "reason,urgent" && typeof record.urgent === "boolean" && typeof record.reason === "string"
       const reason = typeof record.reason === "string" ? record.reason.trim() : ""
@@ -111,7 +111,7 @@ export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
         return
       }
       if (!noticeFits(rows.length, text.trim() === "" ? 0 : text.length, title.trim() === "" ? 0 : title.length)) throw new SimulatedRefusal({ reason: "ledger" })
-      try (store.set(noticesKey, JSON.stringify([...rows, { id, title, text }])) catch effect () => { throw new SimulatedRefusal({ reason: "ledger" }) })
+      store.set(noticesKey, JSON.stringify([...rows, { id, title, text }])) catch effect () => { throw new SimulatedRefusal({ reason: "ledger" }) }
     },
     effect calendar(label: string, events: ReadonlyArray<RangeEvent>, truncated: boolean) {
       try guard()
@@ -164,7 +164,7 @@ export const simulatedTriggers = Layer.provideMerge(Layer.effect(SimulatedTrigge
 
   effect function sent(event: Parameters<typeof held.send>[0]) {
     try guard()
-    return (try (held.send(event) catch () => undefined)) !== undefined
+    return ((held.send(event) catch () => undefined)) !== undefined
   }
 
   return {

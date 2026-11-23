@@ -146,8 +146,9 @@ describe("Notes stories", () => {
       const revision = agent.revision
       try editor.openNote("kept")
       const closed = try editor.leave()
+      const open = (try editor.draft()) === undefined
       try check(() => assert.deepStrictEqual(
-        { dropped, afterDrop, saved, afterSave, closed, unchanged: agent.revision === revision, open: (try editor.draft()) === undefined },
+        { dropped, afterDrop, saved, afterSave, closed, unchanged: agent.revision === revision, open },
         { dropped: true, afterDrop: 1, saved: true, afterSave: ["\nCall Sam", "\nAs it was"], closed: true, unchanged: true, open: true },
       ))
     }
@@ -182,11 +183,11 @@ describe("Notes stories", () => {
       const machine = try CollectionMachine
       try bound()
       // spec/notes/collection.md, "One mutation runs at a time and cancels a read in flight"
-      const confirmed = try (collection.interact("create-note", { content: "Errands\nPost office", creationId: "c-errands" }) catch () => undefined)
+      const confirmed = (collection.interact("create-note", { content: "Errands\nPost office", creationId: "c-errands" }) catch () => undefined)
       const ready = (try machine.get()).phase
       // spec/notes/collection.md, "A mutation is confirmed only by its own reply, and an uncertain one stays under review"
       agent.failNextWrite = true
-      const lost = try (collection.interact("create-note", { content: "Second\nnote", creationId: "c-second" }) catch () => undefined)
+      const lost = (collection.interact("create-note", { content: "Second\nnote", creationId: "c-second" }) catch () => undefined)
       const review = try machine.get()
       // spec/notes/collection.md, "The status line says what is wrong in one word"
       const label = statusLabel(false, review)
@@ -466,11 +467,11 @@ describe("Notes stories", () => {
     provide custodyMachine() {
       const custody = try CustodyMachine
       // spec/notes/audioCustody.md, "One current operation controls the trash, and an erased recording never comes back"
-      const otherOwner = try (custody.send({ type: "trashAudio", noteOwner: 2, operation: 1, metadataConfirmed: true }) catch () => undefined)
+      const otherOwner = (custody.send({ type: "trashAudio", noteOwner: 2, operation: 1, metadataConfirmed: true }) catch () => undefined)
       const trashed = try custody.send({ type: "trashAudio", noteOwner: 1, operation: 1, metadataConfirmed: true })
-      const competing = try (custody.send({ type: "trashAudio", noteOwner: 1, operation: 2, metadataConfirmed: true }) catch () => undefined)
+      const competing = (custody.send({ type: "trashAudio", noteOwner: 1, operation: 2, metadataConfirmed: true }) catch () => undefined)
       const purged = try custody.send({ type: "purgeAudio", noteOwner: 1, operation: 1, bytesGone: true, metadataConfirmed: true })
-      const restore = try (custody.send({ type: "restoreAudio", noteOwner: 1, operation: 1, metadataConfirmed: true }) catch () => undefined)
+      const restore = (custody.send({ type: "restoreAudio", noteOwner: 1, operation: 1, metadataConfirmed: true }) catch () => undefined)
       try check(() => assert.deepStrictEqual(
         { otherOwner, trashedOp: trashed.activeOp, competing, purged: purged.hasAudio, restore, receipts: purged.receiptCount },
         { otherOwner: undefined, trashedOp: 1, competing: undefined, purged: false, restore: undefined, receipts: 1 },

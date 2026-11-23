@@ -48,7 +48,7 @@ export const agentChanges = Layer.effect(AgentChanges, effect {
     const receipts: Array<{ receipt: Receipt; id: string }> = []
     let refused = false
     for (const raw of results) {
-      const result = try (Schema.decodeUnknownEffect(ActionResultRecord)(raw) catch () => undefined)
+      const result = (Schema.decodeUnknownEffect(ActionResultRecord)(raw) catch () => undefined)
       if (result === undefined) continue
       if (!result.success && result.error !== undefined && viewRefusal(result.error)) refused = true
       for (const r of result.effectReceipts ?? []) receipts.push({ receipt: receiptOf(result.success, r), id: r.resource.id })

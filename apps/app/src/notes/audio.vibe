@@ -27,7 +27,7 @@ export const audioLayer = Layer.effect(NotesAudio, effect {
   effect function exactAt(row: NoteRow, offset: number): boolean!! {
     const audio = row.audio
     if (audio === undefined) return false
-    const described = try (effect {
+    const described = (effect {
       return try decodeAudioDescription(try native.invoke("AlphaNoteAudio", "describe", { audioId: audio.audioId }))
     } catch () => undefined)
     const owner = (try collection.current())?.snapshot.notes.some((note) => note.id === row.id) ?? false
@@ -61,7 +61,7 @@ export const audioLayer = Layer.effect(NotesAudio, effect {
       if (current === undefined || note === undefined || note.format?.kind !== "voice") return "not-saved"
       const words = parts.join("\n")
       const data: Record<string, NoteJson> = { ...note.format.data, lines: [{ s: "me", at: 0, t: words }] }
-      const saved = try (collection.interact("update-note", {
+      const saved = (collection.interact("update-note", {
         id: row.id, expectedRevision: current.snapshot.revision, content: contentOf(row.title, "\n", words), color: note.color, format: { kind: "voice", data },
       }) catch () => undefined)
       return saved?.target?.id === row.id ? "saved" : "not-saved"

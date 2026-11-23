@@ -36,7 +36,7 @@ const make = effect {
   const shown = try SubscriptionRef.make<NotesFilter | undefined>(undefined)
 
   effect function send(event: FilterEvent): (ListFilter | undefined)!! {
-    return try (machine.send(event) catch () => undefined)
+    return (machine.send(event) catch () => undefined)
   }
 
   effect function publish(state: ListFilter | undefined): void!! {

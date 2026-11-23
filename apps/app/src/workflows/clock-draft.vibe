@@ -26,7 +26,7 @@ export const clockDraft = Layer.unwrap(effect {
   return Layer.provideMerge(Layer.effect(WorkflowClockDraft, effect {
     const held = try Machine
     const clock = try WorkflowClockPort
-    const sent = (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
+    const sent = effect (event: Parameters<typeof held.send>[0]) => held.send(event) catch () => undefined
     return {
       enter: effect () => { try sent({ type: "enter" }) },
       effect leave() {

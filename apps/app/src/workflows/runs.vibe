@@ -62,8 +62,8 @@ export service WorkflowRuns {
 export const versions = Layer.effect(WorkflowVersions, effect {
   const store = try KeyValueStore.KeyValueStore
   effect function load() {
-    const raw = try (store.get(VERSIONS_KEY) catch () => undefined)
-    const parsed = raw === undefined ? {} : try (Effect.try(() => JSON.parse(raw) as unknown) catch () => ({}))
+    const raw = (store.get(VERSIONS_KEY) catch () => undefined)
+    const parsed = raw === undefined ? {} : (Effect.try(() => JSON.parse(raw) as unknown) catch () => ({}))
     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, ReadonlyArray<string>> : {}
   }
   return {
@@ -99,7 +99,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   const client = agent.workflow
 
   effect function owner() {
-    const scope = try (agent.scope() catch () => undefined)
+    const scope = (agent.scope() catch () => undefined)
     return scope === undefined ? undefined : { scope, owner: ownerOf(scope) }
   }
 
@@ -111,12 +111,12 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
     const who = try owner()
     if (who === undefined) return false
     try adopt(who.owner)
-    const workflow = try (client.detail(workflowId) catch () => undefined)
+    const workflow = (client.detail(workflowId) catch () => undefined)
     if (workflow === undefined) return false
     const version = try seen.ordinal(workflow.id, workflow.versionId)
     if ((try held.get()).workflowId === workflow.id) held.send({ type: "definitionRead", version }) catch () => undefined
     held.send({ type: "openWorkflow", owner: who.owner, workflowId: workflow.id, version, typed: workflow.phoneSpec !== undefined }) catch () => undefined
-    const executions = try (client.executions(workflow.id) catch () => undefined)
+    const executions = (client.executions(workflow.id) catch () => undefined)
     if (executions !== undefined) held.send({ type: "historyRead", entries: executions.map(entryOf) }) catch () => undefined
     return true
   }
@@ -128,7 +128,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   effect function openExact(route: Pick<WorkflowNoticeRoute, "workflowId" | "runId" | "versionId">) {
     const who = try owner()
     if (who === undefined) throw new RunNotFound({ runId: route.runId })
-    const scope = try (tryPromise(() => sha256Hex(JSON.stringify([who.scope.origin, who.scope.ownerId, who.scope.agentId]))) catch () => "")
+    const scope = (tryPromise(() => sha256Hex(JSON.stringify([who.scope.origin, who.scope.ownerId, who.scope.agentId]))) catch () => "")
     const target = try openWorkflowNotice(client, { scope, origin: who.scope.origin, ownerId: who.scope.ownerId, agentId: who.scope.agentId, ...route })
     if (target.kind !== "run") throw new RunNotFound({ runId: route.runId })
     if (!(try openWorkflow(route.workflowId))) throw new RunNotFound({ runId: route.runId })
@@ -140,7 +140,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   effect function settle(sent: WorkflowRun!unknown) {
     const { intent } = try held.get()
     const versionId = try seen.versionId(intent.workflowId, intent.version)
-    const reply = try (effect { return { run: try sent } } catch (error) => ({ error }))
+    const reply = (effect { return { run: try sent } } catch (error) => ({ error }))
     if ("error" in reply) {
       if (reply.error instanceof WorkflowAdmissionRejected) {
         held.send({ type: "versionRefused" }) catch () => undefined
@@ -160,7 +160,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
   effect function refreshRun(first: boolean) {
     const before = try held.get()
     if (!autoRefreshes(before)) return 0
-    const run = try (client.receipt(before.shown.runId, before.shown.workflowId) catch () => undefined)
+    const run = (client.receipt(before.shown.runId, before.shown.workflowId) catch () => undefined)
     if (run === undefined) return refreshAfter(first, false, true)
     held.send({ type: "receiptRead", runId: run.id, finished: run.finished, cancelRequested: false, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
     const after = try held.get()
@@ -173,9 +173,9 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
 
   return {
     effect open(runId: string) {
-      const answer = try (agent.request("GET", `/api/workflow/executions/${runId}`) catch effect () => { throw new RunNotFound({ runId }) })
+      const answer = (agent.request("GET", `/api/workflow/executions/${runId}`) catch effect () => { throw new RunNotFound({ runId }) })
       const raw = typeof answer === "object" && answer !== null ? (answer as { execution?: unknown }).execution : undefined
-      const execution = try (parseWorkflowRun(raw) catch effect () => { throw new RunNotFound({ runId }) })
+      const execution = (parseWorkflowRun(raw) catch effect () => { throw new RunNotFound({ runId }) })
       if (execution.id !== runId) throw new RunNotFound({ runId })
       return try openExact({ workflowId: execution.workflowId, runId, versionId: execution.versionId })
     },
@@ -196,7 +196,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
       }
     },
     effect review() {
-      return (try (held.send({ type: "review" }) catch () => undefined)) !== undefined
+      return ((held.send({ type: "review" }) catch () => undefined)) !== undefined
     },
     effect confirm() {
       const state = try held.get()
@@ -204,7 +204,7 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
       const versionId = try seen.versionId(state.workflowId, state.reviewed)
       const kept = try Ref.make(false)
       const beforeSubmit = effect (submissionId: string) => {
-        const saved = try (held.send({ type: "confirm", submission: submissionId }) catch () => undefined)
+        const saved = (held.send({ type: "confirm", submission: submissionId }) catch () => undefined)
         if (saved === undefined) throw new WorkflowResponseInvalid({ message: "Run request not kept" })
         held.send({ type: "dispatched" }) catch () => undefined
         try Ref.set(kept, true)
@@ -216,16 +216,16 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
       const { intent, custody } = try held.get()
       if (custody !== "Unknown") return "refused" satisfies RunOutcome
       const versionId = try seen.versionId(intent.workflowId, intent.version)
-      const found = try (effect { return { run: try client.reconcile(intent.workflowId, versionId, intent.submission) } } catch () => undefined)
+      const found = (effect { return { run: try client.reconcile(intent.workflowId, versionId, intent.submission) } } catch () => undefined)
       if (found === undefined) return "unknown" satisfies RunOutcome
       held.send({ type: "reconciled", found: found.run !== null, runId: found.run?.id ?? "" }) catch () => undefined
       return found.run !== null ? "recovered" : (try held.get()).custody === "NotAdmitted" ? "not-admitted" : "version-changed"
     },
     effect reviewResend() {
-      return (try (held.send({ type: "reviewResend" }) catch () => undefined)) !== undefined
+      return ((held.send({ type: "reviewResend" }) catch () => undefined)) !== undefined
     },
     effect resend() {
-      const sent = try (held.send({ type: "resend" }) catch () => undefined)
+      const sent = (held.send({ type: "resend" }) catch () => undefined)
       if (sent === undefined) return "busy" satisfies RunOutcome
       const { intent } = try held.get()
       const versionId = try seen.versionId(intent.workflowId, intent.version)
@@ -233,14 +233,14 @@ export const runs = Layer.provideMerge(Layer.effect(WorkflowRuns, effect {
     },
     effect cancel() {
       const state = try held.get()
-      const asked = try (held.send({ type: "requestCancel" }) catch () => undefined)
+      const asked = (held.send({ type: "requestCancel" }) catch () => undefined)
       if (asked === undefined) return false
-      const run = try (client.cancel(state.shown.runId, state.shown.workflowId) catch () => undefined)
+      const run = (client.cancel(state.shown.runId, state.shown.workflowId) catch () => undefined)
       if (run !== undefined) held.send({ type: "receiptRead", runId: run.id, finished: run.finished, cancelRequested: true, status: run.status, reconciliation: run.reconciliation?.state ?? "" }) catch () => undefined
       return true
     },
     effect runMissedNow(runId: string) {
-      return (try (held.send({ type: "runMissedNow", runId }) catch () => undefined)) !== undefined
+      return ((held.send({ type: "runMissedNow", runId }) catch () => undefined)) !== undefined
     },
     effect bind() {
       const who = try owner()

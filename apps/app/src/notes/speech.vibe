@@ -20,7 +20,7 @@ export function refusalCode(error: unknown): string | undefined {
 /** Transcribe a live segment or a saved window through voice's recording transcriber; a saved window heard on the phone is refused, since the phone's own path reads no saved window. */
 export effect function transcribeKept(transcriber: RecordingTranscriber.Shape, recordingId: string, saved?: SavedWindow): (string | SpeechRefused)!! {
   const details = saved === undefined ? {} : { savedNoteId: saved.savedNoteId, savedDurationMs: saved.savedDurationMs, offsetMs: saved.offsetMs }
-  const heard = try (transcriber.transcribe(recordingId, details) catch (error): SpeechRefused => ({ code: refusalCode(error.cause) ?? refusalCode(error) }))
+  const heard = (transcriber.transcribe(recordingId, details) catch (error): SpeechRefused => ({ code: refusalCode(error) }))
   if ("code" in heard) return heard
   if (saved !== undefined && heard.local) return { code: "unavailable" }
   return heard.text

@@ -145,7 +145,7 @@ export const layer = Layer.effect(FilesBrowser, effect {
 
   effect function readTrash(generation: number, volumes: readonly Volume[]) {
     const { ticket } = try trash.get()
-    const { items, outcome } = try trashAcross(volumes)
+    const { items, outcome } = try Effect.provideService(trashAcross(volumes), FilesStorage, storage)
     try dispatchTrash({ type: "trashReply", ticket, items, result: outcome })
     try dispatch({ type: "listReply", ticket: generation, rows: [], groups: [], result: outcome, count: -1 })
   }
@@ -156,7 +156,7 @@ export const layer = Layer.effect(FilesBrowser, effect {
       const counted: CategoryCount | undefined = answer?.status === "ready" ? { category, count: answer.count ?? answer.entries?.length ?? 0, bytes: answer.bytes ?? -1 } : undefined
       return counted
     })
-    const { items, outcome } = try trashAcross(volumes)
+    const { items, outcome } = try Effect.provideService(trashAcross(volumes), FilesStorage, storage)
     try dispatch({ type: "countsReply", ticket, counts: counts.filter((c): c is CategoryCount => c !== undefined), trashed: outcome === "Complete" ? items.length : -1 })
   }
 
@@ -192,7 +192,7 @@ export const layer = Layer.effect(FilesBrowser, effect {
     try dispatch({ type: "accessReply", ticket: accessTicket, access: "AccessDenied", legacy: false, volumes: [] })
   }
 
-  effect function read() {
+  effect function read(): void!! {
     const before = try held.get()
     const answer = storage.state() catch () => undefined
     try dispatch({ type: "accessReply", ticket: before.accessTicket, access: accessOf(answer), legacy: answer?.legacy === true, volumes: answer ? volumesOf(answer) : [] })

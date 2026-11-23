@@ -29,7 +29,10 @@ export async function shareText(title: string, text: string): Promise<"shared" |
 
 export { pageVisible } from "../platform/build-flags.ts";
 
-/** Whether a page is there to post window events, which it is not in a unit test's runtime. */
+/**
+ * Whether a page is there to post window events, which it is not in a unit test's runtime.
+ * @throws {never}
+ */
 export function pageAvailable(): boolean {
   return typeof window !== "undefined";
 }

@@ -97,7 +97,7 @@ export const operationPorts = effect {
       const [note] = matches
       if (matches.length !== 1 || note === undefined) { allPresent = false; break }
       const { title, body } = projectNoteForModel(note)
-      const revision = try (tryPromise(() => sha256Hex(JSON.stringify([title, body]))) catch () => "")
+      const revision = (tryPromise(() => sha256Hex(JSON.stringify([title, body]))) catch () => "")
       if (revision !== selected.revision) { allReviewed = false; break }
       rows.push({ id: selected.id, revision: selected.revision, title, text: body })
     }
@@ -119,7 +119,7 @@ export const operationPorts = effect {
     const screen = try screenAllows()
     const before = try collection.current()
     const attempt = fromRun && screen && before !== undefined
-      ? try (effect {
+      ? (effect {
           const reply = try collection.interact("create-note", {
             content: contentOf(op.title, op.body === "" ? "" : "\n", op.body), forceNew: true, creationId: noteSaveCreationId(call.operationId),
           })
@@ -152,7 +152,7 @@ export const operationPorts = effect {
 
   effect function readBack(op: NotesOrganizeOperation): unknown!! {
     if (op.type === "notes_folder_create") {
-      const found = try (folders.findByName(op.name) catch () => null)
+      const found = (folders.findByName(op.name) catch () => null)
       return found === null ? unresolved : found === undefined ? refused("folder_missing") : { kind: "found", result: { folderId: found.id } }
     }
     const current = try collection.current()
@@ -162,7 +162,7 @@ export const operationPorts = effect {
     }
     if (op.type === "notes_move") {
       const note = current.snapshot.notes.find((item) => item.id === op.target.noteId)
-      const folder = op.folder === null ? null : try (folders.findByName(op.folder) catch () => undefined)
+      const folder = op.folder === null ? null : (folders.findByName(op.folder) catch () => undefined)
       if (note === undefined || folder === undefined) return unresolved
       const held = note.format?.data.folderId
       const folderId = typeof held === "string" ? held : ""

@@ -25,13 +25,13 @@ export const legacySlots: Readonly<Record<string, string>> = {
 }
 
 /** One slot's raw value: the hardware-backed secure store on Android, after moving what the earlier Alpha kept for it, and the WebView's private storage elsewhere. */
-export effect function readSlot(slot: string): (string | undefined)!SlotUnavailable {
+export effect function readSlot(slot: string): (string | undefined)!SlotUnavailable!(Native | KeyValueStore.KeyValueStore) {
   const native = try Native
   if (try native.available(plugin)) {
     const legacy = legacySlots[slot]
     if (legacy !== undefined) try adoptLegacySlot(legacy, slot)
-    const answer = try (native.invoke(plugin, "get", { key: slot }) catch effect () => { throw new SlotUnavailable({ slot }) })
-    const read = try (decodeSecureRead(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const answer = (native.invoke(plugin, "get", { key: slot }) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const read = (decodeSecureRead(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
     if ("error" in read) {
       if (read.error === "not_found") return undefined
       throw new SlotUnavailable({ slot })
@@ -39,16 +39,16 @@ export effect function readSlot(slot: string): (string | undefined)!SlotUnavaila
     return read.value ?? undefined
   }
   const store = try KeyValueStore.KeyValueStore
-  return try (store.get(`alpha.browser.${slot}`) catch effect () => { throw new SlotUnavailable({ slot }) })
+  return (store.get(`alpha.browser.${slot}`) catch effect () => { throw new SlotUnavailable({ slot }) })
 }
 
 /** Replace a slot's value only when it still holds `expected`; false when another writer got there first. */
-export effect function compareExchangeSlot(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable {
+export effect function compareExchangeSlot(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable!(Native | KeyValueStore.KeyValueStore) {
   const native = try Native
   if (try native.available(plugin)) {
-    const answer = try (native.invoke(plugin, "compareAndExchange", { key: slot, expected: expected ?? null, value: value ?? null })
+    const answer = (native.invoke(plugin, "compareAndExchange", { key: slot, expected: expected ?? null, value: value ?? null })
       catch effect () => { throw new SlotUnavailable({ slot }) })
-    const result = try (decodeSecureExchange(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const result = (decodeSecureExchange(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
     if ("exchanged" in result) return result.exchanged
     if (result.ok) return true
     if (result.error === "conflict") return false
@@ -56,8 +56,27 @@ export effect function compareExchangeSlot(slot: string, expected: string | unde
   }
   const store = try KeyValueStore.KeyValueStore
   const key = `alpha.browser.${slot}`
-  const held = try (store.get(key) catch effect () => { throw new SlotUnavailable({ slot }) })
+  const held = (store.get(key) catch effect () => { throw new SlotUnavailable({ slot }) })
   if (held !== expected) return false
-  try ((value === undefined ? store.remove(key) : store.set(key, value)) catch effect () => { throw new SlotUnavailable({ slot }) })
+  const write = value === undefined ? store.remove(key) : store.set(key, value)
+  write catch effect () => { throw new SlotUnavailable({ slot }) }
   return true
+}
+
+/** A slot's reads and compare-and-exchanges over the services in scope when it is made, for a layer to keep for its methods. */
+export interface SlotAccess {
+  read(slot: string): (string | undefined)!SlotUnavailable
+  compareExchange(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable
+}
+
+/** The slots over the phone's secure store, or the WebView's private storage, as this layer was built with them. */
+export effect function slotAccess() {
+  const native = try Native
+  const store = try KeyValueStore.KeyValueStore
+  const access: SlotAccess = {
+    read: (slot) => Effect.provideService(Effect.provideService(readSlot(slot), Native, native), KeyValueStore.KeyValueStore, store),
+    compareExchange: (slot, expected, value) =>
+      Effect.provideService(Effect.provideService(compareExchangeSlot(slot, expected, value), Native, native), KeyValueStore.KeyValueStore, store),
+  }
+  return access
 }

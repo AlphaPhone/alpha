@@ -30,13 +30,13 @@ const make = effect {
   const machine = try OpenMachine
 
   effect function send(event: OpenEvent): (RecordingOpen | undefined)!! {
-    return try (machine.send(event) catch () => undefined)
+    return (machine.send(event) catch () => undefined)
   }
 
   effect function settle(started: RecordingOpen): void!! {
     let answer: { readonly open: boolean } | undefined = { open: false }
     if (try native.available(plugin)) {
-      answer = try (effect { return try decodeRecordingOpen(try native.invoke(plugin, "consumeNoteRecordingOpen")) } catch () => undefined)
+      answer = (effect { return try decodeRecordingOpen(try native.invoke(plugin, "consumeNoteRecordingOpen")) } catch () => undefined)
     }
     const after = try send({ type: "readSettled", ok: answer !== undefined, found: answer?.open === true })
     if (after === undefined) return
@@ -58,7 +58,7 @@ const make = effect {
     },
     effect goneHome() {
       try send({ type: "goneHome" })
-      try (native.invoke(plugin, "clearNoteRecordingOpen") catch () => undefined)
+      native.invoke(plugin, "clearNoteRecordingOpen") catch () => undefined
     },
     effect foreground(state: ForegroundState) {
       const showable = notesShowable(state)

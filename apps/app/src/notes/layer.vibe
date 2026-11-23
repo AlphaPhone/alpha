@@ -26,7 +26,7 @@ const records = Layer.provideMerge(Layer.mergeAll(editorLayer, handoffLayer), La
 const devices = Layer.provideMerge(Layer.mergeAll(trashLayer, cleanupLayer, recorderLayer, audioLayer, originsLayer, shareLayer, sourcesLayer, recordingOpenLayer), records)
 const agent = Layer.provideMerge(organizeLayer, Layer.provideMerge(Layer.mergeAll(foldersLayer, listFilterLayer), devices))
 
-effect function openUnlessShown(editor: NotesEditor.Shape, noteId: string): void!! {
+effect function openUnlessShown(editor: NotesEditor.Shape, noteId: string) {
   const machine = try EditorMachine
   const state = try machine.get()
   if (state.present && state.draftId === noteId) return

@@ -1,6 +1,6 @@
 // spec/files/browser.md, "Back closes the topmost Files layer, and leaves Files only when none is open"; spec/files/browser.md, "Story: Walk my folders and categories"; spec/files/preview.md, "The document viewer opens over the preview and closes exactly once"; spec/files/share.md, "The owner's choice sends once, from the panel on screen, after it closed"; spec/files/trash.md, "Story: Restore or delete several Trash items together"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"
 import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
-import { backLayer } from "../../gen/files__browser.ts"
+import { backLayer } from "../../gen/files__browser.effect.vibe"
 import { Machine as TrashMachine } from "../../gen/files__trash.effect.vibe"
 import { Machine as FilterMachine } from "../../gen/files__filter.effect.vibe"
 import { Machine as PreviewMachine } from "../../gen/files__preview.effect.vibe"

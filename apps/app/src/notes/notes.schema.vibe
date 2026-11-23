@@ -121,21 +121,25 @@ export const KeptDraft = Schema.Struct({
   changes: Schema.Array(KeptChange).check(Schema.isMaxLength(10000)),
 })
 
-/** One deleted note of the earlier device Trash, as the phone's own collection stored it. */
+/**
+ * One deleted note of the earlier device Trash, as the phone's own collection stored it. The earlier store checked only a note's
+ * id, kind and title, so nothing else is bounded here: a long title or body, an unknown colour or a folder id this version would not
+ * write is read as stored, and `legacyFormat` drops what the canonical note cannot hold.
+ */
 export const LegacyTrashNote = Schema.Struct({
   id: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
   kind: Schema.Literals(["text", "list", "voice", "link"]),
-  title: Schema.String.check(Schema.isMaxLength(240)),
-  body: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(20001))),
-  items: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, done: Schema.optionalKey(Schema.Boolean) })).check(Schema.isMaxLength(2000))),
-  lines: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, s: Schema.optionalKey(Schema.String), at: Schema.optionalKey(Schema.Number) })).check(Schema.isMaxLength(5000))),
-  summary: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(200))),
-  actions: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, done: Schema.optionalKey(Schema.Boolean) })).check(Schema.isMaxLength(200))),
-  clips: Schema.optionalKey(Schema.Array(Schema.String).check(Schema.isMaxLength(200))),
-  url: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
-  domain: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(255))),
-  folderId: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^f-[A-Za-z0-9_-]{1,64}$/))),
-  color: Schema.optionalKey(Schema.Literals(["yellow", "green", "rose", "slate"])),
+  title: Schema.String,
+  body: Schema.optionalKey(Schema.String),
+  items: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, done: Schema.optionalKey(Schema.Boolean) }))),
+  lines: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, s: Schema.optionalKey(Schema.String), at: Schema.optionalKey(Schema.Number) }))),
+  summary: Schema.optionalKey(Schema.Array(Schema.String)),
+  actions: Schema.optionalKey(Schema.Array(Schema.Struct({ t: Schema.String, done: Schema.optionalKey(Schema.Boolean) }))),
+  clips: Schema.optionalKey(Schema.Array(Schema.String)),
+  url: Schema.optionalKey(Schema.String),
+  domain: Schema.optionalKey(Schema.String),
+  folderId: Schema.optionalKey(Schema.String),
+  color: Schema.optionalKey(Schema.String),
 })
 
 /** One row of the earlier device Trash: its deletion operation, the note and when it was deleted. */
@@ -146,8 +150,8 @@ export const LegacyTrashEntry = Schema.Struct({
   deletedAt: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: maxSafe })),
 })
 
-/** The earlier device Trash slot `notes-trash:v1:device`. */
-export const LegacyTrashDocument = Schema.Struct({ version: Schema.Literal(1), entries: Schema.Array(LegacyTrashEntry).check(Schema.isMaxLength(10000)) })
+/** The earlier device Trash slot `notes-trash:v1:device`: its rows are read one by one, so one unusual row holds only itself. */
+export const LegacyTrashDocument = Schema.Struct({ version: Schema.Literal(1), entries: Schema.Array(Schema.Unknown) })
 
 /** One `ElizaSecureStore.get` answer: the stored text, a refusal, or the phone's plain `{ value }` with null for an empty slot. */
 export const SecureRead = Schema.Union([
@@ -189,3 +193,5 @@ export const decodeKeptDraft = Schema.decodeUnknownEffect(Schema.fromJsonString(
 export const decodeSecureRead = Schema.decodeUnknownEffect(SecureRead)
 export const decodeSecureExchange = Schema.decodeUnknownEffect(SecureExchange)
 export const decodeLegacyTrash = Schema.decodeUnknownEffect(Schema.fromJsonString(LegacyTrashDocument))
+/** One row of the earlier device Trash. */
+export const decodeLegacyTrashEntry = Schema.decodeUnknownEffect(LegacyTrashEntry)

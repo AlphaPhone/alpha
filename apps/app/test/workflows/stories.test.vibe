@@ -70,9 +70,9 @@ describe("Requests (spec/workflows/vocabulary.md, \"Story: Send only the request
     const sent: Sent[] = []
     provide workflowsOf([], sent) {
       const api = try WorkflowApi
-      const other = try (api.request("GET", "/api/notes") catch (error) => error._tag)
-      const read = try (api.request("GET", "/api/automations", { all: true }) catch (error) => error._tag)
-      const remove = try (api.request("DELETE", "/api/automations") catch (error) => error._tag)
+      const other = (api.request("GET", "/api/notes") catch (error) => error._tag)
+      const read = (api.request("GET", "/api/automations", { all: true }) catch (error) => error._tag)
+      const remove = (api.request("DELETE", "/api/automations") catch (error) => error._tag)
       try Effect.try(() => assert.deepStrictEqual(
         { other, read, remove, reached: sent.filter((s) => s.path !== "/api/auth/me").length },
         { other: "NotSent", read: "NotSent", remove: "NotSent", reached: 0 },
@@ -234,7 +234,7 @@ describe("Runs (spec/workflows/runs.md, \"Story: Open a workflow and see its run
     ]
     provide workflowsOf(handlers, sent) {
       const runs = try WorkflowRuns
-      try (runs.open("r1") catch () => "")
+      runs.open("r1") catch () => ""
       const asked = try runs.cancel()
       try Effect.try(() => assert.deepStrictEqual(
         { asked, cancels: sent.filter((s) => s.method === "POST" && s.path.includes("/cancel")).length },
@@ -391,8 +391,9 @@ describe("Digest sources (spec/workflows/digestSources.md, \"Story: Let my diges
       const granted = (try held.get()).authorization
       const impact = try sources.revokeImpact()
       const revoked = try sources.revokeGrant(impact)
+      const after = (try held.get()).authorization
       try Effect.try(() => assert.deepStrictEqual(
-        { started, approved, granted, impact, revoked, after: (try held.get()).authorization },
+        { started, approved, granted, impact, revoked, after },
         { started: true, approved: true, granted: "Granted", impact: [], revoked: "revoked", after: "NoAuthorization" },
       ))
     }
@@ -562,10 +563,10 @@ describe("Simulator (spec/workflows/simulator.md, \"Story: Walk a workflow end t
       const simulator = try SimulatedWorkflows
       const first = try simulator.send("step-1", "MessageToMaya", "Maya", 1, "On my way")
       const again = try simulator.send("step-1", "MessageToMaya", "Maya", 1, "On my way")
-      const changed = try (simulator.send("step-1", "MessageToMaya", "Maya", 1, "Running late") catch (error) => error.reason)
+      const changed = (simulator.send("step-1", "MessageToMaya", "Maya", 1, "Running late") catch (error) => error.reason)
       return { same: first.id === again.id, changed }
     }, workflowsOf([], [], { variant: "browser", testMocks: true }))
-    const phone = try Effect.provide(effect { return try ((try SimulatedWorkflows).result("text") catch (error) => error.reason) }, workflowsOf([], []))
+    const phone = try Effect.provide(effect { return ((try SimulatedWorkflows).result("text") catch (error) => error.reason) }, workflowsOf([], []))
     try Effect.try(() => assert.deepStrictEqual({ browser, phone }, { browser: { same: true, changed: "receipt" }, phone: "not-loaded" }))
   })
 })
@@ -583,7 +584,7 @@ describe("Simulated triggers (spec/workflows/simulatedTriggers.md, \"Story: Try 
       const hidden = try triggers.check()
       return { first, leave, again, hidden }
     }, workflowsOf([], [], { variant: "browser", testMocks: true }))
-    const phone = try Effect.provide(effect { return try ((try SimulatedTriggers).check() catch (error) => error.reason) }, workflowsOf([], []))
+    const phone = try Effect.provide(effect { return ((try SimulatedTriggers).check() catch (error) => error.reason) }, workflowsOf([], []))
     try Effect.try(() => assert.deepStrictEqual(
       { fired, phone },
       { fired: { first: { queued: 0 }, leave: { queued: 1 }, again: { queued: 0 }, hidden: { stopped: true } }, phone: "not-loaded" },

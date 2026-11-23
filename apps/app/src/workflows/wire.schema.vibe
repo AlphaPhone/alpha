@@ -20,7 +20,8 @@ export schema AutomationRecord {
 export schema AutomationList {
   automations: ReadonlyArray<AutomationRecord>
   workflowFetchError?: string
-  executionFetchErrors?: ReadonlyArray<unknown>
+  /** Only how many there are is read; each is a message or a small record. */
+  executionFetchErrors?: ReadonlyArray<string | Record<string, string | number | boolean | null>>
 }
 
 /** A scheduled task's trigger as the agent lists it. */
@@ -88,6 +89,9 @@ export schema TriggerRecord {
   timezone?: string
   revision?: number
 }
+
+/** `GET /api/triggers`: the agent's prompts. */
+export schema TriggerList { triggers: ReadonlyArray<TriggerRecord> }
 
 /** `GET`, `POST` and `PUT /api/triggers…`. */
 export schema TriggerReply { trigger: TriggerRecord; deliveryConversationId?: string }

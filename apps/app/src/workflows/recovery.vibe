@@ -36,17 +36,17 @@ export const requestRecovery = Layer.provideMerge(Layer.effect(RequestRecovery, 
 
   effect function readAll() {
     const entries: Array<[string, string | null]> = []
-    for (const key of SAVED_REQUEST_KEYS) entries.push([key, (try (store.get(key) catch () => undefined)) ?? null])
+    for (const key of SAVED_REQUEST_KEYS) entries.push([key, ((store.get(key) catch () => undefined)) ?? null])
     return Object.fromEntries(entries) as RequestBackup
   }
 
   return {
     effect open() {
       if (!offered) return undefined
-      const opened = try (held.send({ type: "open" }) catch () => undefined)
+      const opened = (held.send({ type: "open" }) catch () => undefined)
       if (opened === undefined) return undefined
       const id = (try held.get()).current
-      const backup = try (readAll() catch () => undefined)
+      const backup = (readAll() catch () => undefined)
       held.send({ type: "read", id, ok: backup !== undefined }) catch () => undefined
       held.send({ type: "offer", id, ok: backup !== undefined }) catch () => undefined
       return (try held.get()).offered.includes(id) ? backup : undefined

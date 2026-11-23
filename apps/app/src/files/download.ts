@@ -67,7 +67,7 @@ export function pageVisible(): boolean {
 
 /** Hands the bytes to the browser's downloads; the browser never says where, or whether, they were saved. */
 export function handOver(name: string, mimeType: string, bytes: Uint8Array): void {
-  const url = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
+  const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: mimeType }));
   const link = document.createElement("a");
   link.href = url;
   link.download = name;

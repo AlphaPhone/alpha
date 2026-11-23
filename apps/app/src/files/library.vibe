@@ -74,7 +74,7 @@ export const browserLibrary = Layer.provide(Layer.mergeAll(
       return try mapError(selections.bytes(selectionId), () => unavailable("bytes"))
     }
     effect function pick() {
-      const chosen = try (tryPromise(() => chooseFromComputer()) catch () => ({ folder: "", files: [] }))
+      const chosen = (tryPromise(() => chooseFromComputer()) catch () => ({ folder: "", files: [] }))
       const [file] = chosen.files
       if (file === undefined) return { status: "cancelled" } satisfies N.SelectedDocument
       const path = try mapError(provideService(importLibraryFile(IMPORT_FOLDER, { name: file.name, mimeType: file.mimeType, bytes: file.bytes }), LibraryStore, store), () => unavailable("pick"))
@@ -87,7 +87,8 @@ export const browserLibrary = Layer.provide(Layer.mergeAll(
       effect describe(selectionId: string) {
         const file = blob(selectionId) catch () => undefined
         if (file === undefined) return { status: "unavailable" } satisfies N.SelectedDocument
-        return { status: "selected", action: "files", selectionId, name: file.name, mimeType: file.mimeType, size: file.blob.size, uri: objectUrl(file.blob) } satisfies N.SelectedDocument
+        const uri = try Effect.orDie(Effect.try(() => objectUrl(file.blob)))
+        return { status: "selected", action: "files", selectionId, name: file.name, mimeType: file.mimeType, size: file.blob.size, uri } satisfies N.SelectedDocument
       },
       rename: () => succeed({ status: "unsupported" } satisfies N.SelectedDocument),
       effect pdf(selectionId: string, page: number) {
@@ -121,7 +122,7 @@ export const browserLibrary = Layer.provide(Layer.mergeAll(
     const store = try LibraryStore
     return {
       effect folder() {
-        const chosen = try (tryPromise(() => chooseFromComputer({ folder: true })) catch () => ({ folder: "", files: [] as ChosenFile[] }))
+        const chosen = (tryPromise(() => chooseFromComputer({ folder: true })) catch () => ({ folder: "", files: [] as ChosenFile[] }))
         if (!chosen.folder || chosen.files.length === 0) return undefined
         const imported = provideService(importLibraryFolder(chosen.folder, chosen.files.map((f) => ({ path: f.path, mimeType: f.mimeType, bytes: f.bytes }))), LibraryStore, store) catch () => undefined
         return imported

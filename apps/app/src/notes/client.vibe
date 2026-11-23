@@ -49,11 +49,11 @@ function ownerTrashFailure(cause: unknown): NotesFailure | TrashRetentionOff {
 /** The client over the platform's resident service. */
 export const clientLayer = Layer.effect(NotesClient, effect {
   const agent = try Resident
-  const answer = (method: "GET" | "POST", path: string, body: unknown) => agent.json(method, path, body) catch (error) => match (error) {
+  const answer = effect (method: "GET" | "POST", path: string, body: unknown) => agent.json(method, path, body) catch (error) => match (error) {
     when ResidentUnavailable: { status: 503, data: { error: error.reason ?? error.state } };
     when ResidentRefused: { status: error.status, data: { error: error.message, ...(error.code === undefined ? {} : { code: error.code }) } };
   }
-  const notes = createNotesClient(residentTransport((method, path, body) => runPromise(answer(method, path, body))))
+  const notes = try Effect.orDie(Effect.try(() => createNotesClient(residentTransport((method, path, body) => runPromise(answer(method, path, body))))))
   return {
     readState: () => tryPromise({ try: (signal) => notes.readState(signal), catch: failureOf }),
     interact: (capability: NotesCapability, params: Record<string, unknown>) =>

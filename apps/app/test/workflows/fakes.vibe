@@ -1,4 +1,6 @@
 // spec/workflows/index.md
+import { type Approval, DeviceReview } from "../../src/assistant/review.vibe"
+import { NotesCollection, NotesRetired } from "../../src/notes/collection.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
 import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
@@ -86,6 +88,41 @@ export const openingClock = Layer.succeed(WorkflowClockPort, {
   retire: () => succeed(undefined),
 })
 
+/** The assistant's device review as Workflows uses it: a phone step's own proposal runs through `step`, which answers undefined while none is listed. */
+export function deviceReviewOf(step: (runId: string, stepId: string) => Approval | undefined = () => undefined) {
+  return Layer.succeed(DeviceReview, {
+    pending: () => succeed({ ok: true, cards: [], notices: [] }),
+    contextChanged: () => Effect.void,
+    agentChanged: () => Effect.void,
+    approve: (card) => succeed({ card }),
+    cardOf: () => succeed(undefined),
+    workflowStep: (runId: string, stepId: string) => sync(() => step(runId, stepId)),
+    decline: (card) => succeed(card),
+    expire: (card) => succeed(card),
+    directPass: () => succeed({ receipts: [], cards: [], notices: [] }),
+    sync: () => Effect.void,
+    callFacts: () => succeed({ reviewed: false, messageId: "", ownerText: "", digest: "" }),
+    history: () => succeed([]),
+    settleHistory: () => succeed(false),
+  } satisfies DeviceReview.Shape)
+}
+
+/** A Notes collection with no owner bound, recording each revision a reply's note change invalidated (-1 for none named). */
+export function notesOf(invalidated: number[] = []) {
+  return Layer.succeed(NotesCollection, {
+    snapshots: Stream.make(undefined),
+    current: () => succeed(undefined),
+    bind: () => Effect.void,
+    retire: () => Effect.void,
+    refresh: () => Effect.void,
+    invalidate: (revision?: number) => sync(() => { invalidated.push(revision ?? -1) }),
+    interact: () => Effect.fail(new NotesRetired()),
+    needReview: () => Effect.void,
+    clearReview: () => Effect.void,
+    setClean: () => Effect.void,
+  } satisfies NotesCollection.Shape)
+}
+
 /** How a test builds Workflows. */
 export interface Rig {
   readonly variant?: "launcher" | "aosp" | "browser"
@@ -96,13 +133,17 @@ export interface Rig {
   readonly clock?: boolean
   /** The routes the shell opens Workflows at, in order. */
   readonly routes?: ReadonlyArray<string>
+  /** How the assistant's review runs a phone step's own proposal; by default none is ever listed. */
+  readonly workflowStep?: (runId: string, stepId: string) => Approval | undefined
+  /** Where each Notes invalidation is recorded. */
+  readonly invalidated?: number[]
 }
 
 /** Workflows' layer over the fake agent, bridge, build, navigation and memory storage. */
 export function workflowsOf(handlers: ReadonlyArray<Handler>, sent: Sent[], rig: Rig = {}) {
   const platform = Layer.mergeAll(
     residentOf(handlers, sent), nativeOf(rig.native, rig.calls ?? []), buildOf(rig.variant ?? "launcher", rig.testMocks ?? false), memoryStore,
-    navigationOf(rig.opened ?? [], rig.routes ?? []), inFront,
+    navigationOf(rig.opened ?? [], rig.routes ?? []), inFront, deviceReviewOf(rig.workflowStep), notesOf(rig.invalidated ?? []),
   )
   return Layer.provide(layer, rig.clock === true ? Layer.merge(platform, openingClock) : platform)
 }

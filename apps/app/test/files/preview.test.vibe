@@ -88,8 +88,9 @@ it.live("a PDF opens at its first page, moves to the next one, and a page outsid
       const second = try pdf.get()
       try preview.page(3)
       const outside = try pdf.get()
+      const content = (try preview.get()).content
       try Effect.try(() => assert.deepStrictEqual(
-        { content: (try preview.get()).content, first: [first.page, first.count, first.image], second: [second.page, second.image], outside: outside.page,
+        { content, first: [first.page, first.count, first.image], second: [second.page, second.image], outside: outside.page,
           asked: calls.filter((c) => c.method === "pdfSelected").map((c) => (c.args as { page: number }).page) },
         { content: "ContentPdf", first: [0, 3, "file:///page-0.png"], second: [1, "file:///page-1.png"], outside: 1, asked: [0, 1] },
       ))
@@ -109,8 +110,9 @@ it.live("a rendered page handed back at an address the worker does not own is ne
       try preview.enter()
       try preview.openRow({ ...lease, key: rowKey("", lease.path) })
       const pages = try pdf.get()
+      const content = (try preview.get()).content
       try Effect.try(() => assert.deepStrictEqual(
-        { content: (try preview.get()).content, shown: pages.shown, image: pages.image, outcome: pages.outcome },
+        { content, shown: pages.shown, image: pages.image, outcome: pages.outcome },
         { content: "ContentUnavailable", shown: false, image: "", outcome: "PageMalformed" },
       ))
     })

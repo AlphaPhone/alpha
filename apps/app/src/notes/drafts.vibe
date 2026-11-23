@@ -1,7 +1,7 @@
 // spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/editor.md, "A kept draft is offered back only for the same owner over the record it started from, and cleared only by its exact value"
 import { keptDraftCleared, keptDraftOffer, priorDraftChoice, retryDraftWrite, type DraftSlotRead, type KeptDraftOffer } from "../../gen/notes__editor.effect.vibe"
 import { decodeKeptDraft, type KeptChange, type KeptDraft } from "./notes.schema.vibe"
-import { SlotUnavailable, compareExchangeSlot, readSlot, slots } from "./slots.vibe"
+import { type SlotAccess, SlotUnavailable, slotAccess, slots } from "./slots.vibe"
 
 /** The draft slot held something that does not read back as a kept draft, so it is never written over. */
 export error DraftSlotBlocked
@@ -19,11 +19,11 @@ export service NotesDrafts {
   clear(ownerDigest: string, noteId: string, read: KeptRead, confirmedOrDiscarded: boolean): boolean!!
 }
 
-effect function readKept(ownerDigest: string): KeptRead!! {
-  const raw = try (readSlot(slots.draft) catch () => null)
+effect function readKept(access: SlotAccess, ownerDigest: string): KeptRead!! {
+  const raw = access.read(slots.draft) catch () => null
   if (raw === null) return { raw: undefined, draft: undefined, slot: "SlotUnavailable" }
   if (raw === undefined) return { raw, draft: undefined, slot: "SlotAbsent" }
-  const draft = try (decodeKeptDraft(raw) catch () => undefined)
+  const draft = (decodeKeptDraft(raw) catch () => undefined)
   if (draft === undefined) return { raw, draft: undefined, slot: "SlotInvalid" }
   return { raw, draft: draft.ownerDigest === ownerDigest ? draft : undefined, slot: draft.ownerDigest === ownerDigest ? "SlotReadable" : "SlotInvalid" }
 }
@@ -35,20 +35,21 @@ function merged(base: KeptDraft | undefined, ownerDigest: string, change: KeptCh
 
 /** The kept draft slot over the platform's secure slot. */
 export const draftsLayer = Layer.effect(NotesDrafts, effect {
+  const access = try slotAccess()
   const last = try Ref.make<{ readonly raw: string; readonly earlier: KeptDraft | undefined } | undefined>(undefined)
   return {
-    read: readKept,
+    read: (ownerDigest: string) => readKept(access, ownerDigest),
     effect keep(ownerDigest: string, change: KeptChange) {
       let attempts = 0
       while (true) {
         attempts += 1
-        const read = try readKept(ownerDigest)
+        const read = try readKept(access, ownerDigest)
         const stored = try Ref.get(last)
         const choice = priorDraftChoice(read.slot, stored !== undefined && read.raw === stored.raw)
         if (choice === "DraftWriteBlocked") throw new DraftSlotBlocked()
         const base = choice === "EarlierSessionDraft" ? stored?.earlier : choice === "CurrentSlotDraft" ? read.draft : undefined
         const next = JSON.stringify(merged(base, ownerDigest, change))
-        const saved = try compareExchangeSlot(slots.draft, read.raw, next)
+        const saved = try access.compareExchange(slots.draft, read.raw, next)
         if (saved) {
           try Ref.set(last, { raw: next, earlier: choice === "EarlierSessionDraft" ? stored?.earlier : read.draft })
           return
@@ -57,17 +58,17 @@ export const draftsLayer = Layer.effect(NotesDrafts, effect {
       }
     },
     effect offer(ownerDigest: string, noteId: string, currentPrint: string) {
-      const read = try readKept(ownerDigest)
+      const read = try readKept(access, ownerDigest)
       const change = read.draft?.changes.find((row) => row.noteId === noteId)
       const offer = keptDraftOffer(read.draft !== undefined, change !== undefined, change?.basePrint === currentPrint)
       return change === undefined ? { offer } : { offer, change }
     },
     effect clear(ownerDigest: string, noteId: string, read: KeptRead, confirmedOrDiscarded: boolean) {
-      const now = try readKept(ownerDigest)
+      const now = try readKept(access, ownerDigest)
       if (!keptDraftCleared(confirmedOrDiscarded, now.raw === read.raw) || now.draft === undefined) return false
       const changes = now.draft.changes.filter((row) => row.noteId !== noteId)
       const next = changes.length === 0 ? undefined : JSON.stringify({ ...now.draft, changes })
-      const cleared = try (compareExchangeSlot(slots.draft, now.raw, next) catch () => false)
+      const cleared = access.compareExchange(slots.draft, now.raw, next) catch () => false
       if (cleared) try Ref.update(last, (held) => held !== undefined && held.raw === now.raw ? undefined : held)
       return cleared
     },

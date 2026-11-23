@@ -13,6 +13,7 @@ membership.
 
 ### The list holds every row once, pinned rows first, then by time, ties in stored order
 
+The owner pins or unpins the open note from its actions; the pin is part of the note's saved format.
 A row's time is its modified, updated or created time. A row with no readable time takes the time of the
 newest dated row stored after it, so it keeps its stored place among its neighbours. An open draft keeps
 its saved note's time while it is edited; a new note has none until it is saved.
@@ -160,6 +161,9 @@ pure def lawQuotedTitleAlwaysOpens(generic: bool, relative: bool): bool = opensL
 ## Story: Turn text into a checklist and back
 
 > As the owner, I want a checklist written as text and read back to keep every item and its tick.
+
+The open note's actions turn a text note into a checklist and a checklist back into text; both are edits
+of the draft, saved like any other.
 
 ### A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark
 
