@@ -21,7 +21,7 @@ import { AssistantHost, type AgentIdentity } from "./host.vibe"
 import { PhoneLocation } from "./location.vibe"
 import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type MapsShown } from "./ports.vibe"
 import { changeWords, copy, failureKindOf, failureText, liveWaitOf, planActionOf } from "./presentation.vibe"
-import { DeviceReview, type Approval } from "./review.vibe"
+import { DeviceReview, type Approval, type ReplyReview } from "./review.vibe"
 import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
 import { moveFirstDraft } from "./first-send.vibe"
 import { initial as emailStart } from "../../gen/assistant__emailCard.effect.vibe"
@@ -256,9 +256,9 @@ export const composerLayer = Layer.effect(Composer, effect {
         return "restored" as const
     }
   }
-  effect function directly(messageId: string, text: string, pageLinks: readonly string[]) {
+  effect function reviewReply(reply: ReplyReview) {
     acting += 1
-    const pass = try ensuring(review.directPass(messageId, text, pageLinks), sync(() => { acting -= 1 }))
+    const pass = try ensuring(review.replyPass(reply), sync(() => { acting -= 1 }))
     ownKey = (try host.screen()).contextKey
     return pass
   }
@@ -489,7 +489,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const notices = replyNotices((reply as { readonly notices?: unknown }).notices)
     const replyLive = bound && canReplyWith(try client.get(), false)
     const skipped: { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] } = { receipts: [], cards: [], notices: [] }
-    const pass = replyLive ? try directly(reply.userMessageId, composed, pageLinks) : skipped
+    const pass = replyLive ? try reviewReply({ messageId: reply.userMessageId, text: composed, pageLinks, kind: result.kind === "Replied" ? "Replied" : "AgentFailed" }) : skipped
     const delivered = replyLive && (try quiet(client.send({ type: "replyWith", withProposal: pass.cards.length > 0 })))
     if (bound && !delivered) try quiet(client.send({ type: "sendFailed" }))
     const cardsShown = delivered ? pass.cards : []
