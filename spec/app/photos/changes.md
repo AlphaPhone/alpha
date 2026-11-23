@@ -84,7 +84,10 @@ pure def start(r: Run, change: Change, items: Set[int], basis: int, by: Actor): 
 pure def alwaysDecidedByTheOwner(r: Run): bool = running(r) implies r.by == Owner
 ```
 
-### One request of at most 500 items is on its way at a time, and a share is sent whole
+### One request of at most 500 items is on its way at a time, a share is sent whole, and a run the owner declined sends nothing more
+
+Discovered by the proof: without the last, a declined run could seem to
+have requests left.
 
 ```quint
 pure def canSend(r: Run, items: Set[int]): bool =
@@ -99,6 +102,7 @@ pure def alwaysOneRequestAtATime(r: Run): bool =
   (busy(r.request) iff r.sending.size() > 0) and r.sending.size() <= maxRequest
     and r.request.id == r.requests and r.requests >= 0
     and ((r.change == Share and busy(r.request)) implies r.left.size() == 0)
+    and (r.declined implies not(running(r)))
 ```
 
 ### A request ends as the phone answers it, item by item
