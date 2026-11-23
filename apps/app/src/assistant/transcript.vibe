@@ -6,6 +6,8 @@ import type { CardState } from "../../gen/assistant__approvals.ts"
 import type { EmailCard } from "../../gen/assistant__emailCard.ts"
 import { offerAccepted, validDraft } from "../../gen/assistant__emailCard.effect.vibe"
 import { StagedEmail } from "./payloads.schema.vibe"
+import { systemNoticeText as storedNoticeText } from "@elizaos/core/protocol"
+import { systemNoticeText } from "./presentation.vibe"
 import { classify, type Segment } from "./reply-lines.vibe"
 
 /** A file the owner attached, as it travels and as it is saved beside its message. */
@@ -110,13 +112,26 @@ export function emailDraftOf(actionResults: readonly { readonly action: string; 
   return { to: only.to, subject: only.subject, body: only.body }
 }
 
-/** Rows of history as the transcript shows them. */
+/** The system notice a stored agent text is, by the agent's own notice wording, or undefined for any other text. */
+export function storedNoticeKind(text: string): "model-unavailable" | "runtime-error" | "both" | undefined {
+  const value = text.trim()
+  return value === storedNoticeText("model-unavailable") ? "model-unavailable"
+    : value === storedNoticeText("runtime-error") ? "runtime-error"
+    : value === storedNoticeText("model-and-runtime-error") ? "both"
+    : undefined
+}
+
+/** Rows of history as the transcript shows them; a stored system notice is shown in Alpha's words, worded for whether the owner's message before it was unanswered. */
 export function historyRows(messages: readonly { readonly id: string; readonly role: string; readonly text: string; readonly clientMessageId?: string; readonly source?: string }[]): readonly Row[] {
-  return messages.map((message): Row => message.role === "user"
-    ? { kind: "user", id: message.id, text: message.text, files: [], status: "recorded", ...(message.clientMessageId === undefined ? {} : { clientMessageId: message.clientMessageId }) }
-    : message.role === "system"
-      ? { kind: "notice", id: message.id, text: message.text, system: true }
-      : { kind: "agent", id: message.id, text: message.text, segments: classify(message.text, message.source === "lifeops-checkin"),
-          reply: { ...replyStart, status: "Settled", shown: message.text.length, final: message.text.length, spoken: message.text.length },
-          notices: [], cutOff: "NotCutOff", recorded: true })
+  return messages.map((message, at): Row => {
+    const notice = message.role === "user" ? undefined : storedNoticeKind(message.text)
+    if (notice !== undefined) return { kind: "notice", id: message.id, text: systemNoticeText(notice, messages[at - 1]?.role === "user"), system: true }
+    return message.role === "user"
+      ? { kind: "user", id: message.id, text: message.text, files: [], status: "recorded", ...(message.clientMessageId === undefined ? {} : { clientMessageId: message.clientMessageId }) }
+      : message.role === "system"
+        ? { kind: "notice", id: message.id, text: message.text, system: true }
+        : { kind: "agent", id: message.id, text: message.text, segments: classify(message.text, message.source === "lifeops-checkin"),
+            reply: { ...replyStart, status: "Settled", shown: message.text.length, final: message.text.length, spoken: message.text.length },
+            notices: [], cutOff: "NotCutOff", recorded: true }
+  })
 }

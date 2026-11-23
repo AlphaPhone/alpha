@@ -8,7 +8,8 @@ import { contradicts } from "../../gen/assistant__review.ts"
 import { browserCommand, ownPhotoRequest, targetOf, writtenNumbers } from "../../src/assistant/grounding.vibe"
 import { StoredSuggestion } from "../../src/assistant/payloads.schema.vibe"
 import { actionResultText, copy, cutOffText, failureKindOf, failureText, receiptTitle, unsyncedSummary } from "../../src/assistant/presentation.vibe"
-import { emailDraftOf, replyNotices } from "../../src/assistant/transcript.vibe"
+import { systemNoticeText as storedNoticeText } from "@elizaos/core/protocol"
+import { emailDraftOf, historyRows, replyNotices } from "../../src/assistant/transcript.vibe"
 
 it.effect("Understand why a reply did not finish (spec/assistant/reply.md, \"A failure refused before any output replaces the streamed text; any other failure is added after it\")", () => effect {
   const plan = failureKindOf("allowance-exhausted")
@@ -98,4 +99,18 @@ it.effect("A turn with two email drafts offers no card (spec/assistant/emailCard
   const crowded = emailDraftOf([{ action: "GMAIL_DRAFT", data: { to: Array.from({ length: 21 }, (_, at) => `p${at}@example.com`), subject: "All", body: "Hi" } }])
   const twoLines = emailDraftOf([{ action: "GMAIL_DRAFT", data: { to: "ann@example.com", subject: "Lunch\nand more", body: "Noon?" } }])
   try Effect.try(() => assert.deepStrictEqual({ two, crowded, twoLines }, { two: undefined, crowded: undefined, twoLines: undefined }))
+})
+
+it.effect(`A stored system notice is shown in Alpha's words, worded for whether the owner was waiting (spec/assistant/reply.md, "At most five reply notices of at most 500 characters reach the transcript, and only the latest system notice stays, until a real reply follows it")`, () => effect {
+  const rows = historyRows([
+    { id: "m1", role: "user", text: "Hi" },
+    { id: "m2", role: "assistant", text: storedNoticeText("runtime-error") },
+    { id: "m3", role: "assistant", text: storedNoticeText("model-unavailable") },
+    { id: "m4", role: "assistant", text: `${storedNoticeText("runtime-error")}\n` },
+    { id: "m5", role: "assistant", text: "An ordinary reply." },
+  ])
+  try Effect.try(() => assert.deepStrictEqual(
+    rows.map((row) => row.kind === "notice" ? `notice:${row.text}` : row.kind),
+    ["user", "notice:Agent error · Send again", "notice:No AI provider · Open Settings", "notice:Agent degraded", "agent"],
+  ))
 })

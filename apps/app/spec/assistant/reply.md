@@ -53,6 +53,12 @@ pure val linesValues = Set(List()).union(Set(List(Prose))).union(Set(List(FenceM
 
 ### At most five reply notices of at most 500 characters reach the transcript, and only the latest system notice stays, until a real reply follows it
 
+The agent stores a system notice (no model provider, a runtime error) as
+its own text in its host operator's words; the transcript recognises that
+exact text and shows it in Alpha's words instead ("No AI provider · Open
+Settings"; "Agent error · Send again" when it answered the owner's message,
+else "Agent degraded").
+
 ```quint
 pure val noticeLimit = 5
 pure val noticeLength = 500
