@@ -12,8 +12,23 @@ for(const mode of ['fresh','double','response-loss','reload-loss','mismatch','mi
   const {BrowserDaily}=await import('/src/browser/daily.ts'),schedule=BrowserDaily.prototype.scheduleReminder,list=BrowserDaily.prototype.listReminders;(window as any).creates=0;
   BrowserDaily.prototype.scheduleReminder=async function(input){(window as any).creates++;if(mode==='double'||mode==='navigate-after-dispatch'||mode==='newer-draft')await new Promise<void>(r=>(window as any).releaseCreate=r);if(mode==='missing'||mode==='fresh-attempt')throw Error('Transport outcome unknown');const out=await schedule.call(this,input);if(['response-loss','reload-loss','mismatch','changed-repeat-save','missing-attempt'].includes(mode))throw Error('Committed response lost');return out;};
   BrowserDaily.prototype.listReminders=async function(){if(mode==='reload-loss'||['changed-repeat-save','missing-attempt'].includes(mode)&&!(window as any).allowReadback)throw Error('Readback unavailable');const out=await list.call(this);if(mode==='mismatch'&&out.reminders.length)out.reminders[0].title='Changed elsewhere';return out;};
-  if(mode==='sibling-pending'||mode==='history-navigate'){localStorage.setItem('alpha.browser.reminder-creations.v1',JSON.stringify({'prior-owned':{id:'prior-owned',request:{id:'prior-owned',title:'Prior unknown',body:'',at:Date.parse('2027-03-13T17:00Z')},state:'pending'}}));}
-  if(mode==='history-navigate'){const read=Storage.prototype.getItem;let first=true;(window as any).confirmCalls=0;window.confirm=()=>{(window as any).confirmCalls++;return true;};Storage.prototype.getItem=function(k){const result=read.call(this,k);if(k==='alpha.browser.reminder-creations.v1'&&first){first=false;queueMicrotask(()=>{const buttons=[...document.querySelectorAll('button')];(buttons.find(b=>b.getAttribute('aria-label')==='Back to calendar') as HTMLButtonElement)?.click();(buttons.find(b=>b.getAttribute('aria-label')==='Back to apps') as HTMLButtonElement)?.click();});}return result;};}
+  if(mode==='sibling-pending'||mode==='history-navigate'){
+   const {reminderCreationDocument}=await import('/src/browser/reminder-creation-document.ts');
+   await reminderCreationDocument.editJson<Record<string,unknown>>(prior=>({
+    ...prior,'prior-owned':{id:'prior-owned',request:{id:'prior-owned',title:'Prior unknown',body:'',at:Date.parse('2027-03-13T17:00Z')},state:'pending'},
+   }));
+   if(mode==='history-navigate'){
+    const read=reminderCreationDocument.readJson.bind(reminderCreationDocument);
+    reminderCreationDocument.readJson=async function<T>(signal?:AbortSignal){
+     const value=await read<T>(signal),fixture=window as any;
+     if(fixture.holdReminderHistory){
+      fixture.holdReminderHistory=false;
+      await new Promise<void>(resolve=>fixture.releaseReminderHistory=resolve);
+     }
+     return value;
+    };
+   }
+  }
   if(mode==='persistence-failure'){const write=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,k){if(k==='alpha.browser.reminder-creations.v1')throw Error('Storage full');return write.call(this,v,k);};}
   if(mode==='edit-during-retain'){
    // Pause the actual retained document write, independent of browser Web Locks wrappers.
@@ -25,8 +40,19 @@ for(const mode of ['fresh','double','response-loss','reload-loss','mismatch','mi
    };
   }
  },mode);
- const save=page.getByRole('button',{name:'Save event',exact:true});if(mode==='sibling-pending')await reviewCalendarAction(page,()=>save.click());else await save.click();
- if(mode==='history-navigate'){await expect(page.locator('html')).toHaveAttribute('data-active-view','home');expect(await page.evaluate(()=>(window as any).confirmCalls)).toBe(0);expect(await page.evaluate(()=>(window as any).creates)).toBe(0);return;}
+ const save=page.getByRole('button',{name:'Save event',exact:true});
+ if(mode==='history-navigate')await page.evaluate(()=>{(window as any).holdReminderHistory=true;});
+ if(mode==='sibling-pending')await reviewCalendarAction(page,()=>save.click());else await save.click();
+ if(mode==='history-navigate'){
+  await expect.poll(()=>page.evaluate(()=>typeof(window as any).releaseReminderHistory)).toBe('function');
+  await page.getByRole('button',{name:'Back to calendar',exact:true}).last().click();
+  await returnToApps(page);
+  await page.evaluate(()=>(window as any).releaseReminderHistory());
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+  await expect(page.locator('dialog.alpha-operation-review')).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).creates)).toBe(0);
+  return;
+ }
  if(mode==='double'||mode==='navigate-after-dispatch'||mode==='newer-draft'){
   await expect.poll(()=>page.evaluate(()=>typeof(window as any).releaseCreate)).toBe('function');
   await expect(save).toBeDisabled();
