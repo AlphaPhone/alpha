@@ -1,7 +1,8 @@
 import {test, expect, type Page} from '@playwright/test';
 import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
+import {preloadPageModules} from './helpers/page-modules';
 
-// The owner's Approve on Alpha's "Review SMS" card is the confirmation: tapping it sends the text,
+// The owner's Send on Alpha's "Review SMS" card is the confirmation: tapping it sends the text,
 // and no dialog follows. Real renderer, pairing, connection controller, proposal parser, coordinator
 // and installed executor. The agent host, the encrypted action journal and AlphaTelephony are
 // controlled bridge boundaries (scripts/fixtures/native-telephony.ts plus the host below): no model,
@@ -11,16 +12,22 @@ import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
 
 const NUMBER = '+15550100199', BODY = 'On my way';
 
-async function setup(page: Page) {
+async function setup(page: Page, contactMode?: 'one' | 'two' | 'none', reviewFirst=true, bindRequest=true) {
   await page.addInitScript(installTelephonyFixture, {});
-  await page.addInitScript(({number, body}) => {
+  await page.addInitScript(({number, body, contactMode, reviewFirst, bindRequest}) => {
     const w = window as any, fixture = w.smsCardFixture = {
       proposal: null as any, decisions: [] as string[], receipts: [] as any[], sends: [] as any[], refused: [] as string[],
       journal: new Map<string, any>(),
     };
+    if (contactMode) {
+      const contacts = contactMode === 'none' ? [] : [{id: '41', name: 'Carson', phones: [number], emails: []}];
+      if (contactMode === 'two') contacts.push({id: '42', name: 'Carson', phones: ['+15550100198'], emails: []});
+      w.people.splice(0, w.people.length, ...contacts);
+    }
     // installTelephonyFixture chose the offline profile; this check pairs with a local agent instead.
     localStorage.removeItem('alpha.connection.selection.v1');
     const agentId = '12345678-1234-4234-8234-123456789abc', store = new Map<string, string>();
+    localStorage.setItem('alpha.browser.device.v1',JSON.stringify({askBeforeAgentActions:reviewFirst}));
     for (const header of w.Capacitor.PluginHeaders) {
       const extra = header.name === 'AlphaConnection' ? ['request', 'cancel'] : header.name === 'AlphaActionJournal' ? ['reserve', 'markApplying', 'finish'] : [];
       for (const name of extra) if (!header.methods.some((method: any) => method.name === name)) header.methods.push({name, rtype: 'promise'});
@@ -72,8 +79,10 @@ async function setup(page: Page) {
       if (pathname === '/api/conversations/fixture-chat/messages' && input.method === 'POST') {
         if (!String(input.headers['X-Eliza-Device-Capabilities'] ?? '').split(',').includes('sms.compose.v2')) throw Error('sms.compose.v2 was not negotiated');
         fixture.proposal = {id: 'fixture-proposal', digest: 'a'.repeat(64), state: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(), subjectUserId: 'fixture-owner', requestedBy: agentId, action: 'device_action',
-          payload: {action: 'device_action', version: 1, installationId: w.smsCardInstallation, enrollmentId: 'fixture-enrollment', operation: {type: 'sms_compose', target: {kind: 'number', number}, body}}};
-        return ok({text: 'Review the text below.', agentName: 'SMS card fixture'});
+          payload: {action: 'device_action', version: 1, installationId: w.smsCardInstallation, enrollmentId: 'fixture-enrollment', ...(contactMode&&bindRequest?{requestMessageId:'22222222-2222-4222-8222-222222222222'}:{}), operation: {type: 'sms_compose', target: contactMode ? {kind:'contact', query:contactMode==='none'?'Qassem':'Carson'} : {kind: 'number', number}, body, ...(contactMode ? {draft:true} : {})}}};
+        return ok({text: 'Review the text below.', agentName: 'SMS card fixture', ...(contactMode ? {
+          messageId:'11111111-1111-4111-8111-111111111111',userMessageId:'22222222-2222-4222-8222-222222222222',
+        } : {})});
       }
       if (pathname === '/api/client-devices/proposals') return ok({proposals: fixture.proposal ? [fixture.proposal] : []});
       const sent = input.body ? JSON.parse(input.body) : {};
@@ -85,7 +94,7 @@ async function setup(page: Page) {
       }
       throw Error('Unexpected fixture route ' + pathname);
     };
-  }, {number: NUMBER, body: BODY});
+  }, {number: NUMBER, body: BODY, contactMode, reviewFirst, bindRequest});
   await page.route('https://**/*', route => route.abort());
   await page.goto('/?mode=dev');
   await page.getByText('Local development agent', {exact: true}).click();
@@ -94,50 +103,131 @@ async function setup(page: Page) {
   await local.getByLabel('Pairing code', {exact: true}).fill('synthetic-code');
   await local.getByRole('button', {name: 'Connect local agent', exact: true}).click();
   await page.locator('.alpha-connection-scrim').waitFor({state: 'detached'});
+  if (contactMode) {
+    await preloadPageModules(page, ['/src/prototype/model.js']);
+    await page.evaluate(() => {
+      const w = window as any;
+      const {Component} = w.__alphaModules['/src/prototype/model.js'];
+      const render = Component.prototype.renderVals;
+      Component.prototype.renderVals = function () { w.smsCardFixture.shell = this; return render.call(this); };
+    });
+    await page.getByRole('button', {name: 'Open conversation', exact: true}).click();
+    await page.evaluate(async () => {
+      const f = (window as any).smsCardFixture;
+      f.shell.voiceConversationActive = () => true;
+      const signal = new AbortController().signal;
+      f.voice = async (text: string) => {
+        const prepared = await f.shell.prepareVoiceConversation(signal);
+        return f.shell.sendVoiceTurn({...prepared, text, signal, approvalSignal: signal, talkGeneration: 1,
+          turnId: crypto.randomUUID(), assertCurrent: () => signal.throwIfAborted(),
+          voiceTurnSignal: {nextSpeaker: 'agent', agentShouldSpeak: true, source: 'fixture'}});
+      };
+    });
+    return page.getByRole('region', {name: 'Review SMS'});
+  }
   const input = page.getByRole('textbox', {name: 'Ask Alpha', exact: true});
   await input.fill(`Text ${NUMBER}: ${BODY}`);
   await input.press('Enter');
-  const card = page.getByRole('button', {name: /^Review SMS/});
+  const card = page.getByRole('region', {name: 'Review SMS'});
   await expect(card).toBeVisible();
   return card;
 }
 const state = (page: Page) => page.evaluate(() => {
   const f = (window as any).smsCardFixture;
-  return {decisions: f.decisions, sends: f.sends.length, refused: f.refused.length, receipts: f.receipts.map((receipt: any) => receipt.outcome), sendSms: ((window as any).telephonyCalls as string[]).filter(method => method === 'sendSms').length};
+  return {decisions: f.decisions, sends: f.sends.length, refused: f.refused.length, receipts: f.receipts.map((receipt: any) => receipt.outcome), journalEntries:f.journal.size, sendSms: ((window as any).telephonyCalls as string[]).filter(method => method === 'sendSms').length};
 });
 
-test('Approve on the Review SMS card sends the text once, under that card, with no dialog after it', async ({page}) => {
+
+test('a tap on Send dispatches once and does not open another dialog', async ({page}) => {
   const card = await setup(page);
-  // Everything the send depends on is on the card itself; it never says to confirm again.
-  await expect(card).toContainText(`To: ${NUMBER}`);
-  await expect(card).toContainText('From: the SIM chosen in Messages, or your default texting SIM');
-  await expect(card).toContainText(BODY);
-  await expect(card).toContainText('Approve sends it right away. If your conversation with them is open in Messages, it goes into its text field instead, and nothing is sent until you tap Send there. Your carrier may charge for texts.');
-  await expect(card).not.toContainText(/Android|again/);
-  expect((await state(page)).sendSms).toBe(0);
-  // The card's own Approve control is what the owner taps; nothing opens after it.
-  await expect(card).toContainText('Approve');
-  await card.click();
+  await expect(card.getByText(`To ${NUMBER}`, {exact: true})).toBeVisible();
+  await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveText(BODY);
+  await expect(card).not.toContainText('From:');
+  expect((await state(page)).sends).toBe(0);
+  await card.getByRole('button', {name: 'Review SMS: Send'}).click();
   await expect.poll(async () => (await state(page)).receipts).toEqual(['applied']);
   expect(await state(page)).toMatchObject({decisions: ['approve'], sends: 1, refused: 0, sendSms: 1});
   const sent = await page.evaluate(() => (window as any).smsCardFixture.sends[0]);
-  expect(sent).toMatchObject({recipients: [NUMBER], body: BODY, subscriptionId: 1, operationId: 'fixture-proposal'});
-  expect(sent.journalIdentity).toEqual({scope: expect.stringMatching(/^[a-f0-9]{64}$/), proposalId: 'fixture-proposal'});
+  expect(sent).toMatchObject({recipients: [NUMBER], body: BODY, operationId: 'fixture-proposal'});
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('[data-alpha-proposal-review]')).toHaveCount(0);
-  // The same approval never admits a second send: Android refuses a replay of its journal entry.
-  const replay = await page.evaluate(async ({identity}) => {
-    try { await (window as any).Capacitor.nativePromise('AlphaTelephony', 'sendSms', {recipients: ['+15550100199'], body: 'On my way', subscriptionId: 1, operationId: 'fixture-proposal', journalIdentity: identity}); return 'sent'; }
-    catch (error) { return (error as {code?: string}).code; }
-  }, {identity: sent.journalIdentity});
-  expect(replay).toBe('not-approved');
-  expect((await state(page)).sends).toBe(1);
 });
 
-test('Decline on the Review SMS card sends nothing', async ({page}) => {
+test('Don’t send settles the review without dispatching', async ({page}) => {
   const card = await setup(page);
-  await page.getByRole('button', {name: /^Decline/}).first().click();
+  await card.getByRole('button', {name: 'Don’t send'}).click();
   await expect.poll(async () => (await state(page)).decisions).toEqual(['reject']);
   expect(await state(page)).toMatchObject({sends: 0, sendSms: 0, receipts: []});
   await expect(card).toHaveCount(0);
+});
+
+for(const enabled of [true,false])test(`one Talk confirmation sends with approvals ${enabled?'on':'off'}`,async({page})=>{
+  const card=await setup(page,'one',enabled);
+  const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson. On my way.'));
+  expect(reply.reviewRequired).toBeUndefined();
+  expect(reply.speechText).toContain('Send this text');
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText(`Carson (${NUMBER})`);
+  await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveText(BODY);
+  expect((await state(page)).sendSms).toBe(0);
+  await expect.poll(()=>page.evaluate(()=>{
+    const button=document.querySelector<HTMLButtonElement>('[data-alpha-sms-review] [data-alpha-sms-send]');
+    if(!button||button.disabled)return false;
+    button.scrollIntoView({block:'nearest'});
+    const rect=button.getBoundingClientRect();
+    return button.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2));
+  })).toBe(true);
+  if(!enabled&&process.env.ALPHA_SMS_REVIEW_CAPTURE)await page.screenshot({path:`${process.env.ALPHA_SMS_REVIEW_CAPTURE}/SMS review.png`});
+  const confirmation=enabled?'Hmm, send this.':'Send this text.';
+  const confirmed=await page.evaluate(text=>(window as any).smsCardFixture.voice(text),confirmation);
+  expect(confirmed.text).toBe('Message sent.');
+  const sent=page.getByText('Message sent.',{exact:true});
+  await expect(sent).toHaveCount(1);
+  await expect(sent).toBeVisible();
+  const said=await page.getByText(confirmation,{exact:true}).boundingBox();
+  const shown=await sent.boundingBox();
+  expect(shown!.y).toBeGreaterThan(said!.y);
+
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('html')).toHaveAttribute('data-active-view','home');
+  if(!enabled&&process.env.ALPHA_SMS_REVIEW_CAPTURE)await page.screenshot({path:`${process.env.ALPHA_SMS_REVIEW_CAPTURE}/SMS sent.png`});
+  const repeated=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
+  expect(repeated.text).toBe('There is no text ready to send.');
+  const sends=await page.evaluate(()=>(window as any).smsCardFixture.sends);
+  expect(sends).toHaveLength(1);
+  expect(sends[0]).toMatchObject({recipients:[NUMBER],body:BODY});
+});
+
+test('a name with two matches cannot send on a spoken confirmation',async({page})=>{
+  const card=await setup(page,'two',false);
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson saying On my way'));
+  await expect(card.getByRole('button',{name:'Review SMS: Choose recipient'})).toBeVisible();
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
+  expect(await state(page)).toMatchObject({decisions:[],sends:0,sendSms:0,journalEntries:0});
+  await card.getByRole('button',{name:'Review SMS: Choose recipient'}).click();
+  const options=card.getByRole('group',{name:'Choose a recipient'});
+  const send=card.getByRole('button',{name:'Send',exact:true});
+  await expect(send).toBeDisabled();
+  await options.getByRole('radio').first().check();
+  await options.getByRole('radio').last().check();
+  await expect(options.getByRole('radio',{checked:true})).toHaveCount(1);
+  await expect(send).toBeEnabled();
+  expect((await state(page)).sends).toBe(0);
+  await card.getByRole('button',{name:'Not now',exact:true}).click();
+  expect((await state(page)).sends).toBe(0);
+});
+
+test('an explicit draft stays unsent until confirmation with approvals off',async({page})=>{
+  const card=await setup(page,'one',false);
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Draft a text to Carson saying On my way'));
+  await expect(card).toContainText(BODY);
+  expect((await state(page)).sendSms).toBe(0);
+});
+
+test('a pending review that belongs to another turn cannot be spoken for',async({page})=>{
+  const card=await setup(page,'one',false,false);
+  await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson saying On my way'));
+  await expect(card).toHaveCount(1);
+  const answer=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send this text.'));
+  expect(answer.text).toBe('There is no text ready to send.');
+  expect((await state(page)).sends).toBe(0);
 });

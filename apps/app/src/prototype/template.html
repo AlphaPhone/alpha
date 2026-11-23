@@ -4331,6 +4331,24 @@
               </div>
             </sc-if>
 
+            <sc-if value="{{m.smsReview}}">
+              <section class="chat-email-draft alpha-sms-review" aria-label="Review SMS" data-alpha-sms-review="{{m.smsReview.id}}">
+                <sc-if value="{{m.smsReview.showActions}}"><strong>To {{m.smsReview.recipient}}</strong></sc-if>
+                <p class="chat-email-draft-body" data-alpha-telephony-review-body>{{m.smsReview.body}}</p>
+                <sc-if value="{{m.smsReview.picker}}">
+                  <fieldset class="alpha-sms-recipients">
+                    <legend>Choose a recipient</legend>
+                    <sc-for list="{{m.smsReview.picker.options}}" as="recipient">
+                      <label><input type="radio" name="alpha-sms-recipient" checked="{{recipient.selected}}" onChange="{{recipient.select}}"><span>{{recipient.name}}<small>{{recipient.number}}</small></span></label>
+                    </sc-for>
+                  </fieldset>
+                  <sc-if value="{{m.smsReview.picker.note}}"><small>{{m.smsReview.picker.note}}</small></sc-if>
+                  <div><button onClick="{{m.smsReview.picker.dismiss}}">Not now</button><button disabled="{{m.smsReview.picker.disabled}}" onClick="{{m.smsReview.picker.send}}">Send</button></div>
+                </sc-if>
+                <sc-if value="{{m.smsReview.showActions}}"><div><button disabled="{{m.smsReview.disabled}}" onClick="{{m.smsReview.decline}}">Don’t send</button><button data-alpha-sms-send aria-label="Review SMS: {{m.smsReview.button}}" disabled="{{m.smsReview.disabled}}" onClick="{{m.smsReview.send}}">{{m.smsReview.button}}</button></div></sc-if>
+              </section>
+            </sc-if>
+
             <sc-if value="{{m.cProposal}}">
               <div data-alpha-chat-proposal role="group" aria-label="{{m.c.title}}, proposal" style="display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-radius: 22px; background: var(--bg); box-shadow: 0 0 0 1px var(--line); color: var(--fg)">
                 <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--mut)"><span class="alpha-mark-18 alpha-mark-fill" aria-hidden="true"><span class="alpha-compute-mark" aria-hidden="true"></span></span><sc-if value="{{m.proposalOpen}}">Needs approval</sc-if><sc-if value="{{m.proposalReplaced}}">Replaced</sc-if><sc-if value="{{m.proposalDone}}">Done</sc-if></div>

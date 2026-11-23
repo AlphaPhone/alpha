@@ -16,9 +16,12 @@ import {handoffResultText,sendRefusalText} from '../ui/telephony/telephony-messa
 import {setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 import {placeOwnerCall} from './place-owner-call';
 import type {OpenThread} from '../runtime/telephony-executor';
+import type {SmsThreadRecipient} from '../ui/device-actions/client-coordinator';
 let openThreadReader:(()=>OpenThread|null)|null=null,openThreadSelection:(()=>string|null)|null=null;
 /** The selected thread identity for on-device approval checks. */
 export const openSmsThreadSelection=()=>openThreadSelection?.()??null;
+let openThreadRecipient:(()=>SmsThreadRecipient|null)|null=null;
+export const openSmsThreadRecipient=()=>openThreadRecipient?.()??null;
 /** What the owner has open in Messages right now, for `messages_read_selected`; null when no thread is open. */
 export const openSmsThread=()=>openThreadReader?.()??null;
 /** What became of a draft Alpha was asked to put in the open conversation's draft slot. */
@@ -515,6 +518,12 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
   return {participant:one,messages:rows.slice(-THREAD_TAIL).map(row=>({direction:row.direction==='incoming'?'in' as const:'out' as const,date:row.date,body:String(row.body).slice(0,1600)})),truncated:rows.length>THREAD_TAIL||!!session.state.next};};
  openThreadReader=openThread;
  openThreadSelection=()=>inFront()&&session.state.status?.permissions.sms==='granted'?openRow()?.id??null:null;
+ openThreadRecipient=()=>{
+  const thread=openRow();
+  if(!openSmsThreadSelection()||!thread||thread.addresses.length!==1)return null;
+  const number=normalizePhoneNumber(thread.addresses[0]);
+  return number?{threadId:thread.id,number,name:names.get(numberKey(number))??null}:null;
+ };
  const placeAsked=(text:string):AskedDraft=>{
   if(!draftRecipients().length)return 'unavailable';
   if(!ready())return 'unavailable';

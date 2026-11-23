@@ -1251,3 +1251,9 @@ html[data-alpha-browser-underlay] .alpha-phone::after { display:none; }
 .chat-email-draft button { padding:0 14px; min-height:44px; border-radius:22px; background:var(--s2); }
 .chat-email-draft button:last-child { background:var(--fg); color:var(--bg); }
 .chat-email-draft button:disabled { opacity:.45; }
+.alpha-sms-review .chat-email-draft-body { font-size:17px; line-height:1.4; }
+.alpha-sms-recipients { border:0; padding:0; margin:4px 0; }
+.alpha-sms-recipients legend { font-size:14px; font-weight:600; margin-bottom:4px; }
+.alpha-sms-recipients label { min-height:44px; color:var(--fg); padding:4px 0; }
+.alpha-sms-recipients input[type=radio] { width:18px; min-height:0; margin:0 6px 0 0; accent-color:var(--acc); }
+.alpha-sms-recipients small { display:block; }

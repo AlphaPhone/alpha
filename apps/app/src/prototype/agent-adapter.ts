@@ -14,7 +14,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setBrowserTabsClosing,setContactReviewMatches,setFilesReviewIdentity,setFilesShownPaths} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setBrowserTabsClosing,setContactReviewMatches,setFilesReviewIdentity,setFilesShownPaths,setSmsRecipientReview} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -38,7 +38,7 @@ import {isBrowserControl} from '../../../../.eliza/client-features/plugins/plugi
 import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
 import {activeCommsSpec} from './comms-alpha';
-import {openSmsDraftStep,openSmsThread,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
+import {openSmsDraftStep,openSmsThread,openSmsThreadRecipient,openSmsThreadSelection,placeAskedSmsDraft} from './sms-adapter';
 import {captureSelectionOpen} from './context-selection';
 import {openContactRead,openContactSelection,showContactsStep} from './contacts-adapter';
 import {deleteOpenVoicemail,openKeypadStep,openVoicemailRead,openVoicemailSelection} from './phone-adapter';
@@ -350,6 +350,23 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     signal.throwIfAborted();
     return found&&{names:found.contacts.map(contact=>contactChoiceName(contact.displayName)),more:found.more};
   });
+  const smsRecipientMatches=async(query:string,signal:AbortSignal)=>{
+    if(!aospImage)return {options:[],complete:false};
+    const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
+    const matches=await client.searchContacts(query,CONTACT_CALL_LOOKUP_LIMIT);
+    signal.throwIfAborted();
+    return {options:contactCallOptions(matches,normalizePhoneNumber),complete:matches.length<CONTACT_CALL_LOOKUP_LIMIT};
+  };
+  setSmsRecipientReview(async(query,signal)=>{
+    const {options,complete}=await smsRecipientMatches(query,signal).catch(()=>{signal.throwIfAborted();return {options:[],complete:false};});
+    const match=options[0];
+    return complete&&options.length===1&&match.name.toLowerCase()===query.trim().toLowerCase()?match:null;
+  },async(query,body,signal)=>{
+    const {options,complete}=await smsRecipientMatches(query,signal);
+    if(!options.length)return 'not-found';
+    const choice=await askTelephonyReview({kind:'message',options,body,selectBeforeSending:true,...(complete?{}:{more:true})},signal);
+    return choice===null?null:options[choice]??null;
+  },openSmsThreadRecipient);
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
   function modalPanels(){
@@ -472,7 +489,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   }
   function proposalCard(proposal:import('../runtime/alpha-client').ActionProposal){
     const home=proposal.reviewDestination==='home',notes=proposal.reviewDestination==='notes',calendar=proposal.reviewDestination==='calendar';
-    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,proposalId:proposal.id,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
+    return {type:'generic',icon:'check',title:home?'Review Notes on Home':notes?'Review note':calendar?'Choose event in Calendar':proposal.title,sub:home?'Open Home to choose and review a note. Nothing is shared yet.':notes?'Open the matching note to review this request. Nothing changes until you approve it.':calendar?'Choose the matching event, then review what to share. Nothing changes yet.':proposal.description,proposalId:proposal.id,smsReview:proposal.smsReview,privateNotesRead:proposal.privateNotesRead,reviewDestination:proposal.reviewDestination,reviewNoteTarget:proposal.reviewNoteTarget,expiresAt:proposal.expiresAt};
   }
   /**
    * AP-16 D8/AC-26: on a Phone, Messages or Contacts screen a pending action is one proposal card
@@ -490,7 +507,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const call=proposal.title==='Place call',target=callTargetOf(proposal);
     // AC-20: name and number; the phone's contacts fill in what the proposal leaves out (sayProposal).
     const text=target?callCardText(target,null,displayNumber):{title:call?'Call contact':proposal.title,detail:proposal.description};
-    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
+    return {...review,id:proposal.id,kind:call?'call':'other',title:text.title,detail:text.detail,sub:text.detail,button:call?'Call':proposal.smsReview?(proposal.smsReview.addressed?'Send':'Choose recipient'):'Approve',acts:true,act:{mod:'alpha',fn:'execute'},args:{proposalId:proposal.id}};
   }
   /** A card update that also moves a proposal card's shown detail and state. */
   function cardWith(card:Shell,patch:Shell){
@@ -505,11 +522,11 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     // AC-19: over a live emergency call no action is offered on any screen; it is declined so
     // recovery never offers it again.
     if(shell.emergencyLive?.()===true){if(!belongs||belongs())void declineProposal(proposal.id);return;}
-    if(!activeCommsSpec(shell,views)){shell.agentSay(proposal.description,proposalCard(proposal),undefined,belongs);return;}
     if(belongs&&!belongs())return;
     // Recovery and a chat reply can publish the same pending action; one card keeps it.
     if((shell.S().msgs||[]).some((message:Shell)=>message.card?.proposalId===proposal.id))return;
-    const result:CommsProposeResult=shell.propose(commsProposal(proposal),proposal.description);
+    if(!activeCommsSpec(shell,views)){shell.agentSay(proposal.smsReview?'':proposal.description,proposalCard(proposal),undefined,belongs);return;}
+    const result:CommsProposeResult=shell.propose(commsProposal(proposal),proposal.smsReview?'':proposal.description);
     // AC-19: a proposal dropped over an emergency call is declined, so recovery never offers it again.
     if(!result.shown){void declineProposal(proposal.id);return;}
     const target=callTargetOf(proposal);
@@ -1927,6 +1944,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // title repeated as the detail and no second copy printed above it.
       if(c.systemNotice&&m.cGeneric)return {...m,cGeneric:false,cNotice:true,noticeSub:c.sub&&c.sub!==c.title?c.sub:'',hasCalendarText:m.hasCalendarText&&m.displayText!==c.sub&&m.displayText!==c.title};
       const waitingForReply=!!c.recovered&&this.S().typing;
+      if(c.smsReview&&(m.cGeneric||m.cProposal)&&!c.done&&!m.proposalReplaced){
+        const message=sent, disabled=!!this.pendingActionApproval||!!this.decliningProposal||waitingForReply||!proposalCanAct(c,this.emergencyLive?.()===true);
+        return {...m,cGeneric:false,cProposal:false,smsReview:{
+          id:c.proposalId,recipient:c.smsReview.recipient,body:c.smsReview.body,showActions:true,
+          button:c.smsReview.addressed?'Send':'Choose recipient',
+          disabled,send:()=>{if(message&&!disabled)void this.cardAct(message);},
+          decline:()=>{if(message)void this.declineCard(message);},
+        }};
+      }
       if(m.cProposal&&waitingForReply)return {...m,proposalDisabled:true};
       if(!c.proposalId||c.done||c.reviewUnavailable||!m.cGeneric)return m;
       const message=live.find(item=>item.card===c);if(!message)return m;
@@ -2062,11 +2088,40 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       delivered=await input.navigation.apply(target,current,(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{current();if(!openInternalView(this,target,chat)){resolve(false);return;}this.setState({},()=>{try{current();context(this);const switched=(this.S().view||'home')===target&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));return delivered;}finally{input.navigation.finish(delivered);}
   };
-  p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
+  const spokenSmsSend=/^(?:(?:uh|um|hmm|yes|yeah|okay|ok)[, ]+)*(?:(?:i think )?i (?:want to|wanna|would like to) |i['’]d like to |let['’]s |please )?send (?:this(?: (?:text|message))?|it)[.!?]?$/iu;
+  function smsReviewVisible(id:string) {
+    if(document.hidden||document.querySelector('dialog[open]'))return false;
+    return Array.from(document.querySelectorAll<HTMLElement>('[data-alpha-sms-review]')).some(row=>{
+      if(row.dataset.alphaSmsReview!==id||row.closest('[inert],[hidden],[aria-hidden="true"]'))return false;
+      const clip=row.closest('[data-alpha-transcript]')?.getBoundingClientRect();
+      const button=row.querySelector<HTMLButtonElement>('[data-alpha-sms-send]');
+      const rect=button?.getBoundingClientRect();
+      return !!(clip&&rect&&button&&!button.disabled&&rect.width&&rect.height&&rect.top>=clip.top-1&&rect.bottom<=clip.bottom+1&&
+        button.contains(document.elementFromPoint(rect.left+rect.width/2,rect.top+rect.height/2)));
+    });
+  }
+  p.sendVoiceTurn = async function(input:{text:string;turnId:string;voiceTurnSignal:import('../runtime/alpha-client').VoiceTurnSignal;signal:AbortSignal;approvalSignal:AbortSignal;talkGeneration:number;binding:import('../runtime/alpha-client').VoiceConversationBinding;context:import('../runtime/alpha-client').ContextEnvelope;assertCurrent:()=>void;onProgress?:(value:BatchProgressCue)=>void;onReplyStarted?:()=>void;onText?:(text:string,frame:import('../runtime/voice-assistant').AssistantTextFrame)=>void;supersedes?:string;navigation?:import('../runtime/alpha-client').VoiceNavigationContinuation}){
     const {text,turnId,signal,binding}=input;let acceptedContext=input.context;
     const belongs=()=>{try{signal.throwIfAborted();input.assertCurrent();return this.live&&!document.hidden&&connectionController.voiceConversationCurrent(binding)&&alphaClient.continuesContext(acceptedContext);}catch{return false;}};
     const current=()=>{signal.throwIfAborted();input.assertCurrent();context(this);if(!belongs())throw Error('The voice conversation changed.');};
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
+    const smsReview=this.pendingVoiceSmsReview;
+    this.pendingVoiceSmsReview=undefined;
+    if(spokenSmsSend.test(text.trim())&&(smsReview||/send this (?:text|message)[.!?]?$/iu.test(text.trim()))){
+      input.approvalSignal.throwIfAborted();
+      const visible=smsReview&&smsReview.generation===input.talkGeneration&&smsReview.conversationId===binding.conversationId&&
+        smsReview.revision===input.context.revision&&smsReview.expiresAt>Date.now()&&this.emergencyLive?.()!==true&&smsReviewVisible(smsReview.id);
+      const message=visible?this.S().msgs.find((m:Shell)=>m.card?.proposalId===smsReview.id&&m.card.smsReview?.addressed&&
+        m.card.sub===smsReview.description&&!m.card.done&&!m.card.reviewUnavailable&&
+        (m.card.type!=='proposal'||m.card.state==='open')):undefined;
+      this.setState((previous:Shell)=>({msgs:[...previous.msgs,{id:turnId,from:'user',text}]}));
+      const receipt=message?await this.cardAct(message,input.approvalSignal):undefined;
+      current();
+      const answer=receipt?.summary??(message?'Check Messages before trying to send again.':'There is no text ready to send.');
+      const replyId=receipt?`device-receipt:${receipt.proposalId}`:`voice-review:${turnId}`;
+      if(!receipt)this.agentSay(answer,undefined,{id:replyId,deviceReceipt:true},belongs);
+      return {requestId:turnId,conversationId:binding.conversationId,userMessageId:turnId,assistantMessageId:replyId,text:answer,complete:true,localVoiceReply:true as const};
+    }
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
     // A keypad, Contacts or Messages step this turn's request performs waits for the reply and the
@@ -2159,8 +2214,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       for(const receipt of reply.completedActions||[])if(!(reply.completedReads||[]).some(read=>read.receipt.proposalId===receipt.proposalId))this.agentSay(receipt.summary,undefined,{id:`device-receipt:${receipt.proposalId}`,deviceReceipt:true});
       const completedActions=reply.completedActions;
       if(completedActions?.length)this.setState({},()=>{if(this.live&&connectionController.voiceConversationCurrent(binding,false))for(const receipt of completedActions)publishCommittedDeviceChanges(receipt,alphaClient,binding.session);});
-      const review=!!reply.proposals?.length||pendingNotice||emailCardReady;
-      const speechText=spokenActionReply(text,reply,emailCardReady);
+      const sms=reply.proposals?.length===1?reply.proposals[0]:undefined;
+      if(sms?.smsVoiceConfirmable&&sms.smsReview?.addressed&&!pendingNotice&&!emailCardReady){
+        this.pendingVoiceSmsReview={id:sms.id,generation:input.talkGeneration,conversationId:binding.conversationId,revision:acceptedContext.revision,expiresAt:sms.expiresAt,description:sms.description};
+      }
+      const review=(!!reply.proposals?.length&&!this.pendingVoiceSmsReview)||pendingNotice||emailCardReady;
+      const speechText=this.pendingVoiceSmsReview
+        ? 'The text is ready. Say “Send this text” to send it.'
+        : spokenActionReply(text,reply,emailCardReady);
       return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
     }catch(error){
       input.navigation?.finish(false);
@@ -2502,7 +2563,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     this.setState({ msgs: this.S().msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, declined: true, title: 'Declined', sub: result.message }) } : m) });
   };
   const originalCardAct=p.cardAct;
-  p.cardAct = async function (message: Shell) {
+  p.cardAct = async function (message: Shell, voiceSignal?:AbortSignal) {
     const card = message.card || {};
     // AC-26: a replaced or finished proposal never acts. A view's own proposal (a fixture call or
     // "Screen it") is dispatched by the shell to that view's action; live ones are approved below.
@@ -2596,13 +2657,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         }
         this.pendingActionRecoveryAbort?.abort();
         const approval=this.pendingActionApproval=new AbortController();
+        const approvalSignal=voiceSignal?AbortSignal.any([approval.signal,voiceSignal]):approval.signal;
         this.pendingActionApprovalProposalId=card.proposalId;
         this.pendingActionApprovalContext=alphaClient.getState().context;this.pendingActionApprovalSession=session;this.setState({});
         const sessionId = session?.sessionId;
         const beforeView = this.S().view;
         let receipt;
         const readLease=this.readReplyLeases?.get(card.proposalId);
-        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approval.signal):await alphaClient.approve(card.proposalId); }
+        try { receipt = card.recovered?await connectionController.approvePendingAction(card.proposalId,alphaClient.getState().context,approvalSignal,card.smsReview):await alphaClient.approve(card.proposalId,approvalSignal); }
         catch (error) {
           // Navigation may cancel the context-bound chat wait after the effect.
           // Await only that already-started journaled action; never execute again.
@@ -2611,7 +2673,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         }
         if (!this.live || JSON.stringify(connectionController.getSnapshot().session)!==JSON.stringify(session)||readLease&&!connectionController.readReplyCurrent(readLease.binding)) return;
         const displaySummary=actionResultText(receipt.summary);
-        this.setState((previous:Shell)=>this.live&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(session)&&(!readLease||connectionController.readReplyCurrent(readLease.binding))?{ msgs: previous.msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, sub: displaySummary, title: receipt.status === 'succeeded' ? 'Completed' : receipt.status === 'unknown' ? 'Not confirmed' : 'Not completed' }) } : m) }:null);
+        this.setState((previous:Shell)=>this.live&&JSON.stringify(connectionController.getSnapshot().session)===JSON.stringify(session)&&(!readLease||connectionController.readReplyCurrent(readLease.binding))?{ msgs: previous.msgs.map((m: Shell) => m.id === message.id ? { ...m, card: cardWith(m.card, { done: true, ...(voiceSignal&&card.smsReview?{receiptFollowsTurn:true}:{}), sub: displaySummary, title: receipt.status === 'succeeded' ? 'Completed' : receipt.status === 'unknown' ? 'Not confirmed' : 'Not completed' }) } : m) }:null);
         if(receipt.readReply&&this.readReplyLeases?.has(receipt.proposalId)){
           try{await completeReadReply(this,receipt);}
           catch{if(this.live&&readLease?.phase==='unconfirmed')this.setState((previous:Shell)=>this.live&&readLease.phase==='unconfirmed'&&connectionController.readReplyCurrent(readLease.binding)?{msgs:previous.msgs.map((m:Shell)=>m.id===message.id?{...m,card:{...m.card,sub:receipt.summary.replace(/[.!]\s*$/,'')+', but its answer is unconfirmed.'}}:m)}:null);}
@@ -2626,6 +2688,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           if(!alphaClient.getState().pending)this.notesCommittedHandler?.();
           publishCommittedDeviceChanges(receipt,alphaClient,session);
         }});
+        return receipt;
       } catch (e) { const readLease=this.readReplyLeases?.get(card.proposalId);if(this.live&&(!readLease||readLease.phase!=='cancelled'&&connectionController.readReplyCurrent(readLease.binding))&&(!card.recovered||JSON.stringify(card.proposalSession)===JSON.stringify(connectionController.getSnapshot().session)))this.agentSay(deviceActionFailureText(e)); }
       finally {this.pendingActionApproval=null;this.pendingActionApprovalProposalId=null;if(this.live){context(this);this.setState({});}}
     } else if (card.go) this.openView(card.go.view, card.go.patch);

@@ -25,7 +25,7 @@ export type ContactDraft = Omit<ContactRecord, 'id' | 'version'>;
 /** `more`: more contacts match than the lookup lists, so the options are not every match. */
 export type TelephonyReview =
   | {kind: 'call'; options: ContactMatch[]; more?: true}
-  | {kind: 'message'; options: ContactMatch[]; body: string; more?: true}
+  | {kind: 'message'; options: ContactMatch[]; body: string; more?: true; selectBeforeSending?: true}
   /** A new contact whose name or number is already in Contacts: the one option adds it anyway. */
   | {kind: 'contact-create'; options: {name: string; numbers: string[]}[]}
   /** `keeps`: one whole-field request shown twice for one contact, adding to its numbers and addresses or replacing them. */
@@ -172,27 +172,27 @@ async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal
 async function compose(operation: SmsComposeOperation, operationId: string, ports: TelephonyPorts, signal: AbortSignal, present: Present): Promise<SmsComposeResult> {
   const result = (status: SmsComposeResult['status']): SmsComposeResult => ({kind: 'sms-compose', status});
   const target = smsComposeTarget(operation), draftOnly = 'draft' in operation && operation.draft === true;
-  // When that person's conversation is already open, the draft goes into its text field, where the
-  // owner can edit it; the separate review is for a conversation that is not on screen.
+  // Only a draft goes into the conversation's text field. A reviewed send reaches the carrier
+  // even when its conversation is already open.
   const replyThreadId = "replyThreadId" in operation ? operation.replyThreadId : undefined;
   const inOpenThread = (number: string) => ports.draftInOpenThread(operation.body, number, replyThreadId);
   let number: string, placed: ReturnType<typeof inOpenThread>;
   if (target.kind === 'number') {
     // The approval card showed this exact number (`sms.compose.v2`), so nothing is asked again here.
-    number = target.number; placed = inOpenThread(number);
+    number = target.number; placed = draftOnly ? inOpenThread(number) : 'none-selected';
   } else {
     let options: ContactMatch[], more: boolean;
     try { ({options, more} = await numbers(target.query, ports)); } catch { return result('unavailable'); }
     ports.current();
     if (!options.length) return result('not-found');
-    const only = options.length === 1 ? inOpenThread(options[0].number) : null;
+    const only = draftOnly && options.length === 1 ? inOpenThread(options[0].number) : null;
     if (only === 'drafted') return result('drafted');
     // A name is never texted unseen: the lookup is a fuzzy filter and the card showed only the name,
     // so the owner confirms or chooses the matched name and number here, even for one match.
     const choice = await ports.ask({kind: 'message', options, body: operation.body, ...flagMore(more)}, signal);
     if (choice === null || !options[choice]) return result('cancelled');
     ports.current();
-    number = options[choice].number; placed = only ?? inOpenThread(number);
+    number = options[choice].number; placed = only ?? (draftOnly ? inOpenThread(number) : 'none-selected');
   }
   if (placed === 'drafted') return result('drafted');
   if (draftOnly) {

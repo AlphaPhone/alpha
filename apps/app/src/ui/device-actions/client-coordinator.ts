@@ -160,6 +160,7 @@ import {
   isTelephonyAction,
   isTelephonyRead,
   selectedTelephonyView,
+  type SmsComposeOperation,
   type TelephonyActionOperation,
   type TelephonyActionResult,
   smsComposeTarget,
@@ -210,7 +211,6 @@ import { sharedValidatorRefusal } from "./device-action-messages.ts";
 import { UNNAMED_CONTACT } from "../telephony/telephony-messages.ts";
 import {
   SMS_CARRIER_CHARGES,
-  SMS_OPEN_THREAD_DRAFT,
   smsSendFacts,
 } from "../telephony/sms-card-facts.ts";
 
@@ -274,7 +274,22 @@ export function closeAllTabsNotice(closing: BrowserTabsClosing | null): string {
  * Camera open is marked, and names the message that asked for it when the agent bound one
  * (direct mode). A reviewable card names its bound message the same way.
  */
+export interface SmsReview {
+  recipient: string;
+  body: string;
+  addressed: boolean;
+}
+
+export interface SmsThreadRecipient {
+  threadId: string;
+  number: string;
+  name: string | null;
+}
+
+export type SmsActionCard = DeviceActionProposalCard & { smsReview?: SmsReview };
+
 export type ReviewItem = PendingReviewItem & {
+  proposal: SmsActionCard | null;
   cameraCapture?: true;
   cameraRequestMessageId?: string;
   requestMessageId?: string;
@@ -728,6 +743,9 @@ export class DeviceActionCoordinator<
       workflowReview?: R;
       requestKey?: string;
       currentRequest?: CurrentDeviceActionRequest;
+      smsCard?: SmsReview;
+      smsNumber?: string;
+      smsThread?: SmsThreadRecipient;
     }
   >();
   private readReplies = new Map<
@@ -787,6 +805,9 @@ export class DeviceActionCoordinator<
        * offered for, looked up exactly as its executor will; null or a throw
        * when Contacts cannot be read. Without it no such card is offered.
        */
+      smsThreadRecipient?: () => SmsThreadRecipient | null;
+      smsRecipient?: (query: string, signal: AbortSignal) => Promise<{name: string; number: string} | null>;
+      chooseSmsRecipient?: (query: string, body: string, signal: AbortSignal) => Promise<{number: string} | "not-found" | null>;
       contactMatches?: (
         query: string,
         signal: AbortSignal,
@@ -1219,7 +1240,7 @@ export class DeviceActionCoordinator<
     proposal: DeviceProposal,
     context: C,
     contacts?: ContactMatchNames,
-  ): DeviceActionProposalCard {
+  ): SmsActionCard {
     const op = proposal.operation;
     const readReply = proposal.readReplyOrigin
       ? {
@@ -1669,8 +1690,40 @@ export class DeviceActionCoordinator<
         // A card for shown items names the files they resolved to.
         if (filesShownTarget(files)) card = this.card(reviewed, context);
       }
+      let smsNumber: string | undefined, smsThread: SmsThreadRecipient | null | undefined;
+      if (!proposal.workflow && isSmsCompose(reviewed.operation)) {
+        const target = smsComposeTarget(reviewed.operation);
+        let recipient = target.kind === "number" ? target.number : target.query;
+        if (target.kind === "number") smsNumber = target.number;
+        else {
+          const match = await this.options.smsRecipient?.(target.query, signal);
+          assertCurrentReview();
+          if (match) {
+            smsNumber = match.number;
+            recipient = `${match.name} (${match.number})`;
+          }
+        }
+        const smsReview = { recipient, body: reviewed.operation.body, addressed: !!smsNumber };
+        card = { ...card, title: "Review SMS", description: `To: ${recipient}\n\n${smsReview.body}`, smsReview };
+      }
+      if (!proposal.workflow && reviewed.operation.type === "sms_reply_selected") {
+        smsThread = this.options.smsThreadRecipient?.();
+        if (smsThread) {
+          const { name, number } = smsThread;
+          const recipient = name ? `${name} (${number})` : number;
+          const smsReview = { recipient, body: reviewed.operation.body, addressed: true };
+          card = { ...card, title: "Review SMS", description: `To: ${recipient}\n\n${smsReview.body}`, smsReview };
+        }
+      }
+      if (!proposal.workflow && isSmsSend(reviewed.operation)) {
+        const recipient = reviewed.operation.recipients.join(", ");
+        const smsReview = { recipient, body: reviewed.operation.body, addressed: true };
+        card = { ...card, description: `To: ${recipient}\n\n${smsReview.body}`, smsReview };
+      }
       this.proposals.set(proposal.id, {
         proposal: reviewed,
+        ...(card.smsReview ? { smsCard: card.smsReview, smsNumber } : {}),
+        ...(smsThread ? { smsThread } : {}),
         context: structuredClone(context),
         requestKey: browserRequestKey,
       });
@@ -1711,7 +1764,7 @@ export class DeviceActionCoordinator<
   async pending(
     context: C,
     signal: AbortSignal,
-  ): Promise<DeviceActionProposalCard[]> {
+  ): Promise<SmsActionCard[]> {
     const { items, failures } = await this.review(context, signal);
     const proposals = items.flatMap((item) =>
       item.proposal ? [item.proposal] : [],
@@ -1723,20 +1776,10 @@ export class DeviceActionCoordinator<
   }
   /** Only proposals bound by the host to this exact freshly sent user message may run.
    * With "Ask before Alpha acts" off (the default), reversible local actions skip the
-   * optional review. A reply drafted into the open conversation (sms_reply_selected) is such a
-   * local action: it lands in that conversation's text field, visible and editable, and only
-   * the owner's own Send tap sends it.
-   * Two text actions also skip it when directSmsRequest admits them for this message (owner
-   * decision): reading the latest texter's number (sms_latest_sender with includeAddress), and
-   * a draft-only sms_compose addressed either to a number written in this message or, as a
-   * reply, to the latest texter's thread (replyThreadId: the number and thread that read
-   * returned; the phone drafts only into the thread with that id holding exactly that number).
-   * Either draft opens visible and editable in that conversation, and only the owner's Send tap
-   * sends it. A request for a card keeps the card, and a number that contradicts one written in
-   * the message is never direct and stays refused at review (contradictedNumbers). Sends,
-   * deletes, other private reads and Calendar/reminder writes retain their recorded separate
-   * review policy. Recovery, workflows and old hosts remain review-only; ordinary OS
-   * permissions still apply. */
+   * optional review. Outgoing addressed SMS still uses a reviewed chat card.
+   * The latest sender's address can be read when directSmsRequest admits it for
+   * this message. Recoveries and workflow steps retain their own review.
+   */
   async performRequested(
     messageId: string,
     context: C,
@@ -1751,7 +1794,6 @@ export class DeviceActionCoordinator<
       "browser_navigate",
       "camera_capture_photo",
       "photo_library_select",
-      "sms_reply_selected",
       // The keypad in front, filled in at most: only the owner's Call tap there calls.
       "phone_keypad",
       ...NOTES_ORGANIZE_DIRECT_TYPES,
@@ -1786,7 +1828,7 @@ export class DeviceActionCoordinator<
       if (
         results.length >= 4 ||
         (!directTypes.includes(entry.proposal.operation.type) &&
-          !(proof?.messageId === messageId && directSmsRequest(entry.proposal.operation, proof.text))) ||
+          !(entry.proposal.operation.type === "sms_latest_sender" && proof?.messageId === messageId && directSmsRequest(entry.proposal.operation, proof.text))) ||
         entry.proposal.workflow ||
         entry.proposal.requestMessageId !== messageId ||
         (operationType !== undefined &&
@@ -1833,7 +1875,7 @@ export class DeviceActionCoordinator<
       if (camera && !this.cameraAllowed(messageId, proof)) continue;
       if (!(await allowed())) break;
       signal.throwIfAborted();
-      if (entry.proposal.operation.type === "sms_latest_sender" || entry.proposal.operation.type === "sms_compose") proof?.current();
+      if (entry.proposal.operation.type === "sms_latest_sender") proof?.current();
       if (browser) {
         if (
           this.proposals.get(proposalId) !== entry ||
@@ -2146,6 +2188,7 @@ export class DeviceActionCoordinator<
     proposalId: string,
     context: C,
     signal: AbortSignal,
+    approvedSms?: SmsReview,
   ): Promise<DeviceOperationReceipt> {
     if (this.busy) throw new Error("Another device action is being reviewed");
     const reviewed = this.proposals.get(proposalId);
@@ -2176,20 +2219,57 @@ export class DeviceActionCoordinator<
       !this.listedTabCards.has(proposalId)
     )
       throw Error("Review these tabs again before closing them");
-    const p = reviewed.proposal,
-      // Minted before `busy` is taken: a context without randomUUID refuses
-      // this approval instead of leaving the coordinator busy for good.
-      // Both SMS operations use the proposal as the native journal identity.
-      minted =
-        isSmsSend(p.operation) || isSmsCompose(p.operation)
-          ? p.id
-          : crypto.randomUUID();
+    const p = reviewed.proposal;
+    if (reviewed.smsCard && JSON.stringify(reviewed.smsCard) !== JSON.stringify(approvedSms))
+      throw Error("The text changed. Review it again.");
+    const compose = reviewed.smsCard && isSmsCompose(p.operation) ? p.operation : undefined;
+    const sendDraft = !!reviewed.smsThread || (compose && "draft" in compose && compose.draft);
+    // Reserve under the same native identity even when a locally confirmed
+    // carrier send started as a host draft proposal.
+    const sms = isSmsSend(p.operation) || isSmsCompose(p.operation) || !!reviewed.smsThread;
+    const minted = sms ? p.id : crypto.randomUUID();
     this.busy = true;
     this.executing = proposalId;
     this.proposals.delete(proposalId);
     let execution: ReturnType<typeof createDeviceActionExecution> | undefined;
     try {
-      const operationHash = await actionScope(JSON.stringify(p.operation));
+      let operation: SmsComposeOperation | undefined;
+      if (compose) {
+        const target = smsComposeTarget(compose);
+        let number = reviewed.smsNumber;
+        if (target.kind === "contact") {
+          if (number) {
+            const current = await this.options.smsRecipient?.(target.query, signal);
+            if (!current || current.number !== number || `${current.name} (${current.number})` !== reviewed.smsCard?.recipient)
+              return { proposalId, status: "failed", summary: "The recipient changed. Nothing was sent." };
+          } else {
+            const chosen = await this.options.chooseSmsRecipient?.(target.query, compose.body, signal);
+            if (!chosen || chosen === "not-found") {
+              signal.throwIfAborted();
+              await this.mutation(p, "decision", { decision: "reject" }, signal);
+              return chosen === "not-found"
+                ? { proposalId, status: "failed", summary: "No matching contact. Nothing was sent." }
+                : { proposalId, status: "cancelled", summary: "Message cancelled." };
+            }
+            number = chosen.number;
+          }
+        }
+        signal.throwIfAborted();
+        if (!number || p.expiresAt <= Date.now())
+          return { proposalId, status: "failed", summary: "The review expired. Nothing was sent." };
+        operation = { type: "sms_compose", target: { kind: "number", number }, body: compose.body };
+      }
+      if (reviewed.smsThread && p.operation.type === "sms_reply_selected") {
+        const recipient = this.options.smsThreadRecipient?.();
+        if (JSON.stringify(recipient) !== JSON.stringify(reviewed.smsThread))
+          return { proposalId, status: "failed", summary: "The conversation changed. Nothing was sent." };
+        operation = {
+          type: "sms_compose",
+          target: { kind: "number", number: reviewed.smsThread.number },
+          body: p.operation.body,
+        };
+      }
+      const operationHash = await actionScope(JSON.stringify(operation ?? p.operation));
       // A reservation left by an approval that never reached its claim is
       // adopted: nothing was dispatched under it, so this is the same attempt.
       const { entry: earlier } = await this.journal.get({
@@ -2202,7 +2282,7 @@ export class DeviceActionCoordinator<
         earlier.operationHash === operationHash &&
         this.ownEntry(earlier, p) &&
         this.ownDevice(earlier) &&
-        (!(isSmsSend(p.operation) || isSmsCompose(p.operation)) ||
+        (!sms ||
           earlier.operationId === p.id)
           ? earlier
           : undefined;
@@ -2236,7 +2316,7 @@ export class DeviceActionCoordinator<
         operationHash,
         record: {
           digest: p.digest,
-          operation: p.operation,
+          operation: operation ?? p.operation,
           context: deviceJournalContext(context),
           expiresAt: p.expiresAt,
           installationId: this.credential.installationId,
@@ -2266,22 +2346,25 @@ export class DeviceActionCoordinator<
         };
       execution.assertIdentity(reserved.entry);
       execution.assertPrepared();
-      await this.mutation(p, "decision", { decision: "approve" }, signal);
+      let attemptId: string;
+      if (sendDraft) {
+        // The server proposal authorizes a draft. Retire it before the separately
+        // reviewed carrier send, which is bound to the phone's applying journal.
+        const retired = await this.mutation(p, "decision", { decision: "reject" }, signal);
+        if (retired.state !== "rejected") throw Error("The draft could not be retired");
+        attemptId = crypto.randomUUID();
+      } else {
+        await this.mutation(p, "decision", { decision: "approve" }, signal);
+        execution.assertPrepared();
+        const claimed = await this.mutation(p, "claim", {}, signal);
+        if (sms && claimed.providerIdempotencyKey !== operationId)
+          throw Error("SMS execution claim identity changed");
+        if (!claimed.attemptId || claimed.state !== "executing")
+          throw Error("The server did not grant an execution claim");
+        attemptId = claimed.attemptId;
+      }
       execution.assertPrepared();
-      const claimed = await this.mutation(p, "claim", {}, signal);
-      if (
-        (isSmsSend(p.operation) || isSmsCompose(p.operation)) &&
-        claimed.providerIdempotencyKey !== operationId
-      )
-        throw Error("SMS execution claim identity changed");
-      if (!claimed.attemptId || claimed.state !== "executing")
-        throw new Error("The server did not grant an execution claim");
-      execution.assertPrepared();
-      await this.journal.markApplying({
-        scope: this.scope,
-        proposalId,
-        attemptId: claimed.attemptId,
-      });
+      await this.journal.markApplying({ scope: this.scope, proposalId, attemptId });
       let result: ExecutionResult;
       let notDispatched = false;
       try {
@@ -2309,7 +2392,7 @@ export class DeviceActionCoordinator<
           );
         } else
           result = await this.ports.execute(
-            p.operation,
+            operation ?? p.operation,
             operationId,
             context,
             signal,
@@ -2347,7 +2430,7 @@ export class DeviceActionCoordinator<
       }
       const typed: TypedResults = notDispatched
         ? {}
-        : await this.typedResults(p, result, operationId, context);
+        : await this.typedResults(operation ? { ...p, operation } : p, result, operationId, context);
       await this.journal.finish({
         scope: this.scope,
         proposalId,
@@ -2362,6 +2445,7 @@ export class DeviceActionCoordinator<
         },
       });
       if (execution.dispatched) execution.settle(reserved.entry);
+      if (sendDraft) return { proposalId, status: result.status, summary: result.summary };
       // A completed device effect is journaled even if the UI epoch was cancelled.
       // Receipt upload is retried only by the explicit history control.
       const committedChanges: DeviceCommittedChange[] = [];
@@ -2429,7 +2513,7 @@ export class DeviceActionCoordinator<
           p,
           "receipt",
           {
-            attemptId: claimed.attemptId,
+            attemptId: attemptId,
             receipt: notDispatched
               ? { outcome: "failed", operationId, code: NOT_DISPATCHED_CODE }
               : {
@@ -2468,7 +2552,7 @@ export class DeviceActionCoordinator<
           (fg?.kind === "calendar_named" && fg.action === "read")) &&
         p.readReplyOrigin &&
         confirmed.state === "done" &&
-        confirmed.attemptId === claimed.attemptId &&
+        confirmed.attemptId === attemptId &&
         retained &&
         !retained.consumed &&
         retained.digest === p.digest &&
@@ -2477,7 +2561,7 @@ export class DeviceActionCoordinator<
               ...p.readReplyOrigin,
               proposalId,
               digest: p.digest,
-              attemptId: claimed.attemptId,
+              attemptId: attemptId,
             })
           : undefined;
       if (readReply && retained) retained.hint = readReply;
@@ -3950,13 +4034,11 @@ function describeTelephonyAction(
         : {
             title: "Review SMS",
             // Approve sends it: no dialog follows. A name is still matched on the phone, where
-            // the owner picks the person and number before anything is sent. When that person's
-            // conversation is open in Messages, the phone drafts it there instead (AC-14), which
-            // the card says, since it cannot know what will be open when Approve is tapped.
+            // the owner picks the person and number before anything is sent.
             description:
               target.kind === "number"
-                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body, true)}`
-                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_OPEN_THREAD_DRAFT} ${SMS_CARRIER_CHARGES}`,
+                ? `${to}\nFrom: the SIM chosen in Messages, or your default texting SIM\n\n${operation.body}\n\n${smsSendFacts(1, operation.body)}`
+                : `${to}\n\n${operation.body}\n\nAfter you approve, you pick the person and number on your phone, and it is sent to them right away. ${SMS_CARRIER_CHARGES}`,
           };
     }
     case "phone_keypad":

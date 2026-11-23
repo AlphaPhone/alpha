@@ -12,7 +12,7 @@ import type {BrowserTabChoice} from './browser-adapter';
 
 /** The open tabs a chat request's words match, when there are several (browser-adapter.ts browserControl). */
 type TabReview = {kind: 'tab'} & BrowserTabChoice;
-type Pending = {review: TelephonyReview | TabReview; settle: (choice: number | null) => void};
+type Pending = {review: TelephonyReview | TabReview; settle: (choice: number | null) => void; selected?: number};
 let pending: Pending | null = null, repaint: () => void = () => {};
 const ICON = {
   call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z',
@@ -73,12 +73,24 @@ export function presentTelephonyReview(entry: Pending | null) {
   });
   // The lookup read one contact past what the review lists: the owner is told the list is not every match.
   const note = review.kind !== 'tab' && review.kind !== 'contact-create' && review.more ? `Only the first ${CONTACT_CALL_LOOKUP_LIMIT} matching contacts are shown. For another one, ask again with their full name.` : '';
-  return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', note, dismiss: () => settle(null)};
+  const recipientPicker = review.kind === 'message' && review.selectBeforeSending ? {
+    options: review.options.map((option, index) => ({
+      name: option.name,
+      number: displayNumber(option.number),
+      selected: entry.selected === index,
+      select: () => { if (pending === entry) { entry.selected = index; repaint(); } },
+    })),
+    disabled: entry.selected === undefined,
+    send: () => { if (entry.selected !== undefined) settle(entry.selected); },
+    note,
+    dismiss: () => settle(null),
+  } : undefined;
+  return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', note, dismiss: () => settle(null), recipientPicker};
 }
 type Change = 'remove' | 'add' | 'keep' | 'rename';
 const CHANGE_WORD: Record<Change, string> = {remove: 'Remove ', add: 'Add ', keep: 'Keep ', rename: 'Rename from '};
 type Review = ReturnType<typeof presentTelephonyReview>;
-type Row = {id?: unknown; c?: {proposalId?: unknown} & Record<string, unknown>; cProposal?: boolean; cDigest?: boolean; [key: string]: unknown};
+type Row = {id?: unknown; c?: {proposalId?: unknown} & Record<string, unknown>; cProposal?: boolean; cDigest?: boolean; smsReview?: {id: string}; [key: string]: unknown};
 /**
  * Puts an open review into the chat card being approved (`approving` is its proposal id): a proposal
  * card that is still open shows the rows instead of its button; an action digest shows them as its
@@ -87,11 +99,12 @@ type Row = {id?: unknown; c?: {proposalId?: unknown} & Record<string, unknown>; 
  */
 export function placeTelephonyReview(msgs: Row[], review: Review, approving: unknown): Row[] | null {
   if (!review.open) return msgs;
-  const carries = (m: Row) => !!m.c && typeof m.c.proposalId === 'string' && m.c.proposalId === approving && !!(m.cDigest || m.cProposal && m.c.state === 'open');
+  const carries = (m: Row) => !!m.c && typeof m.c.proposalId === 'string' && m.c.proposalId === approving && !!(review.recipientPicker ? m.smsReview : m.cDigest || m.cProposal && m.c.state === 'open');
   const at = msgs.findIndex(carries);
   if (at < 0) return null;
   return msgs.map((m, index) => {
     if (index !== at) return m;
+    if (review.recipientPicker) return {...m, smsReview: {...m.smsReview!, showActions: false, picker: review.recipientPicker}};
     if (m.cProposal) return {...m, c: {...m.c, reviewing: review}, proposalAsk: false};
     // Each line keeps its own wrapping line, strike and weight, and a contact change names in words
     // what it removes, adds and keeps: a flattened one-line list would show a removed number as kept.

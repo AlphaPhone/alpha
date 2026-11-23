@@ -744,7 +744,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           input.signal.addEventListener('abort',cancelReply,{once:true});
           if(input.signal.aborted)cancelReply();
           try{
-            const reply=await chat.shell.sendVoiceTurn({...input,text,...turn,signal:replyController.signal,onText,assertCurrent:assertReplyCurrent,onProgress:ack?.progress,onReplyStarted:ack?.replyStarted,navigation:navigationContinuation(chat,token,input.turnId)});
+            const reply=await chat.shell.sendVoiceTurn({...input,text,...turn,signal:replyController.signal,approvalSignal:input.signal,talkGeneration:token,onText,assertCurrent:assertReplyCurrent,onProgress:ack?.progress,onReplyStarted:ack?.replyStarted,navigation:navigationContinuation(chat,token,input.turnId)});
             if(!input.signal.aborted)await ack?.finish();
             return reply;
           }finally{input.signal.removeEventListener('abort',cancelReply);unsubscribeAck();document.removeEventListener('visibilitychange',retireAck);try{await ack?.stop();}finally{conversationReplyWatch=undefined;}}
@@ -753,7 +753,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         const result=sent.result;input.signal.throwIfAborted();current();
         if(result.complete){markVoiceTiming('first-token');markVoiceTiming('final-reply');}
         const speech=result.speechText??result.text;
-        shortenedReplyId=speech!==result.text?result.assistantMessageId:undefined;
+        shortenedReplyId=result.localVoiceReply||speech!==result.text?result.assistantMessageId:undefined;
         const spoken=typeof speech==='string'?workflowReplyText(speech).text:speech;
         conversationLastTranscript=sent.text;conversationLastReply=spoken;conversationReviewRequired=result.reviewRequired===true&&!result.awaitingUserInput;if(result.awaitingUserInput!==undefined)liveCapture?.release(true);
         return spoken===result.text?result:{...result,text:spoken};

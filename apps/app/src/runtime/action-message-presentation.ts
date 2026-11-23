@@ -116,6 +116,7 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
   const renderedIds = new Set(rendered.map(message => message.id));
   const completedResults = new Map<string, string>();
   for (const message of source) {
+    if (message.card?.receiptFollowsTurn === true) { hidden.add(message.id); continue; }
     if (renderedIds.has(message.id) && message.from === 'agent' && message.card?.proposalId && message.card.done && typeof message.card.sub === 'string' && message.card.sub.trim()) {
       completedResults.set(`device-receipt:${message.card.proposalId}`, message.card.sub);
     }

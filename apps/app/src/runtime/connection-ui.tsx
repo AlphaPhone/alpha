@@ -2162,7 +2162,7 @@ export const connectionController = {
         await review(proposal,context,signal);signal.throwIfAborted();
         if(selected!==active||generation!==epoch||state.session!==session||conversationMemory.get(conversationKey(session))!==conversation||JSON.stringify(service?.identity??null)!==account||document.hidden||state.open)throw Error('The Notes review changed. Nothing was shared.');
       }
-      return selected.actions!.approve(proposal.id, context, signal);
+      return selected.actions!.approve(proposal.id, context, signal, proposal.smsReview);
     })();
     actionReceipts.set(proposal.id, { sessionId, result });
     // A refusal (before the journal reserved anything) can be approved again; a settled receipt stays.
@@ -2202,7 +2202,7 @@ export const connectionController = {
     current();if(!sameJson(choice,after))throw Error('Saved conversation selection changed.');
     return proposals;
   },
-  async approvePendingAction(id:string,context:ContextEnvelope,signal:AbortSignal):Promise<OperationReceipt> {
+  async approvePendingAction(id:string,context:ContextEnvelope,signal:AbortSignal,smsReview?:ActionProposal["smsReview"]):Promise<OperationReceipt> {
     // Refresh authenticated state and exact source preconditions at the tap. No
     // cached chat prose or prior approval can authorize a recovered proposal.
     const selected=active,session=state.session;
@@ -2211,6 +2211,7 @@ export const connectionController = {
     if(active!==selected||state.session!==session)throw Error('The agent changed.');
     const proposal=proposals.find(proposal=>proposal.id===id);
     if(!proposal)throw Error('No longer pending');
+    if(!sameJson(proposal.smsReview,smsReview))throw Error('The text changed. Review it again.');
     return this.execute(proposal,context,signal);
   },
   getWorkflowPresentationProtocol():1|2 { return active?.actions && (active.workflowProtocol ?? 1) >= 2 ? 2 : 1; },
@@ -3439,7 +3440,15 @@ export const connectionController = {
           // pending reviews of other turns, announced or not, never keep the current screen.
           const replyProposals=Array.isArray(reply.actionResults)?replyDeviceProposalIds(reply.actionResults):undefined;
           cameraProposalOnly=requestedCameraNeedsCameraView(replyProposals?items:turnItems,typeof reply.userMessageId==='string'?reply.userMessageId:undefined,!!findViewActionHandoff(reply.actionResults),replyProposals);
-          proposals = turnItems.flatMap(item => item.proposal ? [item.proposal] : []); notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
+          proposals = turnItems.flatMap(item => {
+            const proposal=item.proposal;
+            if(!proposal)return [];
+            const matchesRequest=!!reply.userMessageId&&item.requestMessageId===reply.userMessageId;
+            return [proposal.smsReview&&(matchesRequest||replyProposals?.has(proposal.id))
+              ? {...proposal,smsVoiceConfirmable:true as const}
+              : proposal];
+          });
+          notices.push(...turnItems.flatMap(item => item.notice ? [item.notice.slice(0, 500)] : []));notices=[...new Set(notices)].slice(0,5); }
         catch { update({ message: 'Actions not checked' }); }
       }
       requestSignal.throwIfAborted();

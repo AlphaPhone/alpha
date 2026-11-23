@@ -1,3 +1,4 @@
+import type {SmsReview} from "../ui/device-actions/client-coordinator";
 /** Browser-safe boundary. The composition root supplies an authenticated transport;
  * this module neither invents endpoints nor handles credentials. */
 import {validateNativeNotesReadReplyHint,validateNativeNotesReadReplyOrigin,type NativeNotesReadReplyOrigin,type NativeNotesReadReplyHint} from '../../../../.eliza/client-features/packages/contracts/src/native-notes-query.ts';
@@ -59,6 +60,9 @@ export interface ContextEnvelope extends ViewContext {
 }
 export interface ActionProposal {
   id: string;
+  smsReview?: SmsReview;
+  /** The authenticated host associated the SMS review with this turn. */
+  smsVoiceConfirmable?: true;
   /** Server-retained original request correlation, never approval authority. */
   readReply?: {origin:NativeNotesReadReplyOrigin;digest:string};
   /** Derived by the owning SDK from a validated Notes read operation. */
@@ -642,7 +646,7 @@ export class AlphaClient {
     },options?.signal);
   }
   /** Call only after the user reviews and explicitly approves this exact proposal. */
-  async approve(proposalId: string): Promise<OperationReceipt> {
+  async approve(proposalId: string, approvalSignal?: AbortSignal): Promise<OperationReceipt> {
     const proposal = this.proposals.get(proposalId);
     if (
       !proposal ||
@@ -677,7 +681,7 @@ export class AlphaClient {
         );
       }
       return { ...receipt };
-    });
+    }, approvalSignal);
   }
 }
 export const alphaClient = new AlphaClient();

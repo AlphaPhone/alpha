@@ -41,7 +41,7 @@ import {
   requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
 import {smsSimLabel} from '../ui/telephony/sms-card-facts';
-import type {BrowserTabsClosing, ContactMatchNames} from '../ui/device-actions/client-coordinator';
+import type {BrowserTabsClosing, ContactMatchNames, SmsThreadRecipient} from '../ui/device-actions/client-coordinator';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
 import {isReminderOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
@@ -134,10 +134,23 @@ let contactReviewMatches: ((query:string,signal:AbortSignal)=>Promise<ContactMat
 export function setContactReviewMatches(read: (query:string,signal:AbortSignal)=>Promise<ContactMatchNames|null>) {
   contactReviewMatches=read;
 }
+type SmsRecipient = {name: string; number: string};
+let readSmsRecipient: ((query: string, signal: AbortSignal) => Promise<SmsRecipient | null>) | undefined;
+let chooseSmsRecipient: ((query: string, body: string, signal: AbortSignal) => Promise<SmsRecipient | "not-found" | null>) | undefined;
+let readSmsThread: (() => SmsThreadRecipient | null) | undefined;
+export function setSmsRecipientReview(
+  read: NonNullable<typeof readSmsRecipient>,
+  choose: NonNullable<typeof chooseSmsRecipient>,
+  selectedThread: NonNullable<typeof readSmsThread>,
+) {
+  readSmsRecipient = read;
+  chooseSmsRecipient = choose;
+  readSmsThread = selectedThread;
+}
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},filesShownPaths:async(shown,signal)=>{if(!filesShownPaths)throw Error('Files is unavailable');return filesShownPaths(shown,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),browserTabsClosing:proposalId=>browserTabsClosing?.(proposalId)??null,contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},filesShownPaths:async(shown,signal)=>{if(!filesShownPaths)throw Error('Files is unavailable');return filesShownPaths(shown,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),browserTabsClosing:proposalId=>browserTabsClosing?.(proposalId)??null,contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null,smsThreadRecipient:()=>readSmsThread?.()??null,smsRecipient:async(query,signal)=>readSmsRecipient?.(query,signal)??null,chooseSmsRecipient:async(query,body,signal)=>chooseSmsRecipient?.(query,body,signal)??null});
   }
 }
