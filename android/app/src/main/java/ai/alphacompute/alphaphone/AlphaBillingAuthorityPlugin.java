@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.alphacompute.alphaphone.cloud.CloudAuthWire;
 import ai.alphacompute.alphaphone.cloud.CloudEmailCode;
 import ai.alphacompute.alphaphone.cloud.CloudSignInEnvironment;
 import ai.alphacompute.alphaphone.connection.ConnectionTransport;
@@ -24,10 +25,11 @@ import org.json.JSONObject;
  *
  * Cloud accepts those operations only with a fresh account session, never with the phone's own
  * sign-in key. Like upstream's native host ("billing authority", packages/auth/README.md), this
- * repeats a one-time email code for the signed-in account and keeps the resulting Steward session
+ * repeats a one-time email code for the signed-in account and keeps the resulting session (Steward's
+ * JWT, or the Vibestack Cloud's opaque session on Alpha Cloud, on the deployment's own sign-in wire)
  * in memory only: it is never written to storage, never returned to the renderer and never logged.
  * It is bound to the account in the phone's stored Cloud credential (not to anything the renderer
- * names) and ends after its JWT expiry (at most one hour), on {@link #clear}, when the app process
+ * names) and ends at its expiry (at most one hour), on {@link #clear}, when the app process
  * ends, or as soon as that credential changes: sign-out, a new key or another account.
  *
  * In-app billing is available on every Cloud this build uses (the current Cloud, or Alpha Cloud with
@@ -45,11 +47,11 @@ public final class AlphaBillingAuthorityPlugin extends Plugin {
   @Override public String savedCredential() throws Exception { return new AlphaCredentialStore(getContext()).readCredentialSlot("cloud:production"); }
   @Override public JSONObject identity(String deviceToken) throws Exception { return AlphaConnectionPlugin.readCloudIdentity(deviceToken); }
   @Override public BillingAuthorityRoutes.Reply sendCode(String email, String verifier) throws Exception {
-   return post(CloudEmailCode.SEND_PATH, CloudEmailCode.sendBody(AlphaCloudSignInPlugin.REGISTRATION, environment(), email, verifier), null);
+   return post(CloudAuthWire.emailSendPath(environment()), CloudAuthWire.emailSendBody(AlphaCloudSignInPlugin.REGISTRATION, environment(), email, verifier), null);
   }
   @Override public long codeExpiresAt(Object reported, long now) { return CloudEmailCode.expiresAt(reported, now); }
   @Override public BillingAuthorityRoutes.Reply verifyCode(String email, String code, String verifier) throws Exception {
-   return post(CloudEmailCode.VERIFY_PATH, CloudEmailCode.verifyBody(AlphaCloudSignInPlugin.REGISTRATION, environment(), email, code, verifier), null);
+   return post(CloudAuthWire.emailVerifyPath(environment()), CloudAuthWire.emailVerifyBody(AlphaCloudSignInPlugin.REGISTRATION, environment(), email, code, verifier), null);
   }
   @Override public BillingAuthorityRoutes.Reply request(String method, String path, JSONObject body, String bearer) throws Exception {
    return AlphaBillingAuthorityPlugin.this.request(method, path, body, bearer);
