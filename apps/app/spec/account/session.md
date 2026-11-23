@@ -55,11 +55,12 @@ pure def sometimesStaging(s: Session): bool = s.environment == Staging and s.pha
 ### The native host signs in on the wire of the deployment it addresses
 
 Eliza Cloud, the shipped deployment, is signed in to through Steward: `/steward/auth/*` routes bound
-to the deployment's tenant, answered with a Steward session. Alpha Cloud runs the Vibestack Cloud,
-which serves only its own sign-in routes (`/api/v1/auth/*`, elizaOS/eliza `spec/cloud/client.md`
-`signInRoutes`): each request names the registered client id and flat PKCE fields and nothing else,
-and a verified code answers an opaque session with its own access expiry, or a second-factor
-challenge whose text-message code is sent only when the host asks for it. Alpha Cloud has no tenant.
+to the deployment's tenant, answered with a Steward session. Alpha Cloud signs in through the
+Vibestack Cloud's `/api/v1/auth/*` routes (`signInRoutes` in elizaOS/eliza `spec/cloud/client.md`).
+The host sends only the fields each route accepts. Email and SMS first-factor requests and browser
+Google sign-in name the registered client ID and use flat PKCE fields. A verified first factor
+returns an opaque session with its own access expiry or a second-factor challenge. Cloud sends an
+SMS code for that challenge only when the host asks for one. Alpha Cloud has no tenant.
 The native host (`CloudAuthWire`) takes the wire from the build's deployment, so a completed sign-in on
 either Cloud ends in the same device key (`/api/v1/app-auth/connect`, `mobile/token`, `mobile/ack`),
 and the billing authority keeps the session its code returned for at most an hour on either wire.
