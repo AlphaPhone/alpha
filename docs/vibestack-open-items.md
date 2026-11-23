@@ -104,7 +104,9 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Tooling / repository root
 
-- `upstream.lock.json` must move past eliza `c8f273cec1b`, because `workflowDeviceOffer` is not at pin `c84e5d68e37`. Advance the vendor/eliza gitlink with it.
+- The eliza pin is now vibestack-dp `6451775c35a` (eliza#40258). It exports `workflowDeviceOffer` (`packages/agent/src/device-actions/workflow-offer.vibe`), so the earlier need to move past `c8f273cec1b` is met; `pnpm-lock.yaml` is committed and `pnpm install --frozen-lockfile` passes. `pnpm gen` exits 0.
+- `pnpm typecheck` fails with 493 syntax-phase errors in 93 files (mostly EK0301, `!` beside a union or function type without parentheses, and TS1005/TS1128 around `match (…) { when …: }` blocks). vibelang stops before semantic checking, so the count of type errors behind them is unknown. Browser has 234 of them, account 72, notes 47, inbox 36, every other area under 20.
+- `scripts/generate-licenses.ts --check` crashes: `node_modules/@tesseract.js-data/eng` is not installed (see the OCR item below). The elizaOS entry of the committed notices was edited by hand to name the new pin.
 - The Tesseract OCR assets are not set up:
   - the files are not served under `apps/app/public/ocr/`;
   - `vite.config.ts` must add `localOcrAssets()`;
@@ -132,7 +134,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - `TurnTransport`, `RuntimeJsonBridge.request`/`requestStream` and `client.request`/`client.stream` take no headers, so the development host off the phone drops device headers;
   - `encodeTurnContext` must accept the `selectedObject` kinds `map-place`, `map-route` and `map-search` and the metadata keys `viewClientId`, `viewDelivery` and `uiView` (assumed, not checked);
   - there is no `clientDevice.browserPage` (eliza#40067/#40193);
-  - voice speaks the agent's `acknowledgment` frame, which only readers from elizaOS/eliza#40293 (`1ff497fc4f0`) pass on; at the pinned `c84e5d68e37` no acknowledgment arrives, so a voice turn says no cue and the chat acknowledges from the text before the first tool;
+  - voice speaks the agent's `acknowledgment` frame from the readers of elizaOS/eliza#40293 (`1ff497fc4f0`), which the vibestack-dp pin contains; this is not yet run against the pin;
   - the strict DoneFrame refuses `awaitingReview`, and DoneFrame notices are never produced;
   - there is no shared-note read-reply lease (`readReply`/`completeReadReply`);
   - `./client` does not re-export `learnPeer`/`comparePeer`/`statusRead`.
@@ -190,3 +192,26 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - `owner-routes.json` still lists `/api/lifeops/calendar/sync-control` and `/links`.
 - Some androidTest files still call `AlphaConnection.secureWrite`/`secureRemove`, which the branch removed.
 - `docs/simplification-audit/**` (4,666 files) came in with #1422 and describes the legacy renderer.
+
+## After merging develop through #1459
+
+These develop changes landed on legacy renderer files the port deleted. Their behaviour is not in
+`apps/app` yet; each belongs to the area named and must be ported into its spec and source. The
+develop eliza pins `7a124190a1`, `9222a9e3c6` and `ca435030bc` are legacy-develop commits, not in
+vibestack-dp; whether their agent-side fixes (eliza#40213, #40234, #40265, #40290) are ported to
+vibestack-dp is an upstream question.
+
+- **Browser (#1453):**
+  - "close every tab" from outside a private tab: the receipt counts the tabs it closed and says private tabs were left open (not "Closed all tabs."); the card adds how many private tabs stay open; with only private tabs open the notice says so instead of "No tabs are open to close." No private title or site reaches the agent or the card;
+  - the close-all listing binds each tab's id, address and private flag plus the count of private tabs kept, not titles, so a tab that only retitles itself no longer refuses an approved close-all (`spec/browser/session.md`, `listedOf`/`listingCurrent` still compare titles);
+  - a switch, closing the showing tab and page history run after the receipt; when that presentation is skipped (screen off, context or session changed, request no longer current, or it threw) the owner gets a correction notice instead of an unretracted success claim.
+- **Browser (#1455):** a turn should rarely wait on a page read. Browser captures the shown page once it settles after loading (700 ms) and again when the assistant opens over it (no more than once per 5 s, and not when a capture younger than 20 s holds), keeps one capture per tab and revision in memory for at most 10 minutes, and a turn waits at most 250 ms for a fresher read before sending the capture; it waits the full 1.2 s only when it has none. No capture is taken or kept with Browser page for Alpha off, private tabs are never read, and the browser build does not capture ahead. `spec/browser/pageContext.md` still says every message reads the page itself. The turn's fresh status read starts beside the position and page reads, and the device preferences and Notes folder names start at the beginning of the send.
+- **Assistant / Telephony / Voice (#1453):**
+  - a chat turn holds the view steps its own request performs (a directly requested keypad, filtered Contacts list or draft in another Messages conversation) and runs them once its reply and its own navigation are delivered; a typed turn runs them in place, a voice turn carries the conversation to each step's view through the session's navigation hold, as a spoken VIEWS move does; failed and cancelled turns release their steps;
+  - a held step counts the turn's own delivered switch as current and nothing else; the Browser step asks whether a chat request a view change would cancel is pending (`requestHoldsViews`), not whether any request is (an automatic workflow generation is not);
+  - a view step's show may settle later (the Messages draft step settles once its thread is open); the voice release path waits for it before pinning, and while a navigation commit is still placing its view, changes on the claimed view count as current, so the voice conversation is kept.
+- **Telephony (#1453):**
+  - the contact-save review shows each line on its own wrapping line, with its strike and weight, and says Remove, Add, Keep or Rename from in words;
+  - contact lookups read one row past the ten they list; when more contacts match, the card says "More than N contacts match …, including" and the on-phone review shows a note;
+  - a new contact's numbers are also looked up with Android's exact number matching, so a number saved under another name is shown before it is added again.
+
