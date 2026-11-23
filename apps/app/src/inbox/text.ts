@@ -7,17 +7,17 @@ const INVISIBLE_RUN = /[ \u00a0\u00ad\u034f\u200b-\u200f\u2060\u2800\ufeff]{3,}/
 const SHARED_PROVIDERS = /(?:^|\.)(?:gmail\.com|googlemail\.com|outlook\.com|hotmail\.com|live\.com|yahoo\.com|icloud\.com|proton\.me|protonmail\.com|aol\.com)$/;
 const BRANDS = ["turbotax.intuit.com", "linkedin.com", "cash.app", "paypal.com", "postman.com", "indiegala.com", "canva.com", "robinhood.com", "google.com", "coinbase.com", "github.com", "zillow.com", "mozilla.org", "openai.com"];
 
-/** Whether `value` is one literal email address, as the composer and Cloud accept it. */
+/** Whether `value` is one literal email address, as the composer and Cloud accept it. @throws {never} */
 export function literalMailAddress(value: string): boolean {
   return value.length <= 254 && ADDRESS.test(value);
 }
 
-/** The address an account or message shows, lower-cased for comparison. */
+/** The address an account or message shows, lower-cased for comparison. @throws {never} */
 export function addressKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
-/** A Gmail snippet as text: each character reference decoded once, long runs of invisible characters collapsed. */
+/** A Gmail snippet as text: each character reference decoded once, long runs of invisible characters collapsed. @throws {never} */
 export function decodeMailPreview(text: string): string {
   const decoded = text.includes("&") ? text.replace(REFERENCE, (reference) => {
     const body = reference.slice(1, -1);
@@ -31,7 +31,7 @@ export function decodeMailPreview(text: string): string {
 }
 
 
-/** An address's scheme, credentials and host, or undefined when it is not an address. */
+/** An address's scheme, credentials and host, or undefined when it is not an address. @throws {never} */
 export function parseLink(href: string): { href: string; host: string; https: boolean; credentials: boolean } | undefined {
   try {
     const url = new URL(href);
@@ -43,7 +43,7 @@ export function parseLink(href: string): { href: string; host: string; https: bo
 
 
 
-/** What a sender image may show for an address: a bundled brand icon path, or nothing. */
+/** What a sender image may show for an address: a bundled brand icon path, or nothing. @throws {never} */
 export function senderImageFacts(email: string): { sharedProvider: boolean; validDomain: boolean; brand: string } {
   const match = email.length <= 320 ? /^[^\s<>@]+@([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)$/i.exec(email) : null;
   const domain = match?.[1]?.toLowerCase() ?? "";
@@ -52,35 +52,39 @@ export function senderImageFacts(email: string): { sharedProvider: boolean; vali
   return { sharedProvider: SHARED_PROVIDERS.test(domain), validDomain, brand };
 }
 
-/** The bundled icon of a brand. */
+/** The bundled icon of a brand. @throws {never} */
 export function senderImagePath(brand: string): string {
   return `/icons/senders/${brand}.png`;
 }
 
-/** A reply's subject: one `Re:` in front, one line, at most 998 characters. */
+/** A reply's subject: one `Re:` in front, one line, at most 998 characters. @throws {never} */
 export function replySubject(subject: string): string {
   const line = subject.replace(/[\r\n]+/g, " ");
   return (/^re:/i.test(line) ? line : `Re: ${line}`).slice(0, 998);
 }
 
-/** A forward's subject. */
+/** A forward's subject. @throws {never} */
 export function forwardSubject(subject: string): string {
   return `Fwd: ${subject.replace(/[\r\n]+/g, " ")}`.slice(0, 998);
 }
 
-/** A forward's body: the owner's text, then the forwarded message's header and text. */
+/** A forward's body: the owner's text, then the forwarded message's header and text. @throws {never} */
 export function forwardBody(initial: string, sender: string, subject: string, text: string): string {
   return `${initial}\n\nForwarded message from ${sender}\nSubject: ${subject}\n\n${text}`.slice(0, 64000);
 }
 
-/** A shared subject as the composer keeps it. */
+/** A shared subject as the composer keeps it. @throws {never} */
 export function oneLineSubject(subject: string): string {
   return subject.replace(/[\r\n]+/g, " ").slice(0, 998);
 }
 
-/** UTF-8 size of a value as JSON. */
+/** UTF-8 size of a value as JSON; unbounded for a value JSON cannot hold, so every limit refuses it. @throws {never} */
 export function jsonBytes(value: unknown): number {
-  return new TextEncoder().encode(JSON.stringify(value)).length;
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 /** The request id of one content version of an agent email: the same version always gets the same id. */
@@ -106,7 +110,7 @@ export async function sha256Hex(text: string): Promise<string> {
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-/** The parts of an account key (environment, user, organization, grant); undefined for anything else. */
+/** The parts of an account key (environment, user, organization, grant); undefined for anything else. @throws {never} */
 export function ownerParts(owner: string): { environment: string; userId: string; organizationId: string; grant: string } | undefined {
   let parts: unknown;
   try {

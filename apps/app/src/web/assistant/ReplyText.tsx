@@ -48,7 +48,7 @@ export function ReplyText({ segments, onChoose, onOpenRun, live = false, onOpenM
     <div className="flex flex-col gap-2">
       {blocksOf(segments).map((block, at) => {
         if (block.kind === "text") return <p key={at} className="font-legible whitespace-pre-wrap">{block.lines.join("\n").trim()}</p>;
-        if (block.kind === "code") return <pre key={at} className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs"><code>{block.lines.filter((line) => !/^[ \t]{0,3}(`{3,}|~{3,})/.test(line)).join("\n")}</code></pre>;
+        if (block.kind !== "card") return <pre key={at} className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs"><code>{block.lines.filter((line) => !/^[ \t]{0,3}(`{3,}|~{3,})/.test(line)).join("\n")}</code></pre>;
         const { payload } = block.segment;
         if (payload.kind === "maps") return <MapsCardView key={at} card={payload.card} live={live && onOpenMap !== undefined} onOpenMap={() => onOpenMap?.(payload.card)} />;
         if (payload.kind === "workflow") return <Button key={at} variant="outline" aria-label={`Open workflow run ${payload.run.title}`} onClick={() => onOpenRun?.(payload.run.workflowId, payload.run.runId)}><Workflow aria-hidden className="size-4" />{payload.run.title}</Button>;

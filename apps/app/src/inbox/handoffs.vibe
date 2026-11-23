@@ -24,7 +24,7 @@ export const assistantEmailSender = effect {
   const accounts = try InboxAccounts
   const operations = try MailOperations
   return {
-    effect send(draft: ReviewedEmail): SendAnswer {
+    effect send(draft: ReviewedEmail): SendAnswer!! {
       const a = try accounts.get()
       const toList = [...new Set(draft.to.split(/[,;\n]/).map((t) => t.trim()).filter((t) => t !== ""))]
       const keys = toList.map(addressKey)

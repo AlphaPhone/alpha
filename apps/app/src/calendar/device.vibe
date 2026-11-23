@@ -118,8 +118,8 @@ export const deviceLayer = Layer.effect(DeviceCalendar, effect {
       try SubscriptionRef.set(reads, refused)
       return refused
     }
-    try SubscriptionRef.update(reads, (shown) => ({ ...shown, status: "loading" }))
-    const result: DeviceRead = try effect {
+    try SubscriptionRef.update(reads, (shown): DeviceRead => ({ ...shown, status: "loading" }))
+    const result: DeviceRead = effect {
       if (request && !(try access())) return { status: "denied", range, events: [], calendars: [], truncated: false, readAt: undefined } as DeviceRead
       const reply = try decodeList(try call(native, "list", { begin: range.begin, end: range.end }))
       if (reply.status !== "ready") return { status: "connect", range, events: [], calendars: [], truncated: false, readAt: undefined } as DeviceRead
@@ -232,7 +232,7 @@ export const deviceLayer = Layer.effect(DeviceCalendar, effect {
   }
 
   return {
-    reads: reads.changes,
+    reads: SubscriptionRef.changes(reads),
     writes: writes.changes,
     selections: selection.changes,
     effect available() { return try native.available(PLUGIN) },

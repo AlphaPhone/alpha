@@ -39,7 +39,11 @@ export interface CreateRequest { readonly sourceKey: string; readonly request: C
 export interface UpdateRequest { readonly eventKey: string; readonly request: CalendarUpdateRequest; readonly admitted: boolean }
 
 /** A reviewed deletion or decline of one event at the version reviewed. */
-export interface DeleteRequest { readonly eventKey: string; readonly request: CalendarDeleteRequest; readonly admitted: boolean }
+/**
+ * A deletion of one agent event. `confirmed` is the event as the owner confirmed it from a live read, for a held deletion sent after
+ * its Undo window, when the shown window may have moved on; without it the event is looked up in the feed shown now.
+ */
+export interface DeleteRequest { readonly eventKey: string; readonly request: CalendarDeleteRequest; readonly admitted: boolean; readonly confirmed?: EventRecord }
 
 /** The text an agent event's source revision hashes: its calendar's key and selection version, and the event's etag. */
 export function sourceRevisionText(calendar: CalendarSummary, etag: string): string {
@@ -52,7 +56,7 @@ export effect function eventSourceRevision(calendars: readonly CalendarSummary[]
   const calendar = calendars.find((candidate) => sourceKeyId(candidate) === key)
   const etag = typeof event.metadata.etag === "string" ? event.metadata.etag.trim() : ""
   if (calendar === undefined || etag === "") return ""
-  return try tryPromise({ try: () => sha256Hex(sourceRevisionText(calendar, etag)), catch: () => "" }) catch () => ""
+  return tryPromise({ try: () => sha256Hex(sourceRevisionText(calendar, etag)), catch: () => "" }) catch () => ""
 }
 
 /** The agent's Calendar: reads for the bound account and reviewed writes through it. */
@@ -121,7 +125,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     return after
   }
 
-  effect function feedFor(window: CalendarWindow, id: number): FeedReply {
+  effect function feedFor(window: CalendarWindow, id: number): FeedReply!! {
     const expected = { timeMin: isoInstant(window.range.begin), timeMax: isoInstant(window.range.end) }
     return effect {
       const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/feed", { side: "owner", ...expected, timeZone: window.timeZone })), READ_TIMEOUT)
@@ -134,7 +138,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     } catch (error) => (error instanceof ResidentRefused && (error.status === 401 || error.status === 403) ? "FeedRefused" : "FeedFailed") as FeedReply
   }
 
-  effect function calendarsFor(id: number): readonly CalendarSummary[] | undefined {
+  effect function calendarsFor(id: number): (readonly CalendarSummary[] | undefined)!! {
     return effect {
       const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/calendars", { side: "owner" })), READ_TIMEOUT)
       const list = (try decodeCalendars(answer.data)).calendars
@@ -143,7 +147,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     } catch () => undefined
   }
 
-  effect function upcomingFor(window: CalendarWindow, id: number): EventRecord | null | "failed" {
+  effect function upcomingFor(window: CalendarWindow, id: number): (EventRecord | null | "failed")!! {
     return effect {
       const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/next-context", { side: "owner", timeZone: window.timeZone })), READ_TIMEOUT)
       const next = try decodeNext(answer.data)
@@ -208,14 +212,14 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       try Ref.set(saved, undefined)
       return
     }
-    const entry = try Effect.try({ try: () => JSON.parse(found) as SavedFeed, catch: () => undefined }) catch () => undefined
+    const entry = Effect.try({ try: () => JSON.parse(found) as SavedFeed, catch: () => undefined }) catch () => undefined
     const valid = entry !== undefined && entry.version === 1 && entry.owner === binding.owner
     const feed = valid ? decodeFeed(entry.feed) catch () => undefined : undefined
     const calendars = valid ? decodeCalendars({ calendars: entry.calendars }) catch () => undefined : undefined
     try Ref.set(saved, valid && feed !== undefined && calendars !== undefined ? { ...entry, feed, calendars: calendars.calendars } : undefined)
   }
 
-  effect function readbackAt(sourceKey: string, at: number, timeZone: string): { readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined {
+  effect function readbackAt(sourceKey: string, at: number, timeZone: string): ({ readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined)!! {
     return effect {
       const window = namedReadWindow(at)
       const range = { timeMin: isoInstant(window.startMs), timeMax: isoInstant(window.endMs) }
@@ -244,8 +248,8 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
   }
 
   /** A refusal named by the agent is refused; an agent that was not running or asked to slow down took nothing; any other lost answer may have been applied and is unknown. */
-  effect function sent(call: () => Promise<CalendarChangeReply>): Sent {
-    return try tryPromise({ try: call, catch: (error) => error }) catch (error) =>
+  effect function sent(call: () => Promise<CalendarChangeReply>): Sent!! {
+    return tryPromise({ try: call, catch: (error) => error }) catch (error) =>
       (error instanceof ResidentUnavailable ? "transport"
         : error instanceof ResidentRefused ? (error.status === 429 ? "transport" : error.status >= 400 && error.status < 500 && error.status !== 408 ? "refused" : "unknown")
         : "unknown") as Sent
@@ -275,13 +279,13 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     return (reply) => ("receipt" in reply ? sourceKeyId(reply.receipt.source) : fallback)
   }
 
-  effect function currentEvent(eventKey: string): EventRecord | undefined {
+  effect function currentEvent(eventKey: string): (EventRecord | undefined)!! {
     const view = try SubscriptionRef.get(shown)
     return view.savedAt === undefined ? view.feed?.events.find((event) => agentEventKey(event) === eventKey) : undefined
   }
 
   return {
-    changes: shown.changes,
+    changes: SubscriptionRef.changes(shown),
     effect view() { return try SubscriptionRef.get(shown) },
     effect bind(binding: AgentBinding) {
       const before = try machine.get()
@@ -302,8 +306,8 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       if (after === undefined || after.read.id === 0 || after.read.id === before.read.id) return
       try run(after.read.id)
     },
-    effect create(write: CreateRequest) {
-      const request = write.request
+    effect create(change: CreateRequest) {
+      const request = change.request
       const at = utcInstant(request.startAt) ?? Number.NaN
       let foundKey = ""
       const find = (events: readonly EventRecord[], reply: CalendarChangeReply): Readback => {
@@ -313,19 +317,19 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
         foundKey = found === undefined ? "" : agentEventKey(found)
         return found !== undefined ? "ReadbackFound" : "ReadbackMissing"
       }
-      const outcome = try write("CreateEvent", write.admitted && request.idempotencyKey !== "" && Number.isFinite(at),
-        () => api.createLifeOpsCalendarEvent(request), find, receiptSource(write.sourceKey), at, request.timeZone ?? "UTC")
+      const outcome = try write("CreateEvent", change.admitted && request.idempotencyKey !== "" && Number.isFinite(at),
+        () => api.createLifeOpsCalendarEvent(request), find, receiptSource(change.sourceKey), at, request.timeZone ?? "UTC")
       if (outcome === "Saved" && foundKey !== "" && request.idempotencyKey !== "") {
         const entry = [request.idempotencyKey, foundKey] as const
         try Ref.update(created, (all) => new Map<string, string>([...[...all].slice(-63), entry]))
       }
       return outcome
     },
-    effect update(write: UpdateRequest) {
-      const request = write.request
-      const event = try currentEvent(write.eventKey)
+    effect update(change: UpdateRequest) {
+      const request = change.request
+      const event = try currentEvent(change.eventKey)
       const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : ""
-      const admitted = write.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
+      const admitted = change.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
       const at = utcInstant(request.startAt ?? event?.startAt ?? "") ?? Number.NaN
       const find = (events: readonly EventRecord[], reply: CalendarChangeReply): Readback => {
         const changed = "event" in reply ? reply.event : null
@@ -336,11 +340,12 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       return try write("UpdateEvent", admitted, () => api.updateLifeOpsCalendarEvent(event?.id ?? "", request), find,
         receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
     },
-    effect remove(write: DeleteRequest) {
-      const request = write.request
-      const event = try currentEvent(write.eventKey)
+    effect remove(change: DeleteRequest) {
+      const request = change.request
+      const confirmed = change.confirmed !== undefined && agentEventKey(change.confirmed) === change.eventKey ? change.confirmed : undefined
+      const event = confirmed ?? (try currentEvent(change.eventKey))
       const etag = typeof event?.metadata.etag === "string" ? event.metadata.etag.trim() : ""
-      const admitted = write.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
+      const admitted = change.admitted && event !== undefined && etag !== "" && etag === request.expectedProviderVersion && request.idempotencyKey !== ""
       const at = utcInstant(event?.startAt ?? "") ?? Number.NaN
       const find = (events: readonly EventRecord[]): Readback =>
         events.some((found) => found.id === event?.id && found.status !== "cancelled" && found.metadata.etag === event?.metadata.etag) ? "ReadbackFound" : "ReadbackMissing"

@@ -35,6 +35,9 @@ pure def without(id: int, s: DeferredDeletes): DeferredDeletes = { ...s, held: s
 
 ### Confirming a deletion holds it; a deletion still waiting is sent first, so the only Undo shown is the newest
 
+A held deletion sends the event as the owner confirmed it from a live read, at that version, so
+moving to another day or month during the Undo window does not lose it.
+
 ```quint
 pure def canConfirm(s: DeferredDeletes, target: str, decline: bool): bool = target != "" and not(holding(s, target))
 pure def confirm(s: DeferredDeletes, target: str, decline: bool): DeferredDeletes =

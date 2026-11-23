@@ -45,7 +45,7 @@ export function fakes(agent: CalendarAgentFake, device: DeviceCalendarFake, test
 }
 
 /** Calendar's services over the fakes. */
-export const calendarOver = (agent: CalendarAgentFake, device: DeviceCalendarFake, testMocks = true) => Layer.provide(services, fakes(agent, device, testMocks))
+export const calendarOver = (agent: CalendarAgentFake, device: DeviceCalendarFake, testMocks = true) => Layer.provideMerge(services, fakes(agent, device, testMocks))
 
 /** What is in front, fixed for a journey. */
 export function foregroundAt(state: Partial<ForegroundState>) {

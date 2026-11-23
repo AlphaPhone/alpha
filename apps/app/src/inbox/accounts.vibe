@@ -73,7 +73,7 @@ export const layer = Layer.effect(InboxAccounts, effect {
   const google = try GoogleAccounts
   const saved = try SavedMail
 
-  effect function owner(): MailOwner | undefined {
+  effect function owner(): (MailOwner | undefined)!! {
     const s = try session.current()
     if (ownerOf(s) === 0) return undefined
     return {
