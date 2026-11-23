@@ -47,20 +47,32 @@ function contentSecurity(): Plugin {
   };
 }
 
-export default defineConfig(({ command }) => ({
+function productionCloudDeployment(): Plugin {
+  const publicPolicy = {
+    shipped: { production: cloudDeployment.shipped.production, staging: cloudDeployment.shipped.production },
+    alphaCloudHosts: { production: cloudDeployment.alphaCloudHosts.production, staging: cloudDeployment.alphaCloudHosts.production },
+  };
+  const id = "\0alpha-production-cloud-deployment";
+  return {
+    name: "alpha-production-cloud-deployment",
+    enforce: "pre",
+    apply: "build",
+    resolveId(source) {
+      return source === "../../../../cloud/deployment.json?raw" ? id : undefined;
+    },
+    load(source) {
+      return source === id ? `export default ${JSON.stringify(JSON.stringify(publicPolicy))}` : undefined;
+    },
+  };
+}
+
+export default defineConfig({
   root: "src/web",
   publicDir: "../../public",
   envPrefix: "VITE_",
-  define: {
-    __ALPHA_TEST_MOCKS__: JSON.stringify(mocks),
-    __ALPHA_PRODUCTION_DEPLOYMENT__: JSON.stringify(command === "build" && !mocks),
-    __ALPHA_CLOUD_DEPLOYMENT__: JSON.stringify({
-      shipped: { production: cloudDeployment.shipped.production },
-      alphaCloudHosts: { production: cloudDeployment.alphaCloudHosts.production },
-    }),
-  },
+  define: { __ALPHA_TEST_MOCKS__: JSON.stringify(mocks) },
   resolve: { conditions: ["eliza-source"] },
   // Scan OCR (src/camera/scanWork.ts) loads its worker, cores and English data from /ocr/, never a CDN.
-  plugins: [contentSecurity(), vibelang(), react(), tailwindcss(), localOcrAssets(new URL("./package.json", import.meta.url))],
+  plugins: [contentSecurity(), ...(!mocks ? [productionCloudDeployment()] : []), vibelang(), react(), tailwindcss(), localOcrAssets(new URL("./package.json", import.meta.url))],
   build: { outDir: "../../../../web-dist", emptyOutDir: true, target: "es2023" },
-}));
+});

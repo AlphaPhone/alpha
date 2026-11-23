@@ -3,8 +3,6 @@ import appConfigText from "../../../../app.config.json?raw";
 import deploymentText from "../../../../cloud/deployment.json?raw";
 
 declare const __ALPHA_TEST_MOCKS__: boolean | undefined;
-declare const __ALPHA_PRODUCTION_DEPLOYMENT__: boolean | undefined;
-declare const __ALPHA_CLOUD_DEPLOYMENT__: unknown;
 
 /** ELIZA_DEV_ALLOW_TEST_MOCKS=1 at build time, as vite.config.ts defines `__ALPHA_TEST_MOCKS__`; off everywhere else. */
 export const testMocksBuilt: boolean = typeof __ALPHA_TEST_MOCKS__ === "boolean" && __ALPHA_TEST_MOCKS__;
@@ -55,8 +53,7 @@ export interface CloudAuthority {
 
 type Environments = Record<"production" | "staging", CloudAuthority>;
 
-const productionDeployment = typeof __ALPHA_PRODUCTION_DEPLOYMENT__ === "boolean" && __ALPHA_PRODUCTION_DEPLOYMENT__;
-const deployment: unknown = productionDeployment ? __ALPHA_CLOUD_DEPLOYMENT__ : JSON.parse(deploymentText);
+const deployment: unknown = JSON.parse(deploymentText);
 
 function section(value: unknown, name: string): Record<string, unknown> {
   const found = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[name] : undefined;
@@ -94,11 +91,10 @@ function alphaHosts(environment: "production" | "staging"): CloudAuthority {
 }
 
 /** The Cloud every distributed build uses until the cutover: Eliza Cloud, as cloud/deployment.json ships it. */
-const staging = productionDeployment ? "production" : "staging";
-export const elizaCloud: Environments = { production: shipped("production"), staging: shipped(staging) };
+export const elizaCloud: Environments = { production: shipped("production"), staging: shipped("staging") };
 
 /** Alpha's own Cloud on the hosts cloud/deployment.json names, dormant until the cutover flag is set; its entitlements name Alpha's app id. */
-export const alphaCloud: Environments = { production: alphaHosts("production"), staging: alphaHosts(staging) };
+export const alphaCloud: Environments = { production: alphaHosts("production"), staging: alphaHosts("staging") };
 
 /** The development host's agent origin (`VITE_LOCAL_AGENT_URL`), only in a test-mocks build served off the phone. @throws {never} */
 export function developmentAgentBase(onDevice: boolean): URL | undefined {
