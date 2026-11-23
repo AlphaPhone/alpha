@@ -6,7 +6,8 @@ import { GoogleAccounts, type GoogleAccount } from "../../src/account/google.vib
 import { bindCalendar, readCalendar } from "../../src/calendar/binding.vibe"
 import { CalendarLink, linkLayer } from "../../src/calendar/link.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
-import { binding, calendarOver, same } from "./harness.vibe"
+import { services } from "../../src/calendar/layer.vibe"
+import { binding, fakes, same } from "./harness.vibe"
 import { CalendarAgentFake, DeviceCalendarFake } from "./resident-fake.ts"
 
 const google = { connectorAccountId: "conn-1", providerCalendarId: "owner@example.com" }
@@ -29,8 +30,8 @@ function around(rows: readonly GoogleAccount[], log: { opened: string[]; panels:
 }
 
 function linkOver(agent: CalendarAgentFake, rows: readonly GoogleAccount[], log: { opened: string[]; panels: string[]; disconnects: number }) {
-  const services = calendarOver(agent, new DeviceCalendarFake())
-  return Layer.provideMerge(linkLayer, Layer.mergeAll(linkMachine(), services, around(rows, log)))
+  const platform = Layer.merge(fakes(agent, new DeviceCalendarFake()), around(rows, log))
+  return Layer.provideMerge(linkLayer, Layer.provideMerge(Layer.merge(services, linkMachine()), platform))
 }
 
 describe("Linking Google Calendar (spec/calendar/googleLink.md)", () => {

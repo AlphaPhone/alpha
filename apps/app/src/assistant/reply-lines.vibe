@@ -1,7 +1,8 @@
-// spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"
+// spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/calendar/approvals.md, "Story: Approve or decline a Calendar change the agent asked for"
 import { recognizedMapsCards, type MapsCard } from "@elizaos/plugin-maps/cards"
 import type { Line } from "../../gen/assistant__reply.ts"
 import { FormBlockBody, WorkflowBlock } from "./payloads.schema.vibe"
+import { calendarReviewText } from "../calendar/approvals.vibe"
 
 /** A workflow run a reply announced. */
 export interface WorkflowRun { readonly workflowId: string; readonly runId: string; readonly title: string }
@@ -15,6 +16,7 @@ export type Payload =
   | { readonly kind: "maps"; readonly card: MapsCard }
   | { readonly kind: "workflow"; readonly run: WorkflowRun }
   | { readonly kind: "choice"; readonly id: string; readonly options: readonly ChoiceOption[] }
+  | { readonly kind: "calendar-approval"; readonly requestId: string }
 
 /** One line of a reply as the spec sees it, with the source text it covers. */
 export interface Segment { readonly line: Line; readonly text: string; readonly payload: Payload }
@@ -24,6 +26,7 @@ const workflowOpen = /^\s*\[WORKFLOW\]\s*$/
 const workflowClose = /^\s*\[\/WORKFLOW\]\s*$/
 const choiceOpen = /^\s*\[CHOICE:(maps-share|checkin-[0-9a-f-]{36}) id=([A-Za-z0-9_-]{1,128})\]\s*$/
 const choiceClose = /^\s*\[\/CHOICE\]\s*$/
+const approvalOpen = /^\s*\[CHOICE:approval-[0-9a-fA-F-]{36} id=[0-9a-fA-F-]{36}\]\s*$/
 const form = /^\s*\[FORM\]([\s\S]*)\[\/FORM\]\s*$/
 const bracketTag = /^\s*\[\/?[A-Z][A-Z0-9_:-]*(?:[ \t][^\]]*)?\]/
 const option = /^([^=\n]{1,500})=([^=\n]{1,80})$/
@@ -97,6 +100,17 @@ export function classify(text: string, checkin: boolean): readonly Segment[] {
         ? { line: { tag: "BrokenBlock" }, text: covered.join("\n"), payload: none }
         : { line: { tag: "ToolBlock", card: "WorkflowCard" }, text: covered.join("\n"), payload: { kind: "workflow", run } })
       at = end < 0 ? lines.length : end
+      continue
+    }
+    if (approvalOpen.test(line)) {
+      const end = closingIndex(lines, at + 1, choiceClose)
+      const covered = (end < 0 ? lines.slice(at, at + 1) : lines.slice(at, end + 1)).join("\n")
+      const review = end < 0 ? undefined : calendarReviewText(covered)
+      const requestId = review !== undefined && review.ids.length === 1 && review.text === "" ? review.ids[0] : undefined
+      segments.push(requestId === undefined
+        ? { line: { tag: "UnknownTag" }, text: covered, payload: none }
+        : { line: { tag: "ToolBlock", card: "CalendarCard" }, text: covered, payload: { kind: "calendar-approval", requestId } })
+      at = end < 0 ? at : end
       continue
     }
     const choice = choiceOpen.exec(line)

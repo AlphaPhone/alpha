@@ -22,6 +22,7 @@ import { AgentRestart } from "../../assistant/restart.vibe";
 import { VoiceConversation } from "../../voice/conversation.vibe";
 import { unitsOf } from "../../assistant/units.vibe";
 import { MapsHandoff } from "../../maps/handoff.vibe";
+import { ApprovalReviews } from "../../calendar/approvals.vibe";
 import { newId } from "../../platform/ids.ts";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Button, ScrollArea } from "../components/ui/index.ts";
 import { DictationControl } from "../voice/DictationControl.tsx";
@@ -127,6 +128,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
               onOpenChange={(row) => open(row.app, row.route)}
               onPlan={plan}
               onOpenRun={(workflowId, runId) => open("workflows", `${workflowId}/${runId}`)}
+              onReviewApproval={(requestId) => act(Effect.flatMap(Effect.service(ApprovalReviews), (reviews) => reviews.open(requestId)))}
               onOpenMap={(card, ordinal) => act(Effect.flatMap(Effect.service(MapsHandoff), (maps) => maps.openCard(card, offerOf(ordinal))))}
               onEmail={onEmail}
             />

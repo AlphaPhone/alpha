@@ -20,7 +20,9 @@ ends.
 
 ### A recognized tool block outside a fence becomes its card; inside a fence it stays code
 
-An unknown bracket tag is never a card: outside a fence it reads as text,
+A Calendar approval block (`[CHOICE:approval-<id> id=<id>]` with exactly its approve and reject
+lines) is the Calendar card that opens Calendar's review of that request; any other shape of it is
+an unknown tag. An unknown bracket tag is never a card: outside a fence it reads as text,
 inside a fence it is code. A `[FORM]` block and a malformed workflow block
 are hidden, never shown raw; nothing else is dropped, so the prose after a
 card is kept.
