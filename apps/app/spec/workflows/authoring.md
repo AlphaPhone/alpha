@@ -34,7 +34,9 @@ pure def committedDraft(review: int, a: Authoring): Authoring =
 
 ### A description asking for calls, texts, payments, Contacts, code or email to unnamed people is refused before generation
 
-The refusal names the operations this agent and phone can use instead.
+The refusal names the operations this agent and phone can use instead. When the agent itself asks for
+clarification instead of a draft, its question is shown as it asked it, and the description and any
+draft stay as they were (legacy `workflow-scope-refusal.spec.ts`).
 
 ```quint
 pure def scopeRefused(categories: Set[Category]): bool = categories.size() > 0

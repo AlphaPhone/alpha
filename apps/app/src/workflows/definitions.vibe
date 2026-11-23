@@ -24,7 +24,13 @@ export type ChangeOutcome = "saved" | "replayed" | "refused" | "unknown" | "busy
 export type Described =
   | { readonly kind: "draft"; readonly spec: PhoneWorkflowSpec }
   | { readonly kind: "refused"; readonly message: string }
+  | { readonly kind: "clarify"; readonly message: string }
   | { readonly kind: "unavailable" }
+
+/** Whether a failed generation is the agent asking for clarification (its 422), not a draft that failed. */
+export function clarifying(message: string): boolean {
+  return message.startsWith("Workflow needs clarification: ") || message.startsWith("The request needs clarification.")
+}
 
 const categoryOf: Record<WorkflowScopeCategory, Category> = {
   calls: "Calls", sms: "Sms", payments: "Payments", contacts: "Contacts", code: "ArbitraryCode", email: "UnnamedEmail",
@@ -270,7 +276,13 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
       const scoped = checkWorkflowScope(prompt, operations)
       if (scoped.refused && scopeRefused(scoped.categories.map((c) => categoryOf[c]))) return { kind: "refused", message: scoped.message } satisfies Described
       const kept = try keptDraft()
-      const spec = (client.generatePhone(prompt, known, operations, kept?.spec) catch () => undefined)
+      let asked: string | undefined
+      const spec = (client.generatePhone(prompt, known, operations, kept?.spec) catch (error) => {
+        if (error instanceof WorkflowResponseInvalid && clarifying(error.message)) asked = error.message
+        return undefined
+      })
+      // spec/workflows/authoring.md: the agent's clarifying question is shown as it asked it; the description and draft stay as they were.
+      if (asked !== undefined) return { kind: "clarify", message: asked } satisfies Described
       if (spec === undefined || !validTrigger(typedTrigger(spec.trigger))) return { kind: "unavailable" } satisfies Described
       if (kept !== undefined && !generatedKeepsSchedule(typedTrigger(kept.spec.trigger), typedTrigger(spec.trigger))) return { kind: "unavailable" } satisfies Described
       const edited = (drafts.send({ type: "edit" }) catch () => undefined)

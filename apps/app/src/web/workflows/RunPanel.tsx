@@ -1,9 +1,11 @@
 // spec/workflows/runs.md, "Story: Open a workflow and see its runs"; spec/workflows/runs.md, "Story: Run the version I reviewed exactly once"; spec/workflows/runs.md, "Story: Stop a run I started"; spec/workflows/runs.md, "Story: Run a missed occurrence when I choose"
 import { CheckCircle2, CircleDashed, CircleSlash, Loader2, XCircle } from "lucide-react";
+import { useState } from "react";
 import type { Entry, Runs } from "../../../gen/workflows__runs.ts";
 import { runWord, type RunWord } from "../../../gen/workflows__vocabulary.ts";
 import type { RunOutcome } from "../../workflows/runs.vibe";
 import { Alert, Button, ListRow } from "../components/ui/index.ts";
+import { ReviewDialog } from "./ReviewDialog.tsx";
 import { occurredSentences, occurredWords, reconciliationText, runWords, when } from "./words.ts";
 
 /** The open workflow's runs, its kept run request and what they allow now. */
@@ -46,6 +48,9 @@ function icon(word: RunWord, entry: Entry) {
 export function RunPanel({ runs, can, outcome, onReview, onConfirm, onReconcile, onReviewResend, onResend, onCancel, onSelect, onRunMissedNow }: RunPanelProps) {
   const selected = runs.history.find((e) => e.runId === runs.selected);
   const shown = runs.shown.runId !== "" && runs.shown.runId === runs.selected ? runs.shown : undefined;
+  // spec/workflows/runs.md: Stop asks once more, for the run it names, before anything is sent.
+  const [stopping, setStopping] = useState<string | undefined>(undefined);
+  const askingStop = stopping !== undefined && shown !== undefined && shown.runId === stopping && !shown.finished && !shown.cancelRequested;
   return (
     <section aria-label="Runs" className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2 px-4">
@@ -57,8 +62,12 @@ export function RunPanel({ runs, can, outcome, onReview, onConfirm, onReconcile,
         {runs.custody === "Unknown" && <Button size="lg" variant="outline" disabled={!can.reconcile} onClick={onReconcile}>Check run</Button>}
         {runs.custody === "NotAdmitted" && <Button size="lg" variant="outline" disabled={!can.reviewResend} onClick={onReviewResend}>Send again</Button>}
         {runs.custody === "ConfirmingResend" && <Button size="lg" disabled={!can.resend} onClick={onResend}>Send the same run again</Button>}
-        {shown !== undefined && !shown.finished && <Button size="lg" variant="ghost" disabled={!can.cancel} onClick={onCancel}>{shown.cancelRequested ? "Stopping…" : "Stop run"}</Button>}
+        {shown !== undefined && !shown.finished && <Button size="lg" variant="ghost" disabled={!can.cancel} onClick={() => setStopping(shown.runId)}>{shown.cancelRequested ? "Stopping…" : "Stop run"}</Button>}
       </div>
+      <ReviewDialog open={askingStop} title="Stop this run?" confirm="Stop run" destructive disabled={!can.cancel}
+        onConfirm={() => { setStopping(undefined); onCancel(); }} onCancel={() => setStopping(undefined)}>
+        <p className="text-sm text-muted-foreground">Steps already done stay done.</p>
+      </ReviewDialog>
       {outcome !== undefined && outcomeText[outcome] !== undefined && <Alert variant="warn" role="status" className="mx-4 text-sm">{outcomeText[outcome]}</Alert>}
       {selected !== undefined && selected.occurred !== "Ran" && (
         <Alert className="mx-4 flex flex-col gap-2 text-sm">

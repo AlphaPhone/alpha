@@ -201,6 +201,9 @@ pure def sometimesUnknownAfterSwitch(r: Runs): bool = r.custody == Unknown and r
 
 ### Cancel is asked only for the shown, unfinished run of the current owner
 
+Stop asks once more, naming the run, before the cancel is sent; closing that question sends nothing
+(legacy "Cancel run" then "Confirm cancel").
+
 ```quint
 pure def canRequestCancel(r: Runs): bool = autoRefreshes(r) and not(r.shown.cancelRequested)
 pure def requestCancel(r: Runs): Runs = { ...r, shown: { ...r.shown, cancelRequested: true } }

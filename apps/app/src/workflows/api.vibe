@@ -7,8 +7,8 @@ import { AuthMe } from "./wire.schema.vibe"
 
 /** A request Workflows does not own, or a body where none belongs: nothing was sent. */
 export error NotSent { path: string }
-/** The agent answered with a refusal; `status` is its HTTP status and `code` its refusal code. */
-export error AgentRefused { status: number; code?: string }
+/** The agent answered with a refusal; `status` is its HTTP status, `code` its refusal code and `message` the error it gave. */
+export error AgentRefused { status: number; code?: string; message?: string }
 /** The agent is not running and did not start in time. */
 export error AgentUnavailable { state: string }
 /** The agent answered with something that is not the answer the route documents. */
@@ -70,14 +70,15 @@ export const api = Layer.effect(WorkflowApi, effect {
   effect function request(method: HttpMethod, path: string, body?: unknown) {
     if (!sendable(familyOf(path), methodOf(method), body !== undefined)) throw new NotSent({ path })
     const answer = (resident.json(method, path, body) catch effect (error) => match (error) {
-      when ResidentRefused: throw new AgentRefused({ status: error.status, code: error.code });
+      when ResidentRefused: throw new AgentRefused({ status: error.status, code: error.code, message: error.message });
       when ResidentUnavailable: throw new AgentUnavailable({ state: error.state });
     })
     return answer.data
   }
   const transport: WorkflowRequest = effect (path: string, body: unknown) => request(body === undefined ? "GET" : "POST", path, body) catch effect (error) => match (error) {
     when NotSent: throw workflowHttpError(0, { code: NOT_SENT_CODE });
-    when AgentRefused: throw workflowHttpError(error.status, error.code === undefined ? {} : { code: error.code });
+    // The agent's error text goes with the refusal, so a 422 that asks for clarification reaches the screen as the agent asked it.
+    when AgentRefused: throw workflowHttpError(error.status, { ...(error.code === undefined ? {} : { code: error.code }), ...(error.message === undefined ? {} : { error: error.message }) });
     when AgentUnavailable: throw workflowHttpError(0, {});
   }
   return {
