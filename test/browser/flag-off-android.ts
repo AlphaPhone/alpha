@@ -97,6 +97,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
     const navigation=()=>fixtureNavigation??=(window as any).createNativeNavigationFixture(id,agentId,f);
     const request = async (method: string, path: string, body: any, headers: Record<string, string>, owner?: unknown): Promise<{ status: number; data: unknown }> => {
       const navigationResult=navigation().request(method,path,body,headers,owner);if(navigationResult)return navigationResult;
+      if (path === '/api/notes/trash/recordings' && method === 'GET') return ok({success:true,data:[]});
       // Mounted canonical views probe these sources; this native fixture provides none.
       if (method === 'GET' && ['/api/notes/state', '/api/lifeops/calendar/feed', '/api/lifeops/calendar/calendars', '/api/lifeops/calendar/next-context'].includes(path.split('?')[0])) return { status: 503, data: { error: 'Canonical records unavailable in this fixture' } };
       if (path === '/api/auth/me') return ok({ identity: { id, kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } });
