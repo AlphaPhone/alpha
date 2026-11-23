@@ -1,4 +1,4 @@
-// spec/notes/previous-device.md, "Story: Read Notes kept by an earlier installation of Alpha"
+// spec/notes/previousDevice.md, "Story: Read Notes kept by an earlier installation of Alpha"
 export const previousDeviceSlots = {
   saved: "notes-records:v1:device",
   draft: "notes-draft:v1:device",
