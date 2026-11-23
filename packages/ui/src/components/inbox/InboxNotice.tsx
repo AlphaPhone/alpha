@@ -8,6 +8,8 @@ const notices = {
   savedList: { variant: "info", text: "Saved list", action: "Refresh" },
   listOutOfDate: { variant: "warn", text: "This list may be out of date", action: "Refresh" },
   newerMailMissing: { variant: "info", text: "Newer mail may be missing", action: "Refresh" },
+  savedMessage: { variant: "info", text: "Saved copy. Links and attachments are off." },
+  imagesHidden: { variant: "info", text: "Images are hidden", action: "Show images" },
   reconnect: { variant: "warn", text: "Gmail access was withdrawn", action: "Reconnect" },
   sendingOff: { variant: "warn", text: "Sending is off for this account", action: "Turn on" },
   noReplyAddress: { variant: "warn", text: "No address to reply to" },
