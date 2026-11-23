@@ -7,7 +7,7 @@ import ask from "../src/ask/index.tsx";
 import { Agent } from "../src/platform/agent.vibe";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { button, closeAll, fill, openOver, press, underAct, until } from "./alpha.tsx";
-import { owned } from "./eliza/owned.ts";
+import { owned } from "@repo/eliza-harness/owned";
 import { elizaWorld } from "./eliza/world.vibe";
 
 let mine: Awaited<ReturnType<typeof owned>>;

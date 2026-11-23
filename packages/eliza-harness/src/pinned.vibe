@@ -1,0 +1,12 @@
+import { checkout, ready } from "./checkout.ts"
+
+/** The pinned eliza checkout is not built where `eliza.lock.json` says it is: `pnpm eliza` builds it. */
+export error NotBuilt { commit: string; dir: string }
+
+/** The commit `eliza.lock.json` pins and the directory its build is in, for code that reads the built packages; it builds nothing. */
+export effect function pinnedCheckout() {
+  const at = checkout()
+  const built = try Effect.try({ try: () => ready(at), catch: () => new NotBuilt({ commit: at.commit, dir: at.root }) })
+  if (!built) throw new NotBuilt({ commit: at.commit, dir: at.root })
+  return { commit: at.commit, dir: at.root }
+}

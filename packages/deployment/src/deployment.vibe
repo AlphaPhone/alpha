@@ -1,0 +1,30 @@
+import table from "../deployments.json" with { type: "json" }
+
+/** An origin a phone calls a deployed cloud at: always `https`. */
+const Https = Schema.String.check(Schema.isStartingWith("https://"))
+
+/** Where a cloud answers and which host the phone's App Links name. */
+schema Hosts { cloud: Https; appLinkHost: string }
+
+/** The cloud the harness starts on loopback for one run: its origin is known only when it is listening. */
+schema Local { kind: "local"; profile: "staging" }
+
+/** A deployed cloud, and the one Alpha moves to when the cutover decision is taken (not used before it). */
+schema Hosted { kind: "hosted"; cloud: Https; appLinkHost: string; profile: "staging" | "production"; cutoverCandidate: Hosts }
+
+schema Deployments { local: Local; staging: Hosted; production: Hosted }
+
+export type Deployment = Local | Hosted
+export type Environment = keyof Deployments
+
+/** No environment of `deployments.json` has this name. */
+export error UnknownDeployment { name: string }
+/** `deployments.json` is not the table `Deployments` describes. */
+export error MalformedDeployments { message: string }
+
+/** The row of `deployments.json` named `name`: which cloud the phone, its agent and the page talk to there. */
+export effect function deployment(name: string) {
+  const rows = try mapError(Schema.decodeUnknownEffect(Deployments)(table), (cause) => new MalformedDeployments({ message: cause.message }))
+  if (!Object.hasOwn(rows, name)) throw new UnknownDeployment({ name })
+  return rows[name as Environment] satisfies Deployment
+}

@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowArbitraryExtensions": true,
+    "types": [
+      "node"
+    ],
+    "rootDir": ".",
+    "rootDirs": [
+      ".",
+      ".vibe/declarations"
+    ]
+  },
+  "include": [
+    "src",
+    "test",
+    "*.config.ts"
+  ],
+  "exclude": [
+    "test/fixtures"
+  ],
+  "vibe": {
+    "sidecarDir": ".vibe/declarations"
+  }
+}

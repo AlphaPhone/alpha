@@ -12,7 +12,7 @@ checks this package's types, proofs, tests and page (SPEC.md, "One spec tree").
 | `src/shell/`, `src/ask/` | the shell (Home, the trail, Back) and Ask Alpha, over eliza's turn controller: the areas to read before writing one |
 | `test/sample/`, `spec/app/sample/` | the two sample areas, which only their own journeys mount: the reminders (a read, a feed, an undo window, an attempt outside, kept across restarts) and the text size (senders, an opening that asks the phone, the phone's signals, a page-wide effect) |
 | `test/fakes/` | the world faked once at each boundary: the agent's and the cloud's routes for a browser's fetch, and `phone.ts`, what Capacitor's runtime calls on a phone, with eliza's plugins behind it, typed by eliza's definitions |
-| `test/eliza/` | eliza's real agent and cloud as local processes, for the journeys `*.eliza.test.tsx`, `pnpm dev` and `pnpm eliza:page` |
+| `test/eliza/` | the world of a journey over eliza's real agent and cloud, and `pnpm eliza:page`; the processes themselves are `@repo/eliza-harness`'s, for the journeys `*.eliza.test.tsx` and `pnpm dev` |
 
 ## eliza's agent and cloud
 
@@ -27,7 +27,7 @@ which `pnpm install` makes where the checkout is built, on this package's one co
 | `pnpm eliza` | once per pin: clones eliza at the pin into `~/.cache/alpha/eliza-vibestack/<commit>` (`ALPHA_ELIZA_DIR` names another place, `ALPHA_ELIZA_SOURCE` a local clone to copy), installs it, builds core, the cloud, the agent, the device package and the agent's device bundle, and links `.eliza`. Worktrees that ask at once wait for the one that builds |
 | `pnpm dev` | the page over a local eliza cloud (its own `serve` command, with its staging mailbox) and agent (with its approvals, notifications, schedule and tasks modules): one signed-in, funded owner, a scripted model and a read-only plan catalog, over state of that run alone (`ALPHA_ELIZA_STATE=<dir>` keeps the agent's) |
 | `ALPHA_FAKES=1 pnpm dev` | the page over the journeys' fakes, with no eliza: what the explore stage serves. `ALPHA_FAKES=phone` gives the page the fake phone's plugins, as on an Alpha image |
-| `pnpm test` | the journeys in Node. `test/<area>.eliza.test.tsx` asks the run's setup for the owner named after its file, on one local cloud, with an agent of their own (`test/eliza/owned.ts`); a run with none of them starts nothing |
+| `pnpm test` | the journeys in Node. `test/<area>.eliza.test.tsx` asks the run's setup for the owner named after its file, on one local cloud, with an agent of their own (`@repo/eliza-harness/owned`); a run with none of them starts nothing |
 | `pnpm test:browser` | the journeys that need a real browser, in Chromium |
 | `pnpm eliza:page` | `pnpm dev` and one conversation through the page in Chromium |
 | `pnpm typecheck`, `pnpm build` | `vibelang --noEmit`; `vite build` to `dist/`, each screen in its own chunk. Both stop with the command to run where eliza is not built |

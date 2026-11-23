@@ -2,7 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
 import { defineConfig } from "vite";
-import { eliza } from "./test/eliza/serve.ts";
+import { eliza } from "@repo/eliza-harness/serve";
 import { fakes } from "./test/fakes/serve.ts";
 
 /**

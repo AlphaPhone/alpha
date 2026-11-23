@@ -10,6 +10,8 @@ Everything is built on [the stack](AGENTS.md#the-stack): Node 26, pnpm, VibeLang
 |---|---|
 | `apps/` | deployable applications; `apps/app` is Alpha's page: Home, the built-in apps and Ask Alpha, over eliza's agent and cloud (`pnpm eliza` builds the pinned commit once) |
 | `packages/` | what applications share: `@repo/ui` (components), `@repo/design-system` (tokens) |
+| `packages/eliza-harness` | `@repo/eliza-harness`: the pinned eliza checkout (`pnpm eliza`, `pinnedCheckout()`), its cloud and agent started for journeys and `pnpm dev`, the run's owners, and `pnpm no-bun`; an app imports it from `test/` and its configs, and `pinned` from `src/` |
+| `packages/deployment` | `@repo/deployment`: `deployments.json`, the cloud origin, App Link host and profile of each environment (`local`, `staging`, `production`), read by `deployment(name)` |
 | `vibestack/` | the tools: the `spec` command, Studio, and what any project uses but does not own (`vibestack/testing`, `vibestack/design`, `vibestack/stories`) |
 | `vibestack/examples/` | standalone projects, each with its own install; never part of the workspace |
 

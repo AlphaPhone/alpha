@@ -1,0 +1,47 @@
+{
+  "name": "@repo/eliza-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "bin": {
+    "eliza-harness": "./src/cli.ts"
+  },
+  "exports": {
+    "./checkout": "./src/checkout.ts",
+    "./services": "./src/services.ts",
+    "./serve": "./src/serve.ts",
+    "./setup": "./src/setup.ts",
+    "./owned": "./src/owned.ts",
+    "./pinned": {
+      "types": "./dist/src/pinned.d.ts",
+      "default": "./dist/src/pinned.js"
+    }
+  },
+  "scripts": {
+    "eliza": "node src/cli.ts",
+    "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && vibelang -p tsconfig.build.json",
+    "typecheck": "vibelang --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "4.1.1",
+    "effect": "4.1.1",
+    "vibelang-runtime": "0.0.13"
+  },
+  "peerDependencies": {
+    "vite": "8.3.5",
+    "vitest": "5.1.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.1",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vibelang": "0.0.13",
+    "vibestack": "workspace:*",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

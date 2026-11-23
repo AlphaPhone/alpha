@@ -20,7 +20,12 @@ export interface Checkout {
   readonly cloud: string;
 }
 
-const lock = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../../../../eliza.lock.json"), "utf8")) as Lock;
+/** The repository root: the nearest directory above this file that holds `eliza.lock.json`, from `src/` and from `dist/src/` alike. */
+const repository = (function rootOf(directory: string): string {
+  return fs.existsSync(path.join(directory, "eliza.lock.json")) || path.dirname(directory) === directory ? directory : rootOf(path.dirname(directory));
+})(import.meta.dirname);
+
+const lock = JSON.parse(fs.readFileSync(path.join(repository, "eliza.lock.json"), "utf8")) as Lock;
 
 /** @throws {never} */
 export function checkout(): Checkout {
@@ -38,9 +43,9 @@ const versionOf = (file: string, name: string) => (JSON.parse(fs.readFileSync(fi
  * Effect is refused here, and not found out in a browser.
  */
 function linked(at: Checkout) {
-  const [theirs, ours] = [versionOf(path.join(at.root, "packages/agent/package.json"), "effect"), versionOf(path.join(import.meta.dirname, "../../package.json"), "effect")];
+  const [theirs, ours] = [versionOf(path.join(at.root, "packages/agent/package.json"), "effect"), versionOf(path.join(repository, "package.json"), "effect")];
   if (theirs !== ours) throw new Error(`eliza ${at.commit.slice(0, 12)} is on effect ${theirs} and Alpha on ${ours}: move both together`);
-  const link = path.join(import.meta.dirname, "../../../../.eliza");
+  const link = path.join(repository, ".eliza");
   if (fs.existsSync(link) && fs.realpathSync(link) === fs.realpathSync(at.root)) return;
   fs.rmSync(link, { force: true });
   fs.symlinkSync(at.root, link, "dir");
@@ -80,7 +85,7 @@ async function alone<A>(at: Checkout, work: () => Promise<A>): Promise<A> {
 }
 
 /** Clone eliza at the pinned commit, install it, and build its packages and the agent bundle. Each step is skipped once it is done. */
-async function prepare() {
+export async function prepare() {
   const at = checkout();
   if (!ready(at)) await alone(at, () => build(at));
   linked(at);
@@ -108,18 +113,16 @@ async function build(at: Checkout) {
 }
 
 /** After `pnpm install`: link the checkout where it is built, and say the one command where it is not. Installing never builds it. */
-function link() {
+export function link() {
   const at = checkout();
   if (ready(at)) return linked(at);
   process.stdout.write(`eliza ${at.commit.slice(0, 12)} is not built yet: run \`pnpm eliza\` once (a few minutes) before typecheck, test, build or dev\n`);
 }
 
 /** Before a command that needs the checkout: say the one command that makes it, and stop, where it is not built. */
-function required() {
+export function required() {
   try { prepared(); } catch (cause) {
     process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
     process.exitCode = 1;
   }
 }
-
-if (process.argv[1] === import.meta.filename) await (process.argv.includes("--link") ? link() : process.argv.includes("--ready") ? required() : prepare());
