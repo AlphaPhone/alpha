@@ -174,7 +174,7 @@ test("the bundle audit fails an assetlinks.json with a placeholder or debug fing
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "alpha-assetlinks-audit-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.mkdirSync(path.join(dir, ".well-known"));
-  fs.writeFileSync(path.join(dir, "index.html"), "<!doctype html>");
+  fs.writeFileSync(path.join(dir, "index.html"), `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'">`);
   fs.writeFileSync(path.join(dir, "build-flags.json"), JSON.stringify({ testMocks: false }));
   fs.writeFileSync(path.join(dir, ".well-known/assetlinks.json"), fs.readFileSync(TEMPLATE));
   assert.deepEqual(auditWebBundle(dir).findings.map(row => row.rule), ["assetlinks.json still contains RELEASE_CERT_SHA256_PLACEHOLDER"]);
