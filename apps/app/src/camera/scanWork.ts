@@ -200,7 +200,20 @@ export async function correctPage(image: Blob, corners: Corners, signal: AbortSi
   return new Promise<Blob>((resolve, reject) => output.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("A page could not be converted."))), "image/jpeg", 0.92));
 }
 
-/** One PDF of the reviewed pages, each page's reviewed text placed invisibly behind its own image; at most 8 MB. */
+/** The characters the searchable PDF's Helvetica text layer can draw: printable Latin-1. */
+const PDF_TEXT = /^[\x20-\x7e\xa0-\xff]$/;
+
+/** A reviewed text line holds a character the searchable PDF cannot write; nothing was exported. */
+export class UnsupportedPdfText extends Error {
+  readonly code = "unsupported-text";
+  readonly character: string;
+  constructor(character: string) {
+    super(`“${character}” can’t be written into a searchable PDF. Correct the text, then export again.`);
+    this.character = character;
+  }
+}
+
+/** One PDF of the reviewed pages, each page's reviewed text placed invisibly behind its own image; at most 8 MB. A line holding a character the text layer cannot draw refuses the whole export. */
 export async function buildPdf(pages: readonly Blob[], layers: readonly (readonly TextLine[] | null)[], signal: AbortSignal = new AbortController().signal): Promise<string> {
   if (pages.length < 1 || pages.length > 20 || pages.reduce((sum, page) => sum + page.size, 0) > 64 * 1024 * 1024) throw new Error("Choose 1 to 20 pages, up to 64 MB in total.");
   const { PDFDocument, StandardFonts } = await import("pdf-lib");
@@ -217,8 +230,11 @@ export async function buildPdf(pages: readonly Blob[], layers: readonly (readonl
     sheet.drawImage(embedded, { x: 0, y: 0, width: canvas.width, height: canvas.height });
     for (const line of layers[index] ?? []) {
       const size = Math.max(1, line.height * canvas.height * 0.8);
-      const text = line.text.replace(/[^\x20-\x7e -ÿ]/g, "");
-      if (text === "") continue;
+      const text = line.text;
+      if (text.trim() === "") continue;
+      // A reviewed line the PDF font cannot draw is refused, never silently cut: the owner corrects it before exporting.
+      const unsupported = [...text].find((character) => !PDF_TEXT.test(character));
+      if (unsupported !== undefined) throw new UnsupportedPdfText(unsupported);
       sheet.drawText(text, { x: line.x * canvas.width, y: canvas.height - (line.y + line.height) * canvas.height, size, font, opacity: 0 });
     }
   }

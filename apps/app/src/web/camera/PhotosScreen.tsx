@@ -1,6 +1,6 @@
 // spec/camera/library.md, "Story: See my whole permitted library, newest first"; spec/camera/library.md, "Story: Be told honestly what Android lets Alpha read"; spec/camera/browse.md, "Story: Look at one photo"; spec/camera/browse.md, "Story: Change my photos in batches I confirm"; spec/camera/albums.md, "Story: Keep my photos in albums"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"
 import { Effect } from "effect";
-import { ChevronLeft, Heart, Images, Mail, MessageSquare, Pencil, ScanText, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
+import { ChevronLeft, Heart, Images, Mail, MessageSquare, Pencil, ScanText, Settings2, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useMachine as useCatalog } from "../../../gen/camera__library.react.ts";
 import { useMachine as useBrowse } from "../../../gen/camera__browse.react.ts";
@@ -110,6 +110,10 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
       <header className="flex items-center gap-2 px-2 py-2">
         <Button variant="ghost" size="icon" aria-label={browse.album !== "" ? "Back to albums" : "Back to apps"} onClick={() => (browse.album !== "" ? library((l) => l.openAlbum(undefined)) : onClose())}><ChevronLeft /></Button>
         <h1 className="flex-1 font-serif text-2xl">Photos</h1>
+        {!browse.selecting && browse.album.startsWith("custom:") && (
+          <Button variant="ghost" size="icon" aria-label="Album options" disabled={!canAlbum({ type: "openDialog", target: browse.album.slice("custom:".length), media: "", mediaRevision: "" })}
+            onClick={() => { setName(""); library((l) => l.openAlbumDialog(browse.album.slice("custom:".length), false)); }}><Settings2 /></Button>
+        )}
         {!browse.selecting && browse.tab === "LibraryTab" && (
           <Button variant="ghost" size="icon" aria-label={browser ? "Choose image" : "Scan image text"} onClick={() => scanner((s) => s.chooseImage())}><ScanText /></Button>
         )}
@@ -165,8 +169,9 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
           </li>
         </ul>
       ) : rows.length === 0 ? (
-        <EmptyState title={catalog.main.loading ? "Loading" : browse.tab === "TrashTab" ? (catalog.trash.failed ? "Couldn’t load" : "Empty") : "No photos"} icon={<Images />}>
+        <EmptyState title={catalog.main.loading ? "Loading" : browse.tab === "TrashTab" ? (catalog.trash.failed ? "Couldn’t load" : "Empty") : catalog.main.failed ? "Couldn’t load photos" : browse.filtered ? "No matches" : "No photos"} icon={<Images />}>
           {browse.tab === "TrashTab" && catalog.trash.failed && <Button onClick={() => library((l) => l.retryTrash())}>Try again</Button>}
+          {browse.tab !== "TrashTab" && !catalog.main.loading && catalog.main.failed && <Button onClick={() => library((l) => l.refresh())}>Retry loading photos</Button>}
         </EmptyState>
       ) : (
         <PhotoGrid rows={rows} selection={browse.selection} selecting={browse.selecting} columns={browse.columns} now={now}
@@ -181,6 +186,7 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
       {browse.selecting && (
         <footer className="flex items-center justify-around border-t border-border p-2" aria-label="Selection">
           <span className="font-mono text-xs uppercase">{browse.selection.length}</span>
+          <Button variant="ghost" disabled={!can({ type: "selectAll" })} onClick={() => library((l) => l.selectAll())}>Select all</Button>
           {browse.tab === "TrashTab" ? (
             <>
               <Button variant="ghost" disabled={!can({ type: "beginChange", change: "RestoreChange", count: 1 })} onClick={() => library((l) => l.restore())}><Undo2 />Restore</Button>
@@ -212,12 +218,23 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
                 {[viewer.width > 0 ? `${viewer.width} × ${viewer.height}` : "", formatBytes(viewer.size), viewer.expiresAt > 0 ? `${daysLeft(viewer.expiresAt, now)} days left` : ""].filter((part) => part !== "").join(" · ")}
               </p>
               <footer className="flex justify-around p-2">
-                <Button variant="ghost" size="icon" aria-label="Share" onClick={() => library((l) => l.shareOne(viewer.id))}><Share2 /></Button>
-                {!viewer.video && <Button variant="ghost" size="icon" aria-label="Ask Alpha" onClick={() => media((m) => m.askAboutPhoto(viewer.id))}><Sparkles /></Button>}
-                {!viewer.video && <Button variant="ghost" size="icon" aria-label="Email" onClick={() => media((m) => m.emailPhoto(viewer.id))}><Mail /></Button>}
-                {!viewer.video && messages && viewer.size > 0 && viewer.size <= messagesPictureLimit && <Button variant="ghost" size="icon" aria-label="Send in Messages" onClick={() => media((m) => m.messagePhoto(viewer.id))}><MessageSquare /></Button>}
-                <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => edit((e) => (viewer.video ? e.beginVideo(viewer.id) : e.begin(viewer.id)))}><Pencil /></Button>
-                <Button variant="ghost" size="icon" aria-label="Info" onClick={() => { setName(""); library((l) => l.openAlbumDialog("", false)); }}><Images /></Button>
+                {browse.tab !== "TrashTab" && <Button variant="ghost" size="icon" aria-label="Share" onClick={() => library((l) => l.shareOne(viewer.id))}><Share2 /></Button>}
+                {browse.tab !== "TrashTab" && !viewer.video && <Button variant="ghost" size="icon" aria-label="Ask Alpha" onClick={() => media((m) => m.askAboutPhoto(viewer.id))}><Sparkles /></Button>}
+                {browse.tab !== "TrashTab" && !viewer.video && <Button variant="ghost" size="icon" aria-label="Email" onClick={() => media((m) => m.emailPhoto(viewer.id))}><Mail /></Button>}
+                {browse.tab !== "TrashTab" && !viewer.video && messages && viewer.size > 0 && viewer.size <= messagesPictureLimit && <Button variant="ghost" size="icon" aria-label="Send in Messages" onClick={() => media((m) => m.messagePhoto(viewer.id))}><MessageSquare /></Button>}
+                {browse.tab === "TrashTab" ? (
+                  <>
+                    <Button variant="ghost" size="icon" aria-label="Recover" onClick={() => library((l) => l.viewerChange("restore"))}><Undo2 /></Button>
+                    <Button variant="ghost" size="icon" aria-label="Delete forever" onClick={() => library((l) => l.viewerChange("delete"))}><Trash2 /></Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="ghost" size="icon" aria-label="Edit" onClick={() => edit((e) => (viewer.video ? e.beginVideo(viewer.id) : e.begin(viewer.id)))}><Pencil /></Button>
+                    <Button variant="ghost" size="icon" aria-label={viewer.favorite ? "Remove from favorites" : "Favorite"} aria-pressed={viewer.favorite} onClick={() => library((l) => l.viewerChange("favorite"))}><Heart className={viewer.favorite ? "fill-current" : undefined} /></Button>
+                    <Button variant="ghost" size="icon" aria-label="Add to album" onClick={() => { setName(""); library((l) => l.viewerChange("album")); }}><Images /></Button>
+                    <Button variant="ghost" size="icon" aria-label="Move to trash" onClick={() => library((l) => l.viewerChange("trash"))}><Trash2 /></Button>
+                  </>
+                )}
               </footer>
             </>
           )}

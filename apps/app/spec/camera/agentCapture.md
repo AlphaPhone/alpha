@@ -76,10 +76,19 @@ pure def lawADirectPhotoNeedsTheOwnersWords(reviewed: bool, ownerWords: bool, di
 
 ### A request is admitted only over the visible, free Camera of an unprotected screen; a covering conversation is closed and the request waits for its panel
 
-A hidden Camera, another screen, a protected screen, a recording or a busy
-shutter fails at once and touches nothing.
+A request that may run (its card was approved, or the owner's own words ask
+for the photo) and is asked while Camera is not in front on an unprotected
+screen first opens Camera, and is judged once Camera shows; Camera that has
+not shown within `openLimitMs` is still hidden. A hidden Camera, a protected
+screen, a recording or a busy shutter fails at once and touches nothing, and a
+request that needs its card never opens Camera.
 
 ```quint
+pure val openLimitMs = 3000
+pure def opensCamera(scene: Scene, reviewed: bool, ownerWords: bool, directTaken: bool, sensitive: bool): bool =
+  not(scene.shown) and not(sensitive) and not(needsCard(reviewed, ownerWords, directTaken))
+pure def lawOnlyARequestThatMayRunOpensCamera(scene: Scene, reviewed: bool, ownerWords: bool, directTaken: bool, sensitive: bool): bool =
+  opensCamera(scene, reviewed, ownerWords, directTaken, sensitive) implies (not(sensitive) and (reviewed or (ownerWords and not(directTaken))))
 pure def stageAfterWait(scene: Scene): Stage = if (scene.ready) Armed else Queued
 pure def canAsk(c: Capture, scene: Scene, wanted: Wanted, reviewed: bool, ownerWords: bool, offersLibraryId: bool, sensitive: bool): bool = c.request == NoRequest
 pure def ask(c: Capture, scene: Scene, wanted: Wanted, reviewed: bool, ownerWords: bool, offersLibraryId: bool, sensitive: bool): Capture = {
