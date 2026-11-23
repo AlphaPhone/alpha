@@ -68,6 +68,15 @@ public final class BrowserCookiePolicyInstrumentedTest {
  @Test public void nativeBrowserShowsAddressRewrittenBeforeFirstPaint()throws Exception{
   AtomicReference<WebView> child=new AtomicReference<>();
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
+   // The host's initial navigation disposes any tabs owned by its previous document.
+   // Wait for the product shell or its sign-in screen before creating the fixture tab.
+   String ready="document.readyState==='complete' && !!document.querySelector('[data-active-view], .alpha-google-icon')";
+   boolean hostReady=false;
+   for(int attempt=0;attempt<150;attempt++){
+    if("true".equals(WebViewTestDriver.evaluate(ready))){hostReady=true;break;}
+    android.os.SystemClock.sleep(100);
+   }
+   assertTrue("The product host finished startup navigation",hostReady);
    WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
     WebView web=build(activity,"rewrite_probe",false,AlphaBrowserStores.PERSISTENT_PROFILE);
     BrowserFlowInstrumentedTest.installSameDocumentFixture(web);
