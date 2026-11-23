@@ -25,7 +25,9 @@ do for one message.
 
 The observation must be the non-sensitive Browser view, and its selected `browser-tab` must be the
 tab Browser shows on the unlocked phone, at the same revision. A message that fails any of these
-reads nothing and waits for nothing. Preferences that cannot be read share no page.
+reads nothing and waits for nothing. Preferences that cannot be read share no page. The peer's
+fresh status is read beside the page, not before it, so the read begins as for a peer that takes
+it; the page stays on the phone, and the read is withdrawn once that status does not declare it.
 
 ```quint
 type PageSetting = SettingOn | SettingOff | SettingUnreadable
@@ -96,6 +98,61 @@ pure def sometimesAReadIsWithdrawn(r: PageRead): bool = r.stage == Withdrawn and
 pure val turnValues = Set(1, 2, 3)
 pure val tabValues = Set("t1", "t2")
 pure val revisionValues = Set(0, 1)
+```
+
+### On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read
+
+So that a message rarely waits on the read, Browser on the phone captures the page its shown tab
+holds 700 ms after the tab has loaded it, and again when the assistant opens over Browser unless a
+capture younger than 20 seconds holds, at most once every 5 seconds. A capture is taken only with
+Browser page for Alpha on, Browser shown on the unlocked phone and a settled public HTTPS page of a
+normal tab; a private tab is never read. One capture is kept, in memory on the phone, for the tab,
+revision and navigation it was read from, and is cleared once it is older than 10 minutes; it goes
+nowhere outside a message. With the setting off no capture is served, and the next capture, message
+or move to or from Browser clears it; Browser's teardown clears it too. Reads of one page share one
+read, a read of another page stops it, and a finished read is let go, so its page is held only by
+the capture and the messages awaiting it. The browser build captures nothing ahead, since its read
+fetches the address again. A message whose page has a capture waits at most 250 ms for a fresh read
+and sends the capture when none answers in time; a fresh read that answers decides, and a refused
+one also drops the capture. A message with no capture waits for the read as above. Either way the
+page is handed to the message only after the setting and the shown page are checked again.
+
+```quint
+pure val settleMs = 700
+pure val warmAgeMs = 20000
+pure val warmGapMs = 5000
+pure val freshWaitMs = 250
+pure val captureMaxAgeMs = 600000
+type CaptureFacts = { enabled: bool, priv: bool, onDevice: bool, shown: bool, loaded: bool }
+pure def capturesAhead(c: CaptureFacts): bool = c.enabled and not(c.priv) and c.onDevice and c.shown and c.loaded
+pure def warmsAgain(kept: bool, keptAge: int, sinceWarm: int): bool = sinceWarm >= warmGapMs and not(kept and keptAge < warmAgeMs)
+type Kept = { tab: str, revision: int, navigation: str, age: int }
+pure def serves(k: Kept, tab: str, revision: int, navigation: str): bool =
+  k.tab == tab and k.revision == revision and k.navigation == navigation and k.age <= captureMaxAgeMs
+pure def turnWaitMs(kept: bool): int = if (kept) freshWaitMs else waitMs
+pure def lawNoCaptureWithTheSettingOffOrAPrivateTab(c: CaptureFacts): bool = (not(c.enabled) or c.priv) implies not(capturesAhead(c))
+pure def lawNoCaptureAheadOnTheBrowserBuild(c: CaptureFacts): bool = not(c.onDevice) implies not(capturesAhead(c))
+pure def lawNoCaptureOffBrowserOrBeforeTheLoad(c: CaptureFacts): bool = not(c.shown and c.loaded) implies not(capturesAhead(c))
+pure def lawACaptureServesOnlyItsOwnTabRevisionAndNavigation(k: Kept, tab: str, revision: int, navigation: str): bool =
+  serves(k, tab, revision, navigation) implies (k.tab == tab and k.revision == revision and k.navigation == navigation)
+pure def lawAnOldCaptureNeverServes(k: Kept): bool = k.age > captureMaxAgeMs implies not(serves(k, k.tab, k.revision, k.navigation))
+pure def lawATurnWithACaptureWaitsAtMostTheFreshWait(kept: bool): bool = kept implies turnWaitMs(kept) <= freshWaitMs
+pure def lawATurnNeverWaitsPastItsBudget(kept: bool): bool = turnWaitMs(kept) <= waitMs
+pure def lawARecentCaptureIsNotTakenAgain(keptAge: int, sinceWarm: int): bool = keptAge < warmAgeMs implies not(warmsAgain(true, keptAge, sinceWarm))
+pure def lawCapturesAreSpaced(kept: bool, keptAge: int, sinceWarm: int): bool = sinceWarm < warmGapMs implies not(warmsAgain(kept, keptAge, sinceWarm))
+pure val captureFacts: CaptureFacts = { enabled: true, priv: false, onDevice: true, shown: true, loaded: true }
+pure val cValues: Set[CaptureFacts] = List(
+  captureFacts, { ...captureFacts, enabled: false }, { ...captureFacts, priv: true }, { ...captureFacts, onDevice: false },
+  { ...captureFacts, shown: false }, { ...captureFacts, loaded: false },
+).foldl(Set(), (acc, c) => acc.union(Set(c)))
+pure val keptCapture: Kept = { tab: "t1", revision: 0, navigation: "n1", age: 0 }
+pure val kValues: Set[Kept] = List(
+  keptCapture, { ...keptCapture, tab: "t2" }, { ...keptCapture, revision: 1 }, { ...keptCapture, navigation: "n2" },
+  { ...keptCapture, age: 600000 }, { ...keptCapture, age: 600001 },
+).foldl(Set(), (acc, k) => acc.union(Set(k)))
+pure val navigationValues = Set("n1", "n2")
+pure val keptAgeValues = Set(0, 19999, 20000, 600001)
+pure val sinceWarmValues = Set(0, 4999, 5000, 20000)
 ```
 
 ### A withheld page tells the agent only its address and title, and a sensitive page's address loses its query

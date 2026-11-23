@@ -626,6 +626,30 @@ pure def agentPresent(s: Session, tab: str, selected: str, edit: bool): SessionC
   { state: { ...s, cur: tab, layers: { ...noLayers, editing: edit } }, out: List(ShowBrowser) }
 ```
 
+### The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab
+
+Showing the tab list (`browser_tabs_show`, which the phone advertises as `browser.tabs.show.v1`
+whenever the agent offers it) brings Browser forward with its own tab switcher open over the
+selected tab, and every other layer closed. No tab is opened, switched or closed. It is a change
+the receipt reports, so it runs only when the action is presented and a list that did not open is
+corrected ([agent opens](./agent.md)). The receipt says only "Showing your open tabs in Browser.":
+no tab, title, address or count of the list reaches the agent. A request while Browser has no
+session, no selected tab, is refused before its receipt, "Browser is unavailable.", and nothing is
+shown. The request names nothing the owner typed, so bound to the owner's message it runs without
+review even with no typed words, and unbound it waits for the card.
+
+```quint
+pure def canAgentShowTabs(s: Session, selected: str): bool = isTab(s, selected) and s.cur == selected
+pure def agentShowTabs(s: Session, selected: str): SessionChange =
+  { state: { ...s, layers: { ...noLayers, tabsOpen: true } }, out: List(ShowBrowser) }
+pure def tabListRunsUnreviewed(boundToMessage: bool, wordsTyped: bool): bool = boundToMessage
+pure def lawAnUnboundTabListWaitsForReview(wordsTyped: bool): bool = not(tabListRunsUnreviewed(false, wordsTyped))
+pure def lawABoundTabListRunsUnreviewed(wordsTyped: bool): bool = tabListRunsUnreviewed(true, wordsTyped)
+pure def lawAnUnstartedBrowserShowsNoTabList(selected: str): bool = not(canAgentShowTabs(initial, selected))
+pure def stepShowingTheTabListChangesNoTab(before: Session, via: str, after: Session): bool =
+  via == "agentShowTabs" implies (after.tabs == before.tabs and after.cur == before.cur and after.layers.tabsOpen)
+```
+
 ### The agent opens a new tab, private only when asked, and is refused at the limit
 
 ```quint
@@ -765,8 +789,13 @@ proposal; a later listing of the same proposal never redraws it. A listing still
 tab keeps its identity, address and profile in the same order and the same private tabs stay open:
 a tab that only changes its title, such as an unread count or a page finishing its load, keeps it.
 The shell names each line by its title, else its address, and counts a private tab without naming
-it. The card says how many private tabs stay open and that they close from a private tab; with only
-private tabs open, the notice says so instead of saying no tabs are open. No private title or site
+it. The title is for display only: the listing is bound to each tab's identity, address and
+profile and the count of private tabs it keeps. The card says how many private tabs stay open and
+that they close from a private tab, "1 private tab stays open. Ask from a private tab to close it."
+or "2 private tabs stay open. Ask from a private tab to close them."; with only private tabs open,
+no card is offered and the notice says so instead of saying no tabs are open, "Close all tabs: No
+other tabs are open to close. 1 private tab stays open. Ask from a private tab to close it. Nothing
+was closed." No private title or site
 reaches the agent or the card. The agent never receives the list. At most sixteen proposals keep a
 listing; the oldest is forgotten first.
 
@@ -808,7 +837,7 @@ the listing refuse before any effect, and the owner is told to ask again. The li
 either way. The receipt counts the tabs it closed, "Closed 2 tabs.", and adds "Private tabs were
 left open." when the listing kept any; it never says every tab closed while a private tab stays. Every listed tab closes in one state change. Outside Browser all of them close at once;
 in Browser the others close at once and the tab showing closes when the action is presented, after
-its receipt. A request made outside a private tab never leaves a private tab showing: Browser shows
+its receipt; when it could not close then, the owner is told it stayed open ([agent opens](./agent.md)). A request made outside a private tab never leaves a private tab showing: Browser shows
 a new tab instead.
 
 ```quint

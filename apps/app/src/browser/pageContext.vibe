@@ -1,6 +1,6 @@
-// spec/browser/pageContext.md, "Story: Let Alpha see the page I have open"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"; spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"; spec/browser/pageContext.md, "A withheld page tells the agent only its address and title, and a sensitive page's address loses its query"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
-import { type Event, type PageRead, type Withheld, Machine, machine, mayRead, waitMs } from "../../gen/browser__pageContext.effect.vibe"
-import { curTab, isPrivateTab } from "../../gen/browser__session.effect.vibe"
+// spec/browser/pageContext.md, "Story: Let Alpha see the page I have open"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"; spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"; spec/browser/pageContext.md, "On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read"; spec/browser/pageContext.md, "A withheld page tells the agent only its address and title, and a sensitive page's address loses its query"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
+import { type Event, type PageRead, type Withheld, Machine, captureMaxAgeMs, capturesAhead, machine, mayRead, serves, settleMs, turnWaitMs, warmsAgain } from "../../gen/browser__pageContext.effect.vibe"
+import { type Session, curTab, isPrivateTab } from "../../gen/browser__session.effect.vibe"
 import { settledSecurely } from "../../gen/browser__page.effect.vibe"
 import { PageContextReply } from "../platform/native.schema.vibe"
 import { Preferences } from "../settings/preferences.vibe"
@@ -20,7 +20,7 @@ export interface PageTurnObservation {
 /** The page Browser shows, for one chat message at a time. */
 export service BrowserPageContext {
   readonly changes: Stream.Stream<PageRead>
-  /** The page of the observed tab for one message to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds, and undefined whenever it may not go. */
+  /** The page of the observed tab for one message to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds or, with a capture of the page in hand, 250 ms, and undefined whenever it may not go. */
   forTurn(observation: PageTurnObservation, peerTakesIt: boolean): (BrowserPageObservation | undefined)!!
   /** Whether `url` is exactly a link of the page the latest message carried. */
   carried(url: string): boolean!!
@@ -32,7 +32,27 @@ function onBrowser(state: ForegroundState): boolean {
   return state.visible && !state.locked && state.screen === "home" && state.view === "browser"
 }
 
-/** BrowserPageContext over the page-read machine in memory: the native tab host's isolated read on a device, the public address fetched again without credentials on the browser build. */
+/** The page of the shown tab that may be read now: a settled public HTTPS page of a normal tab. */
+interface Readable { readonly id: string; readonly revision: number; readonly navigation: string; readonly url: string; readonly address: string; readonly title: string }
+
+function readableOf(state: Session): Readable | undefined {
+  const tab = curTab(state)
+  const address = pageAddress(tab.page.url)
+  if (state.cur === "" || isPrivateTab(state, state.cur) || tab.stage !== "Live" || !settledSecurely(tab.page) || address === undefined) return undefined
+  return { id: state.cur, revision: tab.revision, navigation: tab.page.navigation, url: tab.page.url, address, title: tab.page.title }
+}
+
+function keyOf(page: Readable | undefined): string {
+  return page === undefined ? "" : `${page.id}\n${page.revision}\n${page.navigation}`
+}
+
+/** A capture of a page, kept in memory with when it was read. */
+interface Held { readonly page: Readable; readonly read: BrowserPageObservation; readonly at: number }
+
+/** One read of a page, shared by every capture and message of it: its page, undefined when refused or invalid, or "aborted" when a read of another page stopped it. */
+type Fresh = { readonly page: BrowserPageObservation | undefined } | "aborted"
+
+/** BrowserPageContext over the page-read machine in memory: the native tab host's isolated read on a device, captured ahead of a message there and kept in memory, and the public address fetched again without credentials on the browser build. */
 export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, effect {
   const reads = try Machine
   const tabs = try BrowserTabs
@@ -40,7 +60,15 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
   const foreground = try Foreground
   const preferences = try Preferences
   const links = try Ref.make<readonly string[]>([])
+  const scope = try Scope.Scope
+  const gate = try Semaphore.make(1)
   const step = effect (event: Event) => reads.send(event) catch () => undefined
+  /** The one capture kept, in memory only, of the page it was read from. */
+  let kept: Held | undefined
+  /** The timer that clears the kept capture once it is older than ten minutes. */
+  let expiring: Fiber.Fiber<void> | undefined
+  let running: { readonly key: string; readonly done: Deferred.Deferred<Fresh>; readonly fiber: Fiber.Fiber<void> } | undefined
+  let warmedAt = Number.NEGATIVE_INFINITY
 
   effect function read(tab: string, url: string, navigation: string) {
     if (host.onDevice) {
@@ -63,6 +91,92 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     return state.cur === tab && now.revision === revision && now.page.navigation === navigation && !isPrivateTab(state, tab) && onBrowser(try foreground.get())
   }
 
+  /** The capture of `page`; a capture older than ten minutes is dropped. */
+  function keptOf(page: Readable, now: number) {
+    const held = kept
+    if (held === undefined) return undefined
+    const facts = { tab: held.page.id, revision: held.page.revision, navigation: held.page.navigation, age: now - held.at }
+    if (!serves(facts, facts.tab, facts.revision, facts.navigation)) {
+      kept = undefined
+      return undefined
+    }
+    return serves(facts, page.id, page.revision, page.navigation) ? held : undefined
+  }
+
+  effect function forget() {
+    kept = undefined
+    const stopping = running
+    running = undefined
+    if (stopping !== undefined) try Fiber.interrupt(stopping.fiber)
+  }
+
+  /** Keeps `held` until a newer one replaces it or it is older than ten minutes, when it no longer serves. */
+  effect function keep(held: Held) {
+    kept = held
+    const before = expiring
+    expiring = fork.in(scope) effect {
+      try sleep(Duration.millis(captureMaxAgeMs + 1))
+      if (kept === held) kept = undefined
+    }
+    if (before !== undefined) try Fiber.interrupt(before)
+  }
+
+  /** Reads `page` once and keeps what it answered while the setting is on and the page is still shown; a refused read drops its capture. */
+  effect function capture(page: Readable, done: Deferred.Deferred<Fresh>) {
+    const answer = try read(page.id, page.url, page.navigation)
+    const at = try Clock.currentTimeMillis
+    const base = { tabId: `${host.session}:${page.id}`, revision: String(page.revision), capturedAt: at, address: page.address, title: page.title }
+    const got = answer === undefined ? undefined : (Effect.try(() => boundPage(answer, base)) catch () => undefined)
+    if (got === undefined) {
+      if (keyOf(kept?.page) === keyOf(page)) kept = undefined
+    } else if (keyOf(readableOf(try tabs.get())) === keyOf(page) && (try preferences.sharesBrowserPage())) {
+      try keep({ page, read: got, at })
+    }
+    try Deferred.succeed(done, { page: got })
+  }
+
+  /** The read of `page`: the one already running for it, or a new one that stops a read of another page. */
+  effect function reading(page: Readable) {
+    return try Semaphore.withPermit(gate, effect {
+      const key = keyOf(page)
+      const now = running
+      if (now !== undefined && now.key === key && !(try Deferred.isDone(now.done))) return now.done
+      if (now !== undefined) try Fiber.interrupt(now.fiber)
+      const done = try Deferred.make<Fresh>()
+      // A finished read is let go, so its page stays only with the capture and the messages awaiting it.
+      const fiber = fork.in(scope) ensuring(capture(page, done), effect {
+        try Deferred.succeed(done, "aborted")
+        if (running?.done === done) running = undefined
+      })
+      running = { key, done, fiber }
+      return done
+    })
+  }
+
+  /** Captures the shown page ahead of a message, on the phone only: once it has settled after loading, or when the assistant opens over Browser unless a recent capture holds. */
+  effect function ahead(warming: boolean) {
+    const state = try tabs.get()
+    const enabled = try preferences.sharesBrowserPage()
+    if (!enabled) try forget()
+    const page = readableOf(state)
+    if (page === undefined || !capturesAhead({ enabled, priv: isPrivateTab(state, state.cur), onDevice: host.onDevice, shown: onBrowser(try foreground.get()), loaded: true })) return
+    const now = try Clock.currentTimeMillis
+    if (warming) {
+      const held = keptOf(page, now)
+      if (!warmsAgain(held !== undefined, held === undefined ? 0 : now - held.at, now - warmedAt)) return
+      warmedAt = now
+    }
+    try reading(page)
+  }
+
+  if (host.onDevice) {
+    fork.scoped Stream.runForEach(Stream.debounce(Stream.changes(Stream.map(tabs.changes, (state) => keyOf(readableOf(state)))), Duration.millis(settleMs)), (key) => key === "" ? Effect.void : ahead(false))
+    fork.scoped Stream.runForEach(Stream.changes(Stream.map(foreground.changes, (front) => onBrowser(front) && front.chat !== "closed")), (over) => over ? ahead(true) : Effect.void)
+  }
+  // The preferences have no change stream: with the setting off, moving to or from Browser clears the capture too.
+  fork.scoped Stream.runForEach(Stream.changes(Stream.map(foreground.changes, onBrowser)), () => effect { if (!(try preferences.sharesBrowserPage())) try forget() })
+  try addFinalizer(() => sync(() => { kept = undefined }))
+
   effect function serve(turn: number, observation: PageTurnObservation, peerTakesIt: boolean) {
     try Ref.set(links, [])
     const state = try tabs.get()
@@ -71,6 +185,8 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     const observedTab = selected !== undefined && selected.kind === "browser-tab" && selected.id.startsWith(prefix) ? selected.id.slice(prefix.length) : ""
     const tab = curTab(state)
     const address = pageAddress(tab.page.url)
+    const enabled = try preferences.sharesBrowserPage()
+    if (!enabled) try forget()
     const allowed = mayRead({
       browserView: observation.view === "browser",
       sensitive: observation.sensitive === true,
@@ -80,20 +196,22 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
       priv: isPrivateTab(state, state.cur),
       settled: tab.stage === "Live" && settledSecurely(tab.page),
       publicHttps: address !== undefined,
-      enabled: try preferences.sharesBrowserPage(),
+      enabled,
       peerTakesIt,
     })
     const begun = try step({ type: "begin", turn, tab: state.cur, revision: tab.revision, allowed })
-    if (begun?.stage !== "Reading" || address === undefined || selected === undefined || selected.revision === undefined) return undefined
-    const answer = timeout(read(state.cur, tab.page.url, tab.page.navigation), waitMs) catch () => "late" as const
-    if (answer === "late") {
+    const shown = readableOf(state)
+    if (begun?.stage !== "Reading" || shown === undefined || selected === undefined || selected.revision === undefined) return undefined
+    // With a capture of this page in hand the message waits only briefly for a fresher read; a fresh answer decides.
+    const held = keptOf(shown, try Clock.currentTimeMillis)
+    const fresh = try timeoutOption(Deferred.await(try reading(shown)), Duration.millis(turnWaitMs(held !== undefined)))
+    const answered = Option.isSome(fresh) && fresh.value !== "aborted" ? fresh.value : held === undefined ? undefined : { page: held.read }
+    if (answered === undefined) {
       try step({ type: "timedOut", turn })
       return undefined
     }
     const after = try tabs.get()
-    const capturedAt = try Clock.currentTimeMillis
-    const base = { tabId: selected.id, revision: selected.revision, capturedAt, address, title: tab.page.title }
-    const page = answer === undefined ? undefined : (Effect.try(() => boundPage(answer, base)) catch () => undefined)
+    const page = answered.page
     const withheld: Withheld = page?.withheld === undefined ? "NotWithheld" : withheldOf[page.withheld]
     const settledRead = try step({ type: "answered", turn, tab: after.cur, revision: curTab(after).revision, valid: page !== undefined, withheld })
     if (settledRead?.stage !== "Answered" || page === undefined) return undefined

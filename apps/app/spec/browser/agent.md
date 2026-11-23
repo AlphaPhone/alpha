@@ -117,3 +117,61 @@ pure def alwaysASentCommandNamesItsBoundRevision(a: AgentBrowsing): bool = a.com
 pure def alwaysACommandIsNeverRepeated(a: AgentBrowsing): bool = a.sends <= a.claims and a.acks <= a.claims
 pure def sometimesACommandWasSent(a: AgentBrowsing): bool = a.command == Acknowledged and a.sends > 0
 ```
+
+## Story: Be told when a Browser change the receipt reported did not happen
+
+> As the owner, I want to be told when a switch, the close of the tab I was looking at, a back,
+> forward, reload or stop, or the tab list that an action's receipt reported did not happen because
+> Browser changed or was not on screen, so a receipt never stands for a change I cannot see.
+
+### A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction
+
+These changes act on what the owner is looking at, so each runs only when the action is presented,
+after its journal entry and receipt, and only while the phone shows Alpha unlocked and the tab the
+request came from is still selected; a page-history move also needs the same page. Its presentation
+answers whether it ran. One that did not run, or failed, is followed by the owner's correction, and
+the receipt above it is left as it was:
+
+- a switch: "Browser changed or was not on screen, so the tab did not switch. Ask again."
+- closing the showing tab, alone or as the last of every listed tab: "Browser changed or was not on
+  screen, so the tab that was showing stayed open. Ask again from Browser."
+- a page-history move: "The page changed or Browser was not on screen, so it did not go back. Ask
+  again." (go forward, reload, stop loading)
+- the tab list: "Browser changed or was not on screen, so the tab list did not open. Ask again."
+
+A presentation that only brings Browser forward over a change already made (an open, a new tab,
+find, a closed tab that was not showing, every tab closed outside Browser) owes no correction.
+
+Each presentation runs one transition of [the session](./session.md): a switch is `agentPresent` of
+the tab switched to, closing the showing tab is `agentCloseShown`, a page-history move is
+`agentCommandShown`, closing the last listed tab that is showing is `agentCloseAllShown`, the tab
+list is `agentShowTabs`, and bringing Browser forward is `agentPresent` of the tab already chosen. A
+presentation is accepted when the phone shows Alpha unlocked and that transition's guard holds; every
+transition that only a presentation runs owes the correction when its guard refuses it.
+
+```quint
+type ShownChange = NoShownChange | TabSwitched | ShowingTabClosed | PageHistoryMoved | TabListShown
+type AgentPresentation = BringForward | PresentSwitch | PresentCloseShown | PresentCommandShown | PresentCloseAllShown | PresentTabList
+pure def transitionOf(p: AgentPresentation): str = match p {
+  | BringForward => "agentPresent"
+  | PresentSwitch => "agentPresent"
+  | PresentCloseShown => "agentCloseShown"
+  | PresentCommandShown => "agentCommandShown"
+  | PresentCloseAllShown => "agentCloseAllShown"
+  | PresentTabList => "agentShowTabs"
+}
+pure def shownChangeOf(p: AgentPresentation): ShownChange = match p {
+  | BringForward => NoShownChange
+  | PresentSwitch => TabSwitched
+  | PresentCloseShown => ShowingTabClosed
+  | PresentCommandShown => PageHistoryMoved
+  | PresentCloseAllShown => ShowingTabClosed
+  | PresentTabList => TabListShown
+}
+pure def presentedRan(p: AgentPresentation, accepted: bool): bool = shownChangeOf(p) == NoShownChange or accepted
+pure def correctionOwed(p: AgentPresentation, accepted: bool): bool = not(presentedRan(p, accepted))
+pure def lawARefusedPresentationOnlyTransitionIsCorrected(p: AgentPresentation): bool =
+  transitionOf(p) != "agentPresent" implies correctionOwed(p, false)
+pure def lawOnlyBringingBrowserForwardOwesNoCorrection(p: AgentPresentation): bool = correctionOwed(p, false) iff (p != BringForward)
+pure def lawAChangeThatRanIsNeverCorrected(p: AgentPresentation): bool = not(correctionOwed(p, true))
+```

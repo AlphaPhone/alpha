@@ -78,7 +78,7 @@ import java.util.*;
  * video, sharing and the reviewed page excerpt read in an isolated world.
  *
  * <p>Refusals, notices and page errors reach the renderer as the shared host's fixed sentences,
- * which apps/app/src/ui/browser/browser-messages.ts words for the screen; keep them unchanged.
+ * which apps/app/src/browser/messages.ts words for the screen; keep them unchanged.
  * Profile, preference and Keystore names are installed identifiers ({@link AlphaBrowserStores}).
  *
  * <p>Requires Android 10, like the download list it saves through.

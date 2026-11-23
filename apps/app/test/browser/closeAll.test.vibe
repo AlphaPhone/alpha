@@ -1,8 +1,8 @@
-// spec/browser/session.md, "Story: Close every tab from one listed review"
+// spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
 import { assert, it } from "@effect/vitest"
 import { BrowserTabs } from "../../src/browser/session.vibe"
 import { BrowserAgent } from "../../src/browser/agent.vibe"
-import { BROWSER_TABS_CLOSE_ALL_CAPABILITY, NO_TABS_TO_CLOSE_NOTICE, TABS_UNLISTED_NOTICE, browserDeviceCapabilities, closedSummary, closingCard, groundedIn, operationPorts, parseBrowserCloseAll } from "../../src/browser/operations.vibe"
+import { BROWSER_TABS_CLOSE_ALL_CAPABILITY, NO_TABS_TO_CLOSE_NOTICE, TABS_UNLISTED_NOTICE, browserDeviceCapabilities, browserNotDone, closedSummary, closingCard, groundedIn, operationPorts, parseBrowserCloseAll } from "../../src/browser/operations.vibe"
 import { AGENT_REFUSALS } from "../../src/browser/messages.ts"
 import { callsTo, fakeHost, loadPage, report, settledTabs, shownBrowser } from "./fakes.vibe"
 
@@ -91,7 +91,7 @@ it.live("closing every tab from Browser closes the showing tab only when present
       try agent.tabsClosing("from-browser")
       const present = try agent.closeAll("from-browser")
       const beforePresent = (try callsTo(fake.calls, "close")).map((c) => c.args.id)
-      try present.present
+      const closedShowing = try present.present
       const afterPresent = (try callsTo(fake.calls, "close")).map((c) => c.args.id)
       const leftInBrowser = (try tabs.get()).tabs.length
 
@@ -112,23 +112,62 @@ it.live("closing every tab from Browser closes the showing tab only when present
       try tabs.dispatch({ type: "pickTab", id: "bsecret" })
       const fromPrivate = try agent.tabsClosing("private")
       try Effect.try(() => assert.deepStrictEqual({
-        beforePresent, afterPresent, leftInBrowser, fromHome, homeClosed: homeClose.result, onlyPrivate,
+        beforePresent, closedShowing, afterPresent, leftInBrowser, fromHome, homeClosed: homeClose.result, onlyPrivate,
         bankClosed: !home.tabs.some((t) => t.id === "bbank"),
         secretKept: home.tabs.some((t) => t.id === "bsecret"),
         showsPrivate: home.tabs.find((t) => t.id === home.cur)?.profile,
         fromPrivate: fromPrivate === null ? null : [fromPrivate.tabs.map((line) => line.private === true), fromPrivate.kept],
       }, {
         beforePresent: [news],
+        closedShowing: true,
         afterPresent: [news, docs],
         leftInBrowser: 1,
         fromHome: { tabs: [{ title: "New tab" }, { title: "bank.example", host: "bank.example" }], kept: 1 },
         homeClosed: { closed: 2, kept: 1 },
-        onlyPrivate: "Close all tabs: No other tabs are open to close. 1 private tab stays open. Ask from a private tab to close it.",
+        onlyPrivate: "Close all tabs: No other tabs are open to close. 1 private tab stays open. Ask from a private tab to close it. Nothing was closed.",
         bankClosed: true,
         secretKept: true,
         showsPrivate: "Normal",
         fromPrivate: [[true, false], 0],
       }))
+    }
+  })
+})
+
+// spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
+it.live("closing every tab from Browser says the showing tab stayed open when Browser changed before it was presented", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const ports = try operationPorts
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const news = try loadPage(tabs, fake.events, session, "https://news.example/", "1", 1)
+      try tabs.dispatch({ type: "openTab", id: "bdocs", profile: "Normal" })
+      const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
+      ports.itemize(all, "changed")
+      const applied = try promise(() => ports.execute(all, call("changed")))
+      const receipt = ports.summarize(all, "Applied", "changed")
+      // The owner opens another tab before the action is presented: the tab that was showing is no longer selected.
+      try tabs.dispatch({ type: "openTab", id: "bfresh", profile: "Normal" })
+      ports.present(all, call("changed"))
+      try sleep("30 millis")
+      const after = try tabs.get()
+      const said = try Ref.get(fake.toasts)
+      const closed = (try callsTo(fake.calls, "close")).map((c) => c.args.id)
+      try Effect.try(() => assert.deepStrictEqual({
+        applied, receipt, closed,
+        left: after.tabs.map((t) => t.id),
+        said,
+      }, {
+        applied: { kind: "applied" },
+        receipt: "Closed 2 tabs.",
+        closed: [news],
+        left: [docs, "bfresh"],
+        said: [browserNotDone(all)],
+      }))
+      try Effect.try(() => assert.strictEqual(browserNotDone(all), "Browser changed or was not on screen, so the tab that was showing stayed open. Ask again from Browser."))
     }
   })
 })
@@ -140,12 +179,14 @@ it("a close-every-tab card names normal tabs with their host where it differs, c
     keeping: closingCard({ tabs: [{ title: "News", host: "news.example" }], kept: 2 }),
     unlisted: closingCard(null),
     empty: closingCard({ tabs: [], kept: 0 }),
+    onlyPrivate: closingCard({ tabs: [], kept: 2 }),
     receipts: [closedSummary({ closed: 1, kept: 0 }), closedSummary({ closed: 2, kept: 1 })],
   }, {
     listed: { lines: ["News (news.example)", "docs.example.org"], unnamed: 1, unnamedLabel: "private tab" },
     keeping: { lines: ["News (news.example)"], unnamed: 0, unnamedLabel: "private tab", note: "2 private tabs stay open. Ask from a private tab to close them." },
     unlisted: `Close all tabs: ${TABS_UNLISTED_NOTICE}`,
     empty: `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`,
+    onlyPrivate: "Close all tabs: No other tabs are open to close. 2 private tabs stay open. Ask from a private tab to close them. Nothing was closed.",
     receipts: ["Closed 1 tab.", "Closed 2 tabs. Private tabs were left open."],
   })
 })

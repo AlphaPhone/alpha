@@ -19,7 +19,7 @@ import { ChatAttachments } from "./attachments.vibe"
 import { Conversations } from "./conversations.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
 import { PhoneLocation } from "./location.vibe"
-import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type MapsShown } from "./ports.vibe"
+import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, MapsViews, ReplyChanges, TurnSources, type BrowserPage, type MapsShown } from "./ports.vibe"
 import { changeWords, copy, failureKindOf, failureText, liveWaitOf, planActionOf } from "./presentation.vibe"
 import { DeviceReview, type Approval } from "./review.vibe"
 import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
@@ -296,6 +296,8 @@ export const composerLayer = Layer.effect(Composer, effect {
       return false
     }
     const attempt = sendsBefore.nextId
+    // The peer's fresh status, which the turn's optional fields need, is read from the start of the send, beside its other reads and Browser's page.
+    const peering = fork host.peer()
     ownKey = undefined
     const bound = try quiet(client.send({ type: "send" }))
     const unbind = () => effect { if (bound) try quiet(client.send({ type: "sendFailed" })) }
@@ -332,15 +334,19 @@ export const composerLayer = Layer.effect(Composer, effect {
     }
     const screen = try host.screen()
     const observed = observes(screen.exposure)
-    const peer = try host.peer()
-    const place = try location.forTurn(observed, peer.takesLocation)
     const asksFirst = try preferences.asksBeforeActions()
     try sources.preferReview(asksFirst)
-    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
     const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
+    // Browser's page is read beside the status, not after it, as for a peer that takes it: the read stays on the phone,
+    // and below it is withdrawn unless the status declares the page.
+    let paging: Fiber.Fiber<BrowserPage | undefined> | undefined
+    if (browserTab !== undefined) paging = fork pageForTurn(pages, observed, { ...screen.observation, selectedObject: browserTabObject(browserTab) }, browserTab, true)
     const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
     const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
+    const peer = try join peering
+    const place = try location.forTurn(observed, peer.takesLocation)
+    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
     const observation = observed ? {
       ...screen.observation,
@@ -351,7 +357,11 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...(day === undefined ? {} : { calendarDay: day }),
       ...(place === undefined ? {} : { location: place }),
     } : undefined
-    const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
+    let page: BrowserPage | undefined
+    if (paging !== undefined) {
+      if (peer.optionalFields) page = try join paging
+      else try Fiber.interrupt(paging)
+    }
     const browserPage = page === undefined ? undefined : wirePage(page)
     const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
     const context = encodeTurnContext({
