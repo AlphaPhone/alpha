@@ -38,7 +38,7 @@ def stageVideoSources=tasks.register('stageVideoSources',Copy){
   ['VideoCopyEdits.java','VideoEditSpec.java','OwnedMediaConfig.java'].each { name ->
    def shared=new File(nativeMediaRoot(),name)
    if(!shared.isFile())throw new GradleException('Shared video editor source is missing: '+name)
-   files['plugins/plugin-native-media/'+name]=digest(shared)
+   files['packages/os/android/media/'+name]=digest(shared)
   }
   def receipt=layout.buildDirectory.file('generated/video-source-assets/native-video-source.json').get().asFile
   receipt.parentFile.mkdirs();receipt.text=groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson([media3:'1.11.1',files:files,verbatim:true]))
@@ -47,7 +47,7 @@ def stageVideoSources=tasks.register('stageVideoSources',Copy){
 tasks.named('preBuild').configure {dependsOn stageVideoSources}
 dependencies {
  implementation project(':capacitor-android')
- implementation project(':eliza-owned-media')
+ implementation project(':eliza-media')
  implementation 'androidx.media3:media3-transformer:1.11.1'
  implementation 'androidx.media3:media3-effect:1.11.1'
  androidTestImplementation 'androidx.test:runner:1.6.2'

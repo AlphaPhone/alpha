@@ -1,0 +1,187 @@
+{
+ "schema": 1,
+ "description": "The repository-level tests scripts/run-root-tests.ts runs (pnpm test:root), and every other tooling or Cloud test scripts/legacy-retirement.json names, held with the reason and where its behaviour moved.",
+ "run": [
+  "test/android-gzip-assets.test.mjs",
+  "test/aosp-cloud-power-defaults.test.mjs",
+  "test/aosp-cuttlefish.test.mjs",
+  "test/aosp-image-source-packet.test.mjs",
+  "test/aosp-retain-known-good.test.mjs",
+  "test/aosp-sense-policy.test.mjs",
+  "test/aosp-staging-patches.test.mjs",
+  "test/apk-alpha-power-policy.test.mjs",
+  "test/apk-signer-range.test.mjs",
+  "test/cloud-worker.test.mjs",
+  "test/enroll-release-keys.test.mjs",
+  "test/font-license.test.mjs",
+  "test/gradle-verification.test.mjs",
+  "test/instrumentation-outcome-status.test.mjs",
+  "test/pixel10a-image.test.mjs",
+  "test/pixel10a-source.test.mjs",
+  "test/production-bundle-audit.test.mjs",
+  "test/record-release.test.mjs",
+  "test/shared-ui-overrides.test.mjs",
+  "test/sign-release-apks.test.mjs",
+  "test/upstream-native-source.test.mjs",
+  "test/upstream-pin-guard.test.mjs",
+  "test/wallet-disabled.test.mjs"
+ ],
+ "held": [
+  {
+   "files": [
+    "test/check-quint-cache.test.mjs",
+    "test/lemma-check.test.mjs",
+    "test/lemma-checker.test.mjs",
+    "test/quint-address-input.test.mjs",
+    "test/quint-android-build-input-readiness.test.mjs",
+    "test/quint-android-gzip-asset-stage.test.mjs",
+    "test/quint-android-installation-identity.test.mjs",
+    "test/quint-app-info-handoff-composition.test.mjs",
+    "test/quint-application-refinement.test.mjs",
+    "test/quint-back-dispatch.test.mjs",
+    "test/quint-checker.test.mjs",
+    "test/quint-client-feature-publication.test.mjs",
+    "test/quint-client-observation-support.test.mjs",
+    "test/quint-committed-view-observation.test.mjs",
+    "test/quint-composition-refinement.test.mjs",
+    "test/quint-conformance.test.mjs",
+    "test/quint-connection-controller.test.mjs",
+    "test/quint-core-interactive-task-traces.test.mjs",
+    "test/quint-core-plugin-lifecycle-refinement.test.mjs",
+    "test/quint-core-retirement.test.mjs",
+    "test/quint-core-runtime-lifecycle-refinement.test.mjs",
+    "test/quint-core-service-lifecycle-design-refinement.test.mjs",
+    "test/quint-core-service-lifecycle.test.mjs",
+    "test/quint-core-shutdown.test.mjs",
+    "test/quint-core-task-service-refinement.test.mjs",
+    "test/quint-day-anchor.test.mjs",
+    "test/quint-embedding-sql-refinement.test.mjs",
+    "test/quint-embedding-store-identity.test.mjs",
+    "test/quint-fact-write-dedupe-refinement.test.mjs",
+    "test/quint-fact-write-scope.test.mjs",
+    "test/quint-find-in-page.test.mjs",
+    "test/quint-fixture-busy-latch.test.mjs",
+    "test/quint-google-access-publication.test.mjs",
+    "test/quint-google-consent-admission.test.mjs",
+    "test/quint-hosted-background-admission.test.mjs",
+    "test/quint-indicator-provider.test.mjs",
+    "test/quint-inert-hold.test.mjs",
+    "test/quint-legacy-google-connect-refinement.test.mjs",
+    "test/quint-media-copy-intent.test.mjs",
+    "test/quint-mms-compose.test.mjs",
+    "test/quint-mobile-bundle-admission.test.mjs",
+    "test/quint-named-embedding-provenance.test.mjs",
+    "test/quint-native-app-info-handoff.test.mjs",
+    "test/quint-native-conformance.test.mjs",
+    "test/quint-native-crash-journal.test.mjs",
+    "test/quint-native-google-host-artifact.test.mjs",
+    "test/quint-native-mms-dispatch.test.mjs",
+    "test/quint-native-recording.test.mjs",
+    "test/quint-native-refinement.test.mjs",
+    "test/quint-native-request-withdrawal.test.mjs",
+    "test/quint-native-source-renewal.test.mjs",
+    "test/quint-native-stream-bridge.test.mjs",
+    "test/quint-native-text-scale-lifecycle.test.mjs",
+    "test/quint-on-device-recognizer.test.mjs",
+    "test/quint-os-application-refinement.test.mjs",
+    "test/quint-phone-recents.test.mjs",
+    "test/quint-plugin-connector-custody.test.mjs",
+    "test/quint-prepared-source-stamp.test.mjs",
+    "test/quint-prototype-surfaces-source-contracts.test.mjs",
+    "test/quint-provider-execution-refinement.test.mjs",
+    "test/quint-read-aloud.test.mjs",
+    "test/quint-recovery-ui-refinement.test.mjs",
+    "test/quint-refinement-harness.test.mjs",
+    "test/quint-renderer-background-rebuild.test.mjs",
+    "test/quint-renderer-refinement.test.mjs",
+    "test/quint-resident-java-source-stage.test.mjs",
+    "test/quint-resident-liveness.test.mjs",
+    "test/quint-resident-refinement.test.mjs",
+    "test/quint-resident-start-cancel.test.mjs",
+    "test/quint-room-handler-queue.test.mjs",
+    "test/quint-saved-service-read.test.mjs",
+    "test/quint-service-read-cache.test.mjs",
+    "test/quint-services-refinement.test.mjs",
+    "test/quint-single-flight-refinement.test.mjs",
+    "test/quint-source-renewal-question.test.mjs",
+    "test/quint-state-inventory.test.mjs",
+    "test/quint-system-picker-visibility.test.mjs",
+    "test/quint-task-service-refinement.test.mjs",
+    "test/quint-tla-inventory.test.mjs",
+    "test/quint-vault-coordinator-refinement.test.mjs",
+    "test/quint-view-admission.test.mjs"
+   ],
+   "reason": "They drive the legacy Quint and Lemma refinement harness (scripts/quint-lib.ts, check-quint.ts, check-lemma.ts, quint-cache.ts), which scripts/legacy-retirement.json records as removed.",
+   "movedTo": "The vibestack spec check (pnpm check) over apps/app/spec; scripts/legacy-retirement.json maps each model to its area spec."
+  },
+  {
+   "files": [
+    "test/cloud-candidate-deployment.test.mjs",
+    "test/cloud-deployment.test.mjs",
+    "test/cloud-email-deployment.test.mjs",
+    "test/cloud-email-resend.test.mjs",
+    "test/cloud-readiness.test.mjs",
+    "test/cloud-sdk-routing.test.mjs"
+   ],
+   "reason": "They import scripts/cloud-deployment.ts, cloud-registration.ts, cloud-readiness.ts, cloud-sdk-authority.ts or cloud/edge/worker.ts, which moved into the Cloud package.",
+   "movedTo": "cloud/src/*.vibe with cloud/test/*.test.vibe and scripts/cloud-worker.ts (scripts/legacy-retirement.json); the readiness gates beyond smoke are an open item."
+  },
+  {
+   "files": [
+    "test/android-build-fast.test.mjs",
+    "test/android-host.test.mjs",
+    "test/android-identity.test.mjs",
+    "test/aosp-capabilities.test.mjs",
+    "test/android-build-path.test.mjs",
+    "test/strict-build-inputs.test.mjs",
+    "test/source-snapshot.test.mjs",
+    "test/resident-build-output.test.mjs"
+   ],
+   "reason": "They test the schema-1 host, the patched native staging or the legacy runtime source inputs (scripts/prepare-patched-native.ts, local-agent-source.ts, the eliza packages/app generator), which upstream's schema-2 generator replaced.",
+   "movedTo": "Not moved yet: port to @elizaos/os/build generateAndroidHost and the schema-2 profile (docs/vibestack-open-items.md, Tooling)."
+  },
+  {
+   "files": [
+    "test/native-build-inputs.test.mjs"
+   ],
+   "reason": "The embedding host producer reads upstream inputs removed at the pin (packages/os/android/local-inference/scripts/aosp/*, omnivoice-merged.ts).",
+   "movedTo": "Not moved yet: requalify the embedding and voice hosts at the pin (docs/vibestack-open-items.md, Tooling)."
+  },
+  {
+   "files": [
+    "test/android-instrumentation-runner.test.mjs",
+    "test/aosp-native-admission.test.mjs",
+    "test/aosp-pixel10a.test.mjs",
+    "test/ci-emulator-evidence.test.mjs",
+    "test/owner-sign-aosp-release-edges.test.mjs",
+    "test/verify-apks.test.mjs"
+   ],
+   "reason": "They need the harness and image scripts that are still to be rewritten onto @elizaos/os/image (removed campaign scripts, upstream releasetools fixtures, prepare-local-agent.ts).",
+   "movedTo": "Not moved yet: the scripts/os-ported and harness rewrite (docs/vibestack-open-items.md, Tooling)."
+  },
+  {
+   "files": [
+    "test/licenses.test.mjs",
+    "test/runtime-licenses.test.mjs",
+    "test/sbom.test.mjs"
+   ],
+   "reason": "They read bun.lock and the legacy bundle manifests; the generator now reads pnpm-lock.yaml and upstream's manifest.json.",
+   "movedTo": "Not moved yet: port the notice and SBOM tests to pnpm-lock.yaml (docs/vibestack-open-items.md, Tooling)."
+  },
+  {
+   "files": [
+    "test/aosp-image-capability.test.mjs"
+   ],
+   "reason": "It imports apps/app/src/runtime/aosp-image.ts, a legacy renderer module.",
+   "movedTo": "The platform area (scripts/legacy-retirement.json maps the AOSP image capability to apps/app/spec/platform)."
+  },
+  {
+   "files": [
+    "test/cloud-provision.test.mjs",
+    "test/upstream-reachability.test.mjs"
+   ],
+   "reason": "cloud-provision reads the removed cloud/policy.json; upstream-reachability needs the reachability record refreshed for the vibestack-dp pin.",
+   "movedTo": "Not moved yet: port cloud-provision to cloud/deployment.json and re-record scripts/ci/upstream-reachability.json (docs/vibestack-open-items.md, Tooling)."
+  }
+ ]
+}

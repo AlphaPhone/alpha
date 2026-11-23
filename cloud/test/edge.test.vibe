@@ -1,17 +1,10 @@
 // spec/cloud/returnPages.md, "Story: Bring me back to the app when its link did not open"
 import { assert, describe, it } from "@effect/vitest"
 import { edgeRoute, edgeWorker, forwardedHeaders, type EdgeEnv } from "../src/edge.vibe"
-import { EdgeRequest, EdgeResponse } from "../src/edge-platform.ts"
+import { EdgeRequest, EdgeResponse, headersOf } from "../src/edge-platform.ts"
 
 const check = (assertion: () => void) => Effect.try(assertion)
 
-module node {
-  /** @throws {TypeError} */
-  export function headersOf(init: Record<string, string>): Headers {
-    return new Headers(init)
-  }
-}
-import { headersOf } from node
 const address = (text: string): URL => URL.parse(text) ?? URL.parse("https://invalid.invalid")!
 const refusingApi = { fetch: () => Promise.reject(new Error("the route tests never reach the API Worker")) }
 const env: EdgeEnv = { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: "https://api.alphacompute.cc", WEB_ORIGIN: "https://cloud.alphacompute.cc", API: refusingApi }
