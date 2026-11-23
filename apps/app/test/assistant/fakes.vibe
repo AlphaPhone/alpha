@@ -1,6 +1,6 @@
 // spec/assistant/send.md, "Story: Send a message and know what happened to it"
 import { Native, NativeUnavailable } from "../../src/platform/native.vibe"
-import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
+import { Resident, ResidentRefused, type ResidentHeaders } from "../../src/platform/resident.vibe"
 import { ResidentControl, ResidentRecovery } from "../../src/platform/resident-control.vibe"
 import { initial as residentStart } from "../../gen/platform__resident.ts"
 import { memoryStore } from "../../src/platform/storage.vibe"
@@ -328,9 +328,9 @@ export function fakeBrowserViews(answer: ViewAnswer, calls: string[] = []) {
   })
 }
 
-/** The capabilities the shell would advertise. */
-export function fakeAdvertised(names: readonly string[]) {
-  return Layer.succeed(AdvertisedCapabilities, { names: () => succeed(names) })
+/** The capabilities the shell would advertise, and the enrolled device's headers (none: chat only). */
+export function fakeAdvertised(names: readonly string[], device: ResidentHeaders = {}) {
+  return Layer.succeed(AdvertisedCapabilities, { names: () => succeed(names), device: () => succeed(device) })
 }
 
 /** The resident's live feeds: `frames` on the view feed for any client, and no voice. */

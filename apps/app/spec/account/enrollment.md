@@ -131,7 +131,8 @@ The enrollment id is saved beside the key first. On the phone the committed cont
 same agent, the same installation, the same enrollment and, as its subject, the owner the connection
 verified or the signed-in Cloud account. Only then does the phone carry its device headers on
 requests and name its installation and enrollment to the assistant; a phone that is chat only names
-neither, and the conversation goes on.
+neither, runs no device action, and the conversation goes on. While it is chat only, Agent activity
+says so ("Chat only") where it lists what waits for review.
 
 ```quint
 pure def contextConfirmed(sameAgent: bool, sameInstallation: bool, sameEnrollment: bool, ownSubject: bool): bool =
