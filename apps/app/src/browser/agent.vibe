@@ -111,7 +111,8 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
 
   effect function open(url: string, newTab: boolean) {
     const request = newId()
-    const shown = inBrowser(try foreground.get())
+    const at = try foreground.get()
+    const shown = inBrowser(at)
     const selected = (try tabs.get()).cur
     const settled = try settleOf({ type: "agentOpen", request, id: newTabId(), url, newTab, inBrowser: shown }, request)
     if (settled === undefined) throw refuse("RefusedChanged")
@@ -120,8 +121,11 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
     return {
       tab: settled.tab,
       present: effect {
-        try tabs.dispatch({ type: "agentPresent", tab: settled.tab, selected, edit: false })
-        agent.send({ type: "presentOpened", foreground: inBrowser(try foreground.get()) || (try foreground.get()).visible }) catch () => undefined
+        // The tab is shown only while the foreground the open was approved in is still the one in front.
+        const now = try foreground.get()
+        const same = now.visible && !now.locked && now.view === at.view
+        if (same) try tabs.dispatch({ type: "agentPresent", tab: settled.tab, selected, edit: false })
+        agent.send({ type: "presentOpened", foreground: same }) catch () => undefined
       },
     }
   }
