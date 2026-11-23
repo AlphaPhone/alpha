@@ -9711,18 +9711,18 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "reviewRequiredDoesNotResumeTest",
+      "reviewRequiredKeepsListeningTest",
       "staleReplyClosesVoiceTest",
       "failedReplyStartsOverTest",
       "ownerInputPauseIsNotAReviewRequirementTest"
     ],
     "invariants": [
-      "ReviewRequiredStopsListening",
+      "ReviewRequiredKeepsListening",
       "ClosedVoiceHoldsNothing",
       "SendsNeedTurns"
     ],
     "witnesses": [
-      "ReviewRequiredClosesWitness"
+      "ReviewRequiredListeningWitness"
     ],
     "sources": [
       "apps/app/src/prototype/voice-adapter.ts"
@@ -9756,7 +9756,7 @@
       "voice/current": "chatDestination and the panel's owned() check"
     },
     "abstractions": [
-      "The reply is reduced to whether it requires a phone action review, whether it is an owner-input pause, and whether the turn failed. A reply that requires a review ends the turn in the error phase with the microphone off. Reply text, speech and proposals are in VoiceSession, ReadReplyLease and ApprovalRoutes.",
+      "The reply is reduced to whether it carries a review card/notice, whether it is an owner-input pause, and whether the turn failed. A reply that offers review without an owner-input pause keeps the mic open and returns to listening. Reply text, speech and proposals are in VoiceSession, ReadReplyLease and ApprovalRoutes.",
       "A turn is sent and a reply is taken only while the chat is current; a reply for a chat that is no longer current closes voice.",
       "Settings, sign-in and connection recovery of the panel's primary control, and the unconfirmed-media latch, are outside this model (VoiceSurfaceRetirement).",
       "At most three conversation starts per trace, and at most three sent turns per start."

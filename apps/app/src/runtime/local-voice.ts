@@ -47,8 +47,8 @@ export function createOnDeviceVoice() {
     cancel: requestId => native.cancel({ requestId }),
   });
   return {
-    /** Transcription readiness. */
-    async ready(signal: AbortSignal) { return operation(signal, async (requestId, interrupted) => { const result = await Promise.race([native.localSpeechStatus({ requestId }), interrupted]); return result.ready === true && result.execution === execution; }); },
+    /** Transcription readiness (or TTS-only warmup when live ASR runs in the resident agent). */
+    async ready(signal: AbortSignal, { ttsOnly = false }: { ttsOnly?: boolean } = {}) { return operation(signal, async (requestId, interrupted) => { const result = await Promise.race([native.localSpeechStatus({ requestId, ...(ttsOnly ? { ttsOnly: true } : {}) }), interrupted]); return result.ready === true && result.execution === execution; }); },
     /** Read-aloud readiness: a browser without the local agent can still use its own local voices. */
     async playbackReady(signal: AbortSignal) { return operation(signal, async (requestId, interrupted) => { const result = await Promise.race([native.localSpeechStatus({ requestId }), interrupted]); return (result.ready === true || result.playback === true) && result.execution === execution; }); },
     async transcribe(recordingId: string, signal: AbortSignal) { return operation(signal, async (requestId, interrupted) => {
