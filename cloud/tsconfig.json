@@ -12,8 +12,7 @@
     "types": ["node"],
     "customConditions": ["eliza-source"],
     "rootDir": ".",
-    "rootDirs": [".", ".vibe/declarations"],
-    "plugins": [{ "name": "@effect/language-service" }]
+    "rootDirs": [".", ".vibe/declarations"]
   },
   "include": ["src", "test", "generated/*.ts", "*.config.ts"],
   "vibe": { "sidecarDir": ".vibe/declarations" }

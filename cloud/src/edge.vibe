@@ -20,7 +20,7 @@ export type EdgeRoute =
   | { readonly tag: "Forward"; readonly target: URL }
   | { readonly tag: "NotFound" }
 
-export { forwardedHeaders } from "./edge-platform.ts"
+export { forwardedHeaders }
 
 /** Classifies an address: only the web origin's own https addresses are forwarded, each to the same path and query on the API origin. */
 export function edgeRoute(url: URL, env: EdgeEnv): EdgeRoute {
