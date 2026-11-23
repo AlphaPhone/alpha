@@ -1,13 +1,14 @@
 // spec/workflows/simulator.md, "Story: Walk a workflow end to end in the browser without touching anything real"; spec/workflows/deviceSteps.md, "A named calendar range reads today, tomorrow, the next three days or this week from local midnight, and an all-day event counts by its civil dates"; spec/workflows/simulatedTriggers.md, "Story: Try a place or message workflow in the browser without a phone"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
-  type Destination, type Where, focusFits, historyRemovable, noticeFits, receiptMatches, removableRun, resultAccepted,
+  type Destination, type Where, cacheFresh, focusFits, historyRemovable, noticeFits, receiptMatches, removableRun, resultAccepted,
   sendAllowed, simulatorLoads, urgencyDecisionValid, urgencyInputValid, whereFrom,
 } from "../../gen/workflows__simulator.effect.vibe"
 import { type Side, type Triggers, Machine as TriggersMachine, machine as triggersMachine } from "../../gen/workflows__simulatedTriggers.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { ownerKey } from "../platform/storage.vibe"
-import { type RangeEvent, eventsInRange, workflowCalendarRange, workflowInMeeting } from "./calendar-range.ts"
+import type { DeviceEventRecord } from "../calendar/device.schema.vibe"
+import { WorkflowCalendar } from "./calendarRanges.vibe"
 
 /** A simulated step refused; `reason` is the simulator's own word for why. */
 export error SimulatedRefusal { reason: "not-loaded" | "destination" | "receipt" | "urgency" | "result" | "focus" | "history" | "ledger" | "range" }
@@ -37,16 +38,18 @@ export service SimulatedWorkflows {
   removable(statuses: ReadonlyArray<string>): ReadonlyArray<number>!SimulatedRefusal
   /** Post a simulated notice into the bounded ledger. */
   notice(id: string, title: string, text: string): void!SimulatedRefusal
-  /** The events of a calendar read that a named range such as "today's calendar" reads; a truncated read or an unknown label is refused. */
-  calendar(label: string, events: ReadonlyArray<RangeEvent>, truncated: boolean): ReadonlyArray<RangeEvent>!SimulatedRefusal
-  /** Whether a meeting is under way now in a calendar read; a truncated read is refused. */
-  meeting(events: ReadonlyArray<RangeEvent>, truncated: boolean): boolean!SimulatedRefusal
+  /** The phone's events of a named range such as "today's calendar", read through the workflow calendar and reused for at most a minute; an unknown label, a refused or a truncated read is refused. */
+  calendar(label: string): ReadonlyArray<DeviceEventRecord>!SimulatedRefusal
+  /** Whether a meeting is under way now on the phone's calendar; a refused or truncated read is refused. */
+  meeting(): boolean!SimulatedRefusal
 }
 
 export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
   const build = try Build
   const store = try KeyValueStore.KeyValueStore
+  const calendar = try WorkflowCalendar
   const loaded = simulatorLoads(build.info.testMocks, build.info.variant === "browser")
+  const calendarReads = try Ref.make<ReadonlyMap<string, { readonly readAt: number; readonly events: ReadonlyArray<DeviceEventRecord> }>>(new Map())
 
   effect function guard() {
     if (!loaded) throw new SimulatedRefusal({ reason: "not-loaded" })
@@ -113,16 +116,19 @@ export const simulatedWorkflows = Layer.effect(SimulatedWorkflows, effect {
       if (!noticeFits(rows.length, text.trim() === "" ? 0 : text.length, title.trim() === "" ? 0 : title.length)) throw new SimulatedRefusal({ reason: "ledger" })
       store.set(noticesKey, JSON.stringify([...rows, { id, title, text }])) catch effect () => { throw new SimulatedRefusal({ reason: "ledger" }) }
     },
-    effect calendar(label: string, events: ReadonlyArray<RangeEvent>, truncated: boolean) {
+    effect calendar(label: string) {
       try guard()
-      const range = workflowCalendarRange(label, new Date(try Clock.currentTimeMillis))
-      if (range === undefined || truncated) throw new SimulatedRefusal({ reason: "range" })
-      return eventsInRange(events, range)
+      const now = try Clock.currentTimeMillis
+      const key = label.toLowerCase().replaceAll("’", "'")
+      const kept = (try Ref.get(calendarReads)).get(key)
+      if (kept !== undefined && cacheFresh(kept.readAt, now, false)) return kept.events
+      const read = try mapError(calendar.read(label), () => new SimulatedRefusal({ reason: "range" }))
+      try Ref.update(calendarReads, (reads) => new Map([...reads, [key, { readAt: now, events: read.events }]]))
+      return read.events
     },
-    effect meeting(events: ReadonlyArray<RangeEvent>, truncated: boolean) {
+    effect meeting() {
       try guard()
-      if (truncated) throw new SimulatedRefusal({ reason: "range" })
-      return workflowInMeeting(events, try Clock.currentTimeMillis)
+      return try mapError(calendar.inMeeting(), () => new SimulatedRefusal({ reason: "range" }))
     },
   }
 })
