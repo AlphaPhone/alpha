@@ -4,7 +4,8 @@
   "globalPassThroughEnv": ["ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_CLOUD_CUTOVER", "ALPHA_CLOUD_DEPLOYMENT_FILE"],
   "tasks": {
     "//#build:upstream": {
-      "cache": false
+      "cache": false,
+      "passThroughEnv": ["TURBO_CONCURRENCY"]
     },
     "deployment:check": {
       "dependsOn": ["//#build:upstream"],
