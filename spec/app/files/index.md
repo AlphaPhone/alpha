@@ -98,15 +98,16 @@ pure val targetValues = Set(1, 4)
 pure val folderValues = Set(1)
 pure val depthValues = Set(0, 1)
 pure val nameValues = Set("", "c")
+pure val labelValues = Set("c")
 pure val siblingsValues = Set(List(), List("b"))
 pure val doneValues = Set(List(), List(1), List(1, 2))
 pure val failedValues = Set(List(), List(2))
-pure val volumesValues = Set(List()).union(Set(List({ id: 1, used: 3, total: 8 }, { id: 9, used: 0, total: 0 })))
+pure val volumesValues = Set(List({ id: 1, used: 3, total: 8 }, { id: 9, used: 0, total: 0 }))
 pure val fileValues = Set({ id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })
 pure val wantedValues = Set({ text: "", kind: F::Image, anyKind: false }).union(Set({ text: "b", kind: F::Other, anyKind: true }))
 pure val destValues = Set({ folder: 1, path: List(), names: List("b") }).union(Set({ folder: 4, path: List(1), names: List() }))
 pure val weight_enter = 30
-pure val weight_accessReported = 3
+pure val weight_accessReported = 15
 pure val weight_storageRead = 100
 pure val weight_openVolume = 40
 pure val weight_openFolder = 30
@@ -420,8 +421,8 @@ How names are compared is not modelled.
 
 ```quint
 const containsText: (str, str) => bool
-pure def lawEveryNameContainsNoText(name: str): bool = containsText(name, "")
-pure def lawEveryNameContainsItself(name: str): bool = containsText(name, name)
+pure def lawEveryNameContainsNoText(label: str): bool = containsText(label, "")
+pure def lawEveryNameContainsItself(label: str): bool = containsText(label, label)
 ```
 
 ### The owner sets a filter of a kind and a text for the place showing, as a chip the owner sees and clears; only what matches both is shown
