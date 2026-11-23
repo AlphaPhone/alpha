@@ -171,15 +171,15 @@ export function verifyNativeFileBytes(root:string,files:NativeFile[]) {
   }
 }
 /** Inspect executable structure separately from frozen-byte custody checks. */
-export function verifyNativeBuildLibraries(root:string,receipt:NativeBuildReceipt) {
-  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)(path.join(root,'vendor/eliza',nativeModule,'scripts/build-helpers/verify-fused-symbols.ts'));
+export function verifyNativeBuildLibraries(sourceRoot:string,artifactRoot:string,receipt:NativeBuildReceipt) {
+  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)(path.join(sourceRoot,'vendor/eliza',nativeModule,'scripts/build-helpers/verify-fused-symbols.ts'));
   const sdk=nativeAndroidSdk();
   const prebuilt=path.join(sdk,'ndk',receipt.producer.ndk,'toolchains/llvm/prebuilt');
   const host=fs.readdirSync(prebuilt).find(name=>fs.existsSync(path.join(prebuilt,name,'bin/llvm-nm')));
   if(!host)throw Error('Pinned Android NDK inspection tools are required');
   const tool=(name:string)=>path.join(prebuilt,host,'bin',name);
   for(const abi of receipt.voice.abis)for(const library of abi.libraries) {
-    const file=path.join(root,'android/app/src/main/jniLibs',abi.abi,library.name),bytes=fs.readFileSync(file);
+    const file=path.join(artifactRoot,'android/app/src/main/jniLibs',abi.abi,library.name),bytes=fs.readFileSync(file);
     if(bytes.length<64||bytes.readUInt32BE(0)!==0x7f454c46||bytes[4]!==2||bytes[5]!==1||bytes.readUInt16LE(18)!==(abi.abi==='arm64-v8a'?183:62)||minElfLoadAlignment(bytes)<16384)throw Error('Native library ABI or page alignment differs');
     if(library.name==='libelizainference.so') {
       const actual=assertAndroidVoiceLibrary({lib:file,objdump:tool('llvm-objdump'),nm:tool('llvm-nm')});
@@ -187,7 +187,7 @@ export function verifyNativeBuildLibraries(root:string,receipt:NativeBuildReceip
     }
   }
   for(const abi of embeddingAbiLibraries<any>(receipt.embedding as any)) {
-    const jni=path.join(root,'android/app/src/main/jniLibs',abi.abi,'libparadeevoicejni.so'),bytes=fs.readFileSync(jni);
+    const jni=path.join(artifactRoot,'android/app/src/main/jniLibs',abi.abi,'libparadeevoicejni.so'),bytes=fs.readFileSync(jni);
     if(bytes.length<64||bytes.readUInt32BE(0)!==0x7f454c46||bytes[4]!==2||bytes[5]!==1||bytes.readUInt16LE(18)!==(abi.abi==='arm64-v8a'?183:62)||minElfLoadAlignment(bytes)<16384)throw Error('Native JNI ABI or page alignment differs');
     verifyNativeSymbols(execFileSync(tool('llvm-nm'),['-D','--defined-only',jni],{encoding:'utf8'}),receipt.embedding.jniBinding);
     const linkage=execFileSync(tool('llvm-readelf'),['-W','-d',jni],{encoding:'utf8'});

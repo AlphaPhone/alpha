@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated} from '../scripts/embedding-native-contract.ts';
-import {nativeRecipe,nativeRecipeDigest,readNativeBuildReceipt,verifyNativeFileBytes,nativeOutputInventory,NATIVE_BUILD_RECEIPT,fileDigest,bytesDigest,withNativeCacheLock,prepareNativeSource,nativeAndroidSdk,clearStagedNativeInputs} from '../scripts/native-build-inputs.ts';
+import {nativeRecipe,nativeRecipeDigest,readNativeBuildReceipt,verifyNativeFileBytes,verifyNativeBuildLibraries,nativeOutputInventory,NATIVE_BUILD_RECEIPT,fileDigest,bytesDigest,withNativeCacheLock,prepareNativeSource,nativeAndroidSdk,clearStagedNativeInputs} from '../scripts/native-build-inputs.ts';
 
 const root=path.resolve(import.meta.dirname,'..');
 function fixture(t) {
@@ -68,6 +68,30 @@ test('native cache reuse rejects changed, linked and escaping outputs',t=>{
   fs.writeFileSync(file,'evil');assert.throws(()=>verifyNativeFileBytes(dir,files),/Native output changed/);
   fs.unlinkSync(file);fs.symlinkSync(path.join(root,'package.json'),file);assert.throws(()=>verifyNativeFileBytes(dir,files),/symbolic link/);
   files[0].path='../output';assert.throws(()=>verifyNativeFileBytes(dir,files),/Invalid native output path/);
+});
+test('native cache inspection loads its inspector from the source checkout',t=>{
+  const dir=fixture(t);
+  const output=path.join(dir,'output');
+  const sdk=path.join(dir,'sdk');
+  const ndk='fixture-ndk';
+  const bin=path.join(sdk,'ndk',ndk,'toolchains/llvm/prebuilt/host/bin');
+  fs.mkdirSync(bin,{recursive:true});
+  fs.writeFileSync(path.join(bin,'llvm-nm'),'');
+  const previousAndroidHome=process.env.ANDROID_HOME;
+  process.env.ANDROID_HOME=sdk;
+  t.after(()=>{
+    if(previousAndroidHome===undefined)delete process.env.ANDROID_HOME;
+    else process.env.ANDROID_HOME=previousAndroidHome;
+  });
+
+  const abi='arm64-v8a';
+  const name='libelizainference.so';
+  const libraries=path.join(output,'android/app/src/main/jniLibs',abi);
+  fs.mkdirSync(libraries,{recursive:true});
+  fs.writeFileSync(path.join(libraries,name),'invalid ELF');
+  const receipt={producer:{ndk},voice:{abis:[{abi,libraries:[{name}]}]}};
+
+  assert.throws(()=>verifyNativeBuildLibraries(dir,output,receipt),/Native library ABI or page alignment differs/);
 });
 for(const linkedAbi of ['arm64-v8a','x86_64'])test(`native refresh refuses linked ${linkedAbi} before deleting any staged inputs`,t=>{
   const temp=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'alpha-native-refresh-')));

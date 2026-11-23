@@ -57,7 +57,7 @@ export async function preparePortableNativeInputs(root:string) {
   const command=(file:string,args:string[],cwd=root,env:NodeJS.ProcessEnv=process.env)=>execFileSync(file,args,{cwd,env,stdio:'inherit'});
   const productReceipt=path.join(root,NATIVE_BUILD_RECEIPT);
   if(fs.existsSync(productReceipt)) {
-    try {const receipt=verifyNativeBuildFiles(root);verifyNativeBuildLibraries(root,receipt);console.log('Verified cached native inputs for the current source recipe.');return;}
+    try {const receipt=verifyNativeBuildFiles(root);verifyNativeBuildLibraries(root,root,receipt);console.log('Verified cached native inputs for the current source recipe.');return;}
     catch { /* Owned generated output is refreshed below; tracked records and vendor remain untouched. */ }
   }
   assertNativeOutputPath(cacheRoot,path.relative(cacheRoot,cache).split(path.sep).join('/'));
@@ -77,7 +77,7 @@ export async function preparePortableNativeInputs(root:string) {
         command('git',['fetch','--no-tags','--depth','1',readJson<{url:string}>(path.join(root,'upstream.lock.json')).url,existing.producer.sdkCommit],path.join(root,'vendor/eliza'));
       }
       validateNativeBuildReceipt(root,existing,{currentConsumer:false});
-      verifyNativeBuildFiles(cacheOutput,existing);verifyNativeBuildLibraries(cacheOutput,existing);
+      verifyNativeBuildFiles(cacheOutput,existing);verifyNativeBuildLibraries(root,cacheOutput,existing);
       receipt=existing;
     }
   }
@@ -152,7 +152,7 @@ export async function preparePortableNativeInputs(root:string) {
     stageVoiceModels(cacheOutput,{from:[voiceOutput],record:voice});
     for(const prepared of preparations)for(const library of prepared.libraries){if(fs.statSync(library.path).size!==library.bytes||fileDigest(library.path)!==library.sha256)throw Error('Built embedding library changed');fs.copyFileSync(library.path,path.join(cacheOutput,'android/app/src/main/jniLibs',prepared.abi,path.basename(library.path)));}
     receipt.files=[...nativeOutputInventory(receipt).keys()].sort().map(file=>({path:file,bytes:fs.statSync(path.join(cacheOutput,file)).size,sha256:fileDigest(path.join(cacheOutput,file))}));
-    validateNativeBuildReceipt(root,receipt);verifyNativeBuildFiles(cacheOutput,receipt);verifyNativeBuildLibraries(cacheOutput,receipt);assertHeld();writeNativeBuildReceipt(cacheOutput,receipt);
+    validateNativeBuildReceipt(root,receipt);verifyNativeBuildFiles(cacheOutput,receipt);verifyNativeBuildLibraries(root,cacheOutput,receipt);assertHeld();writeNativeBuildReceipt(cacheOutput,receipt);
   }
   // Owned generated directories may be replaced after a recipe changes. Never modify vendor or committed admission data.
   assertHeld();
@@ -166,7 +166,7 @@ export async function preparePortableNativeInputs(root:string) {
   }
   receipt=structuredClone(receipt);receipt.consumerSdkCommit=pin;
   receipt.files=[...nativeOutputInventory(receipt).keys()].sort().map(file=>({path:file,bytes:fs.statSync(path.join(root,file)).size,sha256:fileDigest(path.join(root,file))}));
-  validateNativeBuildReceipt(root,receipt);verifyNativeBuildFiles(root,receipt);verifyNativeBuildLibraries(root,receipt);assertHeld();writeNativeBuildReceipt(root,receipt);
+  validateNativeBuildReceipt(root,receipt);verifyNativeBuildFiles(root,receipt);verifyNativeBuildLibraries(root,root,receipt);assertHeld();writeNativeBuildReceipt(root,receipt);
   verifyNativeBuildFiles(root);
   console.log('Built and staged source-bound native voice and embedding inputs; no device qualification claimed.');
   });
