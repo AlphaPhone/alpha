@@ -49,7 +49,7 @@ pure val charsValues = Set(10, 191, 400)
 pure val scaleValues = Set(0, 100, 150, 600)
 pure val ticketValues = Set(1, 2)
 pure val areaValues = Set("", "deletions", "inbox")
-pure val aboutValues = Set(1, 2)
+pure val aboutValues = Set(0, 1, 2)
 pure val weight_started = 3
 ```
 

@@ -64,7 +64,7 @@ pure def sinceOf(d: Approvals, id: int): int =
 pure def inFlight(p: P::Proposal): bool = p.stage == P::Sent and p.attempt.outcome == A::Sent
 
 pure val idValues = Set(1, 2)
-pure val nowValues = Set(1, 9)
+pure val nowValues = Set(1, 2, 9)
 pure val expiresValues = Set(4, 8)
 pure val seenValues = Set(0, 1)
 pure val signedInValues = Set(1, 2)
@@ -72,11 +72,15 @@ pure val messageValues = Set(1, 2)
 pure val ticketValues = Set(1, 2)
 pure val operationValues = Set(Glance, Look, Change, EmergencyCall)
 pure val wantedValues = Set(Direct, ReviewFirst)
-pure val weight_hold = 4
-pure val weight_succeeded = 4
-pure val weight_completed = 4
-pure val weight_present = 3
-pure val weight_start = 3
+pure val journalValues = Set(P::Written, P::Unwritable)
+pure val claimValues = Set(P::Granted, P::NotRun)
+pure val resultValues = Set(P::Done, P::Lost)
+pure val weight_hold = 10
+pure val weight_succeeded = 20
+pure val weight_completed = 10
+pure val weight_present = 10
+pure val weight_start = 20
+pure val weight_propose = 4
 ```
 
 ### Every proposal the desk holds keeps the rules of a proposal under its own number, every lease the rules of a lease, and the pass the rules of a pass
@@ -95,9 +99,9 @@ pure def alwaysEveryProposalKeepsItsRules(d: Approvals): bool =
 ### The agent proposes under a number not used before, with no lease on it yet, and a card waiting is posted as a notice until it is decided
 
 ```quint
-pure val weight_approve = 3
-pure val weight_reserved = 3
-pure val weight_grant = 3
+pure val weight_approve = 30
+pure val weight_reserved = 10
+pure val weight_grant = 10
 
 pure def noticing(id: int, before: P::Proposal, after: P::Proposal): List[Effect] =
   if (before.stage != P::Pending and after.stage == P::Pending) List(Noticing({ card: id, up: true }))
@@ -224,8 +228,8 @@ pure def hear(d: Approvals, message: int, by: Actor): Approvals = { ...d, pass: 
 ### The phone carries out a claimed effect only while no other is being carried out
 
 ```quint
-pure val weight_perform = 4
-pure val weight_performed = 4
+pure val weight_perform = 30
+pure val weight_performed = 10
 
 pure def canPerform(d: Approvals, id: int, now: int, protectedScreen: bool, signedIn: int, wanted: Preference, by: Actor): bool =
   d.running == 0 and P::canPerform(entry(d, id), now, protectedScreen, signedIn, wanted, by)

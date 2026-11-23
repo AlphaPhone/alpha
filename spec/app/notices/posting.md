@@ -17,18 +17,18 @@ event parameters.
 > As the owner, I want each thing Alpha has to tell me to reach me as one
 > notice, never twice, and never after I already acted on it.
 
-### Posting holds each delivery under its identity, and what a restart left to check; a delivery has its attempt, the owner it is for, whether it was closed by its tap being spent or by being withdrawn, whether notifications kept it from showing, and whether its publisher was told
+### Posting holds each delivery under its identity, and what a restart left to check; a delivery has its attempt, the owner it is for, whether it was closed by its tap being spent or by being withdrawn, whether notifications kept it from showing, whether a refused post was tried again, and whether its publisher was told
 
 ```quint
 import attempt as A from "../../kit/attempt"
 
 type Act = Post | CheckPosted | Withdraw | Acknowledge | CannotShow
 type Effect = { act: Act, number: int }
-type Delivery = { attempt: A::Attempt, owner: int, closed: bool, blocked: bool, acknowledged: bool }
+type Delivery = { attempt: A::Attempt, owner: int, closed: bool, blocked: bool, retried: bool, acknowledged: bool }
 type Posting = { deliveries: int -> Delivery, ids: Set[int], interrupted: Set[int] }
 type Posted = { state: Posting, out: List[Effect] }
 
-pure val unqueued: Delivery = { attempt: A::plan(0), owner: 0, closed: false, blocked: false, acknowledged: false }
+pure val unqueued: Delivery = { attempt: A::plan(0), owner: 0, closed: false, blocked: false, retried: false, acknowledged: false }
 
 pure val initial: Posting = { deliveries: Map(), ids: Set(), interrupted: Set() }
 
@@ -88,12 +88,14 @@ pure def posted(p: Posting, id: int, shown: bool, known: bool): Posting =
   filed(id, p, { ...held(p, id), attempt: A::conclude(held(p, id).attempt, shown, known) })
 ```
 
-### A refused post is tried again under the same identity
+### A refused post is tried again once, under the same identity; refused again, it is not tried any more
 
 ```quint
-pure def canRetry(p: Posting, id: int): bool = held(p, id).attempt.outcome == A::Refused and not(held(p, id).closed)
+pure def canRetry(p: Posting, id: int): bool =
+  held(p, id).attempt.outcome == A::Refused and not(held(p, id).closed) and not(held(p, id).retried)
 
-pure def retry(p: Posting, id: int): Posting = filed(id, p, { ...held(p, id), attempt: A::record(held(p, id).attempt) })
+pure def retry(p: Posting, id: int): Posting =
+  filed(id, p, { ...held(p, id), attempt: A::record(held(p, id).attempt), retried: true })
 ```
 
 ### When the owner's tap on it is spent, nothing is posted after that
@@ -106,17 +108,18 @@ pure def canSpent(p: Posting, id: int): bool = p.ids.contains(id) and not(held(p
 pure def spent(p: Posting, id: int): Posting = filed(id, p, { ...held(p, id), closed: true })
 ```
 
-### Whoever asked for the notice is told once that it was shown, acted on, or cannot be known
+### Whoever asked for the notice is told once that it was shown, acted on, refused twice, or cannot be known
 
 ```quint
-pure def ended(d: Delivery): bool = d.closed or d.attempt.outcome == A::Confirmed or d.attempt.outcome == A::Unknown
+pure def ended(d: Delivery): bool =
+  d.closed or d.attempt.outcome == A::Confirmed or d.attempt.outcome == A::Unknown or (d.attempt.outcome == A::Refused and d.retried)
 
 pure def canAcknowledge(p: Posting, id: int): bool = p.ids.contains(id) and ended(held(p, id)) and not(held(p, id).acknowledged)
 
 pure def acknowledge(p: Posting, id: int): Posted = told(id, p, { ...held(p, id), acknowledged: true }, Acknowledge)
 ```
 
-### A notice is posted once under its identity, only while queued, and never after its tap was spent; its publisher is told once, and that it cannot show once
+### A notice is posted once under its identity, only while queued, and never after its tap was spent; its publisher is told once, and that it cannot show once; a post tried again stays so
 
 ```quint
 pure def stepPostedOnceUnderItsIdentity(before: Posting, via: str, after: Posting, out: List[Effect]): bool =
@@ -127,7 +130,7 @@ pure def stepPostedOnceUnderItsIdentity(before: Posting, via: str, after: Postin
       and (e.act == CannotShow implies not(held(before, e.number).blocked)))
     and before.ids.forall(i => held(after, i).attempt.id == held(before, i).attempt.id
       and (held(before, i).acknowledged implies held(after, i).acknowledged)
-      and (held(before, i).closed implies held(after, i).closed))
+      and (held(before, i).closed implies held(after, i).closed) and (held(before, i).retried implies held(after, i).retried))
 ```
 
 ### A queued delivery has its identity and owner, it is kept from showing only while queued, and its publisher is told only once it ended
@@ -159,14 +162,14 @@ pure val fair_block = "weak"
 pure val fair_check = "weak"
 ```
 
-### A notice can be shown, kept from showing, refused, unknown, acted on before it was posted, and acknowledged
+### A notice can be shown, kept from showing, refused twice, unknown, acted on before it was posted, and acknowledged
 
 ```quint
 pure def sometimesShown(p: Posting): bool = p.ids.exists(i => held(p, i).attempt.outcome == A::Confirmed)
 
 pure def sometimesKeptFromShowing(p: Posting): bool = p.ids.exists(i => held(p, i).blocked)
 
-pure def sometimesRefused(p: Posting): bool = p.ids.exists(i => held(p, i).attempt.outcome == A::Refused)
+pure def sometimesRefused(p: Posting): bool = p.ids.exists(i => held(p, i).attempt.outcome == A::Refused and held(p, i).retried)
 
 pure def sometimesUnknown(p: Posting): bool = p.ids.exists(i => held(p, i).attempt.outcome == A::Unknown)
 

@@ -46,7 +46,8 @@ pure val initial: Collection = {
 
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val rowsValues = Set(0, 1, 3)
-pure val nowValues = Set(0, 50, 150)
+pure val atValues = Set(0, 50, 150)
+pure val nowValues = Set(0, 50, 150, 250)
 pure val signedInValues = Set(1, 2)
 pure val weight_listed = 3
 pure val weight_consent = 2
@@ -125,18 +126,18 @@ pure def lock(c: Collection, locked: bool, by: O::Actor): Listed =
 ### Only the newest listing is shown, while collection is active and the phone unlocked; its text only with consent to previews and never for a secret notification; a listing can fail
 
 The history keeps what was listed, up to twenty, only with consent to it,
-dated from the oldest it keeps.
+dated from the time the oldest it keeps was listed.
 
 ```quint
 pure def canListed(c: Collection, ticket: int, rows: int, by: O::Actor): bool =
   by == O::Phone and R::canAnswer(c.listing, ticket) and active(c) and not(c.locked) and rows >= 0
 
-pure def listed(c: Collection, ticket: int, ok: bool, rows: int, secret: bool, now: int, by: O::Actor): Collection =
+pure def listed(c: Collection, ticket: int, ok: bool, rows: int, secret: bool, at: int, by: O::Actor): Collection =
   val shown = if (ok) rows else 0
   val total = c.kept + shown
   { ...c, listing: R::answer(c.listing, ok), rows: shown, previews: c.preview and not(secret) and shown > 0,
     kept: if (not(c.keep)) 0 else if (total > maxKept) maxKept else total,
-    keptSince: if (c.kept == 0) now else c.keptSince }
+    keptSince: if (c.kept == 0) at else c.keptSince }
 ```
 
 ### History older than its limit is forgotten
@@ -183,10 +184,10 @@ pure def stepRowsComeFromAListing(before: Collection, via: str, after: Collectio
 ### A secret notification's text is never shown
 
 ```quint
-pure def lawASecretIsNeverPreviewed(ticket: int, rows: int, now: int): bool =
+pure def lawASecretIsNeverPreviewed(ticket: int, rows: int, at: int): bool =
   val c = { ...initial, owner: 1, on: true, preview: true, chosen: true, access: K::observe(K::unasked, K::Granted),
     listing: { status: R::Loading, ticket: ticket } }
-  not(listed(c, ticket, true, rows, true, now, O::Phone).previews)
+  not(listed(c, ticket, true, rows, true, at, O::Phone).previews)
 ```
 
 ### Rows can show with their text, without it, the history can be kept while the phone is locked, a listing can fail, and an app can need choosing again

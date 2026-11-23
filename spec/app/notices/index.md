@@ -54,7 +54,7 @@ pure val initial: Notices = { issued: 0, waiting: none, opening: 0, spending: no
 
 pure def about(does: Doing, t: Tap): Effect = { does: does, token: t.token, source: t.source, ticket: 0 }
 
-pure val tokenValues = Set(1, 2, 3)
+pure val tokenValues = 1.to(20)
 pure val ownerValues = Set(1, 2)
 pure val signedInValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3)
@@ -110,6 +110,8 @@ A notice that could not be read keeps its tap waiting for another try. A
 tap that a newer one replaced while it was opening spends nothing.
 
 ```quint
+pure val weight_shown = 5
+
 pure def canShown(s: Notices, token: int, by: O::Actor): bool = by == O::Phone and s.opening != 0 and token == s.opening
 
 pure def shown(s: Notices, token: int, showed: Showed, by: O::Actor): Told =
@@ -273,6 +275,8 @@ pure def confirmQuestion(s: Notices, signedIn: int, blocked: bool, composer: boo
 A newer tap that arrived meanwhile keeps waiting.
 
 ```quint
+pure val weight_spent = 5
+
 pure def canSpent(s: Notices, token: int, by: O::Actor): bool = by == O::Phone and s.spending.token != 0 and token == s.spending.token
 
 pure def spent(s: Notices, token: int, ok: bool, signedIn: int, composer: bool, by: O::Actor): Told =

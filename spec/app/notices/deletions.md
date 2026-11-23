@@ -143,15 +143,16 @@ pure def sometimesOneUndoneAnotherSent(d: Deletions): bool =
 
 ### Every deletion queued is decided
 
-If the journal answers and the phone keeps time, no deletion stays being
-written or in its window.
+If the journal answers whenever it is asked, even when the phone restarts
+in between, and the phone keeps time, no deletion stays being written or in
+its window.
 
 ```quint
 pure def leadsToEveryDeletionIsDecided(d: Deletions, later: Deletions): bool =
   d.numbers.forall(n => (held(d, n).writing or held(d, n).window.holding == U::Held) implies
     (not(held(later, n).writing) and (held(later, n).window.holding != U::Held or held(later, n).paused)))
 
-pure val fair_recorded = "weak"
+pure val fair_recorded = "strong"
 pure val fair_release = "weak"
 pure val fair_undone = "weak"
 pure val fair_recover = "weak"
