@@ -1,9 +1,12 @@
 // spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"; spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/drafts.md, "Each subject keeps one request to Alpha, separate from its draft slot"; spec/telephony/common.md, "A question for Alpha leaves the bar only once a turn took it"
+import { Effect } from "effect";
 import { useMemo } from "react";
+import { commsReviewFromAssistant } from "../../assistant/call-facts.vibe";
 import { useMachine as useCommsMachine } from "../../../gen/telephony__comms.react.ts";
 import { initial as commsInitial, type CommsApp, type Subject } from "../../../gen/telephony__comms.ts";
 import { useMachine as useDraftsMachine } from "../../../gen/telephony__drafts.react.ts";
 import { initial as draftsInitial } from "../../../gen/telephony__drafts.ts";
+import { CallWatch } from "../../telephony/call-bar.vibe";
 import { CommsStage, type OpenCard } from "../../telephony/comms.vibe";
 import { askFromContacts, askFromList, sendRequest } from "../../telephony/list-ask.vibe";
 import { act, answer, now } from "../shell/services.ts";
@@ -57,11 +60,17 @@ export function useComms() {
       if (!request.trim()) return;
       act(sendRequest(state.key));
     },
+    /** End beside the bar (AC-18): ends the call the call bar shows, asked once. */
+    endCall: () => act(CallWatch.use((w) => w.endShown())),
     /** The open proposal and its kept words; a restored one is shown and never approved. */
     card,
-    /** Approve the open, live proposal: only the owner's tap. */
-    approve: (proposalId: string) => act(CommsStage.use((s) => s.approve(proposalId))),
-    /** Dismiss the open proposal, live or restored. */
-    decline: (proposalId: string) => act(CommsStage.use((s) => s.decline(proposalId))),
+    /** Approve the open, live proposal: only the owner's tap, staged first, then run once through the assistant's device review, which redraws its chat card. */
+    approve: (proposalId: string) =>
+      act(Effect.flatMap(CommsStage.use((s) => s.approve(proposalId)), (staged) =>
+        staged ? Effect.flatMap(commsReviewFromAssistant(), (review) => review.approve(proposalId)) : Effect.succeed(false))),
+    /** Dismiss the open proposal, live or restored; a live one is declined through the assistant's device review, and nothing runs. */
+    decline: (proposalId: string) =>
+      act(Effect.flatMap(CommsStage.use((s) => s.decline(proposalId)), (staged) =>
+        staged ? Effect.flatMap(commsReviewFromAssistant(), (review) => review.decline(proposalId)) : Effect.succeed(false))),
   };
 }

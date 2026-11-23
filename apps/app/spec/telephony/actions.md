@@ -65,8 +65,12 @@ pure val candidatesValues = Set(List())
 
 A call or text to a number runs only for a number written in the owner's own request (#1393,
 #1396): a proposal naming a different number, a contact in place of the written number, or a
-number taken from the text's body is refused before anything is looked up. A repeated operation ID
-never runs again.
+number taken from the text's body is refused before anything is looked up. A contact change is
+judged by every number it saves, adds or removes: when the owner's request writes any number, each
+of them must be one the owner wrote, or the change is refused before anything is looked up; a
+request that writes no number leaves the numbers to the owner's review (upstream
+`spec/agent/deviceActions/telephony.md`, `contactValueVerdict`). The refusal says that the number
+is not one the owner wrote. A repeated operation ID never runs again.
 
 ```quint
 pure def startedRun(runId: str, kind: ActionKind, form: TargetForm, grounded: bool): Run =
@@ -84,9 +88,11 @@ pure def sometimesAnUngroundedNumberRefused(a: Actions): bool = resultOf(a.ongoi
 ### A name is looked up on the phone and the owner picks the exact number, even for one match
 
 Every dialable number of every matching contact is one candidate. No match finishes as not found.
-A new contact whose name or number is already in Contacts shows that contact as the one candidate,
-"Add anyway"; a change shows each matching contact before and after; a change that would leave a
-contact exactly as it is is never offered.
+A new contact whose name or any of whose numbers is already in Contacts shows that contact as the
+one candidate, "Add anyway"; a change shows each matching contact before and after, with its `set`
+fields replaced (or added beside the existing values) and its explicit `add` and `remove` values
+applied; a change that would leave a contact exactly as it is is never offered. A removal the
+phone stages in its Undo window is the deletion the owner approved, and reads as deleted.
 
 ```quint
 pure def canCandidatesFound(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isResolving(a.ongoing) and formOf(a.ongoing) == ContactLookup
@@ -116,7 +122,8 @@ pure def sometimesTheOwnerPicksAmongNames(a: Actions): bool = candidatesOf(a.ong
 ### The owner's Not now, leaving the app or a changed context ends a run that has not dispatched
 
 Not now, locking, hiding Alpha, or another view replacing the one the review ran under chooses
-nothing; nothing is called, sent or changed.
+nothing; nothing is called, sent or changed. A review the owner leaves unanswered for five minutes
+also chooses nothing, so a forgotten chooser never acts later and never holds back the next action.
 
 ```quint
 pure def canReviewDismissed(a: Actions, runId: str, by: Actor): bool =
@@ -160,6 +167,12 @@ A coded native refusal (no phone-app role, no call grant, no write access, Conta
 phone refusing before it acted: unavailable. A lost reply may follow an accepted call, a radio that
 took the text, or a committed contact write, so it is unconfirmed, and the run is never retried.
 
+Each receipt is one sentence chosen by the result's own kind and status: a text Android only
+accepted reads "Message handed to Android.", one the radio sent "Message sent.", and only a
+delivery report reads "Message delivered."; no incoming text reads that there is none; an
+emergency-guard refusal and a refused unwritten number each say their own reason. Where the phone
+answered nothing, the sentence follows the outcome alone.
+
 ```quint
 pure def canEffectAnswered(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isDispatching(a.ongoing)
 pure def effectAnswered(a: Actions, runId: str, result: Settled, by: Actor): Actions = { ...a, ongoing: Finished({ runId: runId, kind: kindOf(a.ongoing), result: result }) }
@@ -197,8 +210,13 @@ pure def lawNoRecordIsNeverNotSent(kind: ActionKind): bool = readBackOf(kind, No
 Reads of the open thread, contact or voicemail share only what is open, whole and within bounds,
 or say none is selected. The keypad opens filled in at most; Contacts shows the matches, and Alpha
 learns only whether there was one. A text for a conversation that is open goes into its draft
-slot instead of being sent (AC-14); a reply to the selected conversation goes to that exact
-conversation's full address set (eliza#39920), or says none is selected or that it is occupied.
+slot instead of being sent (AC-14). A draft request (`sms_compose` with `draft: true`) is never
+sent: once its recipient is the number the owner wrote or picked, the text goes into the draft of
+the conversation it names (`replyThreadId`), of the open conversation with that one recipient, or
+of a new message to that number, and Messages opens on it for the owner to edit and send; an
+occupied slot settles as occupied and nothing is sent. A reply to the selected conversation goes to
+that exact conversation's full address set (eliza#39920), or says none is selected or that it is
+occupied.
 The latest sender is read from the newest incoming row's address only, never its body: the last
 four digits, or with `sms.latest-sender.v2` the whole dialable number and its conversation, so a
 reply draft goes to that sender in that conversation (upstream `spec/os/android/messages.md`,

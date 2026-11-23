@@ -215,6 +215,7 @@ export function MessagesScreen({ route }: MessagesScreenProps) {
           }
         }}
         onAlpha={stage.openAlpha}
+        onEnd={stage.endCall}
         onBack={stage.closeChat}
         onAttach={person ? () => void attach() : undefined}
       />
