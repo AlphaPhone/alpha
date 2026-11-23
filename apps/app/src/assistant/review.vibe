@@ -318,7 +318,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const done = try exit(routes.send(event))
     return Exit.isSuccess(done)
   }
-  effect function drawCard(proposal: PendingProposal, recovered: boolean, session: string): ProposalCard {
+  function drawCard(proposal: PendingProposal, recovered: boolean, session: string): ProposalCard {
     const described = ports.describe(proposal.operation)
     proposals.set(proposal.id, proposal)
     const items = listedNow.get(proposal.id)
@@ -360,7 +360,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const described = ports.describe(proposal.operation)
     return typeof said === "string" ? said : `${proposal.title ?? described.title}: ${copy.nothingListed}`
   }
-  effect function stateOf(routes: RoutesMachine.Shape): CardState {
+  effect function stateOf(routes: RoutesMachine.Shape): CardState!! {
     return (try routes.get()).card
   }
   effect function screenCheck(reviewed: boolean, requestEligible: boolean, forceReview: boolean) {
@@ -371,7 +371,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const call = calls.get(proposal.id)
     if (result.kind !== "settled" || result.result.tag !== "Applied" || call === undefined || ports.present === undefined) return
     const show = ports.present
-    try Effect.try(() => show(proposal.operation, call)) catch () => undefined
+    try Effect.ignore(Effect.try(() => show(proposal.operation, call)))
   }
   effect function receiptOf(proposal: PendingProposal, result: ApproveResult) {
     const outcome: Result = result.kind !== "settled" ? (result.kind === "history" ? "Unknown" : "NotStarted")
@@ -498,7 +498,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       for (const proposal of open) {
         const notice = try itemizedNotice(proposal)
         if (notice !== undefined) notices.push(notice)
-        else made.push(try drawCard(proposal, true, identity.session))
+        else made.push(drawCard(proposal, true, identity.session))
       }
       try stage(made)
       return { ok: true, cards: made, notices }
@@ -522,7 +522,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       try custodyStep({ type: "propose", op: ports.classOf(found.operation), workflow: true, bound: false, grounded: false, listed: false })
       if (!(try custodyStep({ type: "reviewWorkflow" }))) return undefined
       consumed.add(found.id)
-      const card = try drawCard(found, false, identity.session)
+      const card = drawCard(found, false, identity.session)
       const done = try custodied(found, false)
       return {
         card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary },
@@ -571,7 +571,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
           notices.push(notice)
           continue
         }
-        const card = try drawCard(proposal, false, identity.session)
+        const card = drawCard(proposal, false, identity.session)
         if (!mayRunReplyProposal(replied, listedNow.has(proposal.id), proposal.requestMessageId === messageId)) {
           left.push(card)
           continue
