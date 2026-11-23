@@ -9,6 +9,7 @@ import {embeddingProducerInputPaths as producerInputPaths,nativeInputPaths,nativ
 import type { EmbeddingInput, EmbeddingProducerInput, PreparedEmbeddingLibrary } from "./stage-embedding-host.ts";
 import {embeddingBuildRemap} from './embedding-build-remap.ts';
 import {isAndroidAbi} from './android-abis.ts';
+import {pinnedEngine} from './paradee-runtime.ts';
 // Full producer module closure and repository-shape metadata; no dependency install.
 
 const root=path.resolve(import.meta.dirname,'..'),upstream=path.join(root,'vendor/eliza');
@@ -24,9 +25,8 @@ if(fs.existsSync(output))throw Error('Output already exists; preserve prior arti
 const git=(directory: string,...command: string[])=>execFileSync('git',['-C',directory,...command],{encoding:'utf8'}).trim();
 const pin=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'),'utf8')).commit;
 if(git(upstream,'rev-parse','HEAD')!==pin)throw Error('Unexpected Eliza pin');
-const forkPath='packages/os/android/local-inference/llama.cpp';
-const forkPin=git(upstream,'ls-tree',pin,forkPath).match(/^160000 commit ([a-f0-9]{40})\t/)?.[1];
-if(!forkPin||git(fork,'rev-parse','HEAD')!==forkPin||git(fork,'status','--porcelain'))throw Error('Engine checkout must be clean at the exact Eliza gitlink');
+const forkPin=pinnedEngine(root).commit;
+if(git(fork,'rev-parse','HEAD')!==forkPin||git(fork,'status','--porcelain'))throw Error('Engine checkout must be clean at the exact Eliza engine lock');
 if(git(fork,'submodule','status','--recursive').split('\n').some(line=>line&&/^[-+U]/.test(line)))throw Error('Engine nested submodules must already be initialized at their pins; no downloads are performed');
 for(const file of ['tools/omnivoice/CMakeLists.txt','tools/omnivoice/include/eliza-inference-ffi.h'])if(!fs.existsSync(path.join(fork,file)))throw Error('Pinned fused engine source is incomplete');
 const identity=androidIdentity(root).appId;
@@ -59,7 +59,6 @@ for(const relative of producerInputPaths){
  else if(createHash('sha256').update(fs.readFileSync(target)).digest('hex')!==digest)throw Error('Producer input overlaps a relocated native input');
  producerInputs.push({path:relative,sha256:digest});
 }
-fs.mkdirSync(path.dirname(path.join(staging,forkPath)),{recursive:true});fs.symlinkSync(fork,path.join(staging,forkPath),'dir');
 const nativeSource=path.join(staging,'packages/os/android/local-inference/src/main/elizavoice-jni');
 const suppliedEngine=option('--engine');
 if(suppliedEngine){for(const name of ['libelizainference.so','libc++_shared.so']){const from=path.join(suppliedEngine,name),to=path.join(staging,'packages/os/android/local-inference/jniLibs',abi,name);if(!fs.statSync(from).isFile()||fs.lstatSync(from).isSymbolicLink())throw Error('Native engine input must be a regular file');fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}}
@@ -74,7 +73,7 @@ const commands=[
 // toolchain file ignores CFLAGS). Bytes built with and without it differ; a receipt records which.
 const remap=args.includes('--remap-build-path');
 const remapEnv=remap?embeddingBuildRemap(root,{sdk,staging,fork,build:path.join(output,'jni-build')}):{};
-const receipt={pin,forkPin,identity,abi,inputs,producerInputs,...(jniBinding.mode==='registered'?{jniBinding}:{}),commands,env:{ANDROID_HOME:sdk,ELIZA_NDK_VERSION:ndkVersion,CMAKE_BUILD_PARALLEL_LEVEL:'2',...remapEnv},buildPathRemapped:remap,built:false,packaged:false,runtimePolicyChanged:false,libraries:undefined as PreparedEmbeddingLibrary[] | undefined};
+const receipt={pin,forkPin,identity,abi,inputs,producerInputs,...(jniBinding.mode==='registered'?{jniBinding}:{}),commands,env:{ANDROID_HOME:sdk,ELIZA_NDK_VERSION:ndkVersion,ELIZA_INFERENCE_ENGINE_DIR:fork,CMAKE_BUILD_PARALLEL_LEVEL:'2',...remapEnv},buildPathRemapped:remap,built:false,packaged:false,runtimePolicyChanged:false,libraries:undefined as PreparedEmbeddingLibrary[] | undefined};
 fs.writeFileSync(path.join(output,'PREPARATION.json'),JSON.stringify(receipt,null,2)+'\n');
 if(args.includes('--build')){
  for(const [executable,...argv] of commands)execFileSync(executable,argv,{cwd:staging,env:{...process.env,...receipt.env},stdio:'inherit'});

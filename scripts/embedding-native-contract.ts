@@ -6,18 +6,17 @@ export function embeddingAbiLibraries<T>(record: {abi:string; libraries:T[]; add
 export const embeddingProducerInputPaths=[
  "package.json",
  "packages/agent/package.json",
- "packages/os/android/local-inference/package.json",
- "packages/os/android/local-inference/scripts/aosp/compile-libllama-paths.ts",
- "packages/os/android/local-inference/scripts/aosp/compile-libllama.ts",
- "packages/os/android/local-inference/scripts/aosp/compile-shim.ts",
- "packages/os/android/local-inference/scripts/aosp/vulkan-source-contract.ts",
- "packages/os/android/local-inference/scripts/aosp/zig-toolchain.ts",
+ "packages/os/android/local-inference/engine.lock.json",
+ "packages/os/android/local-inference/inputs.json",
  "packages/os/android/local-inference/scripts/build-helpers/arm64-simd.ts",
  "packages/os/android/local-inference/scripts/build-helpers/elizavoice-build-flags.ts",
- "packages/os/android/local-inference/scripts/build-helpers/omnivoice-merged.ts",
  "packages/os/android/local-inference/scripts/build-helpers/verify-fused-symbols.ts",
- "packages/os/android/local-inference/scripts/lib/repo-root.ts",
- "packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts"
+ "packages/os/android/local-inference/scripts/build-native.ts",
+ "packages/os/android/local-inference/scripts/build-phonon2-gguf.ts",
+ "packages/os/android/local-inference/scripts/engine.ts",
+ "packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts",
+ "packages/os/android/local-inference/voice-model-versions.json",
+ "packages/os/android/local-inference/voice-product-inputs.mjs",
 ];
 // The native preparation and admission paths share one identity transformation.
 export const nativeInputPaths = [
