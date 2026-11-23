@@ -21,16 +21,11 @@ export const meta: ComponentMeta<InboxListScreenProps> = {
     "Drafts set aside": { aside: 2, onShelf: fn() },
     "Searching": { search: "tax", rows: rows.slice(3) },
     "Loading first page": { loading: true, rows: [], onRefresh: undefined, state: undefined },
-    Empty: { rows: [], state: "empty" },
-    "No matches": { search: "zzz", rows: [], state: "noResults" },
     "Signed out": { account: undefined, rows: [], state: "signedOut", onStateAction: fn(), onRefresh: undefined, onCompose: undefined, onAccount: undefined, onChooseFolder: undefined, onSearch: undefined },
-    "Not connected": { account: undefined, rows: [], state: "notConnected", onStateAction: fn(), onRefresh: undefined, onCompose: undefined, onChooseFolder: undefined, onSearch: undefined },
     "Needs access": { rows: [], state: "needsAccess", onStateAction: fn(), onRefresh: undefined, onCompose: undefined, onChooseFolder: undefined, onSearch: undefined },
     "Access withdrawn": { rows: [], state: "needsAccess", notice: "reconnect", onNoticeAction: fn(), onRefresh: undefined, onCompose: undefined },
     "Spam unavailable": { folder: "spam", unavailable: true, rows: [], state: "unavailable", onRefresh: undefined },
     "Offline with nothing to show": { rows: [], state: "offline", onStateAction: fn() },
-    "May be out of date": { notice: "listOutOfDate", onNoticeAction: fn() },
-    "Newer mail may be missing": { notice: "newerMailMissing", onNoticeAction: fn(), onLoadMore: fn() },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {

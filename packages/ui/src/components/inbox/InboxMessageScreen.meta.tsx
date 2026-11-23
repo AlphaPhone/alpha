@@ -28,8 +28,6 @@ export const meta: ComponentMeta<InboxMessageScreenProps> = {
     Unread: { unread: true },
     Loading: { reading: true, children: undefined },
     "Could not be read": { fault: "unreachable", onFaultAction: fn(), children: undefined },
-    "Changed in Gmail": { fault: "changed", onFaultAction: fn(), children: undefined },
-    "Conversation changed": { fault: "conversationChanged", onFaultAction: fn(), children: undefined },
     "Too large": { fault: "tooLarge", onFaultAction: fn(), children: undefined },
     "Saved copy": { fromPhone: true, ...noActions, onOlder: undefined, attachments: [] },
     "Marking unconfirmed": { notice: "markUnconfirmed", onNoticeAction: fn() },
