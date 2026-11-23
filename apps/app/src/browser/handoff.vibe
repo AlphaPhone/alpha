@@ -58,7 +58,7 @@ export const handoffLayer = Layer.provide(Layer.effect(BrowserHandoff, effect {
         if (opened instanceof BrowserCallFailed) try toasts.show(refusalText(opened.message))
         try send({ type: "dispatched", ok: !(opened instanceof BrowserCallFailed) })
       };
-      when { tag: "Notice", let problem }: if (problem !== "NotOpened") try toasts.show(HANDOFF_NOTICES[problem]);
+      when { tag: "Notice", let problem }: problem !== "NotOpened" ? try toasts.show(HANDOFF_NOTICES[problem]) : undefined;
     }
   }
 
