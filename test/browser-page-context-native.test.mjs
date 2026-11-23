@@ -1,7 +1,7 @@
 // Alpha's native page-context boundary (android/.../alphaphone/browser/AlphaPageContext.java), run on
 // the host JVM: the address the agent may see, the title as one line, and the shape check on the
 // isolated-world script's result. The compiled script must be the exact text that
-// test/browser/page-context-script.spec.ts runs in Chromium. This does not exercise a WebView, an
+// apps/app/test/browser/pageContextScript.browser.test.ts runs in Chromium. This does not exercise a WebView, an
 // isolated world or a device.
 import test from 'node:test';
 import assert from 'node:assert/strict';

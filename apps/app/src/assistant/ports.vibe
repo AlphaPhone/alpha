@@ -142,7 +142,7 @@ export interface PageObservation {
 export service BrowserPages {
   /** The tab Browser shows in front now, or undefined for a private tab, no tab, or Browser not in front. */
   selected(): (ObservedTab | undefined)!!
-  /** The page of the observed tab for one turn to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds, and undefined whenever it may not go. */
+  /** The page of the observed tab for one turn to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds or, with Browser's capture of the page in hand, 250 ms, and undefined whenever it may not go. */
   forTurn(observation: PageObservation, peerTakesIt: boolean): (BrowserPage | undefined)!!
   /** Whether `url` is exactly a link of the page the latest turn carried. */
   carried(url: string): boolean!!

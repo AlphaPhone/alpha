@@ -1,8 +1,8 @@
-// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"
+// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"; spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"; spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
 import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
 import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
-import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, curTab, isPrivateTab, keptOf, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
-import { type Preference, Machine, machine } from "../../gen/browser__agent.effect.vibe"
+import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, canAgentShowTabs, curTab, isPrivateTab, keptOf, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
+import { type AgentPresentation, type Preference, Machine, machine, presentedRan } from "../../gen/browser__agent.effect.vibe"
 import type { PageCommand } from "../../gen/browser__page.ts"
 import { type Interaction, interactionAnswer } from "../../gen/browser__pageContext.effect.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
@@ -66,8 +66,10 @@ export type ViewCommandAnswer =
 export service BrowserAgent {
   /** An approved HTTPS open: the tab it loaded into, and how to show it after the action's receipt. */
   openApproved(url: string, newTab: boolean): Effect.Effect<{ readonly tab: string; readonly present: Effect.Effect<void> }, BrowserOpenRefused>
-  /** A reviewed Browser control from chat; the returned presentation runs after the action's journal and receipt. */
-  control(operation: unknown, observed: BrowserTabSelection | undefined, choose: (choice: BrowserTabChoice) => Effect.Effect<number | null>): Effect.Effect<Effect.Effect<void>, BrowserOpenRefused>
+  /** A reviewed Browser control from chat; the returned presentation runs after the action's journal and receipt, and answers false when a change its receipt reported (a switch, closing the showing tab, a page-history move) did not run. */
+  control(operation: unknown, observed: BrowserTabSelection | undefined, choose: (choice: BrowserTabChoice) => Effect.Effect<number | null>): Effect.Effect<Effect.Effect<boolean>, BrowserOpenRefused>
+  /** Shows Browser's own list of open tabs once the action's receipt settled, or refuses before any effect when Browser has no session: the presentation answers whether the list opened; no tab, title, address or count leaves Browser. */
+  showTabs(): Effect.Effect<Effect.Effect<boolean>, BrowserOpenRefused>
   /** A view command from the assistant's Browser view, claimed once and never repeated. */
   command(raw: unknown, selection: unknown): ViewCommandAnswer!!
   /** An agent view interaction in Browser: `browser-command` is a view command, and `get-text` is refused with where the page comes from. */
@@ -84,8 +86,8 @@ export service BrowserAgent {
   tabsClosing(proposalId: string): (ClosingList | null)!!
   /** Whether the card of `proposalId` was listed and still lists the tabs that would close; it never binds a listing. */
   closingListed(proposalId: string): boolean!!
-  /** Closes exactly the tabs the card of `proposalId` listed, or refuses before any effect: what it closed and kept, and the presentation that closes the tab showing in Browser. */
-  closeAll(proposalId: string): Effect.Effect<{ readonly present: Effect.Effect<void>; readonly result: ClosedTabs }, BrowserOpenRefused>
+  /** Closes exactly the tabs the card of `proposalId` listed, or refuses before any effect: what it closed and kept, and the presentation that closes the tab showing in Browser, false when it stayed open. */
+  closeAll(proposalId: string): Effect.Effect<{ readonly present: Effect.Effect<boolean>; readonly result: ClosedTabs }, BrowserOpenRefused>
 }
 
 const historyOf = { back: "GoBack", forward: "GoForward", reload: "Reload", stop: "StopLoading" } as const satisfies Record<string, PageCommand>
@@ -150,6 +152,19 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
     return id
   }
 
+  // A presentation that brings Browser forward over a change already made: it owes no correction.
+  effect function brought(event: SessionEvent) {
+    try tabs.dispatch(event)
+    return presentedRan("BringForward", true)
+  }
+
+  // A change the receipt already reported runs only now, on a shown, unlocked phone whose selected tab the rules still accept, and answers whether it ran.
+  effect function deferred(presentation: AgentPresentation, event: SessionEvent) {
+    const now = try foreground.get()
+    if (!now.visible || now.locked) return presentedRan(presentation, false)
+    return presentedRan(presentation, (try tabs.dispatch(event)).accepted)
+  }
+
   effect function outcome(event: SessionEvent, request: string) {
     const settled = try settleOf(event, request)
     if (settled === undefined) throw refuse("RefusedChanged")
@@ -206,40 +221,46 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
       const request = newId()
       const observedTab = observed === undefined ? "" : observed.id.slice(observed.id.indexOf(":") + 1)
       const observedRevision = observed === undefined ? 0 : Number(observed.revision)
+      // browser_tabs_show is not in the pinned contract's BrowserControlOperation yet (elizaOS/eliza#40331); once the pin includes it, add its case here delegating to showTabs().
       switch (operation.type) {
         case "browser_search": {
           const opened = try open(searchAddress(operation.query), false)
-          return opened.present
+          return map(opened.present, () => presentedRan("BringForward", true))
         }
         case "browser_tab_new": {
           const id = newTabId()
           try outcome({ type: "agentTabNew", request, id, priv: operation.private === true }, request)
-          return effect { try tabs.dispatch({ type: "agentPresent", tab: id, selected, edit: true }) }
+          return brought({ type: "agentPresent", tab: id, selected, edit: true })
         }
         case "browser_tab_switch": {
           const target = try chosen(operation.target, false, choose)
           try outcome({ type: "agentSwitch", request, target, inBrowser: shown }, request)
-          return effect { try tabs.dispatch({ type: "agentPresent", tab: target, selected, edit: false }) }
+          return deferred("PresentSwitch", { type: "agentPresent", tab: target, selected, edit: false })
         }
         case "browser_tab_close": {
           if (operation.target === undefined && isPrivateTab(state, selected) && !shown) throw refuse("RefusedPrivate")
           const target = operation.target === undefined ? "" : try chosen(operation.target, true, choose)
           const settled = try outcome({ type: "agentClose", request, target, inBrowser: shown, fallback: newTabId() }, request)
-          if (settled.tab !== selected) return effect { try tabs.dispatch({ type: "agentPresent", tab: (try tabs.get()).cur, selected, edit: false }) }
-          return effect { try tabs.dispatch({ type: "agentCloseShown", tab: selected, selected, fallback: newTabId() }) }
+          if (settled.tab !== selected) return brought({ type: "agentPresent", tab: (try tabs.get()).cur, selected, edit: false })
+          return deferred("PresentCloseShown", { type: "agentCloseShown", tab: selected, selected, fallback: newTabId() })
         }
         case "browser_find": {
           try outcome({ type: "agentFind", request, query: operation.text }, request)
           try tabs.typeFind(operation.text)
-          return effect { try tabs.dispatch({ type: "agentPresent", tab: selected, selected, edit: false }) }
+          return brought({ type: "agentPresent", tab: selected, selected, edit: false })
         }
         case "browser_history": {
           const command = historyOf[operation.action]
           try outcome({ type: "agentHistory", request, command, observedTab, observedRevision }, request)
           const navigation = curTab(state).page.navigation
-          return effect { try tabs.dispatch({ type: "agentCommandShown", tab: selected, command, navigation }) }
+          return deferred("PresentCommandShown", { type: "agentCommandShown", tab: selected, command, navigation })
         }
       }
+    },
+    effect showTabs() {
+      const state = try tabs.get()
+      if (!canAgentShowTabs(state, state.cur)) throw new BrowserOpenRefused({ message: "Browser is unavailable." })
+      return deferred("PresentTabList", { type: "agentShowTabs", selected: state.cur })
     },
     command: viewCommand,
     effect interact(capability: string, raw: unknown, selection: unknown) {
@@ -293,9 +314,9 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
       const settled = try outcome({ type: "agentCloseAll", request, proposal: proposalId, inBrowser: shown, fallback: newTabId() }, request)
       if (settled.tab === "") {
         const left = (try tabs.get()).cur
-        return { present: effect { try tabs.dispatch({ type: "agentPresent", tab: left, selected: left, edit: false }) }, result }
+        return { present: brought({ type: "agentPresent", tab: left, selected: left, edit: false }), result }
       }
-      return { present: effect { try tabs.dispatch({ type: "agentCloseAllShown", tab: selected, selected, fallback: newTabId(), hidePrivate }) }, result }
+      return { present: deferred("PresentCloseAllShown", { type: "agentCloseAllShown", tab: selected, selected, fallback: newTabId(), hidePrivate }), result }
     },
   }
 }), machine())

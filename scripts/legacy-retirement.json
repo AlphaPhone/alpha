@@ -597,6 +597,12 @@
    "status": "mapped"
   },
   {
+   "legacy": "test/browser-page-context.test.mjs",
+   "area": "browser",
+   "spec": "apps/app/spec/browser/pageContext.md",
+   "status": "mapped"
+  },
+  {
    "legacy": "test/browser-proof-export.test.mjs",
    "area": "browser",
    "spec": "apps/app/spec/browser/index.md",
@@ -942,6 +948,12 @@
    "legacy": "test/browser/browser-navigation.spec.ts",
    "area": "maps",
    "spec": "apps/app/spec/maps/index.md",
+   "status": "mapped"
+  },
+  {
+   "legacy": "test/browser/browser-page-context.production.spec.ts",
+   "area": "browser",
+   "spec": "apps/app/spec/browser/pageContext.md",
    "status": "mapped"
   },
   {
@@ -3282,6 +3294,12 @@
    "legacy": "test/browser/owner-settings-review.spec.ts",
    "area": "settings",
    "spec": "apps/app/spec/settings/index.md",
+   "status": "mapped"
+  },
+  {
+   "legacy": "test/browser/page-context-script.spec.ts",
+   "area": "browser",
+   "spec": "apps/app/spec/browser/pageContext.md",
    "status": "mapped"
   },
   {

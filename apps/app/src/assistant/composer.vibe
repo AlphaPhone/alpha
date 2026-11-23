@@ -296,6 +296,8 @@ export const composerLayer = Layer.effect(Composer, effect {
       return false
     }
     const attempt = sendsBefore.nextId
+    // Start the peer's status check alongside the send's local preparation.
+    const peering = fork host.peer()
     ownKey = undefined
     const bound = try quiet(client.send({ type: "send" }))
     const unbind = () => effect { if (bound) try quiet(client.send({ type: "sendFailed" })) }
@@ -332,15 +334,15 @@ export const composerLayer = Layer.effect(Composer, effect {
     }
     const screen = try host.screen()
     const observed = observes(screen.exposure)
-    const peer = try host.peer()
-    const place = try location.forTurn(observed, peer.takesLocation)
     const asksFirst = try preferences.asksBeforeActions()
     try sources.preferReview(asksFirst)
-    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
     const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
     const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
     const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
+    const peer = try join peering
+    const place = try location.forTurn(observed, peer.takesLocation)
+    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
     const observation = observed ? {
       ...screen.observation,

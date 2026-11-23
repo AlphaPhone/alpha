@@ -4,10 +4,11 @@ import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { NO_PAGE_READ, NO_VIEW_COMMAND, PAGE_LINK_UNREVIEWED, refusalText } from "../../src/browser/messages.ts"
 import { operationPorts } from "../../src/browser/operations.vibe"
 import { admittedPage, agentPageTitle, bareAddress, boundPage, pageAddress } from "../../src/browser/page-context.ts"
-import { BrowserPageContext } from "../../src/browser/pageContext.vibe"
+import { capturesAhead } from "../../gen/browser__pageContext.effect.vibe"
+import { BrowserPageContext, type PageTurnObservation } from "../../src/browser/pageContext.vibe"
 import { BrowserCallFacts } from "../../src/browser/ports.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
-import { callsTo, fakeHost, loadPage, report, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
+import { type HostEvent, callsTo, fakeHost, loadPage, report, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
 
 const story = {
   url: "https://news.example/story?id=1",
@@ -134,7 +135,7 @@ it.live("a withheld page sends only its address and title, a sensitive one witho
 
 // spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"
 it.live("a slow read never holds the message past its wait, and a page that changed or a setting turned off during the read is dropped", () => effect {
-  let mode = "slow"
+  let mode = "off"
   const sharing = try Ref.make(true)
   const fake = try fakeHost({
     sharing,
@@ -151,21 +152,210 @@ it.live("a slow read never holds the message past its wait, and a page that chan
       const context = try BrowserPageContext
       try settledTabs(tabs)
       try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story", "1", 1)
-      const observation = try observing(agent)
-      const started = try Clock.currentTimeMillis
-      const slow = try context.forTurn(observation, true)
-      const waited = (try Clock.currentTimeMillis) - started
-      const afterSlow = (try Stream.runHead(context.changes))
       mode = "off"
-      const turnedOff = try context.forTurn(observation, true)
+      const turnedOff = try context.forTurn(try observing(agent), true)
       try Ref.set(sharing, true)
       mode = "moved"
-      const moved = try context.forTurn(observation, true)
+      const moved = try context.forTurn(try observing(agent), true)
       const got3 = try context.carried("https://news.example/second")
+      // A read that never answers runs on: the slow message is the last one, on the page the read moved to.
+      mode = "slow"
+      const started = try Clock.currentTimeMillis
+      const slow = try context.forTurn(try observing(agent), true)
+      const waited = (try Clock.currentTimeMillis) - started
+      const afterSlow = (try Stream.runHead(context.changes))
       try Effect.try(() => assert.deepStrictEqual({
         slow, withinWait: waited < 2000, stage: afterSlow._tag === "Some" ? afterSlow.value.stage : "none", turnedOff, moved,
         carriedAfterDrop: got3,
       }, { slow: undefined, withinWait: true, stage: "Withdrawn", turnedOff: undefined, moved: undefined, carriedAfterDrop: false }))
+    }
+  })
+})
+
+/** Lets Browser's fibers follow while the test clock moves `ms` in 10 ms steps. */
+effect function pass(ms: number) {
+  for (let elapsed = 0; elapsed < ms; elapsed += 10) {
+    for (const _ of [1, 2, 3, 4]) try yieldNow
+    try TestClock.adjust("10 millis")
+  }
+  for (const _ of [1, 2, 3, 4]) try yieldNow
+}
+
+/** Loads `url` in the selected tab under the test clock. */
+effect function loaded(tabs: BrowserTabs.Shape, events: PubSub.PubSub<HostEvent>, session: string, url: string, navigation: string, sequence: number) {
+  const loading = fork loadPage(tabs, events, session, url, navigation, sequence)
+  try pass(30)
+  return try join loading
+}
+
+/** One message's page, while the test clock moves `ms`. */
+effect function waiting(context: BrowserPageContext.Shape, observation: PageTurnObservation, ms: number) {
+  const turn = fork context.forTurn(observation, true)
+  try pass(ms)
+  return try join turn
+}
+
+const readAs = (text: string) => ({ ...story, text })
+
+// spec/browser/pageContext.md, "On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read"
+it.effect("a message takes the capture of its page when no fresher read answers within 250 ms, shares the read already running, and takes a fresher read that answers in time", () => effect {
+  let mode = "now"
+  const fake = try fakeHost({
+    answers: {
+      pageContext: () => mode === "late" ? Effect.as(sleep("1 second"), readAs("Read late.")) : mode === "fresh" ? readAs("Read fresh.") : story,
+    },
+  })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      try loaded(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story", "1", 1)
+      try pass(750)
+      const capturedAhead = (try callsTo(fake.calls, "pageContext")).length
+      const observation = try observing(agent)
+      mode = "late"
+      const first = try waiting(context, observation, 300)
+      const joined = try waiting(context, observation, 300)
+      const readsWhileLate = (try callsTo(fake.calls, "pageContext")).length
+      try pass(1000)
+      const late = try waiting(context, observation, 300)
+      try pass(1000)
+      mode = "fresh"
+      const fresh = try waiting(context, observation, 300)
+      try Effect.try(() => assert.deepStrictEqual({
+        capturedAhead, readsWhileLate,
+        texts: [first, joined, late, fresh].map((page) => page?.text),
+        bound: first?.tabId === observation.selectedObject?.id && first?.revision === observation.selectedObject?.revision,
+      }, {
+        capturedAhead: 1, readsWhileLate: 2,
+        texts: [story.text, story.text, "Read late.", "Read fresh."],
+        bound: true,
+      }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read"
+it.effect("a capture never goes with another page or after ten minutes, and turning the setting off clears it", () => effect {
+  let mode = "now"
+  const fake = try fakeHost({ answers: { pageContext: () => mode === "never" ? Effect.never : story } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try loaded(tabs, fake.events, session, "https://news.example/story", "1", 1)
+      try pass(750)
+      mode = "never"
+      try loaded(tabs, fake.events, session, "https://news.example/next", "2", 2)
+      const other = try waiting(context, try observing(agent), 1300)
+      mode = "now"
+      try loaded(tabs, fake.events, session, "https://news.example/third", "3", 3)
+      try pass(750)
+      mode = "never"
+      try TestClock.adjust("11 minutes")
+      const expired = try waiting(context, try observing(agent), 1300)
+      mode = "now"
+      try loaded(tabs, fake.events, session, "https://news.example/fourth", "4", 4)
+      try pass(750)
+      mode = "never"
+      const kept = try waiting(context, try observing(agent), 300)
+      try Ref.set(fake.sharing, false)
+      const off = try waiting(context, try observing(agent), 300)
+      try Ref.set(fake.sharing, true)
+      const cleared = try waiting(context, try observing(agent), 1300)
+      try Effect.try(() => assert.deepStrictEqual(
+        { other, expired, kept: kept?.text, off, cleared },
+        { other: undefined, expired: undefined, kept: story.text, off: undefined, cleared: undefined },
+      ))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read"
+it.effect("with the setting off, moving away from Browser and back clears the capture before any message", () => effect {
+  let mode = "now"
+  const fake = try fakeHost({ answers: { pageContext: () => mode === "never" ? Effect.never : story } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      try loaded(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story", "1", 1)
+      try pass(750)
+      const captured = (try callsTo(fake.calls, "pageContext")).length
+      mode = "never"
+      try Ref.set(fake.sharing, false)
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
+      try pass(20)
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+      try pass(20)
+      try Ref.set(fake.sharing, true)
+      const cleared = try waiting(context, try observing(agent), 1300)
+      try Effect.try(() => assert.deepStrictEqual({ captured, cleared }, { captured: 1, cleared: undefined }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "On the phone Browser captures the shown page ahead of a message, and a message with a capture of its page waits at most 250 ms for a fresher read"
+it.effect("the page is captured ahead only on Browser, of a normal tab, with the setting on, and again as the assistant opens over Browser unless a recent capture holds, at most every 5 seconds", () => effect {
+  let refused = false
+  const fake = try fakeHost({ answers: { pageContext: () => refused ? new Error("Unreadable") : story } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const reads = effect { return (try callsTo(fake.calls, "pageContext")).length }
+      const assistant = effect function (chat: "closed" | "sheet") {
+        try SubscriptionRef.set(fake.foreground, { ...shownBrowser, chat })
+        try pass(20)
+      }
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
+      try loaded(tabs, fake.events, session, "https://news.example/story", "1", 1)
+      try pass(750)
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+      try Ref.set(fake.sharing, false)
+      try loaded(tabs, fake.events, session, "https://news.example/next", "2", 2)
+      try pass(750)
+      try Ref.set(fake.sharing, true)
+      try tabs.dispatch({ type: "openTab", id: "bprivate", profile: "Private" })
+      try loaded(tabs, fake.events, session, "https://secret.example/", "1", 1)
+      try pass(750)
+      const refusedAhead = try reads
+      try tabs.dispatch({ type: "openTab", id: "bnormal", profile: "Normal" })
+      try loaded(tabs, fake.events, session, "https://news.example/story", "1", 1)
+      try pass(750)
+      const settled = try reads
+      try assistant("sheet")
+      const recentHolds = try reads
+      try assistant("closed")
+      try TestClock.adjust("20 seconds")
+      try assistant("sheet")
+      const warmed = try reads
+      try assistant("closed")
+      refused = true
+      try TestClock.adjust("21 seconds")
+      try assistant("sheet")
+      try assistant("closed")
+      try assistant("sheet")
+      const spaced = try reads
+      try assistant("closed")
+      try TestClock.adjust("5 seconds")
+      try assistant("sheet")
+      const again = try reads
+      try Effect.try(() => assert.deepStrictEqual({
+        refusedAhead, settled, recentHolds, warmed, spaced, again,
+        browserBuild: capturesAhead({ enabled: true, priv: false, onDevice: false, shown: true, loaded: true }),
+      }, {
+        refusedAhead: 0, settled: 1, recentHolds: 1, warmed: 2, spaced: 3, again: 4,
+        browserBuild: false,
+      }))
     }
   })
 })

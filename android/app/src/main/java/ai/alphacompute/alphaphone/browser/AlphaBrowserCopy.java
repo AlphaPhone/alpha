@@ -9,7 +9,7 @@ import java.util.Map;
  * sign-in prompt and the message drawn in a tab's frame while its page loads or after it fails.
  *
  * <p>The tab host's refusals, notices and page errors still travel to Alpha's renderer as the
- * shared host's fixed sentences, which apps/app/src/ui/browser/browser-messages.ts words for the
+ * shared host's fixed sentences, which apps/app/src/browser/messages.ts words for the
  * screen. {@link #PAGE_ERRORS} is that file's page-error table, so the frame and the renderer say
  * the same thing; test/browser-native-copy.test.mjs keeps the two equal. Pure JVM.
  */

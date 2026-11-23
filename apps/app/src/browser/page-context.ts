@@ -36,8 +36,8 @@ export interface PageReadAnswer {
 }
 
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@=+-]{0,255}$/;
-const PAGE_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f  ]/;
-const LINE_CONTROL = /[\u0000-\u001f\u007f-\u009f  ]/;
+const PAGE_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u2028\u2029]/;
+const LINE_CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /** The address the agent may see: HTTPS with a host, no credentials, no fragment, at most 2,048 units; undefined otherwise. @throws {never} */
@@ -58,7 +58,7 @@ export function bareAddress(address: string): string {
 
 /** A page title as one bounded line. @throws {never} */
 export function agentPageTitle(value: unknown): string {
-  const line = String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f  ]/g, " ").replace(/\s+/g, " ").trim().slice(0, titleMax);
+  const line = String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ").replace(/\s+/g, " ").trim().slice(0, titleMax);
   return line.replace(/[\uD800-\uDBFF]$/, "");
 }
 

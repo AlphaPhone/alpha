@@ -880,9 +880,11 @@ The subsequent reviewed pin `17e742d454e5f9cc7692397016ce1524cd3f5288` adds the 
 
 The next pin, `fe5c02faed8568a45194ea635ecfe73c084e6882`, is the develop merge of
 [eliza#40067](https://github.com/elizaOS/eliza/pull/40067): the open Browser page
-travels beside the current-turn observation (`clientDevice.browserPage`) and the
-agent sees it once per turn, inside the shared untrusted-content envelope (see
-[browser-page-context.md](browser-page-context.md)). The pin also brings the
+travels beside the current-turn observation (then `clientDevice.browserPage`; in the
+vibestack app the turn context's `browserPage` in the message metadata, sent only to the
+peer compared for that turn) and the agent sees it once per turn, inside the shared
+untrusted-content envelope (see [browser-page-context.md](browser-page-context.md) and
+`apps/app/spec/browser/pageContext.md`). The pin also brings the
 develop merges since `17e742d454`, among them photo card reviews
 ([eliza#40090](https://github.com/elizaOS/eliza/pull/40090)) and scoped native
 password approval ([eliza#40088](https://github.com/elizaOS/eliza/pull/40088)).

@@ -1,8 +1,11 @@
-// spec/browser/presentation.md, "Story: See the page only when nothing covers it"; spec/browser/presentation.md, "Story: Never let a touch meant for Alpha reach the website"
+// spec/browser/presentation.md, "Story: See the page only when nothing covers it"; spec/browser/presentation.md, "Story: Never let a touch meant for Alpha reach the website"; spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
 import { assert, it } from "@effect/vitest"
 import type { CoverFacts, Placement } from "../../gen/browser__presentation.ts"
+import { BrowserAgent } from "../../src/browser/agent.vibe"
+import { browserNotDone, operationPorts } from "../../src/browser/operations.vibe"
 import { BrowserPresenter } from "../../src/browser/presentation.vibe"
-import { callsTo, fakeHost } from "./fakes.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { callsTo, fakeHost, loadPage, report, settledTabs, shownBrowser } from "./fakes.vibe"
 
 const shown: CoverFacts = { inBrowser: true, home: true, layered: false, reviewing: false, modal: false, shade: false, viewport: true, tabLive: true, underlay: true, underAssistant: false }
 const toolbar = { x: 0, y: 600, width: 360, height: 56, cornerRadius: 28 }
@@ -68,4 +71,128 @@ it.live("a host control that appears blocks page input over the whole page until
       try Effect.try(() => assert.deepStrictEqual(got4.map((c) => c.args.hostRects), [[toolbar], whole, [toolbar]]))
     }
   })
+})
+
+// spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
+it.live("a switch or a close of the showing tab that cannot run when presented answers that it did not, and the owner is told what did not happen", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const ports = try operationPorts
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const news = try loadPage(tabs, fake.events, session, "https://news.example/", "1", 1)
+      try tabs.dispatch({ type: "openTab", id: "bdocs", profile: "Normal" })
+      const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
+      const none = () => succeed(null)
+
+      // Through the executor: the receipt reported the switch, and the phone was locked when it was presented.
+      const toNews = { type: "browser_tab_switch", target: "news" }
+      const call = { proposalId: "switch", operationId: "switch-op", attemptId: 1 }
+      const applied = try promise(() => ports.execute(toNews, call))
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
+      ports.present(toNews, call)
+      try sleep("30 millis")
+      const afterLocked = (try tabs.get()).cur
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+
+      // The owner picked another tab before the close of the showing tab was presented.
+      const closing = try agent.control({ type: "browser_tab_close" }, undefined, none)
+      try tabs.dispatch({ type: "showTabs" })
+      try tabs.dispatch({ type: "pickTab", id: news })
+      const closedShowing = try closing
+      const docsKept = (try tabs.get()).tabs.some((t) => t.id === docs)
+
+      // Unchanged, a switch runs and says so.
+      const switching = try agent.control({ type: "browser_tab_switch", target: "docs" }, undefined, none)
+      const switched = try switching
+      const now = (try tabs.get()).cur
+      const said = try Ref.get(fake.toasts)
+      try Effect.try(() => assert.deepStrictEqual({ applied, afterLocked, closedShowing, docsKept, switched, now, said }, {
+        applied: { kind: "applied" },
+        afterLocked: docs,
+        closedShowing: false,
+        docsKept: true,
+        switched: true,
+        now: docs,
+        said: ["Browser changed or was not on screen, so the tab did not switch. Ask again."],
+      }))
+    }
+  })
+})
+
+// spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
+it.live("a back whose page changed or whose phone was locked when presented sends no command and is corrected, and an unchanged one goes back", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const ports = try operationPorts
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const id = try loadPage(tabs, fake.events, session, "https://news.example/", "1", 1)
+      try report(fake.events, session, { id, sequence: 2, navigation: "2", url: "https://news.example/next", committed: true, canBack: true })
+      const back = { type: "browser_history", action: "back" }
+      const call = (proposalId: string) => ({ proposalId, operationId: `${proposalId}-op`, attemptId: 1 })
+
+      // The receipt reported the back, and the page navigated before it was presented.
+      const changed = try promise(() => ports.execute(back, call("changed")))
+      try report(fake.events, session, { id, sequence: 3, navigation: "3", url: "https://news.example/other", committed: true, canBack: true })
+      ports.present(back, call("changed"))
+      try sleep("30 millis")
+      const afterChange = (try callsTo(fake.calls, "command")).length
+
+      // The receipt reported the back, and the phone was locked when it was presented.
+      const locked = try promise(() => ports.execute(back, call("locked")))
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
+      ports.present(back, call("locked"))
+      try sleep("30 millis")
+      const whileLocked = (try callsTo(fake.calls, "command")).length
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+
+      // Unchanged, the back runs on the page it was admitted for and owes nothing.
+      const ran = try promise(() => ports.execute(back, call("ran")))
+      ports.present(back, call("ran"))
+      try sleep("30 millis")
+      const commands = try callsTo(fake.calls, "command")
+      const said = try Ref.get(fake.toasts)
+      try Effect.try(() => assert.deepStrictEqual({
+        receipts: [changed, locked, ran], afterChange, whileLocked,
+        commands: commands.map((c) => [c.args.command, c.args.navigation]),
+        said,
+      }, {
+        receipts: [{ kind: "applied" }, { kind: "applied" }, { kind: "applied" }],
+        afterChange: 0,
+        whileLocked: 0,
+        commands: [["back", "3"]],
+        said: [
+          "The page changed or Browser was not on screen, so it did not go back. Ask again.",
+          "The page changed or Browser was not on screen, so it did not go back. Ask again.",
+        ],
+      }))
+    }
+  })
+})
+
+// spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
+it("each correction names what did not happen and asks again", () => {
+  assert.deepStrictEqual([
+    browserNotDone({ type: "browser_tab_switch", target: "news" }),
+    browserNotDone({ type: "browser_tab_close" }),
+    browserNotDone({ type: "browser_history", action: "back" }),
+    browserNotDone({ type: "browser_history", action: "forward" }),
+    browserNotDone({ type: "browser_history", action: "reload" }),
+    browserNotDone({ type: "browser_history", action: "stop" }),
+    browserNotDone({ type: "browser_tab_new" }),
+  ], [
+    "Browser changed or was not on screen, so the tab did not switch. Ask again.",
+    "Browser changed or was not on screen, so the tab that was showing stayed open. Ask again from Browser.",
+    "The page changed or Browser was not on screen, so it did not go back. Ask again.",
+    "The page changed or Browser was not on screen, so it did not go forward. Ask again.",
+    "The page changed or Browser was not on screen, so it did not reload. Ask again.",
+    "The page changed or Browser was not on screen, so it did not stop loading. Ask again.",
+    "Browser changed or was not on screen, so this was not done. Ask again.",
+  ])
 })
