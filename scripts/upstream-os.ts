@@ -7,6 +7,7 @@ import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Effect} from 'effect';
+import {FetchHttpClient} from 'effect/http';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 import * as osBuild from '@elizaos/os/build';
 import * as osImage from '@elizaos/os/image';
@@ -38,7 +39,8 @@ export const exportCommittedSources = (source: string, commit: string, into: str
   run(osBuild.exportCommittedSources(source, commit, into, paths));
 export const generateAndroidHost = (options: Parameters<typeof osBuild.generateAndroidHost>[0]) => run(osBuild.generateAndroidHost(options));
 export const buildAndroid = (options: Parameters<typeof osBuild.buildAndroid>[0]) => run(osBuild.buildAndroid(options));
-export const stageRuntimePayload = (options: Parameters<typeof osBuild.stageRuntimePayload>[0]) => run(osBuild.stageRuntimePayload(options));
+export const stageRuntimePayload = (options: Parameters<typeof osBuild.stageRuntimePayload>[0]) =>
+  run(Effect.provide(osBuild.stageRuntimePayload(options), FetchHttpClient.layer));
 
 export const resolveAndroidSdkRoot = () => run(osImage.resolveAndroidSdkRoot());
 export const resolveJavaHome = () => run(osImage.resolveJavaHome());
