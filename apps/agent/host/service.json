@@ -1,0 +1,4 @@
+{
+  "service": "ai.alphacompute.alphaphone.AlphaAgentService",
+  "notification": { "channel": "Alpha assistant", "title": "Alpha", "text": "Alpha is running on this phone." }
+}

@@ -63,7 +63,7 @@ the host file's route list. Ask Alpha opens its conversation with
 streamed and asks the agent to stop a turn by its room. The agent's health
 is the plugin's own status, not a route of the page. A route an area fakes
 for want of an agent plugin is not listed: none does today. Each line of
-`apps/agent/host/routes.json` is one route; the pack is refused unless that
+`apps/agent/host/routes.jsonl` is one route; the pack is refused unless that
 list is this one, and eliza's route gate admits each of its routes.
 
 ```quint
