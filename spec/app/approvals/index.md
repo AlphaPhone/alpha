@@ -112,7 +112,8 @@ pure def routed(id: int, d: Approvals, m: P::Moved): Acted =
   { state: { ...d, proposals: d.proposals.put(id, m.state) },
     out: m.out.listMap(e => About({ id: id, does: e })).concat(noticing(id, entry(d, id), m.state)) }
 
-pure def kept(id: int, d: Approvals, p: P::Proposal): Acted = routed(id, d, { state: p, out: List() })
+pure def kept(id: int, d: Approvals, p: P::Proposal): Acted =
+  { state: { ...d, proposals: d.proposals.put(id, p) }, out: noticing(id, entry(d, id), p) }
 
 pure def added(id: int, d: Approvals, m: Acted): Acted =
   { ...m, state: { ...m.state, ids: d.ids.union(Set(id)), since: d.since.put(id, d.waiting.ticket), leases: d.leases.put(id, L::initial) } }

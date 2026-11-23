@@ -32,7 +32,7 @@ pure def held(d: Deletions, number: int): X::Deletion =
 pure def routed(number: int, d: Deletions, m: X::Done): Acted =
   { state: { ...d, deletions: d.deletions.put(number, m.state) }, out: m.out.listMap(e => About({ deletion: number, does: e.act })) }
 
-pure def kept(number: int, d: Deletions, x: X::Deletion): Acted = routed(number, d, { state: x, out: List() })
+pure def kept(number: int, d: Deletions, x: X::Deletion): Acted = { state: { ...d, deletions: d.deletions.put(number, x) }, out: List() }
 
 pure val numberValues = Set(1, 2)
 pure val itemIdValues = Set(1, 2)

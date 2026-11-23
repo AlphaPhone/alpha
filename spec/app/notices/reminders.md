@@ -44,7 +44,7 @@ pure def sinceOf(d: Reminders, number: int): int = if (d.since.keys().contains(n
 pure def routed(number: int, d: Reminders, m: M::Worked): Acted =
   { state: { ...d, reminders: d.reminders.put(number, m.state) }, out: m.out.listMap(e => Reminding({ reminder: number, does: e })) }
 
-pure def kept(number: int, d: Reminders, r: M::Reminder): Acted = routed(number, d, { state: r, out: List() })
+pure def kept(number: int, d: Reminders, r: M::Reminder): Acted = { state: { ...d, reminders: d.reminders.put(number, r) }, out: List() }
 
 pure val numberValues = Set(1, 2, 3)
 pure val ticketValues = 1.to(20)
