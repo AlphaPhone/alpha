@@ -19,3 +19,51 @@ titles, Public Sans everywhere else, and small uppercase tabular labels for meta
 - **Dark.** Follows the owner's appearance setting; a `.dark` or `.light` class on the root overrides it.
 
 Name a value by its token (`bg-primary`, `var(--primary)`), never by its value.
+
+<!-- tokens:start -->
+| Color | Light | Dark |
+| --- | --- | --- |
+| `background` | oklch(1 0 0) | oklch(0.13 0 0) |
+| `foreground` | oklch(0 0 0) | oklch(0.98 0 0) |
+| `card` | oklch(0.985 0 0) | oklch(0.18 0 0) |
+| `card-foreground` | oklch(0 0 0) | oklch(0.98 0 0) |
+| `popover` | oklch(1 0 0) | oklch(0.18 0 0) |
+| `popover-foreground` | oklch(0 0 0) | oklch(0.98 0 0) |
+| `primary` | oklch(0.452 0.313 264.05) | oklch(0.72 0.16 264) |
+| `primary-foreground` | oklch(1 0 0) | oklch(0.13 0 0) |
+| `secondary` | oklch(0.967 0 0) | oklch(0.24 0 0) |
+| `secondary-foreground` | oklch(0 0 0) | oklch(0.98 0 0) |
+| `muted` | oklch(0.967 0 0) | oklch(0.24 0 0) |
+| `muted-foreground` | oklch(0.52 0 0) | oklch(0.74 0 0) |
+| `accent` | oklch(0.94 0 0) | oklch(0.28 0 0) |
+| `accent-foreground` | oklch(0 0 0) | oklch(0.98 0 0) |
+| `destructive` | oklch(0.55 0.22 27) | oklch(0.7 0.17 22) |
+| `destructive-foreground` | oklch(1 0 0) | oklch(0.13 0 0) |
+| `border` | oklch(0.922 0 0) | oklch(0.3 0 0) |
+| `input` | oklch(0.62 0 0) | oklch(0.55 0 0) |
+| `ring` | oklch(0.452 0.313 264.05) | oklch(0.72 0.16 264) |
+| `ok` | oklch(0.52 0.14 150) | oklch(0.8 0.18 152) |
+| `warn` | oklch(0.53 0.11 85) | oklch(0.84 0.15 90) |
+| `info` | oklch(0.452 0.313 264.05) | oklch(0.72 0.16 264) |
+| `scrim` | oklch(0 0 0) | oklch(0 0 0) |
+
+| Token | Value |
+| --- | --- |
+| `radius` | 1rem |
+| `font.sans` | "Public Sans", system-ui, sans-serif |
+| `font.serif` | "Denton", "Fraunces", Georgia, serif |
+| `font.mono` | "Public Sans", system-ui, sans-serif |
+| `font.legible` | "Atkinson Hyperlegible", "Public Sans", system-ui, sans-serif |
+| `shadow.sm` | 0 1px 2px oklch(0 0 0 / 0.08) |
+| `shadow.md` | 0 4px 12px oklch(0 0 0 / 0.12) |
+| `shadow.lg` | 0 12px 32px oklch(0 0 0 / 0.2) |
+| `breakpoint.sm` | 24rem |
+| `breakpoint.md` | 40rem |
+| `breakpoint.lg` | 56rem |
+| `breakpoint.xl` | 72rem |
+| `duration.fast` | 120ms |
+| `duration.base` | 200ms |
+| `duration.slow` | 320ms |
+| `ease.standard` | cubic-bezier(0.2, 0, 0, 1) |
+| `ease.sheet` | cubic-bezier(0.32, 0.72, 0, 1) |
+<!-- tokens:end -->
