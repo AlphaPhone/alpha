@@ -26,7 +26,7 @@ the bundle carries no plugin. `apps/agent` builds the pack into
 The name is the product's character name, `identity.characterName` of the
 old product record (`legacy/apps/app/src/product/alpha-product-registration.ts`),
 and the bio is the one the old agent was given
-(`legacy/scripts/agent-identity.ts`, line 14). The old agent had no system
+(the old tree's agent identity script at `26e827f06`, line 14). The old agent had no system
 prompt of its own and kept its preset's origin line, "{{name}}, made by Alpha
 Compute" (line 10); eliza's launch needs one, so that line, with the name, is
 it. The words are in `apps/agent/host/character.json`.
@@ -93,8 +93,8 @@ pure val localEmbeddings: bool = false
 
 ### The agent's text goes to the owner's cloud account, which is asked for the model the old agent used
 
-The old agent's default model was `qwen-3.8-27b` (`legacy/scripts/agent-model.ts`,
-line 4), called directly at its provider; now the cloud is asked for it, at
+The old agent's default model was `qwen-3.8-27b` (the old tree's agent model script at
+`26e827f06`, line 4), called directly at its provider; now the cloud is asked for it, at
 the origin of the environment's deployment in `packages/deployment`. The local
 environment has no fixed origin (the harness's cloud listens where it can), so
 a pack is built only for a hosted environment; a journey runs the pack
