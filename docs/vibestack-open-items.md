@@ -186,6 +186,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - AppLifecycle's `Net` has no unvalidated state, so sign-in still reads `ElizaSystem.getNetworkStatus` once per lifecycle change for `internetValidated`. A flip with no other App change is not seen until the next return to the app.
 - Not verified: that the owner route table admits `/api/client-devices/{register,context,view-profile}`, and that upstream's context `subjectUserId` equals the resident's `/api/auth/me` owner or the Cloud userId.
 - Not verified: the import cycle account/enrollment → shell/assistantHost (`DeviceCapabilities`) → account/bindings → account/enrollment. Every reference is lazy, inside layer bodies.
+- Account: the native sign-in host speaks the wire of the deployment the build addresses (`cloud/CloudAuthWire.java`, `spec/account/session.md` "The native host signs in on the wire of the deployment it addresses"): Steward on the shipped Eliza Cloud, the Vibestack Cloud's own `/api/v1/auth/*` routes and opaque session on Alpha Cloud. Still open on Alpha Cloud: native Google (`googleSignInMode` `native`) is one key-minting call (`/api/v1/app-auth/mobile/google`) this host does not speak, so only browser Google is offered there; the host-JVM test (`test/cloud-auth-wire.test.mjs`) checks the requests and answers, and no sign-in has been run against a deployed Alpha Cloud or on a device.
 
 ## Inbox, Notes and Telephony (carry-over)
 

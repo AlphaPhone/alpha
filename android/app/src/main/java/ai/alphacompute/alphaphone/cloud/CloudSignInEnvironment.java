@@ -4,8 +4,9 @@ package ai.alphacompute.alphaphone.cloud;
 /**
  * One Eliza Cloud deployment a native sign-in client may use. The host builds these from its own
  * deployment configuration; a product build registers only production, and a development build may
- * add staging. Every request the client makes goes to {@link #api()}; Steward returns a browser
- * sign-in to {@link #callback()}.
+ * add staging. Every request the client makes goes to {@link #api()}; the Cloud returns a browser
+ * sign-in to {@link #callback()}. {@link #wire} says which sign-in routes the deployment serves
+ * (CloudAuthWire): Steward, which needs the deployment's tenant, or the Vibestack Cloud's own, which has none.
  */
 public final class CloudSignInEnvironment {
  private static final String HOST = "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+";
@@ -15,21 +16,28 @@ public final class CloudSignInEnvironment {
  public final String apiHost;
  /** Web host that serves the app's verified return link. */
  public final String callbackHost;
- /** Steward tenant for this deployment, in Steward's own tenant id shape. */
+ /** Steward tenant for this deployment, in Steward's own tenant id shape; empty on the Cloud's own sign-in wire. */
  public final String tenant;
+ /** The sign-in routes this deployment serves. */
+ public final CloudAuthWire.Wire wire;
  /** Public name of the deployment, shown in the authorization dialog. */
  public final String serviceName;
  /** Registered return path on the callback host, e.g. "/myapp/auth/callback". */
  public final String callbackPath;
 
  public CloudSignInEnvironment(String name, String apiHost, String callbackHost, String tenant, String serviceName, String callbackPath) {
+  this(name, apiHost, callbackHost, tenant, serviceName, callbackPath, CloudAuthWire.Wire.STEWARD);
+ }
+ public CloudSignInEnvironment(String name, String apiHost, String callbackHost, String tenant, String serviceName, String callbackPath, CloudAuthWire.Wire wire) {
+  if (wire == null) throw new IllegalArgumentException("Invalid sign-in wire");
   if (name == null || !name.matches("[a-z][a-z0-9-]{0,31}")) throw new IllegalArgumentException("Invalid Cloud environment name");
   if (apiHost == null || !apiHost.matches(HOST) || callbackHost == null || !callbackHost.matches(HOST)) throw new IllegalArgumentException("Invalid Cloud host");
   // Every tenant id Steward accepts (its isValidTenantId), so a host never refuses a real tenant.
-  if (tenant == null || !tenant.matches("[A-Za-z0-9_.:-]{1,64}")) throw new IllegalArgumentException("Invalid Steward tenant");
+  if (wire == CloudAuthWire.Wire.STEWARD ? tenant == null || !tenant.matches("[A-Za-z0-9_.:-]{1,64}") : tenant != null && !tenant.isEmpty() && !tenant.matches("[A-Za-z0-9_.:-]{1,64}"))
+   throw new IllegalArgumentException("Invalid Steward tenant");
   if (serviceName == null || serviceName.trim().isEmpty() || serviceName.length() > 80 || !serviceName.matches("[^\\p{Cc}\\p{Cf}]+")) throw new IllegalArgumentException("Invalid service name");
   if (callbackPath == null || !callbackPath.matches("(/[A-Za-z0-9._~-]+)+")) throw new IllegalArgumentException("Invalid callback path");
-  this.name = name; this.apiHost = apiHost; this.callbackHost = callbackHost; this.tenant = tenant; this.serviceName = serviceName.trim(); this.callbackPath = callbackPath;
+  this.name = name; this.apiHost = apiHost; this.callbackHost = callbackHost; this.tenant = tenant == null ? "" : tenant; this.wire = wire; this.serviceName = serviceName.trim(); this.callbackPath = callbackPath;
  }
  public String api() { return "https://" + apiHost; }
  /** The verified return link; also the mobile App Auth binding string. */
