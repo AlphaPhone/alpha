@@ -12,6 +12,7 @@ import {CanonicalNotesEditor} from './canonical-notes-editor';
 import type {CanonicalNoteSaveIntent} from './note-recorder';
 import {formatDateTime} from './locale-time';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
+import {eraseCanonicalNoteRecordings,type CanonicalRecordingCleanupStore} from '../runtime/canonical-notes-recording-cleanup';
 type Bag=Record<string,any>;
 type CanonicalTrashEntry={id:string;title:string;deletedAt:string;revision:number};
 const UNAVAILABLE='Agent offline';
@@ -63,9 +64,20 @@ export class CanonicalNotesUi {
  private draftBase:{token:string;print:string}|null=null;
  private rebasing=false;
  private retrying=false;
- constructor(port:AppRecordPort,private readonly hooks:{paint():void;review():void;committed?(id:string):void;dropped?(title:string):void}){
+ /** Trash entries with a recording in the last collection read; null before the first read. */
+ private recordedTrash:Set<string>|null=null;
+ private readonly cleanupAbort=new AbortController();
+ private cleanupRunning=false;
+ private cleanupAgain=false;
+ /** `recordings` is this phone's recording store (AlphaNoteAudio), where a voice note recorded here keeps its
+  * recording under the canonical note id. The shell passes it; a view without one never erases recordings. */
+ constructor(port:AppRecordPort,private readonly hooks:{paint():void;review():void;committed?(id:string):void;dropped?(title:string):void;recordings?:CanonicalRecordingCleanupStore}){
   this.controller=new CanonicalNotesController(port,{
    snapshot:(snapshot,reason)=>{
+    // A voice note that left Trash without coming back to Notes was erased: its recording on this phone follows.
+    const recorded=new Set((snapshot.trash??[]).filter(entry=>entry.note.format?.kind==='voice'&&voiceAudio(entry.note.format.data)).map(entry=>entry.note.id));
+    const before=this.recordedTrash;this.recordedTrash=recorded;
+    if(!before||[...before].some(id=>!recorded.has(id)&&!snapshot.notes.some(note=>note.id===id)))this.eraseErasedRecordings();
     this.trashValue=(snapshot.trash??[]).map(entry=>({id:entry.note.id,title:entry.note.title||'Untitled',deletedAt:entry.deletedAt,revision:snapshot.revision}));
     this.baseRows=snapshot.notes.map(note=>this.row(note,snapshot.revision));
     this.editor?.reconcile();
@@ -86,6 +98,23 @@ export class CanonicalNotesUi {
   this.editor=new CanonicalNotesEditor(this.controller,{changed:()=>this.refreshDraftView(),review:()=>this.needsReview(),committed:target=>{this.reviewPending=false;this.failure=null;this.phase='ready';this.hooks.paint();this.hooks.committed?.(target.id);}});
   // Authenticated same-session change events (runtime/app-record-completion.ts) refresh the collection.
   if(this.controller.current)this.controller.listen(window);
+ }
+ /**
+  * One cleanup pass at a time over the agent's erased voice notes (runtime/canonical-notes-recording-cleanup.ts);
+  * a trigger during a pass runs one more. It runs when the collection is first read, which picks up erases made
+  * while this view was away, and whenever a recorded voice note leaves Trash without returning to Notes.
+  */
+ private eraseErasedRecordings():void{
+  const recordings=this.hooks.recordings;
+  if(!recordings||!this.controller.current||this.cleanupAbort.signal.aborted)return;
+  if(this.cleanupRunning){this.cleanupAgain=true;return;}
+  this.cleanupRunning=true;
+  void (async()=>{
+   try{do{this.cleanupAgain=false;await eraseCanonicalNoteRecordings(this.controller,recordings,this.cleanupAbort.signal);}
+    while(this.cleanupAgain&&this.controller.current);}
+   catch{/* Every receipt stays with the agent until a later pass confirms it. */}
+   finally{this.cleanupRunning=false;}
+  })();
  }
  private needsReview():void{this.reviewPending='change';this.phase='review';this.hooks.paint();this.hooks.review();}
  /** The record as Alpha's Notes view reads it: authored rich fields at the top level, local handles left out. */
@@ -151,7 +180,7 @@ export class CanonicalNotesUi {
   }
  }
  /** A connection change ends this binding; an unsaved edit is not carried over, so the owner is told. */
- retire():void{const draft=this.editor.draft;if(draft?.version)this.hooks.dropped?.(draft.title||'Untitled');this.editor.close();this.controller.retire();this.baseRows=[];this.rowsValue=[];this.openValue=null;this.trashValue=[];}
+ retire():void{const draft=this.editor.draft;if(draft?.version)this.hooks.dropped?.(draft.title||'Untitled');this.cleanupAbort.abort();this.recordedTrash=null;this.editor.close();this.controller.retire();this.baseRows=[];this.rowsValue=[];this.openValue=null;this.trashValue=[];}
  /** Wait out an in-flight save and the follow-up it queued for edits typed meanwhile. */
  private async settle():Promise<void>{
   for(let attempt=0;attempt<8&&this.controller.pending;attempt++){await new Promise<void>(resume=>this.idleWaiters.push(resume));await new Promise(resume=>setTimeout(resume,0));}
@@ -261,10 +290,11 @@ export class CanonicalNotesUi {
   }catch{if(this.controller.current&&!canonicalRecordConfirmed)this.needsReview();return false;}
  }
  /** Saves complete note text as a record and returns its identity, or null when the save is not
-  * confirmed. Identical text replays the existing record, so a repeated save never duplicates it.
-  * A failed request throws: the record may or may not exist. */
- async createFromText(content:string):Promise<{id:string;revision:number}|null>{
-  const result=await this.controller.interact('create-note',{content});
+  * confirmed. With a creation id (a workflow step's operation id) a repeat of that creation returns
+  * the record it made; without one, identical text replays the existing record. Either way a
+  * repeated save never duplicates it. A failed request throws: the record may or may not exist. */
+ async createFromText(content:string,creationId?:string):Promise<{id:string;revision:number}|null>{
+  const result=await this.controller.interact('create-note',{content,...(creationId===undefined?{}:{creationId})});
   if(!this.controller.current||!result.target)return null;
   this.hooks.committed?.(result.target.id);return result.target;
  }

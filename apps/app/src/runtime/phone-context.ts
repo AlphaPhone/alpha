@@ -4,6 +4,7 @@ import {parseClientTurnObservation,parseClientCalendarDayObservation,parseClient
 import {clockHandoffCapabilities,clockTimeZone} from './clock-contract.ts';
 import {CAMERA_CAPTURE_CAPABILITY,CAMERA_LENS_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
 import {FILES_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/files-browser-contract.ts';
+import {NOTES_RECORD_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-organize-contract.ts';
 import {BROWSER_FIND_CAPABILITY,BROWSER_HISTORY_CAPABILITY,BROWSER_OPEN_NEW_TAB_CAPABILITY,BROWSER_SEARCH_CAPABILITY,BROWSER_TABS_CAPABILITY,BROWSER_TABS_CLOSE_ALL_CAPABILITY,BROWSER_TABS_SHOW_CAPABILITY} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {SMS_SEND_CAPABILITY} from './sms-agent-contract.ts';
 import {PHONE_DIAL_CAPABILITY,telephonyDeviceCapabilities} from './phone-dial-contract.ts';
@@ -159,7 +160,9 @@ export function selectDeviceCapabilities(offered: unknown, profile: DeviceCapabi
   if(agent.includes(CAMERA_CAPTURE_CAPABILITY)&&profile.camera)capabilities.push(CAMERA_CAPTURE_CAPABILITY,...(agent.includes(CAMERA_LENS_CAPABILITY)?[CAMERA_LENS_CAPABILITY]:[]));
   if(agent.includes('reminders.local-record.v2'))capabilities.push('reminders.local-record.v2');else if(agent.includes('reminders.local-record.v1'))capabilities.push('reminders.local-record.v1');
   // Browser chat reminders use the runtime scheduler; do not offer a second device-creation lifecycle.
-  if(profile.canonicalNotes&&profile.foregroundReview&&agent.includes(NOTES_LIST_FILTER_CAPABILITY))capabilities.push(NOTES_LIST_FILTER_CAPABILITY);
+  // The agent's own Notes: the reviewed list filter, and starting or stopping a voice note in the open Notes view.
+  // Folders, moves and restore stay with the agent's NOTES action, so notes.organize.v1 is not offered.
+  if(profile.canonicalNotes&&profile.foregroundReview)for(const capability of [NOTES_LIST_FILTER_CAPABILITY,NOTES_RECORD_CAPABILITY])if(agent.includes(capability))capabilities.push(capability);
   for(const capability of [...(!native?['calendar.agenda-read.v1']:[]),...(profile.previousNotes?['notes.query.v1']:[]),...(native?['reminders.create.v1']:[]),'calendar.create.v1',...(android||!native?['calendar.next-read.v1']:[]),'maps.selected-read.v1'])if(agent.includes(capability))capabilities.push(capability);
   if(agent.includes(FILES_CAPABILITY)&&profile.files)capabilities.push(FILES_CAPABILITY);
   // Reviewed Browser controls from chat. Find in page is the native tab host's: a web build's page is a frame it cannot search.

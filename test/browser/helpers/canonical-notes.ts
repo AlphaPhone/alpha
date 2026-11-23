@@ -5,7 +5,11 @@ import {expect,type Page} from '@playwright/test';
  * Setting `canonicalNotesFixture.delay` (ms) holds every later response that long, like a slow link.
  * Setting `canonicalNotesFixture.dictation` to a list of transcripts answers the platform speech
  * recognition (DailyApps voice) with them in order, counted in `heard`; unset, the browser build's
- * own answer (no recognition) stands. */
+ * own answer (no recognition) stands.
+ * Unset, `canonicalNotesFixture.recordingCleanup` makes the recording-cleanup routes fail, as an agent
+ * whose Trash keeps notes until restored does. Set to a list of receipts, they are served, and a
+ * completion is accepted only once this phone's recording store holds a `purged` receipt for it (an
+ * agent whose host verifies the erase); each completion is logged in `completions` with that status. */
 export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[],failReads=false}:{path?:string;notes?:unknown[];trash?:unknown[];failReads?:boolean}={}){
  const foreign:string[]=[],errors:string[]=[];
  page.on('pageerror',error=>errors.push(error.message));
@@ -41,6 +45,17 @@ export async function canonicalNotesFixture(page:Page,{path='/',notes=[],trash=[
    if(path.startsWith('/api/lifeops/calendar')){f.otherRequests.push({path,method});throw Error('Calendar is outside this closed Notes fixture');}
    f.requests.push({path,method,body:structuredClone(body)});
    if(path==='/api/notes/state'&&method==='GET'){if(f.failReads)throw Error('Closed canonical fixture read failure');return {success:true,data:structuredClone(f.state)};}
+   if(path.startsWith('/api/notes/trash/')&&!f.recordingCleanup)throw Error('Closed canonical fixture keeps Trash until restored');
+   if(path==='/api/notes/trash/recordings'&&method==='GET')return {success:true,data:structuredClone(f.recordingCleanup)};
+   if(path==='/api/notes/trash/recordings/complete'&&method==='POST'){
+    const {registerPlugin}=await import('/src/platform-plugins.ts');
+    const status=await registerPlugin<any>('AlphaNoteAudio').deletionStatus({audioId:body.audioId,noteId:body.noteId,operationId:body.operationId}).then((receipt:any)=>receipt.status,()=>'unavailable');
+    (f.completions??=[]).push({receipt:structuredClone(body),status});
+    if(status!=='purged')throw Error('The device has not confirmed recording erase.');
+    const index=f.recordingCleanup.findIndex((pending:any)=>JSON.stringify(pending)===JSON.stringify(body));
+    if(index>=0)f.recordingCleanup.splice(index,1);
+    return {success:true,data:{acknowledged:index>=0}};
+   }
    if(path!=='/api/views/notes/interact'||method!=='POST')throw Error('Unexpected canonical Notes fixture request');
    if(f.fail)throw Error('Closed canonical fixture save failure');
    const {capability,params={}}=body;let note:any;const now=new Date().toISOString();

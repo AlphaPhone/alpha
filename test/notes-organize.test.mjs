@@ -106,6 +106,17 @@ test('notes_record starts and saves through the Notes recorder and never touches
  assert.deepEqual(state.recorder,[]);
 });
 
+// On the agent's own Notes there is no Previous notes store, so ready() is false; recording still runs
+// through the recorder, while an operation that edits Previous notes is refused before any effect.
+test('notes_record runs on the agent Notes source without the Previous notes store',async()=>{
+ const {state,host:base}=host({notes:[{id:'a',kind:'text',title:'A'}]}),h={...base,ready:()=>false};
+ assert.deepEqual(await executeNotesOrganize(h,{type:'notes_record',action:'start'},()=>{}),{status:'succeeded',summary:'Recording'});
+ assert.deepEqual(await executeNotesOrganize(h,{type:'notes_record',action:'stop'},()=>{}),{status:'succeeded',summary:'Saved the voice note.'});
+ assert.deepEqual(state.recorder,['start','stop']);
+ assert.deepEqual(await executeNotesOrganize(h,{type:'notes_folder_create',name:'Work'},()=>{}),{status:'failed',summary:'Notes unavailable'});
+ assert.deepEqual(state.folders.folders,[]);assert.equal(state.commits,0);
+});
+
 test('content search also matches a saved recording transcript',()=>{
  const note={id:'v',kind:'voice',title:'Voice note',body:'',audio:{audioId:'x',transcript:'thermal numbers from the lab'}};
  assert.equal(view.noteMatchesText(note,'THERMAL numbers'),true);
