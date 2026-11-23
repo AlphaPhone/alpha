@@ -44,24 +44,40 @@ test('a failed lookup backs off, and an unavailable plugin is never called',asyn
  assert.equal(await none.locate(),undefined);assert.equal(off.calls.length,0);
 });
 
-test('the agent gets the network position when GPS has none, and only the warm-up looks one up',async()=>{
+test('the agent gets the network position when GPS has none, without a turn waiting for it',async()=>{
  const clock={now:1_800_000_000_000};let looked=0,cached;
+ const settle=()=>new Promise(resolve=>setTimeout(resolve,0));
  const network={cached:()=>cached,locate:async()=>{looked++;cached={latitude:37.7764,longitude:-122.4258,accuracyMeters:35.6,timestamp:clock.now};return cached;}};
  const reader=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('no GPS fix');}}});
  const signal=new AbortController().signal;
- assert.equal(await reader.read(signal),undefined);assert.equal(looked,0,'a chat turn never looks up');
  assert.deepEqual(await reader.warm(signal),{latitude:37.7764,longitude:-122.4258,accuracyMeters:36,capturedAt:clock.now},'the warm-up, off the messaging path, waits for its lookup');
  assert.equal(looked,1,'the connection warm-up looks up once when GPS has nothing');
  assert.deepEqual(await reader.read(signal),{latitude:37.7764,longitude:-122.4258,accuracyMeters:36,capturedAt:clock.now});
+ await settle();assert.equal(looked,1,'a turn with a position looks nothing up');
+
+ // The warm-up's lookup failed (the service did not answer): a later turn starts one behind it.
+ let answer;cached=undefined;looked=0;
+ const slow={cached:()=>cached,locate:()=>{looked++;return new Promise(resolve=>{answer=()=>{cached={latitude:37.7764,longitude:-122.4258,accuracyMeters:25,timestamp:clock.now};resolve(cached);};});}};
+ const later=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network:slow,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('no GPS fix');}}});
+ assert.equal(await later.read(signal),undefined,'the turn goes out at once without a position');
+ for(let i=0;i<5;i++)await settle();
+ assert.equal(looked,1,'one lookup runs behind the turn');
+ answer();await settle();
+ assert.equal((await later.read(signal)).accuracyMeters,25,'the next turn carries it');
+
  const off=new PhoneLocationReader({enabled:()=>false,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{throw Error('x');}}});
+ looked=0;cached=undefined;
  assert.equal(await off.read(signal),undefined,'with Alpha location sharing off the agent gets nothing');
- assert.equal(await off.warm(signal),undefined);assert.equal(looked,1,'and nothing is looked up');
+ assert.equal(await off.warm(signal),undefined);await settle();assert.equal(looked,0,'and nothing is looked up');
+ const denied=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'prompt'}),getCurrentPosition:async()=>{throw Error('x');}}});
+ assert.equal(await denied.read(signal),undefined);for(let i=0;i<5;i++)await settle();
+ assert.equal(looked,0,'without the permission a turn starts no lookup');
 
  const cancelled=new AbortController();
  // The connection is retired while the warm-up's GPS read is still running.
  const retired=new PhoneLocationReader({enabled:()=>true,now:()=>clock.now,network,bridge:{checkPermissions:async()=>({location:'granted'}),getCurrentPosition:async()=>{cancelled.abort();throw Error('no GPS fix');}}});
  await assert.rejects(retired.warm(cancelled.signal),{name:'AbortError'});
- assert.equal(looked,1,'a retired connection cannot start a network lookup');
+ assert.equal(looked,0,'a retired connection cannot start a network lookup');
 });
 
 const [{NativeMapsLocation}]=await loadBrowserModule(['apps/app/src/maps/native-location.ts']);
