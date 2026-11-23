@@ -733,6 +733,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const selected: string = s.cur, fromPrivate = shell.S?.().view === 'browser' && isPrivate(selected);
       const still = () => { signal.throwIfAborted(); return !disposed && !document.hidden && state()?.cur === selected; };
       const show = (patch: Bag = {}) => { shell.vset('browser', {editing: false, tabsOpen: false, menu: false, lib: null, share: false, ...patch}); shell.openView('browser', null, null, {restore: true}); };
+      // The phone's own list of open tabs comes to the front, after the action's receipt. The agent
+      // learns only that it is showing: never a tab, a title, an address or a count.
+      // Showing the list is the whole effect, so a skipped one is corrected.
+      if (operation.type === 'browser_tabs_show') return deferred(() => { if (!still()) return false; show({tabsOpen: true}); return true; });
       if (operation.type === 'browser_tab_new') {
         if (s.tabs.length >= MAX_TABS) throw tabLimitRefusal(MAX_TABS);
         const id = newTabId();

@@ -55,6 +55,7 @@ export function browserControlSummary(operation: BrowserControlOperation, closed
       if (!operation.all) return 'Closed the tab.';
       if (!closed) return 'Closed the listed tabs.';
       return `Closed ${tabCount(closed.count)}.${closed.privateKept ? ' Private tabs were left open.' : ''}`;
+    case 'browser_tabs_show': return 'Showing your open tabs in Browser.';
     case 'browser_find': return `Finding “${operation.text}” in the page.`;
     case 'browser_history': return {back: 'Went back a page.', forward: 'Went forward a page.', reload: 'Reloading the page.', stop: 'Stopped loading the page.'}[operation.action];
   }
@@ -65,6 +66,7 @@ export function browserControlNotDone(operation: BrowserControlOperation): strin
   switch (operation.type) {
     case 'browser_tab_switch': return 'Browser changed or was not on screen, so the tab did not switch. Ask again.';
     case 'browser_tab_close': return 'Browser changed or was not on screen, so the tab that was showing stayed open. Ask again from Browser.';
+    case 'browser_tabs_show': return 'Browser changed or was not on screen, so the tab list did not open. Ask again.';
     case 'browser_history': return `The page changed or Browser was not on screen, so it did not ${{back: 'go back', forward: 'go forward', reload: 'reload', stop: 'stop loading'}[operation.action]}. Ask again.`;
     default: return 'Browser changed or was not on screen, so this was not done. Ask again.';
   }

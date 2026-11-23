@@ -190,6 +190,26 @@ test('closing every tab closes exactly the tabs its card listed, and nothing onc
   await assert.rejects(control(all,{proposalId:'second'}),refused(/changed after you reviewed/));
  });
 });
+// v629 (Pixel): "show my open tabs" had no operation; the reply said the agent could not list tabs.
+// The phone's own tab list comes to the front when the action is presented; nothing is sent to the
+// agent about the tabs, and no tab is switched, opened or closed.
+test('showing the open tabs brings Browser\'s own tab list to the front and changes no tab',async()=>{
+ await browser(async({host,sent,open,control})=>{
+  const news=await open('https://news.example/','Morning news',{fresh:false}),docs=await open('https://docs.example.org/','Field guide');
+  const before=host.state().tabs.map(tab=>tab.id),cur=host.state().cur;
+  const present=await control({type:'browser_tabs_show'});
+  assert.equal(host.state().tabsOpen,false,'the list opens only when the action is presented');
+  await present();
+  assert.equal(host.state().tabsOpen,true);
+  assert.deepEqual(host.state().tabs.map(tab=>tab.id),before);assert.equal(host.state().cur,cur);
+  assert.deepEqual(sent('close'),[]);
+  assert.deepEqual(host.rendered().tabCards.map(card=>card.id),[news,docs]);
+  // A list that cannot be shown when presented is reported as not done, never as showing.
+  const later=await host.component.browserControl({type:'browser_tabs_show'},{signal:signal(),choose:async()=>null});
+  assert.equal(later.deferred,true,'the list is the effect, so a skipped one is corrected');
+  assert.equal(later(),true,'presented while Browser is unchanged, it reports that the list is showing');
+ });
+});
 test('closing every tab from Browser closes the showing tab when presented, and never a private tab from outside it',async()=>{
  await browser(async({host,sent,open,control})=>{
   const news=await open('https://news.example/','Morning news',{fresh:false}),docs=await open('https://docs.example.org/','Field guide');
@@ -386,6 +406,7 @@ const direct=[
  [{type:'browser_search',query:'weather in Paris'},'Alpha, search the web for weather in Paris'],
  [{type:'browser_tab_new'},'open a new tab'],
  [{type:'browser_tab_switch',target:'news'},'switch to the news tab'],
+ [{type:'browser_tabs_show'},'show my open tabs'],
  [{type:'browser_find',text:'harbour'},'find harbour on this page'],
  [{type:'browser_history',action:'back'},'go back'],
 ];
