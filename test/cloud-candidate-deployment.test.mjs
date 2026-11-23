@@ -90,7 +90,7 @@ test('the Alpha Cloud cutover flag is off by default: shipped builds keep the cu
  assert.match(outputs['apps/app/src/runtime/cloud-deployment.generated.ts'],/export const alphaCloudCutover: boolean = false;/);
  assert.match(outputs['android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java'],/static final boolean ALPHA_CLOUD_CUTOVER = false;/);
  assert.match(outputs['android/app/cloud-deployment.generated.gradle'],/ext\.alphaCloudCutover = false/);
- assert.ok(!Object.values(outputs).join('\n').includes('alphacompute.ai'),'no Alpha Cloud host in a shipped build');
+ assert.ok(!Object.values(outputs).join('\n').includes('alphacompute.cc'),'no Alpha Cloud host in a shipped build');
  // The committed outputs are the flag-off ones.
  for(const [file,contents] of Object.entries(outputs))assert.equal(fs.readFileSync(file,'utf8'),contents,file);
 });
@@ -100,7 +100,7 @@ test('ALPHA_CLOUD_CUTOVER=1 selects Alpha Cloud as a candidate deployment and tu
  assert.equal(isAlphaCloudDeployment(alpha),true);
  const outputs=deploymentOutputs(alpha);
  assert.match(outputs['apps/app/src/runtime/cloud-deployment.generated.ts'],/export const alphaCloudCutover: boolean = true;/);
- assert.match(outputs['android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java'],/PRODUCTION_API_HOST = "api\.alphacompute\.ai";[\s\S]*static final boolean ALPHA_CLOUD_CUTOVER = true;/);
+ assert.match(outputs['android/app/src/main/java/ai/alphacompute/alphaphone/CloudDeployment.java'],/PRODUCTION_API_HOST = "api\.alphacompute\.cc";[\s\S]*static final boolean ALPHA_CLOUD_CUTOVER = true;/);
  assert.match(outputs['android/app/cloud-deployment.generated.gradle'],/ext\.alphaCloudCutover = true/);
  // A candidate: its own credential namespace, so it cannot read a shipped build's sign-ins.
  write(temp,outputs);
@@ -108,7 +108,7 @@ test('ALPHA_CLOUD_CUTOVER=1 selects Alpha Cloud as a candidate deployment and tu
  const probe=`import('./scripts/cloud-deployment-policy.ts').then(m=>console.log(JSON.stringify([m.ALPHA_CLOUD_CUTOVER,m.CLOUD_DEPLOYMENT_IS_CANDIDATE,m.CLOUD_DEPLOYMENT.production.api])))`;
  const on=spawnSync(process.execPath,['--input-type=module','-e',probe],{encoding:'utf8',env:{...process.env,ALPHA_CLOUD_CUTOVER:'1',ALPHA_CLOUD_DEPLOYMENT_FILE:''}});
  assert.equal(on.status,0,on.stderr);
- assert.deepEqual(JSON.parse(on.stdout),[true,true,'https://api.alphacompute.ai']);
+ assert.deepEqual(JSON.parse(on.stdout),[true,true,'https://api.alphacompute.cc']);
  // Any other value is off.
  const off=spawnSync(process.execPath,['--input-type=module','-e',probe],{encoding:'utf8',env:{...process.env,ALPHA_CLOUD_CUTOVER:'true',ALPHA_CLOUD_DEPLOYMENT_FILE:''}});
  assert.deepEqual(JSON.parse(off.stdout),[false,false,SHIPPED_CLOUD_DEPLOYMENT.production.api]);

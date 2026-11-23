@@ -388,6 +388,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaContactsPlugin.class);
   registerPlugin(DailyAppsPlugin.class);
   registerPlugin(AlphaMapsTransportPlugin.class);
+  registerPlugin(AlphaNetworkLocationPlugin.class);
   registerPlugin(ai.eliza.plugins.camera.CameraPlugin.class);
   registerPlugin(ai.eliza.plugins.location.LocationPlugin.class);
   // Settings › Network: nearby networks, a reviewed join and the system Internet panel.

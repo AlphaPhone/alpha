@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import {CASES, DEVICE_PROFILE, evaluate, FOLLOW_UPS, judge, judgeTurn, summarize} from '../scripts/eval-phone-actions.ts';
+import {CASES, DEVICE_PROFILE, evaluate, FOLLOW_UPS, judge, judgeTurn, summarize, summarizeStream} from '../scripts/eval-phone-actions.ts';
 import {startLoopback, stopLoopback} from '../scripts/fixtures/loopback.ts';
 
 test('a turn passes only when every expectation is proposed and nothing else is', () => {
@@ -150,4 +150,47 @@ test('every proposal a run causes is rejected, late ones are never credited to t
     await assert.rejects(evaluate({origin: 'https://agent.example.com', token}), /loopback/);
   } finally { server.closeAllConnections(); await stopLoopback(server); }
   assert.deepEqual(summarize([{id: 'a', family: 'f', run: 1, outcome: 'pass', proposed: [], ms: 5}, {id: 'a', family: 'f', run: 2, outcome: 'missing', proposed: [], ms: 9}]).unstableCases, ['a']);
+});
+
+test('a streamed run records the acknowledgement, activity, first token and done frame of each turn', async () => {
+  const token = 'synthetic-eval-token';
+  const frame = value => `data: ${JSON.stringify(value)}\n\n`;
+  const server = http.createServer(async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    const body = raw ? JSON.parse(raw) : undefined, url = req.url ?? '';
+    const send = value => { res.writeHead(200, {'Content-Type': 'application/json'}); res.end(JSON.stringify(value)); };
+    if (url === '/api/client-devices/register') return send({installationId: req.headers['x-eliza-device-id'], capabilities: ['phone.call.v1']});
+    if (url === '/api/client-devices/revoke') return send({revoked: true});
+    if (url === '/api/client-devices/proposals') return send({proposals: []});
+    if (url === '/api/conversations') return send({conversation: {id: 'c0'}});
+    if (url.endsWith('/messages')) { res.writeHead(500); return res.end('{}'); }
+    if (url.endsWith('/messages/stream')) {
+      assert.equal(req.headers.accept, 'text/event-stream');
+      res.writeHead(200, {'Content-Type': 'text/event-stream'});
+      const planned = !/capital/.test(body.text);
+      // A planned turn: the acknowledgement, then the activity, then the reply. A direct answer has neither.
+      if (planned) res.write(frame({type: 'status', kind: 'thinking', label: 'Let me check your calendar.'}));
+      if (planned) res.write(frame({type: 'status', kind: 'running_tool', toolName: 'CALENDAR', label: 'Using Calendar'}));
+      res.write(frame({type: 'token', text: 'Draft', provisional: true}));
+      res.write(frame({type: 'token', fullText: planned ? 'Nothing tomorrow.' : 'Paris.'}));
+      return res.end(frame({type: 'done', fullText: planned ? 'Nothing tomorrow.' : 'Paris.', agentName: 'Alpha'}));
+    }
+    res.writeHead(404); res.end('{}');
+  });
+  const origin = await startLoopback(server);
+  try {
+    const cases = CASES.filter(item => ['free-busy', 'question'].includes(item.id));
+    const result = await evaluate({origin, token, cases, followUps: [], streamMode: true});
+    const [planned, direct] = result.rows;
+    assert.equal(planned.stream.ack, 'Let me check your calendar.');
+    assert.equal(planned.stream.activity, 'Using Calendar');
+    assert.ok(planned.stream.ackMs <= planned.stream.activityMs && planned.stream.activityMs <= planned.stream.doneMs);
+    assert.equal(typeof planned.stream.firstTokenMs, 'number', 'a provisional draft is not the first reply token');
+    assert.equal(direct.stream.ack, undefined);
+    assert.equal(direct.reply, 'Paris.');
+    assert.equal(direct.outcome, 'pass');
+    assert.deepEqual({...result.summary.acknowledgements, ackMsMedian: 0, firstTokenMsMedian: 0, doneMsMedian: 0}, {turns: 2, acknowledged: 1, ackMsMedian: 0, firstTokenMsMedian: 0, doneMsMedian: 0});
+    // Without --stream the summary carries no acknowledgement figures.
+    assert.equal(summarizeStream([{id: 'a', family: 'f', run: 1, outcome: 'pass', proposed: [], ms: 1}]), undefined);
+  } finally { server.closeAllConnections(); await stopLoopback(server); }
 });
