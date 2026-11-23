@@ -83,15 +83,15 @@ pure val upToValues = Set(0, 1, 2, 3)
 pure val ranValues = Set(0, 1, 2)
 pure val resultValues = Set(0, 1, 3)
 pure val ownerValues = Set(0, 1, 2)
-pure val weight_pull = 4
-pure val weight_fetched = 60
-pure val weight_pageKept = 20
-pure val weight_ackAnswered = 12
-pure val weight_noticeOpened = 10
-pure val weight_resultRead = 20
-pure val weight_setNotices = 4
-pure val weight_noticesAnswered = 12
-pure val weight_closePanel = 3
+pure val weight_pull = 3
+pure val weight_fetched = 12
+pure val weight_pageKept = 6
+pure val weight_ackAnswered = 4
+pure val weight_noticeOpened = 4
+pure val weight_resultRead = 8
+pure val weight_setNotices = 3
+pure val weight_noticesAnswered = 4
+pure val weight_closePanel = 2
 ```
 
 ### Only the newest 100 results are listed, newest first
