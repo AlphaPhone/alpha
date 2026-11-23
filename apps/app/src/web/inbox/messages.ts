@@ -3,7 +3,7 @@ import type { FailureKind } from "../../../gen/inbox__failures.ts";
 import type { BackgroundStatus, AskFailure } from "../../../gen/inbox__notices.ts";
 import type { Admission, HandoffOutcome } from "../../../gen/inbox__attachments.ts";
 import type { Folder } from "../../../gen/inbox__mailbox.ts";
-import type { OpKind } from "../../../gen/inbox__operations.ts";
+import type { JournalNotice, OpKind } from "../../../gen/inbox__operations.ts";
 import type { ComposerRefusal } from "../../inbox/composer.vibe";
 import type { OperationOutcome } from "../../inbox/operations.vibe";
 import type { AttachmentRefusal } from "../../inbox/reader.vibe";
@@ -143,3 +143,12 @@ export const askFailure: Record<AskFailure, string> = {
 
 /** The placeholder shown for a remote image that was not loaded. */
 export const imagePlaceholder = (alt: string) => (alt ? `[Image: ${alt}]` : "[Image]");
+
+/** What the operation journal says by itself, after a review changed, was discarded or lost its access. */
+export const journalNotice: Record<JournalNotice, string> = {
+  NoJournalNotice: "",
+  ReviewChanged: "Gmail's review did not match the email. Nothing was sent; check it and try again.",
+  ReviewDiscarded: "The email changed after review, so the review was discarded. Nothing was sent.",
+  AccessWithdrawn: "Access to change this mailbox was withdrawn, so the waiting review was discarded.",
+  AnswerRefused: "Gmail's answer did not match this operation, so the saved receipt was kept.",
+}

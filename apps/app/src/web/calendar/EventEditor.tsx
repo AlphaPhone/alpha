@@ -25,6 +25,10 @@ export type EventEditorProps = {
   draft: EditorDraft;
   /** Editing an existing repeating event, which needs a scope. */
   recurring: boolean;
+  /** Whether the calendar the form saves to can take a repeat; the agent's Calendar cannot, so no repeat is offered for it. */
+  repeats?: boolean;
+  /** For a new event, the calendars it may go to: the agent's own (`local`) and each writable calendar on this phone (`native:<id>`). */
+  calendars?: ReadonlyArray<{ readonly value: string; readonly label: string }>;
   /** Times that cannot be shown as a wall-clock span keep their original time. */
   timingLocked: boolean;
   deviceZone: string;
@@ -61,7 +65,7 @@ const SCOPE_VALUE: Readonly<Record<string, RecurrenceScope>> = { instance: "This
  * The event form over its retained draft: typed edits are kept, offered back on reopening, and saved only from what is shown.
  * @model spec/calendar/drafts.md
  */
-export function EventEditor({ fields: opened, draft, recurring, timingLocked, deviceZone, loading, otherAccount, eventChanged, problem, onEdit, onRestore, onReview, onAnswerReview, onRetry, onRecovery, onSave, onClose }: EventEditorProps) {
+export function EventEditor({ fields: opened, draft, recurring, repeats = true, calendars = [], timingLocked, deviceZone, loading, otherAccount, eventChanged, problem, onEdit, onRestore, onReview, onAnswerReview, onRetry, onRecovery, onSave, onClose }: EventEditorProps) {
   const [fields, setFields] = useState(opened);
   const replace = (next: DraftFieldsRecord) => {
     setFields(next);
@@ -70,6 +74,7 @@ export function EventEditor({ fields: opened, draft, recurring, timingLocked, de
   const change = (patch: Partial<DraftFieldsRecord>) => replace({ ...fields, ...patch });
   const inert = !draft.opened || draft.offered || draft.saving || draft.latch;
   const scope: RecurrenceScope = fields.recurrenceScope === undefined ? "NoScope" : SCOPE_VALUE[fields.recurrenceScope] ?? "NoScope";
+  const repeatsHere = repeats || fields.calendar.startsWith("native:");
   const repeatChanged = fields.repeat !== opened.repeat && fields.repeat !== "preserve";
   const blocked = saveBlock(loading, draft.saving, otherAccount, eventChanged, fields.title.trim() === "");
   const scopeProblem = recurring && (scope === "NoScope" || !recurrenceEditAllowed(recurring, repeatChanged, scope));
@@ -142,7 +147,13 @@ export function EventEditor({ fields: opened, draft, recurring, timingLocked, de
                 <SelectContent>{zoneChoices(deviceZone, fields.zone).map((zone) => <SelectItem key={zone} value={zone}>{zone === deviceZone ? `${zone} (this phone)` : zone}</SelectItem>)}</SelectContent>
               </Select>
             )}
-            <Select value={fields.repeat} onValueChange={(repeat) => change({ repeat: repeat as DraftFieldsRecord["repeat"] })}>
+            {calendars.length > 1 && (
+              <Select value={fields.calendar} onValueChange={(calendar) => change({ calendar, ...(calendar.startsWith("native:") ? {} : { repeat: "none" as const }) })}>
+                <SelectTrigger aria-label="Calendar"><SelectValue /></SelectTrigger>
+                <SelectContent>{calendars.map((choice) => <SelectItem key={choice.value} value={choice.value}>{choice.label}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+            {repeatsHere && <Select value={fields.repeat} onValueChange={(repeat) => change({ repeat: repeat as DraftFieldsRecord["repeat"] })}>
               <SelectTrigger aria-label="Repeat"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {recurring && <SelectItem value="preserve">Keep repeat</SelectItem>}
@@ -151,7 +162,7 @@ export function EventEditor({ fields: opened, draft, recurring, timingLocked, de
                 <SelectItem value="weekdays">Weekdays</SelectItem>
                 <SelectItem value="weekly">Weekly</SelectItem>
               </SelectContent>
-            </Select>
+            </Select>}
             {recurring && (
               <RadioGroup aria-label="Applies to" value={fields.recurrenceScope ?? ""} onValueChange={(value) => change({ recurrenceScope: value as DraftFieldsRecord["recurrenceScope"] })}>
                 {(["instance", "this_and_following", "series"] as const).map((value) => (

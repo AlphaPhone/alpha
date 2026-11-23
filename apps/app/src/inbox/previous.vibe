@@ -22,7 +22,8 @@ const previousEnvironments: Record<string, string> = { "ElizaCloud/Production": 
 const modes: Record<string, Mode> = { compose: "ComposeMode", reply: "ReplyMode", "reply-all": "ReplyAllMode", forward: "ForwardMode" }
 
 /** One slot of the previous version and the drafts it holds, newest first, each with its half-typed address. */
-interface PreviousSlotDrafts { readonly slot: string; readonly raw: string; readonly drafts: ReadonlyArray<{ readonly draft: PreviousDraft; readonly toQ: string }> }
+/** One previous slot's drafts; a recovery copy also names the saved revision its edits were typed over (`base`). */
+interface PreviousSlotDrafts { readonly slot: string; readonly raw: string; readonly drafts: ReadonlyArray<{ readonly draft: PreviousDraft; readonly toQ: string; readonly base?: string | null }> }
 
 /** The keys the previous version kept an account's drafts under, for each name `grants` gives its Gmail grant; none for an account outside Eliza Cloud, which the previous version never served. */
 export function previousOwners(owner: string, grants: readonly string[]): string[] {
@@ -114,7 +115,7 @@ export effect function keepPreviousDrafts(owner: string): number!! {
       }
       const copy = try (decodePreviousRecovery(envelope.text) catch () => undefined)
       if (copy === undefined || copy.version !== 1 || copy.owner !== previous || copy.draft.owner !== previous || copy.draft.version !== 1) continue
-      found.push({ slot, raw, drafts: [{ draft: copy.draft, toQ: copy.toQ }] })
+      found.push({ slot, raw, drafts: [{ draft: copy.draft, toQ: copy.toQ, base: copy.baseRevision }] })
     }
     const savedSlot = onDevice ? `inbox-drafts:v1:${previous}` : `${BROWSER_PREFIX}inbox-saved-drafts:v1:${ownerHash}`
     const savedRaw = try (read(savedSlot) catch () => undefined)
@@ -138,10 +139,14 @@ export effect function keepPreviousDrafts(owner: string): number!! {
   let kept = 0
   for (const previous of previousOwners(owner, grants)) {
     const slots = try slotsOf(previous)
+    const savedRevisions = new Map<string, string>()
+    for (const slot of slots) for (const row of slot.drafts) if (row.base === undefined) savedRevisions.set(row.draft.id, row.draft.revision)
     const converted = new Map<string, Draft>()
     for (const slot of slots) {
       for (const row of slot.drafts) {
         if (converted.has(row.draft.id) || row.draft.id === "") continue
+        const saved = savedRevisions.get(row.draft.id)
+        if (row.base !== undefined && saved !== undefined && saved !== row.base) continue
         converted.set(row.draft.id, try previousDraftOf(row.draft, row.toQ))
       }
     }

@@ -47,7 +47,7 @@ export service InboxAccounts {
   readonly changes: Stream.Stream<MailAccounts>
   get(): MailAccounts!!
   /** The Cloud owner now, if one is signed in. */
-  owner(): MailOwner | undefined!!
+  owner(): (MailOwner | undefined)!!
   /** The key of the selected account's drafts and operations, or "" when none is selected. */
   selectedKey(): string!!
   /** Shows the saved accounts of this owner while Cloud restores. */
@@ -94,6 +94,13 @@ export const layer = Layer.effect(InboxAccounts, effect {
     if (after.phase === "Checked" && after.selected !== "") try saved.persist(savedScope(current), after.rows, after.selected, false)
   }
 
+  effect function restoreSaved() {
+    const current = try owner()
+    if (current === undefined) return
+    const restored = try saved.restore(savedScope(current), null)
+    if (restored !== undefined) try send({ type: "restoreSaved", saved: restored.accounts, choice: restored.selected })
+  }
+
   effect function refresh() {
     const current = try owner()
     if (current === undefined) {
@@ -125,7 +132,10 @@ export const layer = Layer.effect(InboxAccounts, effect {
       if (now === generation) continue
       generation = now
       if (now === 0) try send({ type: "signOut" })
-      else try refresh()
+      else {
+        try restoreSaved()
+        try refresh()
+      }
     }
   })
 
@@ -138,12 +148,7 @@ export const layer = Layer.effect(InboxAccounts, effect {
       const s = try machine.get()
       return current === undefined || s.selected === "" ? "" : mailOwnerKey(current, s.selected)
     },
-    effect restoreSaved() {
-      const current = try owner()
-      if (current === undefined) return
-      const restored = try saved.restore(savedScope(current), null)
-      if (restored !== undefined) try send({ type: "restoreSaved", saved: restored.accounts, choice: restored.selected })
-    },
+    restoreSaved,
     refresh,
     effect choose(id: string) {
       const before = try machine.get()

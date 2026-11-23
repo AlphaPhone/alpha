@@ -12,5 +12,5 @@ specs state what Alpha's renderer adds on top of them.
 | --- | --- |
 | Seeing the calendar | [Views and navigation](./presentation.md), [the Home agenda](./home.md) |
 | Changing events | [Editor rules](./editor.md), [retained drafts](./drafts.md), [device calendar writes](./device.md), [the assistant's selection](./selection.md) |
-| The agent's Calendar | [Reads and reviewed writes](./agent.md), [deletion Undo](./deletions.md), [approval review](./approvals.md) |
+| The agent's Calendar | [Reads and reviewed writes](./agent.md), [deletion Undo](./deletions.md), [approval review](./approvals.md), [linking Google Calendar](./googleLink.md) |
 | Agent requests on the phone | [Device actions](./deviceActions.md), [named reads](./namedRead.md), [availability](./availability.md), [reviewed range reads](./rangeRead.md) |

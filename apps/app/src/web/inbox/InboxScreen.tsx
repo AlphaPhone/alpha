@@ -28,7 +28,7 @@ import { DraftsList } from "./DraftsList.tsx";
 import { MailList } from "./MailList.tsx";
 import { LinkReviewDialog, MessageView } from "./MessageView.tsx";
 import { ReviewSheet } from "./ReviewSheet.tsx";
-import { admissionRefusal, attachmentRefusal, composerRefusal, folderNames, operationOutcome, outcomeFeedback } from "./messages.ts";
+import { admissionRefusal, attachmentRefusal, composerRefusal, folderNames, journalNotice, operationOutcome, outcomeFeedback } from "./messages.ts";
 import type { AppServices } from "../runtime.ts";
 import { useLayer } from "../shell/useLayer.ts";
 import { runtime } from "./runtime.ts";
@@ -206,7 +206,9 @@ export function InboxScreen({ onClose }: ScreenProps) {
           )}
         </>
       )}
-      {notice !== "" && <p role="status" aria-live="polite" className="sticky bottom-0 bg-card px-4 py-2 text-sm shadow-md">{notice}</p>}
+      {(notice !== "" || journalNotice[journal.notice] !== "") && (
+        <p role="status" aria-live="polite" className="sticky bottom-0 bg-card px-4 py-2 text-sm shadow-md">{notice || journalNotice[journal.notice]}</p>
+      )}
       <ReviewSheet
         record={record} open={reviewOpen} busy={busy}
         confirmable={record !== undefined && kindAllowed(caps, record.kind) && (!isComposerKind(record.kind) || (hasDraft(openDraft) && composerRef(openDraft).content === record.composer.content && openDraft.id === record.composer.draftId))}

@@ -78,7 +78,7 @@ export service DeviceCalendar {
   openExternal(id: string, begin: number, end: number): DeviceOutcome!!
   remount(): void!!
   /** The selection the assistant may act on now, only while its detail or form still shows it. */
-  selected(): SelectedObject | undefined!!
+  selected(): (SelectedObject | undefined)!!
 }
 
 effect function call(native: Native.Shape, method: string, args?: unknown) {

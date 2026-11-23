@@ -178,25 +178,25 @@ export function failureOf(error: MailFailure, context: "read" | "operation"): Gm
 /** Managed Gmail of the owner's selected grant, through Eliza Cloud. */
 export service Gmail {
   /** What this grant may read and change, from the kinds Cloud reports for it. */
-  capabilities(grant: string): Capabilities!GmailFailed | SignInExpired
+  capabilities(grant: string): Capabilities!(GmailFailed | SignInExpired)
   /** One page of a folder or search, newest first, 25 at a time. */
-  search(grant: string, query: string, pageToken: string): MailPage!GmailFailed | SignInExpired
+  search(grant: string, query: string, pageToken: string): MailPage!(GmailFailed | SignInExpired)
   /** One message whole, at the revision it was read at. */
-  read(grant: string, messageId: string): MailBody!GmailFailed | SignInExpired
+  read(grant: string, messageId: string): MailBody!(GmailFailed | SignInExpired)
   /** One page of a conversation; a later page names the first page's revision. */
-  thread(grant: string, threadId: string, offset: number, historyId: string): ThreadView!GmailFailed | SignInExpired
+  thread(grant: string, threadId: string, offset: number, historyId: string): ThreadView!(GmailFailed | SignInExpired)
   /** One attachment's exact bytes at the message's revision. */
-  attachment(grant: string, messageId: string, partId: string, historyId: string, opaque: boolean): DownloadedFile!GmailFailed | SignInExpired
+  attachment(grant: string, messageId: string, partId: string, historyId: string, opaque: boolean): DownloadedFile!(GmailFailed | SignInExpired)
   /** One page of Gmail drafts, metadata only. */
-  drafts(grant: string, pageToken: string): DraftsPage!GmailFailed | SignInExpired
+  drafts(grant: string, pageToken: string): DraftsPage!(GmailFailed | SignInExpired)
   /** One Gmail draft's content from one snapshot. */
-  draft(grant: string, draftId: string): GmailDraft!GmailFailed | SignInExpired
+  draft(grant: string, draftId: string): GmailDraft!(GmailFailed | SignInExpired)
   /** Records the operation at managed Gmail and returns its review; repeating it under the same request id answers the same receipt. */
-  prepare(grant: string, requestId: string, kind: OpKind, proposal: Proposal): PreparedOperation!GmailFailed | SignInExpired
+  prepare(grant: string, requestId: string, kind: OpKind, proposal: Proposal): PreparedOperation!(GmailFailed | SignInExpired)
   /** Dispatches a prepared operation once, by its review digest. */
-  dispatch(grant: string, requestId: string, digest: string, kind: OpKind, proposal: Proposal): Receipt!GmailFailed | SignInExpired
+  dispatch(grant: string, requestId: string, digest: string, kind: OpKind, proposal: Proposal): Receipt!(GmailFailed | SignInExpired)
   /** Reads an operation's receipt; it never dispatches. */
-  receipt(grant: string, requestId: string): Receipt!GmailFailed | SignInExpired
+  receipt(grant: string, requestId: string): Receipt!(GmailFailed | SignInExpired)
 }
 
 /** Gmail over upstream's managed Gmail client, carried by the platform's Cloud service. */

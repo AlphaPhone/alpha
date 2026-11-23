@@ -1,6 +1,6 @@
 // spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"
 import type { MapsCard } from "@elizaos/plugin-maps/cards";
-import { Workflow } from "lucide-react";
+import { CalendarClock, Workflow } from "lucide-react";
 import { render } from "../../../gen/assistant__reply.ts";
 import type { Segment } from "../../assistant/reply-lines.vibe";
 import { Button } from "../components/ui/index.ts";
@@ -18,6 +18,8 @@ export type ReplyTextProps = {
   live?: boolean;
   /** Open the map a Maps card carries. */
   onOpenMap?: (card: MapsCard) => void;
+  /** Open Calendar's review of a change the agent queued for approval. */
+  onReviewApproval?: (requestId: string) => void;
 };
 
 type Block = { readonly kind: "text" | "code"; readonly lines: string[] } | { readonly kind: "card"; readonly segment: Segment };
@@ -41,7 +43,7 @@ function blocksOf(segments: readonly Segment[]): Block[] {
  * A reply's text with its cards: prose as written, code fences verbatim, recognized tool blocks as cards.
  * @model spec/assistant/reply.md
  */
-export function ReplyText({ segments, onChoose, onOpenRun, live = false, onOpenMap }: ReplyTextProps) {
+export function ReplyText({ segments, onChoose, onOpenRun, live = false, onOpenMap, onReviewApproval }: ReplyTextProps) {
   return (
     <div className="flex flex-col gap-2">
       {blocksOf(segments).map((block, at) => {
@@ -50,6 +52,7 @@ export function ReplyText({ segments, onChoose, onOpenRun, live = false, onOpenM
         const { payload } = block.segment;
         if (payload.kind === "maps") return <MapsCardView key={at} card={payload.card} live={live && onOpenMap !== undefined} onOpenMap={() => onOpenMap?.(payload.card)} />;
         if (payload.kind === "workflow") return <Button key={at} variant="outline" aria-label={`Open workflow run ${payload.run.title}`} onClick={() => onOpenRun?.(payload.run.workflowId, payload.run.runId)}><Workflow aria-hidden className="size-4" />{payload.run.title}</Button>;
+        if (payload.kind === "calendar-approval") return <Button key={at} variant="outline" aria-label="Review Calendar request" disabled={onReviewApproval === undefined} onClick={() => onReviewApproval?.(payload.requestId)}><CalendarClock aria-hidden className="size-4" />Needs your approval · Review</Button>;
         if (payload.kind === "choice") return <div key={at} className="flex gap-2">{payload.options.map((option) => <Button key={option.value} variant="secondary" onClick={() => onChoose?.(option.value)}>{option.label}</Button>)}</div>;
         return null;
       })}

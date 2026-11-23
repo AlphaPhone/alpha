@@ -8,6 +8,7 @@ import { Machine as ClientMachine, canReplyWith } from "../../gen/assistant__con
 import { Machine as RecoveryMachine } from "../../gen/assistant__recovery.effect.vibe"
 import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
 import { statesDirectRequests } from "../../gen/assistant__review.effect.vibe"
+import { interruptedAfterEffect, turnEffects } from "./turn-effects.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
 import { namesMaps, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
 import { Preferences } from "../settings/preferences.vibe"
@@ -501,6 +502,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const viewRows: Row[] = opened.status !== "unavailable" ? []
       : [{ kind: "notice", id: `view-notice:${reply.messageId}`, text: opened.parentView === undefined ? copy.viewUnavailable : copy.viewInside(opened.parentView), system: false }]
     const changed = delivered && inConversation ? try changes.settle(reply.actionResults) : undefined
+    const effects = turnEffects(reply.actionResults)
     const changeRows: Row[] = changed === undefined ? [] : [
       ...changed.workflows.map((change): Row => ({ kind: "change", id: `change:${reply.messageId}:workflow:${change.workflowId}`, text: `${changeWords[change.word]} workflow`, app: "workflows", route: change.workflowId })),
       ...(changed.notesRevision === undefined ? [] : [{ kind: "change", id: `change:${reply.messageId}:notes`, text: copy.notesChanged, app: "notes" } satisfies Row]),
@@ -511,7 +513,8 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...list.map((row) =>
         row.id === userId && row.kind === "user" ? { ...row, id: reply.userMessageId, status: "recorded" as const }
         : row.id === replyId && row.kind === "agent" ? { ...row, id: reply.messageId, recorded: true, notices, ordinal: replyOrdinal, ...(plan === undefined || plan === "Funding" ? {} : { plan }),
-            cutOff: cutOffLabel(result.kind === "AgentFailed", pass.receipts.filter((r) => r.card.state === "DoneCard").length, 0, false) }
+            cutOff: cutOffLabel(result.kind === "AgentFailed", pass.receipts.filter((r) => r.card.state === "DoneCard").length + effects.applied, effects.approvals,
+              result.kind === "AgentFailed" && result.code === interruptedAfterEffect) }
         : row),
       ...pass.notices.map((text, at): Row => ({ kind: "notice", id: `device-notice:${reply.userMessageId}:${at}`, text, system: false })),
       ...pass.receipts.flatMap((done): Row[] => done.receipt === undefined ? [] : [{ kind: "receipt", id: `device-receipt:${done.card.proposalId}`, proposalId: done.card.proposalId, title: done.receipt.title, summary: done.receipt.summary }]),
