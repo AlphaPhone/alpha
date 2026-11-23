@@ -47,7 +47,9 @@ pure def routed(number: int, d: Reminders, m: M::Worked): Acted =
 pure def kept(number: int, d: Reminders, r: M::Reminder): Acted = routed(number, d, { state: r, out: List() })
 
 pure val numberValues = Set(1, 2, 3)
-pure val ticketValues = Set(1, 2, 3)
+pure val ticketValues = 1.to(20)
+pure val weight_listed = 6
+pure val weight_found = 6
 pure val signedInValues = Set(1)
 pure val nowValues = Set(0, 10, 20, 30)
 pure val atValues = Set(0, 10, 20)
