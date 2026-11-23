@@ -1,4 +1,13 @@
 import {expect, type Page} from '@playwright/test';
+import type {BrowserCalendarState} from '../../../apps/app/src/browser/calendar-store';
+
+/** Seed the current browser calendar document for development-only UI fixtures. */
+export async function seedBrowserCalendar(page:Page,state:BrowserCalendarState){
+  await page.evaluate(async state=>{
+    const {calendarDocument}=await import('/src/browser/calendar-store.ts');
+    await calendarDocument.edit(()=>state,current=>{Object.assign(current,state);});
+  },state);
+}
 
 /** Compatibility fixtures seed the persisted authority retained from older installations.
  * This is a synthetic upgrade state, not a current Settings choice or permission grant. */

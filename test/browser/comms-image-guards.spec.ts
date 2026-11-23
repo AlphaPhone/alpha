@@ -32,6 +32,7 @@ async function installedExecutor(page: Page, options?:Parameters<typeof setupTel
     const target = {installationId: 'device'};
     connectionController.getWorkflowDeviceTarget = () => target;
     const state = alphaClient.getState.bind(alphaClient);
+    (window as any).__actualAgentState = state;
     const context = {...state().context, view: 'messages', sensitive: false,
       selectedObject: {kind: 'sms-subscription', id: '1', revision: smsSubscriptionRevision({slot: 0, carrierName: 'Synthetic Carrier'})}};
     alphaClient.getState = () => ({...state(), context});
@@ -141,18 +142,21 @@ test.describe('Alpha image: the installed executor refuses side effects during a
 });
 
 /**
- * Runs one operation on the installed executor with the review fence held on `view`, as a live
- * review on that screen would hold it. The whole result stays on the page so its `present` step
+ * Runs one operation on the installed executor after the renderer publishes `view`.
+ * The whole result stays on the page so its `present` step
  * (the view change the coordinator runs after the receipt) can be run next.
  */
-const execute = (page: Page, operation: Record<string, unknown>, view: 'home' | 'messages' | 'contacts') => page.evaluate(async ({operation, view}) => {
-  const {alphaClient} = await import('/src/runtime/alpha-client.ts' as string);
-  const w = window as any, held = alphaClient.getState(), context = {...held.context, view, selectedObject: undefined};
-  alphaClient.getState = () => ({...held, context});
-  const operationId = crypto.randomUUID();
-  const result = w.__lastExecution = await w.__installedDeviceExecutor(operation, operationId, context, new AbortController().signal, 'b'.repeat(64), undefined, w.approvedCard(operationId));
-  return {result: result.telephonyResult, summary: result.summary as string, presents: typeof result.present === 'function'};
-}, {operation, view});
+const execute = async (page: Page, operation: Record<string, unknown>, view: 'home' | 'messages' | 'contacts') => {
+  await expect.poll(() => page.evaluate(() => (window as any).__actualAgentState().context.view)).toBe(view);
+  return page.evaluate(async operation => {
+    const {alphaClient} = await import('/src/runtime/alpha-client.ts' as string);
+    const w = window as any;
+    alphaClient.getState = w.__actualAgentState;
+    const {context} = alphaClient.getState(), operationId = crypto.randomUUID();
+    const result = w.__lastExecution = await w.__installedDeviceExecutor(operation, operationId, context, new AbortController().signal, 'b'.repeat(64), undefined, w.approvedCard(operationId));
+    return {result: result.telephonyResult, summary: result.summary as string, presents: typeof result.present === 'function'};
+  }, operation);
+};
 const present = (page: Page) => page.evaluate(() => (window as any).__lastExecution.present());
 const shell = (page: Page, act: 'goHome') => page.evaluate(act => {
   const el = document.querySelector('[data-screen]') as any;

@@ -4,8 +4,8 @@ import {setTextScale} from './accessibility-states';
 
 // Live agent Notes are drawn by Alpha's own Notes template, the one mock mode shows, in the view refresh
 // layout: header with Back, title, Record and +, the folder chips, and a one-column
-// list (title, date, two-line preview) with a Pinned section. Recently deleted is a folder chip while it
-// has items; Notes options is available in the list header. Screenshots land in test-results/notes-restore for side-by-side review
+// list (title, date, two-line preview) with a Pinned section. Recently deleted is in Notes options.
+// Screenshots land in test-results/notes-restore for side-by-side review
 // with the mock-mode reference.
 const SHOTS='test-results/notes-restore';
 const at='2026-10-30T09:00:00.000Z';
@@ -80,9 +80,9 @@ test('live agent Notes use the mock-mode Notes design with typed cards',async({p
  await expect(page.getByRole('button',{name:'Recently deleted',exact:true})).toHaveCount(0);
  const options=page.getByRole('button',{name:'Notes options',exact:true});
  await options.click();
- const menu=page.getByRole('dialog',{name:'Notes options'});
- await expect(menu.getByRole('button',{name:'Recently deleted',exact:true})).toBeDisabled();
- await expect(menu.getByRole('button',{name:'On this phone',exact:true})).toHaveCount(0);
+ const menu=page.getByRole('menu',{name:'Notes options'});
+ await expect(menu.getByRole('menuitem',{name:'Recently deleted',exact:true})).toBeDisabled();
+ await expect(menu.getByRole('menuitem',{name:'On this phone',exact:true})).toHaveCount(0);
  await shot(page,'notes-options');
  await page.keyboard.press('Escape');
  await expect(menu).toHaveCount(0);
@@ -171,7 +171,7 @@ test('live agent Notes light editor, checklist and restore-only Recently deleted
  await page.getByRole('button',{name:'More',exact:true}).click();await page.getByRole('menu',{name:'Note actions'}).getByRole('menuitem',{name:'Delete',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).canonicalNotesFixture.state.trash.length)).toBe(1);
  await page.getByRole('button',{name:'Notes options',exact:true}).click();
- await page.getByRole('dialog',{name:'Notes options',exact:true}).getByRole('button',{name:'Recently deleted',exact:true}).click();
+ await page.getByRole('menu',{name:'Notes options',exact:true}).getByRole('menuitem',{name:'Recently deleted',exact:true}).click();
  const trash=page.locator('[data-alpha-subview="notes-trash"]');
  await expect(trash.getByRole('button',{name:'Gift ideas',exact:true})).toBeVisible();
  await expect(trash.getByRole('button',{name:'Empty Recently deleted',exact:true})).toHaveCount(0);

@@ -35,7 +35,7 @@ test('the recovery download preserves the older Notes bytes without resetting th
  await page.addInitScript(({key,previous})=>localStorage.setItem(key,previous),{key:legacyKey,previous});
  await ready(page);
  await selectLegacyNotes(page);
- await page.getByRole('button',{name:'Recover browser Notes',exact:true}).click();
+ await page.getByRole('button',{name:'Recover Notes',exact:true}).click();
  const dialog=page.getByRole('dialog',{name:'Browser Notes recovery'});
  const download=page.waitForEvent('download');
  await dialog.getByRole('button',{name:'Download old copy',exact:true}).click();

@@ -28,7 +28,7 @@ type Bag = Record<string, any>;
 /** What a chat request to switch or close a tab asks the owner when its words match several tabs. */
 export type BrowserTabChoice = {verb: 'Switch to' | 'Close'; options: {title: string; host: string; priv: boolean}[]};
 /** What browserControl returns: the step run after the action's receipt (see runBrowserPresentation). */
-export type BrowserPresentation = (() => boolean | void) & {deferred?: true; closed?: BrowserTabsClosed};
+export type BrowserPresentation = ((detent?: string) => boolean | void) & {deferred?: true; closed?: BrowserTabsClosed};
 // The shared native tab host (BrowserTabHostPlugin) under Alpha's Capacitor name; the web build
 // registers its isolated-frame surface under the same name (browser/register.ts).
 const Browser = registerPlugin<any>('AlphaBrowser');
@@ -702,14 +702,14 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const reuse = approvedOpenTab(state()?.tabs || [], selected, agentTab, privateTab, tab => !tabs.has(tab) && !restored.has(tab) && !tabInfo(tab), newTab);
       const id = await navigate(url.href, !reuse, signal, privateTab, deferPresentation, reuse);
       if (id) agentTab = id;
-      const present = () => {
+      const present = (detent?: string) => {
         signal.throwIfAborted();
         if (!id || disposed || document.hidden || state()?.cur !== (deferPresentation ? selected : id) || !tabs.has(id)) return;
         // Select only after completion; even Browser-origin requests keep their
         // original document context throughout journal and receipt handling.
         if (deferPresentation) shell.vset('browser', {cur: id, editing: false, tabsOpen: false, menu: false, lib: null, share: false});
         // Keep the exact dispatched tab; a normal openView resets its identity.
-        shell.openView('browser', null, null, { restore: true });
+        shell.openView('browser', null, detent, { restore: true });
       };
       // Device actions present only after their durable journal and receipt attempt.
       // Ordinary reviewed web sources keep their immediate presentation.
@@ -724,7 +724,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // A presentation that carries a change the receipt already reports (a switch, closing the
     // showing tab, page history) is `deferred`, and returns whether it made that change, so a
     // skipped one can be corrected (action-message-presentation runBrowserPresentation).
-    const deferred = (run: () => boolean): BrowserPresentation => Object.assign(run, {deferred: true as const});
+    const deferred = (run: (detent?: string) => boolean): BrowserPresentation => Object.assign(run, {deferred: true as const});
     this.browserControl = async (operation: BrowserControlOperation, input: {signal: AbortSignal; observed?: {id: string; revision: string}; proposalId?: string; choose: (choice: BrowserTabChoice, signal: AbortSignal) => Promise<number | null>}) => {
       const {signal} = input, refuse = (message: string): never => { throw new BrowserOpenRefused(message); };
       signal.throwIfAborted();
@@ -732,16 +732,16 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const s = state(); if (!s || disposed) return refuse('Browser is unavailable.');
       const selected: string = s.cur, fromPrivate = shell.S?.().view === 'browser' && isPrivate(selected);
       const still = () => { signal.throwIfAborted(); return !disposed && !document.hidden && state()?.cur === selected; };
-      const show = (patch: Bag = {}) => { shell.vset('browser', {editing: false, tabsOpen: false, menu: false, lib: null, share: false, ...patch}); shell.openView('browser', null, null, {restore: true}); };
+      const show = (detent?: string, patch: Bag = {}) => { shell.vset('browser', {editing: false, tabsOpen: false, menu: false, lib: null, share: false, ...patch}); shell.openView('browser', null, detent, {restore: true}); };
       // The phone's own list of open tabs comes to the front, after the action's receipt. The agent
       // learns only that it is showing: never a tab, a title, an address or a count.
       // Showing the list is the whole effect, so a skipped one is corrected.
-      if (operation.type === 'browser_tabs_show') return deferred(() => { if (!still()) return false; show({tabsOpen: true}); return true; });
+      if (operation.type === 'browser_tabs_show') return deferred(detent => { if (!still()) return false; show(detent, {tabsOpen: true}); return true; });
       if (operation.type === 'browser_tab_new') {
         if (s.tabs.length >= MAX_TABS) throw tabLimitRefusal(MAX_TABS);
         const id = newTabId();
         shell.vset('browser', {tabs: [...s.tabs, {id, hist: ['newtab'], pos: 0, ...(operation.private ? {priv: true} : {})}]});
-        return () => { if (still() && tabOf(id)) show({cur: id, editing: true, addr: ''}); };
+        return (detent?: string) => { if (still() && tabOf(id)) show(detent, {cur: id, editing: true, addr: ''}); };
       }
       if (operation.type === 'browser_tab_close' && operation.all) {
         const listed = input.proposalId === undefined ? undefined : listedForClosing.get(input.proposalId);
@@ -754,9 +754,9 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         const finish = () => closeTabs(closing, !fromPrivate);
         // Outside Browser every listed tab closes now. In Browser, as for one tab, the others close
         // now and the tab showing closes in the presentation, after the action's receipt.
-        if (shell.S?.().view !== 'browser') { finish(); return Object.assign((): boolean => { if (still()) show(); return true; }, {closed}); }
+        if (shell.S?.().view !== 'browser') { finish(); return Object.assign((detent?: string): boolean => { if (still()) show(detent); return true; }, {closed}); }
         closeTabs(closing.filter(id => id !== selected), !fromPrivate);
-        return Object.assign(deferred(() => { if (!still()) return false; finish(); show(); return true; }), {closed});
+        return Object.assign(deferred(detent => { if (!still()) return false; finish(); show(detent); return true; }), {closed});
       }
       if (operation.type === 'browser_tab_switch' || operation.type === 'browser_tab_close') {
         const closing = operation.type === 'browser_tab_close', target = operation.target;
@@ -776,9 +776,9 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
           if (disposed || state()?.cur !== selected || !tabOf(chosen)) refuse('Browser changed while you were choosing. Nothing was done.');
           id = chosen;
         }
-        if (!closing) return deferred(() => { if (!still() || !tabOf(id)) return false; show({cur: id}); return true; });
-        if (id !== selected) { closeTab(id); return () => { if (still()) show(); }; }
-        return deferred(() => { if (!still()) return false; closeTab(id); show(); return true; });
+        if (!closing) return deferred(detent => { if (!still() || !tabOf(id)) return false; show(detent, {cur: id}); return true; });
+        if (id !== selected) { closeTab(id); return (detent?: string) => { if (still()) show(detent); }; }
+        return deferred(detent => { if (!still()) return false; closeTab(id); show(detent); return true; });
       }
       const info = tabInfo(selected);
       // After a restart a restored tab keeps only its saved address until Browser shows it. Reloading
@@ -786,7 +786,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const unloaded = !info && !tabs.has(selected) && restored.has(selected);
       if (unloaded) {
         if (!observedTabCurrent(input.observed, tabs.selection(selected))) refuse('The Browser page changed after the request. Nothing was done.');
-        if (operation.type === 'browser_history' && operation.action === 'reload') return deferred(() => { if (!still()) return false; show(); return true; });
+        if (operation.type === 'browser_history' && operation.action === 'reload') return deferred(detent => { if (!still()) return false; show(detent); return true; });
         refuse('This tab\'s page has not loaded since Alpha restarted. Open Browser so it can load, then ask again.');
       }
       if (operation.type === 'browser_find') {
@@ -794,7 +794,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         if (!Capacitor.isNativePlatform()) refuse('This Browser cannot find text in a page.');
         if (operation.text.length > FIND_TEXT_MAX) refuse(`Find in page takes up to ${FIND_TEXT_MAX} characters.`);
         openFind(refuse); findQuery(operation.text);
-        return () => { if (still()) show(); };
+        return (detent?: string) => { if (still()) show(detent); };
       }
       const action = operation.action, navigation = info?.navigation;
       // The turn asked about one page; a redirect or another tab since then is not that page.
@@ -803,7 +803,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       if (action === 'back' && !info.canBack) refuse('There is no previous page in this tab.');
       if (action === 'forward' && !info.canForward) refuse('There is no next page in this tab.');
       if (action === 'stop' && !info.loading) refuse('The page is not loading.');
-      return deferred(() => { if (!still() || tabInfo(selected)?.navigation !== navigation) return false; show(); void command(action); return true; });
+      return deferred(detent => { if (!still() || tabInfo(selected)?.navigation !== navigation) return false; show(detent); void command(action); return true; });
     };
     this.browserTabNeedsChoice = (target: string) => !disposed && !!state() && namedTabs(target, false).found.length > 1;
     // What a proposal's close-every-tab card lists, and how many private tabs it leaves open. A
