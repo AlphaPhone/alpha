@@ -43,12 +43,14 @@ const repeatText=(rules:unknown)=>{
 /** Only effect fields are shown. Provider versions and request IDs remain authority, not prose. */
 export function calendarApprovalFields(row:CalendarApproval,labels:CalendarApprovalLabels={}){
  const p=row.payload,fields:Field[]=[],add=(label:string,value:string)=>fields.push({label,value});
- const heading=row.action==='schedule_event'?'Add event':row.action==='modify_event'?'Change event':p.cancellationMode==='decline_invitation'?'Decline invitation':p.cancellationMode==='remove_private_copy'?'Remove event from your calendar':'Cancel event';
+ // An invitation answer (elizaOS/eliza#39947) is a modify_event that carries only invitationResponse.
+ const response=row.action==='modify_event'&&p.invitationResponse!=null?p.invitationResponse:undefined;
+ const heading=row.action==='schedule_event'?'Add event':response==='accepted'?'Accept invitation':response==='tentative'?'Answer maybe':row.action==='modify_event'?'Change event':p.cancellationMode==='decline_invitation'?'Decline invitation':p.cancellationMode==='remove_private_copy'?'Remove event from your calendar':'Cancel event';
  let complete=true;
  add('Calendar',labels.calendar??(p.calendarId==='primary'?'Primary calendar':String(p.calendarId)));
  if(labels.account)add('Account',labels.account);
  const common=['action','side','grantId','calendarId','notifyAttendees','editorRequestSha256'];
- const allowed=row.action==='schedule_event'?[...common,'title','startsAtMs','endsAtMs','attendees','location','description','timeZone','allDay','durationMinutes','windowPreset','recurrence','sourceNote','travelBuffer']:row.action==='modify_event'?[...common,'eventId','expectedProvider','expectedProviderVersion','expectedEventUpdatedAt','expectedEventStartAtMs','seriesMaster','recurrenceScope','patch']:[...common,'eventId','expectedProvider','expectedProviderVersion','expectedEventUpdatedAt','expectedEventStartAtMs','seriesMaster','recurrenceScope','cancellationMode'];
+ const allowed=row.action==='schedule_event'?[...common,'title','startsAtMs','endsAtMs','attendees','location','description','timeZone','allDay','durationMinutes','windowPreset','recurrence','sourceNote','travelBuffer']:row.action==='modify_event'?[...common,'eventId','expectedProvider','expectedProviderVersion','expectedEventUpdatedAt','expectedEventStartAtMs','seriesMaster','recurrenceScope','patch','invitationResponse']:[...common,'eventId','expectedProvider','expectedProviderVersion','expectedEventUpdatedAt','expectedEventStartAtMs','seriesMaster','recurrenceScope','cancellationMode'];
  if(Object.keys(p).some(key=>!allowed.includes(key)))complete=false;
  try{
   if(row.action!=='schedule_event'&&(!text(p.eventId)||!p.eventId))throw Error('Event unavailable');
@@ -62,7 +64,11 @@ export function calendarApprovalFields(row:CalendarApproval,labels:CalendarAppro
   const value=row.action==='modify_event'?p.patch:p;
   if(!object(value))throw Error('Details unavailable');
   if(row.action==='modify_event'&&Object.keys(value).some(key=>!['title','startsAtMs','endsAtMs','attendees','location','description','timeZone','recurrence','allDay'].includes(key)))complete=false;
-  if(row.action!=='cancel_event'){
+  if(response!==undefined){
+   if(response!=='accepted'&&response!=='tentative')throw Error('Invalid answer');
+   if(Object.values(value).some(value=>value!=null))throw Error('An answer changes nothing else');
+   add('Answer',response==='accepted'?'Going':'Maybe');
+  }else if(row.action!=='cancel_event'){
    if(['title','startsAtMs','endsAtMs','attendees','location','description'].some(key=>!(key in value)))throw Error('Incomplete event details');
    if(row.action==='modify_event'&&!Object.values(value).some(value=>value!=null))throw Error('No changes');
    if(row.action==='schedule_event'&&(!text(value.title)||!value.title.trim()))throw Error('Title unavailable');

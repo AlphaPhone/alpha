@@ -1,8 +1,8 @@
-// Current Calendar create/update/delete admission and read deferral.
+// Current Calendar create/update/delete/respond admission and read deferral.
 module AgentCalendarMutation {
   type Job = {phase: str, epoch: int, owner: str, session: int, kind: str, issue: str, profile: str, aborted: bool}
   type Dispatch = {id: int, owner: str, session: int, kind: str, side: str, grant: str, calendar: str,
-    external: str, version: str, scope: str, cancellation: str, retainedKey: bool}
+    external: str, version: str, scope: str, cancellation: str, response: str, retainedKey: bool}
   type State = {portOwner: str, portSession: int, portCurrent: bool, owner: str, session: int,
     status: str, profile: str, hasSource: bool, nextFresh: bool, query: int, epoch: int,
     reading: bool, active: int, deferred: int, lastId: int, jobs: int -> Job, outcomes: int -> str,
@@ -12,7 +12,7 @@ module AgentCalendarMutation {
   pure val Owners = Set("", "A", "B")
   pure val FeedStates = Set("ready", "partial", "unavailable")
   pure val Profiles = Set("none", "organizer", "invitee", "email", "unknown", "recurring", "readonly", "unversioned")
-  pure val Kinds = Set("create", "update", "delete")
+  pure val Kinds = Set("create", "update", "delete", "respond")
   pure val Issues = Set("normal", "missing", "blank", "stale", "move", "instance")
   pure val Preservation = Set("same", "changed", "pending", "unreadable", "transport")
   pure val Replies = Set("success", "unknown", "foreign-owner", "foreign-source", "transport")
@@ -55,7 +55,9 @@ module AgentCalendarMutation {
     else if (value.profile == "recurring" and issue != "instance") "scope"
     else if (kind == "update" and issue == "move") "move"
     else if (kind == "delete" and value.profile == "unknown") "disposition"
-    else if (kind == "delete" and issue == "blank") "id"
+    // Only an invitee answers an invitation; the organizer, an email-matched organizer and an unknown disposition never do.
+    else if (kind == "respond" and value.profile != "invitee") "invitee"
+    else if (Set("delete","respond").contains(kind) and issue == "blank") "id"
     else ""
   pure def admission(value: State, kind: str, issue: str): str = {
     val initial = if (kind == "create") {
@@ -91,6 +93,7 @@ module AgentCalendarMutation {
       external:if(create) "" else "provider-event",version:if(create) "" else "v1",
       scope:if(not(create) and job.issue=="instance") "instance" else "",
       cancellation:if(job.kind!="delete") "" else if(job.profile=="invitee") "decline_invitation" else "organizer_cancel",
+      response:if(job.kind=="respond") "accepted" else "",
       retainedKey:job.issue!="blank"}
   }
   action preservationReply(id: int, result: str): bool = all {IDs.contains(id), Preservation.contains(result),
@@ -103,7 +106,7 @@ module AgentCalendarMutation {
   action providerReply(id: int, result: str): bool = all {IDs.contains(id), Replies.contains(result),
     s.jobs.get(id).phase == "remote",
     val job = s.jobs.get(id)
-    val foreign = job.kind != "delete" and result == "foreign-owner" or job.kind == "update" and result == "foreign-source"
+    val foreign = job.kind != "delete" and result == "foreign-owner" or Set("update","respond").contains(job.kind) and result == "foreign-source"
     val outcome = if(result=="transport") "transport" else if(foreign) "foreign"
       else if(not(stillCurrent(s,job))) retiredResult(job)
       else if(job.kind=="create" and result=="unknown") "unknown" else "saved"
@@ -137,6 +140,12 @@ module AgentCalendarMutation {
     .then(preservationReply(1,"same")).then(setPort("B",2,true)).then(retire).then(request(1))
     .then(finishRead("ready","invitee")).then(start("delete","normal")).then(preservationReply(2,"same"))
     .then(providerReply(1,"success")).expect(s.active==2 and s.outcomes.get(1)=="aborted" and safety)
+  run inviteeAloneAnswersTest = initWith("ready","invitee").then(start("respond","blank")).then(start("respond","normal"))
+    .then(preservationReply(2,"same")).expect(s.outcomes.get(1)=="id" and s.dispatched.length()==1
+      and s.dispatched.head().response=="accepted" and s.dispatched.head().cancellation=="" and safety)
+    .then(providerReply(2,"foreign-source")).expect(s.outcomes.get(2)=="foreign" and safety)
+  run organizerNeverAnswersTest = initWith("ready","organizer").then(start("respond","normal"))
+    .expect(s.outcomes.get(1)=="invitee" and s.dispatched==List() and safety)
   run sameOwnerNewSessionRefusesOldBindingTest = initWith("ready","organizer").then(setPort("A",2,true))
     .then(start("update","normal")).then(preservationReply(1,"same"))
     .expect(s.outcomes.get(1)=="owner" and s.dispatched==List() and safety)

@@ -24,7 +24,7 @@ import {errorText} from '../lib/error-text';
 import {CALENDAR_API_REFUSALS} from '../ui/calendar/calendar-api-messages';
 import {attendeeResponseLabel} from '../ui/calendar/attendee-response';
 import {refusalText} from '../ui/utils/native-refusal';
-import {calendarEventLinks,calendarInvitationPending,calendarRepeatText} from './calendar-event-detail';
+import {CALENDAR_INVITATION_NOTICE,calendarEventLinks,calendarInvitationAnswer,calendarRepeatText} from './calendar-event-detail';
 import {DailyApps} from '../daily';
 import {DeferredCalendarDeletes,calendarDeletionHides} from './calendar-deferred-delete';
 import {installCalendarListBack,presentCalendarList} from './calendar-schedule';
@@ -44,7 +44,8 @@ const managedGoogleSource=(calendar:{provider?:string;grantId?:string|null}|unde
 /** Owner text for a refused Calendar action. Messages from runtime/agent-calendar.ts and the host are mapped here. */
 const OWNER_ERRORS:[RegExp,string][]=[
  [/^Calendar owner or agent changed/,'Changed'],
- [/^Retain this (draft|deletion) operation key/,'Can’t save'],
+ [/^Retain this (draft|deletion|response) operation key/,'Can’t save'],
+ [/^Only an invitee can answer this invitation/,'Can’t answer here'],
  [/^Organizer disposition is unavailable; no cancellation was sent/,'Can’t delete here'],
  [/^Moving events between sources/,'Can’t move calendars'],
  [/^Review recurring-series changes in Calendar/,'Edit in Google'],
@@ -259,17 +260,30 @@ export function installAgentCalendarAdapter(Component:any,views:Bag){
      pendingUndo=undoDelete;
      if(selected())api.set({open:null,canonicalDeleteScope:null});
      api.toast(mode==='decline_invitation'?'Invitation declined':'Event deleted',{undo:undoDelete});};
+    // A reviewed answer to an invitation: the same review sheet and live checks as a delete, then one send.
+    const respond=async(answer:'accepted'|'tentative')=>{if(policy.kind!=='editable'||sourceReadOnly){api.toast('Read only');return;}const shell=owner,calendar=controller,reviewTarget=port(),binding=reviewTarget?mapBinding(reviewTarget):null,bytes=JSON.stringify(e);
+     const current=()=>{const now=port(),visible=api.get('calendar');return owner===shell&&!!shell?.live&&controller===calendar&&!!now?.current()&&mapBinding(now)===binding&&visible.open===chosen.id&&!visible.form&&JSON.stringify(calendar?.state.feed?.events.find(value=>calendarEventKey(value)===calendarEventKey(e)))===bytes;};
+     const label=answer==='accepted'?'Accept invitation':'Answer maybe';
+     if(!shell||!calendar||!current()||!await confirmCalendarAction(shell,api,label+'?',[e.title,out.ev.calName,calendarIntervalDetail(Date.parse(e.startAt),Date.parse(e.endAt)).summary,answer==='accepted'?'Your answer: Going':'Your answer: Maybe','No guest notification will be sent.'].join('\n'),label,current)||!current())return;
+     try{await calendar.respond(calendarEventKey(e),policy.providerVersion,crypto.randomUUID(),answer);if(owner===shell&&shell.live){api.toast(answer==='accepted'?'Invitation accepted':'Answered maybe');refresh(true);}}
+     catch(error){if(owner===shell&&shell.live)api.toast(calendarErrorText(error));}};
     out.ev.del=()=>remove(deleteScope);out.ev.scopedDelete=out.ev.recurrenceScopes.length>0;out.ev.singleDelete=!out.ev.scopedDelete;
     // Read-only details from the feed. Links leave Alpha only on the owner's tap, and only over HTTPS.
     const links=calendarEventLinks(e),openLink=(url:URL)=>()=>openCalendarLink(url,api);
     out.ev.hasVideo=!!links.video;out.ev.video=links.videoText;out.ev.join=links.video?openLink(links.video):null;
-    out.ev.repeatText=calendarRepeatText(e);out.ev.inviteNotice=calendarInvitationPending(e)?'You haven’t answered this invitation.':'';
+    out.ev.repeatText=calendarRepeatText(e);
     out.ev.openProvider=links.provider?openLink(links.provider):null;
     // The host refuses deletes and declines for a managed Google calendar; say so and offer Google Calendar.
     if(managed){out.ev.del=null;out.ev.scopedDelete=false;out.ev.providerNotice=cancellationModeForEditorEvent(e)==='decline_invitation'?'Decline this invitation in Google Calendar.':'Delete this event in Google Calendar.';}
-    // Declining is the one answer the pinned Calendar service accepts (its delete route's decline_invitation
-    // mode); Accept and Maybe have no route there. The same reviewed, Undo-able action as the menu item.
-    out.ev.inviteDecline=out.ev.inviteNotice&&out.ev.singleDelete&&!out.ev.readOnly&&cancellationModeForEditorEvent(e)==='decline_invitation'?out.ev.del:null;
+    // The owner's answer. Decline is the reviewed, Undo-able delete (decline_invitation), the same as the menu item;
+    // Going and Maybe are sent through the Calendar service's response route (elizaOS/eliza#39947) after the same
+    // review. Answers are offered for one-off invitations only; a managed Google calendar has no delete here and
+    // the host refuses its responses, so it is answered in Google Calendar.
+    const answer=calendarInvitationAnswer(e),answerable=!!answer&&out.ev.singleDelete&&!out.ev.readOnly&&!managed&&cancellationModeForEditorEvent(e)==='decline_invitation';
+    out.ev.inviteNotice=answer==='needsAction'||answer&&answerable?CALENDAR_INVITATION_NOTICE[answer]:'';
+    out.ev.inviteDecline=answerable&&answer!=='declined'?out.ev.del:null;
+    out.ev.inviteAccept=answerable&&answer!=='accepted'?()=>respond('accepted'):null;
+    out.ev.inviteMaybe=answerable&&answer!=='tentative'?()=>respond('tentative'):null;
   }
   if(out.ev){out.ev.canModify=!out.ev.readOnly;out.ev.sourceLabel=out.ev.readOnly?out.ev.readOnlyLabel:out.ev.calName;
    // Schedule always runs from today: closing an event opened from it returns there.

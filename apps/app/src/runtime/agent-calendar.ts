@@ -1,4 +1,4 @@
-import type {CreateLifeOpsCalendarEventRequest,LifeOpsCalendarEvent,LifeOpsCalendarEventUpdate,LifeOpsCalendarFeed,LifeOpsCalendarSummary,LifeOpsNextCalendarEventContext,GetLifeOpsCalendarFeedRequest,LifeOpsLinkedCalendarControl,LifeOpsLinkedCalendarEventView,UpdateLifeOpsLinkedCalendarControlRequest} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
+import type {LifeOpsCalendarInvitationResponse,CreateLifeOpsCalendarEventRequest,LifeOpsCalendarEvent,LifeOpsCalendarEventUpdate,LifeOpsCalendarFeed,LifeOpsCalendarSummary,LifeOpsNextCalendarEventContext,GetLifeOpsCalendarFeedRequest,LifeOpsLinkedCalendarControl,LifeOpsLinkedCalendarEventView,UpdateLifeOpsLinkedCalendarControlRequest} from '../../../../.eliza/client-features/packages/contracts/src/calendar';
 import {eventEditorMutability,cancellationModeForEditorEvent} from '../ui/calendar/event-editor-policy';
 import {agentCalendarClient} from './agent-calendar-client';
 import type {AppRecordPort} from './app-record-route-policy';
@@ -19,7 +19,7 @@ const OWNER_CACHE_KEY='calendar:owner:v1',FEED_CACHE_KEY='calendar:feed:v1',REFU
 const empty=():AgentCalendarState=>({ownerKey:null,status:'disconnected',feed:null,calendars:[],next:null,nextFresh:false,savedAt:null,error:null,mutating:false});
 /** A response that cannot belong to this owner, agent or window; never kept across a refresh. */
 class CalendarIntegrityError extends Error{}
-type ClientFactory=(p:AppRecordPort,s:AbortSignal)=>Pick<CalendarApi,'getLifeOpsCalendarFeed'|'getLifeOpsCalendars'|'getLifeOpsNextCalendarEventContext'|'createLifeOpsCalendarEvent'|'updateLifeOpsCalendarEvent'|'deleteLifeOpsCalendarEvent'|'getLinkedCalendarControl'|'updateLinkedCalendarControl'>;
+type ClientFactory=(p:AppRecordPort,s:AbortSignal)=>Pick<CalendarApi,'getLifeOpsCalendarFeed'|'getLifeOpsCalendars'|'getLifeOpsNextCalendarEventContext'|'createLifeOpsCalendarEvent'|'updateLifeOpsCalendarEvent'|'deleteLifeOpsCalendarEvent'|'respondToLifeOpsCalendarEvent'|'getLinkedCalendarControl'|'updateLinkedCalendarControl'>;
 type CalendarReadCache=Pick<ServiceReadCache,'get'|'put'>;
 // A failed local write must not reopen refused data on controller retirement or remount.
 const refusedCalendarCacheOwners=new Set<string>();
@@ -242,6 +242,12 @@ export class AgentCalendar {
  delete(eventKey:string,version:string,key:string,scope?:LifeOpsCalendarEventUpdate['recurrenceScope']){
   const event=this.eventForMutation(eventKey,version,scope),mode=cancellationModeForEditorEvent(event);if(!mode)throw Error('Organizer disposition is unavailable; no cancellation was sent');if(!key.trim())throw Error('Retain this deletion operation key');
   return this.mutate(api=>api.deleteLifeOpsCalendarEvent(event.externalId,{side:event.side,grantId:event.grantId,calendarId:event.calendarId,expectedProviderVersion:version,idempotencyKey:key,cancellationMode:mode,...(scope?{recurrenceScope:scope}:{})}));
+ }
+ /** The owner's answer to an invitation (elizaOS/eliza#39947 POST .../response). Only an invitee answers; a decline
+  * stays the reviewed decline_invitation delete above, so this sends Going or Maybe. */
+ respond(eventKey:string,version:string,key:string,responseStatus:Exclude<LifeOpsCalendarInvitationResponse,'declined'>,scope?:'instance'|'series'){
+  const event=this.eventForMutation(eventKey,version,scope);if(cancellationModeForEditorEvent(event)!=='decline_invitation')throw Error('Only an invitee can answer this invitation');if(!key.trim())throw Error('Retain this response operation key');
+  return this.mutate(async(api,port)=>{const result=await api.respondToLifeOpsCalendarEvent(event.externalId,{side:event.side,grantId:event.grantId,calendarId:event.calendarId,responseStatus,expectedProviderVersion:version,idempotencyKey:key,...(scope?{recurrenceScope:scope}:{})});if(result.event.agentId!==port.identity.agentId||result.event.calendarId!==event.calendarId||result.event.grantId!==event.grantId)throw Error('Updated event source could not be verified');return result;});
  }
  /** Review the same owner-bound Calendar service as the active view. */
  async reviewSync():Promise<AgentCalendarSyncReview>{

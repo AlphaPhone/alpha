@@ -182,11 +182,13 @@ test('canonical app records use the shared method policy and bound owner without
    {path:'/api/lifeops/calendar/events',method:'POST',body:'{}'},
    {path:'/api/lifeops/calendar/events/local%3Aevent-1',method:'PATCH',body:'{}'},
    {path:'/api/lifeops/calendar/events/local%3Aevent-1?expectedProviderVersion=1',method:'DELETE'},
+   {path:'/api/lifeops/calendar/events/local%3Aevent-1/response',method:'POST',body:'{}'},
   ]){const r=await f.call(input);assert.equal(r.status,200,input.path);assert.equal(r.data.status,200,input.path);assert.ok(f.calls.some(c=>new URL(c.url).pathname===new URL(input.path,'http://example.invalid').pathname&&c.input.method===input.method));assert(!JSON.stringify(r).includes(paired));}
   for(const input of [
    {path:'/api/notes/state',method:'PATCH',body:'{}'},
    {path:'/api/lifeops/calendar/unknown',method:'GET'},
    {path:'/api/lifeops/calendar/events/a%2Fb',method:'DELETE'},
+   {path:'/api/lifeops/calendar/events/local%3Aevent-1/response?responseStatus=accepted',method:'POST',body:'{}'},
    {path:'/api/lifeops/calendar/feed?unknown=1',method:'GET'},
    {path:'/api/lifeops/calendar/feed?mode=local&mode=remote',method:'GET'},
   ]){const before=f.calls.length;assert.equal((await f.call(input)).status,400,input.path);assert.equal(f.calls.length,before);}

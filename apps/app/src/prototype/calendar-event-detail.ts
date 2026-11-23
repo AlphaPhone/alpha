@@ -7,8 +7,17 @@ export function calendarHttpsLink(value:unknown):URL|null{
  try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password?url:null;}catch{return null;}
 }
 
-/** The owner was invited and has not answered. The owner's own organized events are never invitations. */
-export const calendarInvitationPending=(event:DetailEvent)=>!!event.attendees?.some(guest=>guest.self&&!guest.organizer&&['needsAction','needs-action'].includes(guest.responseStatus??''));
+/** The owner's answer to an invitation, or null when the owner was not invited. The owner's own organized events are
+ * never invitations. An imported feed's lowercased PARTSTAT reads the same as Google's wire value. */
+export function calendarInvitationAnswer(event:DetailEvent):'needsAction'|'accepted'|'tentative'|'declined'|null{
+ const own=event.attendees?.find(guest=>guest.self&&!guest.organizer);if(!own)return null;
+ const status=own.responseStatus==='needs-action'?'needsAction':own.responseStatus;
+ return status==='needsAction'||status==='accepted'||status==='tentative'||status==='declined'?status:null;
+}
+/** The owner was invited and has not answered. */
+export const calendarInvitationPending=(event:DetailEvent)=>calendarInvitationAnswer(event)==='needsAction';
+/** What the detail says about the owner's answer. */
+export const CALENDAR_INVITATION_NOTICE={needsAction:'You haven’t answered this invitation.',accepted:'You’re going.',tentative:'You said maybe.',declined:'You declined this invitation.'} as const;
 
 const DAYS:Record<string,string>={MO:'Mon',TU:'Tue',WE:'Wed',TH:'Thu',FR:'Fri',SA:'Sat',SU:'Sun'};
 const UNITS:Record<string,[string,string]>={DAILY:['daily','days'],WEEKLY:['weekly','weeks'],MONTHLY:['monthly','months'],YEARLY:['yearly','years']};

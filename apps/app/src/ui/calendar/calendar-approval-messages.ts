@@ -68,7 +68,11 @@ function completedText(text: unknown, payload: Payload | undefined): string | nu
     match[2] === "schedule event"
       ? `added ${target} to Calendar.`
       : match[2] === "modify event"
-        ? `changed ${target} in Calendar.`
+        ? payload?.invitationResponse === "accepted"
+          ? `accepted ${target}.`
+          : payload?.invitationResponse === "tentative"
+            ? `answered maybe to ${target}.`
+            : `changed ${target} in Calendar.`
         : `${cancelVerb(payload).toLowerCase()} ${target}${payload?.cancellationMode === "remove_private_copy" ? " from your calendar" : ""}.`;
   return already ? `Already ${sentence}` : sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
@@ -105,6 +109,8 @@ const REASON_TEMPLATES: readonly RegExp[] = [
   new RegExp(`^Modify "([\\s\\S]*)" from ${STAMP} forward by splitting the recurring series\\. Later per-occurrence exceptions will reset(?:, and attendees may receive both split update notifications)?\\.$`),
   new RegExp(`^Modify every occurrence of the recurring series "([\\s\\S]*)" \\(not only ${STAMP}\\)${NOTIFY}\\.$`),
   new RegExp(`^Modify "([\\s\\S]*)" on ${STAMP}${NOTIFY}\\.$`),
+  // modify_event carrying an invitation answer (elizaOS/eliza#39947 owner-editor-gateway respond)
+  /^(?:Accept|Tentatively accept) the invitation "([\s\S]*)" from the authenticated owner calendar editor\.$/,
   // cancel_event
   new RegExp(`^${VERB} "([\\s\\S]*)" from ${STAMP} forward by truncating the recurring series; every later occurrence and exception will be removed(?:, and attendees will be notified)?\\.$`),
   new RegExp(`^${VERB} every occurrence of the recurring series "([\\s\\S]*)" \\(not only ${STAMP}\\); every occurrence and exception will be removed(?:, and attendees will be notified)?\\.$`),
@@ -155,6 +161,8 @@ export function calendarApprovalRequestText(
   const target = named ? quoted(named) : "this event";
   const scope = payload.recurrenceScope;
   if (action === "modify_event") {
+    if (payload.invitationResponse === "accepted") return `Accept the invitation to ${target}.`;
+    if (payload.invitationResponse === "tentative") return `Answer maybe to ${target}.`;
     if (scope === "this_and_following")
       return `Change ${target} from this occurrence on. The repeating event is split, and changes made to single later occurrences are reset.${payload.notifyAttendees === true ? " Guests may get two update emails." : ""}`;
     if (scope === "series") return `Change every occurrence of ${target}, not only the one shown.`;

@@ -133,7 +133,7 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'replaceFormDraft response restoreEditDraft restoreFormDraft resumeEditDraft',
     'resumeFormDraft retryEditDraft retryFormDraft sMinus sPlus save separateCreation tlDown',
     'tlUp toggleAllDay toggleMonth toggleVideo',
-    'closeSearch inviteDecline onSearch openSearch',
+    'closeSearch inviteAccept inviteDecline inviteMaybe onSearch openSearch',
   ],
   contacts: [
     'addEmail addNew addPhone ask cancel cancelDelete cancelEdit change clear clearSearch',
