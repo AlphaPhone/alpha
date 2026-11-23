@@ -1,5 +1,6 @@
 import {test, expect, type Page} from '@playwright/test';
 import {installTelephonyFixture} from '../../scripts/fixtures/native-telephony';
+import {shouldRespondToVoiceTurn} from '../../.eliza/client-features/packages/voice/src/respond-gate';
 import {preloadPageModules} from './helpers/page-modules';
 
 // The owner's Send on Alpha's "Review SMS" card is the confirmation: tapping it sends the text,
@@ -164,7 +165,10 @@ for(const enabled of [true,false])test(`one Talk confirmation sends with approva
   const card=await setup(page,'one',enabled);
   const reply=await page.evaluate(()=>(window as any).smsCardFixture.voice('Send a text to Carson. On my way.'));
   expect(reply.reviewRequired).toBeUndefined();
-  expect(reply.speechText).toContain('Send this text');
+  expect(reply.speechText).toBe('The message is ready for review.');
+  expect(shouldRespondToVoiceTurn('Send this text.',{
+    recentAgentReply:reply.speechText,replyAgeMs:300,echoCancelled:false,
+  })).toBe(true);
   await expect(card).toHaveCount(1);
   await expect(card).toContainText(`Carson (${NUMBER})`);
   await expect(card.locator('[data-alpha-telephony-review-body]')).toHaveText(BODY);

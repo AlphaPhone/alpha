@@ -2219,8 +2219,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         this.pendingVoiceSmsReview={id:sms.id,generation:input.talkGeneration,conversationId:binding.conversationId,revision:acceptedContext.revision,expiresAt:sms.expiresAt,description:sms.description};
       }
       const review=(!!reply.proposals?.length&&!this.pendingVoiceSmsReview)||pendingNotice||emailCardReady;
+      // Speaking the confirmation phrase makes the next utterance look like playback echo.
       const speechText=this.pendingVoiceSmsReview
-        ? 'The text is ready. Say “Send this text” to send it.'
+        ? 'The message is ready for review.'
         : spokenActionReply(text,reply,emailCardReady);
       return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:reply.text,...(speechText===reply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};
     }catch(error){
