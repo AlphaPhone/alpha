@@ -2,6 +2,7 @@
  "schema": 1,
  "description": "The repository-level tests scripts/run-root-tests.ts runs (pnpm test:root), and every other tooling or Cloud test scripts/legacy-retirement.json names, held with the reason and where its behaviour moved.",
  "run": [
+  "test/agent-launch-token-budget.test.mjs",
   "test/android-gzip-assets.test.mjs",
   "test/aosp-cloud-power-defaults.test.mjs",
   "test/aosp-cuttlefish.test.mjs",

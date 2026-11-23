@@ -146,6 +146,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - the strict DoneFrame refuses `awaitingReview`, and DoneFrame notices are never produced;
   - there is no shared-note read-reply lease (`readReply`/`completeReadReply`);
   - `./client` does not re-export `learnPeer`/`comparePeer`/`statusRead`.
+- **agent:** with no `CEREBRAS_RATE_LIMIT_MAX_HOLD_SECONDS` in the launch (the phone sets none), the pin keeps the provider's whole retry time (`packages/agent/src/models/binding.vibe` `rateLimitHold`), so a step refused with Retry-After 59 holds the account for the minute; legacy held under 5 s, before the 5 s re-send. The default hold is being changed upstream (context-budget work); `test/agent-launch-token-budget.test.mjs` now checks only that the phone sets no hold.
 - **agent:** a workflow device-offer helper is missing, so `read_selected_notes`/`create_note` can answer DEVICE_STEP_UNSUPPORTED.
 - **agent/voice:** `VoiceReplyAction` has no failure flag, so the "email action failed" line is unreachable.
 - **cloud:** `@elizaos/cloud` has no `CloudServices.client.googleCalendarSync(request, { signal })` (assumed signature, used by `src/calendar/deviceSync.vibe`), and the device route table lacks `creditsCheckout`.
