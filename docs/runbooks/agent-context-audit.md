@@ -715,12 +715,14 @@ words, not exclude other verbs.
 - **No phone measurement yet.** The first changes are merged (upstream
   `6e2a094775`, product `983f47b18e`); everything above is a host measurement until a
   build on a phone is audited.
-- **A photo and a text in one request proposes only the photo.** The photo is a handoff
-  the phone runs without a card, which ends the turn's queue. (A text and an alarm are
-  both recorded on the follow-up branch, except on the Phone, Messages and Contacts
-  screens, which hold one card at a time.)
-- **The Cloud route drops the provider's error code from a 400,** so the Stage 1 re-send
-  after a `parser_error` applies only on the direct route.
+- **Fixed upstream on develop, not yet on a phone pin:** a photo and a text in one
+  request now get a card each (`c1590fda6f`, `1a28b1578b`; only a request that is
+  nothing but a photo opens the camera without a card, and the Phone, Messages and
+  Contacts screens still hold one card at a time). The Cloud route carries a provider
+  400's `code`, `param` and provider message (`f60b554307`, `c962ce990d`), so the Stage 1
+  re-send after a `parser_error` applies there too. A calendar delete or move whose
+  target lookup Stage 1 bound as a requested search no longer replies "I couldn't look
+  up that event" (`b9c462d368`).
 - **Tools chosen per request sit before the system prompt** in the provider's read
   order: Calendar (18K characters), reminders (20K), messaging (13K). A turn whose tool
   set differs from the last one's re-reads the system prompt and the history. In the
