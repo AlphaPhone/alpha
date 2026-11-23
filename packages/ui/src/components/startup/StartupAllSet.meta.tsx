@@ -6,7 +6,7 @@ import type { StartupAllSetProps } from "./StartupAllSet.tsx";
 const onDone = fn();
 
 export const meta: ComponentMeta<StartupAllSetProps> = {
-  args: { onDone },
+  args: { onDone, children: undefined },
   examples: {
     "Connection failed": { trouble: "ConnectionFailed" },
     "Sign-in needs attention": { trouble: "SignInNeedsAttention" },

@@ -44,8 +44,8 @@ const words: Record<StartupAccessWord, { label: string; status: StatusDotProps["
 };
 
 /**
- * One access and where it stands. The step being asked also says what the access is for and carries its one action:
- * Allow, Settings, Check or Try again.
+ * One access and where it stands. The step being asked, while it lacks access, also says what the access is for and
+ * carries its one action, Allow, Settings, Check or Try again, which is then the word for where it stands.
  * @model spec/app/startup/access.md
  */
 export function StartupAccessRow({ access, word, current = false, action, busy = false, onAct }: StartupAccessRowProps) {
@@ -54,13 +54,13 @@ export function StartupAccessRow({ access, word, current = false, action, busy =
   return (
     <ListRow
       title={title}
-      detail={current ? reason : undefined}
+      detail={current && status !== "ok" ? reason : undefined}
       leading={icon}
       selected={current}
       aria-current={current ? "step" : undefined}
       trailing={
         <>
-          <StatusDot status={status} label={label} showLabel />
+          <StatusDot status={status} label={label} showLabel={!action || status === "ok"} />
           {action ? (
             <Button variant="outline" size="sm" loading={busy} disabled={!onAct && !busy} onClick={onAct}>
               {action}

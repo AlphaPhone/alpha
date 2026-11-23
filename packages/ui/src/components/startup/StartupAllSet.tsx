@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CircleCheck, TriangleAlert } from "lucide-react";
+import { CircleCheck } from "lucide-react";
 import { Alert } from "../Alert.tsx";
 import { Button } from "../Button.tsx";
 import { Sheet, SheetContent } from "../Sheet.tsx";
@@ -28,7 +28,6 @@ const troubles: Record<StartupTrouble, string> = {
  */
 export function StartupAllSet({ trouble, notSaved = false, children, onDone }: StartupAllSetProps) {
   const attention = trouble !== undefined || notSaved;
-  const Icon = attention ? TriangleAlert : CircleCheck;
   return (
     <Sheet open>
       <SheetContent
@@ -42,7 +41,7 @@ export function StartupAllSet({ trouble, notSaved = false, children, onDone }: S
         actions={<Button disabled={!onDone} onClick={onDone}>Done</Button>}
       >
         <div className="flex flex-col items-center gap-4 py-2">
-          <Icon aria-hidden className={attention ? "size-10 text-warn" : "size-10 text-ok"} />
+          {attention ? null : <CircleCheck aria-hidden className="size-10 text-ok" />}
           {trouble ? <Alert variant="warn" className="w-full">{troubles[trouble]}</Alert> : null}
           {notSaved ? <Alert variant="warn" className="w-full">Not saved</Alert> : null}
           {children}
