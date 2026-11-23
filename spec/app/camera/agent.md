@@ -175,9 +175,11 @@ pure def lost(s: Capture, by: Actor): Capture = { ...s, stage: Over, shot: A::co
 
 ### A request ended without a shutter fired none; an uncertain one fired exactly one and is never shot again; a taken one names its photo
 
+Every request asked has a number of its own, from one up.
+
 ```quint
 pure def alwaysResultsAreHonest(s: Capture): bool =
-  s.shutters >= 0 and s.shutters <= 1
+  s.shutters >= 0 and s.shutters <= 1 and s.request >= 0 and (s.stage != Waiting implies s.request > 0)
     and ((s.result == Declined or s.result == Withdrawn or s.result == Blocked or s.result == Expired) implies (s.shutters == 0 and s.stage == Over))
     and (s.result == Uncertain implies (s.shutters == 1 and s.stage == Over and s.shot.outcome == A::Unknown and s.photo == 0))
     and (s.result == Taken implies (s.shutters == 1 and s.stage == Over and s.shot.outcome == A::Confirmed and s.photo > 0))

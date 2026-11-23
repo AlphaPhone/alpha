@@ -154,12 +154,16 @@ pure def alwaysSavedIsWhole(f: Film): bool =
     and (f.stage == Checking implies (f.truncated and f.video > 0 and f.bytes > 0))
 ```
 
-### A recording runs within five minutes and 100 MB
+### A recording runs within five minutes and 100 MB, and one opening holds nothing yet
+
+Discovered by the proof: without the last, a recording could seem to start
+already over its limit.
 
 ```quint
 pure def alwaysWithinLimits(f: Film): bool =
   f.bytes >= 0 and f.bytes <= maxBytes and f.elapsed >= 0 and f.elapsed <= maxSeconds
     and (f.stage == Running implies (f.bytes < maxBytes and not(f.truncated) and f.elapsed < maxSeconds))
+    and (f.stage == Opening implies (f.bytes == 0 and f.elapsed == 0 and not(f.truncated)))
 ```
 
 ### A recording is settled exactly once
