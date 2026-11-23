@@ -144,7 +144,7 @@ pure def canPoll(u: Updates, now: int, idle: bool): bool = u.active and u.busy =
 pure def poll(u: Updates, now: int, idle: bool): Updates =
   if (idle and not(u.pending) and u.permission == AutomaticAllowed and offered(u) and u.bound)
     { ...u, busy: Polling, manual: false }
-  else { ...u, wakeAt: now + interval, failures: 0 }
+  else { ...u, wakeAt: now + interval }
 pure def stepNoHandsOffInstallWithoutAuthority(before: Updates, via: str, after: Updates): bool =
   (via == "poll" and after.busy == Polling) implies (before.bound and before.permission == AutomaticAllowed and not(before.pending))
 pure def sometimesHandsOff(u: Updates): bool = u.busy == Polling
@@ -152,7 +152,19 @@ pure def sometimesHandsOff(u: Updates): bool = u.busy == Polling
 
 ### A failed poll retries after one minute, doubling to fifteen
 
+A poll fails when its check could not be read, when an install was due but the phone was not idle,
+or when Android was still starting or turned the offer away as unavailable or changed. A poll with
+nothing to install, or one Android needs the owner's permission for, waits the full interval.
+
 ```quint
+type PollEnd = PollNothingDue | PollInstalled | PollNeedsOwner | PollBusy | PollRefused | PollCheckFailed
+pure def pollFailedOf(end: PollEnd): bool = end == PollBusy or end == PollRefused or end == PollCheckFailed
+pure def pollEndOf(answer: InstallAnswer): PollEnd =
+  if (answer == Accepted) PollInstalled
+  else if (answer == NeedsPermission or answer == Unsupported) PollNeedsOwner
+  else if (answer == OfferWithdrawn) PollNothingDue
+  else PollRefused
+pure def lawABusyPhoneRetriesSoon(failures: int): bool = pollFailedOf(PollBusy) and backoff(failures) <= interval
 pure def backoff(failures: int): int =
   if (failures <= 1) 60000 else if (failures == 2) 120000 else if (failures == 3) 240000 else if (failures == 4) 480000 else interval
 pure def canPollFinished(u: Updates, now: int, failed: bool): bool = u.busy == Idle and u.active
@@ -172,8 +184,12 @@ pure def alwaysFailuresAreBounded(u: Updates): bool = u.failures >= 0 and u.fail
 
 ### Android's activation is acknowledged once, after the page has kept its drafts
 
-A page that could not keep its drafts acknowledges that it is not ready, and Android cancels.
-Android's ready and settled events, and the app's start, each read the activation again.
+A page that could not keep its drafts acknowledges that it is not ready, and Android cancels. An
+update the owner started is ready only while no voice turn, connection step or call is in flight; a
+hands-off one only while the phone is still idle as a hands-off install needs. Android's ready and
+settled events, and the app's start, each read the activation again, and while Android holds an
+activation (preparing, paused or continuing) Alpha reads it again every second, so Continue shows as
+soon as Android allows it and the screen is released as soon as Android ends it.
 
 ```quint
 pure def canActivationRead(u: Updates, activation: Activation, canContinue: bool): bool = activation != Continuing
@@ -184,6 +200,13 @@ pure def canAcknowledge(u: Updates, ready: bool): bool = u.activation == Prepari
 pure def acknowledge(u: Updates, ready: bool): Updates = { ...u, acknowledged: true }
 pure def canContinueInstall(u: Updates): bool = u.activation == Paused and u.canContinue
 pure def continueInstall(u: Updates): Updates = { ...u, activation: Continuing }
+pure val activationReadMs = 1000
+pure def followsActivation(u: Updates): bool = u.activation == Preparing or u.activation == Paused or u.activation == Continuing
+pure def activationReady(idleFacts: IdleFacts, automatic: bool): bool =
+  if (automatic) updateIdle(idleFacts) else idleFacts.voiceInactive and not(idleFacts.connectionBusy) and not(idleFacts.call)
+pure def lawAHandsOffActivationNeedsIdle(idleFacts: IdleFacts): bool = activationReady(idleFacts, true) implies updateIdle(idleFacts)
+pure def lawNoActivationIsReadyOnACall(idleFacts: IdleFacts, automatic: bool): bool = not(activationReady({ ...idleFacts, call: true }, automatic))
+pure val automaticValues = Set(true, false)
 pure def alwaysContinueOnlyWhenPaused(u: Updates): bool = u.canContinue implies u.activation == Paused
 pure def alwaysAPendingActivationBlocksInstall(u: Updates): bool = (u.activation == Preparing or u.activation == Paused) implies u.pending
 pure def sometimesAcknowledged(u: Updates): bool = u.activation == Preparing and u.acknowledged

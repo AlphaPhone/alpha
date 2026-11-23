@@ -51,9 +51,9 @@ export service DeviceEnrollment {
   readonly changes: Stream.Stream<Enrollment>
   current(): Enrollment!!
   /** The enrollment the agent confirmed for the connection now, or undefined while there is none and the phone is chat only. */
-  enrolled(): EnrolledDevice | undefined!!
+  enrolled(): (EnrolledDevice | undefined)!!
   /** The device headers a request to the resident carries for this enrollment, or undefined while there is none. */
-  headers(): ResidentHeaders | undefined!!
+  headers(): (ResidentHeaders | undefined)!!
   /** Follow the resident's connection and enroll each verified one; runs for the app's life. */
   run(): void!!
 }

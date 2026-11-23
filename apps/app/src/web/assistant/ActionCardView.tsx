@@ -52,6 +52,7 @@ export function ActionCardView({ card, emergency, busy, now, onApprove, onDeclin
           {card.items.unnamed > 0 && <li className="text-muted-foreground">{card.items.unnamed} {card.items.unnamedLabel ?? "more"}{card.items.unnamed === 1 || card.items.unnamedLabel === undefined ? "" : "s"}</li>}
         </ul>
       )}
+      {card.items?.note !== undefined && settled === undefined && <p className="text-sm text-muted-foreground">{card.items.note}</p>}
       {settled === undefined && expiry !== "" && <p className="flex items-center gap-1 font-mono text-xs uppercase text-muted-foreground"><Clock aria-hidden className="size-3" />{expiry}</p>}
       {settled === undefined && (
         <CardFooter className="gap-2">

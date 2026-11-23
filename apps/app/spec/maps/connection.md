@@ -154,6 +154,22 @@ pure def lawChangedAccountReceivesNothing(s: MapsConnection, captured: int, owne
 pure def lawCancelledRequestReturnsNothing(s: MapsConnection, captured: int, owner: int): bool = not(mayReturn(s, captured, owner, true))
 ```
 
+### Every Maps request goes through the Cloud client, with its own request key, and a tile comes back as its image
+
+Search, place details, routes, the viewport copyright and tiles go through the Cloud client, which
+sends each with a request key of its own so Cloud admits and bills it once; the coverage read needs
+none. A tile is the image Cloud sends, PNG, JPEG or WebP of at most 1 MiB, never text to decode. A
+request the map or the screen no longer needs is cancelled with its call.
+
+```quint
+type MapsCall = CoverageCall | SearchCall | DetailsCall | RoutesCall | ViewportCall | TileCall
+pure def keyedCall(call: MapsCall): bool = call != CoverageCall and call != ViewportCall
+pure def lawEveryChargedCallIsKeyed(call: MapsCall): bool =
+  (call == SearchCall or call == DetailsCall or call == RoutesCall or call == TileCall) implies keyedCall(call)
+pure val maxTileBytes = 1048576
+pure def tileAccepted(bytes: int): bool = bytes >= 1 and bytes <= maxTileBytes
+```
+
 ## Story: Back off when Maps asks me to wait
 
 > As the owner, I want Maps to stop sending requests while Cloud has asked it

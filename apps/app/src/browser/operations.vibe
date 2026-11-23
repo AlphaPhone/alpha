@@ -7,7 +7,7 @@ import { groundOf, offersCard, runs } from "../../gen/browser__pageContext.ts"
 import { browserNavigationSummary, copy } from "../assistant/presentation.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import type { ItemizedSet } from "../assistant/transcript.vibe"
-import { BrowserAgent, BrowserOpenRefused, type BrowserTabLine } from "./agent.vibe"
+import { BrowserAgent, BrowserOpenRefused, type ClosedTabs, type ClosingList } from "./agent.vibe"
 import { PAGE_LINK_UNREVIEWED } from "./messages.ts"
 import { BrowserPageContext } from "./pageContext.vibe"
 import { BrowserCallFacts } from "./ports.vibe"
@@ -97,33 +97,48 @@ export function controlSummary(operation: BrowserControlOperation): string {
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
 
+/** What a card or notice says of the private tabs a close-every-tab request leaves open, or nothing when it leaves none. */
+export function keptPrivateNote(kept: number): string {
+  if (kept <= 0) return ""
+  return `${plural(kept, "private tab")} ${kept === 1 ? "stays" : "stay"} open. Ask from a private tab to close ${kept === 1 ? "it" : "them"}.`
+}
+
 /** The card of closing every tab: the tabs it lists by name, private tabs only counted, or what it would do when nothing was listed. */
-export function describeCloseAll(closing: readonly BrowserTabLine[] | undefined): { readonly title: string; readonly detail: string } {
+export function describeCloseAll(closing: ClosingList | undefined): { readonly title: string; readonly detail: string } {
   if (closing === undefined) return { title: "Close all tabs", detail: "Closes every open tab in Browser. The agent does not see your tabs." }
-  const named = closing.filter((tab) => tab.private !== true)
-  const hidden = closing.length - named.length
+  const named = closing.tabs.filter((tab) => tab.private !== true)
+  const hidden = closing.tabs.length - named.length
   const lines = [
     ...named.map((tab) => `• ${tab.title}${tab.host !== undefined && tab.host !== tab.title ? ` (${tab.host})` : ""}`),
     ...(hidden > 0 ? [`• ${plural(hidden, "private tab")}`] : []),
   ]
-  return { title: `Close ${plural(closing.length, "tab")}`, detail: `${lines.join("\n")}\n\nCloses every tab listed here. The agent does not see your tabs.` }
+  const kept = keptPrivateNote(closing.kept)
+  return { title: `Close ${plural(closing.tabs.length, "tab")}`, detail: `${lines.join("\n")}\n\nCloses every tab listed here.${kept === "" ? "" : ` ${kept}`} The agent does not see your tabs.` }
 }
 
-/** The set a close-every-tab card lists: each tab's title, with its host where that differs, and private tabs only counted. */
-export function closingSet(closing: readonly BrowserTabLine[]): ItemizedSet {
-  const named = closing.filter((tab) => tab.private !== true)
+/** The set a close-every-tab card lists: each tab's title, with its host where that differs, private tabs only counted, and how many private tabs stay open. */
+export function closingSet(closing: ClosingList): ItemizedSet {
+  const named = closing.tabs.filter((tab) => tab.private !== true)
+  const note = keptPrivateNote(closing.kept)
   return {
     lines: named.map((tab) => tab.host !== undefined && tab.host !== tab.title ? `${tab.title} (${tab.host})` : tab.title),
-    unnamed: closing.length - named.length,
+    unnamed: closing.tabs.length - named.length,
     unnamedLabel: "private tab",
+    ...(note === "" ? {} : { note }),
   }
 }
 
 /** What a close-every-tab card says for the tabs Browser listed: the set, or the notice shown instead of a card when it could not list them or none would close. */
-export function closingCard(closing: readonly BrowserTabLine[] | null): ItemizedSet | string {
+export function closingCard(closing: ClosingList | null): ItemizedSet | string {
   if (closing === null) return `Close all tabs: ${TABS_UNLISTED_NOTICE}`
-  if (closing.length === 0) return `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`
+  if (closing.tabs.length === 0) return `Close all tabs: ${closing.kept > 0 ? `No other tabs are open to close. ${keptPrivateNote(closing.kept)}` : NO_TABS_TO_CLOSE_NOTICE}`
   return closingSet(closing)
+}
+
+/** The receipt of closing every listed tab: how many closed, and that private tabs were left open when any were. */
+export function closedSummary(result: ClosedTabs | undefined): string {
+  if (result === undefined) return "Closed the listed tabs."
+  return `Closed ${plural(result.closed, "tab")}.${result.kept > 0 ? " Private tabs were left open." : ""}`
 }
 
 /** Browser's executors, plus the itemized card of closing every tab, which the assistant draws per proposal and approves only from the latest review that listed it. */
@@ -146,9 +161,16 @@ export const operationPorts = effect {
   const page = try BrowserPageContext
   const facts = try BrowserCallFacts
   const held = new Map<string, Effect.Effect<void>>()
+  const closed = new Map<string, ClosedTabs>()
 
   effect function presentation(op: BrowserOperation, proposalId: string) {
-    if (op.kind === "closeAll") return try browser.closeAll(proposalId)
+    if (op.kind === "closeAll") {
+      const done = try browser.closeAll(proposalId)
+      closed.delete(proposalId)
+      closed.set(proposalId, done.result)
+      while (closed.size > HELD_PRESENTATIONS) closed.delete(closed.keys().next().value ?? "")
+      return done.present
+    }
     if (op.kind === "navigate") return (try browser.openApproved(op.url, op.newTab)).present
     const observed = op.operation.type === "browser_history" ? try browser.selection() : undefined
     return try browser.control(op.operation, observed, () => succeed(null))
@@ -203,10 +225,10 @@ export const operationPorts = effect {
       const op = decoded(operation)
       return op?.kind === "navigate" && offersCard(groundOf(false, carried(op.url))) ? { tag: "ContactTarget", nameWritten: true } : { tag: "NoTarget" }
     },
-    summarize: (operation, result) => {
+    summarize: (operation, result, proposalId) => {
       const op = decoded(operation)
       if (op === undefined || result !== "Applied") return copy.unconfirmed
-      if (op.kind === "closeAll") return "Closed all tabs."
+      if (op.kind === "closeAll") return closedSummary(proposalId === undefined ? undefined : closed.get(proposalId))
       return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
     },
     itemized: (operation) => decoded(operation)?.kind === "closeAll",

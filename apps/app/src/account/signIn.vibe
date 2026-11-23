@@ -1,7 +1,7 @@
 // spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
 import {
   type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
-  Machine as SignInMachine, enabled, entryOf, machine as signInMachine
+  Machine as SignInMachine, canTapGoogle, enabled, entryOf, machine as signInMachine, mayReopenGoogle, readinessWaitMs, unknownMethods
 } from "../../gen/account__signIn.effect.vibe"
 import type { Net as LifeNet } from "../../gen/platform__lifecycle.ts"
 import { Build } from "../platform/build.vibe"
@@ -30,6 +30,10 @@ export service SignInScreen {
   open(): void!!
   choose(method: CodeMethod): void!!
   google(): void!!
+  /** The Google page was closed or lost: end the waiting attempt as Back does and start a new one. */
+  reopenGoogle(): void!!
+  /** Whether the address field holds text the owner typed; the text itself is never kept. */
+  draft(drafted: boolean): void!!
   /** Send a code to the address or number the owner typed; it is never stored. */
   submit(address: string): void!!
   verify(code: string): void!!
@@ -41,7 +45,7 @@ export service SignInScreen {
   /** The host holds own keys in use, or no longer: the entry ends, or comes back. */
   useOwnKeys(using: boolean): void!!
   /** The deployment's Terms and Privacy, or undefined when they cannot be read. */
-  serviceInfo(): ServiceInfo | undefined!!
+  serviceInfo(): (ServiceInfo | undefined)!!
   /** Opens Android's network settings from the network notice; whether they opened. */
   openWifiSettings(): boolean!!
 }
@@ -113,10 +117,19 @@ export const signInService = Layer.effect(SignInScreen, effect {
   }
 
   effect function readMethods() {
-    const status = effect {
+    const read = effect {
       return try Schema.decodeUnknownEffect(HostStatus)(try native.invoke(plugin, "status", { environment, refreshNegative: true }))
     } catch () => ({})
-    try send({ type: "probeSettles", methods: methodsOf(status), lateFollows: true })
+    const reading = fork.in(scope) read
+    // The chooser waits at most six seconds; an answer after that is the check's late answer.
+    const first = try timeoutOption(Fiber.join(reading), Duration.millis(readinessWaitMs))
+    if (Option.isSome(first)) {
+      try send({ type: "probeSettles", methods: methodsOf(first.value), lateFollows: true })
+      return
+    }
+    try send({ type: "probeSettles", methods: unknownMethods, lateFollows: true })
+    const late = try Fiber.join(reading)
+    try send({ type: "lateMethods", methods: methodsOf(late) })
   }
 
   effect function held<A>(work: A!!) {
@@ -299,7 +312,16 @@ export const signInService = Layer.effect(SignInScreen, effect {
     },
     effect open() { try send({ type: "ownerOpens" }) },
     effect choose(method: CodeMethod) { try send({ type: "chooseMethod", method }) },
+    effect draft(drafted: boolean) {
+      if ((try machine.get()).drafted !== drafted) try send({ type: "draftChanged", drafted })
+    },
     effect google() { try send({ type: "tapGoogle" }) },
+    effect reopenGoogle() {
+      if (!mayReopenGoogle(try machine.get())) return
+      try send({ type: "backDuringGoogle" })
+      try Ref.update(epoch, (n) => n + 1)
+      if (canTapGoogle(try machine.get())) try send({ type: "tapGoogle" })
+    },
     effect submit(address: string) {
       try Ref.set(typed, { address: address.trim(), code: "" })
       try send({ type: "submitAddress" })

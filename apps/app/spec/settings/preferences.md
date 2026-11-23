@@ -88,6 +88,35 @@ pure def defaultOf(preference: Preference): bool = preferenceValue(initial, pref
 pure def lawTheBrowserPageStartsOn(preference: Preference): bool = preference == BrowserPage implies defaultOf(preference)
 ```
 
+### A phone updated from the previous Alpha keeps the choices it saved there
+
+The previous Alpha kept Ask before Alpha acts, Location for Alpha, Browser page for Alpha, Gmail
+changes, Calendar edits and email images in its own device document. When this version has no record
+of its own, it takes those choices once and keeps them as its own; a choice the previous record
+lacks starts at its new-phone value, and the browser simulator's sensors start at theirs. A previous
+record that cannot be read leaves the preferences unreadable, so Alpha asks before every action and
+shares nothing until the owner resets them. Alpha never writes the previous record.
+
+```quint
+type PreviousChoices = {
+  askBeforeActions: bool, agentLocation: bool, browserPage: bool, gmailChanges: bool, calendarEdits: bool, mailImages: bool,
+}
+pure def adoptPrevious(c: PreviousChoices): Preferences = {
+  ...initial, askBeforeActions: c.askBeforeActions, agentLocation: c.agentLocation, browserPage: c.browserPage,
+  gmailChanges: c.gmailChanges, calendarEdits: c.calendarEdits, mailImages: c.mailImages,
+}
+pure val cValues = Set(
+  { askBeforeActions: true, agentLocation: false, browserPage: false, gmailChanges: false, calendarEdits: false, mailImages: false },
+  { askBeforeActions: false, agentLocation: true, browserPage: true, gmailChanges: true, calendarEdits: true, mailImages: true },
+  { askBeforeActions: true, agentLocation: true, browserPage: false, gmailChanges: true, calendarEdits: false, mailImages: true })
+pure def lawThePreviousChoicesStay(c: PreviousChoices): bool = {
+  val p = adoptPrevious(c)
+  p.askBeforeActions == c.askBeforeActions and p.agentLocation == c.agentLocation and p.browserPage == c.browserPage
+    and p.gmailChanges == c.gmailChanges and p.calendarEdits == c.calendarEdits and p.mailImages == c.mailImages
+}
+pure def lawAnAdoptedRecordIsUnedited(c: PreviousChoices): bool = adoptPrevious(c).edits == 0
+```
+
 ### The browser simulator's microphone and location work only with test mocks and the switch on
 
 ```quint
