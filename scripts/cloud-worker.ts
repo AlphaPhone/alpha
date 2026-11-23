@@ -8,7 +8,7 @@
  * names a private NAME=value file (mode 600, outside the checkout).
  *
  *   node scripts/cloud-worker.ts profile   --inputs F --out FILE [--local ORIGIN…]
- *   node scripts/cloud-worker.ts secrets   --environment ENV --env-file F [--apply]
+ *   node scripts/cloud-worker.ts secrets   --environment ENV --env-file F [--apply]  [--frozen]
  *   node scripts/cloud-worker.ts provision --environment ENV --env-file F [--write]
  *   node scripts/cloud-worker.ts preflight --environment ENV [--env-file F]
  *   node scripts/cloud-worker.ts migrate   --environment ENV --inputs F --env-file F
@@ -107,7 +107,13 @@ function writeEnvFile(file: string, values: Record<string, string>) {
 }
 
 /** Fill every generated secret that is absent and return the entitlement public key the operator records in the inputs. */
-export function completeSecrets(values: Record<string, string>): {values: Record<string, string>; entitlementPublicKey: crypto.JsonWebKey} {
+export const GENERATED_SECRETS = ['CLOUD_DIGEST_KEY', 'CLOUD_SEALING_KEY', 'EMAIL_CODE_SECRET', 'GOOGLE_CONNECT_TOKEN_KEY', 'CLOUD_ENTITLEMENT_KEY'] as const;
+/** With `frozen` (CI), nothing is generated: a sealing or entitlement key minted on a runner would rotate and be lost. */
+export function completeSecrets(values: Record<string, string>, {frozen = false} = {}): {values: Record<string, string>; entitlementPublicKey: crypto.JsonWebKey} {
+  if (frozen) {
+    const absent = GENERATED_SECRETS.filter(name => !values[name]);
+    if (absent.length) throw new Error(`Generated secrets are absent (${absent.join(', ')}); run \`secrets\` once locally and store the completed file`);
+  }
   const next = {...values};
   for (const name of ['CLOUD_DIGEST_KEY', 'CLOUD_SEALING_KEY', 'EMAIL_CODE_SECRET', 'GOOGLE_CONNECT_TOKEN_KEY']) if (!next[name]) next[name] = crypto.randomBytes(32).toString('base64url');
   if (!next.CLOUD_ENTITLEMENT_KEY) next.CLOUD_ENTITLEMENT_KEY = crypto.generateKeyPairSync('ec', {namedCurve: 'P-256'}).privateKey.export({type: 'pkcs8', format: 'der'}).toString('base64');
@@ -208,7 +214,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const {values: o, positionals} = parseArgs({allowPositionals: true, options: {
     inputs: {type: 'string'}, resources: {type: 'string', default: path.join(cloudDir, 'resources.json')}, out: {type: 'string'},
     environment: {type: 'string'}, 'env-file': {type: 'string'}, component: {type: 'string', default: 'all'}, local: {type: 'string', multiple: true},
-    apply: {type: 'boolean', default: false}, write: {type: 'boolean', default: false}, json: {type: 'boolean', default: false}}});
+    apply: {type: 'boolean', default: false}, frozen: {type: 'boolean', default: false}, write: {type: 'boolean', default: false}, json: {type: 'boolean', default: false}}});
   const command = positionals[0];
   const usage = () => { console.error('Usage: node scripts/cloud-worker.ts profile|secrets|provision|preflight|migrate|seed|prices|render|check|deploy|smoke [options] (see the header of this file)'); process.exit(2); };
   const environment = () => { const value = o.environment as CloudEnvironment; if (!cloudEnvironments.includes(value)) usage(); return value; };
@@ -228,8 +234,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
       case 'secrets': {
         const env = environment(), file = envFile();
-        const {values, entitlementPublicKey} = completeSecrets(readEnvFile(file));
-        writeEnvFile(file, values);
+        const {values, entitlementPublicKey} = completeSecrets(readEnvFile(file), {frozen: o.frozen});
+        if (!o.frozen) writeEnvFile(file, values);
         say(`entitlement public key for the ${env} operator inputs: ${JSON.stringify(entitlementPublicKey)}`);
         const problems = secretProblems(values, env);
         if (problems.length) throw new Error(problems.join('\n'));

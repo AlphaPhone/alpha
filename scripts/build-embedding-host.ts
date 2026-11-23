@@ -119,7 +119,7 @@ export async function preparePortableNativeInputs(root:string) {
     const {assertAndroidVoiceLibrary}=createRequire(import.meta.url)('./os-ported/app/build-helpers/verify-fused-symbols.ts');
     // The upstream builder verifies each download, converted GGUF and native ABI/symbol contract.
     // It runs in an isolated source checkout; it never writes into vendor/eliza.
-    command('node',[path.join(source,'packages/os/android/local-inference/scripts/paradee-voice/build-native.ts'),'--workspace',path.join(cache,'workspace'),'--out',voiceOutput,'--model-cache',path.join(cacheRoot,'models'),'--python',python],source,env);
+    command('node',[path.join(source,'packages/os/android/local-inference/scripts/build-native.ts'),'--workspace',path.join(cache,'workspace'),'--out',voiceOutput,'--model-cache',path.join(cacheRoot,'models'),'--python',python],source,env);
     const nativeTools=ndkTools(ndk),host=readJson<any>(path.join(root,'android/voice-host/qualified-voice-host.json'));
     const abis=host.abis.map((abi:any)=>({abi:abi.abi,release:abi.release,alignment16KiB:true,abiVersion:assertAndroidVoiceLibrary({lib:path.join(voiceOutput,'jniLibs',abi.abi,'libelizainference.so'),objdump:path.join(nativeTools,'bin/llvm-objdump'),nm:path.join(nativeTools,'bin/llvm-nm')}).abiVersion,componentBuild:`Portable source build from SDK ${pin}, engine ${recipe.engineCommit}, recipe ${nativeRecipeDigest(recipe)}. Integrity only; no device qualification.`,libraries:abi.libraries.map((library:any)=> {
       const output=path.join(voiceOutput,'jniLibs',abi.abi,library.name);

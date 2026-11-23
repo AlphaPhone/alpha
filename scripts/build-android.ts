@@ -26,6 +26,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {publicUpdateChannel} from './update-channel.ts';
 import type {UpdateChannel} from './update-channel.ts';
+import {STAGED_AGENT_ENTRY} from "./agent-payload.ts";
 
 
 type BuildCommand = (command: string, args: string[], extra?: ExecFileSyncOptionsWithBufferEncoding) => unknown;
@@ -150,7 +151,7 @@ export function releaseAdmission({ signed, signerSha256, versionCode }: ReleaseI
  * built and never changes a distributable verdict.
  */
 export function sbomArgs(outDir: string, root = process.cwd()) {
-  const staged = fs.existsSync(path.join(root, "android/app/src/main/assets/agent/agent-bundle.js"));
+  const staged = fs.existsSync(path.join(root, STAGED_AGENT_ENTRY));
   return ["--out", path.join(outDir, "sbom", "alphaphone.cdx.json"), "--apks", outDir, ...(staged ? ["--packaged-runtime"] : [])];
 }
 

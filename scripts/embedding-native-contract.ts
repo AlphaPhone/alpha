@@ -24,8 +24,8 @@ export const nativeInputPaths = [
  'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts',
  'packages/os/android/local-inference/scripts/build-helpers/arm64-simd.ts',
  'packages/os/android/local-inference/scripts/build-helpers/verify-fused-symbols.ts',
- 'packages/os/android/local-inference/elizavoice-jni/CMakeLists.txt',
- 'packages/os/android/local-inference/elizavoice-jni/elizavoice-jni.cpp',
+ 'packages/os/android/local-inference/src/main/elizavoice-jni/CMakeLists.txt',
+ 'packages/os/android/local-inference/src/main/elizavoice-jni/elizavoice-jni.cpp',
 ];
 export const nativeJavaPath = 'packages/os/android/local-inference/src/main/java/ai/eliza/voice/VoiceNative.java';
 interface NativeBinding {mode: 'registered'|'exported'; className: string; subset: 'full'}

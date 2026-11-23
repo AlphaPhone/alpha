@@ -25,19 +25,29 @@ function checkedFile(root: string, entry: ParadeeAsset){
  if(!fs.statSync(file).isFile()||fs.statSync(file).size!==entry.bytes||digest(fs.readFileSync(file))!==entry.sha256)throw Error('Paradee input changed: '+entry.path);
  return file;
 }
-/** Gradle compiles JNI against this exact nested source even when engine binaries are staged. */
+/** The pinned inference engine (upstream local-inference engine.lock.json): an elizaOS/llama.cpp commit the
+ * consumer checks out outside vendor, by default at .eliza/inference-engine/<commit> (android/app/product.gradle
+ * elizaInferenceEngineDir) or where ELIZA_INFERENCE_ENGINE_DIR names. */
+export const ENGINE_LOCK=`${PARADEE_SOURCE}/engine.lock.json`;
+export function pinnedEngine(root: string, env: NodeJS.ProcessEnv = process.env){
+ const lock=JSON.parse(fs.readFileSync(path.join(root,ENGINE_LOCK),'utf8')) as {engine:{repository:string;commit:string;ffiInclude:string;library:string}};
+ if(!/^[a-f0-9]{40}$/.test(lock.engine?.commit??''))throw Error('Invalid engine pin in '+ENGINE_LOCK);
+ const directory=env.ELIZA_INFERENCE_ENGINE_DIR?path.resolve(env.ELIZA_INFERENCE_ENGINE_DIR):path.join(root,'.eliza/inference-engine',lock.engine.commit);
+ return {...lock.engine,directory};
+}
+/** Gradle compiles JNI against this exact engine checkout even when engine binaries are staged. */
 export function verifyParadeeFfi(root: string){
- const vendor=path.join(root,'vendor/eliza'),relative='packages/os/android/local-inference/llama.cpp',fork=path.join(vendor,relative),header='tools/omnivoice/include/eliza-inference-ffi.h';
- const guidance='Initialize the pinned FFI source: git -C vendor/eliza submodule update --init packages/os/android/local-inference/llama.cpp';
+ const vendor=path.join(root,'vendor/eliza');
+ const engine=pinnedEngine(root),fork=engine.directory,header=`${engine.ffiInclude}/eliza-inference-ffi.h`;
+ const guidance=`Check out the pinned engine: git clone ${engine.repository} ${path.relative(root,fork)||fork} && git -C ${path.relative(root,fork)||fork} checkout ${engine.commit}`;
  const git=(directory: string,...args: string[])=>execFileSync('git',['-C',directory,...args],{stdio:['ignore','pipe','pipe'],maxBuffer:4*1024*1024});
  try{
   const pin=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'),'utf8')).commit;
   if(!/^[a-f0-9]{40}$/.test(pin)||git(vendor,'rev-parse','HEAD').toString().trim()!==pin)throw Error('Unexpected parent source pin');
-  const expected=git(vendor,'ls-tree',pin,'--',relative).toString().match(/^160000 commit ([a-f0-9]{40})\t/)?.[1];
-  if(!expected)throw Error('Missing pinned FFI gitlink');
-  let cursor=vendor;for(const part of relative.split('/')){cursor=path.join(cursor,part);if(fs.lstatSync(cursor).isSymbolicLink())throw Error('Linked FFI checkout');}
+  const expected=engine.commit;
+  if(fs.lstatSync(fork).isSymbolicLink())throw Error('Linked FFI checkout');
   if(git(fork,'rev-parse','HEAD').toString().trim()!==expected||git(fork,'status','--porcelain','--untracked-files=normal').length)throw Error('FFI checkout must be clean at its exact pin');
-  const bytes=git(fork,'show',expected+':'+header);cursor=fork;
+  const bytes=git(fork,'show',expected+':'+header);let cursor=fork;
   for(const part of header.split('/')){cursor=path.join(cursor,part);if(fs.lstatSync(cursor).isSymbolicLink())throw Error('Linked FFI header');}
   if(!fs.statSync(cursor).isFile()||!fs.readFileSync(cursor).equals(bytes))throw Error('FFI header changed');
   return {forkPin:expected,headerSha256:digest(bytes)};

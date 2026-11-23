@@ -61,13 +61,14 @@ jobs:
           ALPHA_CLOUD_INPUTS: ${{ secrets.ALPHA_CLOUD_INPUTS }}
         run: |
           umask 077
+          test -n "$ALPHA_CLOUD_ENV" || { echo "ALPHA_CLOUD_ENV is empty: store the completed env file from \`pnpm cloud:worker secrets\`" >&2; exit 1; }
           printf '%s\n' "$ALPHA_CLOUD_ENV" > "$RUNNER_TEMP/alpha-cloud.env"
           printf '%s\n' "$ALPHA_CLOUD_INPUTS" > "$RUNNER_TEMP/alpha-cloud-inputs.json"
       - name: Render and bundle (dry run)
         run: $CLOUD check --environment "${{ inputs.environment }}" --inputs "$RUNNER_TEMP/alpha-cloud-inputs.json" --out "$RUNNER_TEMP/rendered"
       - name: Verify the secrets
         if: inputs.action == 'deploy'
-        run: $CLOUD secrets --environment "${{ inputs.environment }}" --env-file "$RUNNER_TEMP/alpha-cloud.env"
+        run: $CLOUD secrets --environment "${{ inputs.environment }}" --env-file "$RUNNER_TEMP/alpha-cloud.env" --frozen
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Preflight the Cloudflare resources

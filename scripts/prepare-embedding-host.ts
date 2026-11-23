@@ -60,7 +60,7 @@ for(const relative of producerInputPaths){
  producerInputs.push({path:relative,sha256:digest});
 }
 fs.mkdirSync(path.dirname(path.join(staging,forkPath)),{recursive:true});fs.symlinkSync(fork,path.join(staging,forkPath),'dir');
-const nativeSource=path.join(staging,'packages/os/android/local-inference/elizavoice-jni');
+const nativeSource=path.join(staging,'packages/os/android/local-inference/src/main/elizavoice-jni');
 const suppliedEngine=option('--engine');
 if(suppliedEngine){for(const name of ['libelizainference.so','libc++_shared.so']){const from=path.join(suppliedEngine,name),to=path.join(staging,'packages/os/android/local-inference/jniLibs',abi,name);if(!fs.statSync(from).isFile()||fs.lstatSync(from).isSymbolicLink())throw Error('Native engine input must be a regular file');fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}}
 const commands=[
