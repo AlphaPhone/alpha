@@ -7,7 +7,7 @@ import { alphaModel } from "./profile.vibe"
 export error RuntimeConfigInvalid { environment: string; problem: string }
 
 /** The resident agent's cloud model backend for one environment: the deployment's own API origin and Alpha's model. */
-export function cloudModel(rows: ClientDeployment, environment: ClientEnvironment): LaunchDocument["model"] {
+export function cloudModel(rows: ClientDeployment, environment: ClientEnvironment): Extract<LaunchDocument["model"], { readonly backend: "cloud" }> {
   return { backend: "cloud", cloudBaseUrl: agentCloudBase(rows, environment), smallModel: alphaModel, largeModel: alphaModel, imageModel: alphaModel }
 }
 

@@ -47,7 +47,7 @@
     "render": "node --conditions=eliza-source --import vibelang/register src/cli.vibe render",
     "runtime-config": "node --conditions=eliza-source --import vibelang/register src/cli.vibe runtime-config",
     "typecheck": "vibelang --noEmit -p .",
-    "test": "vitest run",
+    "test": "node --conditions=eliza-source node_modules/vitest/vitest.mjs run",
     "seed": "node --conditions=eliza-source --import vibelang/register src/cli.vibe seed",
     "registration": "node --conditions=eliza-source --import vibelang/register src/cli.vibe registration"
   },
