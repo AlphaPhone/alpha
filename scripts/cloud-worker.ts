@@ -254,8 +254,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
           if (command === 'migrate') elizaosCloud(['migrate', '--profile', profile, '--environment', env, '--store', values.DATABASE_URL], serveEnv(values));
           else if (command === 'prices') elizaosCloud(['prices', 'check', '--profile', profile, '--environment', env], serveEnv(values));
           else {
-            const args = alphaCloud(['register-args', '--inputs', inputs(), '--environment', env]) as string[];
-            elizaosCloud([...args, '--profile', profile, '--environment', env, '--store', values.DATABASE_URL], serveEnv(values));
+            const file = path.join(directory, `registration.${env}.json`);
+            const {apply} = alphaCloud(['registration', '--inputs', inputs(), '--environment', env, '--out', file]) as {apply: string[]};
+            elizaosCloud([...apply, '--profile', profile, '--environment', env, '--store', values.DATABASE_URL], serveEnv(values));
           }
         } finally { fs.rmSync(directory, {recursive: true, force: true}); }
         break;

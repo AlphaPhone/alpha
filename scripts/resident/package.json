@@ -1,0 +1,7 @@
+{
+  "name": "@alphacompute/alphaphone-resident",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Alpha Phone's resident agent entry (entry.vibe) and its host bridges (bridges.ts); bundled by scripts/build-agent-bundle.ts, never published."
+}

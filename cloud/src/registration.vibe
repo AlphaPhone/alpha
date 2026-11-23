@@ -105,7 +105,7 @@ export effect function environmentRegistration(profile: CloudProfile, environmen
   return client
 }
 
-/** The `--seed` document `elizaos-cloud serve` and `client register` accept for one environment. */
+/** The `--seed` document `elizaos-cloud serve` accepts for one environment (a local or staging seed, never production). */
 export function seedDocument(client: SeedClient): { readonly clients: ReadonlyArray<SeedClient> } {
   return { clients: [client] }
 }
@@ -116,17 +116,12 @@ export function registryVariable(client: SeedClient, environment: CloudEnvironme
   return JSON.stringify([entry])
 }
 
-/** The `elizaos-cloud client register` arguments for the registration. */
-export function registerArguments(client: SeedClient): ReadonlyArray<string> {
-  return [
-    "client", "register",
-    "--client-id", client.clientId,
-    "--display-name", client.displayName,
-    "--android-package", client.androidPackage,
-    ...client.certFingerprints.flatMap((fingerprint) => ["--cert", fingerprint]),
-    "--sign-in-return", client.signInReturn,
-    "--billing-return", client.billingReturn,
-    "--connect-return", client.connectReturn,
-    ...(client.nativeGoogle ? ["--native-google"] : []),
-  ]
+/** The reviewed registration file `elizaos-cloud client apply --file` applies for one environment: the client, its credential lifetime in days and its Google sign-in switch. */
+export function registrationFile(client: SeedClient, environment: CloudEnvironment): { readonly environment: CloudEnvironment; readonly clients: ReadonlyArray<SeedClient & { readonly credentialTtlDays: number }> } {
+  return { environment, clients: [{ ...client, credentialTtlDays: defaultCredentialTtlMs / (24 * 60 * 60 * 1000) }] }
+}
+
+/** The `elizaos-cloud` arguments that apply a registration file to the served environment's database. */
+export function applyArguments(file: string): ReadonlyArray<string> {
+  return ["client", "apply", "--file", file]
 }

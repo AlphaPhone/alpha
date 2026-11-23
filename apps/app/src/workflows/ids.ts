@@ -8,19 +8,8 @@ export function newId(): string {
   return globalThis.crypto.randomUUID();
 }
 
-/** The lowercase hex SHA-256 of `text`, as the native result ledger keys a scope. */
-export async function sha256Hex(text: string): Promise<string> {
-  const bytes = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-/**
- * The phone's current IANA time zone.
- * @throws {never}
- */
-export function deviceZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-}
+export { sha256Hex } from "../calendar/digest.ts";
+export { deviceZone } from "../calendar/time.ts";
 
 /**
  * The instant of a date-time string, or 0 when it is not one.

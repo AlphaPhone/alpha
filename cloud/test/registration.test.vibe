@@ -1,7 +1,7 @@
 // spec/cloud/nativeClients/registry.md, "Story: Admit only a registered native client"
 import { assert, describe, it } from "@effect/vitest"
 import { alphaCloudProfile } from "../src/profile.vibe"
-import { colonFingerprint, environmentRegistration, registerArguments, registrationProblems, registryVariable, releaseSignerFingerprints, seedDocument } from "../src/registration.vibe"
+import { applyArguments, colonFingerprint, environmentRegistration, registrationFile, registrationProblems, registryVariable, releaseSignerFingerprints, seedDocument } from "../src/registration.vibe"
 import { identity, operatorInputs, rotatedSigner } from "./support.ts"
 
 const check = (assertion: () => void) => Effect.try(assertion)
@@ -37,15 +37,17 @@ describe("Alpha Phone's native client registration", () => {
     try check(() => assert.ok(registrationProblems(shared, "https://api.alphacompute.ai").length > 0))
   })
 
-  it.effect("describes the same registration to the seed, the Worker registry and the operator command", () => effect {
+  it.effect("describes the same registration to the seed, the Worker registry and the applied registration file", () => effect {
     // spec/cloud/operator.md, "Thirteen commands exist, and only credits add and the three account commands name an account"
     const client = try environmentRegistration(alphaCloudProfile(operatorInputs), "staging", identity, rotatedSigner)
     try check(() => assert.deepStrictEqual(seedDocument(client).clients, [client]))
     const [entry] = (try Effect.try(() => JSON.parse(registryVariable(client, "staging")))) as ReadonlyArray<Record<string, unknown>>
     try check(() => assert.deepStrictEqual(Object.keys(entry).sort(), ["androidPackage", "billingReturn", "certFingerprints", "clientId", "connectReturn", "credentialTtlMs", "displayName", "enabled", "environment", "nativeGoogle", "signInReturn"]))
     try check(() => assert.strictEqual(entry.environment, "staging"))
-    const args = registerArguments(client)
-    try check(() => assert.strictEqual(args.filter((arg) => arg === "--cert").length, client.certFingerprints.length))
-    try check(() => assert.ok(!args.includes("--native-google")))
+    const file = registrationFile(client, "staging")
+    try check(() => assert.strictEqual(file.environment, "staging"))
+    try check(() => assert.deepStrictEqual(Object.keys(file.clients[0] ?? {}).sort(), ["androidPackage", "billingReturn", "certFingerprints", "clientId", "connectReturn", "credentialTtlDays", "displayName", "nativeGoogle", "signInReturn"]))
+    try check(() => assert.strictEqual(file.clients[0]?.credentialTtlDays, 30))
+    try check(() => assert.deepStrictEqual(applyArguments("registration.json"), ["client", "apply", "--file", "registration.json"]))
   })
 })

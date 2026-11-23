@@ -1,7 +1,9 @@
-// spec/agent/plugins/bundle.md, "A bundle is built only when every listed plugin and the product plugin ship as packages and the load smoke loaded them"; spec/agent/host/process.md
+// spec/agent/plugins/bundle.md, "A consumer entry ships only as a named package's code inside the source root, and passes the same load smoke as the generated entry"; spec/agent/plugins/bundle.md, "A host module is named only for a bundled package that is not an agent module, and runs with its entry's services over the resident's platform layer"; spec/agent/plugins/profile.md, "A host service never takes an agent service's name"; spec/agent/host/process.md
 import { runAgentCli } from "@elizaos/agent/cli"
-import { InferenceEngine, localInferenceModule, localInferencePluginName } from "@elizaos/plugin-local-inference"
-import { androidInferenceLayer } from "@elizaos/os/inference"
+import type { AgentPlugin, ModuleFactory } from "@elizaos/agent"
+import { localInferenceModule, localInferencePluginName } from "@elizaos/plugin-local-inference"
+import * as localInference from "@elizaos/plugin-local-inference"
+import { AndroidInferenceEngine, androidInferenceLayer } from "@elizaos/os/inference"
 import * as assistant from "@elizaos/plugin-personal-assistant"
 import * as calendar from "@elizaos/plugin-calendar"
 import * as inbox from "@elizaos/plugin-inbox"
@@ -10,6 +12,7 @@ import * as files from "@elizaos/plugin-files"
 import * as workflow from "@elizaos/plugin-workflow"
 import * as maps from "@elizaos/plugin-maps"
 import * as browser from "@elizaos/plugin-browser"
+import { inferenceSocket, namesAlphaView, residentServices, residentStateDirectory, savedPlaceFiles } from "./bridges.ts"
 
 type PluginModule = { readonly default?: unknown; readonly plugin?: unknown }
 
@@ -17,13 +20,23 @@ function entry(packageName: string, module: PluginModule) {
   return { packageName, plugin: module.default ?? module.plugin }
 }
 
-/** The on-device InferenceEngine over the os InferenceHost whose socket the launch environment names (ELIZA_INFERENCE_SOCKET). */
-const engine = await runPromise(effect {
-  const socket = try Config.String("ELIZA_INFERENCE_SOCKET")
-  return try Effect.provide(InferenceEngine.asEffect(), androidInferenceLayer(socket))
-})
+/** Maps with Alpha's own views named, so a request for one of them is never routed as travel, and the assistant's saved places kept under the resident's state directory. */
+const mapsWithHost: AgentPlugin = {
+  ...maps.mapsPlugin,
+  init: async (config, runtime) => {
+    await maps.mapsPlugin.init?.(config, runtime)
+    maps.registerMapsViews(runtime, namesAlphaView)
+    maps.registerMapsSavedPlaces(runtime, savedPlaceFiles(residentStateDirectory))
+  },
+}
 
-/** Alpha's resident agent: the bundled plugins, with local inference hosted over the device's own engine. */
+/** Local inference over the device engine the host services provide on the app process's inference socket. */
+const localInferenceHosted: ModuleFactory<AndroidInferenceEngine> = effect (context) => {
+  const engine = try AndroidInferenceEngine
+  return try localInferenceModule(engine)(context)
+}
+
+/** Alpha's resident agent: the bundled plugins, the workflow device and native digest bridges, and local inference hosted over the device's own engine. */
 runAgentCli({
   bundled: [
     entry("@elizaos/plugin-personal-assistant", assistant),
@@ -32,8 +45,11 @@ runAgentCli({
     entry("@elizaos/plugin-notes", notes),
     entry("@elizaos/plugin-files", files),
     entry("@elizaos/plugin-workflow", workflow),
-    entry("@elizaos/plugin-maps", maps),
+    { packageName: "@elizaos/plugin-maps", plugin: mapsWithHost },
     entry("@elizaos/plugin-browser", browser),
+    entry(localInferencePluginName, localInference),
   ],
-  hostModules: new Map([[localInferencePluginName, localInferenceModule(engine)]]),
+  runtimeServices: residentServices,
+  hostModules: new Map([[localInferencePluginName, localInferenceHosted]]),
+  hostServices: () => androidInferenceLayer(inferenceSocket()),
 })

@@ -1,4 +1,4 @@
-// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/route.md, "A refusal's stated wait is kept only as whole seconds from one second to a day"; spec/voice/listener.md, "Story: See and stop what the listener is doing"
+// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/route.md, "A Cloud refusal's limit is a rate limit, a used allowance, a missing plan or a billing refusal, with a wait of one second to a day"; spec/voice/listener.md, "Story: See and stop what the listener is doing"
 
 /** A recording the native recorder started. */
 export schema RecordingStarted { readonly recordingId: string; readonly maxDurationMs: number }

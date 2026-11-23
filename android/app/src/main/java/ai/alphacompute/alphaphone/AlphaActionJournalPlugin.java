@@ -72,10 +72,10 @@ public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
  private void deviceWork(PluginCall call,java.util.concurrent.Callable<JSObject> task){
   PluginWorkers.submit(worker(),()->{try{if(destroyed())throw new IllegalStateException();call.resolve(task.call());}catch(Exception refused){call.reject(refusal());}},()->call.reject(refusal()));
  }
- /** With a {@code scope}, the shared journal's entry; without one, the device-execution entry for {@code proposalId} ({@code {entry}}, null when absent). */
+ /** With a {@code scope}, the shared journal's entry; without one, the device-execution entry for {@code proposalId} ({@code {entry, digest}}, entry null when absent). */
  @Override @PluginMethod public void get(PluginCall call){
   if(call.getData().has("scope")){super.get(call);return;}
-  deviceWork(call,()->{JSObject out=new JSObject();JSONObject entry=deviceJournal().get(call.getString("proposalId"));out.put("entry",entry==null?JSONObject.NULL:entry);return out;});
+  deviceWork(call,()->{JSObject out=new JSObject();JSONObject entry=deviceJournal().get(call.getString("proposalId"));out.put("entry",entry==null?JSONObject.NULL:entry);if(entry!=null&&!entry.optString("digest").isEmpty())out.put("digest",entry.getString("digest"));return out;});
  }
  /** With a {@code scope}, the shared journal's entries; without one, every device-execution entry ({@code {entries}}). */
  @Override @PluginMethod public void list(PluginCall call){

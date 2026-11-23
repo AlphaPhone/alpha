@@ -562,17 +562,6 @@ private static final class ResidentAttachDiagnostic {
    }
   });
  }
- @PluginMethod public void editProviderKeys(PluginCall call){
-  // JSON null, empty strings and other values never mean removal; Remove is a separate action.
-  for(String field:new String[]{"textKey","voiceKey"})if(call.getData().has(field)&&!(call.getData().opt(field) instanceof String)){
-   call.reject("Enter a key or leave the field unchanged.");return;
-  }
-  changeProvider(call,store->{
-   String failure=NativeProviderSlot.editKeys(providerSlot(store),call.getString("expectedRevision"),
-    call.getString("textKey"),call.getString("voiceKey"),NativeProviderSlot::checkCerebrasKey);
-   if(failure!=null)throw new IllegalArgumentException("Provider validation refused");
-  });
- }
  @PluginMethod public void removeProviderKey(PluginCall call){
   changeProvider(call,store->NativeProviderSlot.removeKey(providerSlot(store),call.getString("expectedRevision"),call.getString("key")));
  }
@@ -631,6 +620,7 @@ private static final class ResidentAttachDiagnostic {
   for(String key:new String[]{"ELIZA_NATIVE_GOOGLE_HOST_MODULE","ELIZA_NATIVE_GOOGLE_BINDING_JSON","ELIZA_NATIVE_GOOGLE_API_KEY","ELIZA_MANAGED_GMAIL_READ_BROKER","ELIZA_MANAGED_GMAIL_SEND_BROKER","ELIZA_MANAGED_GMAIL_OPERATION_BROKER","ELIZA_MANAGED_CALENDAR_READ_BROKER","ELIZA_MANAGED_CALENDAR_DELETE_ENABLED","ELIZA_NATIVE_GOOGLE_GMAIL_SEND_ENABLED","ELIZA_MANAGED_GMAIL_MAILBOX_CHANGES_ENABLED"})env.remove(key);
   env.remove("ELIZA_MOBILE_WORKFLOWS");
   AlphaInferenceHost.configure(context,env);
+  WorkflowBridgeHost.configure(context,env);
   java.io.File nativeHostResources=null;
   java.io.InputStream workerIndex=null;
   try {workerIndex=context.getAssets().open("agent/workflow-worker/files.sha256");}

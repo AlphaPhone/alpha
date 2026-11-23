@@ -8,6 +8,18 @@ export function textOf(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
+/** The whole seconds a `Retry-After` value asks to wait at `now`, from delta seconds or an HTTP date; undefined when it gives none. @throws {never} */
+export function retryAfterSecondsOf(value: string | undefined, now: number): number | undefined {
+  if (value === undefined) return undefined;
+  const text = value.trim();
+  if (/^\d+$/.test(text)) {
+    const seconds = Number(text);
+    return Number.isSafeInteger(seconds) ? seconds : undefined;
+  }
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - now) / 1000));
+}
+
 /**
  * A `fetch` for `@elizaos/cloud/client` over the native Cloud plugin: only requests to `base` go out, as
  * the plugin's own calls in `environment`, so the key it holds is attached by native and never by the page.

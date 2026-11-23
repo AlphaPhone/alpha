@@ -28,7 +28,6 @@ import { shadeLive } from "./shade.vibe"
 import { portsLive } from "./ports.vibe"
 
 export { ShellMail, IdleSources, type ReviewedEmail, type QuietFacts } from "./ports.vibe"
-export { mapsShellLive } from "./mapsShell.vibe"
 export { handoffsLive } from "./handoffs.vibe"
 export { operationPorts } from "./operations.vibe"
 

@@ -1,5 +1,4 @@
 // spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/review.md, "Story: Act only on what I asked for"
-import { operationPorts as assistantOperations } from "../../assistant/operations.vibe"
 import { operationPorts as browserOperations } from "../../browser/operations.vibe"
 import { operationPorts as calendarOperations } from "../../calendar/operations.vibe"
 import { operationPorts as cameraOperations } from "../../camera/operations.vibe"
@@ -10,7 +9,7 @@ import { operationPorts as telephonyOperations } from "../../telephony/operation
 import { registerFamily } from "../assistantHost.vibe"
 import { operationPorts as shellOperations } from "../operations.vibe"
 
-/** Every area's agent device operations, registered in this order once the last of those areas is built; an operation goes to the first family that validates it, so Files' own family comes before the assistant's copy of it. */
+/** Every area's agent device operations, registered in this order once the last of those areas is built; an operation goes to the first family that validates it. */
 export const executorsLive = Layer.effectDiscard(effect {
   try registerFamily(shellOperations)
   try registerFamily(filesOperations)
@@ -20,5 +19,4 @@ export const executorsLive = Layer.effectDiscard(effect {
   try registerFamily(browserOperations)
   try registerFamily(cameraOperations)
   try registerFamily(clockOperations)
-  try registerFamily(assistantOperations)
 })

@@ -90,6 +90,9 @@
       },
       {
         "module": "wifi"
+      },
+      {
+        "module": "network-policy"
       }
     ],
     "modules": [

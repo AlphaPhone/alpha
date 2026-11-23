@@ -111,8 +111,8 @@ it.live("the assistant's photo needs the visible Camera, flips to the named came
   }
 })
 
-// spec/camera/agentCapture.md, "A recording or another shutter that starts first refuses a waiting request"
-it.live("a recording refuses the assistant's photo and takes nothing (spec/camera/agentCapture.md, \"A recording or another shutter that starts first refuses a waiting request\")", () => effect {
+// spec/camera/agentCapture.md, "A recording that starts while the request waits refuses it"
+it.live("a recording refuses the assistant's photo and takes nothing (spec/camera/agentCapture.md, \"A recording that starts while the request waits refuses it\")", () => effect {
   const device = camera()
   provide cameraOver(device) {
     const view = try Viewfinder

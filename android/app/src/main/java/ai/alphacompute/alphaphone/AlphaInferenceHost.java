@@ -8,7 +8,7 @@ import java.io.InputStream;
 import java.security.MessageDigest;
 
 /**
- * Starts the upstream os InferenceHost (ai.eliza.voice.InferenceHost, :eliza-local-inference) for the resident agent
+ * Starts the upstream os inference host (ai.eliza.voice.LocalInferenceHost, :eliza-local-inference) for the resident agent
  * and names its socket in the launch environment; the resident binds @elizaos/os/inference androidInferenceLayer(socket).
  */
 final class AlphaInferenceHost {
@@ -36,7 +36,7 @@ final class AlphaInferenceHost {
   synchronized (LOCK) {
    if (!socket.equals(started)) {
     ai.eliza.voice.VoiceAssets.Bundle bundle = ai.eliza.voice.VoiceAssets.install(context);
-    ai.eliza.voice.InferenceHost.start(context, socket, bundle, models);
+    ai.eliza.voice.LocalInferenceHost.start(context, socket, bundle, models);
     started = socket;
    }
   }

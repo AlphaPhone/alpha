@@ -40,7 +40,7 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && vibelang -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && vibelang -p tsconfig.build.json && node -e \"require('node:fs').cpSync('node_modules/@elizaos/cloud/dist/pages','dist/pages',{recursive:true})\"",
     "deployment": "node --conditions=eliza-source --import vibelang/register src/cli.vibe deployment",
     "deployment:check": "node --conditions=eliza-source --import vibelang/register src/cli.vibe deployment --check",
     "profile": "node --conditions=eliza-source --import vibelang/register src/cli.vibe profile",
@@ -49,7 +49,7 @@
     "typecheck": "vibelang --noEmit -p .",
     "test": "vitest run",
     "seed": "node --conditions=eliza-source --import vibelang/register src/cli.vibe seed",
-    "register-args": "node --conditions=eliza-source --import vibelang/register src/cli.vibe register-args"
+    "registration": "node --conditions=eliza-source --import vibelang/register src/cli.vibe registration"
   },
   "dependencies": {
     "@effect/platform-node": "4.1.1",

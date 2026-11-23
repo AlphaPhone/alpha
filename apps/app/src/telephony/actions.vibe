@@ -7,6 +7,7 @@ import {
   Machine as ActionsMachine, isChoosing, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type Settled, type TargetForm,
 } from "../../gen/telephony__actions.effect.vibe"
 import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
+import { sameLine, writtenNumbers } from "../assistant/grounding.vibe"
 import { AlphaOperation, OwnerRequest } from "./actions.schema.vibe"
 import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
 import { CallWatch } from "./call-bar.vibe"
@@ -47,17 +48,6 @@ export service TelephonyActions {
 export interface ReviewDetails {
   readonly body?: string
   readonly changes?: Readonly<Record<string, { readonly before: ContactDetail; readonly after?: ContactDraft }>>
-}
-
-/** The digits of every phone number written in the owner's own words. */
-export function writtenNumbers(text: string): string[] {
-  return [...text.matchAll(/\+?\d[\d\s().-]{1,30}\d/g)].map((m) => m[0].replace(/\D/g, "")).filter((d) => d.length >= 2 && d.length <= 20)
-}
-
-/** Two written numbers are one line: the same digits, or the same last ten with a country code on one side only. */
-export function sameLine(a: string, b: string): boolean {
-  const x = a.replace(/\D/g, ""), y = b.replace(/\D/g, "")
-  return x === y || (x.length >= 10 && y.length >= 10 && x.slice(-10) === y.slice(-10))
 }
 
 /** A number target is grounded only when the owner wrote that number (#1393); a contact is refused in place of a number the owner wrote, unless the owner also wrote its name (#1396). */

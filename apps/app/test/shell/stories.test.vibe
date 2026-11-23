@@ -14,7 +14,7 @@ import { Machine as InventoryMachine } from "../../gen/shell__inventory.effect.v
 import { Machine as AppInfoMachine } from "../../gen/shell__appInfo.effect.vibe"
 import { Machine as ToastsMachine } from "../../gen/shell__toasts.effect.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
-import { Composer } from "../../src/inbox/composer.vibe"
+import { MailComposer } from "../../src/inbox/composer.vibe"
 import { NotesHandoff } from "../../src/notes/origins.vibe"
 import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
@@ -452,7 +452,7 @@ describe("Handoffs (spec/shell/handoffs.md, \"Story: Carry what I asked for in N
     let drafts = 0
     const fakes = Layer.mergeAll(
       Layer.succeed(NotesHandoff, { requests: Stream.make({ kind: "email-draft", subject: "Lunch", body: "Bring the notes" }, { kind: "open-web-source", url: "" }) } as never),
-      Layer.succeed(Composer, { compose: () => sync(() => { drafts = drafts + 1; return undefined }) } as never),
+      Layer.succeed(MailComposer, { compose: () => sync(() => { drafts = drafts + 1; return undefined }) } as never),
       Layer.succeed(BrowserTabs, { get: () => succeed({ host: "BrowserHost" }), dispatch: () => succeed({ accepted: true, failed: false }) } as never),
     )
     provide memoryStore, inBrowser {

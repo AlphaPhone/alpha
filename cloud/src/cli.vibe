@@ -5,7 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import type { CloudEnvironment } from "@elizaos/cloud/profile"
 import { checkOutputs, deploymentOutputs, selectDeployment, writeOutputs } from "./deployment.vibe"
 import { localProfile, OperatorInputs, readAlphaProfile, type OperatorInputs as Inputs } from "./profile.vibe"
-import { environmentRegistration, registerArguments, seedDocument, type AppIdentity, type ReleaseSigner } from "./registration.vibe"
+import { applyArguments, environmentRegistration, registrationFile, seedDocument, type AppIdentity, type ReleaseSigner } from "./registration.vibe"
 import { checkRuntimeConfig } from "./runtime-config.vibe"
 import { renderEnvironment, type CloudResources } from "./wrangler.vibe"
 
@@ -27,7 +27,7 @@ const usage = [
   "     | alpha-cloud runtime-config",
   "     | alpha-cloud profile --inputs <file> --out <file> [--local <origin>…]",
   "     | alpha-cloud seed --inputs <file> --environment production|staging --out <file>",
-  "     | alpha-cloud register-args --inputs <file> --environment production|staging",
+  "     | alpha-cloud registration --inputs <file> --environment production|staging --out <file>",
   "     | alpha-cloud render --inputs <file> --environment production|staging [--resources <file>] [--out <dir>]",
 ].join("\n")
 
@@ -131,11 +131,14 @@ effect function seed(args: ReadonlyArray<string>) {
   return { seed: out, clientId: client.clientId, environment }
 }
 
-effect function registerArgs(args: ReadonlyArray<string>) {
-  const found = try flags(args, ["inputs", "environment"])
+effect function registration(args: ReadonlyArray<string>) {
+  const found = try flags(args, ["inputs", "environment", "out"])
   const environment = try environmentOf(found.single)
   const { client } = try registrationOf(found.single, environment)
-  return registerArguments(client)
+  const out = try required(found.single, "out")
+  const fs = try FileSystem.FileSystem
+  try fs.writeFileString(out, JSON.stringify(registrationFile(client, environment), null, 2) + "\n")
+  return { file: out, clientId: client.clientId, environment, apply: applyArguments(out) }
 }
 
 effect function render(args: ReadonlyArray<string>) {
@@ -167,7 +170,7 @@ export effect function cli(argv: ReadonlyArray<string>) {
     case "runtime-config": return try runtimeConfig(rest)
     case "profile": return try profileFile(rest)
     case "seed": return try seed(rest)
-    case "register-args": return try registerArgs(rest)
+    case "registration": return try registration(rest)
     case "render": return try render(rest)
     default: throw new UsageInvalid({ message: command === undefined ? usage : `unknown command ${command}\n${usage}` })
   }

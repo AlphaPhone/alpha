@@ -1,9 +1,7 @@
-// spec/cloud/index.md, "Story: Use inference on my subscription or funded pilot account"; spec/cloud/index.md, "Story: Sign in to the Cloud"
+// spec/cloud/index.md, "Story: Use inference on my subscription or funded pilot account"; spec/cloud/index.md, "Story: Sign in to the Cloud"; spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
 import { cloudWorker, type CloudBindings } from "@elizaos/cloud/worker"
 
-export { SpeechRelayCoordinator } from "@elizaos/cloud/worker"
-
-/** Alpha Cloud's API Worker: upstream's whole Cloud Worker with no product extension; identity and resources come from the rendered Wrangler configuration. */
+/** Alpha Cloud's API Worker: upstream's whole Cloud Worker with no product extension, reading its profile from CLOUD_PROFILE, its return pages from ASSETS and its web-origin requests through the edge's X-Forwarded-Host. */
 export const alphaCloudWorker = cloudWorker<CloudBindings>()
 
 export default alphaCloudWorker

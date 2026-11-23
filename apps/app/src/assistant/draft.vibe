@@ -1,5 +1,5 @@
 // spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"
-import type { CameraHandoffs, FrameQuestion, PhotoAttachment } from "../camera/handoffs.vibe"
+import type { CameraHandoffs, FrameQuestion, PhotoAttachment } from "../camera/ports.vibe"
 import { sensitiveText } from "../browser/page-text.ts"
 import { Assistant } from "./assistant.vibe"
 import { ChatAttachments } from "./attachments.vibe"

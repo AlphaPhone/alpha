@@ -1,64 +1,39 @@
 // spec/cloud/returnPages.md, "Story: Bring me back to the app when its link did not open"
 import { assert, describe, it } from "@effect/vitest"
-import { appLink, edgeRoute, forwarded, pageHeaders, readRegistry, returnPage, type EdgeEnv } from "../src/edge.vibe"
-import { alphaCloudProfile } from "../src/profile.vibe"
-import { environmentRegistration, registryVariable } from "../src/registration.vibe"
-import { identity, operatorInputs, rotatedSigner } from "./support.ts"
+import { edgeRoute, forwardedHeaders, type EdgeEnv } from "../src/edge.vibe"
 
 const check = (assertion: () => void) => Effect.try(assertion)
-const state = "s".repeat(43)
 const address = (text: string): URL => URL.parse(text) ?? URL.parse("https://invalid.invalid")!
-
-effect function env(): EdgeEnv {
-  const client = try environmentRegistration(alphaCloudProfile(operatorInputs), "production", identity, rotatedSigner)
-  return { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: "https://api.alphacompute.ai", WEB_ORIGIN: "https://cloud.alphacompute.ai", CLOUD_NAME: "Alpha Cloud", NATIVE_CLIENT_REGISTRY: registryVariable(client, "production") }
-}
+const env: EdgeEnv = { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: "https://api.alphacompute.ai", WEB_ORIGIN: "https://cloud.alphacompute.ai" }
 
 describe("Alpha Cloud's web host", () => {
-  it.effect("shows ReturnToApp only for a registered return of the served environment", () => effect {
+  it.effect("forwards a web-origin address to the same path and query on the API origin", () => effect {
     // spec/cloud/returnPages.md, "A return URL on the web origin shows ReturnToApp only for the one enabled registration of the served environment that holds it"
-    const bindings = try env()
-    const signIn = edgeRoute(address("https://cloud.alphacompute.ai/alphaphone/auth/callback?code=x"), bindings)
-    try check(() => assert.strictEqual(signIn.tag === "ReturnToApp" ? signIn.purpose : signIn.tag, "SignInPage"))
-    const billing = edgeRoute(address("https://cloud.alphacompute.ai/alphaphone/billing/return"), bindings)
-    try check(() => assert.strictEqual(billing.tag === "ReturnToApp" ? billing.purpose : billing.tag, "BillingPage"))
-    try check(() => assert.strictEqual(edgeRoute(address("https://cloud.alphacompute.ai/other/auth/callback"), bindings).tag, "NotFound"))
-    try check(() => assert.strictEqual(edgeRoute(address("https://cloud.alphacompute.ai/alphaphone/auth/callback"), { ...bindings, CLOUD_ENVIRONMENT: "staging" }).tag, "NotFound"))
-    try check(() => assert.strictEqual(edgeRoute(address("https://cloud.alphacompute.ai/.well-known/assetlinks.json"), bindings).tag, "AssetLinks"))
+    const signIn = edgeRoute(address("https://cloud.alphacompute.ai/alphaphone/auth/callback?state=x"), env)
+    try check(() => assert.strictEqual(signIn.tag === "Forward" ? signIn.target.href : signIn.tag, "https://api.alphacompute.ai/alphaphone/auth/callback?state=x"))
+    const links = edgeRoute(address("https://cloud.alphacompute.ai/.well-known/assetlinks.json"), env)
+    try check(() => assert.strictEqual(links.tag === "Forward" ? links.target.pathname : links.tag, "/.well-known/assetlinks.json"))
+    try check(() => assert.strictEqual(edgeRoute(address("https://cloud.alphacompute.ai/health"), env).tag, "Health"))
   })
 
-  it.effect("answers a retryable 503 route when the registry cannot be read", () => effect {
+  it.effect("refuses an address off the web origin, without https or with credentials", () => effect {
     // spec/cloud/returnPages.md, "An address that shows no page is a final 404, and a web-origin address whose registry cannot be read is a retryable 503"
-    const bindings = try env()
-    try check(() => assert.strictEqual(edgeRoute(address("https://cloud.alphacompute.ai/alphaphone/auth/callback"), { ...bindings, NATIVE_CLIENT_REGISTRY: "{" }).tag, "RegistryUnreadable"))
-    try check(() => assert.strictEqual(readRegistry("[{\"clientId\":\"x\",\"extra\":1}]"), undefined))
+    try check(() => assert.strictEqual(edgeRoute(address("https://other.alphacompute.ai/alphaphone/auth/callback"), env).tag, "NotFound"))
+    try check(() => assert.strictEqual(edgeRoute(address("http://cloud.alphacompute.ai/alphaphone/auth/callback"), env).tag, "NotFound"))
+    try check(() => assert.strictEqual(edgeRoute(address("https://user:pass@cloud.alphacompute.ai/"), env).tag, "NotFound"))
+    const escaped = edgeRoute(address("https://cloud.alphacompute.ai//evil.example/x"), env)
+    try check(() => assert.ok(escaped.tag === "NotFound" || (escaped.tag === "Forward" && escaped.target.origin === env.PUBLIC_API_ORIGIN)))
   })
 
-  it.effect("forwards only the purpose's well-formed results and never a sign-in code", () => effect {
-    // spec/cloud/returnPages.md, "The pinned script forwards into the app link only the purpose's well-formed results, where the app reads them"
-    const signIn = forwarded("SignInPage", new URLSearchParams({ code: "secret", state }))
-    try check(() => assert.deepStrictEqual(signIn, [{ name: "error", value: "app_link_unverified" }, { name: "state", value: state }]))
-    try check(() => assert.deepStrictEqual(forwarded("SignInPage", new URLSearchParams({ state: "short" })), []))
-    try check(() => assert.strictEqual(forwarded("ConnectPage", new URLSearchParams({ state, result: "connected", connectionId: "c1" })).length, 3))
-    try check(() => assert.deepStrictEqual(forwarded("ConnectPage", new URLSearchParams({ state, result: "connected" })), []))
-    try check(() => assert.deepStrictEqual(forwarded("ConnectPage", new URLSearchParams({ state, result: "denied", connectionId: "c1" })), []))
-    try check(() => assert.deepStrictEqual(forwarded("BillingPage", new URLSearchParams({ session_id: "cs_test_1", result: "paid" })), [{ name: "session_id", value: "cs_test_1" }]))
-  })
-
-  it.effect("opens the registered return in the app's package, with connect values in the fragment", () => effect {
-    // spec/cloud/returnPages.md, "The page's one action opens the registered return in the package of the registration that holds it"
-    const url = address("https://cloud.alphacompute.ai/alphaphone/auth/callback")
-    try check(() => assert.strictEqual(appLink(url, "SignInPage", "ai.alphacompute.alphaphone", []), "intent://cloud.alphacompute.ai/alphaphone/auth/callback#Intent;scheme=https;package=ai.alphacompute.alphaphone;end"))
-    const connect = appLink(address("https://cloud.alphacompute.ai/alphaphone/gmail/callback"), "ConnectPage", "ai.alphacompute.alphaphone", [{ name: "state", value: state }, { name: "result", value: "denied" }])
-    try check(() => assert.strictEqual(connect, `intent://cloud.alphacompute.ai/alphaphone/gmail/callback#state=${state}&result=denied#Intent;scheme=https;package=ai.alphacompute.alphaphone;end`))
-  })
-
-  it.effect("renders a private page with one link, no form, no script and no query value", () => effect {
-    // spec/cloud/returnPages.md, "Every page is private, unframed and unindexed, has no form, and runs at most the pinned script"
-    const page = returnPage("Alpha Cloud", "Alpha <Phone>", "BillingPage", "intent://cloud.alphacompute.ai/alphaphone/billing/return#Intent;scheme=https;package=ai.alphacompute.alphaphone;end")
-    try check(() => assert.ok(!page.includes("<form") && !page.includes("<script")))
-    try check(() => assert.ok(page.includes("Alpha &lt;Phone&gt;")))
-    try check(() => assert.strictEqual((page.match(/<a /g) ?? []).length, 1))
-    try check(() => assert.ok(pageHeaders["Content-Security-Policy"].includes("frame-ancestors 'none'") && pageHeaders["Cache-Control"] === "no-store"))
+  it.effect("names the web host it was asked for and drops earlier forwarding and hop-by-hop headers", () => effect {
+    // spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
+    const incoming = new Headers({ host: "cloud.alphacompute.ai", "x-forwarded-host": "evil.example", forwarded: "host=evil.example", connection: "keep-alive", accept: "text/html" })
+    const sent = forwardedHeaders(incoming, "cloud.alphacompute.ai")
+    try check(() => assert.strictEqual(sent.get("x-forwarded-host"), "cloud.alphacompute.ai"))
+    try check(() => assert.strictEqual(sent.get("x-forwarded-proto"), "https"))
+    try check(() => assert.strictEqual(sent.get("forwarded"), null))
+    try check(() => assert.strictEqual(sent.get("connection"), null))
+    try check(() => assert.strictEqual(sent.get("host"), null))
+    try check(() => assert.strictEqual(sent.get("accept"), "text/html"))
   })
 })

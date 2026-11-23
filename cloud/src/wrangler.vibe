@@ -44,13 +44,14 @@ function inZone(host: string, zone: string): boolean {
   return host === zone || host.endsWith("." + zone)
 }
 
-/** The plain variables of the API Worker of one environment: origins, database receipt, registry, models and prices. */
+/** The plain variables of the API Worker of one environment: the profile (CLOUD_PROFILE), origins, database receipt, registry, models and prices. */
 export function apiVars(profile: CloudProfile, environment: CloudEnvironment, inputs: EnvironmentInputs, client: SeedClient): Readonly<Record<string, string>> {
   const settings = profile.environments[environment]
   const worker = inputs.worker
   const plans = inputs.billing.plans
   const plan = worker?.plan ?? "plus_monthly"
   return {
+    CLOUD_PROFILE: JSON.stringify(profile),
     CLOUD_ENVIRONMENT: environment,
     PUBLIC_API_ORIGIN: settings.api,
     WEB_ORIGIN: settings.web,
@@ -80,15 +81,13 @@ export function apiVars(profile: CloudProfile, environment: CloudEnvironment, in
   }
 }
 
-/** The plain variables of the web host Worker: the same registry and origins as its environment's API Worker. */
-export function edgeVars(profile: CloudProfile, environment: CloudEnvironment, client: SeedClient): Readonly<Record<string, string>> {
+/** The plain variables of the web host Worker: the origins it forwards between, the same as its environment's API Worker. */
+export function edgeVars(profile: CloudProfile, environment: CloudEnvironment): Readonly<Record<string, string>> {
   const settings = profile.environments[environment]
   return {
     CLOUD_ENVIRONMENT: environment,
     PUBLIC_API_ORIGIN: settings.api,
     WEB_ORIGIN: settings.web,
-    CLOUD_NAME: settings.name,
-    NATIVE_CLIENT_REGISTRY: registryVariable(client, environment),
   }
 }
 
@@ -138,7 +137,7 @@ export effect function renderEnvironment(templates: { readonly api: unknown; rea
   const shared = { workerName: resources.workerName, accountId: resources.accountId, hyperdriveId: resources.hyperdriveId, apiHost: hostOf(settings.api), webHost: hostOf(settings.web) }
   const rendered = {
     api: fillTemplate(templates.api, { ...shared, vars: apiVars(profile, environment, inputs, client) }),
-    edge: fillTemplate(templates.edge, { ...shared, vars: edgeVars(profile, environment, client) }),
+    edge: fillTemplate(templates.edge, { ...shared, vars: edgeVars(profile, environment) }),
   }
   const leak = leakedElizaHost(JSON.stringify(rendered))
   if (leak !== undefined) throw new RenderRefused({ problem: `the rendered ${environment} configuration names ${leak}` })

@@ -1,6 +1,6 @@
 package ai.alphacompute.alphaphone;
 
-/** Install the read-only native source callback before any resident service starts. */
+/** Reset admission, the problem log, the listener owner and the deletion window before any resident service starts; native sources reach the resident through WorkflowBridgeHost. */
 public final class AlphaApplication extends android.app.Application {
  @Override protected void attachBaseContext(android.content.Context base){
   super.attachBaseContext(base);
@@ -13,7 +13,7 @@ public final class AlphaApplication extends android.app.Application {
  private boolean resetRecoveryProcess(){return AlphaDataReset.RESET.isRecoveryProcess(this,getProcessName());}
  @Override public void onCreate(){
   super.onCreate();
-  if(resetRecoveryProcess())return;NativeDigestHost host=new NativeDigestHost(this);NativeSourceHost.configure(host::read);NativeOwnerReminderHost owner=new NativeOwnerReminderHost(this);NativeSourceHost.configureOwnerReminderContext(owner::read);
+  if(resetRecoveryProcess())return;
   // Isolated helper processes have no app storage; only the main process keeps the problem log and schedules upkeep.
   if(android.os.Process.isIsolated()||!getPackageName().equals(getProcessName()))return;
   ai.eliza.plugins.system.crash.CrashLog.install(this);

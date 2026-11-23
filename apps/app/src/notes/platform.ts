@@ -5,11 +5,7 @@ export function randomId(): string {
   return crypto.randomUUID();
 }
 
-/** The lowercase hex SHA-256 of a UTF-8 string, for owner digests and content revisions. */
-export async function sha256Hex(text: string): Promise<string> {
-  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
+export { sha256Hex } from "../calendar/digest.ts";
 
 /** The UTF-8 size of a string and whether it round-trips as text. */
 export function utf8Size(text: string): { readonly bytes: number; readonly valid: boolean } {
@@ -34,10 +30,7 @@ export async function shareText(title: string, text: string): Promise<"shared" |
   }
 }
 
-/** Whether the page is in front, as the recorder and receipts check before acting. */
-export function pageVisible(): boolean {
-  return typeof document === "undefined" || document.visibilityState !== "hidden";
-}
+export { pageVisible } from "../platform/build-flags.ts";
 
 /** Whether a page is there to post window events, which it is not in a unit test's runtime. */
 export function pageAvailable(): boolean {

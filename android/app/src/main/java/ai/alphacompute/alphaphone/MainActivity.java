@@ -381,7 +381,7 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaSystemPlugin.class);
   registerPlugin(ai.eliza.os.agent.AgentPlugin.class);
   registerPlugin(ai.eliza.plugins.signin.ElizaCloudPlugin.class);
-  registerPlugin(ElizaNetworkPolicyPlugin.class);
+  registerPlugin(ai.eliza.plugins.networkpolicy.NetworkPolicyPlugin.class);
   registerPlugin(ElizaSecureStorePlugin.class);
   registerPlugin(AlphaResetPlugin.class);
   registerPlugin(AlphaDeviceAppsPlugin.class);
@@ -408,11 +408,13 @@ public class MainActivity extends BridgeActivity {
   registerPlugin(AlphaBillingAuthorityPlugin.class);
   registerPlugin(AlphaLocalAgentPlugin.class);
   registerPlugin(AlphaActionJournalPlugin.class);
+  registerPlugin(ElizaActionJournalPlugin.class);
   registerPlugin(AlphaVoiceCloudPlugin.class);
   registerPlugin(AlphaVoiceCloudPlugin.Streaming.class);
   registerPlugin(AlphaNoteAudioPlugin.class);
   registerPlugin(AlphaNoteDocumentsPlugin.class);
   registerPlugin(AlphaNotificationsPlugin.class);
+  registerPlugin(ElizaNotificationsPlugin.class);
   registerPlugin(AlphaHostedResultsPlugin.class);
   registerPlugin(AlphaGmailPlugin.class);
   registerPlugin(ai.eliza.plugins.system.SensePlugin.class);

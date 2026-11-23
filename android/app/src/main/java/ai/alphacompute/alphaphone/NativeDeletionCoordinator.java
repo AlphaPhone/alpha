@@ -51,6 +51,21 @@ final class NativeDeletionCoordinator {
      return CalendarDeletionIdentity.parse(target.getString("eventId")).eventId==event;
     }
    },
+   new DeferredDeletionCoordinator.Records(){
+    public String refusal(String kind,JSONObject owner,JSONObject target){
+     if("contact".equals(kind))return AlphaImageCapabilities.aospImage(context)?null:"image-unavailable";
+     return AlphaImageCapability.verified(context)?null:"image-unavailable";
+    }
+    public JSONObject dispatch(String kind,JSONObject target){
+     switch(kind){
+      case "message":return ai.eliza.plugins.messages.MessageDeletion.dispatch(context,target,ai.eliza.plugins.messages.MessageDeletion.roleGuard(context));
+      case "thread":return ai.eliza.plugins.messages.ThreadDeletion.dispatch(context,target,ai.eliza.plugins.messages.MessageDeletion.roleGuard(context));
+      case "voicemail":return ai.eliza.plugins.messages.VoicemailStore.dispatchDeletion(context,target,()->AlphaTelephonyBase.voicemailDeletable(context));
+      case "contact":return ai.eliza.plugins.contacts.ContactsEditor.dispatchRemoval(context,target);
+      default:throw new IllegalArgumentException("Unknown deletion kind");
+     }
+    }
+   },
    delay->WorkManager.getInstance(context).enqueueUniqueWork(WORK,ExistingWorkPolicy.REPLACE,new OneTimeWorkRequest.Builder(DeletionWorker.class).setInitialDelay(delay,TimeUnit.MILLISECONDS).build()));
  }
  private NativeDeletionCoordinator(){}

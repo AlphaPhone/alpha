@@ -2,7 +2,7 @@
 import { opensApp, refusalShown, sourceOpens, type Request } from "../../gen/shell__handoffs.effect.vibe"
 import { secureTypedAddress, typedAddress, newTabId } from "../browser/address.ts"
 import { BrowserTabs } from "../browser/session.vibe"
-import { Composer } from "../inbox/composer.vibe"
+import { MailComposer } from "../inbox/composer.vibe"
 import { NotesHandoff, type NotesRequest } from "../notes/origins.vibe"
 import { Navigation } from "./navigation.vibe"
 import { Notices } from "./notices.vibe"
@@ -19,7 +19,7 @@ export const handoffsLive = Layer.effectDiscard(effect {
   const notes = try NotesHandoff
   const navigation = try Navigation
   const notices = try Notices
-  const composer = try Composer
+  const composer = try MailComposer
   const tabs = try BrowserTabs
 
   effect function openNotes(noteId: string | undefined) {

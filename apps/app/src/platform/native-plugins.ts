@@ -30,13 +30,18 @@ export const nativePlugins = {
     events: ["status", "streamData", "streamEnd", "agentEvent"],
   },
   ElizaCloud: { reach: "AnyNative", methods: ["request", "readGrant", "cancel", "openExternal"], events: [] },
-  ElizaNetworkPolicy: { reach: "AnyNative", methods: ["getMeteredHint", "getPathHints"], events: [] },
+  ElizaNetworkPolicy: { reach: "AnyNative", methods: ["getMeteredHint"], events: [] },
   ElizaSecureStore: { reach: "AnyNative", methods: ["get", "set", "remove", "compareAndExchange", "status"], events: [] },
+  ElizaActionJournal: {
+    reach: "AnyNative",
+    methods: ["reserve", "markApplying", "finish", "get", "list", "pending", "undo", "dismiss"],
+    events: [],
+  },
+  ElizaNotifications: { reach: "AnyNative", methods: ["pendingWorkflowTap", "consumeWorkflowTap"], events: ["pendingWorkflowTap"] },
   AlphaActionJournal: {
     reach: "AnyNative",
     methods: [
-      "get", "edit", "list", "reserve", "markApplying", "finish", "pending", "undo", "dismiss", "reviewClock",
-      "cancelClock", "confirmClock",
+      "get", "edit", "list", "reviewClock", "cancelClock", "confirmClock",
     ],
     events: [],
   },
@@ -143,9 +148,9 @@ export const nativePlugins = {
     methods: [
       "status", "list", "open", "dismiss", "clear", "canonicalPending", "acknowledgeCanonical", "crossAppStatus",
       "notificationApps", "setNotificationPolicy", "resumeCrossApp", "openNotificationAccess", "notificationHistory",
-      "clearNotificationHistory", "pendingWorkflowTap", "consumeWorkflowTap",
+      "clearNotificationHistory",
     ],
-    events: ["canonicalNotificationTap", "pendingWorkflowTap"],
+    events: ["canonicalNotificationTap"],
   },
   AlphaOngoingCall: { reach: "AospImage", methods: ["ongoingCall", "showCall", "endCall"], events: ["ongoingCall"] },
   AlphaPhotoLibrary: {
@@ -170,7 +175,7 @@ export const nativePlugins = {
       "imageCapability", "status", "phoneInfo", "requestAccess", "requestRole", "requestPermissions", "listRecentCalls",
       "dial", "placeCall", "voicemailStatus", "listVoicemail", "fetchVoicemailAudio", "voicemailAudio", "voicemailPcm",
       "markVoicemailHeard", "deleteVoicemail", "observeVoicemail", "composeSms", "listThreads", "listMessages",
-      "latestIncomingSender", "markThreadRead", "deleteMessage", "observeMessages", "sendSms", "sendMms", "cancelSmsReview",
+      "latestIncomingSender", "markThreadRead", "deleteMessage", "deleteThread", "observeMessages", "sendSms", "sendMms", "cancelSmsReview",
       "smsSendHistory", "smsSendResult", "mmsSendResult", "smsNoticePending", "acknowledgeSmsNotice",
     ],
     events: ["messagesChanged", "voicemailChanged", "smsSendUpdated", "mmsSendUpdated"],

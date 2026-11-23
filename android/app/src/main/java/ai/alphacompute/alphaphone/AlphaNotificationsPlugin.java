@@ -34,6 +34,13 @@ public class AlphaNotificationsPlugin extends NotificationsHostPlugin {
   });
  }
  @Override public void load(){super.load();canonicalLive=new java.lang.ref.WeakReference<>(this);}
+ /** The live bridge, for the workflow taps {@link ElizaNotificationsPlugin} serves under the upstream name. */
+ static AlphaNotificationsPlugin live(){return canonicalLive.get();}
+ /** A workflow tap change also reaches the renderer's ElizaNotifications listeners. */
+ @Override protected void notifyListeners(String event,JSObject data,boolean retain){
+  super.notifyListeners(event,data,retain);
+  if(PENDING_WORKFLOW_TAP_EVENT.equals(event))ElizaNotificationsPlugin.forward(event,data);
+ }
  @Override protected void handleOnDestroy(){if(canonicalLive.get()==this)canonicalLive.clear();super.handleOnDestroy();}
 
  @Override protected String appLabel(){return "Alpha Phone";}

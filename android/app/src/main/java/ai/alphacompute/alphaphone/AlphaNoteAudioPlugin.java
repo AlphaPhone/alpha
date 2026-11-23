@@ -228,7 +228,6 @@ public class AlphaNoteAudioPlugin extends Plugin {
   return spans;
  }
 
- @PluginMethod public void migrationStatus(PluginCall call){JSObject result=new JSObject();result.put("state",migrationState);result.put("failedRecords",migrationFailures);call.resolve(result);}
 
  /** Only native recorders can import a stopped clip; the renderer cannot nominate a path. */
  JSObject retain(File source,String recordingId,String noteId,long duration,String transcript)throws Exception {return JSObject.fromJSONObject(recordings().retain(source,recordingId,noteId,duration,transcript));}
