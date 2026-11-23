@@ -12,7 +12,7 @@ import { BrowserPresenter, presenterLayer } from "./presentation.vibe"
 import { BrowserReading, readingLayer } from "./reading.vibe"
 import { BrowserReviews, reviewsLayer } from "./reviews.vibe"
 import { BrowserTabs, tabsLayer } from "./session.vibe"
-import { tabHostLayer } from "./tabHost.vibe"
+import { TabHost, ours, tabHostLayer } from "./tabHost.vibe"
 
 /** Keeps Browser in step with Alpha's foreground while the app runs. */
 const running = Layer.effectDiscard(effect {
@@ -23,7 +23,13 @@ const running = Layer.effectDiscard(effect {
   const marks = try BrowserBookmarks
   const presenter = try BrowserPresenter
   const foreground = try Foreground
+  const host = try TabHost
   try marks.refresh(true)
+  fork.scoped effect {
+    for try (const changed of host.events("bookmarksChanged")) {
+      if (ours(host.session, changed)) try marks.refresh(true)
+    }
+  }
   fork.scoped tabs.run()
   fork.scoped reviews.follow()
   fork.scoped handoff.follow()
