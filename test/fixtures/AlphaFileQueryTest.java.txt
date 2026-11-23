@@ -32,7 +32,14 @@ public class AlphaFileQueryTest {
  static final class StorageCatalog {
   static final int QUERY_MAX=500;
   static int found;
-  static JSArray query(ContentResolver resolver,String text,String mimePrefix,boolean documents,String folder,long from,long to){JSArray out=new JSArray();for(int i=0;i<Math.min(found,QUERY_MAX);i++)out.put(i);return out;}
+  static JSObject queryPage(ContentResolver resolver,String text,String mimePrefix,boolean documents,String folder,long from,long to){
+   JSArray entries=new JSArray();
+   for(int i=0;i<Math.min(found,QUERY_MAX);i++)entries.put(i);
+   JSObject page=new JSObject();
+   page.put("entries",entries);
+   page.put("truncated",found<0||found>QUERY_MAX);
+   return page;
+  }
  }
  private @interface PluginMethod {}
  private interface StorageWork {JSObject run(StorageBrowser browser)throws Exception;}
@@ -44,7 +51,7 @@ public class AlphaFileQueryTest {
  private Object row(StorageBrowser.Row row){return row;}
  /* production query */
  public static void main(String[] args){
-  for(int found:new int[]{0,3,499,500,900})for(boolean folders:new boolean[]{false,true}){
+  for(int found:new int[]{-1,0,3,499,500,501,900})for(boolean folders:new boolean[]{false,true}){
    PluginCall call=new PluginCall(folders);new AlphaFileQueryTest(found).storageQuery(call);
    System.out.println((folders?"folders":"files")+" found="+found+": "+call.result);
   }

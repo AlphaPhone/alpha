@@ -133,9 +133,9 @@ pure def sometimesRequeried(s: Filtering): bool = s.shown != 0 and s.pending == 
 ### A filter says it found nothing only after a complete query
 
 A query is complete only when the device says it was not cut short (`truncated: false`). An answer
-that leaves completeness out counts as incomplete. The phone's file search stops at a fixed page of
-rows, so fewer rows are every match and a full page is incomplete; its folder search cannot see where
-its walk stopped and leaves completeness out.
+that leaves completeness out counts as incomplete. A MediaStore search is complete when the shared
+native catalog reaches the end of its cursor. An unavailable cursor or a visible match past the
+500-row page makes the result incomplete. A folder walk leaves completeness out.
 
 ```quint
 pure def showsNoMatches(filtering: Filtering): bool = filtering.shown != 0 and filtering.pending == 0 and filtering.complete and not(filtering.unavailable) and filtering.rows.length() == 0

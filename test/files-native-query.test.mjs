@@ -26,14 +26,18 @@ function run() {
 
 test('a native file search says whether it read every match; a folder walk leaves it unsaid', {skip}, () => {
   assert.deepEqual(run(), [
+    'files found=-1: entries=0;truncated=true;',
+    'folders found=-1: entries=0;truncated=-;',
     'files found=0: entries=0;truncated=false;',
     'folders found=0: entries=0;truncated=-;',
     'files found=3: entries=3;truncated=false;',
     'folders found=3: entries=3;truncated=-;',
     'files found=499: entries=499;truncated=false;',
     'folders found=499: entries=499;truncated=-;',
-    'files found=500: entries=500;truncated=true;',
+    'files found=500: entries=500;truncated=false;',
     'folders found=500: entries=500;truncated=-;',
+    'files found=501: entries=500;truncated=true;',
+    'folders found=501: entries=500;truncated=-;',
     'files found=900: entries=500;truncated=true;',
     'folders found=900: entries=500;truncated=-;',
   ]);
