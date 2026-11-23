@@ -45,7 +45,12 @@ export async function setup(page:Page,detent='sheet',development=false,canonical
    if(f.browserDestination){
     const present=await f.shell.browserNavigateApproved(f.browserDestination,input.signal,true);
     f.browserDestination=undefined;
-    return {text:'Opening the website.',messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},completedActions:[{proposalId:crypto.randomUUID(),status:'succeeded',summary:'Opened Browser.',presentBrowser:present}]};
+    const text=f.browserReply??'Opening the website.';
+    if(f.browserReply){
+     // Emulate a direct final frame arriving before the phone presents its prepared tab.
+     input.onText?.(text,{provisional:false,direct:true});
+    }
+    return {text,messageId:crypto.randomUUID(),userMessageId:crypto.randomUUID(),messageBinding:{conversationId:f.room,session:f.session},completedActions:[{proposalId:crypto.randomUUID(),status:'succeeded',summary:'Created a browser tab for voice-browser.example.',presentBrowser:f.browserPresentationRefused?()=>false:present}]};
    }
    if(f.projectBeforeReply){
     f.projected=await input.projectRequestedView?.(f.target,input.signal);

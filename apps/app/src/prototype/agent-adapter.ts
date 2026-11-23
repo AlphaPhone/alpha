@@ -10,7 +10,7 @@ import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-fea
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
 import {subscriptionOfferCard} from '../runtime/out-of-funds-notice';
-import {actionResultText,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,spokenActionReply,workflowReplyText} from '../runtime/action-message-presentation';
+import {actionResultText,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,spokenActionReply,VIEW_OPEN_UNCONFIRMED,workflowReplyText} from '../runtime/action-message-presentation';
 import {workflowChanges,workflowViewRefusal,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
@@ -782,6 +782,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   function noteCreationReply(reused:boolean,title?:string):string {
     if(title!==undefined)return `${reused?'Opened':'Saved and opened'} “${title}” in Notes.`;
     return reused?'That note is already saved. I couldn’t open it.':'I saved the note, but couldn’t open it.';
+  }
+  function confirmBrowserReply(shell:Shell,reply:AgentReply,current:()=>boolean):string {
+    if(reply.text!==VIEW_OPEN_UNCONFIRMED||!reply.messageId)return reply.text;
+    const text='Browser is open.';
+    shell.setState((previous:Shell)=>current()?{msgs:previous.msgs.map((m:Shell)=>m.id===reply.messageId?{...m,text}:m)}:null);
+    return text;
   }
   /** Opens Camera for a photo the agent proposed without showing Camera: the same navigation as the Camera app icon. */
   function openRequestedCamera(shell:Shell):Promise<boolean>{
@@ -2274,7 +2280,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       let provisionalSeen=false;
       try{reply=await alphaClient.send(text,(value,frame)=>{current();streamed=true;
         if(frame?.provisional!==false)provisionalSeen=true;
-        else if(input.onText&&!revealCreatedNote&&!provisionalSeen&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
+        else if(input.onText&&!revealCreatedNote&&!provisionalSeen&&!VIEW_OPEN_UNCONFIRMED.startsWith(value.trim())&&(!frame.direct||spokenActionReply(text,{text:value})===value))try{input.onText(value,{origin:'model',provisional:false,...(frame.direct?{direct:true}:{})});}catch{/* Early speech is advisory; the confirmed reply still plays. */}
         this.setState((previous:Shell)=>belongs()?{msgs:previous.msgs.some((m:Shell)=>m.id===streamId)?previous.msgs.map((m:Shell)=>m.id===streamId?{...m,text:value}:m):[...previous.msgs,{id:streamId,from:'agent',text:value,streaming:true}]}:null);},undefined,undefined,{channelType:'VOICE_DM',requestId:turnId,signal,expectedConversationId:binding.conversationId,voiceTurnSignal:input.voiceTurnSignal,projectRequestedView,...(images?{images}:{})});}
       finally{batchVoiceProgressEvents.removeEventListener('progress',progress);batchVoiceReplyEvents.removeEventListener('reply',replyStarted);}
       input.onReplyStarted?.();
@@ -2294,7 +2300,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       keepWorkflowChanges(this,reply,belongs);
       const emailOutcome=await this.stageAgentEmailDraft?.(reply,text,belongs);
       const emailCardReady=emailOutcome===true;
-      const present=reply.completedActions?.find(receipt=>receipt.presentBrowser)?.presentBrowser;
+      const present=reply.completedActions?.find(receipt=>receipt.status==='succeeded'&&receipt.presentBrowser)?.presentBrowser;
       const created=noteCreationTarget(reply.actionResults);
       if(created)recentNotes.set(this,{...identity,messageId:reply.userMessageId,id:created.id});
       let delivered=false;
@@ -2316,6 +2322,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       let nextContext:ContextEnvelope|undefined;
       current();
+      if(present&&delivered)presentedReply={...reply,text:confirmBrowserReply(this,reply,belongs)};
       // A spoken photo request the agent answered without showing Camera opens Camera here first,
       // through the voice session's own navigation hold, so the photo is taken on the visible viewfinder.
       if(!delivered&&reply.userMessageId&&input.navigation&&connectionController.requestedCameraNeedsOpening(reply.userMessageId)){
@@ -2628,7 +2635,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{await completeReadReply(this,completed.receipt);}catch{if(this.live&&sameChat())this.agentSay('The note was shared, but its answer is unconfirmed.');}
       }
       try{
-        const present=reply.completedActions?.find(receipt=>receipt.presentBrowser)?.presentBrowser;
+        const present=reply.completedActions?.find(receipt=>receipt.status==='succeeded'&&receipt.presentBrowser)?.presentBrowser;
         let delivered=false;
         if(created&&plainComposer&&openAfterNoteCreate(text)&&!present&&!reply.proposals?.length&&settlementCurrent()&&
           !attempt.stop.signal.aborted&&alphaClient.continuesContext(navigationContext)){
@@ -2643,9 +2650,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           const text=noteCreationReply(created.reused,delivered&&'title' in target?target.title:undefined);
           const messageId=reply.messageId||streamedId;
           this.setState((previous:Shell)=>settlementCurrent()?{msgs:previous.msgs.map((m:Shell)=>m.id===messageId?{...m,text}:m)}:null);
-        }else delivered=present&&settlementCurrent()&&!attempt.stop.signal.aborted
-          ?await commitNavigation(this,'browser',()=>present(this.S().chat)===true)
-          :await deliverNavigation(reply.actionResults);
+        }else if(present&&settlementCurrent()&&!attempt.stop.signal.aborted){
+          delivered=await commitNavigation(this,'browser',()=>present(this.S().chat)===true);
+          if(delivered)confirmBrowserReply(this,reply,settlementCurrent);
+        }else delivered=await deliverNavigation(reply.actionResults);
         // The agent may propose the photo without showing Camera in the same turn. When that photo is this reply's
         // (bound to this message, or named by the reply's own receipt on an ask-first phone) and no other review of
         // this reply needs the current screen, Camera is opened here.

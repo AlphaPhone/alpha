@@ -117,6 +117,59 @@ test('a late native-style document update after Browser opens keeps the original
  }finally{loadPage!();}
 });
 
+const unconfirmedBrowserReply='I couldn’t confirm that the requested screen opened.';
+for(const canPresent of [true,false])test(`Talk reports the Browser result after foreground presentation (${canPresent?'shown':'refused'})`,async({page})=>{
+ await setup(page);
+ const url='https://voice-browser.example/demo';
+ await page.route(url,route=>route.fulfill({contentType:'text/html',body:'<h1>Proof of page</h1>'}));
+ await page.evaluate(({url,canPresent,reply})=>{
+  const f=(window as any).ownedVoiceNavigation;
+  f.browserDestination=url;
+  f.browserReply=reply;
+  f.browserPresentationRefused=!canPresent;
+  f.prompt='Can you open '+url+' in the browser?';
+ },{url,canPresent,reply:unconfirmedBrowserReply});
+ await utterance(page);
+ await expect(page.locator('html')).toHaveAttribute('data-active-view',canPresent?'browser':'home');
+ if(canPresent){
+  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+  await expect(page.locator('[data-browser-surface]:visible').frameLocator('iframe').getByRole('heading',{name:'Proof of page'})).toBeVisible();
+  await expect(page.getByText('Browser is open.',{exact:true})).toHaveCount(1);
+  await expect(page.getByText(unconfirmedBrowserReply,{exact:true})).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken)).toEqual(['Browser is open.']);
+  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ }else{
+  await expect(page.getByText(unconfirmedBrowserReply,{exact:true})).toHaveCount(1);
+  await expect(voice(page)).toHaveCount(0);
+  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken??[])).toEqual([]);
+ }
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(1);
+});
+
+test('typed Browser navigation reports the visible tab and leaves chat open',async({page})=>{
+ await setup(page);
+ await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();
+ const url='https://voice-browser.example/demo';
+ await page.route(url,route=>route.fulfill({contentType:'text/html',body:'<h1>Proof of page</h1>'}));
+ await page.evaluate(async({url,reply})=>{
+  const f=(window as any).ownedVoiceNavigation;
+  const {connectionController}=await import('/src/runtime/connection-ui.tsx');
+  connectionController.getSelectedConversationId=()=>f.room;
+  f.allowTyped=true;
+  f.browserDestination=url;
+  f.browserReply=reply;
+  f.shell.messageReplyTarget=f.shell.messageEditTarget=undefined;
+ },{url,reply:unconfirmedBrowserReply});
+ const composer=page.getByRole('textbox',{name:'Message Alpha',exact:true}).filter({visible:true});
+ await composer.fill('Can you open '+url+' in the browser?');
+ await page.getByRole('button',{name:'Send',exact:true}).filter({visible:true}).click();
+ await expect(page.locator('html')).toHaveAttribute('data-active-view','browser');
+ await expect(page.getByText('Browser is open.',{exact:true})).toHaveCount(1);
+ await expect(page.getByText(unconfirmedBrowserReply,{exact:true})).toHaveCount(0);
+ await expect(composer).toBeVisible();
+});
+
 for(const stage of ['claim','ack'])test(`Stop while ${stage} is held retires own navigation without speech or rearm`,async({page},info)=>{await setup(page);await page.evaluate(stage=>{(window as any).ownedVoiceNavigation[stage==='claim'?'holdClaim':'holdAck']=true;},stage);await utterance(page);await expect.poll(()=>page.evaluate(stage=>(window as any).ownedVoiceNavigation[stage==='claim'?'claims':'acks'],stage)).toBe(1);await voice(page).getByRole('button',{name:'Stop voice conversation',exact:true}).click();await page.evaluate(stage=>(window as any).ownedVoiceNavigation[stage==='claim'?'releaseClaim':'releaseAck'](),stage);await page.waitForTimeout(400);expect(await page.evaluate(()=>({speech:(window as any).cloudNotesVoice.syntheses,starts:(window as any).cloudNotesVoice.starts,acks:(window as any).ownedVoiceNavigation.acks}))).toEqual({speech:0,starts:1,acks:1});const replies=await page.evaluate(()=>(window as any).ownedVoiceNavigation.requests.filter((request:any)=>request.path.endsWith('interact-result')));expect(replies).toHaveLength(1);expect(replies[0].body).toMatchObject({claimId:'claim-'+replies[0].body.requestId,success:stage==='ack',result:{switched:stage==='ack'}});await expect(page.locator('html')).toHaveAttribute('data-active-view',stage==='claim'?'home':'notes');await noPhysicalOrLocalVoice(page);});
 for(const change of ['user-navigation','account','selection'])test(`held ACK refuses voice continuation after ${change}`,async({page})=>{await setup(page);await page.evaluate(()=>(window as any).ownedVoiceNavigation.holdAck=true);await utterance(page);await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.acks)).toBe(1);await page.evaluate(async change=>{const f=(window as any).ownedVoiceNavigation;if(change==='user-navigation')f.shell.openView('calendar');else if(change==='account'){(window as any).cloudNotesVoice.owner='replacement';(await import('/src/runtime/connection-ui.tsx')).connectionController.close();}else{const {alphaClient}=await import('/src/runtime/alpha-client.ts');alphaClient.setViewContext({...alphaClient.getState().context,selectedObject:{kind:'note',id:'new-user-selection',revision:'2'}});}f.releaseAck();},change);await page.waitForTimeout(400);expect(await page.evaluate(()=>({speech:(window as any).cloudNotesVoice.syntheses,starts:(window as any).cloudNotesVoice.starts}))).toEqual({speech:0,starts:1});await noPhysicalOrLocalVoice(page);});
 
