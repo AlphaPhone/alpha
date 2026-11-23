@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ASR_BACKEND_ROLES, PARADEE_NATIVE, PARADEE_SOURCE, asrSlotFiles, verifyParadeeRuntime, type AsrBackend, type AsrSlot, type ParadeeBuildRecord, type ParadeeVoiceManifest} from './paradee-runtime.ts';
-import {readNativeBuildReceipt} from './native-build-inputs.ts';
+import {readNativeBuildReceipt, verifyNativeFileBytes, type NativeBuildReceipt} from './native-build-inputs.ts';
 
 export const VOICE_HOST_MANIFEST = 'android/voice-host/qualified-voice-host.json';
 export const VOICE_ASR_SLOT = 'android/paradee-voice/asr-inputs.json';
@@ -183,7 +183,7 @@ export function voiceBundleAdmission({names, read}: VoiceBundleEntries, host: Vo
  * speech roots and old upstream outputs must not masquerade as its absence.
  * This says nothing about a built APK, native capability or voice acceptance.
  */
-function voiceStagingState(root: string) {
+function voiceStagingState(root: string, receipt: NativeBuildReceipt | null) {
   const at = (relative: string) => {
     let current = path.resolve(root);
     const rootStat = fs.lstatSync(current);
@@ -207,8 +207,13 @@ function voiceStagingState(root: string) {
     if (entries.length > 64) throw Error('Voice staging ABI inventory is unbounded');
     for (const entry of entries) {
       if (entry.isSymbolicLink()) throw Error('Voice staging JNI sources contain a link');
-      if (entry.name === 'libparadeevoicejni.so' || entry.isDirectory() && at(`${rawJni}/${entry.name}/libparadeevoicejni.so`))
-        throw Error('Unrecorded voice JNI payload is staged in the application');
+      if (entry.name === 'libparadeevoicejni.so') throw Error('Unrecorded voice JNI payload is staged in the application');
+      if (!entry.isDirectory()) continue;
+      const library = `${rawJni}/${entry.name}/libparadeevoicejni.so`;
+      if (!at(library)) continue;
+      const recorded = receipt?.files.find(row => row.path === library);
+      if (!recorded) throw Error('Unrecorded voice JNI payload is staged in the application');
+      verifyNativeFileBytes(root, [recorded]);
     }
   };
   // AGP's ordinary main/build-type/flavor/variant overlays stay active in the
@@ -250,7 +255,7 @@ function voiceStagingState(root: string) {
  */
 export function verifyVoiceHost(root: string, {runtime = verifyParadeeRuntime, abis}: VoiceVerificationOptions = {}) {
   const selected = selectedAndroidAbis(abis);
-  const staging = voiceStagingState(root);
+  const staging = voiceStagingState(root, readNativeBuildReceipt(root));
   const record = readVoiceHost(root);
   const native = path.join(root, PARADEE_NATIVE);
   if (staging === 'absent') {
