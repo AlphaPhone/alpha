@@ -49,6 +49,9 @@ test('named note opening requires an explicit Notes or note reference',()=>{
   assert.equal(namedNoteOpenRequest('Show me my Browser Grocery note.'),'Browser Grocery');
   assert.equal(namedNoteOpenRequest('Open browser grocery in Notes.'),'browser grocery');
   assert.equal(namedNoteOpenRequest('Can you open the shopping list note, please?'),'shopping list');
+  assert.equal(namedNoteOpenRequest('Thank you. Can you open the note titled shopping list?'),'shopping list');
+  assert.equal(namedNoteOpenRequest('Can you open up that shopping list in the notes app, please?'),'shopping list');
+  assert.equal(namedNoteOpenRequest('Thanks. Don’t open the shopping list note.'),undefined);
   assert.equal(namedNoteOpenRequest('Could you open the trip budget note please?'),'trip budget');
   assert.equal(namedNoteOpenRequest('Open the note titled “Dinner, Please”.'),'Dinner, Please');
   assert.equal(namedNoteOpenRequest('Take me to my travel plans note.'),'travel plans');

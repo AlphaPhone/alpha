@@ -481,15 +481,16 @@ test('a spoken exact note title opens its editor from Home and keeps Talk listen
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
 });
 
-for(const mode of ['polite title','follow-up','one request','existing identical note'] as const)test(`Talk opens the actual saved note for a ${mode}`,async({page},info)=>{
+for(const mode of ['polite title','casual title','follow-up','one request','existing identical note'] as const)test(`Talk opens the actual saved note for a ${mode}`,async({page},info)=>{
  await setup(page,'sheet',false,true);
  await page.evaluate(mode=>{
   const f=(window as any).ownedVoiceNavigation;
   const at='2026-11-21T12:00:00Z';
   const make=(id:string,title:string)=>({id,title,body:'\nAvocados, limes, and cheese.',color:'yellow',createdAt:at,updatedAt:at});
   const note=make('record-from-receipt','Shopping List');
-  f.notes=[make('other-record',mode==='polite title'?'Taco Night Plan':'Shopping List')];
-  if(mode==='polite title')f.notes.push(note);
+  const named=mode==='polite title'||mode==='casual title';
+  f.notes=[make('other-record',named?'Taco Night Plan':'Shopping List')];
+  if(named)f.notes.push(note);
   else {
    f.answer=mode==='follow-up'?'I made the checklist.':'The list is saved, but I could not open it.';
    const reused=mode==='existing identical note';
@@ -500,7 +501,8 @@ for(const mode of ['polite title','follow-up','one request','existing identical 
    }]}];
    if(reused)f.notes.push(note);else f.noteToCommit=note;
   }
-  f.prompt=mode==='polite title'?'Can you open the shopping list note, please?':
+  f.prompt=mode==='polite title'?'Thank you. Can you open the note titled shopping list?':
+   mode==='casual title'?'Can you open up that shopping list in the notes app, please?':
    mode==='follow-up'?'Make a checklist in Notes and name it Shopping List.':
    'Make a checklist in Notes called Shopping List and open it.';
   f.releaseNotesRead();
@@ -519,7 +521,7 @@ for(const mode of ['polite title','follow-up','one request','existing identical 
  await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.shell.canonicalNotesUi.open)).toBe('record-from-receipt');
  await expect.poll(()=>page.evaluate(()=>(window as any).ownedVoiceNavigation.spoken.at(-1)))
   .toBe(mode==='one request'?'Saved and opened "Shopping List" in Notes.':'Opened "Shopping List" in Notes.');
- expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(mode==='polite title'?0:1);
+ expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(mode==='polite title'||mode==='casual title'?0:1);
  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
  await page.screenshot({path:info.outputPath('opened-note.png'),animations:'disabled'});

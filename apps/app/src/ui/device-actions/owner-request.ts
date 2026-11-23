@@ -14,8 +14,10 @@ function word(value: string) {
   return unquote(value).replace(/\.$/, "").toLowerCase();
 }
 
+const conversationalLead = /^(?:(?:thanks|thank you|okay|ok|sure|hmm+|um+|uh)[,.!]\s+)*/i;
+
 function noteCommand(text: string) {
-  return ownerCommand(text).replace(/[.!?]+$/, "")
+  return ownerCommand(text.trim().replace(conversationalLead, "")).replace(/[.!?]+$/, "")
     .replace(/(\b(?:note|notes app|in notes)|["”])\s+please$/i, "$1")
     .replace(/\s*,\s*please$/i, "").trim();
 }
@@ -24,14 +26,14 @@ function noteCommand(text: string) {
 export function namedNoteOpenRequest(text: string): string | undefined {
   const request = noteCommand(text);
   const command = request.replace(/^(?:(?:in|from) (?:the )?notes(?: app)?[, ]+|(?:open|(?:go|switch) to) (?:the )?notes(?: app| view)? and )/i, "")
-    .replace(/^(?:take me to|(?:go|switch) to) /i, "open ");
+    .replace(/^(?:open up|take me to|(?:go|switch) to) /i, "open ");
   const named = /^(?:open|show)(?: me)? (?:the |my )?note (?:called|named|titled) (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command);
   const quoted = /^(?:open|show)(?: me)? ((?:the |my )?note )?(".+"|“.+”)( in (?:the )?notes(?: app)?)?$/i.exec(command);
   const quotedTitle = quoted && (request !== command || quoted[1] || quoted[3]) ? quoted[2] : undefined;
   // In speech the owner can put the reference before or after “note”.
-  const shorthand = /^(?:open|show)(?: me)? (?:the |my )?(.+?) note(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
+  const shorthand = /^(?:open|show)(?: me)? (?:the |my |that )?(.+?) note(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
     ?? /^(?:open|show)(?: me)? (?:the |my )?note (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
-    ?? /^open (.+?) in (?:the )?notes(?: app)?$/i.exec(command);
+    ?? /^open (?:the |my |that )?(.+?) in (?:the )?notes(?: app)?$/i.exec(command);
   const target = named?.[1] ?? quotedTitle ?? shorthand?.[1];
   if (!target) return;
   const reference = target.replace(/^(?:a|an|the|my) /i, "").replace(/ (?:note|one)$/i, "");
@@ -66,7 +68,7 @@ const explicitSms = new RegExp(
 const textSms = new RegExp(String.raw`^text\s+(.+?)${smsBodySeparator}([\s\S]+)$`, "i");
 
 export function smsOwnerRequest(text: string) {
-  const command = ownerCommand(text.trim().replace(/^(?:(?:thanks|thank you|okay|ok|sure|hmm+|um+|uh)[,.!]\s+)*/i, ""));
+  const command = ownerCommand(text.trim().replace(conversationalLead, ""));
   const explicit = explicitSms.exec(command);
   const textCommand = textSms.exec(command);
   if (explicit) return {send: explicit[1].toLowerCase() === "send", recipient: word(explicit[2]), body: explicit[3] === undefined ? undefined : unquote(explicit[3])};
