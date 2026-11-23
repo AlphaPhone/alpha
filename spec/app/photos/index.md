@@ -266,17 +266,22 @@ pure def sometimesOwnBeforeAsking(s: Photos): bool =
 > told when they are loading, empty, locked, or could not be read, with a
 > way to try again.
 
-### Only the newest read's answer is shown, and only while Photos is showing
+### Only the newest read's answer is shown, only while Photos is showing, and a further page only adds older items
 
 An answer to an older read is refused. An album list answers the Albums
 tab; any other answer is the items of the grid, of which the phone says
-which Alpha's camera took. A further page joins the rows already listed by
-identity, so nothing listed is dropped; a page at a revision other than the
-first's reads the first page again. A selection keeps only the items still
+which Alpha's camera took. Items are numbered in the order they were taken,
+the newest highest, and the grid opens on the newest. A further page joins
+the rows already listed by identity, so nothing listed is dropped, and adds
+only items older than those listed; a page at a revision other than the
+first's, or one holding anything not older, means the library moved, and
+the first page is read again. A selection keeps only the items still
 listed, and "Add to album" closes when none of its selection is left.
 
 ```quint
 pure def canListed(s: Photos, ticket: int, by: Actor): bool = by == Phone and s.visible and R::canAnswer(s.library, ticket)
+
+pure def older(rows: Set[int], than: Set[int]): bool = rows.forall(r => than.forall(o => r < o))
 
 pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int], starred: Set[int], revision: int, more: bool, by: Actor): Done =
   val answered = { ...s, library: R::answer(s.library, ok), locked: false }
@@ -288,7 +293,7 @@ pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int
   val stars = (if (s.paging) s.starred.union(starred) else starred).intersect(whole)
   val kept = s.selected.intersect(whole)
   if (not(ok)) emit(List(), answered)
-  else if (s.paging and revision != s.revision) listing(List(), answered)
+  else if (s.paging and (revision != s.revision or not(older(rows, s.rows)))) listing(List(), answered)
   else emit(List(), {
     ...answered, rows: whole, mine: own, starred: stars, albums: if (items) s.albums else shown,
     more: more and items, revision: revision, selected: kept, selecting: s.selecting and items,
@@ -296,7 +301,8 @@ pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int
   })
 
 pure def stepAPageKeepsWhatWasListed(before: Photos, via: str, after: Photos): bool =
-  (via == "listed" and before.paging and after.library.status == R::Loaded) implies before.rows.subseteq(after.rows)
+  (via == "listed" and before.paging and after.library.status == R::Loaded)
+    implies (before.rows.subseteq(after.rows) and older(after.rows.exclude(before.rows), before.rows))
 ```
 
 ### The phone can say its library is locked until the phone is unlocked
