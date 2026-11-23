@@ -1,8 +1,11 @@
-// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"
+// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "HOME returns to Home and dismisses what is open above it"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"; spec/shell/overview.md, "Reminders that are overdue are reported by the reminder store and stay until handled"
 import { AccountBindings } from "../account/bindings.vibe"
 import { AccountSheet } from "../account/sheet.vibe"
 import { Entitlement } from "../account/entitlement.vibe"
 import { Assistant } from "../assistant/assistant.vibe"
+import { Machine as RemindersMachine } from "../../gen/clock__reminders.effect.vibe"
+import { Reminders } from "../clock/reminders.vibe"
+import { overdue } from "../clock/schedule.ts"
 import { Conversations } from "../assistant/conversations.vibe"
 import { DeviceFacts } from "../settings/facts.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
@@ -12,11 +15,12 @@ import { fillsLive, idleFill } from "./compose/fills.vibe"
 import { Foreground } from "./foreground.vibe"
 import { handoffsLive } from "./handoffs.vibe"
 import { Navigation } from "./navigation.vibe"
+import { Overview } from "./overview.vibe"
 import { pageEvents, pageHidden } from "./page.ts"
 
 /**
- * What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and returning, and the assistant's
- * dock; an invocation is taken at start, on every return, on each warm `alpha:assist-invocation`, and once the account settles the
+ * What the other areas follow of the shell: the foreground, HOME, covering screens, voice leaving and returning, the assistant's
+ * dock and the reminder store's overdue reminders on Home; an invocation is taken at start, on every return, on each warm `alpha:assist-invocation`, and once the account settles the
  * protected power launch's reference, with Android's keyguard as the foreground last read it.
  */
 export const integrationLive = Layer.effectDiscard(effect {
@@ -30,6 +34,9 @@ export const integrationLive = Layer.effectDiscard(effect {
   const navigation = try Navigation
   const foreground = try Foreground
   const bindings = try AccountBindings
+  const overview = try Overview
+  const reminders = try Reminders
+  const listing = try RemindersMachine
 
   effect function invocation() {
     const nav = try navigation.get()
@@ -87,6 +94,16 @@ export const integrationLive = Layer.effectDiscard(effect {
       speaking = nav.voice
     }
   })
+  // spec/shell/overview.md, "Reminders that are overdue are reported by the reminder store and stay until handled": each
+  // listing the reminder store publishes puts its overdue reminders on Home; the store is read once at start.
+  fork.scoped (effect {
+    for try (const listed of Stream.changesWith(listing.changes, (a, b) => a.published === b.published && a.loaded === b.loaded)) {
+      if (!listed.loaded) continue
+      const at = try Clock.currentTimeMillis
+      try overview.reportOverdue(overdue(listed.rows, at).map((row) => ({ id: row.id, title: row.title, at: row.dueAt })))
+    }
+  })
+  fork.scoped reminders.refresh()
   try entitlement.foreground(!pageHidden())
   try invocation()
 })
