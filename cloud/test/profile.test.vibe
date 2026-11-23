@@ -17,6 +17,8 @@ describe("Alpha Cloud deployment profile", () => {
     try check(() => assert.deepStrictEqual([...production.capabilities], ["inference", "speech", "maps", "managedGoogle", "billing"]))
     try check(() => assert.deepStrictEqual([...production.firstPartyOrigins], ["https://cloud.alphacompute.cc"]))
     try check(() => assert.strictEqual(production.inference?.models[0]?.id, "qwen-3.8-27b"))
+    try check(() => assert.strictEqual(production.inference?.models[0]?.defaultMaxTokens, 40960))
+    try check(() => assert.strictEqual(profile.environments.staging.inference?.models[0]?.defaultMaxTokens, 40960))
   })
 
   it.effect("refuses inputs that give both environments one database", () => effect {
