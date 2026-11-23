@@ -168,7 +168,7 @@ export const enrollmentService = Layer.effect(DeviceEnrollment, effect {
   }
 
   effect function credentialAt(slot: string) {
-    try adoptLegacySlot(slot, slot)
+    provide Native = native { try adoptLegacySlot(slot, slot) }
     const stored = try readSlot(slot)
     if (stored !== undefined) {
       const kept = try Schema.decodeUnknownEffect(DeviceCredential)(try Effect.try(() => JSON.parse(stored) as unknown))
