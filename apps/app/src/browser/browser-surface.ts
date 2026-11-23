@@ -3,6 +3,19 @@ import { WebPlugin } from '@capacitor/core';
 import {bookmarkDocument,browsingSessionDocument} from './preference-documents';
 import {normalizeBrowsing as normalize,type SavedBrowsing as Saved} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/browsing-session.ts';
 
+/** A saved bookmark row, in the native record's format: a bare address, or `{url,title}` when a title
+ * was saved. Records written before titles hold bare addresses only and read back untitled. */
+type BookmarkRow = string | {url: string; title?: string};
+type BookmarkList = {urls: string[]; entries: {url: string; title?: string}[]};
+/** Control characters become spaces; trimmed; at most 300 characters (the native store's rule). */
+export const bookmarkTitle=(title:unknown)=>String(title??'').replace(/[\x00-\x1f\x7f-\x9f]/g,' ').trim().slice(0,300);
+function bookmarkRow(row:unknown):{url:string;title?:string}|undefined{
+ if(typeof row==='string')return {url:row};
+ if(!row||typeof row!=='object'||typeof (row as Bag).url!=='string')return undefined;
+ const title=bookmarkTitle((row as Bag).title);return title?{url:(row as Bag).url,title}:{url:(row as Bag).url};
+}
+type Bag=Record<string,unknown>;
+function bookmarkList(rows:BookmarkRow[]):BookmarkList{const entries=rows.flatMap(row=>{const entry=bookmarkRow(row);return entry?[entry]:[];});return {urls:entries.map(entry=>entry.url),entries};}
 type Tab = { session: string; id: string; private: boolean; frame: HTMLIFrameElement; container: HTMLDivElement; link: HTMLAnchorElement; status:HTMLParagraphElement; history: string[]; position: number; sequence: number; navigation: number; loading: boolean; committed:boolean; error:string };
 /** Unprivileged web surfaces. Remote documents never receive the host bridge. */
 export class BrowserSurface extends WebPlugin {
@@ -63,8 +76,13 @@ export class BrowserSurface extends WebPlugin {
     }
   }
   async close(input:{session:string;id:string}) {const tab=this.tabs.get(this.key(input));tab?.container.remove();this.tabs.delete(this.key(input));}
-  async bookmarks() {return {urls:await bookmarkDocument.read<string[]>(()=>[])};}
-  async setBookmark(input:{url:string;saved:boolean}) {const url=this.address(input.url);return bookmarkDocument.edit<string[],{urls:string[]}>(()=>[],urls=>{const next=urls.filter(value=>value!==url);if(input.saved)next.unshift(url);urls.splice(0,urls.length,...next);return {urls:[...urls]};});}
+  async bookmarks() {return bookmarkList(await bookmarkDocument.read<BookmarkRow[]>(()=>[]));}
+  /** As the native store: an absent `title` keeps the saved one, a blank one removes it. */
+  async setBookmark(input:{url:string;saved:boolean;title?:string}) {const url=this.address(input.url);return bookmarkDocument.edit<BookmarkRow[],BookmarkList>(()=>[],rows=>{
+   const before=rows.find(row=>bookmarkRow(row)?.url===url),kept=before?bookmarkRow(before)?.title:undefined;
+   const title=input.title==null?kept:bookmarkTitle(input.title);
+   const next=rows.filter(row=>bookmarkRow(row)?.url!==url);if(input.saved)next.unshift(title?{url,title}:url);
+   rows.splice(0,rows.length,...next);return bookmarkList(rows);});}
   async share(input:{session:string;id:string;url:string;navigation:number}) {const tab=this.tab(input);if(!tab.committed||tab.loading||tab.error||document.hidden||tab.container.style.display==='none'||tab.navigation!==input.navigation||tab.history[tab.position]!==input.url)throw Error('The page changed. Share it again.');if(!navigator.share)throw Error('Sharing is unavailable in this browser. Use Copy text.');await navigator.share({url:input.url});}
   async browsingState() {return browsingSessionDocument.read<Saved>(()=>normalize({})).then(normalize);}
   async saveBrowsingState(input:Partial<Saved>) {const next=normalize(input);return browsingSessionDocument.edit<Saved,Saved>(()=>normalize({}),state=>{Object.assign(state,next);return next;});}

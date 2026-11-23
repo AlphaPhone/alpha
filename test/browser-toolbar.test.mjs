@@ -4,15 +4,22 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {browserAdapterHost} from '../specs/quint/refinement/application/browser-adapter-host.mjs';
 
-async function browser(run){
- // The native bookmark store keeps addresses only.
- let marks=[];
- const setBookmark=input=>{marks=input.saved?[...marks.filter(url=>url!==input.url),input.url]:marks.filter(url=>url!==input.url);return {urls:marks};};
- const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext','setBookmark','downloads','clearBrowsingData'],results:{bookmarks:()=>({urls:marks}),setBookmark,clearBrowsingData:()=>({closed:[]})}});
+/** `saved`: the native bookmark store's rows at start, as after a cold start; `untitled`: a host that
+ * predates bookmark titles and returns addresses only. The stand-in keeps the store's title rule:
+ * an absent title keeps the saved one, a blank one removes it. */
+async function browser(run,{saved=[],untitled=false}={}){
+ let rows=saved.map(row=>({...row}));
+ const list=()=>untitled?{urls:rows.map(row=>row.url)}:{urls:rows.map(row=>row.url),entries:rows.map(row=>({...row}))};
+ const setBookmark=input=>{
+  const before=rows.find(row=>row.url===input.url),title=input.title===undefined?before?.title:input.title.trim()||undefined;
+  rows=rows.filter(row=>row.url!==input.url);if(input.saved)rows=[{url:input.url,...(title?{title}:{})},...rows];
+  return list();
+ };
+ const host=await browserAdapterHost({instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext','setBookmark','downloads','clearBrowsingData'],results:{bookmarks:list,setBookmark,clearBrowsingData:()=>({closed:[]})}});
  let sequence=0;
  const page=async(id,url,title)=>{host.emit('stateChanged',{id,sequence:++sequence,navigation:'n'+sequence,url,title,committed:true,loading:false,canBack:false,canForward:false,error:''});await host.sync();};
  const type=async address=>{host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();return host.state().cur;};
- try{await run({host,page,type});}finally{await host.teardown();}
+ try{await run({host,page,type,store:()=>rows});}finally{await host.teardown();}
 }
 
 test('opening Find focuses its field once, so the keyboard opens with it',async()=>{
@@ -119,6 +126,66 @@ test('clearing browsing data keeps the names saved with bookmarks',async()=>{
   assert.deepEqual(host.state().visits,[]);
   assert.deepEqual(host.state().titles,{'https://kept.example/recipe':'Lentil soup'},'the bookmark keeps its name; the visit-only name is cleared');
  });
+});
+
+test('bookmarking a page sends its name to the store, which keeps it with the address',async()=>{
+ await browser(async({host,page,type,store})=>{
+  const id=await type('https://kept.example/recipe');await page(id,'https://kept.example/recipe','Lentil\u0007soup');
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  const saving=host.calls.filter(call=>call.name==='setBookmark').at(-1).input;
+  assert.equal(saving.saved,true);assert.equal(saving.title,'Lentil soup','the committed page name, cleaned');
+  assert.deepEqual(store(),[{url:'https://kept.example/recipe',title:'Lentil soup'}]);
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  const removing=host.calls.filter(call=>call.name==='setBookmark').at(-1).input;
+  assert.equal(removing.saved,false);assert.equal('title' in removing,false,'removing sends no name');
+  assert.deepEqual(store(),[]);
+ });
+});
+
+test('a bookmark saved from a private tab sends its name too, as its address is saved',async()=>{
+ await browser(async({host,page,type,store})=>{
+  host.rendered().openPrivate();await host.sync();
+  const id=await type('https://private.example/recipe');await page(id,'https://private.example/recipe','Lentil soup');
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  assert.deepEqual(store(),[{url:'https://private.example/recipe',title:'Lentil soup'}]);
+  assert.deepEqual(host.state().visits,[],'the private visit is still not kept');
+ });
+});
+
+test('a page without a name is bookmarked without one, keeping any name the store has',async()=>{
+ await browser(async({host,page,type})=>{
+  const id=await type('https://untitled.example/a');await page(id,'https://untitled.example/a','');
+  host.rendered().toggleMark();await host.settle();await host.sync();
+  assert.equal('title' in host.calls.filter(call=>call.name==='setBookmark').at(-1).input,false);
+ });
+});
+
+test('after a cold start, bookmarks show the names saved with them; untitled ones show their site',async()=>{
+ await browser(async({host})=>{
+  assert.deepEqual(host.state().marks,['https://kept.example/recipe','https://old.example/page']);
+  assert.deepEqual(host.state().visits,[],'nothing was visited since the start');
+  host.rendered().openLib();await host.sync();
+  const rows=host.rendered().libRows;
+  assert.deepEqual(rows.map(row=>row.name),['Lentil soup','old.example'],'a bookmark saved before titles shows its site');
+  host.rendered().onLibQuery({target:{value:'lentil'}});
+  assert.deepEqual(host.rendered().libRows.map(row=>row.id),['https://kept.example/recipe'],'the saved name can be searched');
+ },{saved:[{url:'https://kept.example/recipe',title:'Lentil soup'},{url:'https://old.example/page'}]});
+});
+
+test('a name seen since the start is newer than the one saved with the bookmark',async()=>{
+ await browser(async({host,page,type})=>{
+  const id=await type('https://kept.example/recipe');await page(id,'https://kept.example/recipe','Lentil soup, revised');
+  host.rendered().openLib();await host.sync();
+  assert.equal(host.rendered().libRows[0].name,'Lentil soup, revised');
+ },{saved:[{url:'https://kept.example/recipe',title:'Lentil soup'}]});
+});
+
+test('a host that returns addresses only shows each bookmark by its site',async()=>{
+ await browser(async({host})=>{
+  host.rendered().openLib();await host.sync();
+  assert.deepEqual(host.rendered().libRows.map(row=>row.name),['kept.example']);
+  assert.deepEqual(host.state().titles,{});
+ },{saved:[{url:'https://kept.example/recipe',title:'Lentil soup'}],untitled:true});
 });
 
 test('the Downloads list\'s Show in Files opens Files at Downloads for this Browser only',async()=>{
