@@ -788,7 +788,7 @@ export class DeviceActionCoordinator<
       contactMatches?: (
         query: string,
         signal: AbortSignal,
-      ) => Promise<string[] | null>;
+      ) => Promise<ContactMatchNames | null>;
     } = {},
   ) {
     this.ports = ports;
@@ -1201,7 +1201,7 @@ export class DeviceActionCoordinator<
   private card(
     proposal: DeviceProposal,
     context: C,
-    contacts?: string[],
+    contacts?: ContactMatchNames,
   ): DeviceActionProposalCard {
     const op = proposal.operation;
     const readReply = proposal.readReplyOrigin
@@ -1522,7 +1522,7 @@ export class DeviceActionCoordinator<
         contactOp.type === "contact_update" ||
         contactOp.type === "contact_delete"
       ) {
-        let names: string[] | null = null;
+        let names: ContactMatchNames | null = null;
         if (!this.missingContacts.has(proposal.id)) {
           try {
             names =
@@ -1534,7 +1534,7 @@ export class DeviceActionCoordinator<
           assertCurrentReview();
           // An address book that answered with no match is final for this
           // request; one that could not be read is asked again next time.
-          if (names && !names.length)
+          if (names && !names.names.length)
             this.missingContacts.set(proposal.id, false);
         }
         if (this.missingContacts.has(proposal.id)) {
@@ -1554,9 +1554,9 @@ export class DeviceActionCoordinator<
             }
             assertCurrentReview();
           }
-          names = [];
+          names = { names: [], more: false };
         }
-        if (!names?.length) {
+        if (!names?.names.length) {
           items.push({
             proposalId: proposal.id,
             proposal: null,
@@ -3768,13 +3768,20 @@ function keypadGrounded(
   return false;
 }
 /**
+ * The phone contacts a contact change or deletion would be offered for, as
+ * its executor looks them up. `more`: further contacts match than the lookup
+ * lists, so `names` is not every match.
+ */
+export type ContactMatchNames = { names: string[]; more: boolean };
+/**
  * The contact a change or deletion applies to, as the phone's lookup named it.
  * Several matches: the owner picks one in the phone's own review after approval.
  */
 function contactTarget(
   query: string,
-  found: string[] | undefined,
+  matches: ContactMatchNames | undefined,
 ): { line: string; choice: string } {
+  const found = matches?.names;
   if (!found?.length) return { line: `Contact: ${query}`, choice: "" };
   // A provider name is only length-checked. Line breaks, other controls and
   // bidi overrides in it must not add or reorder lines on the card the owner
@@ -3786,6 +3793,13 @@ function contactTarget(
         .replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩\s]+/gu, " ")
         .trim() || UNNAMED_CONTACT,
   );
+  // The lookup lists a bounded number of matches: when more exist, the card
+  // never presents the listed ones as every contact that matches.
+  if (matches?.more)
+    return {
+      line: `More than ${contacts.length} ${contacts.length === 1 ? "contact matches" : "contacts match"} “${query}”, including: ${contacts.join(", ")}. For one not listed, ask again with the full name.`,
+      choice: " You choose which one on your phone after you confirm.",
+    };
   if (contacts.length === 1)
     return { line: `Contact: ${contacts[0]}`, choice: "" };
   return {
@@ -3795,7 +3809,7 @@ function contactTarget(
 }
 function describeTelephonyAction(
   operation: TelephonyActionOperation,
-  contacts?: string[],
+  contacts?: ContactMatchNames,
 ): {
   title: string;
   description: string;

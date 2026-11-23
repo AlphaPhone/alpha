@@ -28,6 +28,7 @@ function bridge() {
   const ports = {
     current() {}, normalize: value => value.replace(/[^+\d]/g, '') || null, ask: async () => 0,
     searchContacts: async () => [{id: '1', displayName: 'Ana Torres', phoneNumbers: ['+15555550101']}],
+    contactForNumber: async () => null,
     getContact: async id => ({id, version: 'a'.repeat(64), displayName: 'Ana Torres', phoneNumbers: [{number: '+15555550101', type: 'mobile'}], emailAddresses: []}),
     placeCall: async number => { effects.push(['placeCall', number]); return {status: 'placed'}; },
     sendSms: async number => { effects.push(['sendSms', number]); return 'submitted'; },

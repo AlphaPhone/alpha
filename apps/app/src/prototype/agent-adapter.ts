@@ -346,7 +346,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const client=createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true);
     const found=await contactWriteTargets(query,{searchContacts:(text,limit)=>client.searchContacts(text,limit),...imageContactPorts(registerPlugin<any>('AlphaContacts'),()=>signal.throwIfAborted())});
     signal.throwIfAborted();
-    return found&&found.map(contact=>contactChoiceName(contact.displayName));
+    return found&&{names:found.contacts.map(contact=>contactChoiceName(contact.displayName)),more:found.more};
   });
   let activeShell:Shell|null=null,notesRecovery:AbortController|null=null;
   /** Visible modal panels that are not <dialog>s (digest panel, inline reviews), topmost last. */
@@ -1148,6 +1148,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
+          // Android's exact number matching (AlphaTelephonyPlugin.contactForNumber), so a new contact's
+          // number already saved under another name is shown before it is added again.
+          contactForNumber:async number=>{
+            const found=await registerPlugin<{contactForNumber(input:{number:string}):Promise<unknown>}>('AlphaTelephony').contactForNumber({number});
+            const name=(found as {name?:unknown}|null)?.name;
+            if(name===null)return null;
+            if(typeof name!=='string')throw Object.assign(Error('Contacts answered unexpectedly'),{code:'unavailable'});
+            return name;
+          },
           placeCall:number=>client.placeCall(number),
           ...imageContactPorts(book,current),
           sendSms:imageSmsPort(texts,expectedContext,current),

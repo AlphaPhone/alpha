@@ -41,7 +41,7 @@ import {
   requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
 import {smsSimLabel} from '../ui/telephony/sms-card-facts';
-import type {BrowserTabsClosing} from '../ui/device-actions/client-coordinator';
+import type {BrowserTabsClosing, ContactMatchNames} from '../ui/device-actions/client-coordinator';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
 import {isReminderOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
@@ -122,9 +122,10 @@ export function setBrowserTabsClosing(read: (proposalId:string)=>BrowserTabsClos
   browserTabsClosing=read;
 }
 /** The names of the phone contacts a contact change or deletion would be offered for, looked up
- * as its executor will; null when Contacts cannot be read. Unset, no such card is offered. */
-let contactReviewMatches: ((query:string,signal:AbortSignal)=>Promise<string[]|null>)|undefined;
-export function setContactReviewMatches(read: (query:string,signal:AbortSignal)=>Promise<string[]|null>) {
+ * as its executor will (`more`: further contacts match than it lists); null when Contacts cannot be
+ * read. Unset, no such card is offered. */
+let contactReviewMatches: ((query:string,signal:AbortSignal)=>Promise<ContactMatchNames|null>)|undefined;
+export function setContactReviewMatches(read: (query:string,signal:AbortSignal)=>Promise<ContactMatchNames|null>) {
   contactReviewMatches=read;
 }
 export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,WorkflowPhoneReview> {

@@ -6,7 +6,7 @@
  * the app or a cancelled request chooses nothing. The rows render inside the chat card whose
  * approval is running (AP-16 D8: the proposal card is the one approval surface, never a modal).
  */
-import {sameContactNumber, type ContactDraft, type ContactRecord, type TelephonyReview} from '../runtime/telephony-executor';
+import {CONTACT_CALL_LOOKUP_LIMIT, sameContactNumber, type ContactDraft, type ContactRecord, type TelephonyReview} from '../runtime/telephony-executor';
 import {displayNumber, initials} from './telephony-presenters';
 import type {BrowserTabChoice} from './browser-adapter';
 
@@ -46,7 +46,8 @@ export function contactChangeLines(before: ContactRecord, after: ContactDraft): 
 export function presentTelephonyReview(entry: Pending | null) {
   if (!entry) return {open: false, rows: [] as never[], dismiss: () => {}};
   const {review, settle} = entry;
-  const style = (lines: {text: string; struck: boolean; added: boolean}[]) => lines.map(line => ({text: line.text, decoration: line.struck ? 'line-through' : 'none', color: line.struck ? 'var(--mut)' : 'var(--fg)', weight: line.added ? 600 : 400}));
+  // `change` says in words what a contact change does to a line, for a card that cannot rely on the strike alone.
+  const style = (lines: {text: string; struck: boolean; added: boolean; change?: Change}[]) => lines.map(line => ({text: line.text, decoration: line.struck ? 'line-through' : 'none', color: line.struck ? 'var(--mut)' : 'var(--fg)', weight: line.added ? 600 : 400, change: line.change}));
   const plain = (text: string) => [{text, struck: false, added: false}];
   const rows = review.options.map((option, index) => {
     const choose = () => settle(index);
@@ -63,14 +64,19 @@ export function presentTelephonyReview(entry: Pending | null) {
       // The same request offered both ways says which row keeps the contact's other numbers and addresses.
       const way = change.keeps === 'add' ? 'Add (keep existing)' : change.keeps === 'replace' ? 'Replace' : '';
       return {ini: initials(change.after.displayName || change.before.displayName), name: change.after.displayName || change.before.displayName,
-        lines: style([...(way ? [{text: way, struck: false, added: true}] : []), ...(renamed ? [{text: change.before.displayName, struck: true, added: false}] : []), ...contactChangeLines(change.before, change.after)]), choose, icon: change.keeps === 'add' ? ICON.add : ICON.save, bg: 'var(--acc)',
+        lines: style([...(way ? [{text: way, struck: false, added: true}] : []), ...(renamed ? [{text: change.before.displayName, struck: true, added: false, change: 'rename' as const}] : []),
+          ...contactChangeLines(change.before, change.after).map(line => ({...line, change: line.struck ? 'remove' as const : line.added ? 'add' as const : 'keep' as const}))]), choose, icon: change.keeps === 'add' ? ICON.add : ICON.save, bg: 'var(--acc)',
         label: way ? `${way}: save changes to ${change.before.displayName}` : `Save changes to ${change.before.displayName}`}; }
     const contact = option as ContactRecord;
     return {ini: initials(contact.displayName), name: contact.displayName, lines: style(contactLines(contact).slice(0, 2).flatMap(plain)),
       choose, icon: ICON.delete, bg: 'var(--alpha-call-red)', label: `Delete ${contact.displayName}`};
   });
-  return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', dismiss: () => settle(null)};
+  // The lookup read one contact past what the review lists: the owner is told the list is not every match.
+  const note = review.kind !== 'tab' && review.kind !== 'contact-create' && review.more ? `Only the first ${CONTACT_CALL_LOOKUP_LIMIT} matching contacts are shown. For another one, ask again with their full name.` : '';
+  return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', note, dismiss: () => settle(null)};
 }
+type Change = 'remove' | 'add' | 'keep' | 'rename';
+const CHANGE_WORD: Record<Change, string> = {remove: 'Remove ', add: 'Add ', keep: 'Keep ', rename: 'Rename from '};
 type Review = ReturnType<typeof presentTelephonyReview>;
 type Row = {id?: unknown; c?: {proposalId?: unknown} & Record<string, unknown>; cProposal?: boolean; cDigest?: boolean; [key: string]: unknown};
 /**
@@ -87,7 +93,11 @@ export function placeTelephonyReview(msgs: Row[], review: Review, approving: unk
   return msgs.map((m, index) => {
     if (index !== at) return m;
     if (m.cProposal) return {...m, c: {...m.c, reviewing: review}, proposalAsk: false};
-    return {...m, rows: [...review.rows.map(row => ({ini: row.ini, who: row.name, text: row.lines.map(line => line.text).join(' · '), icon: row.icon, open: row.choose, label: row.label})),
+    // Each line keeps its own wrapping line, strike and weight, and a contact change names in words
+    // what it removes, adds and keeps: a flattened one-line list would show a removed number as kept.
+    const marks = (lines: Review['rows'][number]['lines']) => lines.map(({change, ...line}) => ({...line, text: change ? CHANGE_WORD[change] + line.text : line.text}));
+    return {...m, rows: [...review.rows.map(row => ({ini: row.ini, who: row.name, text: '', marks: marks(row.lines), icon: row.icon, open: row.choose, label: row.label})),
+      ...(review.note ? [{ini: '', who: 'More matches', text: review.note, icon: '', disabled: true}] : []),
       {ini: '', who: 'Not now', text: 'Nothing is called, sent or changed.', icon: ICON.dismiss, open: review.dismiss}]};
   });
 }

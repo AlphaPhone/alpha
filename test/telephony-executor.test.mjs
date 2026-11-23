@@ -26,6 +26,7 @@ function ports(overrides = {}) {
     current() {}, normalize: value => { const digits = value.replace(/[\s().-]/g, ''); return /^\+?[0-9]{2,20}$/.test(digits) ? digits : null; },
     ask: async review => { log.push(['ask', review]); return 0; },
     searchContacts: async (query, limit) => { log.push(['search', query, limit]); return [priya]; },
+    contactForNumber: async number => { log.push(['number', number]); return null; },
     placeCall: async number => { log.push(['call', number]); return {status: 'placed'}; },
     getContact: async id => { log.push(['get', id]); return record(id); },
     saveContact: async (draft, target) => { log.push(['save', draft, target]); return {status: 'saved'}; },
@@ -460,4 +461,41 @@ test('a new contact whose number another contact holds with a country code is sh
   const p = ports({searchContacts: async () => [{id: '9', displayName: 'Robert', phoneNumbers: ['+14155550100']}]});
   await run({type: 'contact_create', contact: {displayName: 'Bob Lee', phoneNumbers: ['4155550100'], emailAddresses: []}}, p);
   assert.equal(did(p, 'ask')[0]?.[1].kind, 'contact-create');
+});
+
+// Review (contacts-approval): the lookup reads one row past what the phone lists, so a review that
+// could not offer every matching contact says so instead of passing ten off as all of them.
+test('more matching contacts than the review can list are flagged on the review and never offered silently', async () => {
+  const many = count => Array.from({length: count}, (_, index) => ({id: String(index + 1), displayName: `John ${String.fromCharCode(65 + index)}`, phoneNumbers: [`+1415555${String(index).padStart(4, '0')}`]}));
+  for (const [count, more] of [[11, true], [10, false]]) {
+    for (const operation of [{type: 'contact_delete', query: 'John'}, {type: 'contact_update', query: 'John', set: {displayName: 'Jon'}}, {type: 'phone_call', target: {kind: 'contact', query: 'John'}}, {type: 'sms_compose', target: {kind: 'contact', query: 'John'}, body: 'hi'}]) {
+      const p = ports({searchContacts: async (query, limit) => { p.log.push(['search', query, limit]); return many(count).slice(0, limit); }, ask: async review => { p.log.push(['ask', review]); return null; }});
+      await run(operation, p);
+      assert.deepEqual(did(p, 'search').map(([, , limit]) => limit), [11], operation.type);
+      const [[, review]] = did(p, 'ask');
+      assert.equal(review.more, more ? true : undefined, `${operation.type} ${count}`);
+      assert.equal(new Set(review.options.map(option => option.id ?? option.before?.id)).size, 10, `${operation.type} offers the ten it listed`);
+      assert.equal(did(p, 'get').length, operation.type.startsWith('contact') ? 10 : 0, 'the row past the limit is never read');
+    }
+  }
+  const {contactWriteTargets} = await import(pathToFileURL(join(dir, 'executor.mjs')));
+  const targets = await contactWriteTargets('John', {searchContacts: async (query, limit) => many(12).slice(0, limit), getContact: async id => record(id)});
+  assert.deepEqual([targets.contacts.length, targets.more], [10, true]);
+});
+test('a new contact whose number is saved under another name is shown as that contact first', async () => {
+  // "Add contact Mom 415-555-0100" while that number is saved as Mother: the name search finds nobody.
+  const p = ports({searchContacts: async query => { p.log.push(['search', query]); return []; }, contactForNumber: async number => { p.log.push(['number', number]); return number === '4155550100' ? 'Mother' : null; }, ask: async review => { p.log.push(['ask', review]); return null; }});
+  const out = await run({type: 'contact_create', contact: {displayName: 'Mom', phoneNumbers: ['5105550164', '4155550100'], emailAddresses: []}}, p);
+  assert.deepEqual(did(p, 'number').map(([, number]) => number), ['5105550164', '4155550100']);
+  assert.deepEqual(did(p, 'ask').map(([, review]) => review), [{kind: 'contact-create', options: [{name: 'Mother', numbers: ['4155550100']}]}]);
+  assert.deepEqual(did(p, 'save'), [], 'Not now saves nothing');
+  assert.equal(out.telephonyResult.status, 'cancelled');
+  // A number nobody holds asks nothing and saves.
+  const free = ports({searchContacts: async () => [], contactForNumber: async () => null});
+  assert.equal((await run({type: 'contact_create', contact: {displayName: 'Mom', phoneNumbers: ['4155550100'], emailAddresses: []}}, free)).telephonyResult.status, 'saved');
+  assert.deepEqual(did(free, 'ask'), []);
+  // A number lookup that fails is not "no twin": nothing is saved unseen.
+  const broken = ports({searchContacts: async () => [], contactForNumber: async () => { throw Object.assign(Error('closed'), {code: 'unavailable'}); }});
+  assert.equal((await run({type: 'contact_create', contact: {displayName: 'Mom', phoneNumbers: ['4155550100'], emailAddresses: []}}, broken)).telephonyResult.status, 'unavailable');
+  assert.deepEqual(did(broken, 'save'), []);
 });
