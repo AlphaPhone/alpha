@@ -62,7 +62,7 @@ export service AgentViews {
   /** This renderer's id, as every turn and view route names it. */
   readonly clientId: string
   /** The fields a turn carries so its prepared view can be delivered here; none on a screen the assistant does not observe. */
-  turnFields(observed: boolean, view: string): ViewTurnFields | undefined!!
+  turnFields(observed: boolean, view: string): (ViewTurnFields | undefined)!!
   /** Deliver the view a reply's action results prepared, only while the screen is still `contextKey`, the one the turn was sent from. */
   deliver(results: readonly { readonly action: string; readonly data: unknown }[], contextKey: string): ViewDelivery!!
   /** Follow the agent's view commands for this renderer, starting the feed when it is not followed already; called on each use of the connection. */

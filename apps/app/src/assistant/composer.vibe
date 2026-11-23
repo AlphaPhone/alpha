@@ -1,5 +1,5 @@
-// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"
-import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type TurnResult } from "@elizaos/agent/client"
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/views.md, "A prepared view opens once under a returned claim, only while the screen and the session are the ones the turn was sent from, and every claim is settled once"; spec/assistant/emailCard.md, "Cards are kept per message on their conversation's shelf, staged once, edited only at the version shown, and an unedited card goes under its owner turn's identity"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"
+import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type ReplyStreamHooks, type TurnResult } from "@elizaos/agent/client"
 import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
 import { Machine as SendsMachine, timedAsVoice, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
 import { Machine as ReplyMachine, machine as replyMachine, refusedBeforeOutput, offersManagePlan, type ReplyView } from "../../gen/assistant__reply.effect.vibe"
@@ -7,12 +7,13 @@ import { Machine as StoppedMachine, recentTurnMs, type ReadKind } from "../../ge
 import { Machine as ClientMachine, canReplyWith } from "../../gen/assistant__conversation.effect.vibe"
 import { Machine as RecoveryMachine } from "../../gen/assistant__recovery.effect.vibe"
 import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
+import { statesDirectRequests } from "../../gen/assistant__review.effect.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
 import { namesMaps, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
 import { Preferences } from "../settings/preferences.vibe"
 import { Latency } from "../voice/latency.vibe"
 import type { DictationTarget } from "../voice/dictation.vibe"
-import { browserTabObject, pageForTurn } from "./browser-page.vibe"
+import { browserTabObject, pageForTurn, wirePage } from "./browser-page.vibe"
 import { ChatAttachments } from "./attachments.vibe"
 import { Conversations } from "./conversations.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
@@ -27,7 +28,6 @@ import { timerCeilingMs } from "../../gen/assistant__approvals.effect.vibe"
 import { turnTransport } from "./transport.vibe"
 import { bindingOf, textOf, unitsOf } from "./units.vibe"
 import { EmailShelf, type EmailRow } from "./email-shelf.vibe"
-import type { AcknowledgingHooks } from "./cue.vibe"
 import { AgentViews, type ViewDelivery } from "./views.vibe"
 
 /** What the composer is doing to a sent message: quoting it in a reply, or correcting it. */
@@ -333,7 +333,8 @@ export const composerLayer = Layer.effect(Composer, effect {
     const observed = observes(screen.exposure)
     const peer = try host.peer()
     const place = try location.forTurn(observed, peer.takesLocation)
-    try sources.preferReview(try preferences.asksBeforeActions())
+    const asksFirst = try preferences.asksBeforeActions()
+    try sources.preferReview(asksFirst)
     const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
     const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
@@ -349,10 +350,15 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...(day === undefined ? {} : { calendarDay: day }),
       ...(place === undefined ? {} : { location: place }),
     } : undefined
-    const context = encodeTurnContext(observation === undefined ? {} : { observation }, { optionalFields: peer.optionalFields })
-    const browserPage = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.browserPage === true)
+    const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
+    const browserPage = page === undefined ? undefined : wirePage(page)
+    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    const context = encodeTurnContext({
+      ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
+      ...(voiceUi === undefined ? {} : { voiceUi }),
+    }, { optionalFields: peer.optionalFields })
     const viewFields = try views.turnFields(observed, screen.observation.view)
-    const pageLinks = (browserPage?.links ?? []).map((link) => link.url)
+    const pageLinks = browserPage === undefined ? [] : (page?.links ?? []).map((link) => link.url)
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
     const quote = aimed?.kind === "reply" ? aimed.quote : undefined
@@ -371,9 +377,9 @@ export const composerLayer = Layer.effect(Composer, effect {
     try latency.draftSent(timed ? composed : "")
     try quiet(sends.send({ type: "transportCall", id: attempt }))
     const labelled = (label: string) => rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, label: label.slice(0, 160) } : row))
-    // The agent's acknowledgment frame is the turn's one acknowledgement; an agent that sends none acknowledges from
-    // the text shown before its first tool. The reply machine takes whichever comes first and refuses the other.
-    const hooks: AcknowledgingHooks = {
+    // The agent's acknowledgment frame is the turn's one acknowledgement and stays the working label until text or the
+    // reply arrives; a tool frame never acknowledges, and its label or a status never replaces the acknowledgment.
+    const hooks: ReplyStreamHooks = {
       onPreview: (text, provisional) => {
         if (!streamed) {
           streamed = true
@@ -393,14 +399,14 @@ export const composerLayer = Layer.effect(Composer, effect {
         try labelled(text)
         pushView("")
       }),
-      onTool: (_name: string, label?: string) => runFork(effect {
+      onTool: (_name: string, label: string | undefined) => runFork(effect {
         try quiet(view.send({ type: "toolStarts" }))
         if (label !== undefined && !acknowledgedByFrame) try labelled(label)
         pushView("")
       }),
     }
     const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
-      { text: composed, metadata: { ...context, ...(viewFields ?? {}), ...(browserPage === undefined ? {} : { clientDevice: { browserPage } }) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
+      { text: composed, metadata: { ...context, ...(viewFields ?? {}) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
       { stream: hooks },
     )))
     const outcome = try classify(result, attempt, streamed)

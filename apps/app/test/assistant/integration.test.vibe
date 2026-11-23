@@ -124,7 +124,7 @@ it.effect("Find what a card is about (spec/assistant/review.md, \"A card opens t
 
 it.effect("A page link stays a card even when its family grounds it (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
   const runs = { count: 0 }
-  const page = { tabId: "t1", revision: "r1", url: "https://news.example.com/today", title: "Today", capturedAt: 1, links: [{ url: "https://news.example.com/story-2", text: "Second story" }] }
+  const page = { tabId: "t1", revision: "r1", url: "https://news.example.com/today", title: "Today", capturedAt: 1, text: "Top stories", truncated: false, links: [{ url: "https://news.example.com/story-2", text: "Second story" }] }
   const story = wireProposal("p21", digest("f"), { type: "browser_navigate", url: "https://news.example.com/story-2" }, "u1")
   provide assistantOver(
     fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Opening it." }, proposals: [story] }),

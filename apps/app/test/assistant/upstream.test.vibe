@@ -13,7 +13,7 @@ import type { PageObservation } from "../../src/assistant/ports.vibe"
 
 const page = {
   tabId: "t1", revision: "r1", url: "https://news.example.com/today#top", title: "Today\nin brief", capturedAt: 1,
-  text: "Top stories", links: [{ url: "https://news.example.com/story-2", text: "Second story" }, { url: "http://plain.example.com/", text: "Insecure" }],
+  text: "Top stories", truncated: false, links: [{ url: "https://news.example.com/story-2", text: "Second story" }, { url: "http://plain.example.com/", text: "Insecure" }],
 }
 
 effect function transcriptNow() {
@@ -32,7 +32,7 @@ function turnBodies(seen: Seen): readonly unknown[] {
 }
 
 function pageOf(body: unknown): unknown {
-  return (body as { readonly metadata?: { readonly clientDevice?: { readonly browserPage?: unknown } } } | undefined)?.metadata?.clientDevice?.browserPage
+  return (body as { readonly metadata?: { readonly browserPage?: unknown } } | undefined)?.metadata?.browserPage
 }
 
 /** Executors whose every operation is a Browser open the owner did not type. */
@@ -148,6 +148,21 @@ it.effect("Let my agent read the page I have open in Browser (spec/assistant/con
   ))
 })
 
+it.effect(`A turn tells the agent direct requests are allowed only with review-first off (spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off")`, () => effect {
+  const sent = effect function (asks: boolean) {
+    const seen: Seen = { calls: [] }
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Done." }, proposals: [] }), fakeHost([]), countingExecutors({ count: 0 }), noNative, fakePreferences({ asks, shares: false })) {
+      const composer = try Composer
+      try composer.edit("Open Settings")
+      try composer.send()
+      return (turnBodies(seen)[0] as { readonly metadata?: { readonly voiceUi?: unknown } } | undefined)?.metadata?.voiceUi
+    }
+  }
+  const direct = try sent(false)
+  const asking = try sent(true)
+  try Effect.try(() => assert.deepStrictEqual({ direct, asking }, { direct: { agentActionMode: "direct-request-v1" }, asking: undefined }))
+})
+
 it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
   const runs = { count: 0 }
   const story = wireProposal("p11", "f".repeat(64), { type: "browser_navigate", url: "https://news.example.com/story-2" }, "u1")
@@ -221,6 +236,16 @@ it.effect(`a reply ready before the cue is audible drops it (spec/assistant/repl
   try cue.replyReady()
   try TestClock.adjust("2 seconds")
   try Effect.try(() => assert.deepStrictEqual(heard, ["asked:On it."]))
+})
+
+it.effect(`a cue that arrives only after the reply is ready is never said (spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s")`, () => effect {
+  const heard: string[] = []
+  const cue = try spokenCue(cueSpeaker(heard, 0, 1000))
+  try cue.replyReady()
+  try cue.say("Sure.")
+  try settle()
+  try TestClock.adjust("2 seconds")
+  try Effect.try(() => assert.deepStrictEqual(heard, []))
 })
 
 it.effect(`an audible cue finishes before the reply, and a long one is cut at 2.5 s (spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s")`, () => effect {

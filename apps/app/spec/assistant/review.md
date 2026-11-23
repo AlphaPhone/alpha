@@ -31,7 +31,11 @@ reading reminders, reading the place or route Maps shows, reading or changing Ca
 folder), changing Photos, and calls, texts and contact changes always need
 review. An operation that would change a setting never becomes
 a card. A Browser open needs the address the owner typed and runs at most
-once per message.
+once per message. With review-first off, each turn tells the agent so, as
+the turn context's `voiceUi.agentActionMode` `direct-request-v1`
+(`spec/agent/conversation/turnContext.md` of Eliza), so that it binds a
+proposal of the owner's own request to the message; with review-first on
+or unreadable the turn says nothing, and every proposal comes as a card.
 
 ```quint
 type Op = OpenView | OpenSettings | CreateNote | BrowserNavigate | CameraCapture | FilesOpen | CreateReminder | NotesRead
@@ -94,12 +98,19 @@ pure def alwaysASettingIsOnlyEverNavigated(c: Custody): bool =
   c.op == SettingsWrite implies (not(c.card) and not(c.busy) and c.dispatches == 0 and c.journal == JournalEmpty)
 pure def alwaysAWorkflowStepIsNeverDirect(c: Custody): bool = c.workflow implies (not(directAuthority(c)) and not(c.busy and c.authority == ByRequest))
 pure def alwaysOneBrowserOpenPerMessage(c: Custody): bool = c.browserAuto <= 1
+pure def statesDirectRequests(reviewFirst: Preference): bool = reviewFirst == PreferenceOff
+pure def lawATurnStatesDirectRequestsOnlyWithReviewFirstOff(reviewFirst: Preference): bool =
+  statesDirectRequests(reviewFirst) iff not(asks(prefer(initial, reviewFirst)))
 ```
 
 ### A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it
 
 The foreground listing never admits a workflow step or an operation outside
-the contract; a workflow step is admitted only by its own run's review.
+the contract; a workflow step is admitted only by its own run's review. A
+reply lists the proposals bound to its message and, as cards, the pending
+ones the agent made for review, which carry no message
+(`spec/agent/deviceActions/index.md` of Eliza), unless they were drawn
+already.
 Recovery after the conversation reopened lists no expired proposal and
 nothing on a private screen. A recovered card from another agent session is
 refused before any journal work ("The agent changed. Review this action

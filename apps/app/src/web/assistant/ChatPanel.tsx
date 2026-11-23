@@ -25,6 +25,7 @@ import { MapsHandoff } from "../../maps/handoff.vibe";
 import { newId } from "../../platform/ids.ts";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Button, ScrollArea } from "../components/ui/index.ts";
 import { DictationControl } from "../voice/DictationControl.tsx";
+import { useVoiceTalk } from "../voice/ConversationControl.tsx";
 import { ReviewRows } from "../telephony/ReviewRows.tsx";
 import { ChatSearchPanel } from "./ChatSearchPanel.tsx";
 import { ComposerBar } from "./ComposerBar.tsx";
@@ -51,6 +52,7 @@ const notices = {
  * @model spec/assistant/send.md
  */
 export function ChatPanel({ open, onTalk }: ChatPanelProps) {
+  const voice = useVoiceTalk(onTalk);
   const transcript = useServiceStream("assistant/transcript", transcriptStream, emptyTranscript);
   const target = useServiceStream("assistant/target", targetStream, undefined);
   const files = useServiceStream("assistant/files", filesStream, []);
@@ -133,6 +135,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
             <ReviewRows />
           </ScrollArea>
         )}
+      {voice.view}
       <ComposerBar
         text={text} files={files} typing={sends.typing} canSend={sendable} unsettled={draftUnsettled(drafts)}
         notice={notices[drafts.notice]} target={target}
@@ -140,7 +143,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
         onText={(value) => { mapsComposer(value.trim() !== "", target?.kind === "edit"); composer((c) => c.edit(value)); }}
         onSend={() => composer((c) => c.send())}
         onStop={() => composer((c) => c.stop())}
-        onTalk={onTalk}
+        onTalk={voice.talk}
         onAttach={pick}
         onRemoveFile={(id) => act(Effect.flatMap(Effect.service(ChatAttachments), (attachments) => attachments.remove(id)))}
         onClearTarget={() => { mapsComposer(text.trim() !== "", false); composer((c) => c.aim(undefined)); }}

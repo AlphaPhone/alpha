@@ -33,7 +33,7 @@ export interface OwnNotice {
 /** Clock's own notifications, rechecked and consumed for a question; unprovided, no notice is found. */
 export service OwnNotices {
   /** The notice `id` as it is listed now, or undefined when it is gone, redacted or not Alpha's own. */
-  current(id: string): OwnNotice | undefined!!
+  current(id: string): (OwnNotice | undefined)!!
   /** Consume the retained notice once; false when it was already consumed or is gone. */
   consume(id: string): boolean!!
   static readonly defaultValue = () => ({
@@ -109,9 +109,9 @@ export interface TurnDay {
 /** What the screens before the assistant add to a turn: Calendar's shown day and Notes' list; unprovided, a turn names neither. */
 export service TurnSources {
   /** The day Calendar shows now, or undefined unless a plain day of the current owner is in front. */
-  calendarDay(): TurnDay | undefined!!
+  calendarDay(): (TurnDay | undefined)!!
   /** The Notes list the turn is sent from, or undefined off the list. */
-  notesList(): TurnRecord | undefined!!
+  notesList(): (TurnRecord | undefined)!!
   /** The owner's "Ask before Alpha acts" preference as Notes' list filter reads it, before each turn. */
   preferReview(reviewFirst: boolean): void!!
   static readonly defaultValue = () => ({
@@ -127,7 +127,7 @@ export interface ObservedTab {
   readonly revision: string
 }
 
-/** The open page a turn carries beside its observation as `clientDevice.browserPage`, exactly as Browser handed it. */
+/** The open page a turn carries beside its observation as the turn context's `browserPage`, exactly as Browser handed it. */
 export type BrowserPage = BrowserPageObservation
 
 /** The screen a turn is sent from, as Browser's page read checks it. */
@@ -140,9 +140,9 @@ export interface PageObservation {
 /** Browser's page for a chat turn, the one model of it (Browser's `BrowserPageContext`), filled from Browser; unprovided, no tab is observed and no page is shared. */
 export service BrowserPages {
   /** The tab Browser shows in front now, or undefined for a private tab, no tab, or Browser not in front. */
-  selected(): ObservedTab | undefined!!
+  selected(): (ObservedTab | undefined)!!
   /** The page of the observed tab for one turn to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds, and undefined whenever it may not go. */
-  forTurn(observation: PageObservation, peerTakesIt: boolean): BrowserPage | undefined!!
+  forTurn(observation: PageObservation, peerTakesIt: boolean): (BrowserPage | undefined)!!
   /** Whether `url` is exactly a link of the page the latest turn carried. */
   carried(url: string): boolean!!
   static readonly defaultValue = () => ({
@@ -162,7 +162,7 @@ export interface MapsShown {
 /** Maps' part of the agent's views, owned by Maps (`MapsAgent`); unprovided, Maps names nothing and delivers no view. */
 export service MapsViews {
   /** What Maps shows now with its identity and revision; undefined off Maps, on a locked screen, or with nothing shown. */
-  shown(): MapsShown | undefined!!
+  shown(): (MapsShown | undefined)!!
   /** Claim and apply a Maps view the agent prepared, under Maps' own delivery: `request` numbers this delivery, `effectKey` what it does, the same across a redelivery; `apply` brings Maps forward. */
   deliver(request: number, effectKey: number, binding: { readonly [field: string]: unknown }, apply: void!!): void!!
   static readonly defaultValue = () => ({

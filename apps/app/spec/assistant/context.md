@@ -18,8 +18,8 @@ rounded to 0.00001° (about a meter) and the accuracy to whole meters, and
 travel as the observation's `location` field
 `{latitude, longitude, accuracyMeters, capturedAt}` with `capturedAt` in
 epoch milliseconds (#1418). While Browser is in front, the page of the
-observed tab travels beside the observation as `clientDevice.browserPage`
-(#1444).
+observed tab travels beside the observation as the turn context's
+`browserPage` (#1444).
 
 ## Story: Let my agent know where I am when I allow it
 
@@ -156,8 +156,10 @@ be read, the 1.2 s wait, the bounds of what is read, the withheld forms and
 the links an open may name. The assistant asks it once per ordinary turn,
 only when the observation is sent and selects the `browser-tab` Browser
 shows in front, which is never a private tab; it sends what Browser handed
-it unchanged, as `clientDevice.browserPage`, only to a peer whose fresh
-status declares `browserPage`, and stores nothing of it. A turn whose page
+it unchanged, as the turn context's `browserPage` beside the observation,
+only to a peer compared for this turn, which is the peer that takes the
+optional fields (Eliza's `encodeTurnContext` drops the page for any other),
+and stores nothing of it. A turn whose page
 Browser did not hand over goes without it; the owner's own cancellation
 still stops the send. The links of the page the latest message carried are
 Browser's to remember ([Review](./review.md)).
@@ -209,7 +211,7 @@ pure val shownValues = Set(NothingShown, PlaceShown, RouteShown, SearchShown)
 The capabilities the agent offered this enrollment come from its device
 registration; each area selects, of those, what it runs on this build
 (the shell's `DeviceCapabilities`). Every turn, proposal route and view
-route of the assistant carries the selection, distinct and in one line,
+route of the assistant, and every voice turn, carries the selection, distinct and in one line,
 as `x-eliza-device-capabilities`, read again for each request; a name the
 agent did not offer is never sent, since an unknown name refuses the whole
 header, and an empty selection sends no header at all.

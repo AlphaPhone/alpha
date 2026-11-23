@@ -22,6 +22,9 @@ export const closeTabsCard: ProposalCard = {
   items: { lines: ["Weather in Paris · weather.com", "The New York Times · nytimes.com"], unnamed: 1, unnamedLabel: "private tab" },
 };
 
+/** A card whose family names where it acts, so it can be opened and still approved. */
+export const notesCard: ProposalCard = { ...liveCard, proposalId: "p-5", destination: "notes" };
+
 /** A card whose review time passed. */
 export const expiredCard: ProposalCard = { ...liveCard, proposalId: "p-3", state: "ExpiredCard" };
 
