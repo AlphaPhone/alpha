@@ -9,6 +9,7 @@ import type { OperationPorts } from "../assistant/review.vibe"
 import { Native } from "../platform/native.vibe"
 import { Build } from "../platform/build.vibe"
 import { describeDays, wall } from "../web/clock/text.ts"
+import { deliveryProblem, exactDue, reminderCardDetail, timingLines } from "./card-text.ts"
 import { ClockReview } from "./agent-review.vibe"
 import { AgentReminderReceipt, DeletionReviewAnswer, JournalEntryReply, ReminderListing, ReminderTarget, SurfaceInfo } from "./native.schema.vibe"
 import { readDay } from "./reads.ts"
@@ -117,18 +118,18 @@ function describeClock(op: ClockOperation): { readonly title: string; readonly d
   }
 }
 
-/** The card's title and detail for a Clock, reminder, named-reminder or day-read operation. */
-export function describeOwned(op: Owned): { readonly title: string; readonly detail: string } {
+/** The card's title and detail for a Clock, reminder, named-reminder or day-read operation; a reminder card names the due time, alert and repeat it saves, in the phone's time zone `zone` unless its repeat names one. */
+export function describeOwned(op: Owned, zone: string = phoneTimeZone()): { readonly title: string; readonly detail: string } {
   switch (op.type) {
     case "clock_handoff": return describeClock(op)
     case "read_selected_reminders": return { title: "Share a day's reminders", detail: `Up to ${op.maximumItems} reminders open by the end of ${op.day} (${op.timeZone}), overdue ones included, and those done that day: titles and times only, never notes.` }
-    case "reminder_create": return { title: "Create a reminder", detail: op.fields.title }
+    case "reminder_create": return { title: "Create a reminder", detail: reminderCardDetail(op.fields, zone) }
     case "reminder_read_selected": return { title: "Read this reminder", detail: "Shares the reminder you have open with your agent." }
-    case "reminder_update": return { title: "Change a reminder", detail: op.fields.title }
+    case "reminder_update": return { title: "Change a reminder", detail: reminderCardDetail(op.fields, zone) }
     case "reminder_complete": return { title: "Mark a reminder done", detail: "The reminder you have open." }
     case "reminder_snooze": return { title: "Snooze a reminder", detail: "The reminder you have open." }
     case "reminder_named": return op.action === "update"
-      ? { title: `Change “${op.name}”`, detail: `Open the reminder named “${op.name}” in Reminders; only that reminder changes, to “${op.fields.title}”.` }
+      ? { title: `Change “${op.name}”`, detail: [`Open the reminder named “${op.name}” in Reminders; only that reminder changes, to “${op.fields.title}”.`, ...(op.fields.schedule === undefined ? ["Timing unchanged."] : timingLines(op.fields.schedule, zone))].join("\n") }
       : { title: `Delete “${op.name}”`, detail: `Open the reminder named “${op.name}” in Reminders; you get ten seconds to Undo.` }
     default: return { title: "Delete a reminder", detail: "You get ten seconds to Undo." }
   }
@@ -150,8 +151,8 @@ function summarizeClock(op: ClockOperation, result: string): string {
   return "The Clock result is unknown."
 }
 
-/** The receipt sentence for a settled Clock, reminder or day-read operation. */
-export function summarizeOwned(op: Owned, result: "NoResult" | "Applied" | "Failed" | "NotStarted" | "Unknown"): string {
+/** The receipt sentence for a settled Clock, reminder or day-read operation: an applied reminder change whose notification the phone could not arrange (its result's `status`) says so, and a created or rescheduled one confirms its exact due instant. */
+export function summarizeOwned(op: Owned, result: "NoResult" | "Applied" | "Failed" | "NotStarted" | "Unknown", status?: string, zone: string = phoneTimeZone()): string {
   if (op.type === "clock_handoff") return summarizeClock(op, result)
   if (op.type === DAY_READ) return result === "Applied" ? `Shared the reminders of ${op.day}.` : result === "Failed" ? "No reminders were shared." : result === "NotStarted" ? "Nothing was shared." : "Alpha can’t tell whether the reminders were shared."
   if (op.type === NAMED) {
@@ -160,7 +161,13 @@ export function summarizeOwned(op: Owned, result: "NoResult" | "Applied" | "Fail
     if (result === "NotStarted") return "Nothing was changed."
     return op.action === "cancel" ? "Deletion queued with ten seconds to Undo; its outcome is unconfirmed." : "The reminder outcome is unconfirmed."
   }
-  if (result === "Applied") return REMINDER_DONE[op.type]
+  if (result === "Applied") {
+    const problem = deliveryProblem(op.type, status)
+    if (problem !== undefined) return problem
+    const fields = op.type === "reminder_create" || op.type === "reminder_update" ? op.fields : undefined
+    const due = fields === undefined ? undefined : exactDue(fields, zone)
+    return fields === undefined || due === undefined ? REMINDER_DONE[op.type] : `${REMINDER_DONE[op.type]} “${fields.title}”, due ${due}.`
+  }
   if (result === "Failed") return op.type === "reminder_create" ? "Nothing was scheduled." : "Nothing was changed because this reminder changed."
   if (result === "NotStarted") return "Nothing was changed."
   return op.type === "reminder_cancel" ? "Deletion queued with ten seconds to Undo; its outcome is unconfirmed." : "The reminder outcome is unconfirmed."
@@ -177,6 +184,15 @@ export const operationPorts = effect {
   const reminders = try Reminders
   const page = try RemindersPage
   const onPhone = <A>(work: Effect.Effect<A, never, Native>) => runPromise(Effect.provideService(work, Native, native))
+  // The delivery status each applied reminder change reported, by operation, for its receipt; the newest 64 are kept.
+  const delivered = new Map<string, string>()
+  const remember = (op: Owned, outcome: unknown) => {
+    const status = (outcome as { readonly kind?: unknown; readonly result?: { readonly status?: unknown } }).result?.status
+    if ((outcome as { readonly kind?: unknown }).kind !== "applied" || typeof status !== "string") return outcome
+    delivered.set(JSON.stringify(op), status)
+    while (delivered.size > 64) delivered.delete(delivered.keys().next().value ?? "")
+    return outcome
+  }
 
   effect function screenAllows() {
     const exposure = (try host.screen()).exposure
@@ -293,7 +309,7 @@ export const operationPorts = effect {
       if (op === undefined) return Promise.resolve(refused("unsupported"))
       if (op.type === DAY_READ) return onPhone(readTheDay(op))
       if (op.type === NAMED) return onPhone(changeNamed(op, at))
-      return onPhone(op.type === "clock_handoff" ? handOff(op, at) : changeReminder(op, at))
+      return op.type === "clock_handoff" ? onPhone(handOff(op, at)) : onPhone(changeReminder(op, at)).then((outcome) => remember(op, outcome))
     },
     readBack: (operation, at) => {
       const op = ownedOperation(operation)
@@ -316,7 +332,7 @@ export const operationPorts = effect {
     target: () => ({ tag: "NoTarget" }),
     summarize: (operation, result) => {
       const op = ownedOperation(operation)
-      return op === undefined ? "" : summarizeOwned(op, result)
+      return op === undefined ? "" : summarizeOwned(op, result, delivered.get(JSON.stringify(op)))
     },
   }
   return ports

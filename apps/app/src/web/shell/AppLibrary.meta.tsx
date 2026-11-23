@@ -7,7 +7,7 @@ const noop = () => {};
 export const meta: ComponentMeta<AppLibraryProps> = {
   args: {
     entries: libraryEntries, query: "", status: "ready", menu: "", onHome: [], dial: "Phone", appInfo: true, controls: idleControls,
-    onSearch: noop, onClose: noop, onDial: noop, onAddToHome: noop, onAppInfo: noop, onCloseMenu: noop, onDismissInfo: noop,
+    onSearch: noop, onClose: noop, onDial: noop, onAddToHome: noop, onAppInfo: noop, onCloseMenu: noop, onDismissInfo: noop, onRetry: noop,
   },
   examples: {
     Loading: { entries: [], status: "loading" },

@@ -1,7 +1,9 @@
 // spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/files/share.md, "Story: Share the files I selected, to the place I chose"; spec/browser/egress.md, "Story: Share or keep the page I am looking at"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/maps/cards.md, "Story: Answer my agent's Maps question with one tap"; spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"; spec/camera/scan.md, "Only a complete, bounded scan request starts a scan, and only over the visible Camera"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
 import { AccountBindings } from "../../account/bindings.vibe"
+import { DeviceEnrollment } from "../../account/enrollment.vibe"
+import { browserPagesFromBrowser, browserViewsFromBrowser, mapsViewsFromMaps } from "../../assistant/fills.vibe"
 import { askAlphaTarget } from "../../assistant/files-bridge.vibe"
-import { CameraComposer, MapsChatCards, MapsRelay, ReplyChanges } from "../../assistant/ports.vibe"
+import { AdvertisedCapabilities, CameraComposer, MapsChatCards, MapsRelay, ReplyChanges } from "../../assistant/ports.vibe"
 import { CameraChat, type ChatMessage } from "../../camera/chat.vibe"
 import { PageMail } from "../../browser/ports.vibe"
 import { CalendarMaps, type CalendarEventOrigin } from "../../calendar/ports.vibe"
@@ -12,6 +14,7 @@ import { assistantEmail } from "../../inbox/handoffs.vibe"
 import { MailComposer, type ComposerRefusal } from "../../inbox/composer.vibe"
 import { emailShareTarget } from "../../inbox/shareTarget.vibe"
 import { mapsRelayPort } from "../../maps/agent.vibe"
+import type { ResidentHeaders } from "../../platform/resident.vibe"
 import { MapsHandoff } from "../../maps/handoff.vibe"
 import { CallWatch } from "../../telephony/call-bar.vibe"
 import { messagesShareTarget } from "../../telephony/share.vibe"
@@ -31,6 +34,13 @@ const PAGE_MAIL_REFUSED: Partial<Record<ComposerRefusal, string>> = {
 /** Why Inbox did not start a page's email draft, in the owner's words. */
 export function pageMailRefusal(refusal: ComposerRefusal): string {
   return PAGE_MAIL_REFUSED[refusal] ?? "Inbox couldn’t start the email. Nothing was added."
+}
+
+/** The enrolled device's own id and key of the enrollment's headers, none while the phone is chat only. */
+export function enrolledDeviceHeaders(headers: ResidentHeaders | undefined): ResidentHeaders {
+  const id = headers?.["x-eliza-device-id"]
+  const key = headers?.["x-eliza-device-key"]
+  return id === undefined || key === undefined ? {} : { "x-eliza-device-id": id, "x-eliza-device-key": key }
 }
 
 /** The idle facts of the areas after the shell: a call from Telephony, connection work and the sign-in card from Account. */
@@ -59,7 +69,8 @@ effect function replyChangesBuilt() {
 /**
  * Fills every slot of ./slots.vibe from its provider, once the last of them is built: Files' share targets, Browser's page mail,
  * Calendar's Maps, Workflows' Clock, the assistant's email, Clock's own notices, Maps' chat and relay, Camera's composer requests,
- * Workflows' reply changes and the phone's device capabilities.
+ * Workflows' reply changes, the phone's device capabilities, Browser's page and views, Maps' views, and the enrolled
+ * device's headers with the capabilities it advertises of those the agent offered at registration.
  */
 export const fillsLive = Layer.effectDiscard(effect {
   const cells = try PortCells
@@ -125,4 +136,26 @@ export const fillsLive = Layer.effectDiscard(effect {
 
   const capabilities = try deviceCapabilities
   try sync(() => fillCell(cells, cells.deviceCapabilities, capabilities))
+
+  const pages = try browserPagesFromBrowser
+  try sync(() => fillCell(cells, cells.browserPages, pages))
+
+  const mapsViews = try mapsViewsFromMaps
+  try sync(() => fillCell(cells, cells.mapsViews, mapsViews))
+
+  const browserViews = try browserViewsFromBrowser
+  try sync(() => fillCell(cells, cells.browserViews, browserViews))
+
+  const enrollment = try DeviceEnrollment
+  const advertised: AdvertisedCapabilities.Shape = {
+    effect names() {
+      const enrolled = try enrollment.enrolled()
+      if (enrolled === undefined) return [] as readonly string[]
+      return try capabilities.advertise(enrolled.capabilities)
+    },
+    effect device() {
+      return enrolledDeviceHeaders(try enrollment.headers())
+    },
+  }
+  try sync(() => fillCell(cells, cells.advertised, advertised))
 })

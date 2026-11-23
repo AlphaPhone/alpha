@@ -2,6 +2,8 @@
 import { Machine as MirrorMachine } from "../../gen/clock__mirror.effect.vibe"
 import { DeliveryRecord, MirrorChoices, MirrorHistory, MirrorRecord } from "./native.schema.vibe"
 import { NOTIFICATIONS, call, command } from "./plugins.vibe"
+import { Native } from "../platform/native.vibe"
+import { pageVisible } from "./page.ts"
 
 type Status = typeof MirrorRecord.Type
 
@@ -93,3 +95,11 @@ export const mirrorLayer = Layer.effect(Mirror, effect {
     },
   }
 })
+
+/** Reads the mirror again when Android says a mirrored row or the mirror's access changed, while the page shows. Never returns. */
+export effect function followMirror() {
+  const native = try Native
+  const mirror = try Mirror
+  if (!(try native.available(NOTIFICATIONS))) return
+  Stream.runForEach(native.listen(NOTIFICATIONS, "mirrorChanged"), () => effect { if (pageVisible()) try mirror.refresh() }) catch () => undefined
+}

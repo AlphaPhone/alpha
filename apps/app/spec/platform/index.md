@@ -355,6 +355,23 @@ pure def lawToolsNeverShowOnThePhone(testMocks: bool, devServer: bool, asked: bo
   not(toolsShown(testMocks, devServer, true, asked))
 ```
 
+### A built page runs only its own scripts
+
+The built page carries a Content-Security-Policy as its first head element, so it covers every route
+the page serves, the delegation return's landing included: scripts and WebAssembly only from the page's
+own origin, never an inline or evaluated script, no plugin object and no base element. The production
+bundle audit refuses a page without it. A test-mocks build may also connect to a development agent on
+the machine; the development server itself is not held to the policy.
+
+```quint
+pure def scriptRuns(ownOrigin: bool, inline: bool, evaluated: bool): bool = ownOrigin and not(inline) and not(evaluated)
+
+pure def lawOnlyThePagesOwnScriptsRun(inline: bool, evaluated: bool): bool =
+  (inline or evaluated) implies not(scriptRuns(true, inline, evaluated))
+
+pure def lawAnotherOriginsScriptNeverRuns(inline: bool, evaluated: bool): bool = not(scriptRuns(false, inline, evaluated))
+```
+
 ### A simulated action only ever changes simulated state
 
 A fixture's call, message, payment or navigation changes the fixture and nothing else; outside a

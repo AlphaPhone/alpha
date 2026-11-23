@@ -5,6 +5,7 @@ import { Machine as TapsMachine } from "../../gen/clock__reminderTaps.effect.vib
 import { ReminderListing, ReminderTap, ReminderTarget, SurfaceInfo } from "./native.schema.vibe"
 import { DAILY, call, command } from "./plugins.vibe"
 import { Reminders } from "./reminders.vibe"
+import { pageVisible } from "./page.ts"
 
 type Target = typeof ReminderTarget.Type
 
@@ -29,7 +30,7 @@ export service ReminderTaps {
   /** A hidden page, the connection chooser, a sensitive context or an open form holds checks back. */
   setBlocked(blocked: boolean): void!!
   /** The question the open review is about, while one is open. */
-  question(): ReminderQuestion | undefined!!
+  question(): (ReminderQuestion | undefined)!!
   /** Closes the question review: a draft continues into the composer, none releases the tap. */
   closeQuestion(draft: string | undefined): void!!
   /** Dismisses the pending link the banner shows. */
@@ -112,7 +113,7 @@ export const reminderTapsLayer = Layer.effect(ReminderTaps, effect {
   }
 })
 
-/** Follows the store's tap, open and resume events for as long as the layer lives. Never returns. */
+/** Follows the store's tap, open, resume and change events for as long as the layer lives. Never returns. */
 export effect function followReminderEvents() {
   const native = try Native
   const taps = try ReminderTaps
@@ -122,6 +123,8 @@ export effect function followReminderEvents() {
   try.all [
     effect { Stream.runForEach(native.listen(DAILY, "pendingReminderTap"), () => taps.check(true)) catch () => undefined },
     effect { Stream.runForEach(native.listen(DAILY, "appResumed"), () => effect { try reminders.refresh(); try taps.check(false) }) catch () => undefined },
+    // The store changed under Alpha (another writer, a delivered alert): read it again while the page shows.
+    effect { Stream.runForEach(native.listen(DAILY, "remindersChanged"), () => effect { if (pageVisible()) try reminders.refresh() }) catch () => undefined },
     effect {
       Stream.runForEach(native.listen(DAILY, "reminderOpened"), (raw) => effect {
         const opened = decoded(raw) catch () => undefined

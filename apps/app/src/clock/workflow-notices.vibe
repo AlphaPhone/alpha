@@ -1,5 +1,6 @@
 // spec/clock/workflowNotices.md, "Story: Return to the run a notice names"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it"; spec/assistant/noticeQuestion.md, "A workflow approval notice is asked about through a reviewed excerpt, rechecked and consumed at Add to chat, and asking never decides the step"; spec/workflows/place.md, "Story: Have a notice reread when the run view moves"
 import { Native } from "../platform/native.vibe"
+import { workflowStepSource } from "../assistant/draft.vibe"
 import type { OwnNotice } from "../assistant/ports.vibe"
 import { WorkflowsPlace } from "../workflows/place.vibe"
 import { ownerPeer, questionPeer, runsPeer } from "./peers.vibe"
@@ -47,7 +48,7 @@ export service WorkflowNotices {
   /** The workflows view refreshed or reset: a read under the old view is read again. */
   viewMoved(): void!!
   /** The tapped notice `id` under question, read again: undefined, and the question ended as changed, unless it is the same token, notice, revision and owner on a visible page. */
-  current(id: string): OwnNotice | undefined!!
+  current(id: string): (OwnNotice | undefined)!!
   /** Add to chat on the question about `id`: consumes its tap once at the notice's revision; false when it was not kept. */
   consume(id: string): boolean!!
   /** The assistant's question review now shows the notice `id`, or none: the asked notice's review closing unadded is the owner's Cancel, a newer review replacing it an interruption. */
@@ -86,12 +87,13 @@ export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
     }
     const open: Asking = { id: askIdOf(source, token), source, token, ownerId, notice, seen: false }
     try Ref.set(asking, open)
-    try review.ask({
-      name: "Alpha Phone notification",
-      text: [open.notice.title, open.notice.text].filter((part) => part.trim() !== "").join("\n"),
-      question: "Help me with this notification.",
-      notice: { id: open.id, revision: open.notice.revision ?? "" },
-    })
+    const excerpt = [open.notice.title, open.notice.text].filter((part) => part.trim() !== "").join("\n")
+    const asked = { id: open.id, revision: open.notice.revision ?? "" }
+    // A workflow approval notice has the assistant's own step question (spec/assistant/noticeQuestion.md); the tap names
+    // neither the workflow nor the step, so the review names it "Workflow step" and the excerpt carries the notice.
+    try review.ask(source === "WorkflowTap"
+      ? workflowStepSource(asked, "", "", excerpt)
+      : { name: "Alpha Phone notification", text: excerpt, question: "Help me with this notification.", notice: asked })
   }
 
   effect function checkOne(source: NoticeTapSource) {

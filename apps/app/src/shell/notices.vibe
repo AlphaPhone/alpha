@@ -26,6 +26,8 @@ export service Notices {
   release(): void!!
   /** Runs the shown toast's Undo and closes it. */
   takeAction(): void!!
+  /** The owner dismissed the shown toast: it closes without its Undo running, and the next one shows. */
+  dismissShown(): void!!
   /** One toasts event, such as a launcher report; false where the rules refuse it. */
   send(event: ToastsEvent): boolean!!
 }
@@ -97,6 +99,11 @@ export const noticesLive = Layer.effect(Notices, effect {
       if (!(try send({ type: "takeAction", seq: state.seq }))) return
       actions.delete(state.shown.undo)
       if (undo !== undefined) try undo()
+    },
+    effect dismissShown() {
+      const state: Toasts = try machine.get()
+      if (!(try send({ type: "dismissShown", seq: state.seq }))) return
+      actions.delete(state.shown.undo)
     },
     send,
   }

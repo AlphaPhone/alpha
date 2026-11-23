@@ -28,7 +28,7 @@ import { followShade, notificationsLayer } from "./notifications.vibe"
 import { CanonicalTaps, canonicalTapsLayer, followCanonicalTaps } from "./canonical-taps.vibe"
 import { WorkflowNotices, followWorkflowNotices, workflowNoticesLayer } from "./workflow-notices.vibe"
 import { deletionsLayer, followDeletions } from "./deletions.vibe"
-import { mirrorLayer } from "./mirror.vibe"
+import { followMirror, mirrorLayer } from "./mirror.vibe"
 import { primeOnGesture } from "./page.ts"
 import { navigationPeer } from "./peers.vibe"
 import { draftsLayer } from "./drafts.vibe"
@@ -115,6 +115,7 @@ const background = Layer.effectDiscard(effect {
   fork.scoped keepTime()
   fork.scoped followReminderEvents()
   fork.scoped followShade()
+  fork.scoped followMirror()
   fork.scoped followCanonicalTaps()
   fork.scoped followWorkflowNotices()
   fork.scoped followDeletions()
