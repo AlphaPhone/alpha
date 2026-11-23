@@ -101,7 +101,7 @@ export const composerLayer = Layer.effect(Composer, effect {
   let acting = 0
   let ownKey: string | undefined
   let dictated: { readonly text: string; readonly binding: string } | undefined
-  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => Effect.match(work, { onFailure: () => false, onSuccess: () => true })
 
   effect function rows(change: (rows: readonly Row[]) => readonly Row[]) {
     try SubscriptionRef.update(transcript, (t) => ({ ...t, rows: collapseSystemNotices(change(t.rows)) }))
@@ -113,8 +113,9 @@ export const composerLayer = Layer.effect(Composer, effect {
   effect function controllerFor(identity: AgentIdentity) {
     const key = JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
     if (session?.key === key) return session
-    if (session !== undefined) {
-      promise(() => session?.controller.reset() ?? Promise.resolve()) catch () => undefined
+    const previous = session
+    if (previous !== undefined) {
+      promise(() => previous.controller.reset()) catch () => undefined
       try quiet(sends.send({ type: "sessionSwitch" }))
       try quiet(client.send({ type: "detach", keepConsumed: false }))
       try quiet(stopped.send({ type: "agentChanged" }))
@@ -161,7 +162,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       if (try quiet(stopped.send({ type: "restoredUnanswered" }))) try check(conversation, last.clientMessageId)
     }
   }
-  effect function expireLater(card: ProposalCard) {
+  effect function expireLater(card: ProposalCard): void!! {
     const now = try Clock.currentTimeMillis
     try sleep(Math.min(timerCeilingMs, Math.max(0, card.expiresAt - now + 1)))
     const rowsNow = (try SubscriptionRef.get(transcript)).rows
@@ -269,7 +270,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (done.status === "delivered") ownKey = (try host.screen()).contextKey
     return done
   }
-  effect function send(handed?: string) {
+  effect function send(handed?: string): boolean!! {
     const identity = try host.identity()
     if (identity === undefined) {
       try host.toast(copy.noAgent)
@@ -310,9 +311,10 @@ export const composerLayer = Layer.effect(Composer, effect {
     try quiet(stopped.send({ type: "sendStart" }))
     try stoppedNotice()
     let conversation = (try SubscriptionRef.get(transcript)).conversation
-    if (aimed?.kind === "edit" && conversation !== null) {
+    const editSource = conversation
+    if (aimed?.kind === "edit" && editSource !== null) {
       try quiet(drafts.send({ type: "edit", text: [] }))
-      const forked = conversations.branch(conversation, aimed.messageId, aimed.requestId, aimed.text) catch () => undefined
+      const forked = conversations.branch(editSource, aimed.messageId, aimed.requestId, aimed.text) catch () => undefined
       if (forked === undefined) {
         try quiet(sends.send({ type: "transportCall", id: attempt }))
         try quiet(sends.send({ type: "transportRefuses", id: attempt }))

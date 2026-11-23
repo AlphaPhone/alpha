@@ -55,7 +55,7 @@ export const attachmentsLayer = Layer.effect(ChatAttachments, effect {
   const store = try KeyValueStore.KeyValueStore
   const files = try SubscriptionRef.make<readonly ChatFile[]>([])
   let held: readonly ChatFile[] = []
-  const quiet = (event: CustodyEvent) => map(custody.send(event), () => true) catch () => false
+  const quiet = (event: CustodyEvent) => Effect.match(custody.send(event), { onFailure: () => false, onSuccess: () => true })
   effect function read(item: Picked) {
     const kind = kindOf(item.mimeType)
     if (!accepted(kind, item.blob.size, item.name.length)) throw new AttachmentRefused({ message: copy.attachmentTooLarge })
