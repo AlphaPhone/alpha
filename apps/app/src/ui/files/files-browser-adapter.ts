@@ -3,8 +3,8 @@ import {
   type FilesAgentOperation,
   type FilesAgentRunner,
   filesFilterOf,
+  filesShownTarget,
 } from "@elizaos/plugin-files/browser/files-agent-contract";
-import { assertFilesReviewTargets } from "./files-operation-presentation";
 import {
   baseName,
   type CategoryFolder,
@@ -1272,13 +1272,25 @@ export function installFilesBrowserAdapter<Selection extends FilesSelection>(
         throw Error("Files changed. Review them again.");
       return result.reviewed;
     },
+    async shownPaths(shown, signal) {
+      signal.throwIfAborted();
+      // Positions name the filter results the owner sees, never a loading or replaced list.
+      if (!visible() || !filter || pendingFilter)
+        throw Error("Files does not show search results");
+      return shown.map((position) => {
+        const row = filterRows[position - 1];
+        if (!row) throw Error("Files does not show that item");
+        return row.path;
+      });
+    },
     async run(op: FilesAgentOperation, signal, openFiles) {
       signal.throwIfAborted();
-      assertFilesReviewTargets(op);
       const reviewRequired = {
         status: "failed" as const,
         summary: "Nothing changed because these files changed after review.",
       };
+      // Shown positions are resolved to paths when the review card is built, never here.
+      if (filesShownTarget(op)) return reviewRequired;
       if (
         (op.type === "files_move" || op.type === "files_trash") &&
         (!op.reviewed || !reviewingPrimary())

@@ -14,7 +14,7 @@ import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
 import {executeNamedCalendarRead,type NamedCalendarReadProvider} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/client/named-read.ts';
 import {reconcileNotesEditor} from '../../../../.eliza/client-features/plugins/plugin-notes/src/client/notes-draft.ts';
-import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setBrowserTabsClosing,setContactReviewMatches,setFilesReviewIdentity} from '../runtime/device-actions';
+import {approvedBrowserOpen,CAMERA_CONTEXT_NOTICE,DeviceActionNotStarted,presentOpenView,publishCommittedDeviceChanges,setBrowserTabNeedsChoice,setBrowserTabsClosing,setContactReviewMatches,setFilesReviewIdentity,setFilesShownPaths} from '../runtime/device-actions';
 import {executeViewInteraction} from '../runtime/view-navigation';
 import {askAboutCameraFrame,captureAgentPhoto,cameraFrameQuestionRequested,cameraScanRequested,library as photoLibrary,requestCameraScan} from './camera-adapter';
 import {isCameraCapture} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/camera-contract.ts';
@@ -1076,6 +1076,14 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       signal.throwIfAborted();
       if(!this.live||document.hidden)throw Error('Files changed');
       return identities;
+    });
+    setFilesShownPaths(async (shown, signal) => {
+      const files=this.filesAgent as FilesAgentRunner|undefined;
+      if(!files?.shownPaths||!this.live||document.hidden)throw Error('Files is unavailable');
+      const paths=await files.shownPaths(shown,signal);
+      signal.throwIfAborted();
+      if(!this.live||document.hidden)throw Error('Files changed');
+      return paths;
     });
     // A refusal proven to happen before any effect returns `failed` with its reason, or throws
     // DeviceActionNotStarted, which the coordinator records as not started with its message. Any

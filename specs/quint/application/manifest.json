@@ -4584,6 +4584,9 @@
       "movedAwayFileIsLeftAloneTest",
       "reviewedOpOutsideFilesRefusedTest",
       "shareOpensSheetOnlyTest",
+      "shownShareResolvesBeforeReviewTest",
+      "shownTrashResolvesThenBindsTest",
+      "unresolvedShownLeavesNoCardTest",
       "protectedScreenTest"
     ],
     "sources": [
@@ -4596,7 +4599,7 @@
       "plugins/plugin-assistant/src/services/device-actions/client-coordinator.ts"
     ],
     "abstractions": [
-      "One Files operation at a time over one representative file; filter and open are the direct types, share, new folder, move and trash need the owner's card. Identity is one boolean: the file is still where the card's identity was read.",
+      "One Files operation at a time over one representative file; filter and open are the direct types, share, new folder, move and trash need the owner's card. Identity is one boolean: the file is still where the card's identity was read. A shown target is one position: it resolves to that file only while Files shows filter results (files.shown-target.v1, eliza#39944).",
       "Android build with the Files capability negotiated; the browser build has no Files agent path. Current-source successor of the agent actions in the historical legacy FilesBrowser design model.",
       "A share succeeds when the system sheet opens; the owner's choice there is a separate owner action. Storage access state, external volumes beyond the primary-storage rule, and the listing reload are abstracted.",
       "The owning test (test/quint-files-agent-actions.test.mjs) replays traces against the executor callback and openInternalView sliced from agent-adapter.ts, the real Files browser runner (files-browser-adapter.ts) over a primary-storage port, the coordinator context gate and its direct-request list. Primary storage only; Android storage and the owner's choice in the share sheet are not driven. Proposal admission, journal reservation, claim and receipt are DeviceActionReview."
@@ -4608,7 +4611,8 @@
       "ProtectedScreenBlocksFiles",
       "MoveAndTrashNeedReviewedIdentity",
       "ShareNeedsOwnerReviewThenSystemSheet",
-      "ReviewOpenedIsNotCompletion"
+      "ReviewOpenedIsNotCompletion",
+      "ShownItemsRunOnlyAsResolvedFiles"
     ],
     "bounds": {
       "maxSamples": 400,

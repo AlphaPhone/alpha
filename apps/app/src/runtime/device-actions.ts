@@ -108,6 +108,12 @@ let filesReviewIdentity: ((paths:string[],signal:AbortSignal)=>Promise<string[]>
 export function setFilesReviewIdentity(read: (paths:string[],signal:AbortSignal)=>Promise<string[]>) {
   filesReviewIdentity=read;
 }
+/** The paths at shown positions (1 is the first) in the Files filter results on screen, so a
+ * share, move or trash of shown items is reviewed as the files themselves (files.shown-target.v1). */
+let filesShownPaths: ((shown:number[],signal:AbortSignal)=>Promise<string[]>)|undefined;
+export function setFilesShownPaths(read: (shown:number[],signal:AbortSignal)=>Promise<string[]>) {
+  filesShownPaths=read;
+}
 /** Browser's answer to whether a tab switch's words match several open tabs. Such a switch is
  * never run directly: its review card lists the tabs for the owner to pick. */
 let browserTabNeedsChoice: ((target:string)=>boolean)|undefined;
@@ -132,6 +138,6 @@ export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,Workf
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),browserTabsClosing:proposalId=>browserTabsClosing?.(proposalId)??null,contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},filesShownPaths:async(shown,signal)=>{if(!filesShownPaths)throw Error('Files is unavailable');return filesShownPaths(shown,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),browserTabsClosing:proposalId=>browserTabsClosing?.(proposalId)??null,contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
   }
 }

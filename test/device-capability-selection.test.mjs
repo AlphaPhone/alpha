@@ -102,3 +102,11 @@ test('canonical Notes negotiates voice recording alone, never the organise set',
   for (const profile of [apk, {...apk, canonicalNotes: true}])
     assert.ok(!selectDeviceCapabilities(offer, profile).includes('notes.organize.v1'));
 });
+
+test('Files shown targets are offered only beside Files itself (FILE-04)', () => {
+  const offer = ['files.browser.v1', 'files.shown-target.v1'];
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, files: true}).slice(2), offer);
+  assert.deepEqual(selectDeviceCapabilities(['files.browser.v1'], {...apk, files: true}).slice(2), ['files.browser.v1']);
+  assert.deepEqual(selectDeviceCapabilities(offer, {...apk, files: false}).slice(2), []);
+  assert.deepEqual(selectDeviceCapabilities(['files.shown-target.v1'], {...apk, files: true}).slice(2), []);
+});
