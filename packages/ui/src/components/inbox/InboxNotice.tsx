@@ -28,6 +28,9 @@ const notices = {
   markFailed: { variant: "warn", text: "Gmail did not mark it" },
   markUnconfirmed: { variant: "warn", text: "Not sure it was marked. Refresh first.", action: "Refresh" },
   selectAgain: { variant: "warn", text: "These emails changed. Select them again." },
+  mayHaveGone: { variant: "warn", text: "It may already have gone" },
+  cannotUndo: { variant: "warn", text: "This cannot be undone" },
+  needsRecipient: { variant: "warn", text: "Add a recipient Gmail accepts first" },
   draftChanged: { variant: "warn", text: "The draft changed. Review it again.", action: "Review" },
   suggestionTooLong: { variant: "warn", text: "Too long to add" },
 } as const satisfies Record<string, Notice>;
