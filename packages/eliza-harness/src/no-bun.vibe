@@ -1,0 +1,53 @@
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { ChildProcess } from "effect/process"
+import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
+
+/** Git could not list or search the repository. */
+export error Unreadable { message: string }
+
+/** The repository runs, installs or locks Bun in `count` places. */
+export error BunFound { count: number }
+
+/** Bun's lock files and its configuration, by file name. */
+const locks = new Set(["bun.lock", "bun.lockb", "bunfig.toml"])
+/** POSIX's spelling of `\b`, which BSD's and GNU's extended expressions alike accept: a word starts or ends here. */
+const [before, after] = ["(^|[^[:alnum:]_])", "([^[:alnum:]_]|$)"]
+/** A Bun command, a `bun:` import, the action that installs Bun, or a script Bun runs. */
+const commands = [
+  `${before}bunx?[[:space:]]+(run|install|add|x|test|build|pm)${after}`,
+  `${before}bun:(ffi|sqlite|test|jsc)${after}`,
+  "setup-bun",
+  `^#!.*${before}bun${after}`,
+].join("|")
+/** What may name Bun: the implementation being replaced, the lock pnpm writes, this check, and the trees its test feeds it. */
+const exempt = [":!legacy", ":!**/pnpm-lock.yaml", ":!packages/eliza-harness/src/no-bun.vibe", ":!**/test/fixtures/**"]
+
+effect function git(repository: string, args: readonly string[]) {
+  const spawner = try ChildProcessSpawner
+  return try mapError(scoped(effect {
+    const child = try spawner.spawn(ChildProcess.make("git", [...args], { cwd: repository, stdin: "ignore" }))
+    const [stdout, stderr] = try.all [Stream.mkString(Stream.decodeText(child.stdout)), Stream.mkString(Stream.decodeText(child.stderr))]
+    const code: number = try child.exitCode
+    return { code, stdout, stderr }
+  }), (cause) => new Unreadable({ message: `git ${args.join(" ")}: ${cause.message}` }))
+}
+
+/** Each tracked line or file of `repository` that runs, installs or locks Bun, outside what `exempt` names. */
+export effect function bunIn(repository: string) {
+  const listed = try git(repository, ["ls-files", "-z"])
+  if (listed.code !== 0) throw new Unreadable({ message: listed.stderr.trim() })
+  const lockFiles = listed.stdout.split("\0").filter((file) => !file.startsWith("legacy/") && locks.has(file.slice(file.lastIndexOf("/") + 1)))
+  const found = try git(repository, ["grep", "-nIE", commands, "--", ".", ...exempt])
+  if (found.code > 1) throw new Unreadable({ message: found.stderr.trim() })
+  return [...lockFiles.map((file) => `${file}: Bun's lock or configuration`), ...found.stdout.split("\n").filter((line) => line !== "")]
+}
+
+effect function main() {
+  const found = try bunIn(".")
+  if (found.length === 0) return try Console.log("no Bun: no Bun lock, command, import, action or shebang outside legacy/")
+  try Console.error(`Bun, where Node 26 and pnpm alone run (AGENTS.md, "This project"):\n${found.join("\n")}`)
+  throw new BunFound({ count: found.length })
+}
+
+if (import.meta.main) NodeRuntime.runMain(Effect.provide(main(), NodeServices.layer))

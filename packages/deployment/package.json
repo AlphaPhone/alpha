@@ -1,0 +1,33 @@
+{
+  "name": "@repo/deployment",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/src/deployment.d.ts",
+      "default": "./dist/src/deployment.js"
+    },
+    "./deployments.json": "./deployments.json"
+  },
+  "scripts": {
+    "build": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\" && vibelang -p tsconfig.build.json",
+    "typecheck": "vibelang --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "effect": "4.1.1",
+    "vibelang-runtime": "0.0.13"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.1.1",
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vibelang": "0.0.13",
+    "vibestack": "workspace:*",
+    "vitest": "catalog:"
+  }
+}

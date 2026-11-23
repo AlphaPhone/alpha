@@ -27,7 +27,7 @@ const journeys = /^(.+)\.eliza\.test\.tsx$/;
 
 export default async function setup(project: TestProject) {
   const state = scratch();
-  const names = fs.readdirSync(path.join(import.meta.dirname, "..")).flatMap((file) => journeys.exec(file)?.[1] ?? []);
+  const names = fs.readdirSync(path.join(project.config.root, "test")).flatMap((file) => journeys.exec(file)?.[1] ?? []);
   const email = (name: string) => `${name}@alpha.test`;
   let cloud: Promise<Cloud> | undefined;
   const agents: Agent[] = [];

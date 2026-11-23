@@ -1,0 +1,1 @@
+Alpha runs on Node 26 and pnpm, never Bun.

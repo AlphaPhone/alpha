@@ -1,0 +1,2 @@
+steps:
+  - uses: oven-sh/setup-bun@v2
