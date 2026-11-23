@@ -126,7 +126,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
     <main aria-label="Workflows" className="flex h-full flex-col gap-4 overflow-y-auto pb-8">
       <header className="flex items-center justify-between px-4 pt-4">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={goBack}><ArrowLeft aria-hidden /></Button>
-        <h1 className="font-serif text-3xl">{where.view === "DigestsView" ? "Scheduled digests" : "Workflows"}</h1>
+        <h1 className="font-display text-3xl">{where.view === "DigestsView" ? "Scheduled digests" : "Workflows"}</h1>
         <Button variant="ghost" size="icon" aria-label="Add to Workflows" onClick={() => void at((p) => p.open("AddingOverlay"))}><Plus aria-hidden /></Button>
       </header>
 

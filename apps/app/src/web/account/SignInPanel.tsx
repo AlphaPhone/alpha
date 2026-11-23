@@ -83,7 +83,7 @@ export function SignInPanel({ signIn, serviceName, terms, android = false, onRet
   if (signIn.screen === "ScreenClosed") return signIn.work === "Probing" ? <Spinner label={`Loading ${serviceName} sign-in`} className="mx-auto my-16" /> : null;
   return (
     <section aria-labelledby="sign-in-title" className="mx-auto flex w-full max-w-sm flex-col gap-5 px-4 py-8">
-      <h1 id="sign-in-title" className="font-serif text-3xl">{signIn.screen === "Choose" ? "Alpha" : signIn.screen === "GoogleWait" ? "In browser" : "Enter code"}</h1>
+      <h1 id="sign-in-title" className="font-display text-3xl">{signIn.screen === "Choose" ? "Alpha" : signIn.screen === "GoogleWait" ? "In browser" : "Enter code"}</h1>
       {signIn.net === "NetOffline" || signIn.net === "NetUnvalidated" ? (
         <Alert variant="warn" aria-label="Sign-in connection">
           <p className="flex items-center gap-2"><WifiOff aria-hidden className="size-4" />{signIn.net === "NetOffline" ? "You’re offline" : "No internet access"}</p>
@@ -146,7 +146,7 @@ export function SignInPanel({ signIn, serviceName, terms, android = false, onRet
           <Button variant="ghost" size="sm" aria-expanded={showTerms} onClick={() => setShowTerms(!showTerms)}>{terms.name} terms and privacy</Button>
           {showTerms && [terms.terms, terms.privacy].map((document) => (
             <article key={document.title} aria-label={document.title} className="flex flex-col gap-2">
-              <h2 className="font-serif text-lg">{document.title}</h2>
+              <h2 className="font-display text-lg">{document.title}</h2>
               {document.sections.map((section) => (
                 <section key={section.title} className="flex flex-col gap-1">
                   <h3 className="font-semibold">{section.title}</h3>

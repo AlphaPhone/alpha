@@ -179,7 +179,7 @@ export function MapPlane(props: MapPlaneProps) {
   if (basemap === "NoBasemap") return <div role="img" aria-label="Google map unavailable" className="size-full bg-muted" />;
   return (
     <div className="relative size-full">
-      <div ref={mount} role="application" aria-label={props.label} className="size-full" />
+      <div ref={mount} role="application" aria-label={props.label} className="size-full bg-muted" />
       {compassShown(turn.bearing, turn.pitch, props.follow) && (
         <Button variant="secondary" size="icon" aria-label="Turn map north up" className="absolute right-4 top-24 rounded-full shadow-md" onClick={northUp}>
           <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />

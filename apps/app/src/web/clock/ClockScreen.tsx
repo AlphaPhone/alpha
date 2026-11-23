@@ -61,7 +61,7 @@ export function ClockScreen({ route, onClose }: ClockScreenProps) {
     <main className="flex min-h-full flex-col gap-4 bg-background px-4 pt-4 pb-28 text-foreground">
       <header className="flex items-center gap-2">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={close}><ChevronLeft aria-hidden className="size-6" /></Button>
-        <h1 className="font-serif text-3xl">Clock</h1>
+        <h1 className="font-display text-3xl">Clock</h1>
       </header>
       <Tabs value={tab} onValueChange={(value) => { if (tab === "alarms") handoffDo((h) => h.retire()); setTab(value as Tab); }}>
         <TabsList>

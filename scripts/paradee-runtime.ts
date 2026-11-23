@@ -1,3 +1,5 @@
+import {nativeEngineCheckout,nativeEngineLockPath,readNativeEngineLock} from './embedding-native-contract.ts';
+import {nativeCacheDirectory} from './native-build-inputs.ts';
 import {selectedAndroidAbis, abiArguments} from './android-abis.ts';
 import fs from 'node:fs';
 import {execFileSync} from 'node:child_process';
@@ -27,20 +29,21 @@ function checkedFile(root: string, entry: ParadeeAsset){
 }
 /** Gradle compiles JNI against this exact nested source even when engine binaries are staged. */
 export function verifyParadeeFfi(root: string){
- const vendor=path.join(root,'vendor/eliza'),relative='packages/os/android/local-inference/llama.cpp',fork=path.join(vendor,relative),header='tools/omnivoice/include/eliza-inference-ffi.h';
- const guidance='Initialize the pinned FFI source: git -C vendor/eliza submodule update --init packages/os/android/local-inference/llama.cpp';
+ const vendor=path.join(root,'vendor/eliza'),header='tools/omnivoice/include/eliza-inference-ffi.h';
+ const guidance='Prepare the pinned FFI source with pnpm agent:build-embedding-host.';
  const git=(directory: string,...args: string[])=>execFileSync('git',['-C',directory,...args],{stdio:['ignore','pipe','pipe'],maxBuffer:4*1024*1024});
  try{
   const pin=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'),'utf8')).commit;
   if(!/^[a-f0-9]{40}$/.test(pin)||git(vendor,'rev-parse','HEAD').toString().trim()!==pin)throw Error('Unexpected parent source pin');
-  const expected=git(vendor,'ls-tree',pin,'--',relative).toString().match(/^160000 commit ([a-f0-9]{40})\t/)?.[1];
-  if(!expected)throw Error('Missing pinned FFI gitlink');
-  let cursor=vendor;for(const part of relative.split('/')){cursor=path.join(cursor,part);if(fs.lstatSync(cursor).isSymbolicLink())throw Error('Linked FFI checkout');}
+  const expected=readNativeEngineLock(git(vendor,'show',`${pin}:${nativeEngineLockPath}`).toString()).commit;
+  const fork=path.resolve(process.env.ELIZA_INFERENCE_ENGINE_DIR??path.join(nativeCacheDirectory(root),nativeEngineCheckout));
+  if(fs.realpathSync(fork)!==fork)throw Error('Linked FFI checkout');
+  let cursor=fork;
   if(git(fork,'rev-parse','HEAD').toString().trim()!==expected||git(fork,'status','--porcelain','--untracked-files=normal').length)throw Error('FFI checkout must be clean at its exact pin');
   const bytes=git(fork,'show',expected+':'+header);cursor=fork;
   for(const part of header.split('/')){cursor=path.join(cursor,part);if(fs.lstatSync(cursor).isSymbolicLink())throw Error('Linked FFI header');}
   if(!fs.statSync(cursor).isFile()||!fs.readFileSync(cursor).equals(bytes))throw Error('FFI header changed');
-  return {forkPin:expected,headerSha256:digest(bytes)};
+  return {fork, forkPin:expected,headerSha256:digest(bytes)};
  }catch(error){throw Error('Paradee FFI source unavailable or changed. '+guidance,{cause:error});}
 }
 /**

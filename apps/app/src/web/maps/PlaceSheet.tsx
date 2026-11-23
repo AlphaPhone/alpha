@@ -47,7 +47,7 @@ export function PlaceSheet(p: PlaceSheetProps) {
     <section aria-label={name} className="flex flex-col gap-3 p-4">
       <header className="flex items-start gap-2">
         {editing === undefined ? (
-          <h2 className="flex-1 font-serif text-2xl">{name}</h2>
+          <h2 className="flex-1 font-display text-2xl">{name}</h2>
         ) : (
           <form className="flex flex-1 gap-2" onSubmit={(e) => { e.preventDefault(); p.onRename(editing); p.onEditing(undefined); }}>
             <Input autoFocus aria-label="Place name" value={editing} maxLength={300} onChange={(e) => p.onEditing(e.target.value)} />

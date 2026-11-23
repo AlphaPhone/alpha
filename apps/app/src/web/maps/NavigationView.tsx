@@ -40,7 +40,7 @@ export function NavigationView({ guidance, content, voiceOn, voiceAllowed, now, 
       <section aria-label="Guidance" aria-live="polite" className="flex items-center gap-3 rounded-xl bg-primary p-4 text-primary-foreground shadow-lg">
         <ManeuverIcon maneuver={arrived ? "arrive" : banner.maneuver} className="size-10 shrink-0" />
         <div className="min-w-0 flex-1">
-          <p className="font-serif text-3xl tabular-nums">{distance}</p>
+          <p className="font-display text-3xl tabular-nums">{distance}</p>
           <p className="truncate text-lg">{instruction}</p>
           {!arrived && !rerouting && banner.then && (
             <p className="flex items-center gap-1 text-sm opacity-80">Then <ManeuverIcon maneuver={banner.then.maneuver} className="size-4" /> {banner.then.instruction}</p>
@@ -50,10 +50,10 @@ export function NavigationView({ guidance, content, voiceOn, voiceAllowed, now, 
       <section aria-label="Navigation" className="flex items-center gap-3 rounded-xl bg-card p-3 shadow-md">
         <div className="min-w-0 flex-1">
           {arrived ? (
-            <p className="font-serif text-2xl">Destination reached</p>
+            <p className="font-display text-2xl">Destination reached</p>
           ) : (
             <>
-              <p className="font-serif text-2xl tabular-nums">{guidanceDuration(banner.remainingSeconds)}</p>
+              <p className="font-display text-2xl tabular-nums">{guidanceDuration(banner.remainingSeconds)}</p>
               <p className="truncate text-sm text-muted-foreground">
                 {`${guidanceDistance(banner.remainingMeters, "en-US")} · arrive ${arrival}${content.route.traffic === "live" ? "" : " · no live traffic"}`}
               </p>

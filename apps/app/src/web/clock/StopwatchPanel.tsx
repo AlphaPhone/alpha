@@ -21,7 +21,7 @@ export function StopwatchPanel({ watch, now, onAction }: StopwatchPanelProps) {
   const at = Math.max(now, watch.seen);
   return (
     <section className="flex flex-col items-center gap-8">
-      <output aria-live="off" className="font-serif text-6xl tabular-nums">{duration(elapsed(watch, at), true)}</output>
+      <output aria-live="off" className="font-display text-6xl tabular-nums">{duration(elapsed(watch, at), true)}</output>
       <div className="flex gap-4">
         {watch.running ? (
           <>

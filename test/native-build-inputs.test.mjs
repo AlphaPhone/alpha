@@ -12,7 +12,7 @@ const root=path.resolve(import.meta.dirname,'..');
 function fixture(t) {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-native-recipe-'));
   t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
-  for(const name of ['upstream.lock.json','app.config.json','android/consumer-host.json','scripts/android-identity.ts','android/voice-host/qualified-voice-host.json','android/embedding-host/build-toolchain.json','android/embedding-host/qualified-host.json','android/embedding-host/native-requirements.txt','android/embedding-host/bootstrap-requirements.txt','android/paradee-voice/asr-inputs.json','scripts/build-embedding-host.ts','scripts/prepare-embedding-host.ts','scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts','scripts/native-build-inputs.ts','scripts/android-stage-voice-models.ts','scripts/local-agent-source.ts','scripts/voice-host.ts','scripts/paradee-runtime.ts','scripts/android-abis.ts','scripts/copy-file-clone.ts','scripts/stage-embedding-host.ts']){
+  for(const name of ['upstream.lock.json','app.config.json','android/consumer-host.json','scripts/android-identity.ts','android/voice-host/qualified-voice-host.json','android/embedding-host/build-toolchain.json','android/embedding-host/qualified-host.json','android/embedding-host/native-requirements.txt','android/embedding-host/bootstrap-requirements.txt','android/paradee-voice/asr-inputs.json','scripts/build-embedding-host.ts','scripts/prepare-embedding-host.ts','scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts','scripts/native-build-inputs.ts','scripts/android-stage-voice-models.ts','scripts/voice-host.ts','scripts/paradee-runtime.ts','scripts/android-abis.ts','scripts/copy-file-clone.ts','scripts/stage-embedding-host.ts']){
     fs.mkdirSync(path.dirname(path.join(dir,name)),{recursive:true});fs.copyFileSync(path.join(root,name),path.join(dir,name));
   }
   fs.mkdirSync(path.join(dir,'vendor'));fs.symlinkSync(path.join(root,'vendor/eliza'),path.join(dir,'vendor/eliza'),'dir');
@@ -45,10 +45,10 @@ function receiptFor(dir){
   const source=name=>execFileSync('git',['-C',path.join(dir,'vendor/eliza'),'show',pin+':'+name]);
   const binding=nativeBinding(source(nativeInputPaths.at(-1)).toString(),source(nativeInputPaths.at(-2)).toString(),recipe.identity);
   const embedding={model:JSON.parse(fs.readFileSync(path.join(dir,'android/embedding-host/qualified-host.json'))).model,identity:recipe.identity,pin,forkPin:recipe.engineCommit,abi:'arm64-v8a',jniIdentityRelocated:true,jniBinding:binding,
-    libraries:[...voice.abis[0].libraries.map(row=>({...row,alignment16KiB:true})),{name:'libelizavoicejni.so',bytes:4,sha256:'a'.repeat(64),alignment16KiB:true}],
+    libraries:[...voice.abis[0].libraries.map(row=>({...row,alignment16KiB:true})),{name:'libparadeevoicejni.so',bytes:4,sha256:'a'.repeat(64),alignment16KiB:true}],
     inputs:nativeInputs(binding).map(name=>({path:name,sourceSha256:bytesDigest(source(name)),generatedSha256:bytesDigest(nativeGenerated(name,source(name).toString(),recipe.identity,binding))})),
     producerInputs:embeddingProducerInputPaths.map(name=>({path:name,sha256:bytesDigest(source(name))})),
-    additionalAbis:[{abi:'x86_64',libraries:[...voice.abis[1].libraries.map(row=>({...row,alignment16KiB:true})),{name:'libelizavoicejni.so',bytes:4,sha256:'b'.repeat(64),alignment16KiB:true}]}]};
+    additionalAbis:[{abi:'x86_64',libraries:[...voice.abis[1].libraries.map(row=>({...row,alignment16KiB:true})),{name:'libparadeevoicejni.so',bytes:4,sha256:'b'.repeat(64),alignment16KiB:true}]}]};
   const receipt={schema:'alpha-native-build/v1',consumerSdkCommit:pin,recipeSha256:nativeRecipeDigest(recipe),recipe,producer:{sdkCommit:pin,platform:'linux',arch:'x64',...recipe.toolchain,python:recipe.python},voice,embedding,files:[],qualification:{deviceExecuted:false,userAccepted:false}};
   receipt.files=[...nativeOutputInventory(receipt)].map(([name,row])=>({path:name,bytes:row?.bytes||4,sha256:row?.sha256||'a'.repeat(64)}));
   return receipt;
@@ -81,14 +81,14 @@ for(const linkedAbi of ['arm64-v8a','x86_64'])test(`native refresh refuses linke
     fs.mkdirSync(path.dirname(directory),{recursive:true});
     const target=abi===linkedAbi?external:directory;fs.mkdirSync(target,{recursive:true});
     if(abi===linkedAbi)fs.symlinkSync(external,directory,'dir');
-    for(const name of ['libelizainference.so','libelizavoicejni.so','libc++_shared.so']){
+    for(const name of ['libelizainference.so','libparadeevoicejni.so','libc++_shared.so']){
       const file=path.join(target,name);fs.writeFileSync(file,'retained '+abi);survivors.push(file);
     }
   }
   assert.throws(()=>clearStagedNativeInputs(product),/symbolic link/);
   for(const file of survivors)assert.ok(fs.existsSync(file),`refresh removed ${file}`);
   assert.equal(fs.readFileSync(bundle,'utf8'),'prior bundle');
-  for(const name of ['libelizainference.so','libelizavoicejni.so','libc++_shared.so'])assert.equal(fs.readFileSync(path.join(external,name),'utf8'),'retained '+linkedAbi);
+  for(const name of ['libelizainference.so','libparadeevoicejni.so','libc++_shared.so'])assert.equal(fs.readFileSync(path.join(external,name),'utf8'),'retained '+linkedAbi);
 });
 test('native refresh clears its owned outputs and preserves unrelated JNI files',t=>{
   const product=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'alpha-native-refresh-owned-')));
@@ -98,7 +98,7 @@ test('native refresh clears its owned outputs and preserves unrelated JNI files'
   const removed=[bundle],retained=[];
   for(const abi of ['arm64-v8a','x86_64']){
     const directory=path.join(product,'android/app/src/main/jniLibs',abi);fs.mkdirSync(directory,{recursive:true});
-    for(const name of ['libelizainference.so','libelizavoicejni.so','libc++_shared.so']){const file=path.join(directory,name);fs.writeFileSync(file,'old');removed.push(file);}
+    for(const name of ['libelizainference.so','libparadeevoicejni.so','libc++_shared.so']){const file=path.join(directory,name);fs.writeFileSync(file,'old');removed.push(file);}
     const other=path.join(directory,'libeliza_bun.so');fs.writeFileSync(other,'unrelated');retained.push(other);
   }
   clearStagedNativeInputs(product);

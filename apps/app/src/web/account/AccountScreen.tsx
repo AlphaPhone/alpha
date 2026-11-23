@@ -92,14 +92,14 @@ export function AccountScreen({ onClose }: AccountScreenProps) {
       onRefresh={() => providerDo((p) => p.refresh())} onBack={signIn.work === "SavingOwnKeys" ? () => providerDo((p) => p.leave()) : undefined}
     />
   );
-  if (signIn.work === "SavingOwnKeys") return <main className="mx-auto flex w-full max-w-lg flex-col gap-6 px-4 py-6"><h1 className="font-serif text-3xl">AI provider</h1>{providerForm}</main>;
+  if (signIn.work === "SavingOwnKeys") return <main className="mx-auto flex w-full max-w-lg flex-col gap-6 px-4 py-6"><h1 className="font-display text-3xl">AI provider</h1>{providerForm}</main>;
   if (sheet.section !== "ProviderSection" && (!isSignedIn(session.phase) || entryOf(signIn) === "OpenedEntry")) return <SignInHost serviceName={authority.name} onClose={onClose} />;
   const keyEnded = session.phase === "KeyRefused" || session.phase === "KeyExpired";
   return (
     <main className="mx-auto flex w-full max-w-lg flex-col gap-6 px-4 py-6">
       <header className="flex items-center gap-2">
         {sheet.section !== "AccountSection" && <Button variant="ghost" size="icon" aria-label="Back" onClick={back}><ArrowLeft aria-hidden /></Button>}
-        <h1 className="font-serif text-3xl">Account</h1>
+        <h1 className="font-display text-3xl">Account</h1>
       </header>
       {sheet.section === "AccountSection" && (
         <>

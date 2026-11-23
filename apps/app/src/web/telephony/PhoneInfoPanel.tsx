@@ -29,7 +29,7 @@ export function PhoneInfoPanel(_props: PhoneInfoPanelProps) {
     <section ref={visit} aria-label="Phone details" className="flex h-full flex-col overflow-y-auto bg-background text-foreground">
       <header className="flex items-center gap-2 px-4 pt-4">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={goBack}><ArrowLeft aria-hidden /></Button>
-        <h1 className="flex-1 font-serif text-2xl">Phone</h1>
+        <h1 className="flex-1 font-display text-2xl">Phone</h1>
       </header>
       {notice && <p role="status" className="px-4 pt-2 text-sm text-muted-foreground">{notice}</p>}
       <PhoneInfoView

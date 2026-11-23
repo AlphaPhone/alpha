@@ -7,12 +7,12 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {verifyEmbeddingHost, verifyEmbeddingInputs} from '../scripts/stage-embedding-host.ts';
-import {embeddingProducerInputPaths,nativeInputPaths, nativeBinding, nativeInputs, nativeGenerated} from '../scripts/embedding-native-contract.ts';
+import {embeddingProducerInputPaths,nativeInputPaths, nativeEngineLockPath, readNativeEngineLock, nativeBinding, nativeInputs, nativeGenerated} from '../scripts/embedding-native-contract.ts';
 const root=path.resolve(import.meta.dirname,'..');
 const git=(directory,...args)=>execFileSync('git',['-C',directory,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
 const committed=JSON.parse(fs.readFileSync(path.join(root,'android/embedding-host/qualified-host.json'),'utf8'));
 // The admission rules are tested on a qualification shaped like the committed record but made for the
-// pinned source: native build inputs and engine gitlink read from vendor/eliza at upstream.lock.json,
+// pinned source: native build inputs and engine lock read from vendor/eliza at upstream.lock.json,
 // and the built pin left as recorded (a reviewed build is never relabelled). The committed record's own
 // state at the pin is the last test in this file.
 const lockCommit=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'),'utf8')).commit;
@@ -20,9 +20,10 @@ const appId=JSON.parse(fs.readFileSync(path.join(root,'app.config.json'),'utf8')
 const sha=value=>createHash('sha256').update(value).digest('hex');
 const qualified=(()=>{
  const record=structuredClone(committed);delete record.producerInputs;
- record.forkPin=git(path.join(root,'vendor/eliza'),'ls-tree',lockCommit,'plugins/plugin-local-inference/native/llama.cpp').match(/^160000 commit ([a-f0-9]{40})\t/)[1];
+ for(const library of record.libraries)if(library.name==='libelizavoicejni.so')library.name='libparadeevoicejni.so';
  // The build inputs come from the shared native contract at the pin (registered JNI: the Java class too).
  const show=file=>execFileSync('git',['-C',path.join(root,'vendor/eliza'),'show',lockCommit+':'+file]);
+ record.forkPin=readNativeEngineLock(show(nativeEngineLockPath).toString('utf8')).commit;
  const binding=nativeBinding(show(nativeInputPaths.at(-1)).toString('utf8'),show(nativeInputPaths.at(-2)).toString('utf8'),appId);
  if(binding.mode==='registered')record.jniBinding=binding;
  record.inputs=nativeInputs(binding).map(file=>{
@@ -58,13 +59,12 @@ function fixture({currentOnly=false,producerInputs=false}={}){
   borrow(objects);
   fs.writeFileSync(path.join(vendor,'.git/objects/info/alternates'),borrowed.join('\n')+'\n');
   git(vendor,'sparse-checkout','init','--no-cone');
-  git(vendor,'sparse-checkout','set','--no-cone',...qualified.inputs.map(row=>'/'+row.path),...embeddingProducerInputPaths.map(name=>'/'+name),'/plugins/plugin-local-inference/native/llama.cpp');
+  git(vendor,'sparse-checkout','set','--no-cone',...qualified.inputs.map(row=>'/'+row.path),...embeddingProducerInputPaths.map(name=>'/'+name));
   git(vendor,'checkout','--detach',JSON.parse(fs.readFileSync(path.join(dir,'upstream.lock.json'),'utf8')).commit);
  }
  git(vendor,'config','user.name','Embedding fixture');git(vendor,'config','user.email','embedding-fixture@example.invalid');
  if(currentOnly){
-  fs.mkdirSync(path.join(vendor,'plugins/plugin-local-inference/native/llama.cpp'),{recursive:true});
-  git(vendor,'add',...new Set([...qualified.inputs.map(row=>row.path),...embeddingProducerInputPaths]));git(vendor,'update-index','--add','--cacheinfo','160000,'+qualified.forkPin+',plugins/plugin-local-inference/native/llama.cpp');git(vendor,'commit','-m','Current native input fixture');
+  git(vendor,'add',...new Set([...qualified.inputs.map(row=>row.path),...embeddingProducerInputPaths]));git(vendor,'commit','-m','Current native input fixture');
   const commit=git(vendor,'rev-parse','HEAD'),file=path.join(dir,'upstream.lock.json'),lock=JSON.parse(fs.readFileSync(file,'utf8'));lock.commit=commit;fs.writeFileSync(file,JSON.stringify(lock));fs.writeFileSync(path.join(vendor,'.git/shallow'),commit+'\n');
  }
  // Tiny content fixtures retain the production manifest shape; the known BGE hash is checked last.
@@ -124,10 +124,13 @@ fixtureTest('every changed committed native build input is refused even when the
   }finally{f.close();}
  }
 });
-fixtureTest('changed engine gitlink, dirty JNI and mismatched locked vendor checkout are refused',()=>{
- const fork='plugins/plugin-local-inference/native/llama.cpp';
+fixtureTest('changed engine lock, dirty JNI and mismatched locked vendor checkout are refused',()=>{
  for(const mutation of [
-  f=>{git(f.vendor,'update-index','--cacheinfo','160000,'+'1'.repeat(40)+','+fork);git(f.vendor,'commit','-m','Change engine pin');f.lock(git(f.vendor,'rev-parse','HEAD'));},
+  f=>{
+   const file=path.join(f.vendor,nativeEngineLockPath),lock=JSON.parse(fs.readFileSync(file,'utf8'));
+   lock.engine.commit='1'.repeat(40);fs.writeFileSync(file,JSON.stringify(lock));
+   git(f.vendor,'add',nativeEngineLockPath);git(f.vendor,'commit','-m','Change engine pin');f.lock(git(f.vendor,'rev-parse','HEAD'));
+  },
   f=>fs.appendFileSync(path.join(f.vendor,qualified.inputs.at(-1).path),'\n// dirty JNI\n'),
   f=>{git(f.vendor,'commit','--allow-empty','-m','Advance checkout without updating runtime lock');},
  ]){const f=fixture();try{mutation(f);assert.throws(()=>verifyEmbeddingHost(f.dir),/source admission changed/);}finally{f.close();}}
@@ -161,7 +164,7 @@ fixtureTest('missing, duplicated or changed producer records cannot qualify embe
 });
 fixtureTest('producer helper drift is rejected both dirty and after a committed source change',()=>{
  const f=fixture({producerInputs:true});try{
-  const helper='packages/app/scripts/aosp/compile-libllama.ts';fs.appendFileSync(path.join(f.vendor,helper),'\n// changed producer helper\n');
+  const helper='packages/os/android/local-inference/scripts/engine.ts';fs.appendFileSync(path.join(f.vendor,helper),'\n// changed producer helper\n');
   assert.throws(()=>verifyEmbeddingInputs(f.dir,f.manifest,{requireProducerInputs:true}),/source admission changed/);
   git(f.vendor,'add',helper);git(f.vendor,'commit','-m','Change producer helper');f.lock(git(f.vendor,'rev-parse','HEAD'));
   assert.throws(()=>verifyEmbeddingInputs(f.dir,f.manifest,{requireProducerInputs:true}),/Embedding producer input changed/);

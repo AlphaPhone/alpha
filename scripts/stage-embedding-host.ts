@@ -4,7 +4,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,verifyNativeJava} from './embedding-native-contract.ts';
+import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeEngineLockPath,readNativeEngineLock,nativeBinding,nativeInputs,nativeGenerated,verifyNativeJava} from './embedding-native-contract.ts';
 import {readNativeBuildReceipt} from './native-build-inputs.ts';
 import {ANDROID_ABIS} from './android-abis.ts';
 const root=path.resolve(import.meta.dirname,'..');
@@ -38,7 +38,6 @@ export type EmbeddingManifest = EmbeddingInputs & {
  jniIdentityRelocated: boolean;
  requalification?: { required: boolean; atPin: string; reason: string };
 };
-const forkPath='packages/os/android/local-inference/llama.cpp';
 
 /** Map original receipt paths onto a verified extracted artifact without rewriting the receipt. */
 export function embeddingLibrarySource(row: Pick<PreparedEmbeddingLibrary, "path" | "artifactPath">,libraryRoot?: string){
@@ -79,9 +78,9 @@ export function verifyEmbeddingInputs(productRoot: string,qualification: Embeddi
     if (sha(git('show', pin + ':' + row.path)) !== row.sha256) throw Error('Embedding producer input changed: ' + row.path);
    }
   }
-  git('diff','--quiet','HEAD','--',...inputPaths,forkPath);
-  const fork=git('ls-tree',pin,forkPath).toString().match(/^160000 commit ([a-f0-9]{40})\t/)?.[1];
-  if(fork!==qualification.forkPin)throw Error('Native engine gitlink changed');
+  git('diff','--quiet','HEAD','--',...inputPaths,nativeEngineLockPath);
+  const fork=readNativeEngineLock(source(nativeEngineLockPath)).commit;
+  if(fork!==qualification.forkPin)throw Error('Native engine lock changed');
   for(const row of inputs){
    const source=git('show',pin+':'+row.path);
    const generated=nativeGenerated(row.path,source.toString('utf8'),identity,binding);

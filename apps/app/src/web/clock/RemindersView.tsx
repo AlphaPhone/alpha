@@ -106,7 +106,7 @@ export function RemindersView(props: RemindersViewProps) {
     <main className="flex min-h-full flex-col gap-4 bg-background px-4 pt-4 pb-28 text-foreground">
       <header className="flex items-center gap-2">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={row ? () => onOpen(undefined) : onBack}><ChevronLeft aria-hidden className="size-6" /></Button>
-        <h1 className="flex-1 font-serif text-3xl">{row ? row.title : "Reminders"}</h1>
+        <h1 className="flex-1 font-display text-3xl">{row ? row.title : "Reminders"}</h1>
         {!row && <Button variant="ghost" size="icon" aria-label="Refresh" onClick={onRefresh}><RefreshCw aria-hidden className="size-5" /></Button>}
         {!row && !editing && <Button size="icon" aria-label="New reminder" disabled={saving} onClick={() => openForm("new")}><Plus aria-hidden className="size-5" /></Button>}
       </header>

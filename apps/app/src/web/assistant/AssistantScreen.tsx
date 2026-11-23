@@ -26,7 +26,7 @@ export function AssistantScreen({ route, onClose }: AssistantScreenProps) {
           <>
             <header className="flex items-center gap-2 px-3 py-2">
               <Button size="icon" variant="ghost" aria-label="Back" onClick={onClose}><ArrowLeft className="size-5" /></Button>
-              <h1 className="font-serif text-2xl">Alpha</h1>
+              <h1 className="font-display text-2xl">Alpha</h1>
             </header>
             <div className="min-h-0 flex-1">
               <ChatPanel open={openFromAssistant} onTalk={() => act(Effect.flatMap(Effect.service(Assistant), (assistant) => assistant.requestVoice()))} />
