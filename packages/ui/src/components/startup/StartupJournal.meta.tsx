@@ -7,11 +7,11 @@ const onClear = fn();
 export const meta: ComponentMeta<StartupJournalProps> = {
   args: {
     entries: [
-      { when: "12 Oct, 08:14", kind: "Crashed" },
-      { when: "14 Oct, 19:02", kind: "FailedToDraw" },
-      { when: "14 Oct, 19:03", kind: "KeptFailing" },
-      { when: "2 Nov, 07:45", kind: "StoppedAnswering" },
-      { when: "9 Nov, 22:30", kind: "FailedToStart" },
+      { at: 1760000000000, when: "12 Oct, 08:14", kind: "Crashed" },
+      { at: 1760086400000, when: "14 Oct, 19:02", kind: "FailedToDraw" },
+      { at: 1760172800000, when: "14 Oct, 19:03", kind: "KeptFailing" },
+      { at: 1760259200000, when: "2 Nov, 07:45", kind: "StoppedAnswering" },
+      { at: 1760345600000, when: "9 Nov, 22:30", kind: "FailedToStart" },
     ],
     onClear,
   },

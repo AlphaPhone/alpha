@@ -5,6 +5,8 @@ import { ListRow } from "../ListRow.tsx";
 import type { StartupJournalKind } from "./vocabulary.ts";
 
 export type StartupJournalEntry = {
+  /** The time of the failure in milliseconds, as the journal records it; names the entry. */
+  at: number;
   /** When it happened, written the way the phone writes times. */
   when: string;
   /** What kind of failure it was. */
@@ -41,8 +43,8 @@ export function StartupJournal({ entries, dropped = 0, onClear }: StartupJournal
         <EmptyState title="No failures" />
       ) : (
         <ListGroup heading="Failures">
-          {entries.map((entry, index) => (
-            <ListRow key={index} title={kinds[entry.kind]} trailing={entry.when} />
+          {entries.map((entry) => (
+            <ListRow key={`${entry.at}-${entry.kind}`} title={kinds[entry.kind]} trailing={entry.when} />
           ))}
         </ListGroup>
       )}
