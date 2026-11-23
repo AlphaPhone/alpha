@@ -45,7 +45,7 @@ export const egressLayer = Layer.provide(Layer.effect(BrowserEgress, effect {
     return viewedOf(try tabs.get(), shown.visible && !shown.locked && shown.screen === "home" && shown.view === "browser")
   }
 
-  effect function perform(out: EgressEffect) {
+  effect function perform(out: EgressEffect): void!! {
     match (out) {
       when { tag: "ShareSheet", let tab, let url, let navigation }: try effect {
         const shared = host.call("share", { id: tab, url, navigation }) catch (error) => error
@@ -65,7 +65,7 @@ export const egressLayer = Layer.provide(Layer.effect(BrowserEgress, effect {
     }
   }
 
-  effect function send(event: Event) {
+  effect function send(event: Event): void!! {
     const change = egress.send(event) catch () => undefined
     if (change !== undefined) for (const out of change.out) try perform(out)
   }

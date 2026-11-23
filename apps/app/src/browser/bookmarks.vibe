@@ -24,7 +24,7 @@ export const bookmarksLayer = Layer.provideMerge(Layer.effect(BrowserBookmarks, 
   const toasts = try Toasts
   const lastFailure = try Ref.make("")
 
-  effect function perform(out: BookmarkEffect) {
+  effect function perform(out: BookmarkEffect): void!! {
     match (out) {
       when { tag: "ReadMarks" }: try effect {
         const read = effect { return try Schema.decodeUnknownEffect(MarkList)(try host.call("bookmarks")) } catch (error) => error
@@ -45,7 +45,7 @@ export const bookmarksLayer = Layer.provideMerge(Layer.effect(BrowserBookmarks, 
     }
   }
 
-  effect function send(event: Event) {
+  effect function send(event: Event): void!! {
     const change = marks.send(event) catch () => undefined
     if (change !== undefined) for (const out of change.out) try perform(out)
   }

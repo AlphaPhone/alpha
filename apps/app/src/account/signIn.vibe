@@ -116,10 +116,10 @@ export const signInService = Layer.effect(SignInScreen, effect {
     }
   }
 
-  effect function readMethods() {
+  effect function readMethods(): void!! {
     const read = effect {
-      return try Schema.decodeUnknownEffect(HostStatus)(try native.invoke(plugin, "status", { environment, refreshNegative: true }))
-    } catch () => ({})
+      return Effect.flatMap(native.invoke(plugin, "status", { environment, refreshNegative: true }), Schema.decodeUnknownEffect(HostStatus)) catch () => ({})
+    }
     const reading = fork.in(scope) read
     // The chooser waits at most six seconds; an answer after that is the check's late answer.
     const first = try timeoutOption(Fiber.join(reading), Duration.millis(readinessWaitMs))

@@ -32,16 +32,16 @@ export const privacyRow = Layer.effect(PrivacyRow, effect {
   return {
     route: () => voice.privacy(),
     effect readListener() {
-      const begun = try (row.send({ type: "beginRead" }) catch () => undefined)
+      const begun = (row.send({ type: "beginRead" }) catch () => undefined)
       if (begun === undefined) return
       const status = try listener.status()
-      try (row.send({ type: "readAnswered", token: begun.issued, listening: listening(status) }) catch () => undefined)
+      row.send({ type: "readAnswered", token: begun.issued, listening: listening(status) }) catch () => undefined
     },
     effect stop(stop: Stop) {
-      const begun = try (row.send({ type: "beginStop", stop }) catch () => undefined)
+      const begun = (row.send({ type: "beginStop", stop }) catch () => undefined)
       if (begun === undefined) return
       const answer = try (stop === "Pause" ? listener.pause() : listener.turnOff())
-      try (row.send({ type: "stopAnswered", confirmed: answer.confirmed, listening: listening(answer.status) }) catch () => undefined)
+      row.send({ type: "stopAnswered", confirmed: answer.confirmed, listening: listening(answer.status) }) catch () => undefined
     },
     openListenerSettings: () => listener.openSettings(),
   }

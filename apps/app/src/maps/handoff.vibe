@@ -6,7 +6,7 @@ import { Machine as ReturnMachine, offered, type ReturnReply } from "../../gen/m
 import { Machine as OpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
 import { restricted } from "../../gen/maps__vocabulary.effect.vibe"
 import { AgentCalendar } from "../calendar/agent.vibe"
-import { callOffered } from "../../gen/maps__screen.ts"
+import { callOffered } from "../../gen/maps__screen.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { modelTravel, MapsProvider } from "./cloud.vibe"

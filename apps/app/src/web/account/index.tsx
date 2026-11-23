@@ -11,12 +11,14 @@ import { authorityOf } from "../../account/deployment.ts";
 import { AccountBindings, type AccountRows } from "../../account/bindings.vibe";
 import { AccountPresentation } from "../../account/presentation.vibe";
 import { AccountSheet } from "../../account/sheet.vibe";
+import { SignInScreen } from "../../account/signIn.vibe";
 import type { AppId, AppScreen, AppSurface } from "../app-screen.ts";
 import { AccountChips, quietChips } from "./AccountChips.tsx";
 import { AccountScreen } from "./AccountScreen.tsx";
 import { PlanNotice } from "./PlanNotice.tsx";
 import { SignInHost } from "./SignInHost.tsx";
 import { act, ask, useServiceStream } from "../shell/services.ts";
+import { closes, sheetBack } from "../shell/surfaceBack.ts";
 import { runtime } from "./runtime.ts";
 
 /** What the shell gives an always-mounted account surface. */
@@ -77,6 +79,10 @@ export const screens: AppScreen[] = [{ id: "account", title: "Account", icon: Us
 
 /** The sign-in page and the plan notice. */
 export const surfaces: AppSurface[] = [
-  { id: "account-sign-in", slot: "overlay", availability: "everywhere", Surface: SignInPage },
+  {
+    id: "account-sign-in", slot: "overlay", availability: "everywhere", Surface: SignInPage,
+    // The page holds Back while it shows: Back ends its step, and on its chooser changes nothing, never reaching the screen under it.
+    back: sheetBack(Effect.map(Effect.service(SignInScreen), (screen) => screen.changes), pageShown, () => closes(Effect.flatMap(Effect.service(SignInScreen), (screen) => screen.back()))),
+  },
   { id: "account-plan-notice", slot: "notices", availability: "everywhere", Surface: PlanNoticeSurface },
 ];

@@ -69,7 +69,7 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
     return readPageOf(try tabs.get(), readingShown(try foreground.get()))
   }
 
-  effect function perform(out: ReadingEffect) {
+  effect function perform(out: ReadingEffect): void!! {
     match (out) {
       when { tag: "QuerySupport" }: try effect {
         if (host.onDevice) {
@@ -140,7 +140,7 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
     }
   }
 
-  effect function send(event: Event) {
+  effect function send(event: Event): void!! {
     const change = reading.send(event) catch () => undefined
     if (change !== undefined) for (const out of change.out) try perform(out)
   }

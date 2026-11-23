@@ -77,8 +77,12 @@ it.live(`Only managed routes leave the phone (spec/account/session.md, "Story: U
       fork.scoped session.run()
       try until(session.changes, (s) => s.loaded)
       const refused = (route: "HandOffRoute" | "PairingRoute" | "FundsRoute" | "MapsRoute") => Effect.match(session.admit(route), { onFailure: () => true, onSuccess: () => false })
+      const got1 = try refused("HandOffRoute")
+      const got2 = try refused("PairingRoute")
+      const got3 = try refused("FundsRoute")
+      const got4 = try refused("MapsRoute")
       try Effect.try(() => assert.deepStrictEqual(
-        { handOff: try refused("HandOffRoute"), pairing: try refused("PairingRoute"), funds: try refused("FundsRoute"), maps: try refused("MapsRoute") },
+        { handOff: got1, pairing: got2, funds: got3, maps: got4 },
         { handOff: true, pairing: true, funds: false, maps: false }
       ))
     })
@@ -420,8 +424,9 @@ it.live(`A plan that needs attention is a Home notice until dismissed (spec/acco
       try sheet.covered(false)
       try sheet.dismissPlan()
       const dismissed = try sheet.current()
+      const got5 = try entitlement.current()
       try Effect.try(() => assert.deepStrictEqual(
-        { needed: needed.planRequired, coveredHides: covered.covered, dismissed: dismissed.planDismissed, admission: (try entitlement.current()).notice },
+        { needed: needed.planRequired, coveredHides: covered.covered, dismissed: dismissed.planDismissed, admission: got5.notice },
         { needed: true, coveredHides: true, dismissed: true, admission: "NeedsPlanNotice" }
       ))
     })

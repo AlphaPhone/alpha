@@ -87,7 +87,7 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
   effect function toast(text: string) { try toasts.show(text) }
   effect function refused(error: BrowserCallFailed) { try toast(refusalText(error.message)) }
 
-  effect function perform(out: SessionEffect, done: { settled: AgentSettled[]; unhandledBack: boolean; failed: boolean }) {
+  effect function perform(out: SessionEffect, done: { settled: AgentSettled[]; unhandledBack: boolean; failed: boolean }): void!! {
     match (out) {
       when { tag: "CreateNative", let id, let profile }: try effect {
         const created = host.call("create", { id, private: profile === "Private" }) catch (error) => error
@@ -123,7 +123,7 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
     }
   }
 
-  effect function dispatch(event: Event) {
+  effect function dispatch(event: Event): Dispatched!! {
     const change = tabs.send(event) catch () => undefined
     if (change === undefined) return nothing
     const done = { settled: [] as AgentSettled[], unhandledBack: false, failed: false }
@@ -131,11 +131,11 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
     return { accepted: true, ...done }
   }
 
-  effect function write(out: readonly WriterEffect[]) {
+  effect function write(out: readonly WriterEffect[]): void!! {
     for (const effectOut of out) {
       match (effectOut) {
         when { tag: "Write", let snapshot }: try effect {
-          const ok = (host.call("saveBrowsingState", snapshot) catch () => undefined) !== undefined
+          const ok = (host.call("saveBrowsingState", { ...snapshot }) catch () => undefined) !== undefined
           const next = writer.send({ type: "writeSettled", ok, now: now() }) catch () => undefined
           if (!ok) try retryLater()
           if (next !== undefined) try write(next.out)
@@ -145,7 +145,7 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
     }
   }
 
-  effect function retryLater() {
+  effect function retryLater(): void!! {
     const wait = (try writer.get()).retryAt - now()
     if (wait <= 0) return
     fork.detached effect {
@@ -154,7 +154,7 @@ export const tabsLayer = Layer.provideMerge(Layer.effect(BrowserTabs, effect {
     }
   }
 
-  effect function save(state: Session) {
+  effect function save(state: Session): void!! {
     if (!mayPersist(state)) return
     const change = writer.send({ type: "offer", snapshot: snapshotOf(state), now: now() }) catch () => undefined
     if (change !== undefined) try write(change.out)
