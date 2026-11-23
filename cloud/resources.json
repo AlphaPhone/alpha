@@ -1,13 +1,13 @@
 {
   "production": {
     "workerName": "alphacompute-cloud-api",
-    "accountId": "00000000000000000000000000000000",
+    "accountId": "50ad2052bbc6ca528d6993a689b419a4",
     "zone": "alphaphone.dev",
     "blobHost": "blob.alphaphone.dev",
     "loginApiUrl": "https://api.alphaphone.dev",
     "mailFrom": "Alpha Cloud <noreply@alphacompute.cc>",
-    "hyperdriveId": "00000000000000000000000000000021",
-    "kvNamespaceId": "00000000000000000000000000000022",
+    "hyperdriveId": "3d60b34707bc4e22941f65aac9f394ef",
+    "kvNamespaceId": "1ff4e9328a9a4fa4860dbdd761a9d9f1",
     "r2Bucket": "alphacompute-cloud-blob",
     "rateLimitNamespaceIds": {
       "GLOBAL_RATE_LIMITER": "2011",
