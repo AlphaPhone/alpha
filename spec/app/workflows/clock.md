@@ -3,14 +3,22 @@
 The Clock page inside Workflows. Android's Clock app owns the alarms, so
 Alpha only hands a reviewed request over to it: set an alarm, show the
 alarms, snooze or dismiss the one ringing. Alpha keeps no alarm of its own,
-and what it remembers of a handoff says only whether Clock was opened.
+and what it remembers of a handoff says only whether Clock was opened. In
+a plain browser there is no Clock, so nothing is handed over and nothing
+is remembered.
+
+The agent may propose the same handoff itself (eliza's `ClockHandoff`
+device operation); that proposal is reviewed by the approvals area
+(`spec/app/approvals`) and ends in the same receipt, under the receipt rule
+stated here. Whether Alpha is showing is the shell's: it sends `suspend`
+when Alpha is hidden.
 
 ## Story: Describe an alarm for Clock
 
 > As the owner, I want to say what Clock should do, with a time, a label
 > and repeat days where my phone can carry them, before anything is sent.
 
-### The page holds what to ask of Clock, the review of it, the handoff and its receipt
+### The page holds whether Clock is there, the last handoff read, what to ask of Clock, the review of it, the handoff and its receipt
 
 The label is counted in characters. Repeat days are the days of the week,
 1 for Sunday to 7 for Saturday; none means a one-time alarm.
@@ -21,10 +29,13 @@ import review as V from "../../kit/review"
 import attempt as A from "../../kit/attempt"
 
 type Handoff = SetAlarm | ShowAlarms | Snooze | Dismiss
-type Receipt = NoReceipt | NotSent | ClockOpened | ClockUnavailable | ClockDenied | ClockFailed | Unclear
-type Effect = ReadHistory({ ticket: int }) | KeepHandoff({ id: int, kind: Handoff }) | OpenClock({ id: int, kind: Handoff })
+type Receipt = NoReceipt | NotSent | Withdrawn | ClockOpened | ClockUnavailable | ClockDenied | ClockFailed | Unclear
+type Effect =
+  | ReadHistory({ ticket: int })
+  | KeepHandoff({ id: int, kind: Handoff })
+  | OpenClock({ id: int, kind: Handoff, hour: int, minute: int, label: int, snooze: int, days: Set[int] })
 type Clock = {
-  open: bool, hidden: bool, history: R::Read, repeats: bool,
+  open: bool, clock: bool, history: R::Read, repeats: bool, lastKind: Handoff, lastReceipt: Receipt,
   kind: Handoff, hour: int, minute: int, label: int, snooze: int, days: Set[int],
   review: V::Review, handoff: A::Attempt, receipt: Receipt,
 }
@@ -34,7 +45,7 @@ pure val maxLabel = 200
 pure val maxSnooze = 60
 
 pure val initial: Clock = {
-  open: false, hidden: false, history: R::unread, repeats: false,
+  open: false, clock: false, history: R::unread, repeats: false, lastKind: SetAlarm, lastReceipt: NoReceipt,
   kind: SetAlarm, hour: 7, minute: 0, label: 0, snooze: 10, days: Set(),
   review: V::unreviewed, handoff: A::plan(0), receipt: NoReceipt,
 }
@@ -46,36 +57,38 @@ pure val minuteValues = Set(-1, 0, 30, 60)
 pure val charsValues = Set(-1, 0, 200, 201)
 pure val minutesValues = Set(0, 1, 60, 61)
 pure val dayValues = Set(0, 1, 2, 7, 8)
+pure val lastReceiptValues = Set(NoReceipt, ClockOpened, Unclear, ClockDenied)
 ```
 
-### Opening the page reads the last handoff and whether this phone carries repeat days
+### Opening the page reads the last handoff and whether this phone carries repeat days, where there is a Clock to hand over to
 
-The page opens only while Alpha is showing. A read that failed can be
-tried again.
+A read that failed can be tried again.
 
 ```quint
 pure def busy(c: Clock): bool = c.handoff.outcome == A::Recorded or c.handoff.outcome == A::Sent
 
-pure def canOpenClock(c: Clock): bool = not(c.open) and not(c.hidden)
+pure def canOpenClock(c: Clock, available: bool): bool = not(c.open)
 
-pure def openClock(c: Clock): Moved =
+pure def openClock(c: Clock, available: bool): Moved =
   val asked = R::ask(c.history)
-  { state: { ...c, open: true, history: asked }, out: List(ReadHistory({ ticket: asked.ticket })) }
+  if (available) { state: { ...c, open: true, clock: true, history: asked }, out: List(ReadHistory({ ticket: asked.ticket })) }
+  else { state: { ...c, open: true, clock: false }, out: List() }
 
-pure def canRetryHistory(c: Clock): bool = c.open and not(c.hidden) and c.history.status == R::Failed
+pure def canRetryHistory(c: Clock): bool = c.open and c.clock and c.history.status == R::Failed
 
 pure def retryHistory(c: Clock): Moved =
   val asked = R::ask(c.history)
   { state: { ...c, history: asked }, out: List(ReadHistory({ ticket: asked.ticket })) }
 ```
 
-### Only the newest read is taken, and once a phone is known to carry repeat days it stays known
+### Only the newest read is taken: it shows the last handoff and what Clock answered, and once a phone is known to carry repeat days it stays known
 
 ```quint
 pure def canHistoryRead(c: Clock, ticket: int): bool = R::canAnswer(c.history, ticket)
 
-pure def historyRead(c: Clock, ticket: int, ok: bool, repeats: bool): Clock =
-  { ...c, history: R::answer(c.history, ok), repeats: c.repeats or (ok and repeats) }
+pure def historyRead(c: Clock, ticket: int, ok: bool, repeats: bool, lastKind: Handoff, lastReceipt: Receipt): Clock =
+  if (ok) { ...c, history: R::answer(c.history, true), repeats: c.repeats or repeats, lastKind: lastKind, lastReceipt: lastReceipt }
+  else { ...c, history: R::answer(c.history, false) }
 ```
 
 ### What to ask of Clock is chosen on the open page, and never while a handoff is in flight
@@ -85,7 +98,7 @@ Every change closes the review, which no longer counts.
 ```quint
 pure def voided(r: V::Review): V::Review = V::dismiss(V::revise(r))
 
-pure def editable(c: Clock): bool = c.open and not(busy(c))
+pure def editable(c: Clock): bool = c.open and c.clock and not(busy(c))
 
 pure def canPick(c: Clock, wanted: Handoff): bool = editable(c) and wanted != c.kind
 
@@ -142,11 +155,13 @@ pure def alwaysTheAlarmIsWellFormed(c: Clock): bool = and {
 }
 ```
 
-### A repeating alarm can be described
+### A repeating alarm can be described, and the page can open where there is no Clock
 
 ```quint
 pure def sometimesARepeatingAlarmIsUnderReview(c: Clock): bool =
   c.review.showing and c.days.contains(2) and c.days.contains(7)
+
+pure def sometimesThereIsNoClock(c: Clock): bool = c.open and not(c.clock) and c.history.status == R::Idle
 ```
 
 ## Story: Review, then hand over to Clock
@@ -157,8 +172,7 @@ pure def sometimesARepeatingAlarmIsUnderReview(c: Clock): bool =
 ### Review shows the request as it is, once the last handoff has been read
 
 ```quint
-pure def canPrepare(c: Clock): bool =
-  editable(c) and not(c.hidden) and c.history.status == R::Loaded and not(c.review.showing)
+pure def canPrepare(c: Clock): bool = editable(c) and c.history.status == R::Loaded and not(c.review.showing)
 
 pure def prepare(c: Clock): Clock = { ...c, review: V::present(c.review) }
 
@@ -178,13 +192,14 @@ pure def confirm(c: Clock): Moved =
     out: List(KeepHandoff({ id: recorded.id, kind: c.kind })) }
 ```
 
-### Clock is opened once the handoff is kept, and a handoff that could not be kept is not sent
+### Clock is opened once the handoff is kept, with exactly what was reviewed, and a handoff that could not be kept is not sent
 
 ```quint
 pure def canHandoffKept(c: Clock, id: int): bool = A::canDispatch(c.handoff) and id == c.handoff.id
 
 pure def handoffKept(c: Clock, id: int, ok: bool): Moved =
-  if (ok) { state: { ...c, handoff: A::dispatch(c.handoff) }, out: List(OpenClock({ id: id, kind: c.kind })) }
+  if (ok) { state: { ...c, handoff: A::dispatch(c.handoff) },
+            out: List(OpenClock({ id: id, kind: c.kind, hour: c.hour, minute: c.minute, label: c.label, snooze: c.snooze, days: c.days })) }
   else { state: { ...c, handoff: A::plan(id), receipt: NotSent }, out: List() }
 ```
 
@@ -196,16 +211,9 @@ recorded for a review that is gone is never sent.
 ```quint
 pure def withdrawn(c: Clock): A::Attempt = if (c.handoff.outcome == A::Recorded) A::plan(c.handoff.id) else c.handoff
 
-pure def receiptAfterWithdrawal(c: Clock): Receipt = if (c.handoff.outcome == A::Recorded) NotSent else c.receipt
+pure def receiptAfterWithdrawal(c: Clock): Receipt = if (c.handoff.outcome == A::Recorded) Withdrawn else c.receipt
 
-pure def canSuspend(c: Clock): bool = not(c.hidden)
-
-pure def suspend(c: Clock): Clock =
-  { ...c, hidden: true, review: V::dismiss(c.review), handoff: withdrawn(c), receipt: receiptAfterWithdrawal(c) }
-
-pure def canResume(c: Clock): bool = c.hidden
-
-pure def resume(c: Clock): Clock = { ...c, hidden: false }
+pure def suspend(c: Clock): Clock = { ...c, review: V::dismiss(c.review), handoff: withdrawn(c), receipt: receiptAfterWithdrawal(c) }
 
 pure def canCloseClock(c: Clock): bool = c.open and not(busy(c))
 
@@ -221,18 +229,14 @@ pure def leave(c: Clock): Clock = {
 }
 ```
 
-### A review is shown only on the open page, while Alpha is showing and no handoff is in flight
+### A review is shown only on the open page of a phone with Clock, while no handoff is in flight, and a handoff waits to be sent only while its review's page is open
 
 ```quint
-pure def alwaysAReviewIsOnTheOpenPage(c: Clock): bool =
-  c.review.showing implies (c.open and not(c.hidden) and not(busy(c)))
-```
-
-### A handoff waits to be sent only while its page is open and showing
-
-```quint
-pure def alwaysAnUnsentHandoffIsOnTheOpenPage(c: Clock): bool =
-  c.handoff.outcome == A::Recorded implies (c.open and not(c.hidden))
+pure def alwaysAReviewIsOnTheOpenPage(c: Clock): bool = and {
+  c.review.showing implies (c.open and c.clock and not(busy(c))),
+  c.handoff.outcome == A::Recorded implies (c.open and c.clock),
+  c.history.status == R::Loading implies c.clock,
+}
 ```
 
 ### Each handoff comes from one confirmed review of the request as it was shown
@@ -245,14 +249,15 @@ pure def stepOneHandoffPerReview(before: Clock, via: str, after: Clock): bool =
   }
 ```
 
-### Clock is opened at most once per handoff, and only for a handoff recorded first
+### Clock is opened at most once per handoff, only for a handoff recorded first, and with what was reviewed
 
 ```quint
 pure def stepClockIsOpenedOncePerRecordedHandoff(before: Clock, via: str, after: Clock, out: List[Effect]): bool =
   and {
     out.length() <= 1,
     out.every(e => match e {
-      | OpenClock(o) => o.id == after.handoff.id and o.kind == after.kind
+      | OpenClock(o) => o.id == after.handoff.id and o.kind == after.kind and o.hour == after.hour and o.minute == after.minute
+          and o.label == after.label and o.snooze == after.snooze and o.days.subseteq(after.days) and after.days.subseteq(o.days)
           and before.handoff.outcome == A::Recorded and after.handoff.outcome == A::Sent
       | KeepHandoff(k) => k.id == after.handoff.id and k.kind == after.kind and via == "confirm"
       | ReadHistory(r) => r.ticket == after.history.ticket
@@ -291,6 +296,16 @@ pure val fair_handoffKept = "weak"
 pure val fair_clockAnswered = "weak"
 ```
 
+### Every kind of handoff can be handed over
+
+```quint
+pure def sometimesASnoozeIsHandedOver(c: Clock): bool = c.handoff.outcome == A::Sent and c.kind == Snooze and c.snooze == 60
+
+pure def sometimesAlarmsAreShown(c: Clock): bool = c.receipt == ClockOpened and c.kind == ShowAlarms
+
+pure def sometimesARingingAlarmIsDismissed(c: Clock): bool = c.receipt == ClockOpened and c.kind == Dismiss
+```
+
 ## Story: Know what happened
 
 > As the owner, I want to be told whether Clock opened, and never to be
@@ -301,19 +316,20 @@ pure val fair_clockAnswered = "weak"
 No answer that can be trusted leaves the outcome unknown.
 
 ```quint
-pure def answers(answer: Receipt): bool = answer != NoReceipt and answer != NotSent
+pure def answers(answer: Receipt): bool = answer != NoReceipt and answer != NotSent and answer != Withdrawn
 
 pure def canClockAnswered(c: Clock, id: int, answer: Receipt): bool = A::canConclude(c.handoff, id) and answers(answer)
 
 pure def clockAnswered(c: Clock, id: int, answer: Receipt): Clock =
-  { ...c, handoff: A::conclude(c.handoff, answer == ClockOpened, answer != Unclear), receipt: answer }
+  { ...c, handoff: A::conclude(c.handoff, answer == ClockOpened, answer != Unclear), receipt: answer,
+    lastKind: c.kind, lastReceipt: answer }
 ```
 
 ### A restart forgets the page, withdraws a handoff not yet sent, and leaves one that was being opened unknown
 
 ```quint
 pure def restart(c: Clock): Clock = {
-  ...c, open: false, hidden: false, history: R::unread, repeats: false,
+  ...c, open: false, clock: false, history: { ...c.history, status: R::Idle }, repeats: false, lastReceipt: NoReceipt,
   kind: SetAlarm, hour: 7, minute: 0, label: 0, snooze: 10, days: Set(), review: voided(c.review),
   handoff: if (c.handoff.outcome == A::Sent) A::conclude(c.handoff, false, false) else withdrawn(c),
   receipt: if (c.handoff.outcome == A::Sent) Unclear else receiptAfterWithdrawal(c),
@@ -322,15 +338,13 @@ pure def restart(c: Clock): Clock = {
 
 ### The receipt says only what Clock answered: that it opened, that it did not, or nothing
 
-A receipt never says an alarm was set, changed or rang.
-
 ```quint
 pure def alwaysTheReceiptSaysOnlyWhatClockAnswered(c: Clock): bool = and {
   c.handoff.id >= 0,
   (c.receipt == ClockOpened) iff (c.handoff.outcome == A::Confirmed),
   (c.receipt == Unclear) iff (c.handoff.outcome == A::Unknown),
   (c.receipt == ClockUnavailable or c.receipt == ClockDenied or c.receipt == ClockFailed) iff (c.handoff.outcome == A::Refused),
-  c.receipt == NotSent implies c.handoff.outcome == A::Planned,
+  (c.receipt == NotSent or c.receipt == Withdrawn) implies c.handoff.outcome == A::Planned,
 }
 ```
 
@@ -341,38 +355,21 @@ pure def stepAnEndedHandoffStaysEnded(before: Clock, via: str, after: Clock): bo
   (A::ended(before.handoff) and after.handoff.id == before.handoff.id) implies after.handoff == before.handoff
 ```
 
-### Clock can be opened
+### Clock can open, refuse, or leave a handoff unknown; a handoff can be withdrawn or not kept; the last handoff is shown after a restart; the history can fail to be read
 
 ```quint
 pure def sometimesClockWasOpened(c: Clock): bool = c.receipt == ClockOpened
-```
 
-### Clock can refuse
-
-```quint
 pure def sometimesClockRefused(c: Clock): bool = c.handoff.outcome == A::Refused
-```
 
-### A handoff can end unknown
-
-```quint
 pure def sometimesAHandoffEndsUnknown(c: Clock): bool = c.receipt == Unclear and not(c.open)
-```
 
-### A handoff can be withdrawn before it is sent
+pure def sometimesAHandoffIsWithdrawn(c: Clock): bool = c.receipt == Withdrawn and c.handoff.id >= 1
 
-```quint
-pure def sometimesAHandoffIsWithdrawn(c: Clock): bool = c.receipt == NotSent and c.hidden
-```
+pure def sometimesAHandoffIsNotKept(c: Clock): bool = c.receipt == NotSent and c.handoff.id >= 1
 
-### A snooze can be handed over
+pure def sometimesTheLastHandoffIsShownAfterARestart(c: Clock): bool =
+  c.open and c.history.status == R::Loaded and c.lastReceipt == Unclear and c.receipt == Unclear
 
-```quint
-pure def sometimesASnoozeIsHandedOver(c: Clock): bool = c.handoff.outcome == A::Sent and c.kind == Snooze and c.snooze == 60
-```
-
-### The last handoff can fail to be read
-
-```quint
 pure def sometimesHistoryCannotBeRead(c: Clock): bool = c.open and c.history.status == R::Failed
 ```
