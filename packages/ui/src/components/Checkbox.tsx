@@ -1,29 +1,27 @@
 import type { ComponentProps } from "react";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
-import { cn, focusRing } from "../lib/cn.ts";
+import { Check, Minus } from "lucide-react";
+import { cn } from "../lib/cn.ts";
+import { markTarget } from "../lib/styles.ts";
 
 export type CheckboxProps = Omit<ComponentProps<typeof CheckboxPrimitive.Root>, "children"> & {
   /** Marks the choice as refused, visibly and through `aria-invalid`. */
   invalid?: boolean;
 };
 
-/** A yes-or-no choice. Name it with a `Label` or `aria-label`. */
+/** A yes-or-no choice, square where a radio button is round; `checked="indeterminate"` shows a dash for a choice made for some of many. Name it with a `Label` or `aria-label`. */
 export function Checkbox({ invalid = false, className, ...props }: CheckboxProps) {
   return (
-    <CheckboxPrimitive.Root
-      aria-invalid={invalid || undefined}
-      className={cn(
-        focusRing,
-        "peer inline-flex size-4 shrink-0 items-center justify-center rounded-sm border border-input bg-background disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground",
-        className,
-      )}
-      {...props}
-    >
-      <CheckboxPrimitive.Indicator>
-        <svg aria-hidden viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="size-3">
-          <path d="m3 8.5 3.5 3.5 6.5-8" />
+    <CheckboxPrimitive.Root aria-invalid={invalid || undefined} className={cn(markTarget, className)} {...props}>
+      <span className="relative flex size-6 items-center justify-center text-primary-foreground">
+        <svg aria-hidden viewBox="0 0 24 24" className="absolute inset-0 size-full fill-background stroke-input stroke-2 transition-colors duration-fast ease-standard group-aria-invalid:stroke-destructive group-data-[state=checked]:fill-primary group-data-[state=checked]:stroke-primary group-data-[state=indeterminate]:fill-primary group-data-[state=indeterminate]:stroke-primary">
+          <rect x="1" y="1" width="22" height="22" rx="6" />
         </svg>
-      </CheckboxPrimitive.Indicator>
+        <CheckboxPrimitive.Indicator className="relative flex">
+          <Check aria-hidden strokeWidth={3} className="size-4 group-data-[state=indeterminate]:hidden" />
+          <Minus aria-hidden strokeWidth={3} className="hidden size-4 group-data-[state=indeterminate]:block" />
+        </CheckboxPrimitive.Indicator>
+      </span>
     </CheckboxPrimitive.Root>
   );
 }
