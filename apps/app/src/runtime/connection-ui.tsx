@@ -78,7 +78,7 @@ import { readNativeNetwork } from './native-network';
 import type { AgentReply, ActionProposal, OperationReceipt, ContextEnvelope, VerifiedSession } from './alpha-client';
 import { CloudResidentBindingController, CloudResidentBindingError, ResidentRebindQueue, parseResidentPlanAdmission, recentResidentPlanAdmission, type ResidentPlanAdmissionRecord } from '../../../../.eliza/client-features/packages/auth/src/auth/cloud-resident-binding.ts';
 import { cloudServiceName, cloudSignInHandOffAvailable, CloudProtocol, CloudProtocolError, type CloudEnvironment } from './cloud-protocol';
-import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSignInError, normalizeSignInCode, signInFailureMessage as formatSignInFailureMessage, signInReadiness, signInReadinessChanged, validSignInEmail, validSignInPhone, type CloudSignInAuthenticated } from './cloud-sign-in';
+import { googleOutcome as signInOutcome, type CloudSignInGoogleOutcome, CloudSignInError, normalizeSignInCode, normalizeSignInPhone, signInFailureMessage as formatSignInFailureMessage, signInReadiness, signInReadinessChanged, validSignInEmail, validSignInPhone, type CloudSignInAuthenticated } from './cloud-sign-in';
 import { entitlementErrorText } from '../ui/cloud/subscription-presentation.ts';
 import { deviceActionRefusal } from '../ui/device-actions/device-action-messages.ts';
 import { checkEntitlement, clearEntitlementKeyCache, describeSubscription, EntitlementError, EntitlementRefresher, isEntitlementSignInFailure, residentAdmissionOutcome, cloudUnreachable, CloudIdentityUnreachable, identityReadRefused, CHOOSE_PLAN_LABEL, MANAGE_PLAN_LABEL, planAdmission, readServiceLimit, redeemFailureMessage, redeemSuccessMessage, serviceLimitMessage, subscriptionSummary, SubscriptionRedeemError, type ServiceLimit, type SubscriptionView } from './subscription-entitlement';
@@ -117,6 +117,8 @@ export interface ConnectionSnapshot {
   providerSignInSelection?:{id:string;environment:CloudEnvironment};
   /** Automatic session restoration has completed; null is now a resolved no-session state. */
   startupResolved?: boolean;
+  /** The sign-in readiness probe is the running operation. It is not an attempt the owner started. */
+  signInProbing?: boolean;
   /** Saved startup restoration is quiet; explicit settings and real failures remain visible. */
   automaticRestore?: boolean;
   /** Subscription plan state from a verified Cloud entitlement; never a credit balance. */
@@ -649,6 +651,8 @@ let googleSignInGeneration=0;
 /** The Cloud key held when the current Google attempt began; a cancel that cannot reach the native
  * commit boundary compares the stored key with it. */
 let googleSignInPrior:{generation:number;environment:CloudEnvironment;credentialId:string|null}|null=null;
+/** The key stored before a code verification began, so a Back that loses to the native commit adopts the new key. */
+let codeSignInPrior:{generation:number;environment:CloudEnvironment;attemptId:string;credentialId:string|null}|null=null;
 function signInClient(environment: CloudEnvironment): CloudProtocol {
   if (cloud.environment !== environment) cloud = makeCloud(environment);
   return cloud;
@@ -951,7 +955,7 @@ async function work(message: string, action: (signal: AbortSignal) => Promise<vo
   // An owner step never waits behind a background plan read: the read stops and the next return checks again.
   planRecheck?.abort();
   const controller = new AbortController(); cancelStoppedVoiceRead(); signInReadinessOwner = null; operation = controller; residentStartInBackground = background;
-  update({ busy: true, backgroundWork: background, ...(background ? {} : { open: true }), message, error: preserveError ? state.error : '' });
+  update({ busy: true, backgroundWork: background, signInProbing: false, ...(background ? {} : { open: true }), message, error: preserveError ? state.error : '' });
   try { await action(controller.signal); }
   catch (error) {
     if(operation!==controller)return;
@@ -965,7 +969,7 @@ async function work(message: string, action: (signal: AbortSignal) => Promise<vo
   // sees a still-busy connection that is no longer starting.
   finally { if (operation === controller) {
     operation = null; residentStartInBackground = false;
-    update({ busy: false, backgroundWork: false, residentStarting: false, ...(background&&!state.open?{message:''}:{}) });
+    update({ busy: false, backgroundWork: false, signInProbing: false, residentStarting: false, ...(background&&!state.open?{message:''}:{}) });
     runQueuedResidentRebind(); runQueuedSignInReturn(); scheduleResidentAutoRetry();
   } }
 }
@@ -1651,7 +1655,6 @@ function pairingError(error: unknown, withCode: boolean): unknown {
 function connectionToast(message: string) { window.dispatchEvent(new CustomEvent('alpha:connection-toast', { detail: message })); }
 export const OWN_KEY_CHECKING = 'Checking key';
 const OWN_KEY_BUSY = 'Busy';
-const signInProbeMessage = (environment: CloudEnvironment) => `Checking ${cloudServiceName(environment)}`;
 const pairingRetired = () => 'Pairing unavailable';
 /** The one wording for a Cloud sign-in that Cloud refused (401, an expired key). */
 const residentSignInExpired = () => 'Sign-in expired';
@@ -2764,6 +2767,8 @@ export const connectionController = {
     };
     await work(`Checking ${cloudServiceName(environment)} sign-in…`, async signal => {
       probeSignal = signal; signInReadinessOwner = signal;
+      // The page reads this, never the busy message. work() clears it when any operation starts or ends.
+      update({ signInProbing: true });
       const methods = await inAppSignInMethods(environment, signal, refreshNegative, ready => { lateMethods = ready; adoptLate(); });
       signal.throwIfAborted();
       // Email stays inside Alpha even when readiness is unavailable. Its native request
@@ -2809,7 +2814,10 @@ export const connectionController = {
     // entry the owner opened, as Back does once the probe has settled.
     const probe=pending&&operation&&signInReadinessOwner===operation.signal?operation:null;
     const closeExplicitEntry=(!pending||!!probe)&&(!view||view.step==='choose')&&explicitSignedOutCloudEntry(state);
-    const prior=pending&&view?.step==='google'&&googleSignInPrior?.generation===googleSignInGeneration&&googleSignInPrior.environment===view.environment?googleSignInPrior:null;
+    const googlePrior=pending&&view?.step==='google'&&googleSignInPrior?.generation===googleSignInGeneration&&googleSignInPrior.environment===view.environment?googleSignInPrior:null;
+    // A code or second-factor verification commits natively too: Back can arrive after the key is stored.
+    const codePrior=pending&&(view?.step==='code'||view?.step==='mfa')&&codeSignInPrior?.generation===googleSignInGeneration&&codeSignInPrior.environment===view.environment&&codeSignInPrior.attemptId===view.attemptId?codeSignInPrior:null;
+    const prior=googlePrior??codePrior;
     connectionController.cancel();
     // Without a commit boundary (Android) the native tail may already have stored the key: once the
     // attempt unwinds (bounded), a key other than the one held before it is adopted, not hidden.
@@ -2817,7 +2825,7 @@ export const connectionController = {
       for(let wait=0;operation===cancellingOperation&&wait<200;wait++)await delay(10);
       const stored=await cloudCredentialStore.read(view.environment).catch(()=>null);
       if(stored?.credentialId&&stored.credentialId!==prior.credentialId&&state.signIn===view&&prior.generation===googleSignInGeneration){
-        googleSignInPrior=null;
+        googleSignInPrior=null;codeSignInPrior=null;
         update({signIn:null,residentSavedCredential:true,message:'Signed in',error:''});
         // The saved-sign-in admission: a running agent rebinds to the key; a stopped one starts with it.
         if(active)queueResidentRebind();else await ensureResident();
@@ -2876,7 +2884,8 @@ export const connectionController = {
   async signInPhone(phone: string) {
     const view = state.signIn;
     if (!view || !cloudSignInPhone || (view.step === 'choose' ? !inAppPhone : view.step !== 'code' || !view.phone)) return;
-    const number = phone.replace(/[\s().-]/g, '');
+    // The host takes E.164 only. The code step and a failed send show the number in that form.
+    const number = normalizeSignInPhone(phone);
     if (!validSignInPhone(number)) { update({ error: signInFailureMessage('invalid-phone') }); return; }
     await work(SIGN_IN_SENDING, signal => sendSignInCode(view, 'phone', number, signal));
   },
@@ -2889,8 +2898,14 @@ export const connectionController = {
     await work('Checking code', async signal => {
       const client = signInClient(view.environment);
       let outcome: CloudSignInAuthenticated;
+      // Which key was stored before this verification, for cancelSignIn. An unreadable store records
+      // nothing, so a cancelled verification then adopts nothing.
+      codeSignInPrior=null;
+      try{const before=await cloudCredentialStore.read(view.environment);codeSignInPrior={generation:googleSignInGeneration,environment:view.environment,attemptId:view.attemptId,credentialId:before?.credentialId??null};}catch{/* No comparison is possible. */}
+      signal.throwIfAborted();
       try {
-        if (view.step === 'mfa') outcome = await client.verifyMfaSignIn(view.attemptId, digits, signal);
+        // A reply that arrives after Back is not a sign-in the owner is waiting for (cancelSignIn reconciles the store).
+        if (view.step === 'mfa') { outcome = await client.verifyMfaSignIn(view.attemptId, digits, signal); signal.throwIfAborted(); }
         else {
           const codeOutcome = view.phone ? await client.verifyPhoneSignIn(view.attemptId, digits, signal) : await client.verifyEmailSignIn(view.attemptId, digits, signal);
           signal.throwIfAborted();
@@ -2987,7 +3002,8 @@ export const connectionController = {
   /** Opens the current account's in-app plans; checkout still requires the owner's payment. */
   async residentManagePlan() {
     if(operation)return;
-    if(!service?.identity.email){update({open:true,error:'Sign in first'});return;}
+    // The gate is the verified Cloud key: an account signed in by phone has no email.
+    if(!service){update({open:true,error:'Sign in first'});return;}
     // An account sheet already showing (a funding prompt) keeps its purpose, so it still closes by itself
     // once a purchase activates the plan; otherwise the plan sheet opens.
     update({open:true,automaticRestore:false,purpose:state.open?state.purpose:'plan',membershipDismissed:false,planManager:true,message:'',error:''});
@@ -3826,8 +3842,8 @@ export function ConnectionChooser({onPresentation}:{onPresentation?:(visible:boo
   // Own API keys are offered where Cloud sign-in is the first step, never when sign-in was opened
   // for the Cloud account or plan, or while own keys are already selected.
   const offerOwnKeys=(productionSignInRequired||(!ownProviderSelected(snapshot)&&snapshot.purpose!=='cloud-account'&&snapshot.purpose!=='plan'))&&requiredSignInView.step==='choose';
-  // The readiness probe is the only operation with this message; it is not an attempt the owner started.
-  const probing=snapshot.busy&&snapshot.message===signInProbeMessage(requiredSignInView.environment);
+  // The readiness probe is not an attempt the owner started (set by the controller, never inferred from copy).
+  const probing=snapshot.signInProbing===true;
   const signInExtra=testMocksEnabled?<button type="button" className="alpha-btn alpha-btn--text" disabled={snapshot.busy} onClick={()=>void connectionController.signInBrowser()}>Browser sign-in (diagnostic)</button>:undefined;
   const ownKeyForm=offerOwnKeys&&ownKeyEntry?<OwnKeyForm busy={snapshot.busy&&!probing} replying={!!sending} saving={ownKeySaving} error={ownKeyAttempted?snapshot.error:''} idleCancelLabel="Back"
     onSave={(key,voice)=>{setOwnKeyAttempted(true);return connectionController.configureLocal(key,LOCAL_PROVIDER_MODEL,voice,{onboarding:true});}}
