@@ -2,6 +2,7 @@
 // Durable machine state is kept with each generated module's `stored(key)` layer over Effect's KeyValueStore.
 // Keys are namespaced per owner so a reset or a different owner never reads another's state.
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { pageStorage } from "./page-events.ts"
 
 /** The namespace every stored machine key of this owner starts with. */
 export function ownerKey(owner: string, key: string): string {
@@ -9,7 +10,7 @@ export function ownerKey(owner: string, key: string): string {
 }
 
 /** Owner-private storage: the WebView's storage, which Android keeps in the app's private data. */
-export const browserStore = KeyValueStore.layerStorage(() => globalThis.localStorage)
+export const browserStore = KeyValueStore.layerStorage(pageStorage)
 
 /** Storage that forgets, for tests and stories. */
 export const memoryStore = KeyValueStore.layerMemory

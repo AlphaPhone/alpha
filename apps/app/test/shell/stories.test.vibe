@@ -203,7 +203,8 @@ describe("Launcher (spec/shell/gestures.md, \"Story: Arrange Home with my finger
         try launcher.context("alpha:notes")
         const editing = (try machine.get()).editing
         try launcher.finishEditing()
-        try Effect.try(() => assert.deepStrictEqual([editing, (try machine.get()).editing, haptics], [true, false, ["long-press"]]))
+        const now0 = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([editing, now0.editing, haptics], [true, false, ["long-press"]]))
       }
     }
   })
@@ -251,7 +252,8 @@ describe("Launcher (spec/shell/gestures.md, \"Story: Arrange Home with my finger
         try feedback.longPress()
         try TestClock.adjust("1 second")
         try feedback.longPress()
-        try Effect.try(() => assert.deepStrictEqual([haptics, (try machine.get()).played], [["long-press", "long-press"], 2]))
+        const now0 = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([haptics, now0.played], [["long-press", "long-press"], 2]))
       }
     }
   })
@@ -262,7 +264,8 @@ describe("Launcher (spec/shell/gestures.md, \"Story: Arrange Home with my finger
         const feedback = try Haptics
         const machine = try HapticsMachine
         try feedback.longPress()
-        try Effect.try(() => assert.deepStrictEqual([(try machine.get()).available, (try machine.get()).played], [false, 0]))
+        const now0 = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([now0.available, now0.played], [false, 0]))
       }
     }
   })
@@ -316,7 +319,7 @@ describe("Startup access (spec/shell/permissions.md, \"Story: Grant Alpha what i
         try permissions.next(false)
         const second = try machine.get()
         try Effect.try(() => assert.deepStrictEqual(
-          [opened.phase, shownCount(opened), allowed.attempted, allowed.states.$PermNotifications, second.progress, shownCount(second)],
+          [opened.phase, shownCount(opened), allowed.attempted, allowed.states.PermNotifications, second.progress, shownCount(second)],
           ["PhaseWalkthrough", 1, ["PermNotifications"], "AccessReady", 1, 2],
         ))
       }
@@ -334,7 +337,8 @@ describe("Startup access (spec/shell/permissions.md, \"Story: Grant Alpha what i
         try TestClock.adjust("21 seconds")
         const late = skippable(try machine.get())
         try permissions.next(true)
-        try Effect.try(() => assert.deepStrictEqual([early, late, (try machine.get()).progress], [false, true, 1]))
+        const now0 = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([early, late, now0.progress], [false, true, 1]))
       }
     }
   })
@@ -369,7 +373,8 @@ describe("Startup access (spec/shell/permissions.md, \"Story: Grant Alpha what i
         try TestClock.adjust("1 millis")
         try permissions.connection({ account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false })
         try TestClock.adjust("1 millis")
-        try Effect.try(() => assert.isTrue((try navigation.get()).holds.includes(WALKTHROUGH_HOLD)))
+        const now0 = try navigation.get()
+        try Effect.try(() => assert.isTrue(now0.holds.includes(WALKTHROUGH_HOLD)))
       }
     }
   })
@@ -415,7 +420,8 @@ describe("Recovery and Home (spec/shell/recovery.md, \"Story: Get my phone back 
         try focus.captureRow("inbox", "row-2")
         try machine.send({ type: "blurred" })
         try focus.rowRendered("inbox", true, false)
-        try Effect.try(() => assert.strictEqual((try machine.get()).lastRow, "row-2"))
+        const now0 = try machine.get()
+        try Effect.try(() => assert.strictEqual(now0.lastRow, "row-2"))
       }
     }
   })

@@ -5,8 +5,8 @@ import { OwnNotices, type OwnNotice } from "../assistant/ports.vibe"
 import { type ConsumeAnswer, Machine as ShadeMachine, type NoticeKind, type NoticeRow, type NoticeSource, consumeAccepted } from "../../gen/clock__notifications.effect.vibe"
 import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
 import { ClearOutcomes, NoticeListing, NoticeRecord, OwnNoticeConsumed } from "./native.schema.vibe"
-import { MalformedReply, NOTIFICATIONS, call, command } from "./plugins.vibe"
-import { NativeUnavailable } from "../platform/native.vibe"
+import { MalformedReply, NOTIFICATIONS, nativeCalls } from "./plugins.vibe"
+import { Native, NativeUnavailable } from "../platform/native.vibe"
 import { WorkflowNotices, asksAboutTap } from "./workflow-notices.vibe"
 import { opaqueId, pageVisible } from "./page.ts"
 
@@ -74,50 +74,51 @@ export service Notifications {
   /** The own rows listed now, for the agent's inspection; other apps' rows never leave the phone. */
   own(): ReadonlyArray<NoticeRow>!!
   /** The own notice `id` as the phone lists it now, read again; undefined when it is gone, hidden, not askable or its text changed under the same revision. */
-  current(id: string): OwnNotice | undefined!!
+  current(id: string): (OwnNotice | undefined)!!
   /** Consumes the notice once through the phone at the revision listed now, or once for this session where the phone cannot; false when it was already consumed, changed or is no longer listed. */
   consume(id: string): boolean!!
 }
 
 /** Notifications over `AlphaNotifications`. */
 export const notificationsLayer = Layer.effect(Notifications, effect {
+  const { call, command } = try nativeCalls()
   const shade = try ShadeMachine
   const notices = try NoticesMachine
   const flows = try AssistantFlows
   const consumed = new Set<string>()
-  const step = (event: Parameters<typeof shade.send>[0]) => shade.send(event) catch () => undefined
+  const step = effect (event: Parameters<typeof shade.send>[0]) => shade.send(event) catch () => undefined
 
   effect function read() {
     return call(NOTIFICATIONS, "list", NoticeListing) catch () => undefined
   }
 
   effect function refresh() {
-    const begun = step({ type: "beginList" })
+    const begun = try step({ type: "beginList" })
     if (begun === undefined) return
     const listing = try read()
-    if (listing === undefined) step({ type: "listFailed", visit: begun.visit })
-    else step({ type: "listedNotices", visit: begun.visit, rows: listing.items.slice(0, 100).map(noticeRowOf), alertsFailed: listing.calendarStatus === "unavailable" })
+    if (listing === undefined) try step({ type: "listFailed", visit: begun.visit })
+    else try step({ type: "listedNotices", visit: begun.visit, rows: listing.items.slice(0, 100).map(noticeRowOf), alertsFailed: listing.calendarStatus === "unavailable" })
   }
 
   effect function act(method: "open" | "dismiss", id: string, revision: string, start: "press" | "swipe") {
     const before = try shade.get()
-    const acting = step(start === "press" ? { type: "press", id, revision } : { type: "swipe", id, revision })
+    const acting = try step(start === "press" ? { type: "press", id, revision } : { type: "swipe", id, revision })
     if (acting === undefined || !acting.acting) return
     const lease = (notices.send({ type: "beginAction" }) catch () => undefined)?.lease
     const row = before.rows.find((r) => r.id === id && r.revision === revision)
     const ok = row !== undefined && (command(NOTIFICATIONS, method, refOf(row)) catch () => false) !== false
-    step({ type: "actionSettled", ok })
+    try step({ type: "actionSettled", ok })
     if (ok && method === "open" && lease !== undefined) notices.send({ type: "actionNavigates", lease }) catch () => undefined
     try refresh()
   }
 
   return {
     effect open() {
-      step({ type: "openShade" })
+      try step({ type: "openShade" })
       try refresh()
     },
     effect close() {
-      step({ type: "closeShade" })
+      try step({ type: "closeShade" })
       notices.send({ type: "retireActions" }) catch () => undefined
     },
     refresh,
@@ -126,27 +127,27 @@ export const notificationsLayer = Layer.effect(Notifications, effect {
     effect clearAll() {
       const state = try shade.get()
       const keys = state.rows.filter((r) => r.clearable).map((r) => ({ id: r.id, revision: r.revision, source: r.source }))
-      if (step({ type: "clearAll", keyList: keys }) === undefined) return
+      if ((try step({ type: "clearAll", keyList: keys })) === undefined) return
       const result = call(NOTIFICATIONS, "clear", ClearOutcomes, { items: state.rows.filter((r) => r.clearable).map(refOf) }) catch () => undefined
-      step({ type: "clearSettled", unavailable: result === undefined || result.outcomes.some((o) => o.status === "unavailable") })
+      try step({ type: "clearSettled", unavailable: result === undefined || result.outcomes.some((o) => o.status === "unavailable") })
       try refresh()
     },
-    select: (id: string, revision: string) => step({ type: "selectNotice", id, revision }),
-    ask: (id: string, revision: string) => step({ type: "ask", id, revision }),
+    select: (id: string, revision: string) => asVoid(step({ type: "selectNotice", id, revision })),
+    ask: (id: string, revision: string) => asVoid(step({ type: "ask", id, revision })),
     effect answer(draft: string | undefined) {
       const state = try shade.get()
       const question = state.question
       if (question.tag !== "QuestionReview") return
       if (draft === undefined || draft.trim() === "") {
-        step({ type: "askClosed" })
+        try step({ type: "askClosed" })
         return
       }
       const reviewed = state.rows.find((r) => r.id === question.id && r.revision === question.revision)
-      step({ type: "askContinue" })
+      try step({ type: "askContinue" })
       const composed = pageVisible() && reviewed !== undefined
         ? try flows.askAboutNotice(reviewed.id, reviewed.revision, askKindOf(reviewed), draft.trim())
         : false
-      step({ type: "askChecked", visit: state.visit, unchanged: composed })
+      try step({ type: "askChecked", visit: state.visit, unchanged: composed })
     },
     effect own() {
       return (try shade.get()).rows.filter((r) => r.source === "OwnNotice" && !r.redacted)
@@ -183,14 +184,23 @@ export const ownNotices = effect {
   return port
 }
 
-/** Reads the shade again every second while it is open and the page visible. Never returns. */
+/** Reads the shade again every second while it is open and the page visible, and at once when Android says one of Alpha's own rows was posted or removed. Never returns. */
 export effect function followShade() {
   const shade = try ShadeMachine
   const notifications = try Notifications
-  while (true) {
+  const native = try Native
+  effect function reread() {
     const state = try shade.get()
     if (state.open && !pageVisible()) try notifications.close()
     else if (state.open && !state.busy && !state.acting) try notifications.refresh()
-    try sleep("1 second")
   }
+  try.all [
+    effect {
+      while (true) {
+        try reread()
+        try sleep("1 second")
+      }
+    },
+    effect { if (try native.available(NOTIFICATIONS)) Stream.runForEach(native.listen(NOTIFICATIONS, "notificationsChanged"), () => reread()) catch () => undefined },
+  ]
 }

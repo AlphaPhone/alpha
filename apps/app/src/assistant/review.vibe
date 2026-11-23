@@ -277,6 +277,11 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     executions = { key, execution }
     return execution
   }
+  /** The verified session once the agent confirmed this phone's enrollment for it; a chat-only phone runs, reviews and reports no device action (spec/account/enrollment.md). */
+  effect function enrolledIdentity() {
+    const identity = try host.identity()
+    return identity === undefined || identity.enrollmentId === "" ? undefined : identity
+  }
   effect function preference() {
     const value: Preference = (try preferences.asksBeforeActions()) ? "PreferenceOn" : "PreferenceOff"
     return value
@@ -363,7 +368,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     return { outcome, title: receiptTitle(titleOf(outcome)), summary }
   }
   effect function execute(proposal: PendingProposal, reviewed: boolean, requestEligible: boolean, forceReview: boolean) {
-    const identity = try host.identity()
+    const identity = try enrolledIdentity()
     if (identity === undefined) return { kind: "invalid" } satisfies ApproveResult
     const messageId = proposal.requestMessageId ?? ""
     facts.set(proposal.id, { reviewed, messageId, ownerText: texts.get(messageId) ?? "", ...(proposal.step === undefined ? {} : { workflow: proposal.step }) })
@@ -467,6 +472,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     pending: () => effect {
       const identity = try host.identity()
       if (identity === undefined) return { ok: false, cards: [], notices: [] }
+      if (identity.enrollmentId === "") return { ok: true, cards: [], notices: [] }
       const exposure = (try host.screen()).exposure
       if (exposure.privateView || exposure.locked || exposure.connectionDialog || exposure.hidden) return { ok: true, cards: [], notices: [] }
       const found = try listed()
@@ -494,7 +500,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     approve,
     cardOf: (proposalId: string) => sync(() => drawn.get(proposalId)),
     workflowStep: (runId: string, stepId: string) => effect {
-      const identity = try host.identity()
+      const identity = try enrolledIdentity()
       if (identity === undefined) return undefined
       const now = try Clock.currentTimeMillis
       const found = (try listing()).find((proposal) => proposal.state === "pending" && proposal.step?.runId === runId && expiryOf(proposal.expiresAt) > now)
@@ -514,7 +520,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       return { ...card, state: try stateOf(routes) }
     },
     directPass: (messageId: string, text: string, pageLinks: readonly string[] = []) => effect {
-      const identity = try host.identity()
+      const identity = try enrolledIdentity()
       if (identity === undefined) return { receipts: [], cards: [], notices: [] }
       const now = try Clock.currentTimeMillis
       // A proposal the agent made for review carries no message, so it joins this reply as a card unless it was drawn already.
@@ -561,7 +567,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       return { receipts, cards: left, notices }
     },
     sync: () => effect {
-      const identity = try host.identity()
+      const identity = try enrolledIdentity()
       if (identity === undefined) return
       const execution = try executionFor(identity)
       promise(() => execution.sync()) catch () => undefined
@@ -586,7 +592,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       return items
     },
     settleHistory: (proposalId: string, outcome: HistoryOutcome) => effect {
-      const identity = try host.identity()
+      const identity = try enrolledIdentity()
       if (identity === undefined) return false
       const execution = try executionFor(identity)
       const said = promise(() => execution.confirmReview(proposalId, historyWire[outcome])) catch () => "refused" as const

@@ -50,4 +50,4 @@ const clock = on(clockLayer, camera);
 export const runtime = ManagedRuntime.make(on(shellIntegration, clock));
 
 /** Every service and Machine the runtime provides. */
-export type AppServices = ManagedRuntime.ManagedRuntime.Success<typeof runtime>;
+export type AppServices = ManagedRuntime.ManagedRuntime.Services<typeof runtime>;

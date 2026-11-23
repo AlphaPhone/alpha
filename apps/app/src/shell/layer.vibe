@@ -43,10 +43,10 @@ const machines = Layer.mergeAll(
   focusMachine(), overviewMachine(), permissionsMachine(), recoveryMachine(), hapticsMachine(),
 )
 
-const foundation = Layer.provideMerge(Layer.mergeAll(navigationLive, noticesLive, hapticsLive, portsLive), machines)
+const foundation = Layer.provideMerge(Layer.mergeAll(navigationLive, noticesLive, hapticsLive, portsLive, foregroundLive), machines)
 
 /** Every shell service and Machine (Navigation, Notices, Haptics, Launcher, Shade, Focus, Overview, Permissions, Recovery, Activity, Foreground) and the ports later areas fill (ShellMail, IdleSources), over the platform services. */
 export const layer = Layer.provideMerge(
-  Layer.mergeAll(launcherLive, shadeLive, geometryLive, focusLive, foregroundLive, overviewLive, permissionsLive, recoveryLive, activityLive),
+  Layer.mergeAll(launcherLive, shadeLive, geometryLive, focusLive, overviewLive, permissionsLive, recoveryLive, activityLive),
   foundation,
 )

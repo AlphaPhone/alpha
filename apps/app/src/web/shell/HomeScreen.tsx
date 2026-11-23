@@ -1,6 +1,7 @@
-// spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Use the library and arrange Home"; spec/shell/overview.md, "Story: See my day on Home"
+// spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Use the library and arrange Home"; spec/shell/overview.md, "Story: See my day on Home"; spec/shell/gestures.md, "A pull asks for Android's shade only on empty launcher Home"
 import { Bell, LayoutGrid, Plus } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { overflowPull } from "../../../gen/shell__gestures.ts";
 import type { Overview } from "../../../gen/shell__overview.ts";
 import type { AppId } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
@@ -32,6 +33,8 @@ export interface HomeScreenProps {
   launching?: string | null;
   /** Home is covered by a layer, the shade or the conversation. */
   covered?: boolean;
+  /** A pull on Home may ask for Android's shade now: launcher Home, unlocked, with nothing over it. */
+  pullEligible?: boolean;
   controls: GestureControls;
   onOpen: (app: AppId) => void;
   onLibrary: () => void;
@@ -40,22 +43,84 @@ export interface HomeScreenProps {
   onNotifications: () => void;
 }
 
+/** The 44-pixel status band at the top is Android's. */
+const STATUS_BAND = 44;
+
+/**
+ * Home's part of the shade pull: whether Home fits its screen, and on a Home taller than the screen, a touch that starts at its
+ * top below the status band, away from a field or tile, claims a downward pull once it has moved six pixels, so the WebView
+ * does not take the drag for scrolling and the shell sees the pull end (spec/shell/gestures.md, `overflowPull`).
+ */
+function useHomePull(eligible: boolean) {
+  const ref = useRef<HTMLElement | null>(null);
+  const [fits, setFits] = useState(true);
+  const live = useRef(eligible);
+  useEffect(() => { live.current = eligible; }, [eligible]);
+  useEffect(() => {
+    const home = ref.current;
+    if (home === null) return;
+    const measure = () => setFits(home.scrollHeight <= home.clientHeight);
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(measure);
+    observer?.observe(home);
+    for (const child of Array.from(home.children)) observer?.observe(child);
+    let touch: { readonly x: number; readonly y: number; claimed: boolean } | undefined;
+    const start = (event: TouchEvent) => {
+      const at = event.touches[0];
+      const target = event.target instanceof Element ? event.target : null;
+      const armed = event.touches.length === 1 && at !== undefined && live.current && home.scrollTop <= 0 && at.clientY >= STATUS_BAND &&
+        home.scrollHeight > home.clientHeight && !target?.closest("[data-alpha-tile],button,input,textarea,[contenteditable]");
+      touch = armed ? { x: at.clientX, y: at.clientY, claimed: false } : undefined;
+    };
+    const move = (event: TouchEvent) => {
+      const at = event.touches[0];
+      if (touch === undefined || at === undefined) return;
+      if (touch.claimed) {
+        event.preventDefault();
+        return;
+      }
+      const claim = overflowPull(live.current, Math.round(at.clientX - touch.x), Math.round(at.clientY - touch.y));
+      if (claim === "ClaimPull") {
+        touch.claimed = true;
+        event.preventDefault();
+      } else if (claim === "ReleasePull") touch = undefined;
+    };
+    const end = () => { touch = undefined; };
+    home.addEventListener("touchstart", start, { passive: true });
+    home.addEventListener("touchmove", move, { passive: false });
+    home.addEventListener("touchend", end);
+    home.addEventListener("touchcancel", end);
+    return () => {
+      observer?.disconnect();
+      home.removeEventListener("touchstart", start);
+      home.removeEventListener("touchmove", move);
+      home.removeEventListener("touchend", end);
+      home.removeEventListener("touchcancel", end);
+    };
+  }, []);
+  return { ref, fits };
+}
+
 /**
  * Home: the daily overview above Alpha's and the owner's tiles, the library tile, and edit mode's bar.
  * @model spec/shell/navigation.md
  */
 export function HomeScreen({
   overview, agenda, attention, tiles, editing = false, editError = "", canAdd = false, library = false, notifications = false, launching = null, covered = false,
-  controls, onOpen, onLibrary, onAdd, onDone, onNotifications,
+  pullEligible = false, controls, onOpen, onLibrary, onAdd, onDone, onNotifications,
 }: HomeScreenProps) {
+  const fits = useHomePull(pullEligible);
   return (
     <section
+      ref={fits.ref}
       aria-label="Home"
       data-alpha-layer="home"
       data-alpha-focus-target="home"
+      data-alpha-home-fits={fits.fits || undefined}
       inert={covered || undefined}
-      className="flex min-h-full flex-col gap-6 overflow-y-auto pt-4"
-      style={{ paddingBottom: "var(--alpha-dock-clearance, 7rem)", scrollPaddingBottom: "var(--alpha-dock-clearance, 7rem)" }}
+      className="flex h-full flex-col gap-6 overflow-y-auto pt-4"
+      // Home that fits gives vertical drags to the page, so a pull reaches the shell rather than the WebView's overscroll.
+      style={{ paddingBottom: "var(--alpha-dock-clearance, 7rem)", scrollPaddingBottom: "var(--alpha-dock-clearance, 7rem)", touchAction: fits.fits ? "pan-x pinch-zoom" : undefined }}
     >
       {notifications && !editing && (
         <div className="flex justify-end px-3">

@@ -4,7 +4,7 @@ import { Machine as HandoffMachine, type Handoff } from "../../gen/clock__handof
 import { Machine as HistoryMachine } from "../../gen/clock__handoffHistory.effect.vibe"
 import type { HandoffAction, HandoffStatus } from "../../gen/clock__vocabulary.ts"
 import { ClockAnswer, SurfaceInfo } from "./native.schema.vibe"
-import { DAILY, call } from "./plugins.vibe"
+import { DAILY, nativeCalls } from "./plugins.vibe"
 import { freshId, pageVisible, phoneTimeZone } from "./page.ts"
 import { navigationPeer } from "./peers.vibe"
 
@@ -53,6 +53,7 @@ export service ClockHandoff {
 
 /** The handoff over the draft machine and the stored history, reaching Clock through `DailyApps`. */
 export const handoffLayer = Layer.effect(ClockHandoff, effect {
+  const { call } = try nativeCalls()
   const draft = try HandoffMachine
   const history = try HistoryMachine
   const build = (try Build).info

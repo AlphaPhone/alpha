@@ -13,7 +13,7 @@ type Read = { readonly kind: "read"; readonly value: string | undefined } | { re
  * where `slot` is still empty, the legacy slot cleared only once `slot` holds a value, and a newer value saved there never written over.
  * An area calls it before it first reads `slot`; what could not be moved stays, to be moved on a later call.
  */
-export effect function adoptLegacySlot(legacySlot: string, slot: string): SlotAdoption!! {
+export effect function adoptLegacySlot(legacySlot: string, slot: string): SlotAdoption!!Native {
   const native = try Native
   if (!(try native.available(LEGACY)) || !(try native.available(SECURE))) return "NothingToAdopt"
 
@@ -52,7 +52,7 @@ export effect function adoptLegacySlot(legacySlot: string, slot: string): SlotAd
 }
 
 /** Moves every pair of `[legacySlot, slot]` as `adoptLegacySlot` does, one after another, answering each outcome in order. */
-export effect function adoptLegacySlots(pairs: ReadonlyArray<readonly [string, string]>): readonly SlotAdoption[]!! {
+export effect function adoptLegacySlots(pairs: ReadonlyArray<readonly [string, string]>): readonly SlotAdoption[]!!Native {
   const outcomes: SlotAdoption[] = []
   for (const [legacySlot, slot] of pairs) outcomes.push(try adoptLegacySlot(legacySlot, slot))
   return outcomes

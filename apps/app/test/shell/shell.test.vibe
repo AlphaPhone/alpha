@@ -13,6 +13,8 @@ import { Navigation, navigationLive } from "../../src/shell/navigation.vibe"
 import { Notices } from "../../src/shell/notices.vibe"
 import { routeCrosses, preparedViewNavigation } from "../../src/shell/ownerRoutes.vibe"
 import { followSurfaceSheets } from "../../src/shell/surfaceSheets.vibe"
+import { enrolledDeviceHeaders } from "../../src/shell/compose/fills.vibe"
+import { requestHeaders } from "../../src/assistant/transport.vibe"
 
 const journal = Layer.succeed(CrashJournal, {
   record: () => succeed(undefined),
@@ -203,5 +205,24 @@ it.effect("Notes' records cross only by their own routes (spec/shell/routes.md, 
   try Effect.try(() => assert.deepStrictEqual(
     [allowed.map(([method, url]) => routeCrosses(method, url, true)), allowed.map(([method, url]) => routeCrosses(method, url, false)), refused.map(([method, url]) => routeCrosses(method, url, true))],
     [allowed.map(() => true), allowed.map(() => false), refused.map(() => false)],
+  ))
+})
+
+// spec/account/enrollment.md, "Only an enrollment the agent's own context confirmed is used, and anything else leaves chat only"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"
+it.effect("an assistant request carries the confirmed enrollment's device id and key with its capabilities, and a chat-only phone sends neither", () => effect {
+  const enrolled = { "x-eliza-device-id": "agent-1", "x-eliza-device-key": "a".repeat(64), "x-eliza-device-capabilities": "calendar.local-event.v1" }
+  try Effect.try(() => assert.deepStrictEqual(
+    [
+      enrolledDeviceHeaders(enrolled),
+      enrolledDeviceHeaders(undefined),
+      requestHeaders(enrolledDeviceHeaders(enrolled), ["maps.selected-read.v1", "maps.selected-read.v1"]),
+      requestHeaders(enrolledDeviceHeaders(undefined), []),
+    ],
+    [
+      { "x-eliza-device-id": "agent-1", "x-eliza-device-key": "a".repeat(64) },
+      {},
+      { "x-eliza-device-id": "agent-1", "x-eliza-device-key": "a".repeat(64), "x-eliza-device-capabilities": "maps.selected-read.v1" },
+      {},
+    ],
   ))
 })

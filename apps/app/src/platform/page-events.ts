@@ -2,8 +2,9 @@
 
 /** What the page reports of the app going to the background and coming back. */
 export interface PageWatch {
+  /** The app went to the background. @throws {never} */
   readonly paused: () => void;
-  /** A return, at a monotonic time in milliseconds. */
+  /** A return, at a monotonic time in milliseconds. @throws {never} */
   readonly returned: (at: number) => void;
 }
 
@@ -27,4 +28,12 @@ export function watchPage(watch: PageWatch): () => void {
     document.removeEventListener("visibilitychange", check);
     window.removeEventListener("focus", check);
   };
+}
+
+/**
+ * The WebView's own storage, which Android keeps in the app's private data, for the owner-private KeyValueStore.
+ * @throws {never}
+ */
+export function pageStorage(): Storage {
+  return globalThis.localStorage;
 }

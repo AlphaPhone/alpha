@@ -1,5 +1,5 @@
 // spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/gestures.md, "Story: Swipe the way the phone expects"; spec/shell/navigation.md, "On Phone, Messages and Contacts the app's own bar stands in for the dock until a conversation opens"
-import { Effect } from "effect";
+import { Effect, Stream } from "effect";
 import { useRef, useState, useSyncExternalStore } from "react";
 import { useMachine as useNavigation } from "../../../gen/shell__navigation.react.ts";
 import { useMachine as useFavorites } from "../../../gen/shell__favorites.react.ts";
@@ -8,7 +8,7 @@ import { useMachine as useOverview } from "../../../gen/shell__overview.react.ts
 import { useMachine as usePermissions } from "../../../gen/shell__permissions.react.ts";
 import { useMachine as useRecovery } from "../../../gen/shell__recovery.react.ts";
 import { useMachine as useAppInfo } from "../../../gen/shell__appInfo.react.ts";
-import { appInert, dockShown, initial as navStart, talking, type Nav } from "../../../gen/shell__navigation.ts";
+import { appInert, dockShown, initial as navStart, restOf, talking, type Nav } from "../../../gen/shell__navigation.ts";
 import { initial as favoritesStart } from "../../../gen/shell__favorites.ts";
 import { initial as toastsStart } from "../../../gen/shell__toasts.ts";
 import { initial as overviewStart } from "../../../gen/shell__overview.ts";
@@ -19,6 +19,7 @@ import { emptyHome, pullOpensShade, swipe } from "../../../gen/shell__gestures.t
 import { appKey, type InstalledApp } from "@elizaos/os/bridges/system";
 import { appOfKey } from "../../shell/apps.vibe";
 import { Launcher, addableViews, appInfoText, homeKeys, inventory, launchErrorText, libraryKeys } from "../../shell/launcher.vibe";
+import { Foreground } from "../../shell/foreground.vibe";
 import { Navigation, setAppBack } from "../../shell/navigation.vibe";
 import { Notices } from "../../shell/notices.vibe";
 import { Permissions } from "../../shell/permissions.vibe";
@@ -41,7 +42,7 @@ import { StartupPermissions } from "./StartupPermissions.tsx";
 import { NoticesSlot, ToastRegion } from "./ToastRegion.tsx";
 import type { GestureControls } from "./TileGrid.tsx";
 import { admittedScreens, allScreens, allSurfaces, homeMounts, onImage, screenOf, surfacesIn, walkthroughMounts } from "./registry.ts";
-import { act } from "./services.ts";
+import { act, useServiceStream } from "./services.ts";
 
 const launcher = (f: (l: Launcher.Shape) => Effect.Effect<void>) => act(Effect.flatMap(Effect.service(Launcher), f));
 const navigate = (f: (n: Navigation.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Navigation), f));
@@ -79,6 +80,26 @@ const controls: GestureControls = {
   erase: (key) => launcher((l) => l.erase(key)),
 };
 
+/** Whether Android's keyguard shows over the page, as the foreground last read it. */
+const lockedStream = Effect.map(Effect.service(Foreground), (foreground) =>
+  Stream.map(Stream.concat(Stream.fromEffect(foreground.get()), foreground.changes), (front) => front.locked));
+
+/** Whether anything between `target` and Home, Home included, is scrolled away from its top. */
+function scrolledFromTop(target: Element | null): boolean {
+  for (let node = target; node !== null; node = node.parentElement) {
+    if (node.scrollTop > 0) return true;
+    if (node.matches('[data-alpha-layer="home"]')) return false;
+  }
+  return false;
+}
+
+/** A gesture that starts in the conversation or the composer, or ends with text selected, is the reader's, not the shell's. */
+function readersGesture(target: Element | null): boolean {
+  if (target?.closest("[data-alpha-transcript],[data-alpha-message-id],[data-alpha-composer]")) return true;
+  const selection = window.getSelection();
+  return selection !== null && !selection.isCollapsed && selection.toString().trim() !== "";
+}
+
 function Surfaces({ slot, admitted }: { slot: SurfaceSlot; admitted: readonly string[] }) {
   return <>{surfacesIn(slot, admitted).map(({ id, Surface }) => <Surface key={id} open={openApp} />)}</>;
 }
@@ -104,7 +125,8 @@ export function ShellRoot() {
     followSheets();
     act(Effect.flatMap(Effect.service(Recovery), (r) => r.mounted()));
   });
-  const start = useRef<{ id: number; x: number; y: number } | null>(null);
+  const start = useRef<{ id: number; x: number; y: number; scrolled: boolean; reader: boolean } | null>(null);
+  const locked = useServiceStream("shell/locked", lockedStream, false);
 
   if (recovery.phase !== "Running") {
     return (
@@ -129,6 +151,7 @@ export function ShellRoot() {
   const covered = appInert(nav) || nav.shade || talking(nav) || nav.voice;
   const infoText = info.notice === "" ? "" : appInfoText(apps.find((app) => appKey(app) === info.notice)?.label ?? info.notice, info.reason);
   const topDialog = nav.layers.filter((layer) => layer.kind === "DialogLayer" || layer.kind === "SheetLayer").length > 0;
+  const pullEligible = emptyHome(launcherHost, nav.host === "AssistantSurface", locked, nav.shade, home, nav.library, nav.voice, talking(nav));
 
   const { agenda: Agenda, attention: Attention } = homeMounts;
   const { account: ReadyAccount } = walkthroughMounts;
@@ -138,22 +161,25 @@ export function ShellRoot() {
       data-alpha-screen
       data-alpha-chat-half={nav.chat === "Sheet" || undefined}
       className={cn(appearance, "relative h-dvh w-full overflow-hidden bg-background font-sans text-foreground")}
-      onPointerDown={(event) => { start.current = { id: event.pointerId, x: event.clientX, y: event.clientY }; }}
+      onPointerDown={(event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        start.current = { id: event.pointerId, x: event.clientX, y: event.clientY, scrolled: scrolledFromTop(target), reader: readersGesture(target) };
+      }}
       onPointerUp={(event) => {
         const begun = start.current;
         start.current = null;
         if (!begun || begun.id !== event.pointerId) return;
-        const dx = event.clientX - begun.x, dy = event.clientY - begun.y;
-        const eligible = emptyHome(launcherHost, nav.host === "AssistantSurface", false, nav.shade, home, nav.library, nav.voice, talking(nav));
         const target = event.target instanceof Element ? event.target : null;
+        if (begun.reader || readersGesture(target)) return;
+        const dx = event.clientX - begun.x, dy = event.clientY - begun.y;
         const onHome = !!target?.closest('[data-alpha-layer="home"]') && !target.closest("[data-alpha-tile],button,input,textarea");
         const editable = !!target?.closest("input,textarea,[contenteditable]");
-        const pulled = pullOpensShade(eligible, begun.y, dx, dy, onHome, editable, document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement, false);
+        const pulled = pullOpensShade(pullEligible, begun.y, dx, dy, onHome, editable, document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement, begun.scrolled);
         const action = swipe(launcherHost, home, nav.chat === "Sheet", talking(nav), pulled, Math.round(begun.x), Math.round(begun.y), Math.round(dx), Math.round(dy));
         if (action === "SwipeBack") navigate((n) => n.back());
         else if (action === "SwipeHome") navigate((n) => n.home());
         else if (action === "SwipeShade") act(Effect.flatMap(Effect.service(Shade), (s) => s.pull()));
-        else if (action === "LowerAssistant") navigate((n) => n.moveChat(home ? "Input" : "Hidden"));
+        else if (action === "LowerAssistant") navigate((n) => n.moveChat(restOf(nav.app)));
         else if (action === "RaiseAssistant") navigate((n) => n.moveChat("Sheet"));
       }}
     >
@@ -170,6 +196,7 @@ export function ShellRoot() {
         notifications={launcherHost || nav.host === "Standalone"}
         launching={snapshot.launching}
         covered={!home || nav.library || covered}
+        pullEligible={pullEligible}
         controls={controls}
         onOpen={(app) => navigate((n) => n.open(app))}
         onLibrary={() => launcher((l) => l.openLibrary())}
@@ -198,6 +225,7 @@ export function ShellRoot() {
           onAppInfo={(key) => launcher((l) => l.appInfo(key))}
           onCloseMenu={() => navigate((n) => n.send({ type: "closeMenu" }))}
           onDismissInfo={() => launcher((l) => l.dismissAppInfo())}
+          onRetry={() => launcher((l) => l.retryLibrary())}
         />
       )}
       <AppFrame nav={nav} screens={screens} failures={recovery.recorded} onClose={() => navigate((n) => n.home())} />
@@ -218,6 +246,7 @@ export function ShellRoot() {
         onHold={() => act(Effect.flatMap(Effect.service(Notices), (n) => n.hold()))}
         onRelease={() => act(Effect.flatMap(Effect.service(Notices), (n) => n.release()))}
         onAction={() => act(Effect.flatMap(Effect.service(Notices), (n) => n.takeAction()))}
+        onDismiss={() => act(Effect.flatMap(Effect.service(Notices), (n) => n.dismissShown()))}
       />
       <StartupPermissions
         walkthrough={walkthrough}

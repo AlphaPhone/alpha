@@ -65,7 +65,7 @@ test('the candidate file reaches the operator registration and cannot pass the c
 }));
 
 test('the production bundle audit refuses a candidate Cloud build and derives staging hosts from the policy',()=>withTemp(temp=>{
- fs.writeFileSync(path.join(temp,'index.html'),'<!doctype html><title>Alpha Phone</title>');
+ fs.writeFileSync(path.join(temp,'index.html'),'<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'wasm-unsafe-eval\'; object-src \'none\'; base-uri \'none\'"><title>Alpha Phone</title>');
  fs.writeFileSync(path.join(temp,'build-flags.json'),JSON.stringify({testMocks:false}));
  const asset=path.join(temp,'index.js');
  const generated='apps/app/src/runtime/cloud-deployment.generated.ts';
@@ -119,7 +119,7 @@ test('ALPHA_CLOUD_CUTOVER=1 selects Alpha Cloud as a candidate deployment and tu
  assert.throws(()=>deploymentOutputs({...alpha,staging:{...alpha.staging,alphaCloud:false}}),/both production and staging/);
  assert.throws(()=>deploymentOutputs({...alpha,staging:{...alpha.staging,alphaCloud:'yes'}}),/Invalid Alpha Cloud marker/);
  // The production bundle audit refuses the Alpha Cloud candidate's generated authorities.
- fs.writeFileSync(path.join(temp,'index.html'),'<!doctype html><title>Alpha Phone</title>');
+ fs.writeFileSync(path.join(temp,'index.html'),'<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'wasm-unsafe-eval\'; object-src \'none\'; base-uri \'none\'"><title>Alpha Phone</title>');
  fs.writeFileSync(path.join(temp,'build-flags.json'),JSON.stringify({testMocks:false}));
  fs.writeFileSync(path.join(temp,'index.js'),outputs['apps/app/src/runtime/cloud-deployment.generated.ts']);
  assert.ok(auditWebBundle(temp).findings.some(finding=>finding.rule.includes('candidate Cloud deployment')));

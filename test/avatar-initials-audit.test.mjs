@@ -20,7 +20,7 @@ test('every hard-coded initials badge fails the audit, including the former MC, 
   assert.equal('PENDING_AVATAR_INITIALS' in audit, false, 'the pending allowance is gone');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'alpha-initials-'));
   t.after(() => fs.rmSync(dir, {recursive: true, force: true}));
-  fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html>');
+  fs.writeFileSync(path.join(dir, 'index.html'), '<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'wasm-unsafe-eval\'; object-src \'none\'; base-uri \'none\'">');
   fs.writeFileSync(path.join(dir, 'build-flags.json'), JSON.stringify({testMocks: false}));
   fs.writeFileSync(path.join(dir, 'app.js'), `const t=${JSON.stringify(badge('MC') + badge('JP') + badge('+2'))};`);
   const former = auditWebBundle(dir);

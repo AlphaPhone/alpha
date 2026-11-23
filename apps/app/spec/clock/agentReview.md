@@ -111,3 +111,22 @@ pure def isHandoff(k: ClockOperationKind): bool = k == ClockRequest
 pure def reviewClassOf(k: ClockOperationKind): ReviewClass = if (k == ReminderRead or k == DayRead) ScheduleRead else ReminderWrite
 pure def lawAReadIsNeverAHandoff(k: ClockOperationKind): bool = reviewClassOf(k) == ScheduleRead implies not(isHandoff(k))
 ```
+
+### A reminder card names the time, alert and repeat it saves, and its receipt says when its alert could not be arranged
+
+Before the owner approves an agent's reminder, or a change to one, the card shows its title, a body
+that says more than the title, when it is due with its time zone, when it alerts (delivery may be
+approximate) or that it has no alert, and how it repeats; a change that keeps the timing says
+"Timing unchanged.". The card rounds to the minute; the receipt of a created or rescheduled reminder
+confirms the exact due instant. When the phone saved the change but reported that notifications are
+off or the alert could not be scheduled, the receipt says so instead of plain success.
+
+```quint
+type CardTiming = TimingShown | TimingUnchanged
+pure def cardTiming(hasSchedule: bool): CardTiming = if (hasSchedule) TimingShown else TimingUnchanged
+type DeliveryReport = Delivered | NotificationsOff | AlertNotScheduled
+pure def receiptSaysSuccess(applied: bool, delivery: DeliveryReport): bool = applied and delivery == Delivered
+pure def lawAScheduledReminderShowsItsTiming(hasSchedule: bool): bool = hasSchedule implies cardTiming(hasSchedule) == TimingShown
+pure def lawAnUnarrangedAlertIsNeverPlainSuccess(applied: bool): bool =
+  not(receiptSaysSuccess(applied, NotificationsOff)) and not(receiptSaysSuccess(applied, AlertNotScheduled))
+```

@@ -7,12 +7,12 @@ import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {execFileSync,spawnSync} from 'node:child_process';
-import {auditWebBundle,DENYLIST,SIMULATED_STUB_TEXT} from '../scripts/audit-production-bundle.ts';
+import {auditWebBundle,contentSecurityProblems,DENYLIST,SIMULATED_STUB_TEXT} from '../scripts/audit-production-bundle.ts';
 
 const script=path.resolve('scripts/audit-production-bundle.ts');
 function bundle(files,flags={testMocks:false}){
   const dir=mkdtempSync(path.join(tmpdir(),'alpha-bundle-audit-'));
-  const all={'index.html':'<!doctype html><title>Alpha Phone</title>','assets/index.js':'console.log("Notes")',...files};
+  const all={'index.html':'<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'self\'; script-src \'self\' \'wasm-unsafe-eval\'; object-src \'none\'; base-uri \'none\'"><title>Alpha Phone</title>','assets/index.js':'console.log("Notes")',...files};
   if(flags!==null)all['build-flags.json']=JSON.stringify(flags);
   for(const [name,content] of Object.entries(all)){mkdirSync(path.dirname(path.join(dir,name)),{recursive:true});writeFileSync(path.join(dir,name),content);}
   return dir;
@@ -21,6 +21,20 @@ const cli=(dir,...args)=>spawnSync(process.execPath,[script,dir,...args],{encodi
 const escape=text=>text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
 const MARKERS=['demo-only-password','Development password provider','Add development provider','Proton Pass · development','10.0.2.2:47850','127.0.0.1:47850'];
 const SIMULATION_MARKERS=['Kitchen Speaker','4000 1234 5678 9017','Card scanned','Simulated payment','Memory wiped','Logs saved to Downloads','Up to date','This page is a visual prototype','Pixel 11 Pro','Powered by elizaOS ·','data-alpha-development-lock-screen','Booked · ','Agent booking'];
+
+// spec/platform/index.md, "A built page runs only its own scripts".
+test('a bundle whose page carries no strict Content-Security-Policy fails',()=>{
+  const dir=bundle({'index.html':'<!doctype html><title>Alpha Phone</title>'});
+  try{
+    const result=auditWebBundle(dir,{testMocks:false});
+    assert.equal(result.ok,false);
+    assert.deepEqual(result.errors,['index.html carries no Content-Security-Policy meta.']);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+  assert.deepEqual(contentSecurityProblems(`<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' 'unsafe-inline'; object-src 'none'; base-uri 'none'">`),
+    ["index.html's Content-Security-Policy allows 'unsafe-eval'.","index.html's Content-Security-Policy allows inline scripts."]);
+  assert.deepEqual(contentSecurityProblems(`<script src="a.js"></script><meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; base-uri 'none'">`),
+    ["index.html's Content-Security-Policy comes after a script."]);
+});
 
 // The loop over DENYLIST below cannot see an entry being removed; this can.
 test('the denylist names the development password provider and the emulator Maps gateway',()=>{

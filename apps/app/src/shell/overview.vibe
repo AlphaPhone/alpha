@@ -79,6 +79,7 @@ effect function ticker(machine: OverviewMachine.Shape) {
 /** The overview service: the agent's calendar feed and workflows read from the resident, the rest reported. */
 export const overviewLive = Layer.effect(Overview, effect {
   const machine = try OverviewMachine
+  const resident = try Resident
   const now = try Clock.currentTimeMillis
   try sendTo(machine, { type: "mount", day: localDay(now), now })
   fork.scoped readAll(machine)
@@ -102,6 +103,6 @@ export const overviewLive = Layer.effect(Overview, effect {
       const overdue = reminders.map((row) => ({ id: row.id, title: row.title, begin: row.at, end: row.at, allDay: false, overdue: true, video: false }))
       try sendTo(machine, { type: "remindersRead", overdue })
     },
-    refresh: () => readAll(machine),
+    refresh: () => Effect.provideService(readAll(machine), Resident, resident),
   }
 })

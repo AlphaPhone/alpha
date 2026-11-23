@@ -1,6 +1,6 @@
 // spec/clock/reminderPage.md, "Story: Step back out of what I have open in Reminders"; spec/clock/reminderPage.md, "Story: Let the agent change a reminder I name only once I have it open"
 import { Machine as PageMachine } from "../../gen/clock__reminderPage.effect.vibe"
-import { chosenFor, type PageForm, type ReopenAsk } from "../../gen/clock__reminderPage.ts"
+import { chosenFor, type PageForm, type ReopenAsk } from "../../gen/clock__reminderPage.effect.vibe"
 import { Machine as RemindersMachine } from "../../gen/clock__reminders.effect.vibe"
 import { Machine as DraftsMachine } from "../../gen/clock__reminderDrafts.effect.vibe"
 import { Machine as TapsMachine } from "../../gen/clock__reminderTaps.effect.vibe"
@@ -36,7 +36,7 @@ export service RemindersPage {
   /** Hardware or gesture Back: closes the innermost dialog, form or detail; false when nothing was open and Back is the shell's. */
   back(): boolean!!
   /** The reminder shown whose listed title is `name`, the only one a change the agent names may apply to. */
-  chosen(name: string): string | undefined!!
+  chosen(name: string): (string | undefined)!!
 }
 
 /** The page over its machine, closing the creation consent, the discard question and a tapped reminder's question first. */
@@ -48,11 +48,11 @@ export const remindersPageLayer = Layer.effect(RemindersPage, effect {
   const reminders = try Reminders
   const kept = try ReminderDrafts
   const taps = try ReminderTaps
-  const step = (event: Parameters<typeof page.send>[0]) => page.send(event) catch () => undefined
+  const step = effect (event: Parameters<typeof page.send>[0]) => page.send(event) catch () => undefined
 
   effect function show(id: string | undefined) {
     try taps.interact()
-    step({ type: "showDetail", id: id ?? "" })
+    try step({ type: "showDetail", id: id ?? "" })
     try reminders.show(id === "" ? undefined : id)
   }
 
@@ -60,14 +60,14 @@ export const remindersPageLayer = Layer.effect(RemindersPage, effect {
     show,
     effect openForm(form: DraftForm) {
       try taps.interact()
-      step({ type: "openForm", form: FORM[form] })
+      try step({ type: "openForm", form: FORM[form] })
     },
-    submitForm: () => step({ type: "submitForm" }),
-    closeForm: () => step({ type: "closeForm" }),
+    submitForm: () => asVoid(step({ type: "submitForm" })),
+    closeForm: () => asVoid(step({ type: "closeForm" })),
     effect askReopen(mode: "open" | "tomorrow") {
-      step({ type: "askReopen", mode: REOPEN[mode] })
+      try step({ type: "askReopen", mode: REOPEN[mode] })
     },
-    closeReopen: () => step({ type: "closeReopen" }),
+    closeReopen: () => asVoid(step({ type: "closeReopen" })),
     effect back() {
       try taps.interact()
       if ((try tapState.get()).stage === "TapQuestion" && (try taps.question()) !== undefined) {
@@ -86,7 +86,7 @@ export const remindersPageLayer = Layer.effect(RemindersPage, effect {
       const before = try page.get()
       const saved = before.submitted && confirmedSave(listing)
       const listed = listing.rows.some((row) => row.id === before.detail)
-      const after = step({ type: "back", saved, listed })
+      const after = try step({ type: "back", saved, listed })
       if (after === undefined) return false
       if (after.detail !== before.detail) try reminders.show(undefined)
       return true

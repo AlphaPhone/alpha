@@ -19,10 +19,10 @@ import { RemindersPage } from "../../clock/reminder-page.vibe";
 import { repeatOf } from "../../clock/schedule.ts";
 import type { ScreenProps } from "../app-screen.ts";
 import { RemindersView } from "./RemindersView.tsx";
-import { runtime } from "../runtime.ts";
+import { runtime, type AppServices } from "../runtime.ts";
 import { act, now } from "../shell/services.ts";
 
-const remind = (use: (r: Reminders.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Reminders), use));
+const remind = (use: (r: Reminders.Shape) => Effect.Effect<unknown, unknown, AppServices>) => act(Effect.flatMap(Effect.service(Reminders), use));
 const taps = (use: (t: ReminderTaps.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ReminderTaps), use));
 const drafts = (use: (d: ReminderDrafts.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ReminderDrafts), use));
 const pageDo = (use: (p: RemindersPage.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(RemindersPage), use));
@@ -46,7 +46,7 @@ export function RemindersScreen({ onClose }: RemindersScreenProps) {
   const keptEdit = kept.edit.tag === "Held" ? keptOf("edit") : undefined;
   const shownId = page.detail === "" ? undefined : page.detail;
   const open = (id: string | undefined) => pageDo((p) => p.show(id));
-  const onDetail = <A,>(id: string, use: (r: Reminders.Shape) => Effect.Effect<A>) => remind((r) => Effect.andThen(r.show(id), use(r)));
+  const onDetail = <A,>(id: string, use: (r: Reminders.Shape) => Effect.Effect<A, unknown, AppServices>) => remind((r) => Effect.andThen(r.show(id), use(r)));
   const settle = (form: DraftForm, id: string, version: number) => Effect.flatMap(Effect.service(ReminderDrafts), (d) => d.settle(form, id, version));
   return (
     <RemindersView

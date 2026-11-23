@@ -19,7 +19,7 @@ const FILTER: Readonly<Record<string, AlarmFilter>> = { all: "FilterAll", priori
 export function soundEventOf(dnd: Switch, mode: typeof InterruptionFacts.Type | undefined, volumes: typeof DeviceVolumes.Type | undefined): RingerEvent {
   const alarm = volumes?.volumes.find((v) => v.stream === "alarm")
   const filter: AlarmFilter = mode?.interruptionFilter === undefined ? "FilterUnread" : FILTER[mode.interruptionFilter] ?? "FilterUnread"
-  return { type: "soundFacts", dnd, filter, reported: alarm !== undefined, volume: Math.round(alarm?.current ?? 0), max: Math.round(alarm?.max ?? 0) }
+  return { type: "soundFacts", dnd, alarmFilter: filter, reported: alarm !== undefined, volume: Math.round(alarm?.current ?? 0), max: Math.round(alarm?.max ?? 0) }
 }
 
 /** The alarms and timers that ring now, with their revisions: a changed set is a new key. */

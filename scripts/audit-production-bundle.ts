@@ -156,6 +156,20 @@ export function readBuildFlags(dir: string) {
   } catch { return {present: true, testMocks: false, candidateCloud: false, fastIteration: false, valid: false}; }
 }
 
+const REQUIRED_CSP = ["default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "object-src 'none'", "base-uri 'none'"];
+
+/** What is wrong with the Content-Security-Policy meta of a built index.html (spec/platform/index.md, "A built page runs only its own scripts"). */
+export function contentSecurityProblems(html: string): string[] {
+  const meta = /<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]*)"/i.exec(html);
+  if (!meta) return ['index.html carries no Content-Security-Policy meta.'];
+  const policy = meta[1]!.replaceAll('&#39;', "'").replaceAll('&apos;', "'");
+  const problems = REQUIRED_CSP.filter(directive => !policy.includes(directive)).map(directive => `index.html's Content-Security-Policy lacks "${directive}".`);
+  if (policy.includes("'unsafe-eval'")) problems.push("index.html's Content-Security-Policy allows 'unsafe-eval'.");
+  if (/script-src[^;]*'unsafe-inline'/.test(policy)) problems.push("index.html's Content-Security-Policy allows inline scripts.");
+  if (meta.index > html.search(/<script\b/i) && html.search(/<script\b/i) >= 0) problems.push("index.html's Content-Security-Policy comes after a script.");
+  return problems;
+}
+
 export const FAST_ITERATION_ERROR = 'build-flags.json records fastIteration:true: this payload comes from pnpm android:build:fast, a developer build that skipped lint, tests and APK verification. It is never a production bundle; build with pnpm android:build:local.';
 
 interface BundleAuditOptions {
@@ -176,6 +190,7 @@ export function auditWebBundle(dir: string, options: BundleAuditOptions = {}) {
   if (flags.present && flags.testMocks !== expected) errors.push(`build-flags.json records testMocks:${flags.testMocks}, expected ${expected}.`);
   if (flags.fastIteration) errors.push(FAST_ITERATION_ERROR);
   if (!existsSync(path.join(dir, 'index.html'))) errors.push('index.html is missing.');
+  else errors.push(...contentSecurityProblems(readFileSync(path.join(dir, 'index.html'), 'utf8')));
   // A candidate Cloud (ALPHA_CLOUD_DEPLOYMENT_FILE) is for development and rehearsal; distributed builds use the shipped policy.
   if (!expected && (flags.candidateCloud || CLOUD_DEPLOYMENT_IS_CANDIDATE)) errors.push('This build addresses a candidate Cloud deployment (ALPHA_CLOUD_DEPLOYMENT_FILE); a production bundle must use the shipped Cloud deployment policy.');
   let files = 0;

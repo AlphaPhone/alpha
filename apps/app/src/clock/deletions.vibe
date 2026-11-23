@@ -2,7 +2,7 @@
 import { originsPeer, ownerPeer } from "./peers.vibe"
 import { Machine as DeletionsMachine, type JournalPhase, type JournalWindow, type PendingRow } from "../../gen/clock__deletions.effect.vibe"
 import { DeletionListing, DeletionRecord, UndoAnswer } from "./native.schema.vibe"
-import { DELETIONS, call } from "./plugins.vibe"
+import { DELETIONS, nativeCalls } from "./plugins.vibe"
 import { pageVisible } from "./page.ts"
 
 type Listed = typeof DeletionRecord.Type
@@ -40,14 +40,15 @@ export service Deletions {
 
 /** Deletions over `AlphaDeletions`. */
 export const deletionsLayer = Layer.effect(Deletions, effect {
+  const { call } = try nativeCalls()
   const notice = try DeletionsMachine
   const session = try ownerPeer()
   const origins = try originsPeer()
-  const step = (event: Parameters<typeof notice.send>[0]) => notice.send(event) catch () => undefined
+  const step = effect (event: Parameters<typeof notice.send>[0]) => notice.send(event) catch () => undefined
 
   effect function followOwner() {
     const owner = (try session.owner())?.key ?? ""
-    if (owner !== (try notice.get()).owner) step({ type: "ownerChanged", owner })
+    if (owner !== (try notice.get()).owner) try step({ type: "ownerChanged", owner })
     return try notice.get()
   }
 
@@ -56,24 +57,24 @@ export const deletionsLayer = Layer.effect(Deletions, effect {
       const admitted = try followOwner()
       if (admitted.owner === "") return
       const listed = call(DELETIONS, "pending", DeletionListing) catch () => undefined
-      if (listed === undefined) step({ type: "pendingFailed", generation: admitted.generation })
+      if (listed === undefined) try step({ type: "pendingFailed", generation: admitted.generation })
       else {
-        step({ type: "pendingAnswered", generation: admitted.generation, rows: listed.deletions.flatMap((row) => pendingRowOf(row) ?? []) })
+        try step({ type: "pendingAnswered", generation: admitted.generation, rows: listed.deletions.flatMap((row) => pendingRowOf(row) ?? []) })
         for (const origin of listed.deletedOrigins ?? []) try origins.forget(origin.kind === "event" ? "event" : "reminder", origin.id)
       }
     },
     effect undo(key: string) {
       const admitted = try followOwner()
-      if (step({ type: "undo", key }) === undefined) return
+      if ((try step({ type: "undo", key })) === undefined) return
       const answer = call(DELETIONS, "undo", UndoAnswer, identityOf(key)) catch () => undefined
       const phase = answer?.phase ?? answer?.status
-      step({ type: "undoAnswered", generation: admitted.generation, key, undone: phase === "undone", tooLate: phase === "deleted" || phase === "dispatching" })
+      try step({ type: "undoAnswered", generation: admitted.generation, key, undone: phase === "undone", tooLate: phase === "deleted" || phase === "dispatching" })
     },
     effect dismiss(key: string) {
       const admitted = try followOwner()
-      if (step({ type: "dismissOutcome", key }) === undefined) return
+      if ((try step({ type: "dismissOutcome", key })) === undefined) return
       const ok = (call(DELETIONS, "dismiss", UndoAnswer, identityOf(key)) catch () => undefined) !== undefined
-      step({ type: "dismissAnswered", generation: admitted.generation, key, ok })
+      try step({ type: "dismissAnswered", generation: admitted.generation, key, ok })
     },
   }
 })
