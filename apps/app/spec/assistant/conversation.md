@@ -153,6 +153,10 @@ the corrected text there; the original conversation keeps its history and
 its composer is saved empty first. A target whose session, message or text
 changed is dropped.
 
+A quoted reply sends the recorded message's ID. A retry keeps the same
+message ID and quote. A prompt handed over by another screen leaves the
+composer's quote in place for the owner to send.
+
 ```quint
 type Row = { recorded: bool, sameSession: bool, settledRow: bool, mine: bool }
 pure def quotable(row: Row, typing: bool): bool = row.recorded and row.sameSession and row.settledRow and not(typing)
