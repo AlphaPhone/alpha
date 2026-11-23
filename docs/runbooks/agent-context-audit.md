@@ -756,7 +756,7 @@ Upstream elizaOS/eliza develop:
 | [#40038](https://github.com/elizaOS/eliza/pull/40038) | `89baf73d94` | A calendar change that read its own target counts as the requested read |
 | [#40090](https://github.com/elizaOS/eliza/pull/40090) | `51a6976551` | The reviews queued behind a requested photo's card are recorded |
 | [#40174](https://github.com/elizaOS/eliza/pull/40174) | `e2ebd0f3ed` | No agent model call sends an output cap; the cap settings are gone; references stay stable per conversation by default; a 4 s hold on direct Cerebras only; SMS drafts with reasoning off |
-| [#40186](https://github.com/elizaOS/eliza/pull/40186) | open | A rejected or expired proposal's record says it never ran |
+| [#40186](https://github.com/elizaOS/eliza/pull/40186) | `a3a19afd17` | A rejected or expired proposal's record says it never ran |
 
 Settings the runtime no longer reads: `ELIZA_PLANNER_MAX_TOKENS` (and its `model`
 value), `ELIZA_CODING_PLANNER_MAX_TOKENS`, `ELIZA_STAGE1_MAX_TOKENS`,
@@ -786,4 +786,4 @@ request ran.
 
 Product: [alpha#1428](https://github.com/eliza-research/alpha/pull/1428) removed the
 launcher's five 4,096 caps; [alpha#1448](https://github.com/eliza-research/alpha/pull/1448)
-pins `e2ebd0f3ed` and stops setting the two settings the runtime no longer reads.
+pins `a3a19afd17`, which has both, and stops setting the two settings the runtime no longer reads.
