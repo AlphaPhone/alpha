@@ -1139,7 +1139,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         // A text is sent under the approved card's journal entry, which Android checks instead of asking again.
         const texts=journalIdentity?approvedCardTelephony(plugin,journalIdentity):client;
         const ownerSession=connectionController.getSnapshot().session,ownerTarget=JSON.stringify(connectionController.getWorkflowDeviceTarget());
-        const current=()=>{signal.throwIfAborted();context(this);if(!ownerSession||connectionController.getSnapshot().session!==ownerSession||JSON.stringify(connectionController.getWorkflowDeviceTarget())!==ownerTarget||!this.live||document.hidden||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
+        const owned=()=>!!ownerSession&&connectionController.getSnapshot().session===ownerSession&&JSON.stringify(connectionController.getWorkflowDeviceTarget())===ownerTarget&&this.live&&!document.hidden;
+        const current=()=>{signal.throwIfAborted();context(this);if(!owned()||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))throw Error('Phone context changed');};
+        // A view step held for this turn also runs after the turn's own screen change (a VIEWS
+        // navigation delivered with this reply), which the exact context check above would refuse.
+        const stepCurrent=()=>{signal.throwIfAborted();context(this);if(!owned()||!alphaClient.followsTurnContext(expectedContext))throw Error('Phone context changed');};
+        const viewStep=(view:string,step:(detent?:string)=>void)=>()=>alphaClient.afterRequestSettles({view,current:stepCurrent,show:step});
         const ports:TelephonyPorts={
           current,ask:askTelephonyReview,normalize:normalizePhoneNumber,
           searchContacts:(query,limit)=>client.searchContacts(query,limit),
@@ -1153,15 +1158,15 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           // A draft for a conversation that is not open, and Contacts filtered to a search: each step
           // changes the view, so it runs after the receipt and only while this review is still current,
           // once the chat request carrying this turn's reply settles (a view change would cancel it).
-          draftFor:async(number,body,threadId)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?await openSmsDraftStep(body,number,threadId,current):null;return step&&(()=>alphaClient.afterRequestSettles(()=>{current();step();}));},
+          draftFor:async(number,body,threadId)=>{const status=await client.status();current();const step=status.permissions.sms==='granted'?await openSmsDraftStep(body,number,threadId,current):null;return step&&viewStep('messages',step);},
           showContacts:async query=>{
             const step=showContactsStep(query),access=step?await book.status():null;
             if(!step||access?.available!==true||access.readable!==true)return null;
             const listed=await book.list({query,limit:1});current();
-            return Array.isArray(listed?.contacts)&&listed.contacts.length?()=>alphaClient.afterRequestSettles(()=>{current();step();}):'not-found';
+            return Array.isArray(listed?.contacts)&&listed.contacts.length?viewStep('contacts',step):'not-found';
           },
           // The keypad opens after the receipt, like a filtered Contacts list; nothing is dialed.
-          openKeypad:number=>{const step=openKeypadStep(number);return step&&(()=>alphaClient.afterRequestSettles(()=>{current();step();}));},
+          openKeypad:number=>{const step=openKeypadStep(number);return step&&viewStep('phone',step);},
           openContact:openContactRead,contactValues:connectionController.contactValuesNegotiated(),
         };
         // AC-19: every side-effect port re-reads Telecom first and refuses unless it can rule out an emergency call.
@@ -1463,7 +1468,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         if(!browserControl){if(ready())present?.();return;}
         runBrowserPresentation(operation,present,ready,text=>{if(this.live)this.agentSay(text,{type:'generic',icon:'info',title:text,sub:'',systemNotice:true,done:true});});
       };
-      const ready=()=>this.live&&!document.hidden&&!alphaClient.getState().pending&&connectionController.getSnapshot().session===browserSession&&JSON.stringify(alphaClient.getState().context)===JSON.stringify(expectedContext);
+      // Only a chat request a view change would cancel holds Browser back; a background workflow
+      // generation does not (afterRequestSettles runs the step at once during one).
+      const ready=()=>this.live&&!document.hidden&&!alphaClient.requestHoldsViews()&&connectionController.getSnapshot().session===browserSession&&alphaClient.followsTurnContext(expectedContext);
       return { status: 'succeeded', summary: browserControl?browserControlSummary(operation,present?.closed):browserNavigationSummary(operation.url),
         // A directly requested open runs inside the chat request that still carries its reply.
         presentBrowser:()=>alphaClient.afterRequestSettles(()=>show(ready)),
@@ -2037,6 +2044,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     current();if(alphaClient.getState().pending||this.S().typing||this.draftSendPending)throw Error('Wait for the current conversation turn.');
     this.voiceSendTurnId=turnId;
     const navigation=connectionController.captureViewNavigation(input.context),userId=crypto.randomUUID(),streamId=crypto.randomUUID();let streamed=false;
+    // A keypad, Contacts or Messages step this turn's request performs waits for the reply and the
+    // turn's own navigation, then carries the conversation to its view (below). A step that cannot
+    // follow the conversation (Browser) runs once the turn has ended, as before.
+    const viewSteps=alphaClient.holdTurnViewSteps(),afterTurn:Array<()=>void>=[];
     try{
       // A turn sent at a pause and taken back unheard when the user kept speaking: its local user
       // message and streamed draft leave the conversation view, and this turn carries the joined text.
@@ -2074,8 +2085,10 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       await new Promise<void>(resolve=>this.setState((previous:Shell)=>belongs()?(()=>{const delivered=(id?:string)=>!!id&&previous.msgs.some((m:Shell)=>m.id===id);const kept=previous.msgs.filter((m:Shell)=>m.id!==streamId&&!(m.id===userId&&delivered(reply.userMessageId))).map((m:Shell)=>m.id===userId?{...m,id:reply.userMessageId,messageBinding:identity}:m);return {msgs:delivered(reply.messageId)?kept.map((m:Shell)=>m.id===reply.messageId?enrichSettledAssistant(m,planActionCard(reply.planAction),identity):m):[...kept,{id:reply.messageId,from:'agent',text:reply.text,messageBinding:identity,streaming:false,card:planActionCard(reply.planAction)??null}]};})():null,resolve));current();
       keepWorkflowChanges(this,reply,belongs);
       const emailCardReady=await this.stageAgentEmailDraft?.(reply)===true;
+      const beforeNavigation=alphaClient.getState().context;
       let delivered=await deliverChatNavigation(this,navigation,reply.actionResults,current,input.navigation);
       let nextContext=input.navigation?.finish(delivered);if(nextContext)acceptedContext=nextContext;
+      if(delivered&&(nextContext||!input.navigation))viewSteps.moved(beforeNavigation);
       current();
       // A spoken photo request the agent answered without showing Camera opens Camera here first,
       // through the voice session's own navigation hold, so the photo is taken on the visible viewfinder.
@@ -2091,6 +2104,18 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         const results=await connectionController.continueRequestedCamera(reply.userMessageId,signal);
         for(const result of results)this.agentSay(result.summary,undefined,{id:`device-receipt:${result.proposalId}`,deviceReceipt:true});
       }
+      // A plain view change would read as leaving the conversation and end it (voice-adapter
+      // chatCurrent), losing this reply. Each held step goes through the voice session's own
+      // navigation hold instead, as a spoken VIEWS move does, so the conversation follows it.
+      await viewSteps.release(async step=>{
+        if(typeof step==='function'||!input.navigation){afterTurn.push(typeof step==='function'?step:()=>{step.current();step.show();});return;}
+        const live=()=>{signal.throwIfAborted();input.assertCurrent();if(!this.live||document.hidden||!connectionController.voiceConversationCurrent(binding))throw Error('The voice conversation changed.');};
+        let shown=false;
+        try{
+          shown=await input.navigation.apply(step.view,()=>{live();step.current();},(chat,onCommitted)=>new Promise<boolean>((resolve,reject)=>{try{step.show(chat);this.setState({},()=>{try{live();context(this);const switched=(this.S().view||'home')===step.view&&!alphaClient.getState().context.sensitive;if(switched)onCommitted(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}}));
+        }catch{shown=false;}finally{const next=input.navigation.finish(shown);if(next)acceptedContext=next;}
+      });
+      current();
       const awaiting=reply.proposals?.filter(proposal=>proposal.readReply?.origin.requestId===turnId&&proposal.readReply.origin.conversationId===identity.conversationId&&proposal.readReply.origin.inReplyTo===reply.userMessageId);
       if(awaiting&&awaiting.length>1)throw Error('More than one Notes review was returned. Use action history.');
       for(const proposal of reply.proposals||[]){retainReadReply(this,proposal,identity,reply.userMessageId);sayProposal(this,proposal,belongs);}
@@ -2114,7 +2139,12 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       input.navigation?.finish(false);
       if(streamed&&this.live)this.setState((previous:Shell)=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{msgs:previous.msgs.map((m:Shell)=>m.id===streamId?{...m,streaming:false,interrupted:true}:m)}:null);
       throw error;
-    }finally{if(this.voiceSendTurnId===turnId&&this.live)await new Promise<void>(resolve=>this.setState(()=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{typing:false}:null,()=>{if(this.voiceSendTurnId===turnId)this.voiceSendTurnId=undefined;resolve();}));}
+    }finally{
+      // A failed or cancelled turn still releases its steps; each checks it is current first.
+      await viewSteps.release(step=>{afterTurn.push(typeof step==='function'?step:()=>{step.current();step.show();});});
+      if(this.voiceSendTurnId===turnId&&this.live)await new Promise<void>(resolve=>this.setState(()=>this.voiceSendTurnId===turnId&&connectionController.voiceConversationCurrent(binding,false)?{typing:false}:null,()=>{if(this.voiceSendTurnId===turnId)this.voiceSendTurnId=undefined;resolve();}));
+      for(const step of afterTurn)try{alphaClient.afterRequestSettles(step);}catch{/* A retired view keeps its journaled receipt. */}
+    }
   };
   /** True, with the reason shown, while the resident has no owner session to take a send. A caller
    * that clears its own field on send (the comms bar) asks first, so the text is not lost. */
@@ -2241,7 +2271,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
     const flushStream=()=>{if(streamFrame){cancelAnimationFrame(streamFrame);streamFrame=0;}if(latestStream!==undefined){const value=latestStream;latestStream=undefined;if(this.live)replaceStream(value);}};
     // Functional: a reply or delivery that landed while the draft was being held is kept.
 
-    let navigation:ReturnType<typeof connectionController.captureViewNavigation>|undefined,readyNavigation:readonly unknown[]|undefined;
+    let navigation:ReturnType<typeof connectionController.captureViewNavigation>|undefined,readyNavigation:readonly unknown[]|undefined,viewSteps:import('../runtime/alpha-client').TurnViewSteps|undefined;
     const deliverNavigation=(results:readonly unknown[]|undefined)=>deliverChatNavigation(this,navigation,results);
     try {
       // A refused send can settle immediately. Commit the cleared composer before
@@ -2264,6 +2294,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       const showStatus=(event:Event)=>{if(this.live&&!streamed&&this.sendAttempt===attempt)this.setState({turnStatus:(event as CustomEvent<string>).detail});};
       localTurnStatus.addEventListener('label',showStatus);
       let reply;
+      // A keypad, Contacts, Messages or Browser step this request performs runs after the reply and
+      // this turn's own navigation are delivered (below), never before or racing that delivery.
+      viewSteps=alphaClient.holdTurnViewSteps();
       // The Notes view context carries the exact selected record and revision.
       try{reply = await alphaClient.send(requestText,value=>{
         attempt.streamed=true;
@@ -2311,7 +2344,9 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         try{await completeReadReply(this,completed.receipt);}catch{if(this.live&&sameChat())this.agentSay('The note was shared, but its answer is unconfirmed.');}
       }
       try{
+        const beforeNavigation=alphaClient.getState().context;
         let delivered=await deliverNavigation(reply.actionResults);
+        if(delivered)viewSteps.moved(beforeNavigation);
         // The agent may propose the photo without showing Camera in the same turn. When that photo is this reply's
         // (bound to this message, or named by the reply's own receipt on an ask-first phone) and no other review of
         // this reply needs the current screen, Camera is opened here.
@@ -2326,6 +2361,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
           }finally{attempt.capturing=false;}
         }
       }catch(error){if(this.live)this.toast(errorNotice(error,'Could not confirm the screen change. Check your screen.'),ERROR_TOAST);}
+      await viewSteps.release();
       // "Open Camera" is dropped once the photo was taken (a receipt) or Camera was opened for this request:
       // there the pending photo is recovered as its review card when this turn ends.
       for(const notice of replyNotices(reply)){
@@ -2405,7 +2441,7 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
         }
       }
     }
-    finally { if(this.sendAttempt===attempt)this.sendAttempt=null;
+    finally { void viewSteps?.release();if(this.sendAttempt===attempt)this.sendAttempt=null;
       // A session change or history reload cancels this send and lets the next one start while this
       // one is still settling: the indicator then belongs to that newer send or voice turn.
       if (this.live&&!this.sendAttempt&&this.voiceSendTurnId===undefined) this.setState({ typing: false, turnStatus: '' });

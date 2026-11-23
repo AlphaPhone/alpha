@@ -94,3 +94,74 @@ test('an automatic workflow generation does not hold the step, and the view chan
  agent.finish('A summary.');
  assert.equal(await generation,'A summary.');
 });
+
+// Review (nav-lease): the Browser step gated itself on getState().pending, which is also true during
+// an automatic workflow generation. afterRequestSettles runs the step at once then, so it saw
+// pending, returned and was never retried: an approved Browser open never came to the front.
+// requestHoldsViews names only the chat request a view change would cancel.
+test('during an automatic workflow generation a step that checks requestHoldsViews shows',async()=>{
+ const client=new AlphaClient(),agent=held();client.attachVerifiedTransport(agent.value);client.setViewContext(view('workflows'));
+ const started=agent.started(),generation=client.generateWorkflowText('Summarise','input text',new AbortController().signal,true);await started;
+ assert.equal(client.getState().pending,true);
+ assert.equal(client.requestHoldsViews(),false);
+ const shown=[];
+ client.afterRequestSettles(()=>{if(client.requestHoldsViews())return;shown.push('browser');});
+ assert.deepEqual(shown,['browser']);
+ agent.finish('A summary.');
+ assert.equal(await generation,'A summary.');
+});
+test('a chat request in flight holds views; a settled one does not',async()=>{
+ const {client,agent,reply}=await turn(view('settings'));
+ assert.equal(client.requestHoldsViews(),true);
+ agent.finish('Done.');await reply;
+ assert.equal(client.requestHoldsViews(),false);
+});
+
+// Review (nav-lease): a step held only until the request settled raced the turn's own delivery
+// (its VIEWS navigation, a voice turn's spoken reply). A turn that holds its view steps runs them
+// itself once its reply and navigation are delivered, and a step still runs after the turn's own
+// screen change, but not after any other change.
+const keypadStep=(client,shown,expected)=>({view:'phone',current:()=>{if(!client.followsTurnContext(expected))throw Error('Phone context changed');},show:detent=>{shown.push(['phone',detent]);client.setViewContext(view('phone'));}});
+test('a held turn runs its view step only at release, through the turn\'s runner',async()=>{
+ const client=new AlphaClient(),agent=held();client.attachVerifiedTransport(agent.value);client.setViewContext(view('home'));
+ const hold=client.holdTurnViewSteps(),started=agent.started(),reply=client.send('open the dialer');await started;
+ const shown=[],expected=client.getState().context;
+ client.afterRequestSettles(keypadStep(client,shown,expected));
+ agent.finish('Opening the keypad.');
+ assert.equal((await reply).text,'Opening the keypad.');
+ await tick();await tick();
+ // The request settled, but the turn has not delivered yet: nothing changed the view.
+ assert.deepEqual(shown,[]);
+ const ran=[];
+ await hold.release(async step=>{ran.push(step.view);step.current();step.show('sheet');});
+ assert.deepEqual(ran,['phone']);
+ assert.deepEqual(shown,[['phone','sheet']]);
+ // Released once: a later release does nothing.
+ await hold.release(()=>{throw Error('released twice');});
+});
+test('a held step still runs after the turn\'s own navigation, and not after another change',async()=>{
+ for(const own of [true,false]){
+  const client=new AlphaClient(),agent=held();client.attachVerifiedTransport(agent.value);client.setViewContext(view('home'));
+  const hold=client.holdTurnViewSteps(),started=agent.started(),reply=client.send('open phone and the keypad');await started;
+  const shown=[],expected=client.getState().context;
+  client.afterRequestSettles(keypadStep(client,shown,expected));
+  agent.finish('Opening Phone.');await reply;
+  // The turn delivers its VIEWS navigation (or something else moves the screen).
+  const before=client.getState().context;client.setViewContext(view(own?'phone':'contacts'));
+  if(own)hold.moved(before);
+  await hold.release();
+  assert.deepEqual(shown,own?[['phone',undefined]]:[]);
+  // Outside the release the move no longer counts.
+  assert.equal(client.followsTurnContext(expected),false);
+ }
+});
+test('a released hold with no runner waits for a request still in flight',async()=>{
+ const client=new AlphaClient(),agent=held();client.attachVerifiedTransport(agent.value);client.setViewContext(view('home'));
+ const hold=client.holdTurnViewSteps(),shown=[];
+ const started=agent.started(),reply=client.send('open the dialer');await started;
+ client.afterRequestSettles(()=>shown.push('phone'));
+ await hold.release();
+ assert.deepEqual(shown,[]);
+ agent.finish('Opening.');await reply;await tick();
+ assert.deepEqual(shown,['phone']);
+});

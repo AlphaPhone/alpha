@@ -75,7 +75,7 @@ export function wavWindows(wav:Uint8Array,seconds=WINDOW_SECONDS):Uint8Array[]{
   chunk.set(wav.subarray(data+start,data+start+length),44);out.push(chunk);}
  return out;
 }
-let keypadOpener:((number?:string)=>(()=>void)|null)|null=null;
+let keypadOpener:((number?:string)=>((detent?:string)=>void)|null)|null=null;
 /** The step that brings the Phone keypad in front, `number` filled in when given; null when Phone
  * is not mounted or not admitted. It never dials: only the owner's Call tap there calls. */
 export const openKeypadStep=(number?:string)=>keypadOpener?.(number)??null;
@@ -104,10 +104,11 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
  keypadOpener=keypadNumber=>{
   const shell=owner;
   if(!shell||!isMvpView('phone'))return null;
-  return ()=>{
+  // `detent` is the chat detent a voice turn carries its conversation to Phone with.
+  return (detent?:string)=>{
    if(owner!==shell||document.hidden)return;
    const chat=shell.S().chat;
-   shell.openView('phone',{tab:'keypad',...(keypadNumber?{prefill:keypadNumber}:{})},chat==='sheet'||chat==='full'?chat:undefined);
+   shell.openView('phone',{tab:'keypad',...(keypadNumber?{prefill:keypadNumber}:{})},detent??(chat==='sheet'||chat==='full'?chat:undefined));
   };
  };
  const changed=()=>owner?.setState({phoneNativeRevision:Date.now()});

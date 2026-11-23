@@ -21,7 +21,7 @@ type Editor={mode:'creating'|'editing';id:string|null;version:string|null;draft:
 /** Why Android would refuse this draft. A new contact's name is judged from its structured fields
     alone, as Android stores it; an edit's omitted fields keep their stored values. */
 export const contactSaveProblem=(mode:Editor['mode'],draft:ContactDraft)=>contactDraftProblem(draft,{create:mode==='creating'});
-let openSelection:(()=>string|null)|null=null,openReader:(()=>ContactDetail|'unavailable'|null)|null=null,listShower:((query:string)=>(()=>void)|null)|null=null;
+let openSelection:(()=>string|null)|null=null,openReader:(()=>ContactDetail|'unavailable'|null)|null=null,listShower:((query:string)=>((detent?:string)=>void)|null)|null=null;
 /** The open contact's identity and version, for on-device approval checks only: never agent context. */
 export const openContactSelection=()=>openSelection?.()??null;
 /** The contact the owner has open in Contacts, for `contact_read_selected`: 'unavailable' when the phone cannot read it whole; null when none is open. */
@@ -45,10 +45,11 @@ export function installContactsAdapter(Component:any,views:Bag){
  listShower=query=>{
   const shell=owner;
   if(!shell||!isMvpView('contacts'))return null;
-  return ()=>{
+  // `detent` is the chat detent a voice turn carries its conversation to Contacts with.
+  return (detent?:string)=>{
    if(owner!==shell||document.hidden)return;
    const chat=shell.S().chat;
-   if(shell.S().view!=='contacts')shell.openView('contacts',undefined,chat==='sheet'||chat==='full'?chat:undefined);
+   if(shell.S().view!=='contacts')shell.openView('contacts',undefined,detent??(chat==='sheet'||chat==='full'?chat:undefined));
    // The list registers its filter when it renders (AC-22); the filter closes an open contact.
    shell.setState({},()=>{if(owner===shell&&available())applyListFilter('contacts',{query,label:query,by:'alpha'});});
   };
