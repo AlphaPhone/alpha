@@ -1,4 +1,4 @@
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fireEvent, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { inGroup } from "./samples.ts";
 import type { StartupAccessRowProps } from "./StartupAccessRow.tsx";
@@ -28,8 +28,9 @@ export const meta: ComponentMeta<StartupAccessRowProps> = {
       await expect(onAct.mock.calls.length).toBe(1);
     },
     "Android answering": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      onAct.mockClear();
       const button = within(canvasElement).getByRole("button", { name: "Allow" });
-      await userEvent.click(button);
+      await fireEvent.click(button);
       await expect([button.getAttribute("aria-busy"), onAct.mock.calls.length]).toEqual(["true", 0]);
     },
     "Being read": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button")).toBeNull(),

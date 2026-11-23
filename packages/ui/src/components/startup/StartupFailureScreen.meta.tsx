@@ -1,4 +1,4 @@
-import { expect, fn, userEvent, within } from "storybook/test";
+import { expect, fireEvent, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { StartupFailureScreenProps } from "./StartupFailureScreen.tsx";
 
@@ -36,7 +36,7 @@ export const meta: ComponentMeta<StartupFailureScreenProps> = {
     "Saving the drafts": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onReload.mockClear();
       const reload = within(canvasElement).getByRole("button", { name: "Reload" });
-      await userEvent.click(reload);
+      await fireEvent.click(reload);
       await expect([reload.getAttribute("aria-busy"), onReload.mock.calls.length]).toEqual(["true", 0]);
     },
     "Unsaved edits": async ({ canvasElement }: { canvasElement: HTMLElement }) => {

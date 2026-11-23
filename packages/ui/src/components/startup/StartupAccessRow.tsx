@@ -46,7 +46,7 @@ const words: Record<StartupAccessWord, { label: string; status: StatusDotProps["
 /**
  * One access and where it stands. The step being asked also says what the access is for and carries its one action:
  * Allow, Settings, Check or Try again.
- * @model spec/app/startup/steps.md
+ * @model spec/app/startup/access.md
  */
 export function StartupAccessRow({ access, word, current = false, action, busy = false, onAct }: StartupAccessRowProps) {
   const { title, reason, icon } = names[access];

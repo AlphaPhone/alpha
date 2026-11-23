@@ -24,7 +24,7 @@ const troubles: Record<StartupTrouble, string> = {
 /**
  * The end of the walkthrough for a new account, or for one whose connection or sign-in needed attention, which it
  * says. Done goes Home.
- * @model spec/app/startup/finish.md
+ * @model spec/app/startup/access.md
  */
 export function StartupAllSet({ trouble, notSaved = false, children, onDone }: StartupAllSetProps) {
   const attention = trouble !== undefined || notSaved;

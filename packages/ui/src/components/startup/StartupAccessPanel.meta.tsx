@@ -1,4 +1,4 @@
-import { expect, fn, screen, userEvent, within } from "storybook/test";
+import { expect, fn, screen, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import { accessRows } from "./samples.ts";
 import type { StartupAccessPanelProps } from "./StartupAccessPanel.tsx";
@@ -11,7 +11,7 @@ const done = { Notifications: "Allowed", Microphone: "Allowed" } as const;
 const asking = { access: "Camera", action: "Allow" } as const;
 
 export const meta: ComponentMeta<StartupAccessPanelProps> = {
-  args: { rows: accessRows(done, asking), current: "Camera", place: { step: 3, count: 7 }, onAct, onContinue },
+  args: { rows: accessRows(done, asking), current: "Camera", place: { step: 3, count: 7 }, onAct, onContinue, onSkip: undefined, onDone: undefined },
   examples: {
     "Allow first": { notice: "AllowFirst" },
     "Android answering": { rows: accessRows(done, { ...asking, busy: true }), onAct: undefined, onContinue: undefined },
@@ -36,13 +36,13 @@ export const meta: ComponentMeta<StartupAccessPanelProps> = {
       onAct.mockClear();
       onContinue.mockClear();
       const sheet = await screen.findByRole("dialog", { name: "Access" });
-      await expect(within(sheet).getByRole("progressbar", { name: "Step 3 of 7" })).toBeVisible();
+      await waitFor(() => expect(within(sheet).getByRole("progressbar", { name: "Step 3 of 7" })).toBeVisible());
       await userEvent.click(within(sheet).getByRole("button", { name: "Allow" }));
       await userEvent.click(within(sheet).getByRole("button", { name: "Continue" }));
       await expect([onAct.mock.calls, onContinue.mock.calls.length]).toEqual([[["Camera"]], 1]);
       await expect(within(sheet).queryByRole("button", { name: "Skip" })).toBeNull();
     },
-    "Allow first": async () => expect(await screen.findByText("Allow first")).toBeVisible(),
+    "Allow first": () => waitFor(async () => expect(await screen.findByText("Allow first")).toBeVisible()),
     "Android answering": async () => {
       const sheet = await screen.findByRole("dialog", { name: "Access" });
       await expect([within(sheet).getByRole("button", { name: "Continue" }), within(sheet).queryByRole("button", { name: "Skip" })]).toEqual([expect.objectContaining({ disabled: true }), null]);
