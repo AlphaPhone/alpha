@@ -153,13 +153,15 @@ device result.
 
 `ALPHA_CLOUD_DEPLOYMENT_FILE=<file.json>` points the build and operator tools at a
 candidate Cloud (the same `production` and `staging` rows as the policy). Run
-`node scripts/cloud-deployment.ts` with it set to regenerate the authorities. A
+`pnpm cloud:deployment` with it set to regenerate the authorities. A
 candidate build has its own credential namespace, and the production bundle audit
 refuses it.
 
-`cloud/` holds the product Cloud's data: `policy.example.json` (the same rows the app
-is built with) and `resources.example.json` (the operator's Cloudflare ids). There is
-no route code here.
+`cloud/` is the product Cloud package (`@alphacompute/alpha-cloud`): `deployment.json`
+(the rows the app is built with), `resources.example.json` (the operator's Cloudflare
+ids) and the `alpha-cloud` command in `cloud/src` that builds the profile, seed,
+registration and Worker configuration from them. Routes come from upstream
+`@elizaos/cloud`.
 
 ```sh
 pnpm cloud:worker check --policy cloud/policy.example.json --resources cloud/resources.example.json \
@@ -594,8 +596,8 @@ Complete it in this order:
    exports the verified public certificates and fingerprints under
    `artifacts/release-public-identities/` for enrollment.
 2. Register `ai.alphacompute.alphaphone` in production and staging. Run
-   `node scripts/cloud-readiness.ts registration --environment <environment>`
-   to print each environment's operator inputs. Keep the existing
+   `pnpm --filter @alphacompute/alpha-cloud exec alpha-cloud registration --inputs <file> --environment <environment> --out <file>`
+   to write each environment's registration. Keep the existing
    `/alphaphone/auth/callback` URLs and entitlement audience.
 
    - In `ELIZA_MOBILE_APP_AUTH_CLIENTS_JSON`, replace the former Alpha row's
@@ -616,12 +618,12 @@ Complete it in this order:
      `node scripts/render-assetlinks.ts --cloud-config --published https://eliza.app/.well-known/assetlinks.json`.
      Preserve existing grants and other products' entries. Deploy and verify
      the published file with `node scripts/render-assetlinks.ts --check <web-origin>/.well-known/assetlinks.json`.
-   - Use `node scripts/cloud-deployment.ts --pages-registration` to update
+   - Use the `alpha-cloud registration` output to update
      Alpha's entry in the protected Cloud release Environment variable
      `ELIZA_NATIVE_AUTH_CALLBACKS_JSON` for production and staging. Keep one
      entry per callback URI and preserve the other products' entries. Verify
      the new Android target in the deployed Pages
-     callback page, run `node scripts/cloud-readiness.ts probe --environment <environment>`,
+     callback page, run `node scripts/cloud-worker.ts smoke --environment <environment>`,
      then complete sign-in on the intended APK. Test with the new package
      selected to open its supported links if the old package is also installed.
      [Cloud registration #666](https://github.com/alphacompute/alphaphone/issues/666),
@@ -823,10 +825,10 @@ operator does not enable OS enrollment or establish device acceptance.
 
 Build output belongs in ignored `web-dist/`, `artifacts/`, `test-results/` and
 `.eliza/` directories. Android host and Capacitor sync output are ignored too.
-Cloud deployment source is `scripts/cloud-deployment-policy.ts`; regenerate its
-renderer and Android bindings with `node scripts/cloud-deployment.ts`.
-`node scripts/cloud-deployment.ts --pages-registration` prints the public Pages
-callback registration for an operator without creating a `config/` directory.
+Cloud deployment source is `cloud/deployment.json`; regenerate its renderer and
+Android bindings with `pnpm cloud:deployment` (`pnpm cloud:deployment:check` checks
+them). `alpha-cloud registration` writes the public callback registration for an
+operator.
 
 The reviewed pin `1803ea88c9460f2e3cb779abe31cd77cfc6f64c5` includes original-preserving message forks and the corrected Pixel source inventory ([eliza#39808](https://github.com/elizaOS/eliza/pull/39808), [eliza#39810](https://github.com/elizaOS/eliza/pull/39810), [eliza#39813](https://github.com/elizaOS/eliza/pull/39813)). Only the conversation-route catalog hash changed and was checked against the selected Git object; no `plugins/plugin-native-messages` file changed, so the three NativeMessageDeletion sidecar entries kept their hashes. The new upstream `packages/agent/quint/ConversationFork.qnt` and `ConversationFork.cases.json` sidecars behind the fork route are not catalogued in `specs/quint/legacy/core/source-inventory.json`. The mobile builder, dependency lock and 23 UUID package files retain their reviewed bytes. This pin does not itself qualify an APK or image.
 
