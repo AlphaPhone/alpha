@@ -65,7 +65,7 @@ export function fakeResident(routes: { readonly [route: string]: FakeRoute }, st
   effect function answer(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body: unknown, headers: ResidentHeaders | undefined): ResidentAnswer!ResidentRefused {
     if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
     if (!routeAllowed(method, path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
-    const sent = deviceHeaders(headers)
+    const sent = deviceHeaders(headers, method, path)
     if (sent === undefined) throw headerRefusal()
     const key = `${method} ${path.split("?")[0]}`
     if (!Object.hasOwn(routes, key)) throw new ResidentRefused({ status: 404, code: "not_found", message: "Not found" })
@@ -80,7 +80,7 @@ export function fakeResident(routes: { readonly [route: string]: FakeRoute }, st
     ensureRunning: () => Effect.void,
     json: (method, path, body, headers) => answer(method, path, body, headers),
     stream: (path: string, _body: unknown, headers?: ResidentHeaders) => {
-      const sent = deviceHeaders(headers)
+      const sent = deviceHeaders(headers, "POST", path)
       if (sent === undefined) return Stream.fail(headerRefusal())
       if (!Object.hasOwn(streams, path)) return Stream.fail(new ResidentRefused({ status: 404, code: "not_found", message: "Not found" }))
       return Stream.unwrap(sync(() => {

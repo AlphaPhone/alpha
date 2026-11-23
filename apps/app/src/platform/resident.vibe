@@ -12,6 +12,14 @@ export interface ResidentAnswer { readonly status: number; readonly data: unknow
 /** Device headers a request carries to the resident, such as `x-eliza-device-capabilities`; names match without regard to case. */
 export type ResidentHeaders = { readonly [name: string]: string }
 
+/** Lets a chat turn ask for the resident's applied-effect marker on a failed reply. */
+export const CUT_OFF_EFFECT_HEADER = "x-elizaos-cut-off-effect"
+
+/** Only a buffered or streamed POST of a conversation turn supports this negotiation. */
+export function postsConversationTurn(method: string, path: string): boolean {
+  return method === "POST" && /^\/api\/conversations\/[^/?#]+\/messages(?:\/stream)?$/.test(path)
+}
+
 /** The resident agent's local API. */
 export service Resident {
   /** The resident's state as it reports it now. */

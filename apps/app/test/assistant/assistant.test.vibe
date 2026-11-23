@@ -88,12 +88,14 @@ it.effect("A quoted reply keeps its target on a stream retry (spec/assistant/con
     const shown = (try transcriptNow()).rows.find((row) => row.kind === "user" && row.text === "Could we make that one?")
     try Effect.try(() => assert.deepStrictEqual({
       attempts: sent.map((call) => call.method),
+      cutOffNegotiated: seen.calls.filter((call) => call.headers?.["x-elizaos-cut-off-effect"] === "applied").map((call) => call.method),
       texts: bodies.map((body) => body.text),
       quotes: bodies.map((body) => body.metadata.replyToMessageId),
       quoteInTranscript: shown?.kind === "user" ? shown.quote : undefined,
       retried: bodies[2]?.clientMessageId !== undefined && bodies[2].clientMessageId === bodies[3]?.clientMessageId,
     }, {
       attempts: ["STREAM", "POST", "STREAM", "POST"],
+      cutOffNegotiated: ["STREAM", "POST", "STREAM", "POST"],
       texts: ["Summarize this file.", "Summarize this file.", "Could we make that one?", "Could we make that one?"],
       quotes: [undefined, undefined, quote.messageId, quote.messageId],
       quoteInTranscript: quote,
