@@ -32,8 +32,8 @@ export interface OperationPorts {
   classOf(operation: unknown): Op
   /** What the operation targets against the owner's words, for a call, dial, text or contact. */
   target(operation: unknown, text: string): Target
-  /** The receipt sentence for a settled result. */
-  summarize(operation: unknown, result: Result): string
+  /** The receipt sentence for a settled result of the proposal `proposalId`. */
+  summarize(operation: unknown, result: Result, proposalId?: string): string
   /** For an operation that acts on a set its card must list: the set, read on this phone when the card is first drawn and bound to `proposalId`, or the notice shown instead of a card when it cannot be listed or is empty; undefined for every other operation. */
   itemize?(operation: unknown, proposalId: string): ItemizedSet | string | undefined
   /** Whether the operation is a handoff (a text, a dial, a telephony change or a Clock request) whose unknown outcome may stay unresolved; undefined counts as a handoff. */
@@ -358,7 +358,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function receiptOf(proposal: PendingProposal, result: ApproveResult) {
     const outcome: Result = result.kind !== "settled" ? (result.kind === "history" ? "Unknown" : "NotStarted")
       : result.result.tag === "Applied" ? "Applied" : result.result.tag === "Unknown" ? "Unknown" : "NotStarted"
-    const said = actionResultText(outcome === "NotStarted" && result.kind !== "settled" ? copy.notDispatched : ports.summarize(proposal.operation, outcome))
+    const said = actionResultText(outcome === "NotStarted" && result.kind !== "settled" ? copy.notDispatched : ports.summarize(proposal.operation, outcome, proposal.id))
     const summary = result.kind === "settled" && !result.synced && outcome !== "NotStarted" ? unsyncedSummary(said) : said
     return { outcome, title: receiptTitle(titleOf(outcome)), summary }
   }
