@@ -4,7 +4,8 @@ import {
   workflowApprovalProposalId, workflowNoticeReads,
 } from "@elizaos/plugin-workflow/client"
 import { type NoticeRoute, Machine as NoticesMachine, stored as noticesStored } from "../../gen/workflows__notices.effect.vibe"
-import { Machine as StepsMachine, machine as stepsMachine } from "../../gen/workflows__deviceSteps.effect.vibe"
+import { type Performed, Machine as StepsMachine, machine as stepsMachine } from "../../gen/workflows__deviceSteps.effect.vibe"
+import { type Approval, DeviceReview } from "../assistant/review.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type OwnerScope, WorkflowApi } from "./api.vibe"
@@ -17,6 +18,14 @@ export const NOTICES_KEY = ownerKey("device", "workflows/notices")
 export const STEP_NOTICE_MS = 86400000
 
 const plugin = "AlphaHostedResults"
+
+/** Whether the agent performs this step through the phone's own workflow bridge, with no proposal for the phone to run: a Calendar range read (scripts/resident/bridges.ts). */
+function bridgeRead(review: StepReview): boolean {
+  return review.phone?.spec.steps.find((step) => step.id === review.approval.nodeId)?.operation === "calendar_range"
+}
+
+/** How often the open step's own proposal is looked for while its decision is in flight. */
+const STEP_POLL_MS = 1000
 
 /** The approval the open run's phone step waits for, as the screen reviews it. */
 export interface StepReview {
@@ -130,6 +139,7 @@ export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
   const held = try StepsMachine
   const agent = try WorkflowApi
   const client = agent.workflow
+  const devices = try DeviceReview
   const current = try Ref.make<StepReview | undefined>(undefined)
 
   effect function readStep(run: WorkflowRun) {
@@ -154,22 +164,31 @@ export const phoneSteps = Layer.provideMerge(Layer.effect(PhoneSteps, effect {
       return try advance()
     }
     if (state.inflight === "Admitting") {
-      const decided = try (effect {
-        const receipt = try client.decideApproval(review.run, review.approval, true)
-        return receipt.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === "approved" && a.requestDigest === review.approval.requestDigest)
-      } catch () => false)
-      if (!decided) held.send({ type: "expire" }) catch () => undefined
+      // The agent performs an approved step inside this decision request, offering it to the phone and answering once it settled, so
+      // the step's own proposal is run here while the decision is in flight (spec/workflows/deviceSteps.md).
+      const decisionDone = try Ref.make(false)
+      const decision = fork ensuring(exit(client.decideApproval(review.run, review.approval, true)), Ref.set(decisionDone, true))
+      let ran: Approval | undefined = undefined
+      const bridged = bridgeRead(review)
+      if (!bridged) {
+        while (ran === undefined && !(try Ref.get(decisionDone))) {
+          ran = try devices.workflowStep(review.run.id, review.approval.nodeId)
+          if (ran === undefined) try sleep(Duration.millis(STEP_POLL_MS))
+        }
+        if (ran === undefined) ran = try devices.workflowStep(review.run.id, review.approval.nodeId)
+      }
+      const answered = join decision
+      const decided = Exit.isSuccess(answered)
+        && answered.value.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === "approved" && a.requestDigest === review.approval.requestDigest)
+      if (!decided && ran === undefined) held.send({ type: "expire" }) catch () => undefined
       held.send({ type: "admit" }) catch () => undefined
-      return try advance()
-    }
-    if (state.inflight === "Executing") {
-      held.send({ type: "execute" }) catch () => undefined
-      const settled = try (effect {
-        const run = try client.receipt(review.run.id, review.run.workflowId)
-        const receipt = run.finished ? undefined : try client.approvals(run)
-        return run.finished || receipt?.approvals.some((a) => workflowApprovalProposalId(a) === id && a.status === "approved") === true
-      } catch () => false)
-      if (settled) held.send({ type: "receiptSent" }) catch () => undefined
+      if ((try held.get()).inflight !== "Executing") return
+      const performed: Performed = ran === undefined
+        ? (bridged && decided ? "PhoneUnknown" : "PhoneNothing")
+        : ran.outcome === "Applied" ? "PhoneApplied" : ran.outcome === "Unknown" ? "PhoneUnknown" : "PhoneNothing"
+      held.send({ type: "execute", performed }) catch () => undefined
+      if ((try held.get()).inflight !== "SendingReceipt") return
+      if (Exit.isSuccess(answered)) held.send({ type: "receiptSent" }) catch () => undefined
       else held.send({ type: "receiptLost" }) catch () => undefined
       return
     }

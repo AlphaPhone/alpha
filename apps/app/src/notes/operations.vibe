@@ -1,16 +1,18 @@
 // spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/organize.md, "A recording receipt says what the recorder did"; spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"; spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"; spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"; spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"; spec/notes/organize.md, "A workflow read shares the selected notes only while each still holds the text the owner reviewed"; spec/notes/organize.md, "A workflow's note is saved once, into the agent's collection, only from the open run in front"
 import {
-  decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeOffered, type NotesDeviceContext, type NotesOrganizeOperation,
+  NOTES_LIST_FILTER_CAPABILITY, decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeOffered, type NotesDeviceContext, type NotesOrganizeOperation,
 } from "@elizaos/plugin-notes/organize"
 import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
 import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
 import { projectNoteForModel } from "@elizaos/plugin-notes/types"
 import { noteSaveResult, notesReadResult } from "../../gen/notes__organize.effect.vibe"
 import { AssistantHost } from "../assistant/host.vibe"
+import { AdvertisedCapabilities, type WorkflowStepRef } from "../assistant/ports.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { NotesFolders } from "./folders.vibe"
 import { contentOf } from "./list.vibe"
+import { NotesListFilter } from "./listFilter.vibe"
 import { NotesOrganize, type OrganizeReceipt } from "./organize.vibe"
 import { pageVisible, sha256Hex } from "./platform.ts"
 
@@ -46,12 +48,24 @@ function notesCount(op: SelectedRead): string {
   return `${op.notes.length} selected note${op.notes.length === 1 ? "" : "s"}`
 }
 
+/** The assistant's facts about an executor call, for the shell to fill from the device review; unprovided, no call serves a workflow run, so a workflow's note is never saved. */
+export service NotesCalls {
+  /** The workflow run and step the call serves, when it was run from that run's own step review; undefined for every other call. */
+  workflow(call: ExecutorCall): (WorkflowStepRef | undefined)!!
+  static readonly defaultValue = () => ({
+    workflow: (_call: ExecutorCall) => succeed(undefined as WorkflowStepRef | undefined),
+  })
+}
+
 /** The executors of the agent's Notes organisation operations and a workflow's note reads and saves, for the shell to compose into DeviceExecutors. */
 export const operationPorts = effect {
   const organize = try NotesOrganize
   const collection = try NotesCollection
   const folders = try NotesFolders
   const host = try AssistantHost
+  const calls = try NotesCalls
+  const filter = try NotesListFilter
+  const advertised = try AdvertisedCapabilities
   const offered = try organize.capabilities()
 
   function owned(operation: unknown): NotesOrganizeOperation | undefined {
@@ -100,7 +114,8 @@ export const operationPorts = effect {
   }
 
   effect function saveNote(op: NoteSave, call: ExecutorCall): unknown!! {
-    const fromRun = (try host.screen()).observation.view === "workflows"
+    const step = try calls.workflow(call)
+    const fromRun = step !== undefined && (try host.screen()).observation.view === "workflows"
     const screen = try screenAllows()
     const before = try collection.current()
     const attempt = fromRun && screen && before !== undefined
@@ -123,6 +138,10 @@ export const operationPorts = effect {
   }
 
   effect function run(op: NotesOrganizeOperation): unknown!! {
+    if (op.type === "notes_list_filter") {
+      const names = try advertised.names()
+      try filter.negotiate(names.includes(NOTES_LIST_FILTER_CAPABILITY))
+    }
     const admitted = try organize.admit(op, try contextNow(), false, false, true)
     if (admitted === undefined) return refused("not_here")
     const receipt: OrganizeReceipt = try organize.execute(admitted.operation)
