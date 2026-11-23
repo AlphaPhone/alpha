@@ -207,7 +207,7 @@ public class BrowserFlowInstrumentedTest {
 
  /** Same-document fixture origin. Every request to it is answered in memory by the tab's own client
   * wrapper below; nothing reaches the network and TLS is never bypassed for a real host. */
- private static final String SAME="https://same-document.invalid/";
+ static final String SAME="https://same-document.invalid/";
  private static String sameDocumentPage(String path){
   if(path.equals("/head"))return "<!doctype html><head><script>history.replaceState(null,'','/replaced')</script><title>Replaced fixture</title></head><body><p>Address replaced before first paint.</p></body>";
   return "<!doctype html><title>Same-document fixture</title><p>Same-document navigation fixture.</p><a id='frag' href='#section'>Section</a><form id='signin' onsubmit='return false'><input id='user' name='username' autocomplete='username'></form><section id='section' style='margin-top:1500px'>Section</section>";
@@ -256,8 +256,13 @@ public class BrowserFlowInstrumentedTest {
   for(int i=0;i<50&&presentedTab()==null;i++)SystemClock.sleep(100);
   assertNotNull("The fixture tab is presented",presentedTab());
   WebViewTestDriver.withActivity(MainActivity.class,main->{try{
-   Object tab=presentedTabObject(main);WebView web=(WebView)field(tab.getClass(),tab,"web");android.webkit.WebViewClient original=web.getWebViewClient();
-   web.setWebViewClient(new android.webkit.WebViewClient(){
+   Object tab=presentedTabObject(main);WebView web=(WebView)field(tab.getClass(),tab,"web");installSameDocumentFixture(web);
+  }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
+  address(SAME+path.substring(1));
+ }
+ static void installSameDocumentFixture(WebView web){
+  android.webkit.WebViewClient original=web.getWebViewClient();
+  web.setWebViewClient(new android.webkit.WebViewClient(){
     @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView v,android.webkit.WebResourceRequest r){
      original.shouldInterceptRequest(v,r);android.net.Uri uri=r.getUrl();boolean fixture=r.isForMainFrame()&&"https".equals(uri.getScheme())&&"same-document.invalid".equals(uri.getHost());
      byte[] body=(fixture?sameDocumentPage(uri.getPath()):"Fixture route refused").getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -273,9 +278,7 @@ public class BrowserFlowInstrumentedTest {
     @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){original.onReceivedSslError(v,h,e);}
     @Override public void onReceivedHttpAuthRequest(WebView v,android.webkit.HttpAuthHandler h,String host,String realm){original.onReceivedHttpAuthRequest(v,h,host,realm);}
     @Override public boolean onRenderProcessGone(WebView v,android.webkit.RenderProcessGoneDetail d){return original.onRenderProcessGone(v,d);}
-   });
-  }catch(ReflectiveOperationException error){throw new AssertionError(error);}});
-  address(SAME+path.substring(1));
+  });
  }
  /** pushState records a new entry without a load; Back and Forward then move within the same document. */
  @Test public void sameDocumentPushStateThenBackAndForward()throws Exception{
