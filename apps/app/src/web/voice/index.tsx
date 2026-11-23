@@ -2,7 +2,7 @@
 import type { AppScreen, AppSurface } from "../app-screen.ts";
 import { VoiceIndicator } from "./VoiceIndicator.tsx";
 
-export { ConversationControl, type ConversationControlProps } from "./ConversationControl.tsx";
+export { ConversationControl, useVoiceTalk, type ConversationControlProps, type VoiceTalk } from "./ConversationControl.tsx";
 export { DictationControl, type DictationControlProps } from "./DictationControl.tsx";
 
 /** Voice has no app of its own. */
