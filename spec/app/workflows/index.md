@@ -63,6 +63,17 @@ pure val versionValues = Set(0, 1, 2)
 pure val nameValues = Set(0, 3)
 pure val charsValues = Set(0, 5, 81)
 pure val ownerValues = Set(0, 1, 2)
+pure val weight_workflowRead = 10
+pure val weight_reviewChange = 4
+pure val weight_confirmChange = 4
+pure val weight_flip = 4
+pure val weight_sendChange = 4
+pure val weight_changeAnswered = 4
+pure val weight_changeUnanswered = 4
+pure val weight_checkChange = 4
+pure val weight_changeChecked = 10
+pure val weight_reviewResend = 6
+pure val weight_confirmResend = 6
 ```
 
 ### Opening a workflow, or refreshing it, reads it from the agent for the owner signed in, and closes any review

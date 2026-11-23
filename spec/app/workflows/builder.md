@@ -133,8 +133,8 @@ Every change is counted as an edit of the draft, and voids the review.
 pure def unlocked(b: Builder): bool =
   b.open and b.offer.status == R::Loaded and not(Q::kept(b.save)) and b.draft.sync != D::Conflicted
 
-pure def changed(b: Builder): Builder =
-  { ...b, draft: D::edit(b.draft), review: V::dismiss(V::revise(b.review)), discarding: false }
+pure def changed(draft: D::Draft, b: Builder): Builder =
+  { ...b, draft: D::edit(draft), review: V::dismiss(V::revise(b.review)), discarding: false }
 ```
 
 ### A workflow is named in 1 to 80 characters
@@ -142,7 +142,7 @@ pure def changed(b: Builder): Builder =
 ```quint
 pure def canRename(b: Builder, chars: int): bool = unlocked(b) and 1 <= chars and chars <= maxName and chars != b.name
 
-pure def rename(b: Builder, chars: int): Builder = changed({ ...b, name: chars })
+pure def rename(b: Builder, chars: int): Builder = changed(b.draft, { ...b, name: chars })
 ```
 
 ### A step is added at the end: a read first, an operation the agent offers, reading a step already there, within its limits, and choosing only from the phone's list
@@ -162,7 +162,7 @@ pure def canAddStep(b: Builder, op: T::Operation, source: int, text: int, items:
     and (source == 0 or T::holds(b.steps, source)) and chosenFromList(b, op, items)
 
 pure def addStep(b: Builder, op: T::Operation, source: int, text: int, items: int, span: T::Span, days: int): Builder =
-  changed({ ...b, steps: b.steps.append(newStep(b, op, source, text, items, span, days)), next: b.next + 1 })
+  changed(b.draft, { ...b, steps: b.steps.append(newStep(b, op, source, text, items, span, days)), next: b.next + 1 })
 ```
 
 ### A step is removed from the end, so no step loses what it reads
@@ -170,7 +170,7 @@ pure def addStep(b: Builder, op: T::Operation, source: int, text: int, items: in
 ```quint
 pure def canRemoveStep(b: Builder): bool = unlocked(b) and b.steps.length() >= 1
 
-pure def removeStep(b: Builder): Builder = changed({ ...b, steps: b.steps.removeAt(b.steps.length() - 1) })
+pure def removeStep(b: Builder): Builder = changed(b.draft, { ...b, steps: b.steps.removeAt(b.steps.length() - 1) })
 ```
 
 ### The phone's notes are listed to choose from, and its calendars only with calendar access, which is asked for once and afterwards changed in Settings
@@ -237,19 +237,19 @@ one.
 pure def canSetPreset(b: Builder, preset: S::Preset): bool =
   unlocked(b) and S::canPickPreset(b.when, preset) and (preset == S::Manual or b.schedules)
 
-pure def setPreset(b: Builder, preset: S::Preset): Builder = changed({ ...b, when: S::pickPreset(b.when, preset) })
+pure def setPreset(b: Builder, preset: S::Preset): Builder = changed(b.draft, { ...b, when: S::pickPreset(b.when, preset) })
 
 pure def canToggleDay(b: Builder, day: int): bool = unlocked(b) and S::canToggleDay(b.when, day)
 
-pure def toggleDay(b: Builder, day: int): Builder = changed({ ...b, when: S::toggleDay(b.when, day) })
+pure def toggleDay(b: Builder, day: int): Builder = changed(b.draft, { ...b, when: S::toggleDay(b.when, day) })
 
 pure def canSetTime(b: Builder, hour: int, minute: int): bool = unlocked(b) and S::canSetTime(b.when, hour, minute)
 
-pure def setTime(b: Builder, hour: int, minute: int): Builder = changed({ ...b, when: S::setTime(b.when, hour, minute) })
+pure def setTime(b: Builder, hour: int, minute: int): Builder = changed(b.draft, { ...b, when: S::setTime(b.when, hour, minute) })
 
 pure def canSetZone(b: Builder, zone: int): bool = unlocked(b) and S::canSetZone(b.when, zone)
 
-pure def setZone(b: Builder, zone: int): Builder = changed({ ...b, when: S::setZone(b.when, zone) })
+pure def setZone(b: Builder, zone: int): Builder = changed(b.draft, { ...b, when: S::setZone(b.when, zone) })
 ```
 
 ### A workflow can be set to run on the days chosen
@@ -270,7 +270,7 @@ pure def canUseGenerated(b: Builder, steps: List[T::Step], baseline: int): bool 
   unlocked(b) and baseline == b.draft.edits and steps.length() >= 1 and T::wellFormed(steps, b.catalog)
 
 pure def useGenerated(b: Builder, steps: List[T::Step], baseline: int): Builder =
-  changed({ ...b, steps: steps, next: steps.foldl(b.next, (n, s) => if (s.id >= n) s.id + 1 else n) })
+  changed(b.draft, { ...b, steps: steps, next: steps.foldl(b.next, (n, s) => if (s.id >= n) s.id + 1 else n) })
 ```
 
 ### A drafted workflow is only used whole, on the draft it was asked for
@@ -335,7 +335,7 @@ pure def canDiscard(b: Builder): bool =
   b.open and not(Q::kept(b.save)) and b.draft.sync != D::Conflicted and (b.steps.length() >= 1 or b.name >= 1 or b.workflow >= 1)
 
 pure def discard(b: Builder): Builder =
-  if (b.discarding) { ...changed(b), steps: List(), name: 0, workflow: 0, version: 0, when: { ...b.when, preset: S::Manual, days: Set() } }
+  if (b.discarding) { ...changed(b.draft, b), steps: List(), name: 0, workflow: 0, version: 0, when: { ...b.when, preset: S::Manual, days: Set() } }
   else { ...b, discarding: true }
 ```
 
@@ -459,7 +459,8 @@ pure def alwaysAKeptSaveLocksTheDraft(b: Builder): bool = and {
 
 pure def stepAKeptSaveFreezesTheDraft(before: Builder, via: str, after: Builder): bool =
   (Q::kept(before.save) and Q::kept(after.save))
-    implies (after.steps == before.steps and after.name == before.name and after.workflow == before.workflow and S::same(after.when, before.when))
+    implies (after.steps == before.steps and after.name == before.name and after.workflow == before.workflow and S::same(after.when, before.when)
+      and after.draft.edits == before.draft.edits)
 ```
 
 ### Each save is applied at most once: a draft is cleared once per save the agent applied

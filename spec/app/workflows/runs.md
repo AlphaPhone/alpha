@@ -56,6 +56,15 @@ pure val runIdValues = Set(0, 1, 2, 3)
 pure val versionValues = Set(0, 1, 2)
 pure val ownerValues = Set(0, 1, 2)
 pure val statusValues = Set(Running, Done, Failed, Stopped, Missed, Skipped, Interrupted, NoRun)
+pure val weight_reviewRun = 4
+pure val weight_confirmRun = 4
+pure val weight_sendRun = 4
+pure val weight_runUnanswered = 4
+pure val weight_checkRun = 4
+pure val weight_runChecked = 10
+pure val weight_reviewResend = 6
+pure val weight_confirmResend = 6
+pure val weight_runAnswered = 10
 ```
 
 ### A run has ended once it is done, failed, stopped, missed, skipped or interrupted, and only an interrupted run's outcome is unknown

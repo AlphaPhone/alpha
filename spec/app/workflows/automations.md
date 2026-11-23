@@ -69,11 +69,29 @@ pure val issuesValues = Set(0, 1, 3)
 pure val hourValues = Set(-1, 9, 24)
 pure val minuteValues = Set(-1, 30, 60)
 pure val dayValues = Set(-1, 0, 6, 7)
+pure val statusValues = Set(Scheduled, Completed, Dismissed)
 pure val zoneValues = Set(0, 1)
 pure val charsValues = Set(0, 12, 2001)
 pure val minutesValues = Set(0, 15, 1441)
 pure val workflowValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
+pure val weight_automationsRead = 60
+pure val weight_act = 6
+pure val weight_reviewChange = 15
+pure val weight_confirmChange = 15
+pure val weight_sendChange = 15
+pure val weight_changeAnswered = 20
+pure val weight_changeUnanswered = 8
+pure val weight_checkChange = 8
+pure val weight_changeChecked = 15
+pure val weight_letGo = 10
+pure val weight_openEditor = 6
+pure val weight_editRow = 30
+pure val weight_setText = 10
+pure val weight_setTarget = 10
+pure val weight_pickPreset = 10
+pure val weight_toggleDay = 15
+pure val weight_reviewCreate = 15
 ```
 
 ### The list is read for the owner signed in, once at a time, and only its newest answer is taken
@@ -344,31 +362,31 @@ pure def closeEditor(a: Automations): Automations = { ...a, editing: false, revi
 Every change voids the review.
 
 ```quint
-pure def edited(a: Automations): Automations = { ...a, review: V::dismiss(V::revise(a.review)) }
+pure def voided(r: V::Review): V::Review = V::dismiss(V::revise(r))
 
 pure def canSetText(a: Automations, chars: int): bool = a.editing and 0 <= chars and chars <= maxText
 
-pure def setText(a: Automations, chars: int): Automations = edited({ ...a, text: chars })
+pure def setText(a: Automations, chars: int): Automations = { ...a, text: chars, review: voided(a.review) }
 
 pure def canSetTarget(a: Automations, workflow: int): bool = a.editing and a.kind == WorkflowTask and workflow >= 1 and workflow != a.target
 
-pure def setTarget(a: Automations, workflow: int): Automations = edited({ ...a, target: workflow })
+pure def setTarget(a: Automations, workflow: int): Automations = { ...a, target: workflow, review: voided(a.review) }
 
 pure def canPickPreset(a: Automations, preset: S::Preset): bool = a.editing and S::canPickPreset(a.when, preset)
 
-pure def pickPreset(a: Automations, preset: S::Preset): Automations = edited({ ...a, when: S::pickPreset(a.when, preset) })
+pure def pickPreset(a: Automations, preset: S::Preset): Automations = { ...a, when: S::pickPreset(a.when, preset), review: voided(a.review) }
 
 pure def canToggleDay(a: Automations, day: int): bool = a.editing and S::canToggleDay(a.when, day)
 
-pure def toggleDay(a: Automations, day: int): Automations = edited({ ...a, when: S::toggleDay(a.when, day) })
+pure def toggleDay(a: Automations, day: int): Automations = { ...a, when: S::toggleDay(a.when, day), review: voided(a.review) }
 
 pure def canSetTime(a: Automations, hour: int, minute: int): bool = a.editing and S::canSetTime(a.when, hour, minute)
 
-pure def setTime(a: Automations, hour: int, minute: int): Automations = edited({ ...a, when: S::setTime(a.when, hour, minute) })
+pure def setTime(a: Automations, hour: int, minute: int): Automations = { ...a, when: S::setTime(a.when, hour, minute), review: voided(a.review) }
 
 pure def canSetZone(a: Automations, zone: int): bool = a.editing and S::canSetZone(a.when, zone)
 
-pure def setZone(a: Automations, zone: int): Automations = edited({ ...a, when: S::setZone(a.when, zone) })
+pure def setZone(a: Automations, zone: int): Automations = { ...a, when: S::setZone(a.when, zone), review: voided(a.review) }
 ```
 
 ### What is asked is always one the agent can be asked for
