@@ -136,6 +136,7 @@ function PhoneApp({ route }: PhoneScreenProps) {
           }
         }}
         onAlpha={stage.openAlpha}
+        onEnd={stage.endCall}
         onBack={stage.closeChat}
       />
     </section>

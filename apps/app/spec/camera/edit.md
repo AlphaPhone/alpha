@@ -62,6 +62,9 @@ pure def begin(e: Edit, source: str, canReplace: bool, unresolved: bool, image: 
 ### Rotate turns the photo and its crop a quarter clockwise; a look and the crop are previewed before they count
 
 The crop step shows the whole rotated photo; keeping all of it is no crop.
+The owner drags the area to move it within the photo, drags a corner to resize
+it against the opposite corner (holding a chosen shape), uses the arrow keys
+to the same effect, or resets it to the whole photo or the centred shape.
 An area is in thousandths of the rotated photo and keeps at least 5% of each
 side.
 

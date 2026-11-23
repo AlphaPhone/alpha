@@ -30,7 +30,7 @@ const first = (title: string) => title.split(/\s+/)[0] ?? title
 /** Alpha's own answer to a list question on Phone and Messages: it filters the list on screen with a chip, never by a request. */
 export service ListAsk {
   /** Alpha's one line when it answered by filtering the list, or null when the question is for the assistant. */
-  ask(app: "phone" | "messages", text: string): string | null!!
+  ask(app: "phone" | "messages", text: string): (string | null)!!
 }
 
 /** The list answers over the Phone and Messages machines. */
@@ -77,25 +77,20 @@ export function stillTyped(query: ListQuery, text: string): boolean {
 }
 
 /**
- * Opens the chat on subject `key`, addressing Alpha, with `text` for it, and answers whether a turn took it, refused it, or said
- * nothing in time. Needs the assistant and the shell's Navigation when it runs, on the app's runtime.
+ * Opens the chat on subject `key`, addressing Alpha, asks `text` there through the assistant's `askComms`, and answers whether a turn
+ * took it, refused it, or said nothing in time; asking the same text again is a new question. A turn still being taken after the
+ * wait carries on, and the field keeps the text. Needs the assistant and the shell's Navigation when it runs, on the app's runtime.
  */
 export effect function askAlpha(key: string, text: string) {
   const assistant = try Assistant
   const navigation = try Navigation
   const comms = try CommsMachine
   try (comms.send({ type: "alphaOpened" }, "Owner") catch () => undefined)
-  const heard = fork Stream.runHead(Stream.filter(assistant.commsAsks, (ask) => ask.key === key))
-  for (let round = 0; round < 3; round += 1) try Effect.yieldNow
-  const opened = try (navigation.open("assistant", askRoute(key, text)) catch () => false)
-  if (!opened) {
-    try Fiber.interrupt(heard)
-    return "AskNotTaken" as AskAnswer
-  }
-  const said = try timeoutOption(Fiber.join(heard), Duration.millis(ASK_WAIT_MS))
-  try Fiber.interrupt(heard)
-  const ask = Option.getOrUndefined(Option.flatten(said))
-  const answer: AskAnswer = ask === undefined ? "AskUnanswered" : ask.taken ? "AskTaken" : "AskNotTaken"
+  const opened = try (navigation.open("assistant", `comms:${key}`) catch () => false)
+  if (!opened) return "AskNotTaken" as AskAnswer
+  const asking = fork.detached assistant.askComms(key, text)
+  const said = try timeoutOption(Fiber.join(asking), Duration.millis(ASK_WAIT_MS))
+  const answer: AskAnswer = Option.isNone(said) ? "AskUnanswered" : said.value ? "AskTaken" : "AskNotTaken"
   return answer
 }
 

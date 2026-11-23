@@ -61,12 +61,18 @@ pure val weight_ocrSettled = 2
 
 ### The text review reads the image on the device, then the owner may edit the text
 
+A reading belongs to the review it was started for: its answer settles only the
+review still showing that same image, and closing or replacing the review
+abandons it, so a late reading never fills another review.
+
 ```quint
 pure def canOpenText(d: Dialogs, image: str): bool = not(d.text.shown) and not(d.hidden) and image != ""
 pure def openText(d: Dialogs, image: str): Dialogs = { ...d, text: { ...closedText, shown: true, image: image } }
 pure val imageValues = Set("", "blob:frame")
-pure def canOcrSettled(d: Dialogs, ok: bool, body: str): bool = d.text.shown and d.text.ocr == OcrStarting and (ok or body == "")
-pure def ocrSettled(d: Dialogs, ok: bool, body: str): Dialogs = { ...d, text: { ...d.text, ocr: if (ok) OcrReady else OcrFailed, body: body } }
+pure def canOcrSettled(d: Dialogs, image: str, ok: bool, body: str): bool = d.text.shown and d.text.image == image and d.text.ocr == OcrStarting and (ok or body == "")
+pure def ocrSettled(d: Dialogs, image: str, ok: bool, body: str): Dialogs = { ...d, text: { ...d.text, ocr: if (ok) OcrReady else OcrFailed, body: body } }
+pure def stepAReadingFillsOnlyItsOwnReview(before: Dialogs, via: str, after: Dialogs): bool =
+  (via == "ocrSettled") implies after.text.image == before.text.image
 pure def canEditText(d: Dialogs, body: str): bool = d.text.shown and d.text.ocr == OcrReady and not(d.text.attempted)
 pure def editText(d: Dialogs, body: str): Dialogs = { ...d, text: { ...d.text, body: body, textRevision: d.text.textRevision + 1 } }
 pure val bodyValues = Set("", "Lunch 12 PM https://example.com")
@@ -159,7 +165,9 @@ pure def closeDocument(d: Dialogs): Dialogs = closeNestedIn(false, d)
 ### Keep text needs the recognised text; a PDF request already sent is unconfirmed if the dialog closes
 
 Closing while the PDF is still being prepared reports nothing, because
-nothing was asked of the store.
+nothing was asked of the store. A reviewed line holding a character the PDF's
+text layer cannot draw is never cut silently: preparing fails, the owner is
+told which character, and nothing is exported until the text is corrected.
 
 ```quint
 pure def canRecognised(d: Dialogs): bool = d.searchable.shown and not(d.searchable.ready)

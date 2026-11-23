@@ -87,6 +87,31 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
   const log = (name: string) => calls.push(name)
   const listing = () => ({ carrier: world.carrier, gate: "WriteIdle", voicemails: world.carrier === "CarrierReady" ? world.voicemails : [] })
   const queued = (kind: string, id: string) => ({ status: "queued", deletion: { kind, id, expiresAt: 99 } })
+  const messages = {
+    status: async () => status(),
+    threadPage: async () => (log("threadPage"), { rows: world.threads, next: null }),
+    messagePage: async (threadId: string) => (log("messagePage"), { rows: world.messages.filter((m) => m.threadId === threadId), next: null }),
+    listThreads: async () => world.threads,
+    markThreadRead: async () => (log("markThreadRead"), undefined),
+    observeMessages: async () => async () => {},
+    latestIncomingSender: async () => (log("latestIncomingSender"), { status: "found", last4: "0100" }),
+    deleteMessage: async (reference: { id: string }) => {
+      log("deleteMessage")
+      world.messages = world.messages.filter((m) => m.id !== reference.id)
+      return queued("MessageRecord", reference.id)
+    },
+    sendSms: async () => { log("sendSms"); sent++; return await world.smsAnswer() },
+    smsSendResult: async () => (log("smsSendResult"), { kind: "sms-send", operationId: "x", subscriptionId: 7, bindingHash: "", status: "sent", parts: [], createdAt: 9 }),
+    smsSendHistory: async () => (log("smsSendHistory"), world.smsHistory.map((entry) => ({ kind: "sms-send", subscriptionId: 7, bindingHash: "", parts: [], createdAt: 9, ...entry }))),
+    sendMms: async () => { log("sendMms"); sent++; return { status: "submitted", createdAt: 9 } },
+    mmsSendResult: async () => ({ status: "sent", createdAt: 9 }),
+  }
+  // The owner's Send reaches the composer port, never the plain bridge Alpha's approved sends use.
+  const composer = {
+    ...messages,
+    sendSms: async () => { log("composer.sendSms"); sent++; return await world.smsAnswer() },
+    sendMms: async () => { log("composer.sendMms"); sent++; return { status: "submitted", createdAt: 9 } },
+  }
   const clients = {
     phone: {
       status: async () => (log("status"), status({ callLog: world.callLog })),
@@ -123,25 +148,8 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
         return queued("VoicemailRecord", id)
       },
     },
-    messages: {
-      status: async () => status(),
-      threadPage: async () => (log("threadPage"), { rows: world.threads, next: null }),
-      messagePage: async (threadId: string) => (log("messagePage"), { rows: world.messages.filter((m) => m.threadId === threadId), next: null }),
-      listThreads: async () => world.threads,
-      markThreadRead: async () => (log("markThreadRead"), undefined),
-      observeMessages: async () => async () => {},
-      latestIncomingSender: async () => (log("latestIncomingSender"), { status: "found", last4: "0100" }),
-      deleteMessage: async (reference: { id: string }) => {
-        log("deleteMessage")
-        world.messages = world.messages.filter((m) => m.id !== reference.id)
-        return queued("MessageRecord", reference.id)
-      },
-      sendSms: async () => { log("sendSms"); sent++; return await world.smsAnswer() },
-      smsSendResult: async () => (log("smsSendResult"), { kind: "sms-send", operationId: "x", subscriptionId: 7, bindingHash: "", status: "sent", parts: [], createdAt: 9 }),
-      smsSendHistory: async () => (log("smsSendHistory"), world.smsHistory.map((entry) => ({ kind: "sms-send", subscriptionId: 7, bindingHash: "", parts: [], createdAt: 9, ...entry }))),
-      sendMms: async () => { log("sendMms"); sent++; return { status: "submitted", createdAt: 9 } },
-      mmsSendResult: async () => ({ status: "sent", createdAt: 9 }),
-    },
+    messages,
+    composer,
     contacts: {
       open: async () => (log("contacts.open"), { available: true, readable: true, writable: true }),
       close: async () => (log("contacts.close"), undefined),
@@ -186,7 +194,8 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
     Layer.succeed(VoicemailTranscriber, { ready: () => succeed(true), transcribe: () => sync(() => (log("transcribe"), world.transcript)) }),
     Layer.succeed(Navigation, {
       open: (app: string, route?: string) => sync(() => (log(`navigation.open:${app}:${route ?? ""}`), true)),
-      get: () => sync(() => ({ app: world.place.app, places: world.place.app === "" ? [] : [{ ...world.place, inner: false }] })),
+      changes: Stream.never,
+      get: () => sync(() => ({ app: world.place.app, hidden: false, places: world.place.app === "" ? [] : [{ ...world.place, inner: false }] })),
     } as unknown as Navigation.Shape),
   )
   return {

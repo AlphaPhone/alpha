@@ -10,7 +10,7 @@ import { CameraNotices } from "./notices.vibe"
 import { newId } from "../platform/ids.ts"
 import { PhotoStore } from "./photos.vibe"
 import { scannedLinks, suggestScanEvent, textLayerValid, type TextLine } from "./scanText.ts"
-import { base64Of, blobFromBase64, buildPdf, copyText, correctPage, detectEdges, fullPage, imageSize, jpegBlob, objectUrl, recognizeText, revokeUrl, type Corners } from "./scanWork.ts"
+import { UnsupportedPdfText, base64Of, blobFromBase64, buildPdf, copyText, correctPage, detectEdges, fullPage, imageSize, jpegBlob, objectUrl, recognizeText, revokeUrl, type Corners } from "./scanWork.ts"
 import { StoredDraft as StoredDraftShape, StoredPage } from "./storage.schema.vibe"
 import { Viewfinder } from "./viewfinder.vibe"
 
@@ -86,6 +86,8 @@ export const scanner = Layer.effect(Scanner, effect {
   const keepIds = new Map<number, string>()
   let frame: Blob | undefined
   let frameUrl = ""
+  /** The text reading of the open review, aborted when the review is replaced or closed. */
+  let reading: AbortController | undefined
   let corrected: { index: number; corners: Corners; preview: Blob | undefined; previewUrl: string } | undefined
   let captured: Blob | undefined
   let noteId = ""
@@ -120,24 +122,29 @@ export const scanner = Layer.effect(Scanner, effect {
     if (opened === undefined) return
     try doc({ type: "closeKeepReview" })
     try doc({ type: "openKeepReview", source, hasPort: true, native: !bridge.browser })
+    reading?.abort()
+    const controller = new AbortController()
+    reading = controller
+    const shown = frameUrl
     try forkDetach(effect {
-      const read = try exit(tryPromise(() => recognizeText(image, undefined, () => undefined)))
-      if (Exit.isSuccess(read)) try dialog({ type: "ocrSettled", ok: true, body: read.value.text })
+      const read = try exit(tryPromise(() => recognizeText(image, controller.signal, () => undefined)))
+      if (controller.signal.aborted) return
+      if (Exit.isSuccess(read)) try dialog({ type: "ocrSettled", image: shown, ok: true, body: read.value.text })
       else {
-        try dialog({ type: "ocrSettled", ok: false, body: "" })
-        try say("Scan failed")
+        const settled = try dialog({ type: "ocrSettled", image: shown, ok: false, body: "" })
+        if (settled !== undefined) try say("Scan failed")
       }
     })
   }
 
-  effect function readDraft(): StoredDraft | undefined!! {
+  effect function readDraft(): (StoredDraft | undefined)!! {
     const raw = kv.get(DRAFT) catch () => undefined
     if (raw === undefined) return undefined
     const parsed = Effect.try({ try: (): unknown => JSON.parse(raw), catch: () => undefined }) catch () => undefined
     return Schema.decodeUnknownEffect(StoredDraftShape)(parsed) catch () => undefined
   }
 
-  effect function writeDraft(expected: number): number | undefined!! {
+  effect function writeDraft(expected: number): (number | undefined)!! {
     const stored = try readDraft()
     if ((stored?.revision ?? 0) !== expected) return undefined
     const ids = (try scan.get()).pageIds
@@ -195,8 +202,8 @@ export const scanner = Layer.effect(Scanner, effect {
   }
 
   effect function exportPages(blobs: readonly Blob[], layers: readonly (readonly TextLine[] | null)[], kind: string): ExportResult!! {
-    const data = tryPromise(() => buildPdf(blobs, layers, undefined)) catch effect () => {
-      try say("PDF failed")
+    const data = tryPromise({ try: () => buildPdf(blobs, layers, undefined), catch: (cause) => cause }) catch effect (cause) => {
+      try say(cause instanceof UnsupportedPdfText ? cause.message : "PDF failed")
       return undefined
     }
     if (data === undefined) return "ExportRetryable"
@@ -315,6 +322,8 @@ export const scanner = Layer.effect(Scanner, effect {
       if (accepted) try dialog({ type: "offerEvent", revision: now.text.textRevision })
     },
     effect closeText() {
+      reading?.abort()
+      reading = undefined
       try dialog({ type: "textClose" })
       try doc({ type: "closeKeepReview" })
     },

@@ -89,17 +89,22 @@ export service PhotoLibrary {
   setFilter(filter: PhotosFilter): number!!
   clearFilter(): void!!
   openAlbumDialog(target: string, forSelection: boolean): void!!
+  /**
+   * A change from the viewer to the item it shows: that item as a one-item selection, so it is the same reviewed change as from the
+   * grid. The viewer closes for it, and reopens on the item after a favorite change, where the item stays in its list.
+   */
+  viewerChange(action: "favorite" | "trash" | "restore" | "delete" | "album"): void!!
   albumEvent(event: AlbumEvent): void!!
   /** The rows the open list shows, in grid order. */
   rows(): readonly Row[]!!
   /** The item the viewer shows. */
-  shown(): ShownItem | undefined!!
+  shown(): (ShownItem | undefined)!!
   /** The Photos observation for the assistant's turn. */
   observation(sensitive: boolean): ReturnType<typeof photosObservation>!!
   /** "This photo" under the capabilities the assistant named. */
   shownTarget(header: string | undefined): ReturnType<typeof shownPhotoFor>!!
   /** Read one item, in the window or in the library. */
-  find(id: string): Row | undefined!!
+  find(id: string): (Row | undefined)!!
 }
 
 /** The library service over the catalog, browse and album Machines and the photo store. */
@@ -266,6 +271,20 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
     return read === undefined ? undefined : rowOf(read)
   }
 
+  effect function favoriteSelected() {
+    const b = try browse.get()
+    const target = favoriteTarget(b.selection, b.favorites)
+    try change(target, target === "FavoriteChange" ? "favorite" : "unfavorite", try selected())
+  }
+
+  effect function prepareDeleteSelected() {
+    const items = try selected()
+    const prepared = store.prepareDeleteTrash(items) catch (failure) => failure
+    if (prepared instanceof PhotosFailed) return try say(photosText(prepared.message, "Select deleted items again."))
+    pendingDelete = prepared.confirmation
+    try sendBrowse({ type: "prepareDelete" })
+  }
+
   effect function cancelDeleteNow() {
     if (pendingDelete !== undefined) store.cancelDeleteTrash(pendingDelete) catch () => undefined
     pendingDelete = undefined
@@ -393,11 +412,7 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
     },
     closeViewer: () => effect { try sendBrowse({ type: "closeViewer" }) },
     pinch: (wider: boolean) => effect { try sendBrowse({ type: "pinch", wider }) },
-    effect favorite() {
-      const b = try browse.get()
-      const target = favoriteTarget(b.selection, b.favorites)
-      try change(target, target === "FavoriteChange" ? "favorite" : "unfavorite", try selected())
-    },
+    favorite: favoriteSelected,
     trash: () => effect { try change("TrashChange", "trash", try selected()) },
     restore: () => effect { try change("RestoreChange", "restore", try selected()) },
     effect undo() {
@@ -419,13 +434,7 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
         if (opened instanceof PhotosFailed) try say(photosText(opened.message, "Share failed"))
       }
     },
-    effect prepareDelete() {
-      const items = try selected()
-      const prepared = store.prepareDeleteTrash(items) catch (failure) => failure
-      if (prepared instanceof PhotosFailed) return try say(photosText(prepared.message, "Select deleted items again."))
-      pendingDelete = prepared.confirmation
-      try sendBrowse({ type: "prepareDelete" })
-    },
+    prepareDelete: prepareDeleteSelected,
     effect confirmDelete() {
       const confirmation = pendingDelete
       if (confirmation === undefined) return
@@ -485,6 +494,24 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
       const items = forSelection ? try selected() : []
       const first = items[0]
       albums.send({ type: "openDialog", target, media: first?.id ?? "", mediaRevision: first?.revision ?? "" }) catch () => undefined
+    },
+    effect viewerChange(action: "favorite" | "trash" | "restore" | "delete" | "album") {
+      const id = (try browse.get()).viewer
+      if (id === "") return
+      try sendBrowse({ type: "closeViewer" })
+      if ((try sendBrowse({ type: "startSelection", id })) === undefined) return
+      if (action === "album") {
+        const items = try selected()
+        albums.send({ type: "openDialog", target: "", media: items[0]?.id ?? "", mediaRevision: items[0]?.revision ?? "" }) catch () => undefined
+        return
+      }
+      if (action === "delete") return try prepareDeleteSelected()
+      if (action === "favorite") {
+        try favoriteSelected()
+        if ((try sendBrowse({ type: "openViewer", id })) !== undefined) try forkDetach(playable(id))
+        return
+      }
+      try change(action === "trash" ? "TrashChange" : "RestoreChange", action, try selected())
     },
     effect albumEvent(event: AlbumEvent) {
       const before = try albums.get()

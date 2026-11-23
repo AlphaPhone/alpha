@@ -65,7 +65,9 @@ pure val requestValues = Set("", "Say I'll be late")
 
 Typing takes the slot over from Alpha's draft. Any edit (text, recipients, SIM, pictures) makes a
 different message, so the operation bound to the old one is released and the next Send reviews the
-new one under a new ID.
+new one under a new ID. When a send needs a SIM because the phone has no default SMS SIM, the
+owner picks one of the phone's SIMs beside the bar; the pick is the SIM edit, and the next Send
+goes from it.
 
 ```quint
 pure def canOwnerTyped(d: Drafts, thread: str, by: Actor): bool = ownerOnly(by) and slotOf(d.slots, thread).outcome != Sending
@@ -185,7 +187,12 @@ pure def sometimesAPictureMessageWaits(d: Drafts): bool = d.slots.some(x => x.pi
 ### Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation
 
 A send needs text or a picture, a recipient, and no send in flight. With an operation already
-bound, Send reads that operation back under the same ID instead of minting a new one.
+bound, Send reads that operation back under the same ID instead of minting a new one. The owner's
+Send reaches Android only through the launcher's own Messages composer port
+(`AlphaMessagesComposerPort`), which admits it only from the launcher's main frame in front with
+window focus and never from the assistant surface, so that Send is its own review; Alpha's approved
+texts never use that port. A missing composer reply leaves the outcome unknown and keeps the
+operation for read-back.
 
 ```quint
 pure def canSendStarted(d: Drafts, thread: str, operationId: str, by: Actor): bool = {
@@ -210,7 +217,9 @@ Submitted, sent and delivered clear the slot. Cancelled, denied, a refusal befor
 and a failure release the operation and keep the text for another explicit review. A lost answer
 or an unknown status keeps the operation bound to the exact text, so no Undo or Alpha draft can
 swap it away and a later Send only reads it back. A late journal receipt settles the slot the same
-way after the composer timed out.
+way after the composer timed out. A slot that is loaded while it is still sending, because the app
+stopped before the answer came, has lost that answer: it reads unconfirmed and keeps its
+operation, so the composer is not locked and a later Send only reads it back.
 
 ```quint
 pure def canSendAnswered(d: Drafts, thread: str, operationId: str, by: Actor): bool =

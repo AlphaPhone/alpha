@@ -131,6 +131,7 @@ export function ContactsScreen({ route }: ContactsScreenProps) {
           else stage.askContacts(c.query);
         }}
         onAlpha={stage.openAlpha}
+        onEnd={stage.endCall}
         onBack={stage.closeChat}
       />
     </section>

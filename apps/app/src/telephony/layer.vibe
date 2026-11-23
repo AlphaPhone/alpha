@@ -39,11 +39,23 @@ export function draftPictures(state: typeof draftsInitial): string[] {
   return state.slots.flatMap((slot) => slot.pictures.map((picture) => pictureSlot(slot.thread, picture.pictureName)))
 }
 
-/** The owner's drafts and requests, read and written under whoever is signed in now, and shown afresh when that owner changes. */
+/**
+ * The owner's drafts and requests, read and written under whoever is signed in now, and shown afresh when that owner changes.
+ * A slot loaded while it was still sending was cut off by the app stopping: its answer is lost, so it reads unconfirmed and keeps its
+ * operation for read-back, at start and for the account that signs in.
+ */
 export const draftsKept = Layer.effect(DraftsMachine, effect {
   const kept = try ownerKept("drafts", draftsInitial, decodeDrafts, draftPictures)
   const inner = try draftsOver(kept.load, kept.keep)
-  const changes = try kept.follow(inner.changes, () => inner.get(), () => inner.get())
+  const interrupted = effect {
+    for (const slot of (try inner.get()).slots) {
+      if (slot.outcome !== "Sending" || slot.operation.tag !== "BoundOperation") continue
+      try (inner.send({ type: "sendAnswered", thread: slot.thread, operationId: slot.operation.operationId, receipt: "ReceiptLost" }, "Device") catch () => undefined)
+    }
+    return try inner.get()
+  }
+  try interrupted
+  const changes = try kept.follow(inner.changes, () => inner.get(), () => interrupted)
   return { ...inner, changes }
 })
 

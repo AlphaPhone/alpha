@@ -265,14 +265,17 @@ pure def sometimesZoomed(c: Camera): bool = c.zoom > 10
 
 ### Switching cameras turns the flash and light off and returns zoom to 1× first
 
-A switch that fails leaves the preview as it was.
+The flash, the light and the zoom are reset on the camera before the switch is tried, so a switch
+that fails keeps its lens and preview but shows them reset as well: the header never shows a flash
+or a zoom the camera no longer has.
 
 ```quint
 pure def canFlip(c: Camera, ok: bool): bool = active(c) and ready(c) and not(recordingBusy(c)) and not(c.capturing)
 pure def flip(c: Camera, ok: bool): Camera =
-  if (ok) { ...c, lens: if (c.lens == BackLens) FrontLens else BackLens, flash: FlashOff, light: false, zoom: 10, countdown: 0 } else c
+  if (ok) { ...c, lens: if (c.lens == BackLens) FrontLens else BackLens, flash: FlashOff, light: false, zoom: 10, countdown: 0 }
+  else { ...c, flash: FlashOff, light: false, zoom: 10 }
 pure def stepFlipResetsLensSettings(before: Camera, via: str, after: Camera): bool =
-  (via == "flip" and after.lens != before.lens) implies (after.flash == FlashOff and not(after.light) and after.zoom == 10)
+  via == "flip" implies (after.flash == FlashOff and not(after.light) and after.zoom == 10)
 ```
 
 ### The last-capture tile is read from the Camera album once the preview is ready, and a newer capture wins over it
@@ -360,6 +363,9 @@ pure def sometimesSoundlessRecording(c: Camera): bool = c.recording == Recording
 ```
 
 ### A recording ends by the owner, by its length or size limit, or by leaving, and says "max length" only after the limit
+
+A recording is limited to five minutes or 100 MiB, whichever comes first, at medium quality, so
+every recording can open in the video editor.
 
 ```quint
 pure def canRecordingTick(c: Camera, seconds: int, bytes: int): bool = c.recording == RecordingActive and seconds >= c.elapsed and bytes >= 0

@@ -7,7 +7,7 @@ import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
 import { TelephonyActions } from "../../src/telephony/actions.vibe"
 import { barEligibleIn } from "../../src/telephony/front.vibe"
-import { askFromList, askRoute } from "../../src/telephony/list-ask.vibe"
+import { askFromList } from "../../src/telephony/list-ask.vibe"
 import { advertisedOf, classOf, handoffOf } from "../../src/telephony/operations.vibe"
 import { CallWatch } from "../../src/telephony/call-bar.vibe"
 import { ContactsView } from "../../src/telephony/contacts.vibe"
@@ -140,19 +140,28 @@ it.live("See my live call over every view (spec/telephony/callBar.md, \"Story: S
 })
 
 const QUESTION = "what should I say back to her?"
-const heard = (taken: boolean) => Layer.succeed(Assistant, { commsAsks: Stream.make({ key: "phone:recents:", taken }) } as unknown as Assistant.Shape)
+const asked: string[] = []
+const heard = (taken: boolean) => Layer.succeed(Assistant, {
+  commsAsks: Stream.never,
+  askComms: (key: string, text: string) => sync(() => (asked.push(`${key}|${text}`), taken)),
+} as unknown as Assistant.Shape)
 
 it.live("A question a turn took leaves the bar (spec/telephony/common.md, \"A question for Alpha leaves the bar only once a turn took it\")", () => effect {
   const fake = fakePhone()
   const layer = Layer.merge(fake.layer, heard(true))
   provide layer {
     const phone = try PhoneMachine
+    asked.length = 0
     try phone.send({ type: "queryTyped", typed: QUESTION })
     const line = try askFromList("phone", "phone:recents:", QUESTION)
     const after = (try phone.get()).listQuery
+    // The same text asked again is a new question for the assistant, not a route it already followed.
+    try phone.send({ type: "queryTyped", typed: QUESTION })
+    try askFromList("phone", "phone:recents:", QUESTION)
     try Effect.try(() => assert.deepStrictEqual(
-      { line, after: after.tag, opened: fake.calls.filter((c) => c.startsWith("navigation.open:assistant")) },
-      { line: null, after: "NoQuery", opened: [`navigation.open:assistant:${askRoute("phone:recents:", QUESTION)}`] },
+      { line, after: after.tag, opened: fake.calls.filter((c) => c.startsWith("navigation.open:assistant")), asked },
+      { line: null, after: "NoQuery", opened: ["navigation.open:assistant:comms:phone:recents:", "navigation.open:assistant:comms:phone:recents:"],
+        asked: [`phone:recents:|${QUESTION}`, `phone:recents:|${QUESTION}`] },
     ))
   }
 })

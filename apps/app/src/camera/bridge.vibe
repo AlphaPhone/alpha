@@ -26,8 +26,8 @@ export interface RecordingOptions {
   readonly maxFileSize: number
 }
 
-/** The recording limits Camera uses: ten minutes, or 100 MB. */
-export const RECORDING = { quality: "high", maxDuration: 600, maxFileSize: 100_000_000 } as const
+/** The recording limits Camera uses (spec/camera/viewfinder.md): five minutes, or 100 MiB, at medium quality, so a clip fits the video editor's five minutes. */
+export const RECORDING = { quality: "medium", maxDuration: 300, maxFileSize: 104_857_600 } as const
 
 /** The phone's camera, its device controls and the system pickers, as Camera and scans reach them. */
 export service CameraBridge {
@@ -48,7 +48,7 @@ export service CameraBridge {
   /** Alpha's app info in Android Settings, where camera and microphone access are allowed. */
   openPrivacySettings(): void!CameraFailed
   /** One image from the system picker; undefined when the owner cancelled. */
-  pickImage(): Blob | undefined!CameraFailed
+  pickImage(): (Blob | undefined)!CameraFailed
   exportPdf(title: string, dataBase64: string): ExportReply!CameraFailed
   readPhotoSelected(id: string, revision: string): SourceBytes!CameraFailed
   /** Android takes the volume keys as Camera's shutter only while this is on; the press arrives as the page event `alpha:volume-shutter`. */
