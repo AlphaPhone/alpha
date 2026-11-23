@@ -20,6 +20,8 @@ import { browserNoticeText, browserPageErrorText } from '../ui/browser/browser-m
 import { sectionKey as historySection } from '../ui/mobile-shell/photos-view';
 import { approvedOpenTab, BrowserOpenRefused, matchingTabs, observedTabCurrent, searchAddress, surfacePollIdle, tabLimitRefusal } from '../browser/browser-poll';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
+import {parseClientBrowserPageObservation,type ClientBrowserPageObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
+import {agentPageTitle,pageAddress,registerBrowserPageSource,type ObservedBrowserTab} from '../runtime/browser-page-context';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
 type Bag = Record<string, any>;
 /** What a chat request to switch or close a tab asks the owner when its words match several tabs. */
@@ -203,6 +205,30 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       catch(error){questionReview=false;lastGeometry='';throw error;}
     }catch(error){if(!controller.signal.aborted)report(error);}finally{if(!questionReview&&reading===controller)reading=undefined;}
   }
+  /** The open page for a chat turn (Settings → Privacy → Browser page for Alpha), bound to the
+   * observed tab and revision. On Android, Alpha's page-context script runs in the tab's isolated
+   * world and reads no field values, storage or frames; the web build fetches the public address
+   * again without credentials. Other tabs and private tabs are never read. */
+  async function pageContext(observed:ObservedBrowserTab,signal:AbortSignal):Promise<ClientBrowserPageObservation|undefined>{
+    const id=state()?.cur;
+    const same=()=>{if(disposed||!id||state()?.cur!==id||isPrivate(id))return false;const now=tabs.selection(id);return now?.id===observed.id&&now.revision===observed.revision;};
+    if(!id||!same())return undefined;
+    const info=tabInfo(id),address=info&&pageAddress(info.url);
+    if(!info?.committed||info.loading||info.error||info.externalOnly||!address)return undefined;
+    let read:Bag;
+    if(Capacitor.isNativePlatform())read=await Browser.pageContext({session,id,url:info.url,navigation:info.navigation});
+    else{const result=await browserReadingSource(info.url,signal);read=result?.blocked?{withheld:'sensitive-page'}:result?{text:result.text,truncated:result.truncated}:{withheld:'unreadable'};}
+    signal.throwIfAborted();
+    if(!same()||tabInfo(id)?.navigation!==info.navigation)return undefined;
+    // A sensitive page's query may hold its tokens: only its origin and path go.
+    const sensitive=read?.withheld==='sensitive-page',bare=()=>{const url=new URL(address);url.search='';return url.href;};
+    const base={tabId:observed.id,revision:observed.revision,capturedAt:Date.now(),url:sensitive?bare():typeof read?.url==='string'?read.url:address,title:agentPageTitle(typeof read?.title==='string'?read.title:info.title)};
+    const content=read?.withheld?{withheld:read.withheld}:{text:read?.text,truncated:read?.truncated,...(read?.selection===undefined?{}:{selection:read.selection}),...(read?.links===undefined?{}:{links:read.links})};
+    // A read this contract refuses still tells the agent which page is open.
+    try{return parseClientBrowserPageObservation({...base,...content});}
+    catch{return parseClientBrowserPageObservation({...base,url:address,withheld:'unreadable'});}
+  }
+  const unregisterPageSource=registerBrowserPageSource(pageContext);
   function hide() {
     if (lastGeometry === hiddenGeometry) return;
     void presentBrowser({session,id:null});
@@ -751,9 +777,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       listedForClosing.set(proposalId, {key, lines});
       return lines;
     };
-    // Identity only: visible page content, URL and browsing history are not
-    // transmitted merely by opening the agent. Navigation changes the revision
-    // so a proposal for an earlier document cannot retain current authority.
+    // Identity only: opening the agent transmits no page content, address or history.
+    // A chat turn may carry the open page beside it (pageContext, owner setting).
+    // Navigation changes the revision so a proposal for an earlier document cannot
+    // retain current authority.
     this.browserSelection = () => tabs.selection(state()?.cur);
     const S=this.S();const b=this.vget('browser');if(S.view!=='browser'||b.menu||b.editing||b.tabsOpen||b.lib||S.shade)hide();else {blockPageInput();schedulePresentation();}return oldRender.call(this);};
   let listener: any, resumeListener: any, openedListener: any, closedListener: any, noticeListener: any, findListener: any, fullscreenListener: any, showDownloadsListener: any;
@@ -892,5 +919,5 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
   chromeObserver.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','style','hidden','inert','aria-hidden']});
   const chromeTransition=(event:Event)=>{if(chromeChanged(event.target as Node))schedulePresentation();};
   for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.addEventListener(event,chromeTransition,true);
-  return ()=>{window.removeEventListener('alpha:bookmarks-document-changed',bookmarksDocumentChanged);window.removeEventListener('alpha:browser-open-view',openBrowserView);stopReading();unsubscribeReading();disposed=true;clearInterval(timer);if(presentationFrame!==undefined)window.cancelAnimationFrame(presentationFrame);browserBackdrop();window.removeEventListener('pointermove',schedulePresentation,true);chromeObserver.disconnect();for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.removeEventListener(event,chromeTransition,true);window.removeEventListener('resize',update);document.removeEventListener('visibilitychange',visibility);void resumeListener?.remove();void listener?.remove();void openedListener?.remove();void closedListener?.remove();void noticeListener?.remove();void findListener?.remove();void fullscreenListener?.remove();void showDownloadsListener?.remove();window.clearTimeout(findTimer);for(const id of tabs.dispose())void Browser.close({session,id}).catch(()=>{});};
+  return ()=>{unregisterPageSource();window.removeEventListener('alpha:bookmarks-document-changed',bookmarksDocumentChanged);window.removeEventListener('alpha:browser-open-view',openBrowserView);stopReading();unsubscribeReading();disposed=true;clearInterval(timer);if(presentationFrame!==undefined)window.cancelAnimationFrame(presentationFrame);browserBackdrop();window.removeEventListener('pointermove',schedulePresentation,true);chromeObserver.disconnect();for(const event of ['transitionrun','transitionend','transitioncancel','animationstart','animationend'])document.removeEventListener(event,chromeTransition,true);window.removeEventListener('resize',update);document.removeEventListener('visibilitychange',visibility);void resumeListener?.remove();void listener?.remove();void openedListener?.remove();void closedListener?.remove();void noticeListener?.remove();void findListener?.remove();void fullscreenListener?.remove();void showDownloadsListener?.remove();window.clearTimeout(findTimer);for(const id of tabs.dispose())void Browser.close({session,id}).catch(()=>{});};
 }

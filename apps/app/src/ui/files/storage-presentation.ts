@@ -187,6 +187,7 @@ export const STORAGE_OUTCOMES: ReadonlyMap<string, string> = new Map([
   ["Select files to share.", "Select files to share."],
   ["Sharing is unavailable in this browser.", "Sharing is unavailable in this browser."],
   ["Unsupported file operation.", "Files cannot do that here."],
+  ["The trash could not be read.", "Trash couldn’t be read."],
   ["Nothing selected", "Nothing is selected."],
 ]);
 

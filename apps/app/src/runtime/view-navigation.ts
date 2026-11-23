@@ -49,9 +49,10 @@ export async function executeViewInteraction(
 	current();
 	if (view !== "browser")
 		throw new ViewInteractionRefused("UNSUPPORTED", "This phone has no agent command for that view.");
-	// Page text reaches the agent only through the owner's reviewed question, never a direct read.
+	// There is no separate read: the open page rides each turn as clientDevice.browserPage
+	// while Browser is on screen and the owner's setting is on.
 	if (capability === "get-text")
-		throw new ViewInteractionRefused("UNSUPPORTED", 'This phone does not read Browser pages for the agent. The owner can open the Browser menu and choose "Ask about page" to share a reviewed excerpt.');
+		throw new ViewInteractionRefused("UNSUPPORTED", 'There is no separate page read. While Browser is on screen, the open page comes with each message as browserPage, unless the owner turned off Browser page for Alpha in Settings, Privacy. Without it, the owner can choose "Ask about page" in the Browser menu to share a reviewed excerpt.');
 	if (capability !== "browser-command")
 		throw new ViewInteractionRefused("UNSUPPORTED", "Browser supports back, forward and reload from chat.");
 	// History commands answer in the Browser plugin's result envelope, which the agent decodes by code.

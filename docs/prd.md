@@ -56,6 +56,12 @@ Local speech does not imply an offline language model. Hosted inference receives
 Location for Alpha is on by default. When Android allows access, ordinary chats
 include the phone's last known location. Hosted inference can receive this
 location. The owner can turn off Location for Alpha under Settings → Privacy.
+Browser page for Alpha is on by default (owner request 2026-11-22). While
+Browser is on screen, an ordinary chat includes the open page's address, title,
+visible text (at most 6,000 characters), selection and up to 20 links. Private
+tabs never do; sign-in, account and one-time-code pages send only their address
+and title. Hosted inference can receive the page. The owner can turn it off under
+Settings → Privacy.
 Full photo access is local permission scope, not bulk Cloud upload authorization.
 
 Passkeys, Telegram, Discord and Wallet are outside MVP. The Alpha Compute

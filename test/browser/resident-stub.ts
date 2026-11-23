@@ -64,6 +64,9 @@ export interface ResidentStubOptions {
   /** Conversations carry a room, so Stop reaches upstream's turn abort route; the agent answers
    * that no turn was running (`aborted: false`), so the reply may still finish. */
   abortRoute?: boolean;
+  /** Optional observation fields the agent's /api/status declares (absent: no status route); the
+   * agent then also negotiates userTextFormatVersion 1 at registration. */
+  observationSupport?: string[];
 }
 
 export async function residentStub(page: Page, options: ResidentStubOptions = {}) {
@@ -118,6 +121,7 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
     };
     const room = 'c0ffee00-1111-4222-8333-444455556666';
     const conversations = async (method: string, path: string, body: any): Promise<{ status: number; data: unknown } | null> => {
+      if (path === '/api/status' && method === 'GET' && options.observationSupport) return { status: 200, data: { serverInstanceId: '5a5e5a5e-0000-4000-8000-00000000a11a', clientTurnObservationSupport: { version: 1, optionalFields: options.observationSupport } } };
       if (path === '/api/conversations' && method === 'POST') { const row = { id: 'resident-chat-' + (agent.conversations.length + 1), title: String(body.title || 'Alpha Phone') }; agent.conversations.push(row); agent.history[row.id] = []; sessionStorage.setItem('resident-stub-agent', JSON.stringify(agent)); return { status: 200, data: { conversation: row } }; }
       if (path === '/api/conversations') {
         s.lists++; if (s.holdReads) await new Promise<void>(resolve => { s.heldList = resolve; });
@@ -195,7 +199,8 @@ export async function residentStub(page: Page, options: ResidentStubOptions = {}
       if (plugin === 'Agent' && method === 'request' && input.path === '/api/agents' && s.start === 'starting') { f.calls.push('Agent.request'); return { status: 200, body: JSON.stringify({ agents: [{ id: '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11', name: 'Alpha', status: 'starting' }] }) }; }
       // The harness still registers the device (it answers the committed-enrollment read from that
       // registration); only the capabilities the agent offers in its answer change.
-      if (plugin === 'Agent' && method === 'request' && input.path === '/api/client-devices/register' && options.offered) { const registered = await base(plugin, method, input); return { ...registered, body: JSON.stringify({ ...JSON.parse(registered.body), capabilities: options.offered }) }; }
+      // An agent that declares observation fields also negotiates the plain-text request format, as the pinned agent does.
+      if (plugin === 'Agent' && method === 'request' && input.path === '/api/client-devices/register' && (options.offered || options.observationSupport)) { const registered = await base(plugin, method, input); return { ...registered, body: JSON.stringify({ ...JSON.parse(registered.body), ...(options.offered ? { capabilities: options.offered } : {}), ...(options.observationSupport ? { userTextFormatVersion: 1 } : {}) }) }; }
       if (plugin === 'DailyApps' && method === 'surfaceInfo' && options.clockRepeatDaysVersion !== undefined) { f.calls.push('DailyApps.surfaceInfo'); return { assistant: false, clockRepeatDaysVersion: options.clockRepeatDaysVersion }; }
       if (plugin === 'Agent' && method === 'request') {
         const answer = await conversations(input.method || 'GET', input.path, input.body ? JSON.parse(input.body) : {});

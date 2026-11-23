@@ -226,6 +226,20 @@ test('every Settings row is a control backed by real state, with no fixture valu
  expect((await callNames(page)).filter(name=>name!=='Agent.setGoogleAgentAccess'&&/\.set(?!Flashlight)|\.perform$/i.test(name))).toEqual([]);
 });
 
+test('Browser page for Alpha defaults on, says what it shares and keeps the owner’s choice',async({page})=>{
+ await nativeStub(page,{snapshot:{permissions:{Microphone:true,Location:true,Camera:false,Calendar:true},locationAccess:'precise'}});
+ await openSettings(page,'Privacy');
+ const browserPage=()=>current(page).getByRole('switch',{name:'Browser page for Alpha',exact:true});
+ await expect(browserPage()).toHaveAttribute('aria-checked','true');
+ await expect(current(page).getByText('When you chat with Browser open, Alpha gets the page’s address, title, visible text and links. Never private tabs or sign-in pages. Hosted models can receive it.',{exact:true})).toBeVisible();
+ await browserPage().click();
+ await expect(browserPage()).toHaveAttribute('aria-checked','false');
+ await openSettings(page,'Privacy');
+ await expect(browserPage()).toHaveAttribute('aria-checked','false');
+ await browserPage().click();
+ await expect(browserPage()).toHaveAttribute('aria-checked','true');
+});
+
 test('location for Alpha defaults on and keeps the owner’s choice',async({page})=>{
  await nativeStub(page,{snapshot:{permissions:{Microphone:true,Location:true,Camera:false,Calendar:true},locationAccess:'precise'}});
  await openSettings(page,'Privacy');

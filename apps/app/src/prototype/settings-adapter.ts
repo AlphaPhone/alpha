@@ -985,6 +985,15 @@ export function installSettingsAdapter(Component: any, views: Bag) {
             toggle:async()=>{try{await editDevicePreferences(value=>{value.agentLocationEnabled=!value.agentLocationEnabled;});changed();}catch{api.toast('Not saved');}}
           }]));
         }
+        // The open Browser page rides each chat turn while Browser is on screen; private tabs never do.
+        const browserPageOn=cachedDevicePreferences()?.agentBrowserPageEnabled===true;
+        page.groups.push(group([{
+          kTog:true,label:'Browser page for Alpha',aria:'Browser page for Alpha',
+          hasSub:true,sub:'When you chat with Browser open, Alpha gets the page’s address, title, visible text and links. Never private tabs or sign-in pages. Hosted models can receive it.',
+          on:browserPageOn,track:browserPageOn?'background:var(--acc)':'background:var(--line)',kx:browserPageOn?20:0,
+          dis:preferences!=='ready',
+          toggle:async()=>{try{await editDevicePreferences(value=>{value.agentBrowserPageEnabled=!value.agentBrowserPageEnabled;});changed();}catch{api.toast('Not saved');}}
+        }]));
         page.groups.push(group([{kNav:true,label:'Password manager',lbl:'Password manager',chev:true,noAB:true,go:()=>api.set({page:'password-provider'})}]));
         if(PASSWORD_PAGES.includes(state.page)){
           const helpers={info,group,toast:(message:string)=>api.toast(message),set:(patch:Bag)=>api.set(patch),ic:api.ic||{}};
@@ -1222,7 +1231,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       const sections = [
         ['Account', ['Accounts', 'Connections', 'AI provider']],
         ['Preferences', ['Display', 'Notifications']],
-        ['Privacy', ['Set up Alpha access', 'Ask before Alpha acts', 'Location for Alpha']],
+        ['Privacy', ['Set up Alpha access', 'Ask before Alpha acts', 'Location for Alpha', 'Browser page for Alpha']],
         ['Apps', ['Calendar', 'Password manager', 'Photos']],
         ['Help', ['About']],
       ] as const;

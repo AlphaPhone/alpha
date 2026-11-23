@@ -236,6 +236,11 @@ function id(value: unknown): string {
 
 // ── Screen binding ──────────────────────────────────────────────────────────
 
+/** The current request with the links of the Browser page it carried, if any. */
+type BrowserPageRequest = CurrentDeviceActionRequest & {
+  readonly pageLinks?: readonly string[];
+};
+
 export const CAMERA_CONTEXT_NOTICE = "Open Camera to take the requested photo.";
 /** Closing every tab without a card listing them is never offered. */
 export const TABS_UNLISTED_NOTICE =
@@ -838,7 +843,11 @@ export class DeviceActionCoordinator<
           : browserDestinationMatches(
               operation,
               groundBrowserDestination(proof.text, operation.url, name),
-            )),
+            ) ||
+            // A link of the Browser page this message carried, exactly as the
+            // page gave it: never direct, so it keeps its review card.
+            (proof as BrowserPageRequest).pageLinks?.includes(operation.url) ===
+              true),
     };
     if (this.browserPolicy.has(proposal.id) || this.browserPolicy.size < 128)
       this.browserPolicy.set(proposal.id, policy);
