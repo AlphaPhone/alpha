@@ -12165,6 +12165,10 @@
       "ConfirmIsOfShownStep",
       "StatusTruthful"
     ],
+    "witnesses": [
+      "DigestChangedBeforeAdmissionWitness",
+      "AnchorMovedBeforeReadWitness"
+    ],
     "sources": [
       "apps/app/src/prototype/workflow-adapter.ts",
       "apps/app/src/runtime/workflow-device-contract.ts",
@@ -12234,7 +12238,8 @@
       "The second tap is interleaved at four awaited points: the phone review read, the agent's decision request (the claim follows in the same step), the executor's final screen check and the receipt upload. The coordinator's own short awaits (journal, binding hash) are not interleaved, so its pre-dispatch expiry check is not separately exercised.",
       "An aborted request is refused before it reaches the agent; a request the agent processed whose response was lost is not modeled. Deny is decided at the phone review read in one step.",
       "Native notification delivery, OS approval notices and speech are separate obligations; the executor's effect is one recorded step.",
-      "Agent events and leaving the app are explored once the owner has started a decision or a receipt is awaited, and quietAgent (a ghost with no source counterpart) lets random walks reach the end of an uninterrupted decision. Agent events before the owner's first tap are not explored; a review reads the agent's current state either way."
+      "Agent events and leaving the app are explored once the owner has started a decision or a receipt is awaited, and quietAgent (a ghost with no source counterpart) lets random walks reach the end of an uninterrupted decision. Agent events before the owner's first tap are not explored; a review reads the agent's current state either way.",
+      "EffectMatchesReview can fail: dropping admit's proposal-number check (the agent's superseding of a pending proposal on a digest change) or readReview's anchor check makes simulation find a violation, and both races are required witnesses (DigestChangedBeforeAdmissionWitness, AnchorMovedBeforeReadWitness). Dropping only the phone's own digest check in readReview does not violate it, because the agent refuses the superseded proposal; the phone check is defence in depth there. The replay observes the property's ghosts at the effect: the spec digest named on the card the owner last confirmed, and the proposal and run digest the agent stand-in admitted. The anchor half has no ghost the source exposes; removing decidePhone's anchor check fails the replay through the phone status instead."
     ]
   }
 ]

@@ -7,6 +7,8 @@
  * executors use. The second tap's four awaited points (the phone review read, the agent's
  * decision, the executor and the receipt upload) are held open as gates, so the model's agent and
  * phone events interleave inside the decision; an aborted gate is refused before it reaches the agent.
+ * At the effect it also observes the ghosts of EffectWasAdmitted and EffectMatchesReview: the spec
+ * digest named on the card the owner last confirmed and the proposal and run digest the agent admitted.
  */
 import assert from 'node:assert/strict';
 import {recordComparedObservation} from '../observed-replay.mjs';
@@ -62,7 +64,7 @@ async function subject() {
   Date.now = () => clock;
   const gate = gates();
   const agent = {digest: 1, anchor: 1, closed: false, issued: 1, state: 'pending', proposalDigest: 1, receipt: 'none',
-    expires: {1: clock + 3_600_000}, effects: 0, denials: 0, admitted: null};
+    expires: {1: clock + 3_600_000}, effects: 0, denials: 0, admitted: null, admittedDigest: 0};
   const current = () => 'step-' + agent.issued;
   const expired = () => Object.values(agent.expires).every(at => at <= clock);
   const wire = () => ({id: current(), digest: 'c'.repeat(64), state: agent.state, subjectUserId: session.ownerId, requestedBy: session.agentId,
@@ -86,7 +88,7 @@ async function subject() {
       if (!admissible(id)) throw Error('This proposal is no longer pending');
       agent.state = 'rejected'; agent.denials++;
     } else if (suffix === 'claim') {
-      assert.equal(agent.state, 'approved'); agent.state = 'executing'; agent.admitted = id;
+      assert.equal(agent.state, 'approved'); agent.state = 'executing'; agent.admitted = id; agent.admittedDigest = agent.digest;
     } else if (suffix === 'receipt') {
       if (!syncing) await gate.hold('receipt', signal);
       if (lost) { lost = false; throw Error('The receipt upload failed'); }
@@ -107,6 +109,8 @@ async function subject() {
     removeEventListener(type, listener) { this.listeners = this.listeners.filter(entry => entry !== listener); }};
   const context = {view: 'workflows', sensitive: false, selectedObject: {kind: 'workflow-run', id: 'run', revision: 'v1'}};
   const alphaClient = {getState: () => ({context})};
+  // The spec digest the card names at the owner's last approve tap, and the binding of the effect run.
+  let tapped = 0, effect = null;
   // The executor port: agent-adapter's workflow presentation executor reduced to its screen guard and one recorded effect.
   const execute = async (operation, operationId, approved, signal) => {
     assert.equal(operation.type, 'post_notification');
@@ -115,6 +119,9 @@ async function subject() {
     if (!workflowStepScreenCurrent({live: true, hidden: document.hidden, current: alphaClient.getState().context, approved, read: false}))
       throw Error('Workflow review context changed');
     agent.effects++;
+    // What the effect ran under: the spec digest named on the card the owner confirmed, and the
+    // proposal and run digest the agent admitted (EffectWasAdmitted, EffectMatchesReview).
+    effect = {tappedDigest: tapped, admittedIssue: Number(agent.admitted.slice('step-'.length)), admittedDigest: agent.admittedDigest};
     return {status: 'succeeded', summary: posted};
   };
   const coordinator = new DeviceActions(session, {...device, key: 'k'.repeat(64)}, 'd'.repeat(64), request, journal, execute);
@@ -168,6 +175,7 @@ async function subject() {
   const tap = async approved => {
     const step = app.render().r.phoneSteps[0];
     assert.ok(step && !step.disabled, 'the model decides a step the phone does not offer');
+    if (approved) tapped = issueOf(step);
     readArmed = true;
     approved ? step.approve() : step.deny();
     await settled();
@@ -211,7 +219,7 @@ async function subject() {
     foreground: !document.hidden, open: !!view, shown: !!step, shownIssue: step ? issueOf(step) : 0,
     disabled: step ? step.disabled : null,
     confirm: step ? (step.approveLabel === 'Confirm approve' ? 'approve' : step.denyLabel === 'Confirm deny' ? 'deny' : 'none') : 'none',
-    status: view ? statusText[view.phoneStatus] : '', inflight: inflight(), journal: journalOutcome(), effects: agent.effects, denials: agent.denials};
+    status: view ? statusText[view.phoneStatus] : '', inflight: inflight(), journal: journalOutcome(), effects: agent.effects, denials: agent.denials, effect};
   };
   // Each proposal is bound to its own spec digest, which the card's identity lines name.
   const issueOf = step => { const issue = Object.keys(specDigests).find(key => step.identity.includes('Spec: ' + specDigests[key])); assert.ok(issue, step.identity); return Number(issue); };
@@ -221,7 +229,8 @@ async function subject() {
 const project = s => ({agent: {digest: s.digest, anchor: s.anchor, closed: s.closed, expired: s.expired, issued: s.issued, proposal: s.proposal,
   proposalDigest: s.proposalDigest, receipt: s.receipt},
 foreground: s.foreground, open: s.open, shown: s.shown, shownIssue: s.shownIssue, disabled: s.shown ? s.expired || s.inflight !== 'none' : null,
-confirm: s.confirm, status: s.status, inflight: s.inflight, journal: s.journal, effects: s.effects, denials: s.denials});
+confirm: s.confirm, status: s.status, inflight: s.inflight, journal: s.journal, effects: s.effects, denials: s.denials,
+effect: s.effects === 1 ? {tappedDigest: s.tappedDigest, admittedIssue: s.admittedIssue, admittedDigest: s.admittedDigest} : null});
 
 async function replay(walk, label, seen) {
   const code = await subject();

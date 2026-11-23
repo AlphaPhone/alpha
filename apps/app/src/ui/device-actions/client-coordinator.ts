@@ -1036,6 +1036,15 @@ export class DeviceActionCoordinator<
       throw Error("Device library access was not negotiated with this agent");
     if (isFilesOperation(op) && !this.capability(FILES_CAPABILITY))
       throw Error("Files access was not negotiated with this agent");
+    // The pinned Files contract also accepts files named by their shown
+    // positions; such an operation needs its own capability, as the shared
+    // coordinator checks.
+    if (
+      isFilesOperation(op) &&
+      filesShownTarget(op) &&
+      !this.capability(FILES_SHOWN_TARGET_CAPABILITY)
+    )
+      throw Error("Files shown items were not negotiated with this agent");
     if (
       isFilesOperation(op) &&
       filesShownTarget(op) &&
@@ -1053,6 +1062,7 @@ export class DeviceActionCoordinator<
           ))
     )
       throw Error("Notes folders were not negotiated with this agent");
+    // An album or share of the open Photos item needs its own capability.
     if (
       isPhotosViewOperation(op) &&
       !photosViewFormSupported(op, this.credential.capabilities)
@@ -2150,6 +2160,8 @@ export class DeviceActionCoordinator<
       assertClockHandoffTimeZone(reviewed.proposal.operation, context.timeZone);
     if (isNativeNotesQuery(reviewed.proposal.operation))
       assertNotesQueryContext(context);
+    // Files named only by shown positions were never resolved to the files a
+    // card names, so they are never approved.
     if (
       isFilesOperation(reviewed.proposal.operation) &&
       (filesShownTarget(reviewed.proposal.operation) ||
