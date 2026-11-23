@@ -14,7 +14,7 @@ and each failure as events.
 ```quint
 type Route = Device | Cloud | Direct
 type Duplex = Interruptible | TakesTurns
-type Shown = Off | Starting | Listening | Thinking | Speaking | AwaitingReview | Retrying | Retiring | Failed
+type Shown = Off | Starting | Listening | Thinking | Speaking | Retrying | Retiring | Failed
 type SessionPhase = PhaseStarting | PhaseListening | PhaseThinking | PhaseSpeaking
 type Notice = NoNotice | PausedForCall | CallHoldsMicrophone | CannotInterrupt | ReviewInChat | VoicePaused
   | StopUnconfirmed | RestOfReplyUnread
@@ -50,7 +50,7 @@ pure def canDisclose(c: Conversation, route: Route): bool = route != Device and 
 pure def disclose(c: Conversation, route: Route): Conversation =
   if (route == Cloud) { ...c, cloudDisclosed: true } else { ...c, cartesiaDisclosed: true }
 pure def alwaysNetworkVoiceWasDisclosed(c: Conversation): bool =
-  (running(c.shown) or c.shown == AwaitingReview) implies disclosedFor(c, c.route)
+  running(c.shown) implies disclosedFor(c, c.route)
 ```
 
 ### Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call
@@ -157,7 +157,7 @@ pure def shownOf(p: SessionPhase): Shown =
 pure def canObserved(c: Conversation, phase: SessionPhase): bool = running(c.shown)
 pure def observed(c: Conversation, phase: SessionPhase): Conversation =
   { ...c, shown: shownOf(phase), retries: if (phase == PhaseSpeaking) 0 else c.retries,
-    notice: if (c.notice == CannotInterrupt or c.notice == RestOfReplyUnread) c.notice else NoNotice }
+    notice: if (c.notice == CannotInterrupt or c.notice == RestOfReplyUnread or c.notice == ReviewInChat) c.notice else NoNotice }
 ```
 
 ### Streamed text is spoken early only from confirmed frames of a reply proven direct
@@ -208,19 +208,24 @@ pure def sometimesPausedQuietly(c: Conversation): bool = c.notice == VoicePaused
 
 ## Story: Review what voice is about to do
 
-> As the owner, I want a spoken request that needs my approval, such as a call or a text, to stop
-> with the microphone off and wait in the chat, so that voice never acts for me unseen.
+> As the owner, I want a spoken request that needs my approval, such as a call or a text, to wait
+> for me in the chat while the conversation keeps going, so that voice never acts for me unseen and
+> I never have to start voice again to carry on.
 
-### A reply that needs review stops voice with the microphone off and says it waits in the chat
+### A reply that needs review waits in the chat while voice keeps listening
 
-Nothing streamed before it is spoken.
+Nothing streamed before it is spoken. The action is never approved by voice: it waits for the
+owner's review in the chat, and the conversation goes back to listening with the notice shown
+until that review settles, whichever way it settles. Settling clears the notice and ends nothing.
 
 ```quint
 pure def canReviewNeeded(c: Conversation): bool = c.shown == Thinking or c.shown == Speaking
-pure def reviewNeeded(c: Conversation): Conversation = { ...c, shown: AwaitingReview, notice: ReviewInChat, claim: NoClaim }
-pure def canReviewSettled(c: Conversation): bool = c.shown == AwaitingReview
-pure def reviewSettled(c: Conversation): Conversation = retiredAs(Retiring, c)
-pure def sometimesWaitingForReview(c: Conversation): bool = c.shown == AwaitingReview
+pure def reviewNeeded(c: Conversation): Conversation = { ...c, shown: Listening, notice: ReviewInChat, claim: NoClaim }
+pure def canReviewSettled(c: Conversation): bool = c.notice == ReviewInChat
+pure def reviewSettled(c: Conversation): Conversation = { ...c, notice: NoNotice }
+pure def stepReviewKeepsVoice(before: Conversation, via: str, after: Conversation): bool =
+  (via == "reviewNeeded" or via == "reviewSettled") implies (running(before.shown) implies running(after.shown))
+pure def sometimesWaitingForReview(c: Conversation): bool = c.notice == ReviewInChat and c.shown == Listening
 ```
 
 ## Story: Mute the speaker without ending voice
@@ -233,7 +238,7 @@ pure def sometimesWaitingForReview(c: Conversation): bool = c.shown == AwaitingR
 ```quint
 pure def canMuteSpeaker(c: Conversation, muted: bool): bool = c.muteOffered and running(c.shown) and muted != c.muted
 pure def muteSpeaker(c: Conversation, muted: bool): Conversation = { ...c, muted: muted }
-pure def alwaysMutingNeedsItsControl(c: Conversation): bool = c.muted implies (c.muteOffered and (running(c.shown) or c.shown == AwaitingReview))
+pure def alwaysMutingNeedsItsControl(c: Conversation): bool = c.muted implies (c.muteOffered and running(c.shown))
 ```
 
 ## Story: End voice cleanly, and never lose what I type
@@ -250,7 +255,7 @@ Alpha left the front is a hidden page, and one it cancelled is a stop; none is s
 settlement decides it.
 
 ```quint
-pure def active(s: Shown): bool = running(s) or s == AwaitingReview
+pure def active(s: Shown): bool = running(s)
 pure def canStop(c: Conversation, media: bool): bool = active(c.shown) or c.shown == Failed
 pure def stop(c: Conversation, media: bool): Conversation =
   if (media) retiredAs(Retiring, c) else { ...retiredAs(Off, c), retries: 0 }

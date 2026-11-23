@@ -30,7 +30,7 @@ export const operationPorts = effect {
       if (op === undefined) return { kind: "refused", code: "unsupported" }
       const prepared = await runPromise(files.prepare(op, await runPromise(context())))
       if (prepared.kind !== "ready") return { kind: "refused", code: prepared.kind === "notAvailable" ? "not_available" : "failed", result: prepared }
-      const done = await runPromise(files.run(prepared.op, await runPromise(context()), navigation.switchForAgent("files", "")))
+      const done = await runPromise(files.run(prepared.op, await runPromise(context()), host.openView("files")))
       return done.status === "succeeded" ? { kind: "applied", result: done } : { kind: "refused", code: "files_failed", result: done }
     },
     readBack: async () => ({ kind: "refused", code: "no_readback" }),

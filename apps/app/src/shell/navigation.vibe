@@ -28,8 +28,8 @@ export service Navigation {
   closeLayer(id: string): boolean!!
   /** Moves the assistant to a detent. */
   moveChat(detent: Detent): boolean!!
-  /** The agent's navigation: captured, claimed and committed on the screen in front; true when its app is now shown. */
-  switchForAgent(app: AppId, route: string): boolean!!
+  /** The agent's navigation: captured, claimed and committed on the screen in front; true when Home (`""`) or its app is now shown. */
+  switchForAgent(app: AppId | "", route: string): boolean!!
 }
 
 /**
@@ -179,7 +179,7 @@ export const navigationLive = Layer.effect(Navigation, effect {
     openLayer: (id: string, kind: LayerKind, covers: boolean) => send({ type: "openLayer", id, kind, covers }),
     closeLayer: (id: string) => send({ type: "closeLayer", id }),
     moveChat: (detent: Detent) => send({ type: "moveChat", detent }),
-    effect switchForAgent(app: AppId, route: string) {
+    effect switchForAgent(app: AppId | "", route: string) {
       const claimed = (try send({ type: "captureClaim" })) && (try send({ type: "claimView", app })) && (try send({ type: "commitClaim", route }))
       if (!claimed) return false
       const shown = (try machine.get()).app === app

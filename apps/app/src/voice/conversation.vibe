@@ -9,7 +9,7 @@ import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { ResidentControl } from "../platform/resident-control.vibe"
 import { ResidentFeeds } from "../platform/view-events.vibe"
-import { Machine, active, endpointerOf, openMicHangoverMs, profileOf, running, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
+import { Machine, active, endpointerOf, openMicHangoverMs, profileOf, running, speaksEarly, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { readingMayStart } from "../../gen/voice__speech.effect.vibe"
 import { acknowledgement, voiceReplyHooks, type Acknowledgement } from "./acknowledgement.vibe"
@@ -40,6 +40,8 @@ export interface VoiceStart {
   readonly voiceUi?: () => { readonly [key: string]: unknown }
   /** Whether the conversation the voice started in is still the one on screen. */
   readonly chatCurrent: () => boolean
+  /** Optional hook receiving actionResults from a finished voice turn so actions/views/reviews settle consistently. */
+  readonly onActionResults?: (results: readonly unknown[], messageId: string) => void!!
 }
 
 /** The voice assistant: listens, sends each finished turn by itself, speaks the reply and can be interrupted. */
@@ -50,6 +52,8 @@ export service VoiceConversation {
   get(): Conversation!!
   /** The route voice would start on now. */
   route(): Route!!
+  /** Proactively warm Cloud speech (for `connection`, at most once/min) and on-device speech/VAD/liveCapture availability in the background without opening the mic. */
+  prewarm(connection?: number): void!!
   /** The owner acknowledged what the route in use sends. */
   disclose(): void!!
   /** The owner starts voice on the route in use now. */
@@ -121,6 +125,35 @@ function shownPhaseOf(phase: string): SessionPhase | "idle" | "error" {
   return phase === "PhaseError" ? "error" : "idle"
 }
 
+/** Complete sentences followed by whitespace in streamed preview text, and the exact character offset consumed. */
+function completeSentences(unspoken: string): { readonly sentences: readonly string[]; readonly consumed: number } {
+  const sentences: string[] = []
+  let consumed = 0
+  const boundary = /[.!?](?=\s)/g
+  let match = boundary.exec(unspoken)
+  while (match !== null) {
+    const end = match.index + 1
+    const chunk = unspoken.slice(consumed, end).trim()
+    if (chunk !== "") sentences.push(chunk)
+    consumed = end
+    match = boundary.exec(unspoken)
+  }
+  return { sentences, consumed }
+}
+
+/** Skip only the exact sentence prefix already spoken early during streaming. */
+function unspokenSuffix(fullSpoken: string, spokenPrefix: string): string {
+  const prefix = spokenPrefix.trim()
+  if (prefix === "") return fullSpoken
+  const trimmed = fullSpoken.trim()
+  if (trimmed === prefix) return ""
+  if (trimmed.startsWith(prefix)) {
+    const rest = trimmed.slice(prefix.length)
+    if (rest === "" || /^\s/.test(rest)) return rest.trim()
+  }
+  return fullSpoken
+}
+
 /** The conversation service over the conversation Machine it is given. */
 export const conversationService = Layer.effect(VoiceConversation, effect {
   const held = try Machine
@@ -144,6 +177,9 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   let pendingChat: (() => boolean) | undefined
   let cue: Acknowledgement | undefined
   let stream: StreamSession | undefined
+  let cachedLiveCapture: boolean | undefined
+  let onDeviceProbed = false
+  let prewarming = false
   const listeners = new Set<(envelope: unknown) => void>()
 
   effect function send(event: Event) {
@@ -184,7 +220,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         try sleep(Math.max(QUIET_RETRY_WAIT_MS, (facts.retryAfterSeconds ?? 0) * 1000))
         const chatCurrent = current?.chatCurrent() ?? false
         try send({ type: "retryWaited", chatCurrent })
-        if ((try held.get()).shown === "Starting" && current !== undefined) try open(current, state.route)
+        if ((try held.get()).shown === "Starting" && current !== undefined) try open(current, state.route, try liveRouteNow(state.route))
       }
       return
     }
@@ -206,9 +242,13 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       return undefined
     }
     const opened = decode(LiveCaptureStarted, raw)
-    if (opened === undefined || opened.captureId !== captureId) return events.failed(lastCause)
+    if (opened === undefined || opened.captureId !== captureId) {
+      cachedLiveCapture = undefined
+      return events.failed(lastCause)
+    }
     if (opened.nativeAsr === false) {
       native.invoke("AlphaVoiceCloud", "stopLiveCapture", { captureId, discard: true }) catch () => undefined
+      cachedLiveCapture = undefined
       lastCause = { code: "native-asr-unavailable" }
       return events.failed(lastCause)
     }
@@ -216,9 +256,10 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     try microphone.opened(ticket)
     events.opened({ echoCancelled: opened.echoCancelled })
     const ends = Stream.filter(native.listen("AlphaVoiceCloud", "liveCaptureEnded"), (value) => decode(LiveCaptureEnded, value)?.captureId === captureId)
-    const ended = Option.getOrUndefined(Stream.runHead(ends) catch () => Option.none())
+    const ended = Option.getOrUndefined(Stream.runHead(ends) catch () => Option.none<unknown>())
     if (!capturing) return
     capturing = false
+    cachedLiveCapture = undefined
     lastCause = { code: decode(LiveCaptureEnded, ended)?.error ?? "capture-ended" }
     events.failed(lastCause)
   }
@@ -227,12 +268,16 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     try endStream()
     const account = try routes.account()
     if (account.kind !== "cloud") return undefined
-    const relay = try cloudStreaming(account.environment, account.credentialId, () => stream?.sessionId === sessionId, (text: string) => {
-      const session = stream
-      if (session === undefined || session.sessionId !== sessionId) return
-      session.seq += 1
-      emit(envelope(sessionId, session.turn, "partial", text, session.seq))
-    })
+    const relay = try Effect.provideService(
+      cloudStreaming(account.environment, account.credentialId, () => stream?.sessionId === sessionId, (text: string) => {
+        const session = stream
+        if (session === undefined || session.sessionId !== sessionId) return
+        session.seq += 1
+        emit(envelope(sessionId, session.turn, "partial", text, session.seq))
+      }),
+      Native,
+      native,
+    )
     const session: StreamSession = { sessionId, relay, owner: voiceAbort(), capture: undefined, ended: undefined, turn: newId(), seq: 0 }
     stream = session
     try speech.bindStream(relay)
@@ -319,7 +364,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         events.opened({ echoCancelled: false })
         first = false
       }
-      const gated = try gateRecording(started.recordingId, speakingNow, () => !capturing)
+      const gated = try Effect.provideService(gateRecording(started.recordingId, speakingNow, () => !capturing), Native, native)
       const clip = decode(RecordingClip, native.invoke("AlphaVoiceCloud", "stopRecording", {}) catch () => undefined)
       if (!capturing || clip === undefined || !gated.heard) {
         native.invoke("AlphaVoiceCloud", "cancelRecording", {}) catch () => undefined
@@ -351,29 +396,93 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   effect function answerOf(conversationId: string, body: TurnBody, ack: Acknowledgement, microphoneClear: () => boolean, signal: AbortSignal) {
     const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`
-    const hooks = voiceReplyHooks(ack, microphoneClear, () => { runFork(latency.mark("FirstToken")) })
+    let earlyEligible = true
+    let provenDirect = false
+    let consumedChars = 0
+    let spokenPrefix = ""
+    let earlyStarted = false
+    const earlyQueue = try Queue.unbounded<readonly string[] | null>()
+    const earlyWorker = fork effect {
+      while (true) {
+        const next = try Queue.take(earlyQueue)
+        if (next === null) break
+        if (signal.aborted || !earlyEligible) continue
+        if (!earlyStarted) {
+          earlyStarted = true
+          try latency.mark("TtsStart")
+        }
+        const turn = try latency.nativeTurn()
+        speech.speakPieces(next, () => sync(() => { follows() }), turn) catch () => undefined
+      }
+    }
+    const hooks = voiceReplyHooks(ack, microphoneClear, () => { runFork(latency.mark("FirstToken")) }, {
+      onAcknowledgment: () => {
+        earlyEligible = false
+        provenDirect = false
+      },
+      onReady: () => {
+        if (earlyEligible) provenDirect = true
+      },
+      onPreview: (text: string, provisional: boolean) => {
+        if (provisional) {
+          earlyEligible = false
+          provenDirect = false
+          return
+        }
+        if (!speaksEarly("ConfirmedFrame", provenDirect) || !earlyEligible || signal.aborted) return
+        if (text.length <= consumedChars) return
+        const { sentences, consumed } = completeSentences(text.slice(consumedChars))
+        if (sentences.length === 0) return
+        const pieces = sentences.flatMap((sentence) => {
+          const plan = planReply(sentence)
+          return plan.kind === "speak" ? plan.pieces : []
+        })
+        if (pieces.length === 0) return
+        consumedChars += consumed
+        spokenPrefix = text.slice(0, consumedChars)
+        runFork(Queue.offer(earlyQueue, pieces))
+      },
+    })
     // A voice turn carries the device headers, read again for each turn, as the assistant's own turns do.
     const headers = try Effect.provideService(deviceHeaders(), AdvertisedCapabilities, advertised)
     const outcome = tryPromise(() => readReplyStream(Stream.toAsyncIterable(resident.stream(`${path}/stream`, body, headers)), hooks, signal)) catch effect (error) => {
+      earlyEligible = false
+      try Queue.offer(earlyQueue, null)
+      try Fiber.interrupt(earlyWorker)
       lastCause = error
       throw error
     }
     if (outcome.kind === "Failed") {
+      earlyEligible = false
+      try Queue.offer(earlyQueue, null)
+      try Fiber.interrupt(earlyWorker)
       lastCause = { code: outcome.code }
       throw new Error("The agent's voice reply failed.")
     }
     if (outcome.kind === "Done") {
       const awaitingReview = "awaitingReview" in outcome && outcome.awaitingReview === true
+      try Queue.offer(earlyQueue, null)
+      if (awaitingReview) {
+        earlyEligible = false
+        try speech.stop("Replies")
+        try Fiber.interrupt(earlyWorker)
+      } else {
+        try join earlyWorker
+      }
       const done: VoiceTurnReply = { messageId: outcome.messageId, text: outcome.text, ...(outcome.action === undefined ? {} : { action: outcome.action }), ...(awaitingReview ? { awaitingReview } : {}) }
-      return done
+      const actionResults = Array.isArray(outcome.actionResults) ? outcome.actionResults : undefined
+      return { reply: done, spokenPrefix: awaitingReview ? "" : spokenPrefix, actionResults }
     }
+    earlyEligible = false
+    try Queue.offer(earlyQueue, null)
+    try Fiber.interrupt(earlyWorker)
     const answer = resident.json("POST", path, body, headers) catch effect (error) => {
       lastCause = error
       throw error
     }
     const resent = decode(VoiceTurnReply, answer.data)
     if (resent === undefined) throw new Error("The agent's voice reply was not usable.")
-    return resent
+    return { reply: resent, spokenPrefix: "", actionResults: undefined as readonly unknown[] | undefined }
   }
 
   function ports(start: VoiceStart, route: Route, sessionId: string, liveCapture: boolean, streamed: StreamSession | undefined): VoiceSessionPorts {
@@ -419,6 +528,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
           speech.speakPieces(segments.flatMap((segment) => { const plan = planReply(segment); return plan.kind === "speak" ? plan.pieces : [] }), () => sync(() => { events.segmentPlayed(); follows() }), turn)
             catch (error) => { events.broke(error); follows() }
           try latency.finish("Answered")
+          follows()
         })
       },
       stop() { run(speech.stop("Replies")) },
@@ -444,42 +554,55 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       send: (turn: TurnBody, signal: AbortSignal) => runPromise(effect {
         try latency.endpointed("LongGap")
         try latency.mark("Request")
+        follows()
         if (route === "Device") try speech.warmDevice()
-        const ack = try acknowledgement()
+        const ack = try Effect.provideService(acknowledgement(), Speech, speech)
         cue = ack
         const microphoneClear = () => liveCapture || !runSync(microphone.get()).open
         const retireCue = () => { runFork(ack.cancel()) }
         signal.addEventListener("abort", retireCue, { once: true })
         if (signal.aborted) try ack.cancel()
         const body: TurnBody = { text: turn.text, channelType: turn.channelType, metadata: turn.metadata, clientMessageId: turn.clientMessageId }
-        const reply = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
+        const result = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
           try ack.cancel()
           if (cue === ack) cue = undefined
+          follows()
           throw error
         }
+        const { reply, spokenPrefix, actionResults } = result
         if (signal.aborted) {
           try ack.cancel()
           if (cue === ack) cue = undefined
+          follows()
           throw new Error("The agent's voice reply was not usable.")
         }
         try latency.mark("FirstToken")
+        if (actionResults !== undefined && actionResults.length > 0 && start.onActionResults !== undefined) {
+          start.onActionResults(actionResults, reply.messageId) catch () => undefined
+        }
         if (reply.awaitingReview === true) {
           try ack.cancel()
           if (cue === ack) cue = undefined
+          try speech.stop("Replies")
           try send({ type: "reviewNeeded" })
-          live?.stop()
+          follows()
           const waiting: VoiceReply = { messageId: reply.messageId, text: "" }
           return waiting
         }
         try ack.idle()
         if (cue === ack) cue = undefined
         if (signal.aborted) throw new Error("The agent's voice reply was not usable.")
-        const answered: VoiceReply = { messageId: reply.messageId, text: spokenLineOf(reply.text, replyActionOf(reply.action)), ...(reply.action === undefined ? {} : { action: reply.action }) }
+        const fullSpoken = spokenLineOf(reply.text, replyActionOf(reply.action))
+        const remaining = reply.action === undefined ? unspokenSuffix(fullSpoken, spokenPrefix) : fullSpoken
+        if (spokenPrefix !== "" && remaining === "") try latency.finish("Answered")
+        const answered: VoiceReply = { messageId: reply.messageId, text: remaining, ...(reply.action === undefined ? {} : { action: reply.action }) }
+        follows()
         return answered
       }),
       abort: (roomId: string, reason: string) => runPromise(effect {
         resident.json("POST", `/api/turns/${encodeURIComponent(roomId)}/abort`, { reason }) catch () => undefined
         try latency.finish("Abandoned")
+        follows()
       }),
     }
     const heardPort = (conversationId: string, messageId: string, body: unknown) => runPromise(effect {
@@ -496,28 +619,29 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       speaker,
       clock: {
         now: () => runSync(Clock.currentTimeMillis),
-        after: (ms: number, work: () => void) => { run(effect { try sleep(ms); try sync(work) }) },
+        after: (ms: number, work: () => void) => { run(effect { try sleep(ms); try sync(work); follows() }) },
       },
       clientMessageId: () => newId(),
       ...(start.voiceUi === undefined ? {} : { voiceUi: start.voiceUi }),
-      onPartial: () => { run(latency.mark("LastUserAudio")) },
+      onPartial: () => { run(latency.mark("LastUserAudio")); follows() },
     }
   }
 
-  effect function open(start: VoiceStart, route: Route) {
+  effect function open(start: VoiceStart, route: Route, liveRoute: boolean) {
     const sessionId = `live-${newId()}`
     const transcripts = effect {
       for try (const event of feeds.voice()) emit({ type: "event", event })
     }
     const agentEvents = fork.detached effect { transcripts catch () => undefined }
-    const liveRoute = try liveRouteNow(route)
     const streamed = route === "Cloud" && liveRoute ? (try openStream(sessionId)) : undefined
+    try speech.holdEngine()
     const session = createLiveVoiceSession({
       ...ports(start, route, sessionId, liveRoute, streamed),
       sessionId,
       subscribe: (listen) => {
-        listeners.add(listen)
-        return () => { listeners.delete(listen); runFork(Fiber.interrupt(agentEvents)) }
+        const observed = (raw: unknown) => { listen(raw); follows() }
+        listeners.add(observed)
+        return () => { listeners.delete(observed); runFork(Fiber.interrupt(agentEvents)) }
       },
     })
     live = session
@@ -527,10 +651,16 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     const gaps = duplex === "TakesTurns" ? defaultVoiceProfile : timing
     const profile: VoiceProfile = { shortGapMs: gaps.shortGapMs, longGapMs: gaps.longGapMs, bargeInHoldMs: gaps.bargeInHoldMs, stopReport: timing.heardOnStop ? "StopReportsHeard" : "StopReportsNone" }
     session.start("ConversationMode", liveRoute ? "FullDuplex" : "HalfDuplex", profile)
+    follows()
   }
 
   effect function liveRouteNow(route: Route) {
-    if (route === "Device") return decode(LiveCaptureStatus, native.invoke("AlphaVoiceCloud", "liveCaptureStatus", {}) catch () => undefined)?.available === true
+    if (route === "Device") {
+      if (cachedLiveCapture !== undefined) return cachedLiveCapture
+      const available = decode(LiveCaptureStatus, native.invoke("AlphaVoiceCloud", "liveCaptureStatus", {}) catch () => undefined)?.available === true
+      cachedLiveCapture = available
+      return available
+    }
     return route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))
   }
 
@@ -552,6 +682,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     cue = undefined
     if (playing !== undefined) try playing.cancel()
     session?.stop()
+    try speech.releaseEngineHold()
     const relayStopped = try endStream()
     if (!media) return
     const confirmed = (try mediaStopped()) && relayStopped
@@ -580,13 +711,32 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     const muteOffered = try native.available("AlphaVoiceCloud")
     if (!(try send({ type: "start", route, echoCancelled, live: liveRoute, muteOffered, admitted: next.admitted && entry === "EntryAllowed", callActive: false }))) return
     current = next
-    try open(next, route)
+    try open(next, route, liveRoute)
+  }
+
+  effect function prewarm(connection?: number) {
+    if (connection !== undefined) try speech.warmCloud(connection)
+    if (prewarming) return
+    prewarming = true
+    fork.detached effect {
+      try ensuring(effect {
+        try speech.prewarmDevice()
+        if (!onDeviceProbed && (try native.available("AlphaVoiceCloud"))) {
+          onDeviceProbed = true
+          routes.probeOnDevice() catch () => false
+        }
+        if (cachedLiveCapture === undefined && (try native.available("AlphaVoiceCloud"))) {
+          try liveRouteNow("Device")
+        }
+      }, sync(() => { prewarming = false }))
+    }
   }
 
   return {
     changes: held.changes,
     get: () => held.get(),
     route: () => routes.route(),
+    prewarm,
     effect disclose() { try send({ type: "disclose", route: try routes.route() }) },
     start,
     effect stop() {
@@ -610,9 +760,12 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     effect hidden() {
       if (try send({ type: "hidden" })) try retire(true)
     },
-    effect returned(callSeen: boolean) { try send({ type: "returned", callSeen }) },
+    effect returned(callSeen: boolean) {
+      cachedLiveCapture = undefined
+      try send({ type: "returned", callSeen })
+    },
     effect reviewSettled() {
-      if (try send({ type: "reviewSettled" })) try retire(true)
+      try send({ type: "reviewSettled" })
     },
     effect typedSend(sendTyped: () => void!!, chatCurrent: () => boolean) {
       const before = try held.get()

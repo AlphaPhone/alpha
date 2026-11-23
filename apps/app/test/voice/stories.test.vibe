@@ -173,10 +173,10 @@ it.effect(`Keep voice going through a passing failure (spec/voice/conversation.m
 })
 
 it.effect(`Review what voice is about to do (spec/voice/conversation.md, "Story: Review what voice is about to do")`, () => effect {
-  // spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat"
+  // spec/voice/conversation.md, "A reply that needs review waits in the chat while voice keeps listening"
   const waiting = reviewNeeded({ ...talking, shown: "Thinking" })
   const settled = reviewSettled(waiting)
-  try Effect.try(() => assert.deepStrictEqual({ waiting: [waiting.shown, waiting.notice], settled: settled.shown }, { waiting: ["AwaitingReview", "ReviewInChat"], settled: "Retiring" }))
+  try Effect.try(() => assert.deepStrictEqual({ waiting: [waiting.shown, waiting.notice], settled: [settled.shown, settled.notice] }, { waiting: ["Listening", "ReviewInChat"], settled: ["Listening", "NoNotice"] }))
 })
 
 it.effect(`Mute the speaker without ending voice (spec/voice/conversation.md, "Story: Mute the speaker without ending voice")`, () => effect {

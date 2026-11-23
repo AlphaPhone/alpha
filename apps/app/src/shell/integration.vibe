@@ -9,6 +9,7 @@ import { Reminders } from "../clock/reminders.vibe"
 import { overdue } from "../clock/schedule.ts"
 import { Conversations } from "../assistant/conversations.vibe"
 import { DeviceFacts } from "../settings/facts.vibe"
+import { Preferences } from "../settings/preferences.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
 import { VoiceConversation } from "../voice/conversation.vibe"
 import { executorsLive } from "./compose/executors.vibe"
@@ -39,6 +40,13 @@ export const integrationLive = Layer.effectDiscard(effect {
   const overview = try Overview
   const reminders = try Reminders
   const listing = try RemindersMachine
+  const preferences = Option.getOrUndefined(try Effect.serviceOption(Preferences))
+  let connectionEpoch = 1
+  let asksBeforeActions = true
+
+  effect function refreshAsksBeforeActions() {
+    if (preferences !== undefined) asksBeforeActions = preferences.asksBeforeActions() catch () => true
+  }
 
   effect function invocation() {
     const nav = try navigation.get()
@@ -46,6 +54,7 @@ export const integrationLive = Layer.effectDiscard(effect {
     const launch = try bindings.powerLaunchNow()
     const signIn = (try bindings.idle()).signInOpen
     const latest = (conversations.list() catch () => [])[0] as { readonly id: string; readonly roomId?: string } | undefined
+    try refreshAsksBeforeActions()
     const screen = {
       unlocked: !front.locked, visible: !nav.hidden, dialogOpen: nav.layers.length > 0,
       connectionPrompt: signIn || nav.layers.some((layer) => layer.id.startsWith("account")), voiceActive: nav.voice,
@@ -55,6 +64,7 @@ export const integrationLive = Layer.effectDiscard(effect {
     const start = {
       admitted: !nav.hidden && nav.holds.length === 0, callActive,
       conversationId: latest?.id ?? "", roomId: latest?.roomId ?? latest?.id ?? "",
+      voiceUi: () => ({ asksBeforeActions }),
       chatCurrent: () => true,
     }
     if (try voice.startFromInvocation(screen, start)) try navigation.send({ type: "startVoice" })
@@ -63,7 +73,17 @@ export const integrationLive = Layer.effectDiscard(effect {
   // Talk in the chat (spec/voice/conversation.md, "Voice starts only from the owner, …"): voice goes to the chat's own
   // conversation, a new chat first gets one, and the chat stays current while the transcript shows it.
   let chatNow: string | null = null
-  fork.scoped (effect { for try (const shown of composer.transcript) chatNow = shown.conversation })
+  fork.scoped (effect {
+    let hadPendingReview = false
+    for try (const shown of composer.transcript) {
+      chatNow = shown.conversation
+      const hasPendingReview = shown.rows.some((row) => row.kind === "card")
+      if (hadPendingReview && !hasPendingReview && (try voice.get()).notice === "ReviewInChat") {
+        try voice.reviewSettled()
+      }
+      hadPendingReview = hasPendingReview
+    }
+  })
   effect function talkFromChat() {
     const nav = try navigation.get()
     const front = try foreground.get()
@@ -72,9 +92,11 @@ export const integrationLive = Layer.effectDiscard(effect {
     if (open === null && row !== undefined) try composer.open(row.id, true)
     const started = open ?? row?.id
     if (started === undefined) return
+    try refreshAsksBeforeActions()
     const start = {
       admitted: !nav.hidden && nav.holds.length === 0 && !front.locked, callActive: !(try calls.allowed()),
       conversationId: started, roomId: row?.roomId ?? started,
+      voiceUi: () => ({ asksBeforeActions }),
       chatCurrent: () => chatNow === started,
     }
     try voice.start(start)
@@ -92,6 +114,7 @@ export const integrationLive = Layer.effectDiscard(effect {
         const callSeen = callAtHide || (try calls.live())
         callAtHide = false
         try voice.returned(callSeen)
+        try voice.prewarm(connectionEpoch)
         try facts.resume()
         try invocation()
       } else {
@@ -104,16 +127,38 @@ export const integrationLive = Layer.effectDiscard(effect {
   fork.scoped (effect { for try (const _ of pageEvents("alpha:assist-invocation")) try invocation() })
   fork.scoped (effect {
     for try (const launch of Stream.drop(Stream.changesWith(bindings.powerLaunch, (a, b) => a.initialRestorePending === b.initialRestorePending && a.accountRef === b.accountRef), 1)) {
+      connectionEpoch += 1
+      if (!pageHidden()) try voice.prewarm(connectionEpoch)
       if (!launch.initialRestorePending) try invocation()
+    }
+  })
+  fork.scoped (effect {
+    for try (const _ of Stream.drop(Stream.changesWith(entitlement.changes, (a, b) => a.host === b.host), 1)) {
+      connectionEpoch += 1
+      if (!pageHidden()) try voice.prewarm(connectionEpoch)
+    }
+  })
+  fork.scoped (effect {
+    let wasActive = false
+    for try (const current of voice.changes) {
+      const activeNow = current.shown !== "Off" && current.shown !== "Failed"
+      if (wasActive && !activeNow && (try navigation.get()).voice) {
+        try navigation.send({ type: "stopVoice" })
+      }
+      wasActive = activeNow
     }
   })
   fork.scoped (effect {
     let covering = false
     let speaking = false
+    let sheetOpen = false
     for try (const nav of navigation.changes) {
       const next = nav.app !== "" || nav.library || nav.shade
       if (next !== covering) try sheet.covered(next)
       covering = next
+      const openNow = nav.chat === "Sheet" || nav.chat === "Full"
+      if (openNow && !sheetOpen && !nav.hidden) try voice.prewarm(connectionEpoch)
+      sheetOpen = openNow
       if (speaking && !nav.voice && !(try voice.claimed())) try voice.stop()
       speaking = nav.voice
     }
@@ -129,6 +174,7 @@ export const integrationLive = Layer.effectDiscard(effect {
   })
   fork.scoped reminders.refresh()
   try entitlement.foreground(!pageHidden())
+  if (!pageHidden()) try voice.prewarm(connectionEpoch)
   try invocation()
 })
 

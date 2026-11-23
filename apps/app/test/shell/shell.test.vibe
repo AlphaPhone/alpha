@@ -1,7 +1,7 @@
 // spec/shell/index.md, "Story: Open an app from Home and keep my place"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/favorites.md, "Story: Keep Home the way I arranged it"; spec/shell/toasts.md, "Story: Read what just happened, at my own pace"; spec/shell/landing.md, "Story: Come back to Alpha after authorizing a connection"; spec/shell/routes.md, "Story: Let only my own app reach my agent's records"
 // @vitest-environment happy-dom
 import { assert, it } from "@effect/vitest"
-import { Machine as NavigationMachine, stored as storedNavigation } from "../../gen/shell__navigation.effect.vibe"
+import { Machine as NavigationMachine, dockShown, restOf, stored as storedNavigation } from "../../gen/shell__navigation.effect.vibe"
 import { Machine as FavoritesMachine } from "../../gen/shell__favorites.effect.vibe"
 import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
@@ -225,4 +225,37 @@ it.effect("an assistant request carries the confirmed enrollment's device id and
       {},
     ],
   ))
+})
+
+// spec/shell/navigation.md, "An app opens only while it is admitted and nothing holds the phone"; spec/shell/navigation.md, "A claim is captured on one screen, committed on it, and confirmed in the app it opened"
+it.effect("browser rests on Input with dock shown, and agent switches to apps or Home keep voice and an open sheet", () => effect {
+  provide memoryStore, platform {
+    provide shell {
+      const navigation = try Navigation
+      try navigation.open("browser")
+      const onBrowser = try navigation.get()
+      try navigation.moveChat("Sheet")
+      try navigation.send({ type: "startVoice" })
+      const toCalendar = try navigation.switchForAgent("calendar", "")
+      const onCalendar = try navigation.get()
+      const toHome = try navigation.switchForAgent("", "")
+      const onHome = try navigation.get()
+      try navigation.home()
+      const manualHome = try navigation.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        {
+          browserRest: [restOf("browser"), onBrowser.chat, dockShown(onBrowser)],
+          agentCalendar: [toCalendar, onCalendar.app, onCalendar.voice, onCalendar.chat],
+          agentHome: [toHome, onHome.app, onHome.voice, onHome.chat],
+          manualHomeVoice: manualHome.voice,
+        },
+        {
+          browserRest: ["Input", "Input", true],
+          agentCalendar: [true, "calendar", true, "Sheet"],
+          agentHome: [true, "", true, "Sheet"],
+          manualHomeVoice: false,
+        },
+      ))
+    }
+  }
 })

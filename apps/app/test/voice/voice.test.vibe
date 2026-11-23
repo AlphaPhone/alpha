@@ -116,7 +116,8 @@ it.live(`Dictate into the draft I am writing (spec/voice/dictation.md, "Story: D
     try dictation.start()
     try dictation.cancel()
     try dictation.stop()
-    try Effect.try(() => assert.deepStrictEqual({ inserted: cancelled.inserted, stage: stageOf(try dictation.get()) }, { inserted: [], stage: "Closed" }))
+    const cancelledState = try dictation.get()
+    try Effect.try(() => assert.deepStrictEqual({ inserted: cancelled.inserted, stage: stageOf(cancelledState) }, { inserted: [], stage: "Closed" }))
   }
 })
 
@@ -242,4 +243,97 @@ it.effect(`Hear a short line for an action (spec/voice/speech.md, "Story: Hear a
   const plain = spokenLineOf("It is sunny.", replyActionOf(undefined))
   const verbatim = spokenLineOf("Event ID: ev_123 is booked.", replyActionOf({ kind: "CALENDAR_CREATE", validatedCard: false, verbatimAsked: true }))
   try Effect.try(() => assert.deepStrictEqual({ drafted, plain, verbatim }, { drafted: EMAIL_DRAFT_READY, plain: "It is sunny.", verbatim: "Event ID: ev_123 is booked." }))
+})
+
+it.live(`Prewarm voice once and hold/release speech engine across a conversation (spec/voice/speech.md, "Cloud speech is warmed at most once a minute for each connection")`, () => effect {
+  const calls: Calls = []
+  const warmBridge = {
+    ...onPhone,
+    "AlphaVoiceCloud.liveCaptureStatus": { available: true },
+    "AlphaVoiceCloud.holdSpeechEngine": { held: true },
+    "AlphaVoiceCloud.releaseSpeechEngineHold": {},
+    "AlphaVoiceCloud.warmSpeechOutput": {},
+    "AlphaVoiceCloud.startLiveCapture": { captureId: "c1", sampleRate: 16000, echoCancelled: true, nativeAsr: true },
+    "AlphaVoiceCloud.stopLiveCapture": {},
+  }
+  provide voice(calls, warmBridge) {
+    const conversation = try VoiceConversation
+    try conversation.prewarm(1)
+    try sleep("50 millis")
+    try conversation.start({ admitted: true, callActive: false, conversationId: "c-1", roomId: "room-1", chatCurrent: () => true })
+    try sleep("50 millis")
+    try conversation.stop()
+    const invoked = names(calls)
+    const liveStatusCount = invoked.filter((n) => n === "AlphaVoiceCloud.liveCaptureStatus").length
+    const ttsOnlyWarm = calls.some((c) => c.name === "AlphaVoiceCloud.localSpeechStatus" && (c.args as { readonly ttsOnly?: boolean } | undefined)?.ttsOnly === true)
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        liveStatusCount,
+        ttsOnlyWarm,
+        held: invoked.includes("AlphaVoiceCloud.holdSpeechEngine"),
+        released: invoked.includes("AlphaVoiceCloud.releaseSpeechEngineHold"),
+      },
+      { liveStatusCount: 1, ttsOnlyWarm: true, held: true, released: true },
+    ))
+  }
+})
+
+it.live(`Subsequent native reply sentences pass append: true and skip duplicate play when appended (spec/voice/speech.md, "Story: Hear Alpha reply, and stop it at once")`, () => effect {
+  const calls: Calls = []
+  let synthesized = 0
+  const playbackEvents = try PubSub.unbounded<{ readonly event: string; readonly payload: unknown }>()
+  const eventsByName = (wanted: string) => Stream.filterMap(Stream.fromPubSub(playbackEvents), (item) => item.event === wanted ? Result.succeed(item.payload) : Result.failVoid)
+  const customPlatform = Layer.mergeAll(
+    Layer.succeed(Native, {
+      available: () => Effect.succeed(true),
+      invoke: (plugin: string, method: string, args?: unknown) => effect {
+        calls.push({ name: `${plugin}.${method}`, args })
+        if (method === "synthesizeLocal") {
+          synthesized += 1
+          const input = (args ?? {}) as { readonly requestId?: string; readonly append?: boolean }
+          if (synthesized === 1) return { playbackId: "p1", execution: "device" }
+          fork.detached effect {
+            try sleep("10 millis")
+            try PubSub.publish(playbackEvents, { event: "playbackSegmentStarted", payload: { playbackId: "p1", requestId: input.requestId } })
+            try sleep("10 millis")
+            try PubSub.publish(playbackEvents, { event: "playbackEnded", payload: { playbackId: "p1" } })
+          }
+          return { playbackId: "p1", execution: "device", appended: input.append === true }
+        }
+        return {}
+      },
+      listen: (_plugin: string, event: string) => eventsByName(event),
+    }),
+    Layer.succeed(Cloud, {
+      base: "https://api.eliza.app",
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.fail(new CloudUnavailable({ status: 404, message: `${method} ${path}` })),
+    }),
+    Layer.succeed(Resident, {
+      status: () => Effect.succeed("running" as const),
+      ensureRunning: () => Effect.void,
+      json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string) => Effect.succeed({ status: 200, data: { method, path } }),
+      stream: () => Stream.empty,
+    }),
+    Layer.succeed(ResidentControl, {
+      changes: Stream.never,
+      session: () => Effect.succeed(undefined),
+      refreshAccount: () => Effect.void,
+      stop: () => Effect.void,
+      recovered: () => Effect.void,
+    }),
+    Layer.succeed(ResidentFeeds, { view: () => Stream.never, voice: () => Stream.never }),
+    Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks: false } }),
+    memoryStore,
+  )
+  provide Layer.provide(layer, customPlatform) {
+    const speech = try Speech
+    try speech.speakPieces(["First sentence here.", "Second sentence here."], () => sync(() => undefined))
+    const synthCalls = calls.filter((c) => c.name === "AlphaVoiceCloud.synthesizeLocal")
+    const playCalls = calls.filter((c) => c.name === "AlphaVoiceCloud.play")
+    const secondArgs = synthCalls[1]?.args as { readonly append?: boolean; readonly replace?: boolean } | undefined
+    try Effect.try(() => assert.deepStrictEqual(
+      { synthCount: synthCalls.length, secondAppend: secondArgs?.append, secondReplace: secondArgs?.replace, playCount: playCalls.length },
+      { synthCount: 2, secondAppend: true, secondReplace: false, playCount: 1 },
+    ))
+  }
 })

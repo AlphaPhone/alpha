@@ -23,16 +23,34 @@ export interface Acknowledgement {
  * its `reply_ready` frame. Text streamed before then may be the cue's own text, which the agent restarts before its
  * tools run, so it never readies the reply; `firstText` hears the first text shown, once.
  */
-export function voiceReplyHooks(ack: Acknowledgement, microphoneClear: () => boolean, firstText: () => void): ReplyStreamHooks {
+export interface EarlyReplyHooks {
+  readonly onAcknowledgment?: () => void
+  readonly onPreview?: (text: string, provisional: boolean) => void
+  readonly onReady?: () => void
+}
+
+export function voiceReplyHooks(
+  ack: Acknowledgement,
+  microphoneClear: () => boolean,
+  firstText: () => void,
+  early?: EarlyReplyHooks,
+): ReplyStreamHooks {
   let first = true
   return {
-    onAcknowledgment: (text: string) => { runFork(ack.acknowledged(text, microphoneClear)) },
+    onAcknowledgment: (text: string) => {
+      early?.onAcknowledgment?.()
+      runFork(ack.acknowledged(text, microphoneClear))
+    },
     onPreview: (text: string, provisional: boolean) => {
+      early?.onPreview?.(text, provisional)
       if (provisional || text === "" || !first) return
       first = false
       firstText()
     },
-    onReady: () => { runFork(ack.preempt()) },
+    onReady: () => {
+      early?.onReady?.()
+      runFork(ack.preempt())
+    },
   }
 }
 

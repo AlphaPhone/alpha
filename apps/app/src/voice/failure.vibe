@@ -79,7 +79,7 @@ export const MEDIA_UNCONFIRMED = "Speech could not be stopped. Restart Alpha."
 /** Said when a reply stopped partway and the rest is in the chat. */
 export const REST_UNREAD = "Couldn't read the rest aloud. The full reply is above."
 /** Said when a spoken request waits for the owner's review in the chat. */
-export const REVIEW_IN_CHAT = "Review it in the chat. The microphone is off."
+export const REVIEW_IN_CHAT = "Review it in the chat. Voice is still listening."
 /** Said once a start when the reply cannot be interrupted by speaking. */
 export const CANNOT_INTERRUPT = "Voice can't interrupt a reply here. Tap Stop speaking to cut it short."
 /** Said when quiet retries ran out or Cloud asked for a long wait. */

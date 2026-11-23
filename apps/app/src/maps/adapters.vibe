@@ -8,6 +8,7 @@ import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { Build } from "../platform/build.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Navigation as ShellNavigation } from "../shell/navigation.vibe"
+import { VoiceConversation } from "../voice/conversation.vibe"
 import { pageEvents } from "../shell/page.ts"
 import type { AppId } from "../web/app-screen.ts"
 import { MapsHandoff } from "./handoff.vibe"
@@ -32,6 +33,7 @@ export function shellStateOf(nav: Nav, calls: CallBar, facts: ShellFacts, native
 
 const shellLive = Layer.effect(MapsShell, effect {
   const navigation = try ShellNavigation
+  const voice = Option.getOrUndefined(try Effect.serviceOption(VoiceConversation))
   const foreground = try Foreground
   const calls = try CallBarMachine
   const lifecycle = try AppLifecycle
@@ -55,8 +57,19 @@ const shellLive = Layer.effect(MapsShell, effect {
     effect open(app: string, route?: string) {
       const forAgent = agentOpen === app
       agentOpen = ""
-      if (forAgent) try navigation.switchForAgent(app as AppId, route ?? "")
-      else try navigation.open(app as AppId, route)
+      if (forAgent) {
+        if (voice !== undefined && (try navigation.get()).voice) {
+          let switched = false
+          try voice.followScreen(() => effect {
+            switched = try navigation.switchForAgent(app as AppId, route ?? "")
+            return switched
+          }, () => switched)
+        } else {
+          try navigation.switchForAgent(app as AppId, route ?? "")
+        }
+      } else {
+        try navigation.open(app as AppId, route)
+      }
     },
     effect admitOwnViewOpen(app: string) { agentOpen = app },
     effect back() { try navigation.back() },

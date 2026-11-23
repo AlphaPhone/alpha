@@ -1,6 +1,7 @@
 // spec/shell/navigation.md, "An approved open_view shows Home or an admitted app, and is applied only once it is in front"; spec/shell/index.md, "An app is offered only where its availability admits it"
 import { operationOf } from "@elizaos/agent/operations"
 import { viewShown } from "../../gen/shell__navigation.effect.vibe"
+import { AssistantHost } from "../assistant/host.vibe"
 import { copy } from "../assistant/presentation.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { APP_IDS } from "./apps.vibe"
@@ -22,13 +23,17 @@ function titleOf(view: string): string {
 /** The shell's family of agent device operations for `DeviceExecutors`: an approved open_view shows Home or an app this build admits, through the agent's claimed navigation, and changes nothing else. */
 export const operationPorts = effect {
   const navigation = try Navigation
+  const host = Option.getOrUndefined(try Effect.serviceOption(AssistantHost))
 
   effect function show(view: string) {
-    if (view === "home") try navigation.home()
-    else {
+    if (view === "home") {
+      const shown = host !== undefined ? try host.openView("home") : try navigation.switchForAgent("", "")
+      if (!shown) return false
+    } else {
       const app = APP_IDS.find((known) => known === view)
       if (app === undefined || !(try navigation.get()).admitted.includes(app)) return false
-      if (!(try navigation.switchForAgent(app, ""))) return false
+      const shown = host !== undefined ? try host.openView(app) : try navigation.switchForAgent(app, "")
+      if (!shown) return false
     }
     const nav = try navigation.get()
     return viewShown(view, nav.admitted, nav.app, nav.library)

@@ -1,0 +1,45 @@
+// spec/shell/navigation.md, "An app opens only while it is admitted and nothing holds the phone"; spec/shell/navigation.md, "A claim is captured on one screen, committed on it, and confirmed in the app it opened"; spec/shell/navigation.md, "On Phone, Messages and Contacts the app's own bar stands in for the dock until a conversation opens"
+import { assert, it } from "@effect/vitest"
+import { dockShown, restOf, stored as storedNavigation } from "../../gen/shell__navigation.effect.vibe"
+import { buildInfo, fakeNative } from "../../src/platform/layers.vibe"
+import { memoryStore, ownerKey } from "../../src/platform/storage.vibe"
+import { Navigation, navigationLive } from "../../src/shell/navigation.vibe"
+
+const navLayer = Layer.provideMerge(navigationLive, storedNavigation(ownerKey("device", "shell/navigation")))
+const platform = Layer.mergeAll(memoryStore, fakeNative({}), buildInfo({ variant: "aosp" }))
+
+it.effect("browser rests on Input with dock shown, and agent switches to apps or Home keep voice and an open sheet", () => effect {
+  provide platform {
+    provide navLayer {
+      const navigation = try Navigation
+      try navigation.open("browser")
+      const onBrowser = try navigation.get()
+      try navigation.open("phone")
+      const onPhone = try navigation.get()
+      try navigation.moveChat("Sheet")
+      try navigation.send({ type: "startVoice" })
+      const toCalendar = try navigation.switchForAgent("calendar", "")
+      const onCalendar = try navigation.get()
+      const toHome = try navigation.switchForAgent("", "")
+      const onHome = try navigation.get()
+      try navigation.home()
+      const manualHome = try navigation.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        {
+          browserRest: [restOf("browser"), onBrowser.chat, dockShown(onBrowser)],
+          phoneRest: [restOf("phone"), onPhone.chat, dockShown(onPhone)],
+          agentCalendar: [toCalendar, onCalendar.app, onCalendar.voice, onCalendar.chat],
+          agentHome: [toHome, onHome.app, onHome.voice, onHome.chat],
+          manualHomeVoice: manualHome.voice,
+        },
+        {
+          browserRest: ["Input", "Input", true],
+          phoneRest: ["Input", "Input", false],
+          agentCalendar: [true, "calendar", true, "Sheet"],
+          agentHome: [true, "", true, "Sheet"],
+          manualHomeVoice: false,
+        },
+      ))
+    }
+  }
+})
