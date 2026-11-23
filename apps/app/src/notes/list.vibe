@@ -1,5 +1,5 @@
-// spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"; spec/notes/list.md, "A record is shown as its kind only when it carries that kind's data"; spec/notes/list.md, "A row carries only an opaque recording handle, checked against its own recording"; spec/notes/list.md, "A row is shown when it matches every part of the filter"; spec/notes/list.md, "A default title takes the next number after the highest one in use, Trash included"; spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"; spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
-import { itemMark, nextDefaultNumber, opensLocally, rowMatches, shownKind, shownOrder, voiceAudioValid, type NoteKind } from "../../gen/notes__list.effect.vibe"
+// spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"; spec/notes/list.md, "A record is shown as its kind only when it carries that kind's data"; spec/notes/list.md, "A row carries only an opaque recording handle, checked against its own recording"; spec/notes/list.md, "A row is shown when it matches every part of the filter"; spec/notes/list.md, "A Notes route opens one note or shows one list filter, and the plain list otherwise"; spec/notes/list.md, "A default title takes the next number after the highest one in use, Trash included"; spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"; spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
+import { itemMark, nextDefaultNumber, opensLocally, routeAsk, rowMatches, shownKind, shownOrder, voiceAudioValid, type NoteKind } from "../../gen/notes__list.effect.vibe"
 import { authoredNoteText } from "@elizaos/plugin-notes/format"
 import { projectNoteForModel, reconstructNoteContent, type NoteFormat, type StickyNote } from "@elizaos/plugin-notes/types"
 
@@ -177,6 +177,34 @@ export function filterRows(rows: readonly NoteRow[], filter: NotesFilter | undef
   if (filter === undefined) return [...rows]
   return rows.filter((row) => rowMatches(filter.kind !== undefined, row.kind === filter.kind, filter.folder !== undefined,
     folderOf(row, folderIds) === (filter.folder ?? ""), filter.text !== undefined, matchesText(row, filter.text ?? "")))
+}
+
+const filterRoute = "filter?"
+const kindNames: readonly KindName[] = ["text", "list", "voice", "link"]
+
+/** The route that opens Notes at a note or shows a list filter; undefined for the plain list. */
+export function notesRouteOf(request: { readonly filter?: NotesFilter; readonly noteId?: string }): string | undefined {
+  if (request.noteId !== undefined) return request.noteId
+  const filter = request.filter
+  if (filter === undefined) return undefined
+  const query = new URLSearchParams()
+  if (filter.text !== undefined) query.set("text", filter.text)
+  if (filter.kind !== undefined) query.set("kind", filter.kind)
+  if (filter.folder !== undefined) query.set("folder", filter.folder)
+  return filterRoute + query.toString()
+}
+
+/** What a Notes route asks for: one note, one list filter, or the plain list. */
+export function notesRouteRequest(route: string | undefined): { readonly filter?: NotesFilter; readonly noteId?: string } {
+  const text = route ?? ""
+  const isFilter = text.startsWith(filterRoute)
+  const query = new URLSearchParams(isFilter ? text.slice(filterRoute.length) : "")
+  const words = query.get("text") ?? ""
+  const kind = kindNames.find((name) => name === query.get("kind"))
+  const folder = query.get("folder") ?? ""
+  const filter: NotesFilter = { ...(words === "" ? {} : { text: words }), ...(kind === undefined ? {} : { kind }), ...(folder === "" ? {} : { folder }) }
+  const asked = routeAsk(text === "", isFilter, Object.keys(filter).length > 0)
+  return asked === "RouteNote" ? { noteId: text } : asked === "RouteFilter" ? { filter } : {}
 }
 
 /** The two-line preview of a row: its body, checklist with marks, transcript or a link's domain. */

@@ -1,18 +1,16 @@
 // spec/assistant/index.md, "Story: Ask my assistant from anywhere"
 import { Effect } from "effect";
+import { act, ask } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 import { Assistant } from "../../assistant/assistant.vibe";
 import { ChatAttachments } from "../../assistant/attachments.vibe";
 import { Composer } from "../../assistant/composer.vibe";
 import { AssistantDraft } from "../../assistant/draft.vibe";
-import { DeviceReview } from "../../assistant/review.vibe";
 import { ChatSearch } from "../../assistant/search.vibe";
 import { AssistantHost } from "../../assistant/host.vibe";
 import { AssistantEmail } from "../../assistant/ports.vibe";
-
-/** Run one effect of the assistant's services in the app runtime, without waiting for it. */
-export const run = (work: Effect.Effect<unknown, unknown, Assistant | Composer | ChatAttachments | DeviceReview | ChatSearch | AssistantHost | AssistantDraft>) =>
-  runtime.runFork(Effect.catchCause(work, () => Effect.void));
+import { AgentRestart } from "../../assistant/restart.vibe";
+import { Navigation } from "../../shell/navigation.vibe";
 
 /** The composer's transcript stream. */
 export const transcriptStream = Effect.map(Effect.service(Composer), (composer) => composer.transcript);
@@ -30,3 +28,23 @@ export const inferenceOf = () => runtime.runSync(Effect.flatMap(Effect.service(A
 export const ownAddressNow = () => runtime.runSync(Effect.flatMap(Effect.service(AssistantEmail), (mail) => mail.address()));
 /** Whether an emergency call is live now. */
 export const emergencyNow = () => runtime.runSync(Effect.flatMap(Effect.service(AssistantHost), (host) => host.emergency()));
+/** Whether Restart is offered for an agent the service holds for review. */
+export const restartStream = Effect.map(Effect.service(AgentRestart), (restart) => restart.offered);
+/** The assistant's own route the shell shows now, or "" off the assistant. */
+const routeNow = Effect.map(Effect.flatMap(Effect.service(Navigation), (navigation) => navigation.get()),
+  (nav) => nav.app === "assistant" ? nav.places.find((place) => place.app === "assistant")?.route ?? "" : "");
+
+/** Open an app view from the full assistant screen, keeping the chat's detent. */
+export const openFromAssistant = (app: string, route?: string) =>
+  act(Effect.flatMap(Effect.service(AssistantHost), (host) => host.openView(app, route)));
+
+/** Leave Agent activity for the conversation. */
+export const leaveActivity = () => act(Effect.flatMap(Effect.service(Navigation), (navigation) => navigation.open("assistant", "")));
+
+/** Back while the assistant is in front: Agent activity, then a question review, then search, then a reply or edit aim; false when Back is the shell's. */
+export const assistantBack = (): Promise<boolean> =>
+  ask(Effect.gen(function* () {
+    if ((yield* routeNow) === "activity") return yield* Effect.flatMap(Effect.service(Navigation), (navigation) => navigation.open("assistant", ""));
+    if (yield* Effect.flatMap(Effect.service(AssistantDraft), (draft) => draft.back())) return true;
+    return yield* Effect.flatMap(Effect.service(Assistant), (assistant) => assistant.back());
+  }), false);

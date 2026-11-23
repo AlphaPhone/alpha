@@ -11,11 +11,13 @@ export const meta: ComponentMeta<PrivacyPagesProps> = {
     page: "Privacy", facts: general.facts, preferences: { value: preferences, readable: true }, native: true,
     privacy: { route: "OnPhone", listener: listenerOn, aosp: true }, privacyActs: { stop: none, listenerSettings: none },
     onPermissions: none, onPreference: none, onResetPreferences: none, onHandoff: none, onAccessSetup: none,
+    resetAsked: false, onAskReset: none,
   },
   states: {
     ViaCloud: { privacy: { route: "ViaCloud", listener: listenerOn, aosp: true } },
     StopUnconfirmed: { privacy: { route: "OnPhone", listener: stopUnconfirmed, aosp: true } },
     Unreadable: { preferences: { value: preferences, readable: false } },
+    ResetAsked: { preferences: { value: preferences, readable: false }, resetAsked: true },
     Permissions: { page: "Permissions" },
     Browser: { native: false, privacy: { route: "OnPhone", listener: listenerOn, aosp: false } },
   },

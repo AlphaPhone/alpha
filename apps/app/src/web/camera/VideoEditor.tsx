@@ -1,4 +1,4 @@
-// spec/camera/videoEdit.md, "Story: Trim a video into a copy"
+// spec/camera/videoEdit.md, "Story: Trim a video into a copy"; spec/camera/videoEdit.md, "Story: Recover a video copy that may exist"
 import { Crop, RotateCw } from "lucide-react";
 import type { Event as VideoEvent, VideoEditor as VideoEditorState } from "../../../gen/camera__videoEdit.ts";
 import { videoClock } from "../../camera/messages.vibe";
@@ -49,7 +49,12 @@ export function VideoEditor({ state, can, source, editor }: VideoEditorProps) {
             <Button variant={trim.crop ? "primary" : "secondary"} size="icon" aria-label="Crop" aria-pressed={trim.crop} disabled={!can({ type: "toggleCrop" })} onClick={() => editor((e) => e.videoEvent({ type: "toggleCrop" }))}><Crop /></Button>
           </div>
           {state.outcome === "VideoNotSaved" && <p role="status" className="text-sm text-destructive">Not saved. Reopen the editor to try again.</p>}
-          {state.outcome === "VideoUnconfirmed" && <p role="status" className="text-sm text-warn">Save unconfirmed. Check Photos before trying again.</p>}
+          {state.outcome === "VideoUnconfirmed" && (
+            <div className="flex items-center gap-2">
+              <p role="status" className="flex-1 text-sm text-warn">Save unconfirmed. Check Photos before trying again.</p>
+              <Button variant="secondary" size="sm" onClick={() => editor((e) => e.reviewVideoCopy())}>Check Photos</Button>
+            </div>
+          )}
         </footer>
       </SheetContent>
     </Sheet>

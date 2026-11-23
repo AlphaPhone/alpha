@@ -37,7 +37,7 @@ pure val initial: Reading = { support: SupportUnknown, phase: NotReading, kind: 
 type ReadingProblem = ReadingUnsupported | NoVoice | LoadHttpsToRead | LoadHttpsToAsk | SensitivePage | ReadingFailed | ReadingStopped | SpeechFailed
 type ReadingNote = { problem: ReadingProblem }
 type Utterance = { generation: int }
-type ReadingEffect = QuerySupport | RequestReading(ReadPage) | SpendToken | CancelReading | RequestExcerpt(ReadPage)
+type ReadingEffect = QuerySupport | RequestReading(ReadPage) | SpendToken(Utterance) | CancelReading | RequestExcerpt(ReadPage)
   | ComposeQuestion(ReadPage) | FetchSource(ReadPage) | SpeakLocally(Utterance) | StopLocalSpeech | Note(ReadingNote)
 type ReadingChange = { state: Reading, out: List[ReadingEffect] }
 pure def note(problem: ReadingProblem): ReadingEffect = Note({ problem: problem })
@@ -62,6 +62,7 @@ pure def alwaysAReadingIsBoundToAPage(r: Reading): bool = r.phase != NotReading 
 Without isolated reading, or without a voice for this agent, nothing is asked for and the owner is
 told why. The menu closes first, and the page must still be the one asked about when the native
 request goes out. Speech that fails before it ends says so; speech the owner stopped says nothing.
+Each spoken token is numbered, so the late end of a stopped reading never ends a newer one.
 
 ```quint
 pure def canReadAloud(r: Reading, page: ReadPage, voice: bool): bool = r.phase == NotReading
@@ -76,13 +77,18 @@ pure def readingPrepared(r: Reading, page: ReadPage): ReadingChange =
   else { state: ended(1, r), out: List(CancelReading) }
 pure def canReadingReturned(r: Reading, ok: bool, sensitive: bool): bool = r.phase == Extracting and r.kind == ReadAloud
 pure def readingReturned(r: Reading, ok: bool, sensitive: bool): ReadingChange =
-  if (ok) { state: { ...r, phase: Speaking }, out: List(SpendToken) }
+  if (ok) { state: { ...r, phase: Speaking, generation: r.generation + 1, speech: r.generation + 1 }, out: List(SpendToken({ generation: r.generation + 1 })) }
   else { state: ended(1, r), out: List(CancelReading, note(if (sensitive) SensitivePage else ReadingFailed)) }
-pure def canSpeechEnded(r: Reading, ok: bool): bool = r.phase == Speaking and r.kind == ReadAloud
-pure def speechEnded(r: Reading, ok: bool): ReadingChange =
-  { state: ended(1, r), out: if (ok) List(CancelReading) else List(CancelReading, note(SpeechFailed)) }
+pure def canSpeechEnded(r: Reading, generation: int, ok: bool): bool = generation >= 1
+pure def speechEnded(r: Reading, generation: int, ok: bool): ReadingChange =
+  if (r.phase == Speaking and r.kind == ReadAloud and generation == r.speech)
+    { state: ended(1, r), out: if (ok) List(CancelReading) else List(CancelReading, note(SpeechFailed)) }
+  else { state: r, out: List() }
 pure def stepATokenIsSpentOnlyForAReturnedReading(before: Reading, via: str, after: Reading, out: List[ReadingEffect]): bool =
-  out.every(e => match e { | SpendToken => via == "readingReturned" and before.phase == Extracting | _ => true })
+  out.every(e => match e { | SpendToken(u) => via == "readingReturned" and before.phase == Extracting and u.generation == after.speech | _ => true })
+pure def stepOnlyTheLatestTokenEndsARead(before: Reading, via: str, after: Reading, out: List[ReadingEffect]): bool =
+  (via == "speechEnded" and out.length() > 0) implies (before.phase == Speaking and before.kind == ReadAloud and after.phase == NotReading)
+pure def alwaysAReadAloudSpeaksItsLatestToken(r: Reading): bool = (r.kind == ReadAloud and r.phase == Speaking) implies (r.speech == r.generation and r.speech >= 1)
 pure def sometimesSpeaking(r: Reading): bool = r.phase == Speaking and r.kind == ReadAloud
 ```
 
@@ -98,6 +104,16 @@ pure def pageChanged(r: Reading, page: ReadPage): ReadingChange =
   else { state: ended(1, r), out: if (r.kind == ReadLocally) List(StopLocalSpeech) else List(CancelReading) }
 pure def stepALeftPageIsNeverStillRead(before: Reading, via: str, after: Reading): bool =
   (via == "pageChanged" and after.phase != NotReading) implies after.bound == before.bound
+```
+
+### Back closes the excerpt review the owner sees: Ask about page is closed, and a local reading is stopped
+
+Read aloud on the phone has no review; Back then belongs to Browser's layers.
+
+```quint
+pure def reviewShown(r: Reading): bool =
+  r.kind != ReadAloud and (r.phase == Reviewing or (r.kind == ReadLocally and r.phase == Speaking))
+pure def sometimesALocalReviewIsShown(r: Reading): bool = reviewShown(r) and r.kind == ReadLocally
 ```
 
 ## Story: Ask about a page once I approve the excerpt

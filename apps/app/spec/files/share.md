@@ -17,9 +17,9 @@ type Destination = SystemSheet | EmailDraft | MessagesPicture | SaveCopy | Cance
 type DeliveryOutcome = Delivered | DeliveryAborted | DeliveryFailed
 type ShareEffect = { panel: int, destination: Destination }
 type SharePanel = { seen: int, active: int, hidden: bool, invalid: List[int], emails: List[int], messages: List[int],
-  settled: List[int], effects: List[ShareEffect], notice: bool, alerts: int }
+  settled: List[int], effects: List[ShareEffect], reported: List[int], notice: bool, alerts: int }
 pure val initial: SharePanel = { seen: 0, active: 0, hidden: false, invalid: List(), emails: List(), messages: List(),
-  settled: List(), effects: List(), notice: false, alerts: 0 }
+  settled: List(), effects: List(), reported: List(), notice: false, alerts: 0 }
 pure def afterClose(active: int, panel: SharePanel): SharePanel =
   if (active == 0) panel else { ...panel, active: 0, settled: panel.settled.append(active), notice: false }
 pure def offers(s: SharePanel, id: int, destination: Destination): bool =
@@ -74,20 +74,30 @@ pure def alwaysTheNoticeBelongsToAStaleSelection(s: SharePanel): bool = s.notice
 
 ### The owner's choice sends once, from the panel on screen, after it closed
 
+The choice closes the panel and records the send before the destination runs, so a destination that
+covers Files (Android's share sheet) and hides it cannot lose the send. The destination's outcome is
+reported afterwards, once for each send.
+
 ```quint
 pure def canChoose(s: SharePanel, id: int, destination: Destination): bool = id >= 1 and id <= s.seen
-pure def choose(s: SharePanel, id: int, destination: Destination, outcome: DeliveryOutcome): SharePanel = {
+pure def choose(s: SharePanel, id: int, destination: Destination): SharePanel = {
   val previous = afterClose(s.active, s)
   if (id != s.active or s.hidden or not(offers(s, id, destination))) s
   else if (s.invalid.includes(id)) { ...s, notice: true }
   else if (destination == CancelShare) previous
-  else { ...previous, effects: s.effects.append({ panel: id, destination: destination }),
-    alerts: if (outcome == DeliveryFailed) s.alerts + 1 else s.alerts }
+  else { ...previous, effects: s.effects.append({ panel: id, destination: destination }) }
 }
+pure def canReportDelivery(s: SharePanel, id: int): bool =
+  s.effects.some(e => e.panel == id) and not(s.reported.includes(id))
+pure def reportDelivery(s: SharePanel, id: int, outcome: DeliveryOutcome): SharePanel =
+  { ...s, reported: s.reported.append(id), alerts: if (outcome == DeliveryFailed) s.alerts + 1 else s.alerts }
+pure def alwaysAReportFollowsItsSend(s: SharePanel): bool =
+  s.reported.every(id => s.effects.some(e => e.panel == id)) and s.alerts <= s.reported.length()
+pure def alwaysEachSendIsReportedOnce(s: SharePanel): bool = s.reported.every(id => s.reported.select(o => o == id).length() == 1)
 pure def alwaysAnEffectFollowsItsPanelsClose(s: SharePanel): bool =
   s.effects.every(e => s.settled.includes(e.panel) and offers(s, e.panel, e.destination) and e.destination != CancelShare)
 pure def alwaysEachPanelSendsOnce(s: SharePanel): bool = s.effects.every(e => s.effects.select(o => o.panel == e.panel).length() == 1)
 pure def sometimesEmailed(s: SharePanel): bool = s.effects.some(e => e.destination == EmailDraft)
 pure def sometimesAStaleSelectionNotified(s: SharePanel): bool = s.notice
-pure def sometimesAFailureReported(s: SharePanel): bool = s.alerts > 0 and s.effects.length() == 1
+pure def sometimesAFailureReported(s: SharePanel): bool = s.alerts > 0 and s.effects.length() == 1 and s.reported.length() == 1
 ```

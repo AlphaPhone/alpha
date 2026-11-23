@@ -80,6 +80,13 @@ export const LocationEvent = Schema.Struct({
   cached: Schema.optionalKey(Schema.Boolean),
 })
 export const LocationError = Schema.Struct({ code: Schema.String })
+
+/** What `AlphaNetworkLocation.locate` answers: a position resolved from the visible Wi-Fi and cells, or that they are the networks of the fingerprint it was given. */
+export const NetworkAnswer = Schema.Union([
+  Schema.Struct({ unchanged: Schema.Literal(true), fingerprint: text(64) }),
+  Schema.Struct({ latitude: between(-90, 90), longitude: between(-180, 180), accuracy: meters, timestamp: Schema.Finite, fingerprint: text(64) }),
+])
+export type NetworkAnswer = typeof NetworkAnswer.Type
 export const WatchId = Schema.Struct({ watchId: Schema.String.check(Schema.isMinLength(1)) })
 
 export const NavigationAvailability = Schema.Struct({ background: Schema.Boolean, activeSessionId: Schema.optionalKey(Schema.String) })

@@ -12,12 +12,14 @@ import type { ScreenProps } from "../app-screen.ts";
 import { Avatar, Button, Input, ListRow } from "../components/ui/index.ts";
 import { openApp } from "./open.ts";
 import { CommsBar } from "./CommsBar.tsx";
+import { RestoredProposal } from "./RestoredProposal.tsx";
 import { DraftBubble } from "./DraftBubble.tsx";
 import { MessageBubble } from "./MessageBubble.tsx";
 import { deleteNoticeText, isAskSentence, phoneNoticeText, queryOf, sendProblemText, threadTitle } from "./present.ts";
 import { ThreadList } from "./ThreadList.tsx";
 import { ListAsk } from "../../telephony/list-ask.vibe";
 import { runtime, type TelephonyRuntime } from "./runtime.ts";
+import { backIn } from "./back.ts";
 import { useComms } from "./useComms.ts";
 
 export interface MessagesScreenProps extends ScreenProps {
@@ -64,14 +66,7 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
     on.runFork(MessagesView.use((v) => v.openThread(threadId)));
     stage.show("MessagesApp", "ThreadSubject", `messages:thread:${threadId}`);
   };
-  const back = () => {
-    if (stage.back()) return;
-    if (open) {
-      on.runFork(MessagesView.use((v) => v.closeThread()));
-      stage.show("MessagesApp", "ListSubject", "messages:list:");
-    } else if (m.view.tag === "Composing") on.runFork(MessagesView.use((v) => v.pickerClose()));
-    else if (m.searching) send({ type: "searchClosed" });
-  };
+  const back = () => void backIn("messages", on);
   const sole = threadCallNumber(m.view) !== "";
   const attach = async () => {
     const answer = await on.runPromise(PictureAttach.use((p) => p.attach(thread)));
@@ -207,6 +202,7 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
           ))}
         </ul>
       )}
+      <RestoredProposal card={stage.card} onDismiss={stage.decline} />
       <CommsBar
         comms={stage.comms}
         person={person ? title : ""}

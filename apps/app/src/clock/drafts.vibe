@@ -1,6 +1,7 @@
 // spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"
 import { Machine as DraftsMachine, type Kept, type Slot } from "../../gen/clock__reminderDrafts.effect.vibe"
 import { Machine as RemindersMachine } from "../../gen/clock__reminders.effect.vibe"
+import type { Reminders as ReminderScreen } from "../../gen/clock__reminders.ts"
 import { KeptReminderForm } from "./drafts.schema.vibe"
 import { draftOfKept, keptFormOf, type ReminderDraft } from "./schedule.ts"
 import { freshId } from "./page.ts"
@@ -11,6 +12,13 @@ export type DraftForm = "new" | "edit"
 const SLOT: Readonly<Record<DraftForm, Slot>> = { new: "CreationSlot", edit: "EditSlot" }
 
 const CONFIRMED: ReadonlySet<string> = new Set(["Saved", "Updated", "Rescheduled", "AlreadyExists", "AlertUnconfirmed"])
+
+const outcomeTag = (outcome: ReminderScreen["outcome"]): string => (typeof outcome === "object" ? outcome.tag : outcome)
+
+/** Whether the last write is over and the store confirmed the save of a form: a submitted form is then no longer shown. */
+export function confirmedSave(screen: ReminderScreen): boolean {
+  return screen.stage === "WIdle" && CONFIRMED.has(outcomeTag(screen.outcome))
+}
 
 /** A kept form as it resumes today, with the identity and version it was kept under. */
 export interface KeptDraft {
@@ -68,9 +76,7 @@ export const draftsLayer = Layer.effect(ReminderDrafts, effect {
       step({ type: "keep", slot: SLOT[form], id: under, revision, fields })
     },
     effect settle(form: DraftForm, id: string, version: number) {
-      const outcome = (try screen.get()).outcome
-      const tag = typeof outcome === "object" ? outcome.tag : outcome
-      if (CONFIRMED.has(tag)) step({ type: "saved", slot: SLOT[form], id, version })
+      if (CONFIRMED.has(outcomeTag((try screen.get()).outcome))) step({ type: "saved", slot: SLOT[form], id, version })
     },
     askDiscard: (form: DraftForm) => step({ type: "askDiscard", slot: SLOT[form] }),
     cancelDiscard: () => step({ type: "cancelDiscard" }),

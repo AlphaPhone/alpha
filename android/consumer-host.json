@@ -38,6 +38,9 @@
         "module": "runtime-files"
       },
       {
+        "module": "voice-io"
+      },
+      {
         "module": "local-inference"
       },
       {

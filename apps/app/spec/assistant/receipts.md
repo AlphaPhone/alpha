@@ -128,3 +128,47 @@ pure def maySettle(read: HistoryRead, kind: JournalKind): bool =
 pure def lawAPassiveReadNeverSettles(kind: JournalKind): bool = not(maySettle(PassiveList, kind)) and not(maySettle(PassiveGet, kind))
 pure def lawAnUnprovenKindNeverSettles(read: HistoryRead): bool = not(maySettle(read, UnprovenKind))
 ```
+
+## Story: Know what my agent changed
+
+> As the owner, after a reply I want to see which workflows, notes or
+> calendar events it changed, each one tap away, so that I can check the
+> change without hunting for it.
+
+### A reply's changes are shown once, only for what its action results prove, and each opens its own view
+
+The reply's action results go to Workflows once, after the reply settled
+and only for a reply delivered to the current conversation; a workflow
+card opens that workflow, a Notes or Calendar hint opens that app, and a
+chat edit refused in favour of the Workflows view says so. A reply whose
+results prove nothing shows nothing.
+
+```quint
+type ChangeFacts = { delivered: bool, workflows: int, notes: bool, calendar: bool, refusedForWorkflows: bool }
+pure def hints(c: ChangeFacts): int =
+  if (not(c.delivered)) 0 else c.workflows + (if (c.notes) 1 else 0) + (if (c.calendar) 1 else 0) + (if (c.refusedForWorkflows) 1 else 0)
+pure def lawAnUndeliveredReplyShowsNoChange(c: ChangeFacts): bool = not(c.delivered) implies hints(c) == 0
+pure def lawNothingProvenShowsNothing(delivered: bool): bool =
+  hints({ delivered: delivered, workflows: 0, notes: false, calendar: false, refusedForWorkflows: false }) == 0
+pure def lawEveryChangedWorkflowGetsItsCard(c: ChangeFacts): bool = c.delivered implies hints(c) >= c.workflows
+pure val cValues = Set(
+  { delivered: true, workflows: 2, notes: true, calendar: false, refusedForWorkflows: false },
+  { delivered: false, workflows: 1, notes: true, calendar: true, refusedForWorkflows: true },
+)
+```
+
+### A result is shown only after its journal entry and receipt settled
+
+An applied operation that brings its app forward (Browser opening a page,
+a closed tab's list) does so only after the phone journaled the result and
+the receipt was settled, never from inside the executor, so a crash
+between them never shows an effect the journal does not hold (#1226,
+#1438). A result that is not applied shows nothing.
+
+```quint
+type Shown = { applied: bool, journaled: bool, receiptSettled: bool }
+pure def presents(s: Shown): bool = s.applied and s.journaled and s.receiptSettled
+pure def lawAnUnjournaledResultIsNeverShown(s: Shown): bool = not(s.journaled) implies not(presents(s))
+pure def lawAFailedResultIsNeverShown(s: Shown): bool = not(s.applied) implies not(presents(s))
+pure val sValues = Set({ applied: true, journaled: false, receiptSettled: true }, { applied: false, journaled: true, receiptSettled: true }, { applied: true, journaled: true, receiptSettled: true })
+```

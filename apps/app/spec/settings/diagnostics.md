@@ -4,7 +4,8 @@ The problem log Android and the renderer keep (`ElizaSystem.crashLog`, at most 5
 diagnostics export that copies only allowlisted fields of strict shapes, and the licence notices the
 app ships. Each entry is shown with Alpha's own title for its source, reason or kind; an exit reason
 or kind Alpha does not know reads as its fallback, and an identifier is never shown. A Cloud AI
-request the renderer recorded as failed reads as "Cloud AI request failed", with no detail of it.
+request the renderer recorded as failed reads as "Cloud AI request failed", with the stage, reason
+and HTTP status the journal kept from its fixed lists, or "Details unavailable" where it kept none.
 
 ## Story: See what went wrong and share it with support
 
@@ -45,17 +46,21 @@ pure def sometimesProblemsShown(d: Diagnostics): bool = d.problems.length() >= 1
 
 ### Clearing the log asks first, and runs once
 
-A clear the journal could not confirm says so and keeps the log shown.
+A clear the journal could not confirm says so and keeps the log shown. Android's Back while the
+clear awaits confirmation cancels it and stays on the log.
 
 ```quint
 pure def canAskClear(d: Diagnostics): bool = d.log == LogShown and d.problems.length() > 0 and not(d.clearing)
 pure def askClear(d: Diagnostics): Diagnostics = { ...d, confirmClear: true }
+pure def canCancelClear(d: Diagnostics): bool = d.confirmClear
 pure def cancelClear(d: Diagnostics): Diagnostics = { ...d, confirmClear: false }
 pure def canConfirmClear(d: Diagnostics): bool = d.confirmClear and not(d.clearing)
 pure def confirmClearLog(d: Diagnostics): Diagnostics = { ...d, confirmClear: false, clearing: true, clearFailed: false }
 pure def canCleared(d: Diagnostics, ok: bool): bool = d.clearing
 pure def cleared(d: Diagnostics, ok: bool): Diagnostics =
   if (ok) { ...d, clearing: false, problems: List(), log: LogShown, version: d.version + 1 } else { ...d, clearing: false, clearFailed: true }
+pure def stepBackOnAConfirmationKeepsTheLog(before: Diagnostics, via: str, after: Diagnostics): bool =
+  via == "cancelClear" implies (after.problems == before.problems and after.clearing == before.clearing)
 pure def stepClearingOnlyAfterConfirming(before: Diagnostics, via: str, after: Diagnostics): bool =
   via == "confirmClearLog" implies before.confirmClear
 pure def sometimesCleared(d: Diagnostics): bool = d.version >= 1 and d.log == LogShown and d.problems.length() == 0

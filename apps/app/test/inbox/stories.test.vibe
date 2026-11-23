@@ -6,7 +6,7 @@ import { failureOf } from "../../src/inbox/gmail.vibe"
 import { suggestRecipients } from "../../src/inbox/composer.vibe"
 import { senderImageFacts } from "../../src/inbox/text.ts"
 import { emailShareTarget } from "../../src/inbox/shareTarget.vibe"
-import { InboxAccounts, Mailbox, MailComposer, MailOperations, MailSelection, MailNoticesShell, MailSuggestions, Reader, SavedMail } from "../../src/inbox/layer.vibe"
+import { InboxAccounts, Mailbox, MailComposer, MailOperations, MailSelection, MailNoticesShell, MailSuggestions, Reader, SavedMail, inboxBack } from "../../src/inbox/layer.vibe"
 import { base64, calls, grantA, grantB, inboxApp, mailCloud, readMessage, settle, zeroDigest } from "./support.vibe"
 
 const row1 = { id: "m1", threadId: "t-m1", sender: "Bo <bo@example.com>", senderAddress: "bo@example.com", subject: "Subject m1", snippet: "About m1", receivedAt: "2026-11-21T09:30:00Z", unread: true, starred: false, attached: false }
@@ -237,6 +237,38 @@ it.live("Reply all goes to the sender and the others, never to me, and replying 
     try Effect.try(() => assert.deepStrictEqual(
       { to: reply.fields.toList, cc: reply.fields.ccList, subject: reply.fields.subject, sameDraft: reopened.open.id === reply.id, body: reopened.open.fields.body, shelf: reopened.shelf.length },
       { to: ["bo@example.com"], cc: ["cy@example.com"], subject: "Re: Subject m1", sameDraft: true, body: "Tuesday?", shelf: 0 }))
+  }
+})
+
+// spec/inbox/drafts.md, "Back sets the draft aside, leaving keeps it open, and Drafts reopens it"
+it.live("Back sets the reply aside, then closes the message, then ends the search, and is the shell's at the folder list", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log)) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    const composer = try MailComposer
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    try mailbox.search("plan")
+    try reader.open({ ...row1, unread: false })
+    try composer.reply("ReplyMode")
+    const reply = (try composer.mine()).open
+    try composer.edit({ ...reply.fields, body: "Noon works" }, "")
+    const fromComposer = try inboxBack()
+    const shelved = (try composer.mine()).shelf.map((d) => d.fields.body)
+    const fromMessage = try inboxBack()
+    const closed = (try reader.get()).phase
+    const fromSearch = try inboxBack()
+    const query = (try mailbox.get()).query
+    const atList = try inboxBack()
+    try composer.compose({ toList: ["bo@example.com"], subject: "Later", body: "Kept open", files: [] })
+    const hidden = try composer.hide()
+    const whileHidden = try inboxBack()
+    const kept = (try composer.mine()).open.fields.subject
+    try Effect.try(() => assert.deepStrictEqual(
+      { fromComposer, shelved, fromMessage: fromMessage.taken, closed, fromSearch: fromSearch.taken, query, atList: atList.taken, hidden, whileHidden: whileHidden.taken, kept },
+      { fromComposer: { taken: true }, shelved: ["Noon works"], fromMessage: true, closed: "Closed", fromSearch: true, query: "", atList: false, hidden: true, whileHidden: false, kept: "Later" }))
   }
 })
 

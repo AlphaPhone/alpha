@@ -42,6 +42,19 @@ pure val categoriesValues = Set(Set(), Set(Calls), Set(Payments, ArbitraryCode))
 pure def lawAnyRefusedCategoryStopsGeneration(categories: Set[Category]): bool = categories.contains(Sms) implies scopeRefused(categories)
 ```
 
+### The unsent description is kept for its owner across closing and reopening
+
+Closing the draft sheet keeps what the owner typed; reopening it, or reloading Alpha, shows that
+text again for the same owner and never another owner's. A description the phone could not keep
+stays on screen with a warning, and saving or discarding the draft forgets it (#465).
+
+```quint
+pure def keptTextShown(sameOwner: bool, kept: bool): bool = sameOwner and kept
+pure val sameOwnerValues = Set(true, false)
+pure val keptValues = Set(true, false)
+pure def lawAnotherOwnersTextIsNeverShown(kept: bool): bool = not(keptTextShown(false, kept))
+```
+
 ## Story: Save exactly the draft I reviewed, once
 
 > As the owner, I review the draft before saving it, and I want the save to be of those exact

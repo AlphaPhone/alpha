@@ -20,11 +20,11 @@ type Task = NoTask | Unlocking | Locking | Editing | Removing | Revealing | Copy
 type Entry = { id: str, label: str, username: str, sites: List[str], revision: int }
 type Autofill = AutofillUnread | AutofillThisApp | AutofillOther | AutofillNone | AutofillUnsupported
 type Vault = {
-  visit: int, phase: Phase, entries: List[Entry], task: Task, confirmReset: bool, confirmRemove: str,
+  visit: int, phase: Phase, entries: List[Entry], selected: str, task: Task, confirmReset: bool, confirmRemove: str,
   autofill: Autofill, browserFill: bool, backupReady: bool, observed: bool,
 }
 pure val initial: Vault = {
-  visit: 0, phase: Closed, entries: List(), task: NoTask, confirmReset: false, confirmRemove: "",
+  visit: 0, phase: Closed, entries: List(), selected: "", task: NoTask, confirmReset: false, confirmRemove: "",
   autofill: AutofillUnread, browserFill: false, backupReady: false, observed: true,
 }
 pure val entriesValues = Set(List()).union(Set(List({ id: "a", label: "Bank", username: "ann", sites: List("bank.example"), revision: 1 })))
@@ -35,7 +35,7 @@ pure def openPage(v: Vault): Vault = { ...initial, visit: v.visit + 1, phase: Ch
 pure def canStatusRead(v: Vault, visit: int, phase: Phase, autofill: Autofill, browserFill: bool, backupReady: bool): bool =
   visit == v.visit and v.phase != Closed and v.task == NoTask and phase != Closed and phase != Checking and phase != Unlocked
 pure def statusRead(v: Vault, visit: int, phase: Phase, autofill: Autofill, browserFill: bool, backupReady: bool): Vault =
-  { ...v, phase: if (v.phase == Damaged) Damaged else phase, entries: List(), autofill: autofill, browserFill: browserFill, backupReady: backupReady }
+  { ...v, phase: if (v.phase == Damaged) Damaged else phase, entries: List(), selected: "", autofill: autofill, browserFill: browserFill, backupReady: backupReady }
 pure def alwaysEntriesOnlyWhileUnlocked(v: Vault): bool = v.entries.length() > 0 implies v.phase == Unlocked
 pure def alwaysTheAgentObservesNothingWhileDataIsHeld(v: Vault): bool = holdsData(v) implies not(v.observed)
 ```
@@ -54,7 +54,8 @@ pure def canBeginTask(v: Vault, task: Task, id: str): bool =
 pure def beginTask(v: Vault, task: Task, id: str): Vault = { ...v, task: task, confirmRemove: if (task == Removing) v.confirmRemove else "" }
 pure val idValues = Set("", "a")
 pure def canListed(v: Vault, visit: int, entries: List[Entry]): bool = visit == v.visit and v.task == NoTask and (v.phase == Unlocked or v.phase == Locked)
-pure def listed(v: Vault, visit: int, entries: List[Entry]): Vault = { ...v, phase: Unlocked, entries: entries }
+pure def listed(v: Vault, visit: int, entries: List[Entry]): Vault =
+  { ...v, phase: Unlocked, entries: entries, selected: if (entries.some(e => e.id == v.selected)) v.selected else "" }
 pure def sometimesUnlockedWithEntries(v: Vault): bool = v.phase == Unlocked and v.entries.length() >= 1
 ```
 
@@ -65,12 +66,12 @@ type Answer = Done | Refused | WasLocked | KeyInvalidated | Conflicted
 pure def canTaskAnswered(v: Vault, visit: int, answer: Answer): bool = visit == v.visit and v.task != NoTask
 pure def taskAnswered(v: Vault, visit: int, answer: Answer): Vault = {
   val ended = { ...v, task: NoTask, confirmReset: false, confirmRemove: "" }
-  if (answer == KeyInvalidated) { ...ended, phase: Damaged, entries: List() }
-  else if (answer == WasLocked or (answer == Done and v.task == Locking)) { ...ended, phase: Locked, entries: List() }
-  else if (answer == Done and v.task == Resetting) { ...ended, phase: Locked, entries: List() }
+  if (answer == KeyInvalidated) { ...ended, phase: Damaged, entries: List(), selected: "" }
+  else if (answer == WasLocked or (answer == Done and v.task == Locking)) { ...ended, phase: Locked, entries: List(), selected: "" }
+  else if (answer == Done and v.task == Resetting) { ...ended, phase: Locked, entries: List(), selected: "" }
   else ended
 }
-pure def lock(v: Vault): Vault = if (v.phase == Unlocked) { ...v, phase: Locked, entries: List(), confirmRemove: "", confirmReset: false } else v
+pure def lock(v: Vault): Vault = if (v.phase == Unlocked) { ...v, phase: Locked, entries: List(), selected: "", confirmRemove: "", confirmReset: false } else v
 pure def stepAnInvalidatedKeyForgetsTheList(before: Vault, via: str, after: Vault): bool =
   after.phase == Damaged implies after.entries.length() == 0
 pure def sometimesDamaged(v: Vault): bool = v.phase == Damaged
@@ -84,6 +85,31 @@ pure def stepLeavingForgetsEverything(before: Vault, via: str, after: Vault): bo
   via == "leavePage" implies (after.phase == Closed and after.entries.length() == 0 and after.task == NoTask and after.observed)
 ```
 
+### An entry opens from the list, and only a listed entry stays open
+
+The entry shown is one the list holds; a lock, a new visit or a list without it closes it.
+
+```quint
+pure def canOpenEntry(v: Vault, id: str): bool = v.phase == Unlocked and v.task == NoTask and v.entries.some(e => e.id == id)
+pure def openEntry(v: Vault, id: str): Vault = { ...v, selected: id, confirmRemove: "" }
+pure def canCloseEntry(v: Vault): bool = v.selected != ""
+pure def closeEntry(v: Vault): Vault = { ...v, selected: "", confirmRemove: "" }
+pure def alwaysTheEntryShownIsListed(v: Vault): bool = v.selected != "" implies v.entries.some(e => e.id == v.selected)
+pure def sometimesAnEntryOpen(v: Vault): bool = v.selected != ""
+```
+
+### Android's Back cancels a pending confirmation first, then closes the entry shown
+
+Back is the vault's while a confirmation or an entry is open; on the list it leaves the page.
+
+```quint
+pure def canCancelConfirm(v: Vault): bool = v.task == NoTask and (v.confirmReset or v.confirmRemove != "")
+pure def cancelConfirm(v: Vault): Vault = { ...v, confirmReset: false, confirmRemove: "" }
+pure def backTaken(v: Vault): bool = canCancelConfirm(v) or canCloseEntry(v)
+pure def stepCancellingStartsNothing(before: Vault, via: str, after: Vault): bool =
+  via == "cancelConfirm" implies (after.task == before.task and after.selected == before.selected)
+```
+
 ## Story: Delete or reset only on purpose
 
 > As the owner, I tap Delete twice to remove a password, and a vault Android can no longer decrypt
@@ -92,7 +118,7 @@ pure def stepLeavingForgetsEverything(before: Vault, via: str, after: Vault): bo
 ### A removal acts on the revision the owner selected, after a second tap
 
 ```quint
-pure def canAskRemove(v: Vault, id: str): bool = v.phase == Unlocked and v.task == NoTask and v.entries.some(e => e.id == id)
+pure def canAskRemove(v: Vault, id: str): bool = v.phase == Unlocked and v.task == NoTask and v.selected == id and v.entries.some(e => e.id == id)
 pure def askRemove(v: Vault, id: str): Vault = { ...v, confirmRemove: id }
 pure def stepRemovingNeedsTheSecondTap(before: Vault, via: str, after: Vault): bool =
   (via == "beginTask" and after.task == Removing) implies (before.confirmRemove != "")

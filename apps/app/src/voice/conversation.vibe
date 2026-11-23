@@ -3,14 +3,15 @@ import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, t
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
+import { ResidentControl } from "../platform/resident-control.vibe"
 import { ResidentFeeds } from "../platform/view-events.vibe"
 import { Machine, active, endpointerOf, openMicHangoverMs, profileOf, running, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { readingMayStart } from "../../gen/voice__speech.effect.vibe"
 import { Microphone } from "./capture.vibe"
 import { Dictation } from "./dictation.vibe"
-import { refusalOf } from "./failure.vibe"
-import { newId } from "./ids.ts"
+import { callCaused, cancelledByPhone, pausedByPhone, refusalOf } from "./failure.vibe"
+import { newId } from "../platform/ids.ts"
 import { Latency } from "./latency.vibe"
 import { Listener, type InvocationScreen } from "./listener.vibe"
 import { CloudSpeechEvent, CloudSpeechStarted, ClefTurnAnswer, EndOfTurnScore, LiveCaptureEnded, LiveCaptureStarted, LiveCaptureStatus, RecordingClip, RecordingStarted, TranscriptReply, VoiceTurnReply } from "./native.schema.vibe"
@@ -81,9 +82,9 @@ const QUIET_RETRY_WAIT_MS = 2000
 const LONG_WAIT_SECONDS = 30
 const decode = <A>(schema: Schema.Decoder<A>, raw: unknown) => Option.getOrUndefined(Schema.decodeUnknownOption(schema)(raw))
 
-function envelope(sessionId: string, turnId: string, phase: "speech-start" | "speech-end" | "final" | "error", text?: string) {
+function envelope(sessionId: string, turnId: string, phase: "speech-start" | "speech-end" | "partial" | "final" | "error", text?: string, seq?: number) {
   return { type: "event", event: { type: "agent_event", stream: VOICE_TRANSCRIPT_STREAM,
-    payload: { type: VOICE_TRANSCRIPT_STREAM, sessionId, turnId, phase, ...(text === undefined ? {} : { text }) } } }
+    payload: { type: VOICE_TRANSCRIPT_STREAM, sessionId, turnId, phase, ...(text === undefined ? {} : { text }), ...(seq === undefined ? {} : { seq }) } } }
 }
 
 function shownPhaseOf(phase: string): SessionPhase | "idle" | "error" {
@@ -99,6 +100,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   const held = try Machine
   const native = try Native
   const resident = try Resident
+  const control = try ResidentControl
   const feeds = try ResidentFeeds
   const cloud = try Cloud
   const routes = try VoiceRoute
@@ -135,6 +137,18 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     const state = try held.get()
     if (phase === "error") {
       const facts = refusalOf(lastCause, 0)
+      if (callCaused(facts)) {
+        if (try send({ type: "callStarted" })) try retire(true)
+        return
+      }
+      if (pausedByPhone(facts)) {
+        if (try send({ type: "hidden" })) try retire(true)
+        return
+      }
+      if (cancelledByPhone(facts)) {
+        if (try send({ type: "stop", media: true })) try retire(true)
+        return
+      }
       const transient = facts.status === 503 || facts.status === 429
       try send({ type: "sessionFailed", transient, longWait: (facts.retryAfterSeconds ?? 0) > LONG_WAIT_SECONDS })
       if ((try held.get()).shown === "Retrying") {
@@ -152,13 +166,23 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     run(follow())
   }
 
-  effect function captureLive(captureId: string, sessionId: string, start: VoiceStart, ticket: number, events: CaptureEvents) {
-    const raw = native.invoke("AlphaVoiceCloud", "startLiveCapture", { captureId, sessionId, echoCancel: true, nativeAsr: true, roomId: start.roomId, endHangoverMs: openMicHangoverMs }) catch effect (error) => {
+  effect function captureLive(captureId: string, start: VoiceStart, ticket: number, events: CaptureEvents) {
+    const session = try control.session()
+    if (session === undefined) {
+      lastCause = { code: "no-session" }
+      return events.failed(lastCause)
+    }
+    const raw = native.invoke("AlphaVoiceCloud", "startLiveCapture", { captureId, ownerId: session.owner, echoCancel: true, nativeAsr: true, roomId: start.roomId, endHangoverMs: openMicHangoverMs }) catch effect (error) => {
       lastCause = error
       return undefined
     }
     const opened = decode(LiveCaptureStarted, raw)
     if (opened === undefined || opened.captureId !== captureId) return events.failed(lastCause)
+    if (opened.nativeAsr === false) {
+      native.invoke("AlphaVoiceCloud", "stopLiveCapture", { captureId, discard: true }) catch () => undefined
+      lastCause = { code: "native-asr-unavailable" }
+      return events.failed(lastCause)
+    }
     capturing = true
     try microphone.opened(ticket)
     events.opened({ echoCancelled: opened.echoCancelled })
@@ -166,7 +190,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     const ended = Option.getOrUndefined(Stream.runHead(ends) catch () => Option.none())
     if (!capturing) return
     capturing = false
-    lastCause = { code: decode(LiveCaptureEnded, ended)?.reason ?? "capture-ended" }
+    lastCause = { code: decode(LiveCaptureEnded, ended)?.error ?? "capture-ended" }
     events.failed(lastCause)
   }
 
@@ -182,20 +206,30 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     try microphone.opened(ticket)
     events.opened({ echoCancelled: started.echoCancelled === true })
     let turn = newId()
+    let seq = 0
     for try (const value of native.listen("AlphaCloudSpeechStream", "cloudSpeechEvent")) {
       if (!capturing) break
       const event = decode(CloudSpeechEvent, value)
       if (event === undefined || event.sessionId !== sessionId) continue
       if (event.type === "error") {
-        lastCause = { code: event.code ?? "cloud-stream" }
+        lastCause = { code: event.code ?? "cloud-stream", ...(event.status === undefined ? {} : { status: event.status }), ...(event.data === undefined ? {} : { data: event.data }) }
         capturing = false
         emit(envelope(sessionId, turn, "error"))
         events.failed(lastCause)
         break
       }
-      if (event.type === "speech-start") { turn = newId(); emit(envelope(sessionId, turn, "speech-start")) }
+      if (event.type === "speech-start") {
+        turn = newId()
+        seq = 0
+        emit(envelope(sessionId, turn, "speech-start"))
+      }
+      if (event.type === "transcript" && event.final !== true && event.text !== undefined) {
+        seq += 1
+        emit(envelope(sessionId, turn, "partial", event.text, seq))
+      }
+      const heardFinal = (event.type === "speech-end" && event.text !== undefined) || (event.type === "transcript" && event.final === true)
       if (event.type === "speech-end") emit(envelope(sessionId, turn, "speech-end"))
-      if (event.type === "transcript") {
+      if (heardFinal) {
         try latency.mark("AsrFinal")
         emit(envelope(sessionId, turn, "final", event.text ?? ""))
       }
@@ -259,7 +293,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         const ticket = runSync(microphone.acquire("AssistantCapture"))
         if (ticket === undefined) return events.failed({ code: "microphone-refused" })
         const opening = effect {
-          if (route === "Device") try captureLive(captureId, sessionId, start, ticket, events)
+          if (route === "Device") try captureLive(captureId, start, ticket, events)
           else if (route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))) try captureStream(sessionId, try routes.account(), ticket, events)
           else try captureBatch(sessionId, ticket, events)
         }
@@ -284,7 +318,8 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       speak(segments: readonly string[], events: SpeakerEvents) {
         run(effect {
           try latency.mark("TtsStart")
-          speech.speakPieces(segments.flatMap((segment) => { const plan = planReply(segment); return plan.kind === "speak" ? plan.pieces : [] }), () => sync(() => { events.segmentPlayed(); follows() }))
+          const turn = try latency.nativeTurn()
+          speech.speakPieces(segments.flatMap((segment) => { const plan = planReply(segment); return plan.kind === "speak" ? plan.pieces : [] }), () => sync(() => { events.segmentPlayed(); follows() }), turn)
             catch (error) => { events.broke(error); follows() }
           try latency.finish("Answered")
         })

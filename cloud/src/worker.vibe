@@ -1,7 +1,37 @@
 // spec/cloud/index.md, "Story: Use inference on my subscription or funded pilot account"; spec/cloud/index.md, "Story: Sign in to the Cloud"; spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
-import { cloudWorker, type CloudBindings } from "@elizaos/cloud/worker"
+import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud/worker"
+import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
 
-/** Alpha Cloud's API Worker: upstream's whole Cloud Worker with no product extension, reading its profile from CLOUD_PROFILE, its return pages from ASSETS and its web-origin requests through the edge's X-Forwarded-Host. */
-export const alphaCloudWorker = cloudWorker<CloudBindings>()
+/** The API Worker's bindings: upstream's, with the profile read from the static assets and pinned by its digest, since the profile is larger than a Worker variable may be. */
+export type AlphaCloudBindings = Omit<CloudBindings, "CLOUD_PROFILE" | "ASSETS"> & {
+  readonly CLOUD_PROFILE_SHA256: string
+  readonly ASSETS: AssetFetcher
+}
+
+const upstream = cloudWorker<CloudBindings>()
+const profiled = new WeakMap<object, CloudBindings>()
+
+async function bindingsOf(env: AlphaCloudBindings): Promise<CloudBindings | undefined> {
+  const known = profiled.get(env)
+  if (known !== undefined) return known
+  const profile = await readProfileAsset(env.ASSETS, env.CLOUD_PROFILE_SHA256)
+  if (profile === undefined) return undefined
+  const bound = { ...env, CLOUD_PROFILE: profile } as unknown as CloudBindings
+  profiled.set(env, bound)
+  return bound
+}
+
+/** Alpha Cloud's API Worker: upstream's whole Cloud Worker with no product extension, its profile from the ASSETS copy that CLOUD_PROFILE_SHA256 names, its return pages from ASSETS and its web-origin requests through the edge's X-Forwarded-Host. */
+export const alphaCloudWorker = {
+  async scheduled(event: { readonly scheduledTime: number }, env: AlphaCloudBindings): Promise<void> {
+    const bound = await bindingsOf(env)
+    if (bound === undefined) throw new Error("Alpha Cloud's profile asset is missing or differs from CLOUD_PROFILE_SHA256")
+    await upstream.scheduled(event, bound)
+  },
+  async fetch(request: Request, env: AlphaCloudBindings, execution?: WorkerExecution): Promise<Response> {
+    const bound = await bindingsOf(env)
+    return bound === undefined ? profileUnavailable() : upstream.fetch(request, bound, execution)
+  },
+}
 
 export default alphaCloudWorker

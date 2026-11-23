@@ -4,6 +4,8 @@
     "records": {
       "prefixes": [
         "/api/notes/state",
+        "/api/notes/interact",
+        "/api/notes/trash",
         "/api/views/notes/interact",
         "/api/lifeops/calendar"
       ],
@@ -22,7 +24,18 @@
             "POST"
           ],
           "paths": [
+            "/api/notes/interact",
+            "/api/notes/trash/erase",
+            "/api/notes/trash/recordings/complete",
             "/api/views/notes/interact"
+          ]
+        },
+        {
+          "methods": [
+            "GET"
+          ],
+          "paths": [
+            "/api/notes/trash/recordings"
           ]
         },
         {

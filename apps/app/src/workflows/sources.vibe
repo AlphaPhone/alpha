@@ -1,7 +1,8 @@
-// spec/workflows/digestSources.md, "Story: Let my digest read Google through Cloud only as I authorized"; spec/workflows/digestSources.md, "Story: Let my digest read my phone's Calendar and reminders only with my consent"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/digestSources.md, "Story: Choose exactly what a Google source reads"
+// spec/workflows/digestSources.md, "Story: Let my digest read Google through Cloud only as I authorized"; spec/workflows/digestSources.md, "Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed"; spec/workflows/digestSources.md, "Story: Let my digest read my phone's Calendar and reminders only with my consent"; spec/workflows/digestSources.md, "Story: Renew my phone source before its week ends"; spec/workflows/digestSources.md, "Story: Choose exactly what a Google source reads"
 import type { DigestLoop, DigestSource, HostedNativeSelection } from "@elizaos/plugin-workflow/digests"
 import {
-  type Impact, type PhoneSourceProblem, type RenewalAction, Machine, phoneSourceProblem, renewalAction, renewalArmed, revokeConfirmable, sourceRegistered, stored,
+  type Impact, type PhoneSourceProblem, type RenewalAction, Machine, canRevokeGrant, canRevokeNamedGrant, phoneSourceProblem, renewalAction, renewalArmed, revokeConfirmable,
+  sourceRegistered, stored,
   type Selection, validSelection,
 } from "../../gen/workflows__digestSources.effect.vibe"
 import { Build } from "../platform/build.vibe"
@@ -10,7 +11,8 @@ import { ownerKey } from "../platform/storage.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { WorkflowApi, decoded } from "./api.vibe"
 import { Digests } from "./digests.vibe"
-import { deviceZone, instant, newId, sha256Hex } from "./ids.ts"
+import { deviceZone, instant, sha256Hex } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
 import { ConsentReply, DelegationRequest, PhoneCalendarList, ReadAccess, RenewalTapRecord, RevokeReply, SourceIdentity } from "./wire.schema.vibe"
 
 export const SOURCES_KEY = ownerKey("device", "workflows/digest-sources")
@@ -78,6 +80,8 @@ export service DigestSourcesService {
   cancelGrant(): void!!
   /** The saved sources and digests that read through Google, as removing access would stop them. */
   revokeImpact(): ReadonlyArray<ImpactRow>!!
+  /** Open the removal review of the grant `grantId` that Account named, or of this session's own grant for "": what removing it would stop reading. */
+  reviewRemoval(grantId: string): ReadonlyArray<ImpactRow>!!
   /** Remove Google access after the owner reviewed `reviewed`; a changed list is not revoked. */
   revokeGrant(reviewed: ReadonlyArray<ImpactRow>): RevokeOutcome!!
   /** The phone's calendars a phone source may read, asking for read access first. */
@@ -128,7 +132,7 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
   const build = try Build
   const digests = try Digests
   const android = build.info.variant !== "browser"
-  const delegation = try Ref.make({ state: "", sessionId: "", grantId: "" })
+  const delegation = try Ref.make({ state: "", sessionId: "", grantId: "", named: "" })
   const offered = try Ref.make<ReadonlyArray<PhoneCalendar>>([])
 
   effect function sessionId() {
@@ -217,7 +221,7 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
     effect bind() {
       const id = try sessionId()
       if (id === "" || (try Ref.get(delegation)).sessionId === id) return
-      try Ref.set(delegation, { state: "", sessionId: id, grantId: "" })
+      try Ref.set(delegation, { state: "", sessionId: id, grantId: "", named: "" })
       try Ref.set(offered, [])
       const generation = (try held.get()).session + 1
       held.send({ type: "selectSession", session: generation }) catch () => undefined
@@ -258,9 +262,18 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
       if (state !== "") delegate("cancel", { state, confirmed: true }) catch () => undefined
     },
     revokeImpact: impact,
+    effect reviewRemoval(grantId: string) {
+      try now()
+      try Ref.update(delegation, (d) => ({ ...d, named: grantId }))
+      try digests.poll(true)
+      return try impact()
+    },
     effect revokeGrant(reviewed: ReadonlyArray<ImpactRow>) {
-      const { grantId } = try Ref.get(delegation)
+      const { grantId: own, named } = try Ref.get(delegation)
+      const grantId = named !== "" ? named : own
       if (grantId === "") return "unconfirmed" satisfies RevokeOutcome
+      const before = try held.get()
+      if (!(named !== "" ? canRevokeNamedGrant(before, true) : canRevokeGrant(before, true))) return "unconfirmed" satisfies RevokeOutcome
       try digests.poll(true)
       if (!sameRows(reviewed, try impact())) return "changed" satisfies RevokeOutcome
       const answer = try (effect {
@@ -268,8 +281,9 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
         const reply = try decoded(RevokeReply, route, try agent.request("POST", route, { grantId, confirmed: true }))
         return reply.remoteRevocation === "confirmed"
       } catch () => false)
-      held.send({ type: "revokeGrant", confirmed: answer }) catch () => undefined
-      if (answer) try Ref.update(delegation, (d) => ({ ...d, grantId: "" }))
+      if (named !== "") held.send({ type: "revokeNamedGrant", confirmed: answer && named === own }) catch () => undefined
+      else held.send({ type: "revokeGrant", confirmed: answer }) catch () => undefined
+      if (answer) try Ref.update(delegation, (d) => ({ ...d, grantId: d.grantId === grantId ? "" : d.grantId, named: "" }))
       return answer ? "revoked" : "unconfirmed"
     },
     effect phoneCalendars() {
@@ -357,6 +371,13 @@ export const digestSources = Layer.provideMerge(Layer.effect(DigestSourcesServic
 /** The route Workflows opens a renewal review of `sourceId` under. */
 export function renewalRoute(sourceId: string): string {
   return `renew:${sourceId}`
+}
+
+/** The grant a `google-removal/<grantId>` route from Account names, or undefined for any other route. */
+export function removalGrantOf(route: string): string | undefined {
+  if (!route.startsWith("google-removal/")) return undefined
+  const grantId = route.slice("google-removal/".length).replace(/%3A/gi, ":")
+  return /^[A-Za-z0-9._:-]{1,200}$/.test(grantId) ? grantId : undefined
 }
 
 /** Resolves each renewal reminder tap Android reports, opening Workflows at that source's renewal review, for as long as the layer lives. */

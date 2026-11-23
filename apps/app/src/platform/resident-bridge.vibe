@@ -3,7 +3,8 @@ import type { RuntimeJsonBridge, RuntimeStatus, RuntimeStreamFrame } from "@eliz
 import type { AgentStatus, AgentStreamData, AgentStreamEnd, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
 import { abortOutcome, runtimePhaseOf, stopConfirmed, type AbortOutcome, type Boot } from "../../gen/platform__resident.effect.vibe"
 import { Machine as Relay, machine as relayMachine, type Event as RelayEvent, type Failure, type Relay as RelayState } from "../../gen/platform__nativeStream.effect.vibe"
-import { bytesOfBase64, jsonBytes, newId } from "./native-capacitor.ts"
+import { bytesOfBase64, jsonBytes } from "./native-capacitor.ts"
+import { newId } from "./ids.ts"
 
 const IDLE_MS = 60000
 const TURN_MS = 600000
@@ -163,7 +164,7 @@ export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body:
       }
     } else if (next.kind === "chunk") {
       const bytes = bytesOfBase64(next.dataBase64)
-      const after = try hear({ type: "chunk", size: bytes === undefined ? -1 : bytes.length })
+      const after = try hear({ type: "chunk", byteCount: bytes === undefined ? -1 : bytes.length })
       if (after.outcome === "Open" && bytes !== undefined) {
         yield { kind: "chunk", data: bytes }
         ended = false

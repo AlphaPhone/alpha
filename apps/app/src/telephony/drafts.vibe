@@ -9,7 +9,7 @@ import {
 } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as MessagesMachine, type OutgoingState } from "../../gen/telephony__messages.effect.vibe"
 import { callerOf, refusalTag, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
-import { newOperationId } from "./ids.ts"
+import { newId as newOperationId } from "../platform/ids.ts"
 import { CloudSession } from "../account/layer.vibe"
 
 /** How long a text Android has only handed to the carrier is watched for the radio's answer. */

@@ -8,6 +8,7 @@ export const screens: AppScreen[] = [];
 export const surfaces: AppSurface[] = [];
 
 export { InlineSheet, type InlineSheetProps } from "./InlineSheet.tsx";
-export { useLayer, perform } from "./useLayer.ts";
+export { useLayer } from "./useLayer.ts";
 export { ShellRoot } from "./ShellRoot.tsx";
 export { CallbackLanding, type CallbackLandingProps } from "./CallbackLanding.tsx";
+export { NotificationsPage, NotificationsSettings, deliveryWord, type NotificationsPageProps, type NotificationsSettingsProps } from "./NotificationsPage.tsx";

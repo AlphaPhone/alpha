@@ -1,9 +1,11 @@
-// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"; spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"
+// spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderTaps.md, "Story: Open the reminder I tapped"; spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"; spec/clock/reminderPage.md, "Story: Step back out of what I have open in Reminders"
 import { useState } from "react";
 import { BellRing, Check, ChevronLeft, CircleAlert, ListTodo, Plus, RefreshCw, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import { canBeginWrite, type ReminderRow, type Reminders } from "../../../gen/clock__reminders.ts";
+import { formShown, type ReminderPage } from "../../../gen/clock__reminderPage.ts";
+import { confirmedSave } from "../../clock/drafts.vibe";
 import type { ReminderDraft } from "../../clock/schedule.ts";
-import { overdue, todos, upcoming } from "../../clock/schedule.ts";
+import { overdue, repeatOf, todos, upcoming } from "../../clock/schedule.ts";
 import { Alert, Button, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListRow, Separator } from "../components/ui/index.ts";
 import { ReminderForm } from "./ReminderForm.tsx";
 import { reminderOutcome } from "./text.ts";
@@ -28,11 +30,19 @@ export type RemindersViewProps = {
   unconfirmed: number;
   /** A tapped reminder whose link is still pending. */
   tapPending: boolean;
-  /** The reminder whose detail is open, if any. */
-  openId?: string;
+  /** What the page has open: the reminder shown, the form and the Reopen question. */
+  page: ReminderPage;
   /** The page's latest instant. */
   now: number;
   onOpen: (id: string | undefined) => void;
+  /** Opens the new-reminder form, or the edit form of the reminder shown. */
+  onOpenForm: (form: "new" | "edit") => void;
+  /** Cancel closes the form; a kept draft stays. */
+  onCloseForm: () => void;
+  /** Asks whether to reopen the completed reminder shown. */
+  onAskReopen: (mode: "open" | "tomorrow") => void;
+  /** Answers or dismisses the Reopen question. */
+  onCloseReopen: () => void;
   onBack: () => void;
   onRefresh: () => void;
   onCreate: (draft: ReminderDraft) => void;
@@ -46,8 +56,6 @@ export type RemindersViewProps = {
   onOpenTap: () => void;
   onDismissTap: () => void;
 };
-
-const SAVED: ReadonlySet<string> = new Set(["Saved", "Updated", "Rescheduled", "AlreadyExists", "AlertUnconfirmed"]);
 
 const when = (at: number) => new Date(at).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -66,7 +74,7 @@ function draftOf(row: ReminderRow | undefined): ReminderDraft {
   today.setHours(0, 0, 0, 0);
   const day = new Date(due);
   day.setHours(0, 0, 0, 0);
-  return { title: row.title, body: row.body, dayOffset: Math.round((day.getTime() - today.getTime()) / 86_400_000), minuteOfDay: due.getHours() * 60 + due.getMinutes(), repeat: "none", alertMinutes: row.hasAlert ? row.alertMinutes : null };
+  return { title: row.title, body: row.body, dayOffset: Math.round((day.getTime() - today.getTime()) / 86_400_000), minuteOfDay: due.getHours() * 60 + due.getMinutes(), repeat: repeatOf(row.rule), alertMinutes: row.hasAlert ? row.alertMinutes : null };
 }
 
 /**
@@ -74,16 +82,14 @@ function draftOf(row: ReminderRow | undefined): ReminderDraft {
  * @model spec/clock/reminders.md
  */
 export function RemindersView(props: RemindersViewProps) {
-  const { reminders, keptNew, keptEdit, discarding, unconfirmed, tapPending, openId, now, onOpen, onBack, onRefresh, onCreate, onContinueCreate, onEdit, onDecide, onReopen, onDelete, onSaveTodo, onTodo, onOpenTap, onDismissTap, onKeep, onDiscard, onDiscardAnswer } = props;
-  const [form, setForm] = useState<"new" | "edit" | undefined>(undefined);
-  const [submitted, setSubmitted] = useState(false);
-  const [reopening, setReopening] = useState<"open" | "tomorrow" | undefined>(undefined);
+  const { reminders, keptNew, keptEdit, discarding, unconfirmed, tapPending, page, now, onOpen, onOpenForm, onCloseForm, onAskReopen, onCloseReopen, onBack, onRefresh, onCreate, onContinueCreate, onEdit, onDecide, onReopen, onDelete, onSaveTodo, onTodo, onOpenTap, onDismissTap, onKeep, onDiscard, onDiscardAnswer } = props;
   const [todo, setTodo] = useState("");
   const saving = reminders.stage !== "WIdle";
-  const saved = submitted && !saving && SAVED.has(typeof reminders.outcome === "object" ? reminders.outcome.tag : "");
-  const editing = form !== undefined && !saved;
-  const openForm = (which: "new" | "edit") => { setForm(which); setSubmitted(false); };
-  const row = reminders.rows.find((r) => r.id === openId);
+  const editing = formShown(page, confirmedSave(reminders));
+  const form = page.form === "EditForm" ? "edit" : "new";
+  const openForm = onOpenForm;
+  const reopening = page.reopen === "ReopenOpen" ? "open" : page.reopen === "ReopenTomorrow" ? "tomorrow" : undefined;
+  const row = reminders.rows.find((r) => r.id === page.detail);
   const outcome = reminderOutcome(reminders.outcome, row?.repeats ?? false);
   const allowed = (kind: Parameters<typeof canBeginWrite>[1], r: ReminderRow) => canBeginWrite(reminders, kind, r.id, r.revision);
   const listed = (rows: ReminderRow[]) => rows.map((r) => (
@@ -140,9 +146,9 @@ export function RemindersView(props: RemindersViewProps) {
           saving={saving}
           kept={formKept}
           onChange={(draft) => onKeep(form === "edit" ? "edit" : "new", draft)}
-          onCancel={() => setForm(undefined)}
+          onCancel={onCloseForm}
           onDiscard={() => onDiscard(form === "edit" ? "edit" : "new")}
-          onSave={(draft) => { if (form === "edit" && row) onEdit(row, draft); else onCreate(draft); setSubmitted(true); }}
+          onSave={(draft) => { if (form === "edit" && row) onEdit(row, draft); else onCreate(draft); }}
         />
       ) : row ? (
         <section className="flex flex-col gap-4">
@@ -151,8 +157,8 @@ export function RemindersView(props: RemindersViewProps) {
           <div className="flex flex-wrap gap-2">
             {allowed("DoneWrite", row) && <Button disabled={saving} onClick={() => onDecide(row, "done")}><Check aria-hidden className="size-4" />Done</Button>}
             {allowed("SnoozeWrite", row) && <Button variant="secondary" disabled={saving} onClick={() => onDecide(row, "snooze")}>Snooze</Button>}
-            {allowed("ReopenWrite", row) && <Button variant="secondary" disabled={saving} onClick={() => setReopening("open")}><RotateCcw aria-hidden className="size-4" />Reopen</Button>}
-            {allowed("ReopenWrite", row) && <Button variant="outline" disabled={saving} onClick={() => setReopening("tomorrow")}>Tomorrow</Button>}
+            {allowed("ReopenWrite", row) && <Button variant="secondary" disabled={saving} onClick={() => onAskReopen("open")}><RotateCcw aria-hidden className="size-4" />Reopen</Button>}
+            {allowed("ReopenWrite", row) && <Button variant="outline" disabled={saving} onClick={() => onAskReopen("tomorrow")}>Tomorrow</Button>}
             {allowed("EditWrite", row) && <Button variant="outline" disabled={saving} onClick={() => openForm("edit")}>Edit</Button>}
             {allowed("DeleteWrite", row) && <Button variant="ghost" aria-label="Delete reminder" disabled={saving} onClick={() => onDelete(row)}><Trash2 aria-hidden className="size-4" /></Button>}
           </div>
@@ -202,17 +208,17 @@ export function RemindersView(props: RemindersViewProps) {
           <DialogTitle>Discard unsaved reminder?</DialogTitle>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => onDiscardAnswer(false)}>Keep</Button>
-            <Button variant="destructive" onClick={() => { onDiscardAnswer(true); setForm(undefined); }}>Discard</Button>
+            <Button variant="destructive" onClick={() => { onDiscardAnswer(true); onCloseForm(); }}>Discard</Button>
           </div>
         </DialogContent>
       </Dialog>
-      <Dialog open={reopening !== undefined && row !== undefined} onOpenChange={(open) => { if (!open) setReopening(undefined); }}>
+      <Dialog open={reopening !== undefined && row !== undefined} onOpenChange={(open) => { if (!open) onCloseReopen(); }}>
         <DialogContent>
           <DialogTitle>Reopen?</DialogTitle>
           <p className="text-sm text-muted-foreground">{reopening === "open" ? "No alert" : "Alert tomorrow at the same time"}</p>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setReopening(undefined)}><Undo2 aria-hidden className="size-4" />Cancel</Button>
-            <Button onClick={() => { if (row && reopening) onReopen(row, reopening); setReopening(undefined); }}>Reopen</Button>
+            <Button variant="ghost" onClick={onCloseReopen}><Undo2 aria-hidden className="size-4" />Cancel</Button>
+            <Button onClick={() => { if (row && reopening) onReopen(row, reopening); onCloseReopen(); }}>Reopen</Button>
           </div>
         </DialogContent>
       </Dialog>

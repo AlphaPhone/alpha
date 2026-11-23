@@ -26,13 +26,16 @@ bound to the agent session that listed it.
 
 Opening a view (Settings included, which is navigation and never a settings
 write), creating a note, opening a typed address in Browser, taking a photo
-and opening a file may run directly; creating a reminder and reading notes
-always need review. An operation that would change a setting never becomes
+and opening a file may run directly; creating a reminder, reading notes,
+reading or changing Calendar, changing files (share, move, trash, a new
+folder), changing Photos, and calls, texts and contact changes always need
+review. An operation that would change a setting never becomes
 a card. A Browser open needs the address the owner typed and runs at most
 once per message.
 
 ```quint
-type Op = OpenView | OpenSettings | CreateNote | BrowserNavigate | CameraCapture | FilesOpen | CreateReminder | NotesRead | SettingsWrite
+type Op = OpenView | OpenSettings | CreateNote | BrowserNavigate | CameraCapture | FilesOpen | CreateReminder | NotesRead
+  | CalendarRead | CalendarWrite | FilesChange | PhotosChange | CommsAct | SettingsWrite
 type Preference = PreferenceOff | PreferenceOn | PreferenceUnreadable
 type Journal = JournalEmpty | JournalReserved | JournalApplying | JournalTerminal
 type Authority = NoAuthority | ByReview | ByRequest
@@ -56,7 +59,9 @@ pure val initial: Custody = {
   admitted: false, at: benign, route: NoRoute, session: 0, cardSession: 0,
 }
 pure def directOp(op: Op): bool = op == OpenView or op == OpenSettings or op == CreateNote or op == BrowserNavigate or op == CameraCapture or op == FilesOpen
-pure def reviewedOp(op: Op): bool = op == CreateReminder or op == NotesRead
+pure def reviewedOp(op: Op): bool =
+  op == CreateReminder or op == NotesRead or op == CalendarRead or op == CalendarWrite or op == FilesChange or op == PhotosChange or op == CommsAct
+pure def lawAReviewedClassIsNeverDirect(op: Op): bool = reviewedOp(op) implies not(directOp(op))
 pure def parses(op: Op): bool = directOp(op) or reviewedOp(op)
 pure def valid(c: Custody): bool = c.fresh and not(c.sensitive or c.expired or c.aborted)
 pure def asks(c: Custody): bool = c.reviewFirst != PreferenceOff
@@ -247,4 +252,26 @@ pure def lawAnUntypedNumberNeverDials(typed: bool): bool = typed or not(keypadDi
 pure def lawOnePhotoPerMessage(own: bool, length: int): bool = not(photoDirect(own, length, true))
 pure def lawAnAmbiguousTabNeedsTheOwner(grounded: bool, command: bool): bool = not(browserDirect(grounded, command, true))
 pure val lengthValues = Set(0, 1, 512, 513)
+```
+
+### A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it
+
+Closing every Browser tab is offered only as a card that lists the tabs
+that will close, read from Browser on this phone when the card is first
+drawn and bound to that proposal; a private tab is counted, not named, and
+the agent never receives the list (#1443). A proposal whose set cannot be
+listed, or is empty, gets a notice instead of a card ("Close all tabs: …").
+A new review forgets every earlier listing, and approval never reads the
+set again: reading binds a list, and only a card may do that. Its executor
+acts on exactly the listed set or on nothing.
+
+```quint
+type Listing = NotItemized | Unlisted | ListedEmpty | Listed
+pure def cardOffered(l: Listing): bool = l == NotItemized or l == Listed
+pure def noticeInstead(l: Listing): bool = l == Unlisted or l == ListedEmpty
+pure def approvable(l: Listing, listedInLatestReview: bool): bool = l == NotItemized or (l == Listed and listedInLatestReview)
+pure def lawAnUnlistedSetIsNeverACard(l: Listing): bool = (l == Unlisted or l == ListedEmpty) implies not(cardOffered(l))
+pure def lawAnItemizedCardNeedsTheLatestListing(l: Listing): bool = l != NotItemized implies not(approvable(l, false))
+pure def lawEveryOfferIsACardOrANotice(l: Listing): bool = cardOffered(l) or noticeInstead(l)
+pure val lValues = Set(NotItemized, Unlisted, ListedEmpty, Listed)
 ```

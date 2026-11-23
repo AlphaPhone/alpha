@@ -1,5 +1,5 @@
 // spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/passwords.md, "Leaving the page or the app going to the background locks the vault and forgets the visit"
-import { type AppRow, type Page, Machine, appPage, forwardOf, initial, machine, sectionOf } from "../../gen/settings.effect.vibe"
+import { type AppRow, type Page, type Settings, Machine, accessSetupStep, appPage, forwardOf, initial, machine, sectionOf } from "../../gen/settings.effect.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { Build } from "../platform/build.vibe"
 import { Navigation } from "../shell/navigation.vibe"
@@ -22,7 +22,9 @@ export service SettingsPages {
   route(route: string): void!!
   /** Open a page from the one shown, and read what it shows. */
   open(page: Page): void!!
-  /** Android's Back: one page up; false on the root, where Back leaves Settings. */
+  /** The page shown, and the visit it was opened under. */
+  current(): Settings!!
+  /** Android's Back: the vault's or the problem log's own confirmation or entry first, then one page up; false on the root, where Back leaves Settings. */
   back(): boolean!!
   /** Open a licence's details from the list. */
   openLicence(index: number): void!!
@@ -88,8 +90,11 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
       if (opened !== undefined) try entered(section)
     },
     open,
+    current: () => held.get(),
     effect back() {
       const before = try held.get()
+      if (before.page === "Passwords" && (try vault.back())) return true
+      if (before.page === "Problems" && (try diagnostics.back())) return true
       const after = try (held.send({ type: "back" }) catch () => undefined)
       if (after === undefined) return false
       if (before.page === "Passwords") try vault.leave()
@@ -112,7 +117,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
       if (before.page === "Passwords") try vault.leave()
     },
     effect accessSetup() {
-      try permissions.reopen(0)
+      try permissions.reopen(accessSetupStep)
     },
   }
 })

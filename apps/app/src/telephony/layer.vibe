@@ -1,4 +1,4 @@
-// spec/telephony/index.md; spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"; spec/telephony/drafts.md, "Story: Keep what I was asking Alpha"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
+// spec/telephony/index.md; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"; spec/telephony/drafts.md, "Story: Keep what I was asking Alpha"; spec/telephony/comms.md, "Story: See what Alpha is acting on"
 import { machine as actionsMachine } from "../../gen/telephony__actions.effect.vibe"
 import { machine as attentionMachine } from "../../gen/telephony__attention.effect.vibe"
 import { machine as callBarMachine } from "../../gen/telephony__callBar.effect.vibe"
@@ -7,9 +7,11 @@ import { machine as contactsMachine } from "../../gen/telephony__contacts.effect
 import { Machine as DraftsMachine, decodeSender as draftsSender, decodeState as decodeDrafts, initial as draftsInitial, machineOver as draftsOver } from "../../gen/telephony__drafts.effect.vibe"
 import { machine as messagesMachine } from "../../gen/telephony__messages.effect.vibe"
 import { machine as phoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { machine as phoneInfoMachine } from "../../gen/telephony__phoneInfo.effect.vibe"
 import { machine as voicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
 import { telephonyActionsLayer } from "./actions.vibe"
 import { homeAttentionLayer } from "./attention.vibe"
+import { telephonyBackLayer } from "./back.vibe"
 import { bridgesLayer, type TelephonyBridges } from "./bridges.vibe"
 import { callWatchLayer } from "./call-bar.vibe"
 import { commsStageLayer } from "./comms.vibe"
@@ -18,11 +20,15 @@ import { draftSendsLayer } from "./drafts.vibe"
 import { messagesViewLayer } from "./messages.vibe"
 import { ownerKept } from "./owner.vibe"
 import { phoneViewLayer } from "./phone.vibe"
+import { phoneInfoViewLayer } from "./phone-info.vibe"
 import { listAskLayer } from "./list-ask.vibe"
 import { pictureAttachLayer } from "./share.vibe"
 import { deletionUndoLayer } from "./undo.vibe"
 import { voicemailViewLayer } from "./voicemail.vibe"
 
+export { TelephonyBack, type TelephonyApp } from "./back.vibe"
+export { CommsStage, type CardWords, type OpenCard } from "./comms.vibe"
+export { PhoneInfoView } from "./phone-info.vibe"
 export { messagePictureHandoff, messagesShareTarget } from "./share.vibe"
 export { operationPorts } from "./operations.vibe"
 export { TelephonyCalls, VoicemailTranscriber } from "./ports.vibe"
@@ -34,11 +40,19 @@ export const draftsKept = Layer.effect(DraftsMachine, effect {
   return { ...inner, changes: Stream.merge(inner.changes, Stream.mapEffect(kept.owners, () => inner.get())) }
 })
 
-/** The comms stage and its open proposal, read and written under whoever is signed in now, and republished when that changes. */
+/**
+ * The comms stage and its open proposal, read and written under whoever is signed in now, and republished when that changes.
+ * A proposal it holds when it is loaded, at start or for the account that signs in, came from the store: it is marked restored.
+ */
 export const commsKept = Layer.effect(CommsMachine, effect {
   const kept = try ownerKept("comms", commsInitial, decodeComms)
   const inner = try commsOver(kept.load, kept.keep)
-  return { ...inner, changes: Stream.merge(inner.changes, Stream.mapEffect(kept.owners, () => inner.get())) }
+  const restore = effect {
+    try (inner.send({ type: "restored" }, "Device") catch () => undefined)
+    return try inner.get()
+  }
+  try restore
+  return { ...inner, changes: Stream.merge(inner.changes, Stream.mapEffect(kept.owners, () => restore)) }
 })
 
 /** One untrusted event and sender through the owner's stored drafts, as the conformance driver reaches them: false where it is refused, the state unchanged. */
@@ -71,7 +85,7 @@ export effect function commsNow() {
 
 /** Every telephony machine: the visit state in memory, and the owner's drafts and stage stored per owner. */
 export const machines = Layer.mergeAll(
-  callBarMachine(), phoneMachine(), voicemailMachine(), messagesMachine(), contactsMachine(), actionsMachine(), attentionMachine(),
+  callBarMachine(), phoneMachine(), phoneInfoMachine(), voicemailMachine(), messagesMachine(), contactsMachine(), actionsMachine(), attentionMachine(),
   draftsKept, commsKept,
 )
 
@@ -79,16 +93,16 @@ export const machines = Layer.mergeAll(
 export function telephonyLayer<E, R>(bridges: Layer.Layer<TelephonyBridges, E, R>) {
   const base = Layer.provideMerge(deletionUndoLayer, Layer.provideMerge(bridges, machines))
   const views = Layer.provideMerge(
-    Layer.mergeAll(callWatchLayer, phoneViewLayer, voicemailViewLayer, draftSendsLayer, contactsViewLayer, commsStageLayer, homeAttentionLayer, listAskLayer),
+    Layer.mergeAll(callWatchLayer, phoneViewLayer, phoneInfoViewLayer, voicemailViewLayer, draftSendsLayer, contactsViewLayer, commsStageLayer, homeAttentionLayer, listAskLayer),
     base,
   )
   const conversations = Layer.provideMerge(Layer.mergeAll(messagesViewLayer, pictureAttachLayer), views)
-  return Layer.provideMerge(telephonyActionsLayer, conversations)
+  return Layer.provideMerge(Layer.mergeAll(telephonyActionsLayer, telephonyBackLayer), conversations)
 }
 
 /**
- * Phone, Messages, Contacts, voicemail, the call bar, the comms stage, Home's cards and the approved actions,
- * over the platform's Native, Build and KeyValueStore, the shell's Foreground, the account's CloudSession and voice's VoiceConversation and Microphone
+ * Phone, Messages, Contacts, voicemail, Settings → Phone, the call bar, the comms stage, Home's cards, in-app Back and the approved actions,
+ * over the platform's Native, Build and KeyValueStore, the shell's Foreground and Navigation, the account's CloudSession and voice's VoiceConversation and Microphone
  * (Files' FilePicker is needed only when attaching). `operationPorts`, `messagesShareTarget` and `messagePictureHandoff` are
  * built over it by the shell; the TelephonyCalls and VoicemailTranscriber ports fall back to refusing defaults until provided.
  */

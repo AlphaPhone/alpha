@@ -150,8 +150,10 @@ pure def sometimesAttached(s: Drafts): bool = s.accounts.some(a => a.open.fields
 
 ### Back sets the draft aside, leaving keeps it open, and Drafts reopens it
 
-Back from the composer moves a meaningful draft to Drafts. Leaving the Inbox only hides the
-composer; the draft is offered again as Continue draft. A shelved draft opens again in the
+Back from the composer moves a meaningful draft to Drafts; a hidden composer does not take Back.
+Leaving the Inbox, by Back, Home or another app, only hides the composer; the draft is offered
+again as Continue draft. Inside the Inbox, Back closes an attachment, then the open message, then a
+selection, then a search, and at the folder list it is the shell's. A shelved draft opens again in the
 composer, after the open one is set aside; an earlier version of an email that was already sent
 opens only after the owner confirms that sending it creates another message.
 

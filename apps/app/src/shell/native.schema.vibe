@@ -79,3 +79,6 @@ export schema LegacyWalkthroughMemory {
 
 /** Android's platform capabilities: whether the Alpha image granted startup access at first boot. */
 export schema PlatformCapabilities { readonly startupPermissionDefaults?: boolean }
+
+/** `Agent.takeInvocation`: whether Android's keyguard shows now; unknown counts as locked natively. */
+export schema KeyguardFacts { readonly locked: boolean }

@@ -10,57 +10,109 @@ all. The location is read through the `ElizaLocation` plugin
 (`checkPermissions`, `getCurrentPosition({ accuracy: "high", maxAge: 300000, timeout: 10000 })`),
 only on a native build and only while "Location for Alpha" is on in Settings
 › Privacy (on by default) and the permission is granted; the assistant
-never asks for the permission itself. Coordinates are rounded to 0.00001°
-(about a meter) and the accuracy to whole meters, and travel as the
-observation's `location` field `{latitude, longitude, accuracyMeters, capturedAt}` (#1418).
+never asks for the permission itself. When GPS has no fix (indoors, or an
+image without a network location provider) the `AlphaNetworkLocation`
+plugin (`locate({ unchangedFrom? })`) resolves the visible Wi-Fi access
+points and cell towers instead, only when asked (#1441). Coordinates are
+rounded to 0.00001° (about a meter) and the accuracy to whole meters, and
+travel as the observation's `location` field
+`{latitude, longitude, accuracyMeters, capturedAt}` with `capturedAt` in
+epoch milliseconds (#1418).
 
 ## Story: Let my agent know where I am when I allow it
 
 > As the owner, I want my ordinary chats to carry my last known location
-> when Location for Alpha is on, so that "near me" and "how long to get
-> home" just work, and I want it gone the moment I turn it off.
+> when Location for Alpha is on, indoors too, so that "near me" and "how
+> long to get home" just work without my message waiting for a fix, and I
+> want it gone the moment I turn it off.
 
 ### A turn carries the location only with the setting on, the permission granted, a screen that is not private and a peer that takes it
 
-The fix sent is at most 30 minutes old. A fix under a minute old is reused;
-otherwise the turn waits at most 1.5 s for a fresh one and goes without it
-when none arrives. The resident connection starts a fix when it connects so
-the first turn has one.
+A turn never waits for the phone's position: it sends the last GPS fix
+when it is at most 30 minutes old, else the last network answer while it
+may still stand, and at most starts one shared background read. Rough
+location is enough, so a GPS read happens at most every 5 minutes, and an
+empty or failed one waits 2 minutes before the next. Turning the setting
+off or losing the permission forgets both.
 
 ```quint
 type Fix = NoFix | HasFix({ ageS: int })
-type Locator = { native: bool, enabled: bool, granted: bool, fix: Fix, reads: int, prompts: int }
-pure val initial: Locator = { native: true, enabled: true, granted: false, fix: NoFix, reads: 0, prompts: 0 }
-pure val reuseS = 60
+type Locator = {
+  native: bool, enabled: bool, granted: bool, gps: Fix, network: Fix,
+  gpsWaitS: int, networkWaitS: int, reads: int, lookups: int, prompts: int, turnWaits: int,
+}
+pure val initial: Locator = {
+  native: true, enabled: true, granted: false, gps: NoFix, network: NoFix,
+  gpsWaitS: 0, networkWaitS: 0, reads: 0, lookups: 0, prompts: 0, turnWaits: 0,
+}
+pure val reuseS = 300
+pure val retryS = 120
 pure val sendableS = 1800
-pure val waitMs = 1500
+pure val networkReuseS = 900
+pure val networkUnchangedS = 3600
+pure val networkRetryS = 120
 pure val platformMaxAgeMs = 300000
 pure val platformTimeoutMs = 10000
 pure val precision = 100000
 pure def ageOf(f: Fix): int = match f { | HasFix(x) => x.ageS | NoFix => -1 }
+pure def aged(f: Fix, seconds: int): Fix = match f { | HasFix(x) => HasFix({ ageS: x.ageS + seconds }) | NoFix => NoFix }
 pure def allowed(l: Locator): bool = l.native and l.enabled and l.granted
-pure def needsRead(l: Locator): bool = allowed(l) and (l.fix == NoFix or ageOf(l.fix) >= reuseS)
-pure def sendsLocation(l: Locator, observed: bool, peerTakesIt: bool): bool =
-  allowed(l) and observed and peerTakesIt and l.fix != NoFix and ageOf(l.fix) <= sendableS
+pure def gpsCurrent(l: Locator): bool = l.gps != NoFix and ageOf(l.gps) <= sendableS
+pure def networkCurrent(l: Locator): bool = l.network != NoFix and ageOf(l.network) <= networkUnchangedS
+pure def located(l: Locator): bool = gpsCurrent(l) or networkCurrent(l)
+pure def usesNetwork(l: Locator): bool = not(gpsCurrent(l)) and networkCurrent(l)
+pure def needsRead(l: Locator): bool = allowed(l) and l.gpsWaitS <= 0
+pure def sendsLocation(l: Locator, observed: bool, peerTakesIt: bool): bool = allowed(l) and observed and peerTakesIt and located(l)
+pure def forgotten(l: Locator): Locator = { ...l, gps: NoFix, network: NoFix, gpsWaitS: 0, networkWaitS: 0 }
 pure def canToggle(l: Locator, on: bool): bool = l.native and l.enabled != on
-pure def toggle(l: Locator, on: bool): Locator = { ...l, enabled: on, fix: if (on) l.fix else NoFix }
+pure def toggle(l: Locator, on: bool): Locator = if (on) { ...l, enabled: true } else { ...forgotten(l), enabled: false }
 pure def canPermissionChanges(l: Locator, granted: bool): bool = l.granted != granted
-pure def permissionChanges(l: Locator, granted: bool): Locator = { ...l, granted: granted, fix: if (granted) l.fix else NoFix }
+pure def permissionChanges(l: Locator, granted: bool): Locator = if (granted) { ...l, granted: true } else { ...forgotten(l), granted: false }
 pure def canRead(l: Locator): bool = needsRead(l)
-pure def read(l: Locator): Locator = { ...l, reads: l.reads + 1 }
+pure def read(l: Locator): Locator = { ...l, reads: l.reads + 1, gpsWaitS: retryS }
 pure def canFixArrives(l: Locator, ageS: int): bool = allowed(l) and l.reads >= 1 and ageS >= 0 and ageS <= platformMaxAgeMs / 1000
-pure def fixArrives(l: Locator, ageS: int): Locator = { ...l, fix: HasFix({ ageS: ageS }) }
-pure def canElapse(l: Locator, seconds: int): bool = seconds >= 1 and l.fix != NoFix
-pure def elapse(l: Locator, seconds: int): Locator = { ...l, fix: HasFix({ ageS: ageOf(l.fix) + seconds }) }
-pure def alwaysNoFixIsKeptWithoutConsent(l: Locator): bool = not(allowed(l)) implies l.fix == NoFix
+pure def fixArrives(l: Locator, ageS: int): Locator = { ...l, gps: HasFix({ ageS: ageS }), gpsWaitS: reuseS }
+pure def canElapse(l: Locator, seconds: int): bool = seconds >= 1
+pure def elapse(l: Locator, seconds: int): Locator =
+  { ...l, gps: aged(l.gps, seconds), network: aged(l.network, seconds), gpsWaitS: l.gpsWaitS - seconds, networkWaitS: l.networkWaitS - seconds }
+pure def alwaysNoFixIsKeptWithoutConsent(l: Locator): bool = not(allowed(l)) implies (l.gps == NoFix and l.network == NoFix)
 pure def alwaysTheAssistantNeverAsksForLocation(l: Locator): bool = l.prompts == 0
+pure def alwaysATurnNeverWaitsForAFix(l: Locator): bool = l.turnWaits == 0
+pure def alwaysAGpsReadBacksOff(l: Locator): bool = l.gpsWaitS <= reuseS
 pure def lawAPrivateScreenNeverSendsLocation(l: Locator, peer: bool): bool = not(sendsLocation(l, false, peer))
-pure def lawAnOldFixIsNeverSent(l: Locator): bool = ageOf(l.fix) > sendableS implies not(sendsLocation(l, true, true))
+pure def lawAnOldFixIsNeverSent(l: Locator): bool = (ageOf(l.gps) > sendableS and not(networkCurrent(l))) implies not(sendsLocation(l, true, true))
+pure def lawAStaleNetworkAnswerIsNeverSent(l: Locator): bool = (not(gpsCurrent(l)) and ageOf(l.network) > networkUnchangedS) implies not(sendsLocation(l, true, true))
 pure def sometimesLocationSent(l: Locator): bool = sendsLocation(l, true, true) and l.reads >= 1
-pure def sometimesTurnedOffForgetsTheFix(l: Locator): bool = l.native and not(l.enabled) and l.fix == NoFix and l.reads >= 1
+pure def sometimesSentFromTheNetwork(l: Locator): bool = sendsLocation(l, true, true) and usesNetwork(l)
+pure def sometimesTurnedOffForgetsTheFix(l: Locator): bool = l.native and not(l.enabled) and l.gps == NoFix and l.network == NoFix and l.reads >= 1
 pure val ageSValues = Set(0, 30, 299)
-pure val secondsValues = Set(1, 60, 1800)
-pure val lValues = Set(initial).union(Set({ ...initial, granted: true, fix: HasFix({ ageS: 1801 }) })).union(Set({ ...initial, granted: true, fix: HasFix({ ageS: 10 }) }))
+pure val secondsValues = Set(1, 120, 1800)
+pure val lValues = Set(initial).union(Set({ ...initial, granted: true, gps: HasFix({ ageS: 1801 }) })).union(Set({ ...initial, granted: true, gps: HasFix({ ageS: 10 }), gpsWaitS: 300 }))
+```
+
+### The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again
+
+Only the resident connection's warm-up, a Maps action or a locate card
+looks up; a chat turn only reads the last answer. The warm-up first waits
+for its GPS read and looks up only when that read left no current fix. An
+answer is reused for 15 minutes; after that the same visible networks keep
+it, confirmed without a request, for up to an hour from when it was
+resolved; a failed lookup is not retried for 2 minutes. An answer Maps
+looked up is the same answer, and a turn carries it too. Only access point
+and cell identities and signal leave the phone, never network names.
+
+```quint
+pure def canLookUp(l: Locator, warm: bool): bool = allowed(l) and warm and not(gpsCurrent(l)) and l.networkWaitS <= 0
+pure def lookUp(l: Locator, warm: bool): Locator = { ...l, lookups: l.lookups + 1, networkWaitS: networkRetryS }
+pure def canNetworkArrives(l: Locator, ageS: int): bool = allowed(l) and ageS >= 0 and ageS <= networkUnchangedS
+pure def networkArrives(l: Locator, ageS: int): Locator = { ...l, network: HasFix({ ageS: ageS }), networkWaitS: networkReuseS }
+pure def canNetworkConfirmed(l: Locator): bool = allowed(l) and l.lookups >= 1 and networkCurrent(l)
+pure def networkConfirmed(l: Locator): Locator = { ...l, networkWaitS: networkReuseS }
+pure def lawATurnNeverLooksUp(l: Locator): bool = not(canLookUp(l, false))
+pure def lawAFreshGpsFixNeedsNoLookup(l: Locator): bool = gpsCurrent(l) implies not(canLookUp(l, true))
+pure def alwaysANetworkLookupBacksOff(l: Locator): bool = l.networkWaitS <= networkReuseS
+pure def sometimesLookedUp(l: Locator): bool = l.lookups >= 1 and usesNetwork(l)
+pure val warmValues = Set(true, false)
 ```
 
 ## Story: Tell my agent what my screen shows, and nothing more

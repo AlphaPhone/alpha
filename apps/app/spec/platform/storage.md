@@ -58,6 +58,11 @@ pure def alwaysAnOwnerNeedsAnAdmittedStartup(s: Storage): bool = (s.owner != "" 
 
 ### A stored value that is not a state is held for review and never written over
 
+Before a value is held, it is copied apart, beside itself in the same owner namespace, so the area
+may start fresh and save new drafts while the damaged copy waits. A value that cannot be copied is
+not held. Resolving the review removes only that copy, never what the area saved since; a reset
+removes it with the rest of the namespace.
+
 ```quint
 pure def canCorruptFound(s: Storage, key: str): bool = s.startupAdmitted and not(s.review.includes(key))
 pure def corruptFound(s: Storage, key: str): Storage = { ...s, review: s.review.append(key) }

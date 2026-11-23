@@ -21,7 +21,9 @@ final class RendererCredentialSlots {
   // SMS send ledger and per-operation records are native-owned.
   "sms-send-ledger", "alpha-sms-operation",
   // The agent device-execution journal and Clock's review marks are reached only through AlphaActionJournal.
-  "device-execution", "clock-agent-review"
+  "device-execution", "clock-agent-review",
+  // Shared password backup recovery keys never leave native code (PasswordSharedBackup).
+  "password-backup-recovery"
  };
  /** Full-match patterns of the draft and pending-action slots that admit compare-and-exchange. */
  private static final String[] COMPARE_EXCHANGE = {

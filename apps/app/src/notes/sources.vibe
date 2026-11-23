@@ -13,7 +13,8 @@ export type SourceNotice = "opened" | "removed" | "unconfirmed" | "mismatch" | "
 /** The web source dialog and the linked attachment of the open note. */
 export service NotesSources {
   openDialog(noteId: string): boolean!!
-  closeDialog(): void!!
+  /** Close the web source dialog; false when it was not open. */
+  closeDialog(): boolean!!
   visit(): SourceNotice!!
   removeWebSource(): SourceNotice!!
   page(active: boolean, visible: boolean): void!!
@@ -69,7 +70,7 @@ const make = effect {
       try Ref.set(opened, { noteId, print })
       return (try sendDialog({ type: "openDialog" })) !== undefined
     },
-    effect closeDialog() { try sendDialog({ type: "closeDialog" }) },
+    effect closeDialog() { return (try sendDialog({ type: "closeDialog" })) !== undefined },
     effect visit() {
       const current = try fresh()
       const acted = try sendDialog({ type: "act", kind: "VisitAction" })

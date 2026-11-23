@@ -18,6 +18,8 @@ export service NotesHandoff {
   readonly requests: Stream.Stream<NotesRequest>
   readonly filters: Stream.Stream<NotesFilter | undefined>
   request(request: NotesRequest): void!!
+  /** Show a filter another app's route asked for, without asking the shell for anything. */
+  showFilter(filter: NotesFilter): void!!
   clearFilter(): void!!
 }
 
@@ -32,6 +34,7 @@ export const handoffLayer = Layer.effect(NotesHandoff, effect {
       if (request.kind === "open-notes" && request.filter !== undefined) try SubscriptionRef.set(filter, request.filter)
       try PubSub.publish(hub, request)
     },
+    showFilter: (asked: NotesFilter) => SubscriptionRef.set(filter, asked),
     clearFilter: () => SubscriptionRef.set(filter, undefined),
   }
 })

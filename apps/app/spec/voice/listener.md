@@ -155,7 +155,9 @@ pure def sometimesUnboundAfterATake(l: Listener): bool = not(l.bound) and l.take
 ### A pending power press is discarded, never kept, while the screen cannot start voice
 
 A hidden screen, an open dialog, a connection prompt or voice already running discards it before
-any invocation is taken, so it cannot start voice later.
+any invocation is taken, so it cannot start voice later. The protected power launch that started
+Alpha cold is settled once: claimed for the signed-in account before any other invocation is taken,
+or discarded with the first press a blocked screen discards.
 
 ```quint
 pure def screenFree(visible: bool, dialogOpen: bool, connectionPrompt: bool, voiceActive: bool): bool =

@@ -11,10 +11,13 @@ so every other area can fence a request or a result to the account it was made f
 > As the owner, I sign in to Eliza Cloud once on my phone, and my agent keeps running on the phone
 > whatever happens to my sign-in, so that Cloud only adds managed services and never replaces my agent.
 
-### The build addresses one deployment, and staging only with test mocks
+### The build addresses one deployment, and staging only with test mocks or the Cloud resident's browser preview
 
-The deployment and environment are fixed when the session loads. A production build addresses only
-production; staging needs `ELIZA_DEV_ALLOW_TEST_MOCKS=1`.
+The deployment and environment are fixed when the session loads, and they are the platform's
+(spec/platform/index.md, "Staging is reached only by a test-mocks build that chose it, or a browser
+preview of the Cloud resident"), so the session and every Cloud request address one Cloud. A
+production build addresses only production; staging needs `ELIZA_DEV_ALLOW_TEST_MOCKS=1`, or the
+development server's browser preview of the Cloud resident.
 
 ```quint
 type Deployment = ElizaCloud | AlphaCloud
@@ -25,23 +28,23 @@ type Waiting = NoNotice | PlainNotice | RestartedNotice
 type Holder = Free | Attempt | SigningOut
 type Account = { userId: str, organizationId: str, credentialId: str, expiresAt: int }
 type Session = {
-  deployment: Deployment, environment: Environment, testMocks: bool, loaded: bool,
+  deployment: Deployment, environment: Environment, testMocks: bool, preview: bool, loaded: bool,
   phase: Phase, account: Account, generation: int, expiryWarning: bool, renewals: int,
   startupResolved: bool, holder: Holder, waiting: Waiting, waitingGeneration: int,
   notices: int, dropped: int, revocation: Revocation, created: bool, priorUnconfirmed: bool
 }
 pure val noAccount: Account = { userId: "", organizationId: "", credentialId: "", expiresAt: 0 }
 pure val initial: Session = {
-  deployment: ElizaCloud, environment: Production, testMocks: false, loaded: false,
+  deployment: ElizaCloud, environment: Production, testMocks: false, preview: false, loaded: false,
   phase: SignedOut, account: noAccount, generation: 0, expiryWarning: false, renewals: 0,
   startupResolved: false, holder: Free, waiting: NoNotice, waitingGeneration: 0,
   notices: 0, dropped: 0, revocation: NoRevocation, created: false, priorUnconfirmed: false
 }
-pure def canLoad(s: Session, deployment: Deployment, environment: Environment, testMocks: bool): bool =
-  not(s.loaded) and (environment == Production or testMocks)
-pure def load(s: Session, deployment: Deployment, environment: Environment, testMocks: bool): Session =
-  { ...s, loaded: true, deployment: deployment, environment: environment, testMocks: testMocks }
-pure def alwaysStagingNeedsTestMocks(s: Session): bool = s.environment == Staging implies s.testMocks
+pure def canLoad(s: Session, deployment: Deployment, environment: Environment, testMocks: bool, preview: bool): bool =
+  not(s.loaded) and (environment == Production or testMocks or preview)
+pure def load(s: Session, deployment: Deployment, environment: Environment, testMocks: bool, preview: bool): Session =
+  { ...s, loaded: true, deployment: deployment, environment: environment, testMocks: testMocks, preview: preview }
+pure def alwaysStagingNeedsTestMocksOrThePreview(s: Session): bool = s.environment == Staging implies (s.testMocks or s.preview)
 pure def alwaysNothingBeforeLoad(s: Session): bool = not(s.loaded) implies (s.phase == SignedOut and s.holder == Free)
 pure def sometimesStaging(s: Session): bool = s.environment == Staging and s.phase == SignedIn
 ```
@@ -254,4 +257,29 @@ pure def lawNoAgentIsHostedOrPaired(testMocks: bool, deployment: Deployment): bo
   not(routeAdmitted(HostedAgentRoute, testMocks, deployment)) and not(routeAdmitted(PairingRoute, testMocks, deployment))
 pure def lawTheHandOffNeedsTestMocks(deployment: Deployment): bool = not(routeAdmitted(HandOffRoute, false, deployment))
 pure def lawAlphaCloudSellsNoCredits(testMocks: bool): bool = not(routeAdmitted(FundsRoute, testMocks, AlphaCloud))
+```
+
+## Story: Talk to my agent from the power button at cold start
+
+> As the owner, a long press of the power button on the Alpha image while the phone starts opens
+> voice only for the account I am signed in to, and never while sign-in or setup holds the phone.
+
+### A protected power launch is claimed only for a settled, quiet production account with its agent connected
+
+The account reference names the Cloud environment, the user and the organization, and is given
+only once startup has settled, nothing is being signed in or out, the account's key may be used,
+the environment is production and the agent is connected; the ids must be well-formed. Until
+startup settles with nothing interactive open, the first restore is still pending and the launch
+waits for it rather than being discarded.
+
+```quint
+pure def restorePending(settled: bool, interactive: bool): bool = not(interactive) and not(settled)
+pure def powerLaunchClaimable(settled: bool, interactive: bool, busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
+  settled and not(interactive) and not(busy) and usable and production and connected and wellFormedIds
+pure def lawAnInteractivePhoneNeverClaims(settled: bool, busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
+  not(powerLaunchClaimable(settled, true, busy, usable, production, connected, wellFormedIds))
+pure def lawStagingNeverClaims(settled: bool, interactive: bool, busy: bool, usable: bool, connected: bool, wellFormedIds: bool): bool =
+  not(powerLaunchClaimable(settled, interactive, busy, usable, false, connected, wellFormedIds))
+pure def lawAPendingRestoreIsNeverClaimed(busy: bool, usable: bool, production: bool, connected: bool, wellFormedIds: bool): bool =
+  restorePending(false, false) and not(powerLaunchClaimable(false, false, busy, usable, production, connected, wellFormedIds))
 ```

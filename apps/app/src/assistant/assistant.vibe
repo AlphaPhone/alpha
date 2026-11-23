@@ -1,16 +1,17 @@
-// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"
-import { Machine as DockMachine, swallowWindow, type Detent, type Dock, type Surface } from "../../gen/assistant__dock.effect.vibe"
-import { chatOf, restOf, type Detent as ShellDetent, type Nav } from "../../gen/shell__navigation.effect.vibe"
+// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/index.md, "Back closes what the assistant opened before it leaves the assistant"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"
+import { Machine as DockMachine, swallowWindow, type Dock, type Surface } from "../../gen/assistant__dock.effect.vibe"
+import type { Detent } from "../../gen/assistant__detents.ts"
+import { chatOf, restOf, type Nav } from "../../gen/shell__navigation.effect.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
 import { Machine as DraftsMachine, shown, slotOf, type Drafts } from "../../gen/assistant__draft.effect.vibe"
-import { Machine as SummonsMachine, startsVoice, type Origin } from "../../gen/assistant__entry.effect.vibe"
+import { Machine as SummonsMachine, closesSurface, startsVoice, takesLaunch, type Origin } from "../../gen/assistant__entry.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { AttachmentRefused, ChatAttachments, type Picked } from "./attachments.vibe"
 import { Composer } from "./composer.vibe"
 import { ChatSearch } from "./search.vibe"
 import { AssistantHost } from "./host.vibe"
-import { AssistInvocation } from "./payloads.schema.vibe"
+import { AssistInvocation, SurfaceLaunch } from "./payloads.schema.vibe"
 import { unitsOf } from "./units.vibe"
 import type { ChatFile } from "./transcript.vibe"
 
@@ -35,6 +36,30 @@ export service Assistant {
   requestVoice(): void!!
   /** Follow Android's assist invocations, and keep the dock, the conversation and search in step with the shell, for as long as it runs. */
   follow(): void!!
+  /** Back while the assistant is in front: close search, then drop a reply or edit aim; false when Back is the shell's. */
+  back(): boolean!!
+  /** Each question a Messages or Phone list bar asked through the `comms:<key>:ask:<text>` route, and whether a turn took it. */
+  readonly commsAsks: Stream.Stream<CommsAsk>
+}
+
+/** A list-bar question the assistant was asked from Messages or Phone, and whether it was taken. */
+export interface CommsAsk {
+  readonly key: string
+  readonly taken: boolean
+}
+
+/** The list-bar question a route names, or undefined for any other route. */
+export function commsAskOf(route: string | undefined): { readonly key: string; readonly text: string } | undefined {
+  const found = route === undefined ? null : /^comms:([^:]+):ask:(.+)$/s.exec(route)
+  if (found === null) return undefined
+  const key = found[1] ?? ""
+  let text = ""
+  try {
+    text = decodeURIComponent(found[2] ?? "")
+  } catch {
+    text = ""
+  }
+  return key === "" || text.trim() === "" ? undefined : { key, text }
 }
 
 const tickMs = 200
@@ -46,17 +71,7 @@ function holds(state: Drafts): boolean {
 
 /** The surface the dock rests on for the shell's navigation: Home, an app on the bar, or an app on the pill. */
 export function surfaceOf(nav: Nav): Surface {
-  return nav.app === "" ? "HomeView" : restOf(nav.app) === "ChatInput" ? "BarView" : "PillView"
-}
-
-/** The dock's detent for the shell's. */
-export function dockDetentOf(detent: ShellDetent): Detent {
-  return detent === "ChatHidden" ? "Hidden" : detent === "ChatInput" ? "Input" : detent === "ChatSheet" ? "Sheet" : "Full"
-}
-
-/** The shell's detent for the dock's. */
-export function shellDetentOf(detent: Detent): ShellDetent {
-  return detent === "Hidden" ? "ChatHidden" : detent === "Input" ? "ChatInput" : detent === "Sheet" ? "ChatSheet" : "ChatFull"
+  return nav.app === "" ? "HomeView" : restOf(nav.app) === "Input" ? "BarView" : "PillView"
 }
 
 function settledDock(state: Dock): boolean {
@@ -79,7 +94,10 @@ export const assistantLayer = Layer.effect(Assistant, effect {
   const composer = try Composer
   const search = try ChatSearch
   const voice = try PubSub.unbounded<void>()
+  const asks = try PubSub.unbounded<CommsAsk>()
   const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  let surface = false
+  let launchTaken = false
   effect function show(detent: Detent) {
     const state = try dock.get()
     if (state.chat === detent) return
@@ -93,8 +111,22 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     let owner: string | undefined
     let voiced = false
     let locked = false
-    let placed: ShellDetent | undefined
+    let placed: Detent | undefined
+    let routed: string | undefined
     for try (const nav of navigation.changes) {
+      if (nav.host === "AssistantSurface" && !surface) {
+        surface = true
+        fork.detached takeLaunch()
+      }
+      const route = nav.app === "assistant" ? nav.places.find((place) => place.app === "assistant")?.route : undefined
+      const asked = route !== routed ? commsAskOf(route) : undefined
+      routed = route
+      if (asked !== undefined) {
+        fork.detached effect {
+          const taken = try composer.send(asked.text)
+          try PubSub.publish(asks, { key: asked.key, taken })
+        }
+      }
       const view = surfaceOf(nav)
       const before = try dock.get()
       if (before.view !== view && !before.drag.active) try quiet(dock.send({ type: "navigate", view }))
@@ -102,7 +134,7 @@ export const assistantLayer = Layer.effect(Assistant, effect {
       voiced = nav.voice
       const shellChat = chatOf(nav)
       const now = try dock.get()
-      if (placed !== undefined && shellChat !== placed && settledDock(now) && now.chat !== dockDetentOf(shellChat)) try show(dockDetentOf(shellChat))
+      if (placed !== undefined && shellChat !== placed && settledDock(now) && now.chat !== shellChat) try show(shellChat)
       placed = shellChat
       const screen = try host.screen()
       if (screen.exposure.locked !== locked) {
@@ -130,10 +162,11 @@ export const assistantLayer = Layer.effect(Assistant, effect {
       if (!settledDock(state) || state.chat === pushed) continue
       pushed = state.chat
       const nav = try navigation.get()
-      const target = shellDetentOf(state.chat)
+      if (closesSurface(surface, state.chat === "Hidden", nav.app !== "")) native.invoke("DailyApps", "closeAssistant", {}) catch () => undefined
+      const target = state.chat
       if (nav.chat === target || chatOf(nav) === target) continue
       if (!(try navigation.moveChat(target))) {
-        const back = dockDetentOf(chatOf(try navigation.get()))
+        const back = chatOf(try navigation.get())
         if (back !== state.chat) try show(back)
       }
     }
@@ -160,6 +193,15 @@ export const assistantLayer = Layer.effect(Assistant, effect {
       if (voiced) try PubSub.publish(voice, undefined)
     }
   }
+  effect function takeLaunch() {
+    if (!takesLaunch(surface, launchTaken)) return
+    launchTaken = true
+    const said = native.invoke("Agent", "takeInvocation", {}) catch () => undefined
+    const taken = Schema.decodeUnknownOption(SurfaceLaunch)(said)
+    if (Option.isNone(taken) || !taken.value.assistant) return
+    if (taken.value.locked !== false) try quiet(summons.send({ type: "lockChanges", locked: true }))
+    try invoked({ origin: taken.value.invocation ?? "assist", cold: true })
+  }
   return {
     holdingDraftChanges: Stream.changes(Stream.map(drafts.changes, holds)),
     holdingDraft: () => map(drafts.get(), holds),
@@ -175,6 +217,11 @@ export const assistantLayer = Layer.effect(Assistant, effect {
     },
     show,
     requestVoice: () => map(PubSub.publish(voice, undefined), () => undefined),
+    commsAsks: Stream.fromPubSub(asks),
+    back: () => effect {
+      if (try search.close()) return true
+      return try composer.back()
+    },
     follow: () => effect {
       fork.detached ticks()
       fork.detached followShell()

@@ -1,7 +1,7 @@
 // spec/calendar/agent.md, "Story: Return to the event I left Calendar from"; spec/calendar/approvals.md, "Story: Read where a Calendar request stands"; spec/calendar/preservation.md, "Story: Keep my old app calendar, read only, for each account that chose to"; spec/calendar/preservation.md, "Story: Know whether my saved calendar is safe before the agent's Calendar starts"
 import { describe, it } from "@effect/vitest"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { AgentCalendar } from "../../src/calendar/agent.vibe"
+import { AgentCalendar, eventSourceRevision } from "../../src/calendar/agent.vibe"
 import { approvalPresentation } from "../../src/calendar/approvalFields.vibe"
 import { bindCalendar, readCalendar } from "../../src/calendar/binding.vibe"
 import type { ApprovalRecord } from "../../src/calendar/feed.schema.vibe"
@@ -28,9 +28,13 @@ describe("The agent's Calendar (spec/calendar/agent.md, spec/calendar/approvals.
       const begin = Date.parse(event.startAt)
       const found = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin)
       const moved = try calendar.verifyReturn(agentEventKey(event), "etag-2", begin)
+      const sourceRevision = try eventSourceRevision((try calendar.view()).calendars, event)
+      const sameSource = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin, sourceRevision)
+      const otherSource = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin, "0".repeat(64))
       try bindCalendar(otherBinding)
       const foreign = try calendar.verifyReturn(agentEventKey(event), "etag-1", begin)
-      try same([found, moved, foreign === "ReturnFound"], ["ReturnFound", "ReturnMissing", false])
+      try same([found, moved, /^[a-f0-9]{64}$/.test(sourceRevision), sameSource, otherSource, foreign === "ReturnFound"],
+        ["ReturnFound", "ReturnMissing", true, "ReturnFound", "ReturnMissing", false])
     }
   })
 

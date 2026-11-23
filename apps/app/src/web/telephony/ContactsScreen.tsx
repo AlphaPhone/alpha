@@ -8,10 +8,12 @@ import type { ScreenProps } from "../app-screen.ts";
 import { Avatar, Button, EmptyState, Input, ListRow } from "../components/ui/index.ts";
 import { openApp } from "./open.ts";
 import { CommsBar } from "./CommsBar.tsx";
+import { RestoredProposal } from "./RestoredProposal.tsx";
 import { ContactEditor } from "./ContactEditor.tsx";
 import { ContactDetailView } from "./ContactDetailView.tsx";
 import { contactsNoticeText, isAskSentence } from "./present.ts";
 import { runtime, type TelephonyRuntime } from "./runtime.ts";
+import { backIn } from "./back.ts";
 import { useComms } from "./useComms.ts";
 
 export interface ContactsScreenProps extends ScreenProps {
@@ -40,19 +42,9 @@ export function ContactsScreen({ route, runtime: on = runtime }: ContactsScreenP
   const chatOpen = stage.comms.height !== "SheetClosed";
   const notice = contactsNoticeText(c.notice) || (c.gate === "WriteUnsettled" ? "Outcome unknown · refresh Contacts" : "");
   const read = (query: string, explicit = false) => on.runFork(ContactsView.use((v) => v.read(query, explicit)));
-  const back = () => {
-    if (stage.back()) return;
-    if (editor) can({ type: "editorClosed" }) && send({ type: "editorClosed" });
-    else if (c.confirming) send({ type: "deleteDeclined" });
-    else if (c.openId) {
-      send({ type: "contactClosed" });
-      stage.show("ContactsApp", "ListSubject", "contacts:list:");
-    } else if (c.chip) on.runFork(ContactsView.use((v) => v.clearChip()));
-    else if (searching) {
-      setSearching(false);
-      read("");
-    }
-  };
+  const back = () => void backIn("contacts", on).then((took) => {
+    if (!took && searching) setSearching(false);
+  });
   const person = open?.title ?? "";
   return (
     <section ref={visit} aria-label="Contacts" className="flex h-full flex-col bg-background text-foreground">
@@ -130,6 +122,7 @@ export function ContactsScreen({ route, runtime: on = runtime }: ContactsScreenP
           </>
         )}
       </div>
+      <RestoredProposal card={stage.card} onDismiss={stage.decline} />
       <CommsBar
         comms={stage.comms}
         person={person}

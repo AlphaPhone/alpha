@@ -84,7 +84,7 @@ describe("Notification questions (spec/clock/notifications.md, \"Story: Ask Alph
     const own = { id: "reminder-1", revision: "v1", source: "own", kind: "reminder", appLabel: "Alpha Phone", title: "Call", text: "Ask about Friday", at: 1, clearable: true, canOpen: true }
     const mail = { ...own, id: "mail-1", source: "external", kind: "other", appLabel: "Mail", title: "Invoice", text: "Pay now" }
     let items = [own, mail]
-    const assistant = fakeAssistant()
+    const assistant = fakeAssistant(false, false, (id) => items.find((item) => item.id === id && item.source === "own"))
     const phone = fakePhone({ "AlphaNotifications.list": () => ({ items, scope: "device" }) })
     provide Layer.provideMerge(notificationsLayer, machines), phone.layer, assistant.layer {
       const notifications = try Notifications

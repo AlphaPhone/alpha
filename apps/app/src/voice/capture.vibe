@@ -26,7 +26,7 @@ export service Microphone {
   permissionAnswered(granted: boolean): void!!
   /** Whether Alpha runs on the phone, where its settings can allow the microphone. */
   native(): boolean!!
-  /** Open Android's settings for Alpha, where the microphone can be allowed. */
+  /** Open Android's app details page for Alpha, where the microphone permission can be allowed. */
   openAppSettings(): void!!
   /** The last 44 level bars of the recording, while the capture stays open. */
   levels(recordingId: string): Stream.Stream<readonly number[]>
@@ -82,7 +82,7 @@ export const captureService = Layer.effect(Microphone, effect {
     effect foregroundChanged(inFront: boolean) { try send({ type: "foregroundChanged", inFront }) },
     effect permissionAnswered(granted: boolean) { try send({ type: "permissionAnswered", granted }) },
     effect native() { return build.info.variant !== "browser" },
-    effect openAppSettings() { native.invoke("AlphaDevice", "openSettings", { page: "app" }) catch () => undefined },
+    effect openAppSettings() { native.invoke("AlphaDevice", "openSettings", { page: "privacy" }) catch () => undefined },
     levels,
   }
 })

@@ -25,10 +25,7 @@ import { Permissions } from "../../shell/permissions.vibe";
 import { Recovery } from "../../shell/recovery.vibe";
 import { Shade } from "../../shell/shade.vibe";
 import type { AppId, SurfaceSlot } from "../app-screen.ts";
-import { HomeAgendaCard } from "../calendar/index.tsx";
 import { useAppearanceClass } from "../settings/index.tsx";
-import { HomeCards } from "../telephony/index.tsx";
-import { VoiceRuntimeProvider } from "../voice/index.tsx";
 import { runtime } from "../runtime.ts";
 import { cn } from "../lib/cn.ts";
 import { AddToHomeSheet } from "./AddToHomeSheet.tsx";
@@ -41,11 +38,11 @@ import { StandInShade } from "./StandInShade.tsx";
 import { StartupPermissions } from "./StartupPermissions.tsx";
 import { NoticesSlot, ToastRegion } from "./ToastRegion.tsx";
 import type { GestureControls } from "./TileGrid.tsx";
-import { admittedScreens, allScreens, onImage, screenOf, surfacesIn } from "./registry.ts";
-import { perform } from "./useLayer.ts";
+import { admittedScreens, allScreens, homeMounts, onImage, screenOf, surfacesIn } from "./registry.ts";
+import { act } from "./services.ts";
 
-const launcher = (f: (l: Launcher.Shape) => Effect.Effect<void>) => perform(Effect.flatMap(Effect.service(Launcher), f));
-const navigate = (f: (n: Navigation.Shape) => Effect.Effect<unknown>) => perform(Effect.flatMap(Effect.service(Navigation), f));
+const launcher = (f: (l: Launcher.Shape) => Effect.Effect<void>) => act(Effect.flatMap(Effect.service(Launcher), f));
+const navigate = (f: (n: Navigation.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Navigation), f));
 const openApp = (app: AppId, route?: string) => navigate((n) => n.open(app, route));
 
 function faceOf(key: string, apps: readonly InstalledApp[], details: ReadonlyMap<string, string[]>, admitted: readonly string[]): TileFace | undefined {
@@ -92,7 +89,7 @@ export function ShellRoot() {
   const info = useAppInfo(runtime).state ?? appInfoStart;
   const { snapshot, details } = useSyncExternalStore(inventory.subscribe, inventory.getSnapshot, inventory.getSnapshot);
   const appearance = useAppearanceClass();
-  useState(() => perform(Effect.flatMap(Effect.service(Recovery), (r) => r.mounted())));
+  useState(() => act(Effect.flatMap(Effect.service(Recovery), (r) => r.mounted())));
   const start = useRef<{ id: number; x: number; y: number } | null>(null);
 
   if (recovery.phase !== "Running") {
@@ -100,8 +97,8 @@ export function ShellRoot() {
       <RecoveryScreen
         diagnostics={diagnosticsOf(recovery.phase === "StartupFailed" ? "startup" : "render", recovery.errorClass, document.documentElement.dataset.alphaVersion ?? "", nav.host === "Standalone" ? "web" : "android", new Date())}
         homeEscape={recovery.homeEscape}
-        onReload={() => perform(Effect.flatMap(Effect.service(Recovery), (r) => r.reload()))}
-        onSwitchHome={() => perform(Effect.flatMap(Effect.service(Recovery), (r) => r.switchHome()))}
+        onReload={() => act(Effect.flatMap(Effect.service(Recovery), (r) => r.reload()))}
+        onSwitchHome={() => act(Effect.flatMap(Effect.service(Recovery), (r) => r.switchHome()))}
       />
     );
   }
@@ -119,98 +116,98 @@ export function ShellRoot() {
   const infoText = info.notice === "" ? "" : appInfoText(apps.find((app) => appKey(app) === info.notice)?.label ?? info.notice, info.reason);
   const topDialog = nav.layers.filter((layer) => layer.kind === "DialogLayer" || layer.kind === "SheetLayer").length > 0;
 
+  const { agenda: Agenda, attention: Attention } = homeMounts;
+
   return (
-    <VoiceRuntimeProvider runtime={runtime as never}>
-      <div
-        data-alpha-screen
-        data-alpha-chat-half={nav.chat === "ChatSheet" || undefined}
-        className={cn(appearance, "relative h-dvh w-full overflow-hidden bg-background font-sans text-foreground")}
-        onPointerDown={(event) => { start.current = { id: event.pointerId, x: event.clientX, y: event.clientY }; }}
-        onPointerUp={(event) => {
-          const begun = start.current;
-          start.current = null;
-          if (!begun || begun.id !== event.pointerId) return;
-          const dx = event.clientX - begun.x, dy = event.clientY - begun.y;
-          const eligible = emptyHome(launcherHost, nav.host === "AssistantSurface", false, nav.shade, home, nav.library, nav.voice, talking(nav));
-          const target = event.target instanceof Element ? event.target : null;
-          const onHome = !!target?.closest('[data-alpha-layer="home"]') && !target.closest("[data-alpha-tile],button,input,textarea");
-          const editable = !!target?.closest("input,textarea,[contenteditable]");
-          const pulled = pullOpensShade(eligible, begun.y, dx, dy, onHome, editable, document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement, false);
-          const action = swipe(launcherHost, home, nav.chat === "ChatSheet", talking(nav), pulled, Math.round(begun.x), Math.round(begun.y), Math.round(dx), Math.round(dy));
-          if (action === "SwipeBack") navigate((n) => n.back());
-          else if (action === "SwipeHome") navigate((n) => n.home());
-          else if (action === "SwipeShade") perform(Effect.flatMap(Effect.service(Shade), (s) => s.pull()));
-          else if (action === "LowerAssistant") navigate((n) => n.moveChat(home ? "ChatInput" : "ChatHidden"));
-          else if (action === "RaiseAssistant") navigate((n) => n.moveChat("ChatSheet"));
-        }}
-      >
-        <Surfaces slot="top" admitted={admitted} />
-        <HomeScreen
-          overview={overview}
-          agenda={<HomeAgendaCard open={openApp} />}
-          attention={onImage(admitted) ? <HomeCards open={openApp} /> : undefined}
-          tiles={tiles}
-          editing={nav.editing}
-          editError={nav.editing ? launchErrorText(snapshot.launchError) : ""}
-          canAdd={hidden.length > 0}
-          library={libraryShown}
-          notifications={launcherHost || nav.host === "Standalone"}
+    <div
+      data-alpha-screen
+      data-alpha-chat-half={nav.chat === "Sheet" || undefined}
+      className={cn(appearance, "relative h-dvh w-full overflow-hidden bg-background font-sans text-foreground")}
+      onPointerDown={(event) => { start.current = { id: event.pointerId, x: event.clientX, y: event.clientY }; }}
+      onPointerUp={(event) => {
+        const begun = start.current;
+        start.current = null;
+        if (!begun || begun.id !== event.pointerId) return;
+        const dx = event.clientX - begun.x, dy = event.clientY - begun.y;
+        const eligible = emptyHome(launcherHost, nav.host === "AssistantSurface", false, nav.shade, home, nav.library, nav.voice, talking(nav));
+        const target = event.target instanceof Element ? event.target : null;
+        const onHome = !!target?.closest('[data-alpha-layer="home"]') && !target.closest("[data-alpha-tile],button,input,textarea");
+        const editable = !!target?.closest("input,textarea,[contenteditable]");
+        const pulled = pullOpensShade(eligible, begun.y, dx, dy, onHome, editable, document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement, false);
+        const action = swipe(launcherHost, home, nav.chat === "Sheet", talking(nav), pulled, Math.round(begun.x), Math.round(begun.y), Math.round(dx), Math.round(dy));
+        if (action === "SwipeBack") navigate((n) => n.back());
+        else if (action === "SwipeHome") navigate((n) => n.home());
+        else if (action === "SwipeShade") act(Effect.flatMap(Effect.service(Shade), (s) => s.pull()));
+        else if (action === "LowerAssistant") navigate((n) => n.moveChat(home ? "Input" : "Hidden"));
+        else if (action === "RaiseAssistant") navigate((n) => n.moveChat("Sheet"));
+      }}
+    >
+      <Surfaces slot="top" admitted={admitted} />
+      <HomeScreen
+        overview={overview}
+        agenda={<Agenda open={openApp} />}
+        attention={onImage(admitted) ? <Attention open={openApp} /> : undefined}
+        tiles={tiles}
+        editing={nav.editing}
+        editError={nav.editing ? launchErrorText(snapshot.launchError) : ""}
+        canAdd={hidden.length > 0}
+        library={libraryShown}
+        notifications={launcherHost || nav.host === "Standalone"}
+        launching={snapshot.launching}
+        covered={!home || nav.library || covered}
+        controls={controls}
+        onOpen={(app) => navigate((n) => n.open(app))}
+        onLibrary={() => launcher((l) => l.openLibrary())}
+        onAdd={() => launcher((l) => l.openAdd())}
+        onDone={() => launcher((l) => l.finishEditing())}
+        onNotifications={() => act(Effect.flatMap(Effect.service(Shade), (s) => s.pull()))}
+      />
+      {nav.library && (
+        <AppLibrary
+          entries={entries}
+          query={nav.query}
+          status={snapshot.status}
+          menu={nav.menu}
+          onHome={favorites.entries}
+          dial={nav.admitted.includes("phone") ? undefined : snapshot.dial?.label ?? (snapshot.dial ? "Phone" : undefined)}
           launching={snapshot.launching}
-          covered={!home || nav.library || covered}
+          error={launchErrorText(snapshot.launchError)}
+          infoNotice={infoText}
+          appInfo={launcherHost}
+          covered={covered}
           controls={controls}
-          onOpen={(app) => navigate((n) => n.open(app))}
-          onLibrary={() => launcher((l) => l.openLibrary())}
-          onAdd={() => launcher((l) => l.openAdd())}
-          onDone={() => launcher((l) => l.finishEditing())}
-          onNotifications={() => perform(Effect.flatMap(Effect.service(Shade), (s) => s.pull()))}
+          onSearch={(query) => launcher((l) => l.search(query))}
+          onClose={() => launcher((l) => l.closeLibrary())}
+          onDial={() => launcher((l) => l.openDial())}
+          onAddToHome={(key) => launcher((l) => l.addToHome(key))}
+          onAppInfo={(key) => launcher((l) => l.appInfo(key))}
+          onCloseMenu={() => navigate((n) => n.send({ type: "closeMenu" }))}
+          onDismissInfo={() => launcher((l) => l.dismissAppInfo())}
         />
-        {nav.library && (
-          <AppLibrary
-            entries={entries}
-            query={nav.query}
-            status={snapshot.status}
-            menu={nav.menu}
-            onHome={favorites.entries}
-            dial={nav.admitted.includes("phone") ? undefined : snapshot.dial?.label ?? (snapshot.dial ? "Phone" : undefined)}
-            launching={snapshot.launching}
-            error={launchErrorText(snapshot.launchError)}
-            infoNotice={infoText}
-            appInfo={launcherHost}
-            covered={covered}
-            controls={controls}
-            onSearch={(query) => launcher((l) => l.search(query))}
-            onClose={() => launcher((l) => l.closeLibrary())}
-            onDial={() => launcher((l) => l.openDial())}
-            onAddToHome={(key) => launcher((l) => l.addToHome(key))}
-            onAppInfo={(key) => launcher((l) => l.appInfo(key))}
-            onCloseMenu={() => navigate((n) => n.send({ type: "closeMenu" }))}
-            onDismissInfo={() => launcher((l) => l.dismissAppInfo())}
-          />
-        )}
-        <AppFrame nav={nav} screens={screens} failures={recovery.recorded} onClose={() => navigate((n) => n.home())} />
-        <AddToHomeSheet hidden={hidden} open={nav.adding} onAdd={(key) => launcher((l) => l.addView(key))} onClose={() => launcher((l) => l.closeAdd())} />
-        <StandInShade open={nav.shade} onClose={() => navigate((n) => n.send({ type: "closeShade" }))} />
-        {dockShown(nav) && <Surfaces slot="dock" admitted={admitted} />}
-        <div className="absolute inset-x-0 z-40 flex flex-col gap-2" style={{ top: "calc(var(--alpha-header-clearance, 0px) + 4rem)" }}>
-          <Surfaces slot="notices" admitted={admitted} />
-          <NoticesSlot notices={toasts.notices} onDismiss={(message) => perform(Effect.flatMap(Effect.service(Notices), (n) => n.dismiss(message)))} />
-        </div>
-        <ToastRegion
-          toasts={toasts}
-          inDialog={topDialog}
-          onHold={() => perform(Effect.flatMap(Effect.service(Notices), (n) => n.hold()))}
-          onRelease={() => perform(Effect.flatMap(Effect.service(Notices), (n) => n.release()))}
-          onAction={() => perform(Effect.flatMap(Effect.service(Notices), (n) => n.takeAction()))}
-        />
-        <StartupPermissions
-          walkthrough={walkthrough}
-          onAllow={() => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.allow()))}
-          onNext={(skip) => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.next(skip)))}
-          onFinish={() => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.finish()))}
-          onClose={() => perform(Effect.flatMap(Effect.service(Permissions), (p) => p.close()))}
-        />
-        <Surfaces slot="overlay" admitted={admitted} />
+      )}
+      <AppFrame nav={nav} screens={screens} failures={recovery.recorded} onClose={() => navigate((n) => n.home())} />
+      <AddToHomeSheet hidden={hidden} open={nav.adding} onAdd={(key) => launcher((l) => l.addView(key))} onClose={() => launcher((l) => l.closeAdd())} />
+      <StandInShade open={nav.shade} onClose={() => navigate((n) => n.send({ type: "closeShade" }))} />
+      {dockShown(nav) && <Surfaces slot="dock" admitted={admitted} />}
+      <div className="absolute inset-x-0 z-40 flex flex-col gap-2" style={{ top: "calc(var(--alpha-header-clearance, 0px) + 4rem)" }}>
+        <Surfaces slot="notices" admitted={admitted} />
+        <NoticesSlot notices={toasts.notices} onDismiss={(message) => act(Effect.flatMap(Effect.service(Notices), (n) => n.dismiss(message)))} />
       </div>
-    </VoiceRuntimeProvider>
+      <ToastRegion
+        toasts={toasts}
+        inDialog={topDialog}
+        onHold={() => act(Effect.flatMap(Effect.service(Notices), (n) => n.hold()))}
+        onRelease={() => act(Effect.flatMap(Effect.service(Notices), (n) => n.release()))}
+        onAction={() => act(Effect.flatMap(Effect.service(Notices), (n) => n.takeAction()))}
+      />
+      <StartupPermissions
+        walkthrough={walkthrough}
+        onAllow={() => act(Effect.flatMap(Effect.service(Permissions), (p) => p.allow()))}
+        onNext={(skip) => act(Effect.flatMap(Effect.service(Permissions), (p) => p.next(skip)))}
+        onFinish={() => act(Effect.flatMap(Effect.service(Permissions), (p) => p.finish()))}
+        onClose={() => act(Effect.flatMap(Effect.service(Permissions), (p) => p.close()))}
+      />
+      <Surfaces slot="overlay" admitted={admitted} />
+    </div>
   );
 }

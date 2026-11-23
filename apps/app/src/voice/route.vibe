@@ -6,7 +6,7 @@ import {
 } from "@elizaos/plugin-local-inference/speech-route"
 import { Native } from "../platform/native.vibe"
 import { privacyOf, sendsOf, type Route, type Sends } from "../../gen/voice__route.effect.vibe"
-import { newId } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
 import { LocalSpeechStatus } from "./native.schema.vibe"
 
 /** The owner's account as the account area reports it: none, Cloud with its credential, or own keys with their revision. */

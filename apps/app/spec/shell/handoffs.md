@@ -37,18 +37,14 @@ pure def lawCalendarFollowsItsOwnDrafts(accepted: bool): bool =
   not(opensApp(CalendarDraft, accepted)) and not(refusalShown(CalendarDraft, accepted))
 ```
 
-### A note's web page opens only as a parsed web address, in a new ordinary tab
+### A note's web page opens only as a secure web address, through Browser's approved open
 
-The address is read as the owner would type it, upgraded to a secure address where the browser
-host requires one; anything that does not parse as a web address, or reads as empty, is refused.
-The page opens in a new tab of the ordinary profile, never in a private one or in a tab the owner
-already had open.
+The page opens the way an approved open from the agent does: Browser takes it only as an HTTPS
+address with a host and no credentials in it, opens it in the tab in front, and presents it once the
+owner is in Browser. Anything else, or a page Browser refuses, opens nothing and says why.
 
 ```quint
-pure def sourceOpens(parsed: bool, empty: bool, tabOpened: bool, submitted: bool): bool =
-  parsed and not(empty) and tabOpened and submitted
-pure def lawAnUnparsedAddressNeverOpens(empty: bool, tabOpened: bool, submitted: bool): bool =
-  not(sourceOpens(false, empty, tabOpened, submitted))
-pure def lawAnEmptyAddressNeverOpens(parsed: bool, tabOpened: bool, submitted: bool): bool =
-  not(sourceOpens(parsed, true, tabOpened, submitted))
+pure def sourceOpens(secure: bool, dispatched: bool): bool = secure and dispatched
+pure def lawAnInsecureAddressNeverOpens(dispatched: bool): bool = not(sourceOpens(false, dispatched))
+pure def lawARefusedPageNeverOpens(secure: bool): bool = not(sourceOpens(secure, false))
 ```

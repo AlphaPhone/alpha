@@ -1,14 +1,15 @@
 // spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "A dictation opens for one draft of one account, and opening another draft replaces it"
 import { Effect } from "effect";
-import { useSyncExternalStore } from "react";
 import { useMachine } from "../../../gen/voice__dictation.react.ts";
 import { useMachine as useCapture } from "../../../gen/voice__capture.react.ts";
 import { deniedSettingsOffered, initial as micInitial } from "../../../gen/voice__capture.ts";
 import { Microphone } from "../../voice/capture.vibe";
 import { Dictation, type DictationTarget } from "../../voice/dictation.vibe";
 import { DictationButton } from "./DictationButton.tsx";
-import { levelStore } from "./levels.ts";
+import { act, useServiceStream } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
+
+const noLevels: readonly number[] = [];
 
 /** The draft a mounted dictation control fills. */
 export interface DictationControlProps {
@@ -23,12 +24,12 @@ export interface DictationControlProps {
 export function DictationControl({ target }: DictationControlProps) {
   const { state } = useMachine(runtime);
   const { state: mic = micInitial } = useCapture(runtime);
-  const levels = useSyncExternalStore(levelStore.subscribe, levelStore.get);
+  const levels = useServiceStream("voice.levels", Effect.map(Effect.service(Dictation), (d) => d.levels()), noLevels, { resets: true });
   const dictation = Effect.service(Dictation);
   const ours = runtime.runSync(Effect.flatMap(dictation, (d) => d.targetId())) === target.id;
   const route = runtime.runSync(Effect.flatMap(dictation, (d) => d.route()));
   const native = runtime.runSync(Effect.flatMap(Effect.service(Microphone), (m) => m.native()));
-  const use = (work: (d: Dictation.Shape) => Effect.Effect<void>) => () => { runtime.runFork(Effect.flatMap(dictation, work)); };
+  const use = (work: (d: Dictation.Shape) => Effect.Effect<void>) => () => { act(Effect.flatMap(dictation, work)); };
   return (
     <DictationButton
       dictation={ours ? state : undefined}
@@ -41,7 +42,7 @@ export function DictationControl({ target }: DictationControlProps) {
       onRetry={use((d) => d.retry())}
       onDiscard={use((d) => d.discard())}
       onCancel={use((d) => d.cancel())}
-      onOpenSettings={() => { runtime.runFork(Effect.flatMap(Effect.service(Microphone), (m) => m.openAppSettings())); }}
+      onOpenSettings={() => { act(Effect.flatMap(Effect.service(Microphone), (m) => m.openAppSettings())); }}
     />
   );
 }

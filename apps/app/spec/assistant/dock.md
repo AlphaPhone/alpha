@@ -1,8 +1,9 @@
 # Dock
 
 The compact assistant: a composer bar or a pill resting at the bottom of
-every screen, and the sheet it opens into. The chat is in one of four
-detents: `Hidden` (the pill), `Input` (the bar), `Sheet` and `Full`. One
+every screen, and the sheet it opens into. The chat is in one of the four
+detents of [Detents](./detents.md): `Hidden` (the pill), `Input` (the bar),
+`Sheet` and `Full`, with their rests and Home's bar defined there. One
 pointer gesture at a time is captured, a drag or a tap; it settles in one
 detent, and the click the platform may deliver after it is swallowed for a
 window of two ticks (a tick is 200 ms). Home always keeps its bar. The shell
@@ -19,7 +20,7 @@ pointer travel into a direction, a zone and whether it was a flick.
 ### A gesture is captured only from a detent, surface and voice state the shell still shows
 
 ```quint
-type Detent = Hidden | Input | Sheet | Full
+import detents.* from "./detents"
 type Surface = HomeView | BarView | PillView
 type Control = NoControl | FocusControl | OpenControl | TypeControl | TalkControl | ResizeControl | ToolbarControl
 type Direction = Up | Down
@@ -35,8 +36,7 @@ pure val initial: Dock = {
   view: HomeView, chat: Input, voice: false, drag: noDrag, remembered: false, swallowAge: swallowWindow, dragAge: swallowWindow,
   ghost: false, ghostLabel: NoControl, effects: 0, clickThrough: false, ignored: 0, barKept: false,
 }
-pure def isOpen(chat: Detent): bool = chat == Sheet or chat == Full
-pure def restOf(view: Surface): Detent = if (view == PillView) Hidden else Input
+pure def restOf(view: Surface): Detent = restFor(view == PillView)
 pure def handle(label: Control): bool = label != ToolbarControl
 pure def canDown(d: Dock, label: Control): bool =
   not(d.drag.active) and not(d.voice) and handle(label)
@@ -64,7 +64,7 @@ the top goes `Full`, and otherwise the sheet opens.
 ```quint
 type Released = { lands: Detent, keeps: bool }
 pure def release(mode: Detent, direction: Direction, zone: Zone, flick: bool, home: bool): Released = {
-  val collapse = if (home) Input else Hidden
+  val collapse = restFor(not(home))
   if (isOpen(mode))
     if (flick) { lands: if (direction == Up) Full else collapse, keeps: false }
     else if (zone == Floor) { lands: collapse, keeps: false }
@@ -159,7 +159,7 @@ pure def stepATouchAboveTheSheetOnlyClosesIt(before: Dock, via: str, after: Dock
   via == "touchOutside" implies (after.voice == before.voice and after.view == before.view and not(isOpen(after.chat)))
 pure def canVoiceEnds(d: Dock): bool = d.voice
 pure def voiceEnds(d: Dock): Dock = { ...d, voice: false }
-pure def alwaysHomeKeepsItsBar(d: Dock): bool = d.view == HomeView implies d.chat != Hidden
+pure def alwaysHomeKeepsItsBar(d: Dock): bool = keepsItsBar(d.view == HomeView, d.chat)
 pure def alwaysAKeptBarIsHomesBar(d: Dock): bool = d.barKept implies (d.view == HomeView and d.chat == Input)
 pure def alwaysARememberedHeightIsOpen(d: Dock): bool = d.remembered implies isOpen(d.chat)
 pure def sometimesHomeBarPulledDownStays(d: Dock): bool = d.barKept and d.swallowAge == 0

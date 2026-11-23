@@ -4,9 +4,11 @@ import {
   Machine as GoogleMachine, consentPageAllowed, machine as googleMachine
 } from "../../gen/account__google.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
 import { Cloud } from "../platform/cloud.vibe"
+import { CloudServices } from "../platform/cloud-services.vibe"
 import { Native } from "../platform/native.vibe"
-import { authorityOf, consentPageOf, deployment, environmentFor, freshKey, googleWorkspaceCallback, hostEnvironment } from "./deployment.ts"
+import { authorityOf, consentPageOf, deployment, googleWorkspaceCallback } from "./deployment.ts"
 import { Entitlement } from "./entitlement.vibe"
 import { CloudSession, ownerOf } from "./session.vibe"
 import { ConsentStart, GoogleAccountList, WorkspaceConsumed, WorkspaceOffer } from "./google.schema.vibe"
@@ -63,10 +65,11 @@ export const googleService = Layer.effect(GoogleAccounts, effect {
   const machine = try GoogleMachine
   const cloud = try Cloud
   const native = try Native
+  const services = try CloudServices
   const build = try Build
   const session = try CloudSession
   const entitlement = try Entitlement
-  const environment = environmentFor(build.info.testMocks)
+  const environment = buildCloudEnvironment(build.info)
   const authority = authorityOf(deployment, environment)
   const rows = try SubscriptionRef.make<ReadonlyArray<GoogleAccount>>([])
   const workspaceState = try Ref.make("")
@@ -83,7 +86,7 @@ export const googleService = Layer.effect(GoogleAccounts, effect {
 
   effect function binding() {
     const s = try session.current()
-    return { environment: hostEnvironment(environment), userId: s.account.userId, organizationId: s.account.organizationId, credentialId: s.account.credentialId, sessionId: String(s.generation) }
+    return { environment: environmentName(environment), userId: s.account.userId, organizationId: s.account.organizationId, credentialId: s.account.credentialId, sessionId: String(s.generation) }
   }
 
   effect function readAccounts() {
@@ -109,7 +112,7 @@ export const googleService = Layer.effect(GoogleAccounts, effect {
       try send({ type: "cancelWait" })
       return
     }
-    native.invoke("AlphaConnection", "openExternal", { url: started.authUrl, requestId: freshKey() }) catch effect () => { try send({ type: "cancelWait" }) }
+    services.openExternal(started.authUrl) catch effect () => { try send({ type: "cancelWait" }) }
   }
 
   effect function revoke() {

@@ -1,6 +1,6 @@
 import type { ComponentMeta } from "vibestack/stories";
 import type { StartupPermissionsProps } from "./StartupPermissions.tsx";
-import { cameraStep, reviewedStep, stalledStep } from "./fixtures.ts";
+import { cameraStep, grantedSteps, reviewedStep, stalledStep, stillOffStep } from "./fixtures.ts";
 
 const noop = () => {};
 
@@ -11,5 +11,7 @@ export const meta: ComponentMeta<StartupPermissionsProps> = {
     NotSaved: { walkthrough: { ...cameraStep, phase: "PhaseReady", progress: -1, completed: true, progressError: true } },
     Stalled: { walkthrough: stalledStep },
     Review: { walkthrough: reviewedStep },
+    Granted: { walkthrough: grantedSteps },
+    StillOff: { walkthrough: stillOffStep },
   },
 };

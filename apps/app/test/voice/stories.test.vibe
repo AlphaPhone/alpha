@@ -10,7 +10,7 @@ import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { Microphone } from "../../src/voice/capture.vibe"
 import { VoiceConversation } from "../../src/voice/conversation.vibe"
 import { Dictation, speechGateOf } from "../../src/voice/dictation.vibe"
-import { failureMessage, refusalOf } from "../../src/voice/failure.vibe"
+import { callCaused, cancelledByPhone, failureMessage, pausedByPhone, refusalOf } from "../../src/voice/failure.vibe"
 import { Latency, VOICE_TIMING_FORMAT } from "../../src/voice/latency.vibe"
 import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
@@ -34,8 +34,10 @@ type Answer = unknown | { readonly refuse: string } | ((args: Record<string, unk
 
 const onPhone: Record<string, Answer> = {
   "AlphaVoiceCloud.localSpeechStatus": { ready: true, execution: "device" },
-  "AlphaVoiceCloud.markVoiceTurn": (args) => ({ turnId: args.turnId, monotonicMs: 1000 }),
-  "AlphaVoiceCloud.nativeVoiceTiming": (args) => ({ turnId: args.turnId, lastUserAudioMs: 1000, firstPcmMs: 1350, audibleMs: 1400 }),
+  "AlphaVoiceCloud.markVoiceTurn": (args) => ({ marked: true, voiceTurnId: typeof args.voiceTurnId === "string" ? args.voiceTurnId : "phone-turn-1" }),
+  "AlphaVoiceCloud.nativeVoiceTiming": { format: "alpha-native-voice-timing-v3", records: [
+    { turnId: "phone-turn-1", outcome: "passed", marks: { "last-user-audio": 1000, request: 1100, "first-pcm": 1350, "audible-playback": 1400 } },
+  ] },
   "AlphaDevice.openSettings": { opened: true },
   "ElizaSense.turnOff": { available: false, reason: "not-installed" },
 }
@@ -159,6 +161,11 @@ it.effect(`Keep voice going through a passing failure (spec/voice/conversation.m
   const ownKey = sessionFailed({ ...talking, route: "Direct" }, true, false)
   try Effect.try(() => assert.deepStrictEqual({ once: once.shown, twice: twice.retries, paused: [paused.shown, paused.notice], longWait: longWait.notice, ownKey: ownKey.shown },
     { once: "Retrying", twice: 2, paused: ["Off", "VoicePaused"], longWait: "VoicePaused", ownKey: "Failed" }))
+  // spec/voice/conversation.md, "Stop, a call, a hidden or sensitive screen, sign-out and reset retire voice; a call says so once"
+  const streamBusy = refusalOf({ code: "connection-lost", status: 429, data: { retryAfterSeconds: 40 } }, 0)
+  const ended = (code: string) => { const facts = refusalOf({ code }, 0); return [callCaused(facts), pausedByPhone(facts), cancelledByPhone(facts)] }
+  try Effect.try(() => assert.deepStrictEqual({ streamBusy: [streamBusy.status, streamBusy.retryAfterSeconds], call: ended("call-active"), paused: ended("paused"), cancelled: ended("cancelled"), capture: ended("capture"), noStatus: refusalOf({ code: "protocol", status: 0 }, 0).status },
+    { streamBusy: [429, 40], call: [true, false, false], paused: [false, true, false], cancelled: [false, false, true], capture: [false, false, false], noStatus: undefined }))
 })
 
 it.effect(`Review what voice is about to do (spec/voice/conversation.md, "Story: Review what voice is about to do")`, () => effect {
@@ -318,6 +325,7 @@ const listenerOnImage: Record<string, Answer> = {
   "ElizaSense.pause": { available: true, state: "PAUSED_USER", consented: true, listening: false, microphoneOpen: false, saved: true },
   "ElizaSense.bindInvocationSession": { bound: true },
   "ElizaSense.discardProtectedPowerInvocation": { discarded: true },
+  "ElizaSense.discardProtectedPowerLaunch": {},
   "ElizaSense.takeInvocation": { assistant: true, invocation: "power", locked: false },
 }
 
@@ -349,7 +357,25 @@ it.live(`Start voice from my listener or the power button, once (spec/voice/list
     const state = try listener.get()
     const sense = names(calls).filter((n) => n.startsWith("ElizaSense.") && n !== "ElizaSense.status")
     try Effect.try(() => assert.deepStrictEqual({ blocked, free, discards: state.discards, takes: state.takes, voiceStarts: state.voiceStarts, sense },
-      { blocked: false, free: true, discards: 1, takes: 1, voiceStarts: 1, sense: ["ElizaSense.bindInvocationSession", "ElizaSense.discardProtectedPowerInvocation", "ElizaSense.takeInvocation"] }))
+      { blocked: false, free: true, discards: 1, takes: 1, voiceStarts: 1,
+        sense: ["ElizaSense.bindInvocationSession", "ElizaSense.discardProtectedPowerLaunch", "ElizaSense.discardProtectedPowerInvocation", "ElizaSense.takeInvocation"] }))
+  }
+  // spec/voice/listener.md, "A pending power press is discarded, never kept, while the screen cannot start voice"
+  const coldLaunch: Record<string, Answer> = {
+    ...listenerOnImage,
+    "ElizaSense.claimProtectedPowerLaunch": (args) => (args.accountRef === "account-1" ? { assistant: true, invocation: "power", locked: false } : { assistant: false }),
+  }
+  const launched: Calls = []
+  provide voice(launched, coldLaunch, "aosp") {
+    const listener = try Listener
+    try listener.boot()
+    try timeout(Stream.runHead(Stream.filter(listener.changes, (state) => state.bound)), "5 seconds")
+    const free = { unlocked: true, visible: true, dialogOpen: false, connectionPrompt: false, voiceActive: false, powerAccountRef: "account-1" }
+    const first = try listener.takeInvocation(free)
+    const second = try listener.takeInvocation(free)
+    const sense = names(launched).filter((n) => n === "ElizaSense.claimProtectedPowerLaunch" || n === "ElizaSense.takeInvocation")
+    try Effect.try(() => assert.deepStrictEqual({ first, second, sense },
+      { first: true, second: true, sense: ["ElizaSense.claimProtectedPowerLaunch", "ElizaSense.takeInvocation"] }))
   }
 })
 
@@ -360,6 +386,7 @@ it.live(`Know how long I wait for Alpha's voice (spec/voice/latency.md, "Story: 
     const latency = try Latency
     const first = try latency.begin()
     try latency.mark("Request")
+    const bound = try latency.nativeTurn()
     try latency.finish("Answered")
     const second = try latency.begin()
     try latency.finish("Answered")
@@ -367,7 +394,8 @@ it.live(`Know how long I wait for Alpha's voice (spec/voice/latency.md, "Story: 
     try Effect.try(() => assert.deepStrictEqual({
       count: entries.length, format: entries[0]?.format, ids: [entries[0]?.turnId === first, entries[1]?.turnId === second],
       wait: entries[0]?.lastInputToAudibleMs, outcome: entries[0]?.outcome, text: entries.some((entry) => "text" in entry),
-    }, { count: 2, format: VOICE_TIMING_FORMAT, ids: [true, true], wait: 400, outcome: "Answered", text: false }))
+      bound, unbound: entries[1]?.lastInputToAudibleMs, offset: entries[0]?.clockOffsetMs,
+    }, { count: 2, format: VOICE_TIMING_FORMAT, ids: [true, true], wait: 400, outcome: "Answered", text: false, bound: "phone-turn-1", unbound: null, offset: null }))
   }
 })
 

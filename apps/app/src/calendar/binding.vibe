@@ -1,7 +1,6 @@
 // spec/calendar/agent.md, "The port reports the current agent binding; a usable port always names an owner"; spec/calendar/presentation.md, "While Calendar is in front it reads again once a minute, never hidden, during a read or a write, or without a session"; spec/calendar/presentation.md, "Leaving Calendar ends its transient overlays and any pending save request"; spec/calendar/presentation.md, "Crossing midnight keeps the chosen dates"; spec/calendar/editor.md, "A form's day follows the calendar date when midnight passes"; spec/calendar/presentation.md, "Revoked access hides a source at once; hiding the agent calendar is a preference of that account"; spec/calendar/presentation.md, "Agent rows belong to the owner they were read for, and a changed owner clears them"; spec/calendar/deletions.md, "Leaving the app sends a waiting deletion at once; another account or session drops it unsent"; spec/calendar/drafts.md, "Changing owner closes the editor; the old owner's slot keeps its edits"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Machine as PresentationMachine, rereadDue } from "../../gen/calendar__presentation.effect.vibe"
-import type { ResidentSession } from "../platform/resident-control.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 import { AgentCalendar, type AgentBinding, type CalendarWindow } from "./agent.vibe"
@@ -14,14 +13,7 @@ import { LegacyCalendar } from "./preservation.vibe"
 import { CalendarSync } from "./sync.vibe"
 import { civilDay, deviceZone } from "./time.ts"
 
-/** The binding of the resident agent's verified session: its owner and agent, under the session's generation; no session is no usable binding. */
-export function residentBinding(session: ResidentSession | undefined): AgentBinding {
-  return session === undefined || session.owner === ""
-    ? { owner: "", session: 0, agentId: "", usable: false }
-    : { owner: JSON.stringify(["resident", session.owner, session.agent]), session: session.generation, agentId: session.agent, usable: true }
-}
-
-/** Tell Calendar which account and agent session it serves; Calendar's layer calls this on every change of the resident's session. */
+/** Tell Calendar which account and agent session it serves; Calendar's layer calls this on every change of Account's agent binding. */
 export effect function bindCalendar(binding: AgentBinding) {
   const presentation = try PresentationMachine
   const agent = try AgentCalendar

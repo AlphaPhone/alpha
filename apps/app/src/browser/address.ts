@@ -125,11 +125,6 @@ export function newTabId(): string {
   return `b${globalThis.crypto.randomUUID().replace(/-/g, "")}`;
 }
 
-/** A new random identity for a host session or a request. */
-export function newId(): string {
-  return globalThis.crypto.randomUUID();
-}
-
 /** The current time in milliseconds, for visit times and the writer's clock. */
 export function now(): number {
   return Date.now();

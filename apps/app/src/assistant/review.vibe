@@ -1,8 +1,8 @@
-// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"
+// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/receipts.md, "A result is shown only after its journal entry and receipt settled"
 import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type ExecutorCall } from "@elizaos/agent/client"
 import { Machine as RoutesMachine, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
-import { Machine as CustodyMachine, canDirect, contradicts, type Event as CustodyEvent, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
-import { titleOf, type Result } from "../../gen/assistant__receipts.effect.vibe"
+import { Machine as CustodyMachine, approvable, canDirect, cardOffered, contradicts, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
+import { offered, titleOf, type Evidence, type Resolution, type Result } from "../../gen/assistant__receipts.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { deviceJournalOver } from "../platform/native-plugins.ts"
 import { Preferences } from "../settings/preferences.vibe"
@@ -10,7 +10,7 @@ import { Resident } from "../platform/resident.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
 import { PendingListing, type PendingProposal } from "./payloads.schema.vibe"
 import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
-import type { ProposalCard } from "./transcript.vibe"
+import type { ItemizedSet, ProposalCard } from "./transcript.vibe"
 import { ask } from "./transport.vibe"
 import { browserCommand, writtenNumbers } from "./grounding.vibe"
 import { WithdrawableRequests } from "./withdrawable.vibe"
@@ -31,6 +31,31 @@ export interface OperationPorts {
   target(operation: unknown, text: string): Target
   /** The receipt sentence for a settled result. */
   summarize(operation: unknown, result: Result): string
+  /** For an operation that acts on a set its card must list: the set, read on this phone when the card is first drawn and bound to `proposalId`, or the notice shown instead of a card when it cannot be listed or is empty; undefined for every other operation. */
+  itemize?(operation: unknown, proposalId: string): ItemizedSet | string | undefined
+  /** Whether the operation is a handoff (a text, a dial, a telephony change or a Clock request) whose unknown outcome may stay unresolved; undefined counts as a handoff. */
+  handoff?(operation: unknown): boolean
+  /** Show an applied operation's result, such as bringing Browser forward, only after its journal entry and receipt settled (#1226, #1438). */
+  present?(operation: unknown, call: ExecutorCall): void
+}
+
+/** What the assistant knows of one executor call: whether the owner approved its card, the owner message it answers and that message's words. */
+export interface CallFacts {
+  readonly reviewed: boolean
+  readonly messageId: string
+  readonly ownerText: string
+}
+
+/** How the owner may settle a past action whose outcome the phone cannot prove. */
+export type HistoryOutcome = "happened" | "didnt" | "unresolved"
+
+/** One past phone action that still waits for the owner to say what happened. */
+export interface HistoryItem {
+  readonly proposalId: string
+  readonly title: string
+  readonly detail: string
+  /** The outcomes its saved evidence allows. */
+  readonly offers: readonly HistoryOutcome[]
 }
 
 /** The executors of every area, composed by the shell with `deviceExecutorsLive`. */
@@ -43,8 +68,8 @@ export interface Approval { readonly card: ProposalCard; readonly receipt?: { re
 
 /** Device action review: cards, their two approval routes, decline and the direct pass of one message. */
 export service DeviceReview {
-  /** The cards of what is pending for this device, under the current screen; `ok` is false when the listing could not be read. */
-  pending(): { readonly ok: boolean; readonly cards: readonly ProposalCard[] }!!
+  /** The cards of what is pending for this device, under the current screen, and the notices shown instead of a card; `ok` is false when the listing could not be read. */
+  pending(): { readonly ok: boolean; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] }!!
   /** The screen context changed: every live card is replaced and the custody forgets its freshness; a private screen also stops it. */
   contextChanged(sensitive: boolean): void!!
   /** The agent session changed: a card listed under the earlier one is never approved. */
@@ -59,6 +84,36 @@ export service DeviceReview {
   directPass(messageId: string, text: string): { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] }!!
   /** Upload every settled receipt the journal still holds. */
   sync(): void!!
+  /** What the assistant knows of an executor call it started. */
+  callFacts(call: ExecutorCall): CallFacts!!
+  /** The past actions that wait for the owner to say what happened; undefined when the journal could not be read. */
+  history(): (readonly HistoryItem[] | undefined)!!
+  /** The owner said what happened to a past action; false when the agent did not take it. */
+  settleHistory(proposalId: string, outcome: HistoryOutcome): boolean!!
+}
+
+const historyWire = { happened: "ReviewedApplied", didnt: "ReviewedNotApplied", unresolved: "ReviewedUnresolved" } as const
+const resolutionOf = { happened: "ResolvedApplied", didnt: "ResolvedNotApplied", unresolved: "Unresolved" } as const satisfies Record<HistoryOutcome, Resolution>
+
+/** The listing an operation's card needs, from what its family's `itemize` said. */
+export function listingOf(said: ItemizedSet | string | undefined): Listing {
+  return said === undefined ? "NotItemized" : typeof said === "string" ? "Unlisted" : said.lines.length + said.unnamed === 0 ? "ListedEmpty" : "Listed"
+}
+
+function evidenceOf(raw: unknown): Evidence {
+  if (typeof raw !== "object" || raw === null) return "NoEvidence"
+  const evidence = raw as { readonly code?: unknown; readonly result?: unknown }
+  if (typeof evidence.code === "string") return "NotAppliedEvidence"
+  return evidence.result === undefined ? "NoEvidence" : "AppliedEvidence"
+}
+
+function parsedOperation(raw: unknown): unknown {
+  if (typeof raw !== "string") return raw
+  try {
+    return JSON.parse(raw) as unknown
+  } catch {
+    return undefined
+  }
 }
 
 effect function holdRoutes(start: Routes) {
@@ -85,6 +140,11 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   const cards = new Map<string, RoutesMachine.Shape>()
   const proposals = new Map<string, PendingProposal>()
   const consumed = new Set<string>()
+  const itemized = new Set<string>()
+  const listedNow = new Map<string, ItemizedSet>()
+  const facts = new Map<string, CallFacts>()
+  const texts = new Map<string, string>()
+  const calls = new Map<string, ExecutorCall>()
   let executions: { readonly key: string; readonly execution: DeviceExecution<unknown> } | undefined
   const post = (path: string, body: unknown) => runPromise(run(ask("POST", path, body)))
   const journalCall = (method: string, args: unknown) => runPromise(native.invoke("AlphaActionJournal", method, args))
@@ -100,7 +160,11 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     if (executions?.key === key) return executions.execution
     const execution = new DeviceExecution<unknown>({
       identity: { ownerId: identity.owner, agentId: identity.agent, origin: identity.origin, installationId: identity.installationId, enrollmentId: identity.enrollmentId },
-      journal, agent, validate: (operation) => ports.validate(operation), execute: (operation, call) => ports.execute(operation, call),
+      journal, agent, validate: (operation) => ports.validate(operation),
+      execute: (operation, call) => {
+        calls.set(call.proposalId, call)
+        return ports.execute(operation, call)
+      },
       readBack: (operation, call) => ports.readBack(operation, call),
     })
     executions = { key, execution }
@@ -132,11 +196,28 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function cardOf(proposal: PendingProposal, recovered: boolean, session: string): ProposalCard {
     const described = ports.describe(proposal.operation)
     proposals.set(proposal.id, proposal)
+    const items = listedNow.get(proposal.id)
     return {
       proposalId: proposal.id, digest: proposal.digest, title: proposal.title ?? described.title, detail: proposal.description ?? described.detail,
       expiresAt: expiryOf(proposal.expiresAt), state: recovered ? "RecoveredCard" : "LiveCard", recovered, session,
       ...(described.destination === undefined ? {} : { destination: described.destination }),
+      ...(items === undefined ? {} : { items }),
     }
+  }
+  effect function newReview() {
+    listedNow.clear()
+  }
+  effect function itemizedNotice(proposal: PendingProposal) {
+    const said = ports.itemize?.(proposal.operation, proposal.id)
+    const listing = listingOf(said)
+    if (listing === "NotItemized") return undefined
+    itemized.add(proposal.id)
+    if (cardOffered(listing) && said !== undefined && typeof said !== "string") {
+      listedNow.set(proposal.id, said)
+      return undefined
+    }
+    const described = ports.describe(proposal.operation)
+    return typeof said === "string" ? said : `${proposal.title ?? described.title}: ${copy.nothingListed}`
   }
   effect function stateOf(routes: RoutesMachine.Shape): CardState {
     return (try routes.get()).card
@@ -144,6 +225,12 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function screenCheck(reviewed: boolean, requestEligible: boolean, forceReview: boolean) {
     const screen = try host.screen()
     return { live: !screen.exposure.hidden, nonsensitive: !(screen.exposure.privateView || screen.exposure.locked || screen.exposure.connectionDialog), exact: true, forceReview, requestEligible, reviewed }
+  }
+  effect function presented(proposal: PendingProposal, result: ApproveResult) {
+    const call = calls.get(proposal.id)
+    if (result.kind !== "settled" || result.result.tag !== "Applied" || call === undefined || ports.present === undefined) return
+    const show = ports.present
+    try Effect.try(() => show(proposal.operation, call)) catch () => undefined
   }
   effect function receiptOf(proposal: PendingProposal, result: ApproveResult) {
     const outcome: Result = result.kind !== "settled" ? (result.kind === "history" ? "Unknown" : "NotStarted")
@@ -155,6 +242,8 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function execute(proposal: PendingProposal, reviewed: boolean, requestEligible: boolean, forceReview: boolean) {
     const identity = try host.identity()
     if (identity === undefined) return { kind: "invalid" } satisfies ApproveResult
+    const messageId = proposal.requestMessageId ?? ""
+    facts.set(proposal.id, { reviewed, messageId, ownerText: texts.get(messageId) ?? "" })
     const execution = try executionFor(identity)
     const check = try screenCheck(reviewed, requestEligible, forceReview)
     const device: DeviceProposal = { id: proposal.id, digest: proposal.digest, expiresAt: expiryOf(proposal.expiresAt), operation: proposal.operation }
@@ -166,6 +255,10 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const identity = try host.identity()
     if (card.recovered && identity?.session !== card.session) {
       try host.toast(copy.agentChanged)
+      return { card: { ...card, state: try stateOf(routes) } }
+    }
+    if (!approvable(itemized.has(card.proposalId) ? "Listed" : "NotItemized", listedNow.has(card.proposalId))) {
+      try host.toast(copy.reviewListAgain)
       return { card: { ...card, state: try stateOf(routes) } }
     }
     if (!(try step(routes, { type: "tapApprove" }))) return { card: { ...card, state: try stateOf(routes) } }
@@ -181,6 +274,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     consumed.add(card.proposalId)
     const result = try execute(proposal, true, false, true)
     const receipt = try receiptOf(proposal, result)
+    try presented(proposal, result)
     if (receipt.outcome === "Applied") {
       try step(routes, { type: "agentExecutes" })
       try step(routes, { type: "receiptArrives" })
@@ -230,21 +324,28 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     try custodyStep({ type: "settle", outcome: receipt.outcome === "Applied" ? "Succeeded" : receipt.outcome === "Unknown" ? "UnknownResult" : "FailedResult" })
     try custodyStep({ type: "upload" })
     try custodyStep({ type: "finish", synced: result.synced })
+    try presented(proposal, result)
     return receipt
   }
   return {
     pending: () => effect {
       const identity = try host.identity()
-      if (identity === undefined) return { ok: false, cards: [] }
+      if (identity === undefined) return { ok: false, cards: [], notices: [] }
       const exposure = (try host.screen()).exposure
-      if (exposure.privateView || exposure.locked || exposure.connectionDialog || exposure.hidden) return { ok: true, cards: [] }
+      if (exposure.privateView || exposure.locked || exposure.connectionDialog || exposure.hidden) return { ok: true, cards: [], notices: [] }
       const found = try listed()
-      if (found === undefined) return { ok: false, cards: [] }
+      if (found === undefined) return { ok: false, cards: [], notices: [] }
       const now = try Clock.currentTimeMillis
       const open = found.filter((proposal) => proposal.state === "pending" && expiryOf(proposal.expiresAt) > now && proposal.workflow === undefined && ports.validate(proposal.operation) !== undefined)
+      try newReview()
       const made: ProposalCard[] = []
-      for (const proposal of open) made.push(try cardOf(proposal, true, identity.session))
-      return { ok: true, cards: made }
+      const notices: string[] = []
+      for (const proposal of open) {
+        const notice = try itemizedNotice(proposal)
+        if (notice !== undefined) notices.push(notice)
+        else made.push(try cardOf(proposal, true, identity.session))
+      }
+      return { ok: true, cards: made, notices }
     },
     contextChanged: (sensitive: boolean) => effect {
       for (const routes of cards.values()) try step(routes, { type: "contextChanged" })
@@ -264,6 +365,8 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       const identity = try host.identity()
       if (identity === undefined) return { receipts: [], cards: [], notices: [] }
       const listed = (try listing()).filter((proposal) => proposal.state === "pending" && proposal.requestMessageId === messageId)
+      texts.set(messageId, text)
+      try newReview()
       try custodyStep({ type: "startPass", sameMessage: false })
       const receipts: Approval[] = []
       const left: ProposalCard[] = []
@@ -280,7 +383,16 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
           notices.push(ungrounded ? copy.browserUngrounded : target.tag === "ContactTarget" ? copy.wrongNumberContact : copy.wrongNumber)
           continue
         }
+        const notice = try itemizedNotice(proposal)
+        if (notice !== undefined) {
+          notices.push(notice)
+          continue
+        }
         const card = try cardOf(proposal, false, identity.session)
+        if (listedNow.has(proposal.id)) {
+          left.push(card)
+          continue
+        }
         const done = try directOne(proposal, text, messageId)
         if (done === undefined) left.push(card)
         else receipts.push({ card: { ...card, state: done.outcome === "Applied" ? "DoneCard" : "UnconfirmedCard", summary: done.summary }, receipt: { title: done.title, summary: done.summary } })
@@ -292,6 +404,33 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       if (identity === undefined) return
       const execution = try executionFor(identity)
       promise(() => execution.sync()) catch () => undefined
+    },
+    callFacts: (call: ExecutorCall) => sync(() => facts.get(call.proposalId) ?? { reviewed: false, messageId: "", ownerText: "" }),
+    history: () => effect {
+      const entries = tryPromise(() => journal.list()) catch () => undefined
+      if (entries === undefined) return undefined
+      const items: HistoryItem[] = []
+      for (const raw of entries) {
+        if (typeof raw !== "object" || raw === null) continue
+        const entry = raw as { readonly proposalId?: unknown; readonly operation?: unknown; readonly evidence?: unknown; readonly acknowledged?: unknown }
+        if (typeof entry.proposalId !== "string" || entry.acknowledged !== false) continue
+        const operation = parsedOperation(entry.operation)
+        const owned = operation !== undefined && ports.validate(operation) !== undefined
+        const described = owned ? ports.describe(operation) : { title: copy.phoneAction, detail: "" }
+        const handoff = !owned || (ports.handoff?.(operation) ?? true)
+        const evidence = evidenceOf(entry.evidence)
+        const offers = (["happened", "didnt", "unresolved"] as const).filter((outcome) => offered(handoff, evidence, resolutionOf[outcome]))
+        items.push({ proposalId: entry.proposalId, title: described.title, detail: described.detail, offers })
+      }
+      return items
+    },
+    settleHistory: (proposalId: string, outcome: HistoryOutcome) => effect {
+      const identity = try host.identity()
+      if (identity === undefined) return false
+      const execution = try executionFor(identity)
+      const said = promise(() => execution.confirmReview(proposalId, historyWire[outcome])) catch () => "refused" as const
+      if (said === "refused") try host.toast(copy.historyRefused)
+      return said === "sent"
     },
   }
 })

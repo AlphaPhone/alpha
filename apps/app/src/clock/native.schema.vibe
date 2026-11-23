@@ -98,6 +98,9 @@ export const AgentReminderReceipt = Schema.Struct({
 /** The proposal digest the action journal holds for an approved entry (`AlphaActionJournal.get`). */
 export const JournalDigest = Schema.Struct({ digest: Schema.String.check(Schema.makeFilter((s: string) => s.length > 0 && s.length <= 128)) })
 
+/** The action journal's answer to `get`: the approved entry, or null when none is kept. */
+export const JournalEntryReply = Schema.Struct({ entry: Schema.NullOr(JournalDigest) })
+
 /** A to-do decision's answer (`todoDecision`). */
 export const TodoDecided = Schema.Struct({ id: Schema.String, status: Schema.Literals(["todo", "completed", "cancelled"]) })
 
@@ -158,7 +161,7 @@ export const WorkflowTapRecord = Schema.Struct({
   workflowVersionId: Schema.optionalKey(Schema.String),
   retained: Schema.optionalKey(Schema.Boolean),
   question: Schema.optionalKey(Schema.Boolean),
-  notice: Schema.optionalKey(Schema.Struct({ title: Schema.String, text: Schema.String })),
+  notice: Schema.optionalKey(Schema.Struct({ title: Schema.String, text: Schema.String, revision: Schema.optionalKey(Schema.String) })),
 })
 
 const Titled = Schema.Struct({ title: Schema.optionalKey(Schema.String) })

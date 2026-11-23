@@ -5,7 +5,7 @@ import { Machine as Feed, machine as feedMachine, type FrameKind } from "../../g
 import { ResidentUnavailable } from "./resident.vibe"
 import { ResidentControl } from "./resident-control.vibe"
 import { ViewInteract, VoiceTranscript } from "./native.schema.vibe"
-import { newId } from "./native-capacitor.ts"
+import { newId } from "./ids.ts"
 
 /** The resident's live feeds for this renderer: nothing is replayed, kept or resubscribed by itself. */
 export service ResidentFeeds {

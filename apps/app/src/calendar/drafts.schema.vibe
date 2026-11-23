@@ -1,4 +1,4 @@
-// spec/calendar/drafts.md, "Typing retains the fields under the event revision being edited; under a conflict or storage error they stay only here"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"
+// spec/calendar/drafts.md, "Typing retains the fields under the event revision being edited; under a conflict or storage error they stay only here"; spec/calendar/drafts.md, "Story: Keep each account's draft with that account"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
 // The retained draft slot as storage holds it. Anything else in the slot needs recovery and is never offered.
 
 const Short = Schema.String.check(Schema.isMaxLength(256), Schema.makeFilter((value) => !value.includes("\0")))
@@ -23,6 +23,11 @@ export const DraftFields = Schema.Struct({
   calendar: Handle,
   creationId: Key,
   origin: Schema.Literals(["typed", "note", "scan"]),
+  noteLink: Schema.optionalKey(Schema.Struct({
+    version: Schema.Literal(2),
+    noteId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512)),
+    revision: Schema.String.check(Schema.isMaxLength(512)),
+  })),
   recurrenceScope: Schema.optionalKey(Schema.Literals(["instance", "this_and_following", "series"])),
   expectedProviderVersion: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4096))),
 })

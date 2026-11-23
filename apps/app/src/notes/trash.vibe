@@ -25,11 +25,14 @@ export service NotesTrash {
   readonly rows: Stream.Stream<readonly TrashRow[]>
   readonly cleanups: Stream.Stream<readonly NotesTrashRecordingCleanup[]>
   open(): void!!
-  close(): void!!
+  /** Close Recently deleted; false when it was not open. */
+  close(): boolean!!
   ask(row: TrashRow): void!!
-  closeAsk(): void!!
+  /** Close a row's review; false when none was open. */
+  closeAsk(): boolean!!
   askErase(all: boolean): void!!
-  cancelErase(): void!!
+  /** Cancel an erase confirmation; false when none was asked. */
+  cancelErase(): boolean!!
   restore(row: TrashRow): TrashNotice!!
   undo(noteId: string, deletedAt: string): TrashNotice!!
   erase(row?: TrashRow): TrashNotice!!
@@ -115,12 +118,12 @@ const make = effect {
       try probeRetention()
       try send({ type: "openTrash" })
     },
-    effect close() { try send({ type: "closeTrash" }) },
+    effect close() { return (try send({ type: "closeTrash" })) !== undefined },
     effect ask(row: TrashRow) {
       try Ref.set(asked, row)
       try send({ type: "askRow" })
     },
-    effect closeAsk() { try send({ type: "closeAsk" }) },
+    effect closeAsk() { return (try send({ type: "closeAsk" })) !== undefined },
     effect askErase(all: boolean) {
       if (!all) {
         const row = try Ref.get(asked)
@@ -128,7 +131,7 @@ const make = effect {
       }
       try send({ type: "askErase", everything: all })
     },
-    effect cancelErase() { try send({ type: "cancelErase" }) },
+    effect cancelErase() { return (try send({ type: "cancelErase" })) !== undefined },
     effect restore(row: TrashRow) {
       try Ref.set(asked, row)
       const ok = try exact(row, true)

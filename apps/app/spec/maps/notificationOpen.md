@@ -37,7 +37,6 @@ pure val weight_tapNotification = 3
 A record read while Maps could not be shown is consumed without opening.
 
 ```quint
-pure def canTapNotification(s: NotificationOpen): bool = s.taps < 3
 pure def tapNotification(s: NotificationOpen): NotificationOpen =
   if (s.disposed) { ...s, pending: true, taps: s.taps + 1 }
   else flushed(true, { ...s, pending: true, taps: s.taps + 1, requested: true, revision: s.revision + 1 })
@@ -45,7 +44,7 @@ pure def canSetReady(s: NotificationOpen, on: bool): bool = on != s.ready
 pure def setReady(s: NotificationOpen, on: bool): NotificationOpen = { ...s, ready: on }
 pure def canFlush(s: NotificationOpen): bool = readable(s)
 pure def flush(s: NotificationOpen): NotificationOpen = flushed(true, s)
-pure def canReadSettles(s: NotificationOpen, ok: bool, found: bool): bool = s.checking and (ok or s.failures < 2)
+pure def canReadSettles(s: NotificationOpen, ok: bool, found: bool): bool = s.checking
 pure def readSettles(s: NotificationOpen, ok: bool, found: bool): NotificationOpen = {
   val current = not(s.disposed) and s.epoch == s.captured
   val hit = ok and found and s.pending

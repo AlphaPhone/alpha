@@ -12,12 +12,14 @@ opens the walkthrough again at a chosen step.
 type Perm = PermNotifications | PermMicrophone | PermCamera | PermLocation | PermCalendar | PermPhotos | PermFiles
 type Access = AccessChecking | AccessAsk | AccessSettings | AccessReady | AccessUnavailable
 type Phase = PhaseSignIn | PhaseWalkthrough | PhaseReady | PhaseHome
+type Grant = GrantNone | GrantPrecise | GrantApproximate | GrantAll | GrantSelected | GrantLimited
+type CheckNotice = NoCheckNotice | NoticeStillOff | NoticeUnconfirmed
 type Permissions = {
-  restored: bool, native: bool, keys: List[Perm], states: Perm -> Access, attempted: Set[Perm],
+  restored: bool, native: bool, keys: List[Perm], states: Perm -> Access, grants: Perm -> Grant, attempted: Set[Perm],
   progress: int, target: int, reopened: bool, review: bool,
   pending: int, generation: int, ticket: int, operations: Perm -> int,
   signedIn: bool, foreground: bool, phase: Phase, completed: bool, progressError: bool,
-  stalled: bool, imageKnown: bool, automatic: bool, untouched: bool, attention: bool, quietEnd: bool
+  stalled: bool, imageKnown: bool, automatic: bool, untouched: bool, attention: bool, quietEnd: bool, notice: CheckNotice
 }
 pure val NativeKeys = List(PermNotifications, PermMicrophone, PermCamera, PermLocation, PermCalendar, PermPhotos, PermFiles)
 pure val BrowserKeys = List(PermNotifications, PermMicrophone, PermCamera, PermLocation)
@@ -25,12 +27,14 @@ pure val initial: Permissions = {
   restored: false, native: false, keys: BrowserKeys,
   states: Map(PermNotifications -> AccessChecking, PermMicrophone -> AccessChecking, PermCamera -> AccessChecking,
     PermLocation -> AccessChecking, PermCalendar -> AccessChecking, PermPhotos -> AccessChecking, PermFiles -> AccessChecking),
+  grants: Map(PermNotifications -> GrantNone, PermMicrophone -> GrantNone, PermCamera -> GrantNone,
+    PermLocation -> GrantNone, PermCalendar -> GrantNone, PermPhotos -> GrantNone, PermFiles -> GrantNone),
   attempted: Set(), progress: 0, target: -1, reopened: false, review: false,
   pending: -1, generation: 0, ticket: 0,
   operations: Map(PermNotifications -> -1, PermMicrophone -> -1, PermCamera -> -1, PermLocation -> -1,
     PermCalendar -> -1, PermPhotos -> -1, PermFiles -> -1),
   signedIn: false, foreground: false, phase: PhaseSignIn, completed: false, progressError: false,
-  stalled: false, imageKnown: false, automatic: false, untouched: true, attention: false, quietEnd: false
+  stalled: false, imageKnown: false, automatic: false, untouched: true, attention: false, quietEnd: false, notice: NoCheckNotice
 }
 pure val attemptedValues = Set(Set(), Set(PermCamera))
 pure val savedValues = Set(0, 2, 7)
@@ -59,7 +63,7 @@ pure def restore(p: Permissions, native: bool, attempted: Set[Perm], saved: int,
   { ...p, restored: true, native: native, keys: keys, attempted: attempted,
     completed: done or saved >= keys.length(),
     progress: if (done or saved >= keys.length()) -1 else if (saved < 0) 0 else saved,
-    imageKnown: p.imageKnown or not(native), untouched: not(touched), quietEnd: false }
+    imageKnown: p.imageKnown or not(native), untouched: not(touched), quietEnd: false, notice: NoCheckNotice }
 }
 pure val touchedValues = Set(true, false)
 pure val nativeValues = Set(true, false)
@@ -78,12 +82,14 @@ completed installation signing in again shows Home, or the Ready card when a new
 ```quint
 pure def signIn(p: Permissions, created: bool): Permissions =
   { ...p, signedIn: true, foreground: true, generation: p.generation + 1, pending: -1, target: -1, reopened: false, review: false,
-    phase: if (p.progress >= 0) PhaseWalkthrough else if (created) PhaseReady else PhaseHome, stalled: false, quietEnd: false }
+    phase: if (p.progress >= 0) PhaseWalkthrough else if (created) PhaseReady else PhaseHome, stalled: false, quietEnd: false,
+    notice: NoCheckNotice }
 pure def signOut(p: Permissions): Permissions =
   { ...p, signedIn: false, foreground: false, phase: PhaseSignIn, pending: -1, generation: p.generation + 1, target: -1, reopened: false,
     stalled: false, quietEnd: false }
 pure def suspend(p: Permissions): Permissions = { ...p, foreground: false, pending: -1, generation: p.generation + 1, stalled: false }
-pure def resume(p: Permissions): Permissions = { ...p, foreground: true, pending: -1, generation: p.generation + 1, stalled: false }
+pure def resume(p: Permissions): Permissions =
+  { ...p, foreground: true, pending: -1, generation: p.generation + 1, stalled: false, notice: NoCheckNotice }
 pure def alwaysSignedOutMeansSignIn(p: Permissions): bool = (not(p.signedIn)) iff (p.phase == PhaseSignIn)
 pure val createdValues = Set(true, false)
 ```
@@ -98,19 +104,29 @@ already allowed on Android offers Android's own settings page for it instead (Fi
 access page, Notifications the app's notification page, every other step the privacy page).
 
 ```quint
-pure def platformStatus(p: Permissions, key: Perm, access: Access): Permissions = { ...p, states: p.states.put(key, access) }
+pure def platformStatus(p: Permissions, key: Perm, access: Access, grant: Grant): Permissions =
+  { ...p, states: p.states.put(key, access), grants: p.grants.put(key, if (access == AccessReady) grant else GrantNone) }
 pure def canBegin(p: Permissions): bool =
   p.signedIn and (p.foreground or p.reopened) and p.phase == PhaseWalkthrough and p.pending == -1 and inRange(p, selected(p)) and
   accessOf(p, selected(p)) != AccessChecking and p.operations.getOr(keyAt(p, selected(p)), -1) == -1
 pure def begin(p: Permissions): Permissions =
-  { ...p, pending: selected(p), ticket: p.generation, operations: p.operations.put(keyAt(p, selected(p)), p.generation) }
+  { ...p, pending: selected(p), ticket: p.generation, operations: p.operations.put(keyAt(p, selected(p)), p.generation),
+    notice: NoCheckNotice }
 pure def canAsk(p: Permissions): bool =
   p.pending >= 0 and inRange(p, p.pending) and accessOf(p, p.pending) == AccessAsk and not(p.attempted.contains(keyAt(p, p.pending)))
 pure def ask(p: Permissions): Permissions = { ...p, attempted: p.attempted.union(Set(keyAt(p, p.pending))) }
 pure def canSettle(p: Permissions, access: Access): bool =
   p.pending >= 0 and inRange(p, p.pending) and p.ticket == p.generation and p.operations.getOr(keyAt(p, p.pending), -1) == p.ticket
-pure def settle(p: Permissions, access: Access): Permissions =
-  { ...p, pending: -1, states: p.states.put(keyAt(p, p.pending), access), operations: p.operations.put(keyAt(p, p.pending), -1) }
+pure def noticeAfter(native: bool, access: Access): CheckNotice =
+  if (native or access == AccessReady or access == AccessChecking) NoCheckNotice
+  else if (access == AccessSettings) NoticeStillOff
+  else NoticeUnconfirmed
+pure def settle(p: Permissions, access: Access): Permissions = {
+  val key = keyAt(p, p.pending)
+  { ...p, pending: -1, states: p.states.put(key, access), operations: p.operations.put(key, -1),
+    grants: p.grants.put(key, if (access == AccessReady) p.grants.getOr(key, GrantNone) else GrantNone),
+    notice: noticeAfter(p.native, access) }
+}
 pure def canRetire(p: Permissions, key: Perm): bool = p.operations.getOr(key, -1) >= 0 and p.operations.getOr(key, -1) != p.generation
 pure def retire(p: Permissions, key: Perm): Permissions = { ...p, operations: p.operations.put(key, -1) }
 pure def offersSettings(p: Permissions): bool =
@@ -142,7 +158,7 @@ pure def advance(p: Permissions, skip: bool): Permissions = {
   val untouched = p.untouched and not(skip) and not(p.attempted.contains(keyAt(p, p.progress)))
   val quiet = last and automaticNow(p) and untouched and not(p.attention) and not(p.progressError)
   { ...p, phase: if (quiet) PhaseHome else if (last) PhaseReady else PhaseWalkthrough, progress: if (last) -1 else p.progress + 1,
-    completed: p.completed or last, untouched: untouched, stalled: false, quietEnd: quiet,
+    completed: p.completed or last, untouched: untouched, stalled: false, quietEnd: quiet, notice: NoCheckNotice,
     pending: -1, generation: if (p.pending >= 0) p.generation + 1 else p.generation }
 }
 pure def canFinish(p: Permissions): bool = p.signedIn and p.phase == PhaseReady and p.pending == -1
@@ -150,15 +166,51 @@ pure def finish(p: Permissions): Permissions = { ...p, phase: PhaseHome, quietEn
 pure def canOpenTarget(p: Permissions, index: int): bool = p.signedIn and inRange(p, index)
 pure def openTarget(p: Permissions, index: int): Permissions =
   { ...p, phase: PhaseWalkthrough, target: index, pending: -1, generation: p.generation + 1, reopened: true, review: p.completed,
-    stalled: false, quietEnd: false }
+    stalled: false, quietEnd: false, notice: NoCheckNotice }
 pure def canCloseTarget(p: Permissions): bool = p.target >= 0 and p.pending == -1
 pure def closeTarget(p: Permissions): Permissions =
-  { ...p, phase: if (p.signedIn) PhaseHome else PhaseSignIn, target: -1, reopened: false, review: false, quietEnd: false }
+  { ...p, phase: if (p.signedIn) PhaseHome else PhaseSignIn, target: -1, reopened: false, review: false, quietEnd: false,
+    notice: NoCheckNotice }
 pure def progressWriteFailed(p: Permissions): Permissions =
   { ...p, progressError: true, phase: if (p.quietEnd) PhaseReady else p.phase, quietEnd: false }
 pure def stepCompletionIsNeverUndone(before: Permissions, after: Permissions): bool = before.completed implies after.completed
 pure def sometimesCompleted(p: Permissions): bool = p.completed and p.phase == PhaseHome and p.attempted.size() > 0
 pure def sometimesReviewedFromSettings(p: Permissions): bool = p.review and p.target >= 0
+```
+
+### An allowed step says how much Android allowed, and a browser request left off says so
+
+On Android an allowed Location step reads Precise or Approximate, and an allowed Photos step All,
+Selected or Limited, as Android last reported them; every other allowed step reads Allowed. A step
+that is no longer allowed keeps no such grant. In a browser, an Allow that the browser leaves off
+reads "Still off", and one it cannot confirm reads "Couldn’t confirm", until the next request, step,
+return to the foreground or review; Android never shows either line, because its own page answers.
+
+```quint
+pure def grantOf(p: Permissions, index: int): Grant =
+  if (accessOf(p, index) == AccessReady) p.grants.getOr(keyAt(p, index), GrantNone) else GrantNone
+pure def alwaysAGrantBelongsToAnAllowedStep(p: Permissions): bool =
+  NativeKeys.every(k => p.grants.getOr(k, GrantNone) == GrantNone or p.states.getOr(k, AccessChecking) == AccessReady)
+pure def alwaysACheckNoticeIsTheBrowsers(p: Permissions): bool = p.notice != NoCheckNotice implies not(p.native)
+pure def lawAnAllowedAnswerSaysNothing(native: bool): bool = noticeAfter(native, AccessReady) == NoCheckNotice
+pure def lawAndroidSaysNothing(access: Access): bool = noticeAfter(true, access) == NoCheckNotice
+pure def sometimesStillOff(p: Permissions): bool = p.notice == NoticeStillOff
+pure def sometimesApproximate(p: Permissions): bool = p.grants.getOr(PermLocation, GrantNone) == GrantApproximate
+```
+
+### Back leaves a review and finishes the Ready card; on a first-run step it does nothing
+
+While the panel holds the phone, Back reaches it before the shell's own order. Back leaves a review
+opened from Settings, as Close does, and finishes the Ready card, as Done does. On a first-run step,
+and while a request is in flight, it does nothing, so Back never skips a step or grants anything.
+
+```quint
+type WalkthroughBack = BackCloses | BackFinishes | BackHeld
+pure def backOf(p: Permissions): WalkthroughBack =
+  if (canCloseTarget(p)) BackCloses else if (canFinish(p)) BackFinishes else BackHeld
+pure def alwaysBackSkipsNoFirstRunStep(p: Permissions): bool =
+  (p.phase == PhaseWalkthrough and p.target == -1) implies backOf(p) == BackHeld
+pure def sometimesBackClosesAReview(p: Permissions): bool = backOf(p) == BackCloses
 ```
 
 ### A step still checking or asking after twenty seconds can be skipped

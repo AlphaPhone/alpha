@@ -4,7 +4,8 @@ import type { GoogleGrant } from "../../../gen/calendar__googleLink.ts";
 import { syncWord } from "../../../gen/calendar__sync.ts";
 import { CalendarSync, type SyncDestination } from "../../calendar/sync.vibe";
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from "../components/ui/index.ts";
-import { useSyncView, run } from "./hooks.ts";
+import { useSyncView } from "./hooks.ts";
+import { perform } from "../shell/services.ts";
 
 const WORDS = { SyncOff: "Off", SyncOn: "On", SyncSynced: "Synced", SyncNeedsReview: "Needs review", SyncPaused: "Paused" } as const;
 
@@ -34,7 +35,7 @@ export function SyncSettings({ grant, destinations }: SyncSettingsProps) {
       <Select value={savedKey} disabled={!(view.review?.paused ?? true) || view.review?.pendingDispatch != null}
         onValueChange={(key) => {
           const destination = destinations.find((candidate) => `${candidate.connectorAccountId}/${candidate.providerCalendarId}` === key);
-          if (destination) void run(CalendarSync.use((sync) => sync.change("SelectDestination", destination)));
+          if (destination) void perform(CalendarSync.use((sync) => sync.change("SelectDestination", destination)));
         }}>
         <SelectTrigger aria-label="Google Calendar destination"><SelectValue placeholder="Choose a Google calendar" /></SelectTrigger>
         <SelectContent>{destinations.map((candidate) => (
@@ -43,19 +44,19 @@ export function SyncSettings({ grant, destinations }: SyncSettingsProps) {
       </Select>
       <label className="flex min-h-11 items-center justify-between gap-3 text-sm">
         {reviewing ? "Confirm sync" : "Sync"}
-        <Switch checked={control.consent} aria-label={reviewing ? "Confirm sync" : "Sync"} onCheckedChange={(on) => void run(CalendarSync.use((sync) => {
+        <Switch checked={control.consent} aria-label={reviewing ? "Confirm sync" : "Sync"} onCheckedChange={(on) => void perform(CalendarSync.use((sync) => {
           if (!on) return sync.withdrawConsent();
           return reviewing ? sync.giveConsent() : sync.reviewConsent();
         }))} />
       </label>
       <div className="flex items-center justify-between text-sm">
         <span role="status">{WORDS[word]}</span>
-        <Button variant="ghost" size="icon" aria-label="Review sync" onClick={() => void run(CalendarSync.use((sync) => sync.review()))}><RefreshCw /></Button>
+        <Button variant="ghost" size="icon" aria-label="Review sync" onClick={() => void perform(CalendarSync.use((sync) => sync.review()))}><RefreshCw /></Button>
       </div>
       {grant === "WriteGrant" && saved === undefined && (
-        <Button variant="secondary" onClick={() => void run(CalendarSync.use((sync) => sync.link(grant, destinations)))}>Choose Google calendar</Button>
+        <Button variant="secondary" onClick={() => void perform(CalendarSync.use((sync) => sync.link(grant, destinations)))}>Choose Google calendar</Button>
       )}
-      {view.review?.pendingDispatch != null && <Button variant="outline" aria-label="Check pending operation" onClick={() => void run(CalendarSync.use((sync) => sync.change("RecoverDispatch")))}>Check</Button>}
+      {view.review?.pendingDispatch != null && <Button variant="outline" aria-label="Check pending operation" onClick={() => void perform(CalendarSync.use((sync) => sync.change("RecoverDispatch")))}>Check</Button>}
     </section>
   );
 }

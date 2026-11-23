@@ -198,13 +198,7 @@ export function localDateTime(at: number): { date: string; time: string; weekday
   return { date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`, time: `${pad(d.getHours())}:${pad(d.getMinutes())}`, weekday: d.getDay() };
 }
 
-/**
- * A fresh random identity.
- * @throws {never}
- */
-export function freshId(): string {
-  return crypto.randomUUID();
-}
+export { newId as freshId } from "../platform/ids.ts";
 
 /** The SHA-256 of the canonical JSON of `value`, in hex. */
 export async function digestOf(value: unknown): Promise<string> {

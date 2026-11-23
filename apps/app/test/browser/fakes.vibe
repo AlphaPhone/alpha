@@ -1,4 +1,4 @@
-// The Browser shell over a fake native tab host: the device's WebViews cannot run here, so the plugin is faked once, at the Native boundary.
+// spec/browser/session.md, "Story: Browse in tabs": the Browser shell over a fake native tab host, faked once at the Native boundary.
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Cloud } from "../../src/platform/cloud.vibe"

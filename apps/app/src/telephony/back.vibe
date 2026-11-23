@@ -1,0 +1,118 @@
+// spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/messages.md, "Back closes Messages' own layers one at a time, innermost first, before it leaves Messages"; spec/telephony/contacts.md, "Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/phone.md, "Back clears Alpha's filter before it leaves Phone"
+import { backStep, Machine as CommsMachine } from "../../gen/telephony__comms.effect.vibe"
+import { contactsBack, Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
+import { messagesBack, Machine as MessagesMachine } from "../../gen/telephony__messages.effect.vibe"
+import { Machine as PhoneMachine, phoneBack } from "../../gen/telephony__phone.effect.vibe"
+import { Machine as VoicemailMachine, voicemailBack } from "../../gen/telephony__voicemail.effect.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { ContactsView } from "./contacts.vibe"
+import { MessagesView } from "./messages.vibe"
+import { VoicemailView } from "./voicemail.vibe"
+
+/** The three telephony apps a Back can land in. */
+export type TelephonyApp = "phone" | "messages" | "contacts"
+
+/** Where a stage entry's subject is shown: its app and the route that reopens it there. */
+export function placeOfKey(key: string): { readonly app: TelephonyApp; readonly route?: string } {
+  if (key.startsWith("messages:thread:")) return { app: "messages", route: key.slice("messages:".length) }
+  if (key.startsWith("messages:")) return { app: "messages" }
+  if (key.startsWith("contacts:")) return { app: "contacts" }
+  if (key.startsWith("phone:keypad:")) return { app: "phone", route: "keypad:" }
+  return { app: "phone", route: "recents" }
+}
+
+/** Hardware or gesture Back inside Phone, Messages and Contacts. */
+export service TelephonyBack {
+  /** Back while `app` is in front: true when the stage, the chat or one of the app's own layers took it, false when Back is the shell's. */
+  back(app: TelephonyApp): boolean!!
+}
+
+/** Back over the comms stage, each app's machine and the views that close what they opened. */
+export const telephonyBackLayer = Layer.effect(TelephonyBack, effect {
+  const comms = try CommsMachine
+  const phone = try PhoneMachine
+  const voicemail = try VoicemailMachine
+  const messages = try MessagesMachine
+  const contacts = try ContactsMachine
+  const messagesView = try MessagesView
+  const contactsView = try ContactsView
+  const voicemailView = try VoicemailView
+  const navigation = try Navigation
+
+  effect function stage(app: TelephonyApp) {
+    const c = try comms.get()
+    const step = backStep(c)
+    if (step === "AppBack") return false
+    if (step === "ChatCloses") {
+      try (comms.send({ type: "chatClosed" }, "Owner") catch () => undefined)
+      return true
+    }
+    const after = try (comms.send({ type: "stageReturned" }, "Owner") catch () => undefined)
+    if (after === undefined) return true
+    const place = placeOfKey(after.key)
+    if (place.app !== app) {
+      try navigation.open(place.app, place.route)
+      return true
+    }
+    const m = try messages.get()
+    if (app === "messages" && place.route === undefined && m.view.tag === "InThread") try messagesView.closeThread()
+    else if (app === "messages" && place.route !== undefined) try navigation.open("messages", place.route)
+    else if (app === "contacts") try (contacts.send({ type: "contactClosed" }) catch () => undefined)
+    return true
+  }
+
+  effect function phoneLayers() {
+    const p = try phone.get()
+    if (p.tab === "VoicemailTab") {
+      const v = try voicemail.get()
+      const step = voicemailBack(v)
+      if (step === "VoicemailDeleteHolds") return true
+      if (step === "ConfirmCloses") {
+        try (voicemail.send({ type: "deleteDeclined" }) catch () => undefined)
+        return true
+      }
+      if (step === "VoicemailCloses") {
+        try voicemailView.open(v.opened.openId)
+        return true
+      }
+    }
+    if (phoneBack(p) === "LeavesPhone") return false
+    try (phone.send({ type: "queryCleared" }) catch () => undefined)
+    return true
+  }
+
+  effect function messagesLayers() {
+    const step = messagesBack(try messages.get())
+    if (step === "LeavesMessages") return false
+    if (step === "MenuCloses") try (messages.send({ type: "menuClosed" }) catch () => undefined)
+    else if (step === "ThreadCloses") {
+      try messagesView.closeThread()
+      try (comms.send({ type: "subjectShown", app: "MessagesApp", subject: "ListSubject", key: "messages:list:" }, "Owner") catch () => undefined)
+    } else if (step === "PickerCloses" || step === "ComposeCloses") try messagesView.pickerClose()
+    else if (step === "SearchCloses") try (messages.send({ type: "searchClosed" }) catch () => undefined)
+    else if (step === "MessagesChipClears") try (messages.send({ type: "queryCleared" }) catch () => undefined)
+    return true
+  }
+
+  effect function contactsLayers() {
+    const step = contactsBack(try contacts.get())
+    if (step === "LeavesContacts") return false
+    if (step === "EditorCloses") try (contacts.send({ type: "editorClosed" }) catch () => undefined)
+    else if (step === "DeleteDeclines") try (contacts.send({ type: "deleteDeclined" }) catch () => undefined)
+    else if (step === "ContactCloses") {
+      try (contacts.send({ type: "contactClosed" }) catch () => undefined)
+      try (comms.send({ type: "subjectShown", app: "ContactsApp", subject: "ListSubject", key: "contacts:list:" }, "Owner") catch () => undefined)
+    } else if (step === "ChipClears") try contactsView.clearChip()
+    else if (step === "SearchClears") try contactsView.read("", false)
+    return true
+  }
+
+  return {
+    effect back(app: TelephonyApp) {
+      if (try stage(app)) return true
+      if (app === "phone") return try phoneLayers()
+      if (app === "messages") return try messagesLayers()
+      return try contactsLayers()
+    },
+  }
+})

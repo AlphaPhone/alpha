@@ -109,7 +109,7 @@ describe("Agent Clock operations (spec/clock/agentReview.md, \"Story: Let the ag
   it.effect("refuse a reminder change whose reminder moved since it was approved (spec/clock/reminders.md, \"Story: Change a reminder exactly once\")", () => effect {
     const target = { sourceId: "s1", sourceRevision: "a".repeat(64), reminderId: "r1", occurrenceId: "o1", revision: "b".repeat(64) }
     const phone = fakePhone({
-      "AlphaActionJournal.get": () => ({ digest: "d1" }),
+      "AlphaActionJournal.get": () => ({ entry: { digest: "d1" } }),
       "DailyApps.selectedReminder": () => ({ ...target, revision: "c".repeat(64) }),
       "DailyApps.operateReminder": () => ({ status: "succeeded" }),
     })
@@ -134,11 +134,11 @@ describe("What Clock answered (spec/clock/vocabulary.md, \"Story: Hear only what
     provide Layer.provideMerge(Layer.provideMerge(workflowClockPort, handoffLayer), machines), phone.layer, build("launcher") {
       const port = try WorkflowClockPort
       const draft = try HandoffMachine
-      try port.prepare()
+      try port.prepare({ hour: 7, minute: 30, label: "Gym", days: [] })
       const mismatched = try port.confirm()
       const reported = (try draft.get()).message
       answer = "set"
-      try port.prepare()
+      try port.prepare({ hour: 7, minute: 30, label: "Gym", days: [] })
       const opened = try port.confirm()
       try Effect.try(() => assert.deepStrictEqual(
         { mismatched, reported, opened, sent: phone.calls.filter((c) => c.method === "clockHandoff").length },

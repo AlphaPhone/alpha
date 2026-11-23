@@ -1,4 +1,4 @@
-// spec/clock/reminderTaps.md, "Story: Ask about a reminder I tapped"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is consumed; cancelling returns the tap"
+// spec/clock/reminderTaps.md, "Story: Ask about a reminder I tapped"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it"
 import { useState } from "react";
 import { Button, Sheet, SheetContent, Textarea } from "../components/ui/index.ts";
 

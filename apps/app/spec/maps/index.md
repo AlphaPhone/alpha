@@ -19,7 +19,7 @@ milliseconds.
 | Vocabulary | [Travel modes, fix quality, guidance thresholds, Google terms](./vocabulary.md) |
 | Provider | [Cloud Maps connection, account binding and request pause](./connection.md) |
 | Screen | [Search, place, directions, origin and route choice](./screen.md), [map plane and credits](./plane.md), [saved places](./savedPlaces.md) |
-| Location | [Location custody, one-shot and continuous fixes](./location.md); the phone location sent with chat is the assistant's [turn context](../assistant/context.md) |
+| Location | [Location custody, one-shot and continuous fixes](./location.md), [network position when GPS has no fix](./networkFix.md); the phone location sent with chat is the assistant's [turn context](../assistant/context.md) |
 | Guidance | [Turn-by-turn guidance, reroute and screen-off service](./guidance.md); voice follows `@elizaos/plugin-maps` guidance speech |
 | Agent | [Bringing Maps forward and device navigation](./agentSurface.md), [selected read and context](./selectedRead.md), [relay delivery and redelivery](./delivery.md) |
 | Hand-offs | [Chat cards and share choices](./cards.md), [return to a Calendar event](./eventReturn.md), [notification open](./notificationOpen.md) |

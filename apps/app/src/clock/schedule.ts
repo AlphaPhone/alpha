@@ -1,6 +1,6 @@
 // spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderDrafts.md, "Story: Find my unsaved reminder where I left it"; spec/clock/reminders.md, "The outcome is decided by reading the reminders back, and a reopen counts only as a new open occurrence at the reviewed time"
 // A reminder's due instant, alert and recurrence in the phone's time zone, worked out before anything starts.
-import type { Delivery, Precheck, ReminderRow, ReminderStatus } from "../../gen/clock__reminders.ts";
+import type { Delivery, Precheck, RepeatRule, ReminderRow, ReminderStatus } from "../../gen/clock__reminders.ts";
 import { localDateTime, phoneTimeZone, wallTime } from "./page.ts";
 
 const MINUTE = 60_000;
@@ -97,6 +97,21 @@ export function reopenScheduleOf(row: Pick<ReminderRow, "dueAt" | "hasAlert" | "
   const lead = row.hasAlert ? row.alertMinutes : 0;
   if (dueAt - lead * MINUTE <= now) return "PrecheckTimePassed";
   return { at: dueAt - lead * MINUTE, dueAt, alertMinutes: lead, recurrence: null };
+}
+
+const REPEAT: Readonly<Record<RepeatRule, ReminderDraft["repeat"]>> = {
+  RepeatNever: "none",
+  RepeatDaily: "daily",
+  RepeatWeekdays: "weekdays",
+  RepeatWeekly: "weekly",
+};
+
+/**
+ * The form's repeat for a listed reminder's rule, so an edit starts from the repeat the reminder has.
+ * @throws {never}
+ */
+export function repeatOf(rule: RepeatRule): ReminderDraft["repeat"] {
+  return REPEAT[rule];
 }
 
 const STATUS: Readonly<Record<string, ReminderStatus>> = {

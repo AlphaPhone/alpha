@@ -8,6 +8,8 @@ a start, the permission check, the prompt, the wait for the screen to be in
 front and the watch itself, belongs to the generation that started it, so a
 late answer of a retired session changes nothing. Only the owner's own locate
 and the guidance watch the owner started may show the permission prompt.
+When GPS has no fix, a [network position](./networkFix.md) stands in as an
+approximate one.
 
 The chat's view of the phone's position, sent with ordinary turns when the
 owner allows Location for Alpha, is the assistant's
@@ -20,7 +22,9 @@ never the origin of a route, which Maps plans from its own fresh fix.
 
 `cleanupPending` is a native watch or listener of a retired session whose
 removal has not been confirmed; a new session waits for it. `quietUsed` is
-whether this visit's quiet fix has been taken.
+whether this visit's quiet fix has been taken. `gps` is whether the session
+has had a GPS fix, and `approximate` whether the last fix it counted was a
+network position.
 
 ```quint
 import vocabulary.* from "./vocabulary"
@@ -30,11 +34,11 @@ type LocationPhase = Idle | Stopping | Checking | Prompting | WaitingFront | Sta
 type LocationFailure = NoLocationFailure | Denied | Unavailable | TimedOut | CleanupUnconfirmed
 type Locator = {
   generation: int, purpose: Purpose, phase: LocationPhase, hidden: bool, cleanupPending: bool,
-  failure: LocationFailure, fixes: int, errors: int, quietUsed: bool, prompted: bool,
+  failure: LocationFailure, fixes: int, errors: int, quietUsed: bool, prompted: bool, gps: bool, approximate: bool,
 }
 pure val initial: Locator = {
   generation: 0, purpose: NoPurpose, phase: Idle, hidden: false, cleanupPending: false,
-  failure: NoLocationFailure, fixes: 0, errors: 0, quietUsed: false, prompted: false,
+  failure: NoLocationFailure, fixes: 0, errors: 0, quietUsed: false, prompted: false, gps: false, approximate: false,
 }
 pure def admitting(s: Locator): bool =
   s.phase == Stopping or s.phase == Checking or s.phase == Prompting or s.phase == WaitingFront or s.phase == Starting
@@ -60,7 +64,7 @@ pure def canBeginLocate(s: Locator, purpose: Purpose): bool =
   purpose != NoPurpose and not(admitting(s)) and
   (purpose != QuietFix or (not(s.quietUsed) and (s.phase == Idle or s.phase == Failed)))
 pure def beginLocate(s: Locator, purpose: Purpose): Locator = {
-  ...s, generation: s.generation + 1, purpose: purpose, failure: NoLocationFailure, prompted: false,
+  ...s, generation: s.generation + 1, purpose: purpose, failure: NoLocationFailure, prompted: false, gps: false, approximate: false,
   phase: if (s.cleanupPending or s.phase == Watching) Stopping else Checking,
   cleanupPending: s.cleanupPending or s.phase == Watching or s.phase == Starting,
   quietUsed: s.quietUsed or purpose == QuietFix,
@@ -121,8 +125,8 @@ pure def watchStarted(s: Locator, owner: int, created: bool): Locator =
 pure def canFixArrives(s: Locator, owner: int, ageMs: int): bool = owner == s.generation and s.phase == Watching
 pure def fixArrives(s: Locator, owner: int, ageMs: int): Locator =
   if (not(freshAge(ageMs))) s
-  else if (oneShot(s.purpose)) { ...s, fixes: s.fixes + 1, phase: Idle, purpose: NoPurpose, cleanupPending: true }
-  else { ...s, fixes: s.fixes + 1 }
+  else if (oneShot(s.purpose)) { ...s, fixes: s.fixes + 1, gps: true, approximate: false, phase: Idle, purpose: NoPurpose, cleanupPending: true }
+  else { ...s, fixes: s.fixes + 1, gps: true, approximate: false }
 pure def canWatchFails(s: Locator, owner: int): bool = owner == s.generation and s.phase == Watching
 pure def watchFails(s: Locator, owner: int): Locator = { ...s, phase: Failed, failure: Unavailable, errors: s.errors + 1, cleanupPending: true }
 pure def canTimedOut(s: Locator, owner: int): bool = owner == s.generation and oneShot(s.purpose) and s.phase != Idle and s.phase != Failed
@@ -134,7 +138,7 @@ pure def stopLocate(s: Locator): Locator = {
   cleanupPending: s.cleanupPending or s.phase == Watching or s.phase == Starting,
 }
 pure def stepFixNeedsTheCurrentWatch(before: Locator, via: str, after: Locator): bool =
-  after.fixes > before.fixes implies via == "fixArrives" and before.phase == Watching
+  after.fixes > before.fixes implies (via == "fixArrives" or via == "networkFixArrives") and before.phase == Watching
 pure def stepRetiredSessionCannotWatch(before: Locator, via: str, after: Locator): bool =
   (after.phase == Watching and before.phase != Watching) implies via == "watchStarted" and after.generation == before.generation
 pure def alwaysCountsAreNotNegative(s: Locator): bool = s.fixes >= 0 and s.errors >= 0 and s.generation >= 0
@@ -142,4 +146,26 @@ pure def sometimesGuidanceWatches(s: Locator): bool = s.purpose == GuidanceWatch
 pure def sometimesCleanupRefused(s: Locator): bool = s.failure == CleanupUnconfirmed
 pure val fair_cleanupSettles = "weak"
 pure def leadsToCleanupSettles(s: Locator, later: Locator): bool = s.cleanupPending implies not(later.cleanupPending)
+```
+
+### When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers
+
+The wait starts once the watch is running; a kept network answer is shown at
+once, without waiting. A one-shot session, a locate card or "near me", ends
+with the network position. A GPS fix first means no lookup, and once GPS has
+fixed no network position is counted; a lookup of a retired session, or one
+that finishes after Maps left, changes nothing. A network position is never
+precise, so it never guides ([fix quality](./vocabulary.md)).
+
+```quint
+pure val gpsGraceMs = 4000
+pure def canNetworkFixArrives(s: Locator, owner: int): bool = owner == s.generation and s.phase == Watching and not(s.gps)
+pure def networkFixArrives(s: Locator, owner: int): Locator =
+  if (oneShot(s.purpose)) { ...s, fixes: s.fixes + 1, approximate: true, phase: Idle, purpose: NoPurpose, cleanupPending: true }
+  else { ...s, fixes: s.fixes + 1, approximate: true }
+pure def alwaysApproximateOnlyWithoutGps(s: Locator): bool = s.approximate implies not(s.gps)
+pure def stepGpsEndsTheStandIn(before: Locator, via: str, after: Locator): bool =
+  via == "networkFixArrives" implies not(before.gps) and after.generation == before.generation
+pure def sometimesApproximateFix(s: Locator): bool = s.approximate and s.fixes >= 1
+pure def sometimesGpsAfterTheStandIn(s: Locator): bool = s.gps and s.purpose == GuidanceWatch and s.fixes >= 2
 ```

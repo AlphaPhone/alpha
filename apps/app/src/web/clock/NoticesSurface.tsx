@@ -31,13 +31,14 @@ import { NotificationShade } from "./NotificationShade.tsx";
 import { QuestionSheet } from "./QuestionSheet.tsx";
 import { RetainedDataNotice } from "./RetainedDataNotice.tsx";
 import { RingingCard } from "./RingingCard.tsx";
-import { buildInfo, run, runtime } from "./connect.ts";
+import { runtime } from "../runtime.ts";
+import { act, buildInfo } from "../shell/services.ts";
 
-const clock = (act: (a: ClockActions.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ClockActions), act));
-const deletions = (act: (d: Deletions.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(Deletions), act));
-const shadeDo = (act: (n: Notifications.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(Notifications), act));
+const clock = (use: (a: ClockActions.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ClockActions), use));
+const deletions = (use: (d: Deletions.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Deletions), use));
+const shadeDo = (use: (n: Notifications.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Notifications), use));
 
-const recover = (act: (r: ClockRecovery.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ClockRecovery), act));
+const recover = (use: (r: ClockRecovery.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ClockRecovery), use));
 
 /** What the shell gives the notices surface: how to open an app at a route. */
 export type NoticesSurfaceProps = {
@@ -104,11 +105,11 @@ export function NoticesSurface(_props: NoticesSurfaceProps) {
       )}
       {reminderQuestion && (
         <QuestionSheet name="Alpha Phone notification" excerpt={[reminderQuestion.title, reminderQuestion.text].filter(Boolean).join("\n")}
-          onAnswer={(draft) => run(Effect.flatMap(Effect.service(ReminderTaps), (t) => t.closeQuestion(draft)))} />
+          onAnswer={(draft) => act(Effect.flatMap(Effect.service(ReminderTaps), (t) => t.closeQuestion(draft)))} />
       )}
       {workflowQuestion && (
         <QuestionSheet name="Workflows notification" excerpt={[workflowQuestion.title, workflowQuestion.text].filter(Boolean).join("\n")}
-          onAnswer={(draft) => run(Effect.flatMap(Effect.service(WorkflowNotices), (w) => w.answer(draft)))} />
+          onAnswer={(draft) => act(Effect.flatMap(Effect.service(WorkflowNotices), (w) => w.answer(draft)))} />
       )}
       {shadeRow && (
         <QuestionSheet name={`${shadeRow.appLabel || "Alpha Phone"} notification`} excerpt={[shadeRow.title, shadeRow.text].filter(Boolean).join("\n")}

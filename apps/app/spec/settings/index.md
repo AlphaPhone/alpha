@@ -43,7 +43,10 @@ pure val sValues = Set(initial).union(Set({ ...initial, developer: true }))
 
 ### A page opens from its parent, and Back returns to that parent
 
-Android's Back does the same: it pops one page, and on the root it leaves Settings.
+Android's Back does the same: it pops one page, and on the root it leaves Settings. What the page
+holds open closes first and Back stays on the page: the erase or preferences-reset confirmation,
+the Wi-Fi password sheet, the problem log's clear confirmation, and the vault's pending
+confirmation or open entry. A confirmation belongs to the visit of the page that opened it.
 
 ```quint
 pure def canOpen(s: Settings, page: Page): bool =

@@ -1,10 +1,11 @@
-// spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"; spec/calendar/editor.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"; spec/calendar/editor.md, "A managed Google event is never deleted here, and its other repeating changes reach one occurrence"; spec/calendar/device.md, "A lost edit or an unknown delete holds only its own event"
-import { Trash2, Pencil, Video, MapPin, ExternalLink, RefreshCw } from "lucide-react";
+// spec/calendar/presentation.md, "Story: Open an event and come back"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/calendar/presentation.md, "The people list says Organizer or Alpha's word for each reply, never the provider's value"; spec/calendar/editor.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"; spec/calendar/editor.md, "A managed Google event is never deleted here, and its other repeating changes reach one occurrence"; spec/calendar/device.md, "A lost edit or an unknown delete holds only its own event"
+import { Trash2, Pencil, Video, MapPin, ExternalLink, RefreshCw, StickyNote } from "lucide-react";
 import { useState } from "react";
 import { type ReplyWord, replyWord } from "../../../gen/calendar__presentation.ts";
 import { cancellationMode, managedDeleteOffered, managedScopeAllowed, type CancellationMode, type RecurrenceScope } from "../../../gen/calendar__editor.ts";
 import type { EventRecord, CalendarRecord as CalendarSummary } from "../../calendar/feed.schema.vibe";
 import { type CalendarRow, managedGoogle, repeatText } from "../../calendar/model.vibe";
+import type { OriginView } from "../../notes/origins.vibe";
 import { Avatar, Button, RadioGroup, RadioGroupItem, Sheet, SheetContent } from "../components/ui/index.ts";
 import { intervalDetail } from "./layout.ts";
 
@@ -77,7 +78,14 @@ export type EventDetailProps = {
   onCheckAgain: () => void;
   onOpenLink: (url: string) => void;
   onPlace: (place: string) => void;
+  /** The note this event was made from, as Notes resolves it; absent when it was not made from a note. */
+  origin?: OriginView;
+  onOpenOrigin?: () => void;
   onClose: () => void;
+};
+
+const ORIGIN_WORDS: Readonly<Record<OriginView["label"], string>> = {
+  FromNoteTitled: "From note", DeletedNoteLabel: "From a deleted note", KindOnlyLabel: "From a note",
 };
 
 const SCOPES: readonly { readonly scope: RecurrenceScope; readonly label: string }[] = [
@@ -88,7 +96,7 @@ const SCOPES: readonly { readonly scope: RecurrenceScope; readonly label: string
  * One event: when and where, its calendar, and only the changes Alpha can make to it exactly.
  * @model spec/calendar/presentation.md
  */
-export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, onEdit, onAskDelete, onDelete, onCloseDelete, onCheckAgain, onOpenLink, onPlace, onClose }: EventDetailProps) {
+export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, onEdit, onAskDelete, onDelete, onCloseDelete, onCheckAgain, onOpenLink, onPlace, origin, onOpenOrigin, onClose }: EventDetailProps) {
   const [scope, setScope] = useState<RecurrenceScope>("ThisOccurrence");
   if (row === undefined) return null;
   const detail = intervalDetail(row);
@@ -106,6 +114,11 @@ export function EventDetail({ row, facts, deleting, held, canEdit, canDelete, on
           )}
           <p className="font-mono text-xs uppercase tracking-widest text-muted-foreground">{row.writable ? `${row.calendarName} · ${row.account}` : `${row.calendarName} · Read only`}</p>
           {row.notes && <p className="whitespace-pre-wrap text-sm">{row.notes}</p>}
+          {origin !== undefined && (
+            origin.label === "DeletedNoteLabel" || onOpenOrigin === undefined
+              ? <p className="text-sm text-muted-foreground">{ORIGIN_WORDS[origin.label]}</p>
+              : <Button variant="ghost" className="justify-start" onClick={onOpenOrigin}><StickyNote aria-hidden />{origin.title ? `${ORIGIN_WORDS[origin.label]} · ${origin.title}` : ORIGIN_WORDS[origin.label]}</Button>
+          )}
           {facts.people.length > 0 && (
             <ul aria-label="People" className="flex flex-col">
               {facts.people.map((person) => (

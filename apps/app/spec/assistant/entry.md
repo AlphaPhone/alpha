@@ -71,3 +71,20 @@ and opens the assistant then; it never starts voice.
 pure def tileLaunches(locked: bool, unlocked: bool): bool = not(locked) or unlocked
 pure def lawALockedTileWaitsForUnlock(locked: bool): bool = locked implies not(tileLaunches(locked, false))
 ```
+
+### On the assistant surface, its launch is taken once, and closing the chat with no app open closes the surface
+
+When Android opened Alpha as the system assistant (its own assist
+activity), the renderer takes that launch's invocation once
+(`Agent.takeInvocation`), as an invocation of its origin; a locked or
+unknown keyguard never starts voice. Hiding the chat while no app is open
+closes the assistant surface (`DailyApps.closeAssistant`), back to what was
+in front before.
+
+```quint
+pure def takesLaunch(assistantSurface: bool, taken: bool): bool = assistantSurface and not(taken)
+pure def closesSurface(assistantSurface: bool, chatHidden: bool, appOpen: bool): bool = assistantSurface and chatHidden and not(appOpen)
+pure def lawALaunchIsTakenOnce(surface: bool): bool = not(takesLaunch(surface, true))
+pure def lawTheMainSurfaceNeverCloses(hidden: bool, open: bool): bool = not(closesSurface(false, hidden, open))
+pure def lawAnOpenAppKeepsTheSurface(surface: bool, hidden: bool): bool = not(closesSurface(surface, hidden, true))
+```

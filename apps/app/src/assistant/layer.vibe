@@ -23,12 +23,20 @@ import { draftLayer } from "./draft.vibe"
 import { flowsLayer } from "./flows.vibe"
 import { suggestionsLayer } from "./suggestion.vibe"
 import { withdrawableLayer } from "./withdrawable.vibe"
+import { networkLocationLayer } from "./network-location.vibe"
+import { cameraCallFactsLive } from "./call-facts.vibe"
+import { restartLayer } from "./restart.vibe"
 
 export { Assistant } from "./assistant.vibe"
 export { AssistantDraft, cameraHandoffsFromAssistant } from "./draft.vibe"
 export { askAlphaTarget, filesCapabilities } from "./files-bridge.vibe"
 export { AssistantHost } from "./host.vibe"
-export { AssistantEmail, MapsChatCards, OwnNotices, WorkflowStepDecisions } from "./ports.vibe"
+export { AssistantEmail, CameraComposer, MapsChatCards, MapsRelay, OwnNotices, ReplyChanges, TurnSources, WorkflowStepDecisions } from "./ports.vibe"
+export { NetworkLocation, type NetworkPosition } from "./network-location.vibe"
+export { PhoneLocation } from "./location.vibe"
+export { telephonyCallsFromAssistant } from "./call-facts.vibe"
+export { turnSourcesLive } from "./turn-sources.vibe"
+export { AgentRestart } from "./restart.vibe"
 export { Composer } from "./composer.vibe"
 export { Suggestions } from "./suggestion.vibe"
 export { AssistantFlows } from "./flows.vibe"
@@ -45,14 +53,14 @@ export const machines = Layer.mergeAll(
 )
 
 const services = Layer.provideMerge(
-  Layer.mergeAll(conversationsLayer, locationLayer, attachmentsLayer, reviewLayer, suggestionsLayer),
-  Layer.provideMerge(withdrawableLayer, machines),
+  Layer.mergeAll(conversationsLayer, locationLayer, attachmentsLayer, reviewLayer, suggestionsLayer, restartLayer),
+  Layer.provideMerge(Layer.mergeAll(withdrawableLayer, networkLocationLayer), machines),
 )
 
 const conversation = Layer.provideMerge(searchLayer, Layer.provideMerge(composerLayer, services))
 
-/** The assistant's services and machines, needing Native, Resident, KeyValueStore, Preferences (settings), Navigation (shell core), AssistantHost and DeviceExecutors (shell); the ports in ports.vibe refuse until Inbox, Clock, Workflows and Maps fill them. */
+/** The assistant's services and machines, and Camera's per-call facts, needing Native, Resident, ResidentControl, ResidentRecovery, KeyValueStore, Preferences (settings), Navigation (shell core), AssistantHost and DeviceExecutors (shell); the ports in ports.vibe answer with their defaults until Inbox, Clock, Workflows, Maps, Camera, Notes and Calendar fill them. */
 export const layer = Layer.provideMerge(
-  Layer.mergeAll(flowsLayer, draftLayer),
+  Layer.mergeAll(flowsLayer, draftLayer, cameraCallFactsLive),
   Layer.provideMerge(assistantLayer, conversation),
 )

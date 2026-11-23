@@ -47,6 +47,8 @@ export service ClockHandoff {
   confirm(): void!!
   /** Leaving, Back or hiding retires the review. */
   retire(): void!!
+  /** Hardware or gesture Back: retires an open review, and holds Back while the reviewed request is being sent; false when no review is open. */
+  back(): boolean!!
 }
 
 /** The handoff over the draft machine and the stored history, reaching Clock through `DailyApps`. */
@@ -69,6 +71,13 @@ export const handoffLayer = Layer.effect(ClockHandoff, effect {
     },
     effect retire() {
       draft.send({ type: "retire" }) catch () => undefined
+    },
+    effect back() {
+      const phase = (try draft.get()).phase
+      if (phase === "Saving" || phase === "Opening") return true
+      if (phase !== "Reviewing") return false
+      draft.send({ type: "retire" }) catch () => undefined
+      return true
     },
     effect confirm() {
       if (!pageVisible()) {

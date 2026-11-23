@@ -151,3 +151,31 @@ it.live("an unconfirmed copy is checked before another edit, and a found copy se
     try Effect.try(() => assert.deepStrictEqual({ uncertain, status: settled.status, writes: settled.writes, saves }, { uncertain: "EditUncertain", status: "EditSaved", writes: 1, saves: 1 }))
   }
 })
+
+// spec/camera/browse.md, "Story: Look at one photo"
+it.live("Back closes the viewer, then the selection, then hands Back to the shell (spec/camera/browse.md, \"Story: Look at one photo\")", () => effect {
+  const device = library()
+  provide cameraOver(device) {
+    const photos = try PhotoLibrary
+    const editor = try MediaEditor
+    const agent = try AgentPhotos
+    const catalog = try CatalogMachine
+    const browse = try BrowseMachine
+    try photos.enter()
+    try until(() => effect { return (try catalog.get()).main.loaded && (try catalog.get()).read === "ReadIdle" })
+    try photos.openViewer("m:1")
+    const viewing = (try browse.get()).viewer
+    const noEditor = try editor.back()
+    const noCard = try agent.back()
+    const closedViewer = try photos.back()
+    const afterViewer = (try browse.get()).viewer
+    try photos.startSelection("m:2")
+    const closedSelection = try photos.back()
+    const selecting = (try browse.get()).selecting
+    const shell = try photos.back()
+    try Effect.try(() => assert.deepStrictEqual(
+      { viewing, noEditor, noCard, closedViewer, afterViewer, closedSelection, selecting, shell },
+      { viewing: "m:1", noEditor: false, noCard: false, closedViewer: true, afterViewer: "", closedSelection: true, selecting: false, shell: false },
+    ))
+  }
+})

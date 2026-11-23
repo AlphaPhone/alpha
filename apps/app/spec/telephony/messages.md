@@ -154,6 +154,32 @@ pure def lawOnlyAOnePersonConversationOffersCall(threadId: str, addresses: List[
   (threadCallNumber(InThread({ threadId: threadId, addresses: addresses })) != "") iff (addresses.length() == 1 and addresses.nthOr(0, "") != "")
 ```
 
+### Back closes Messages' own layers one at a time, innermost first, before it leaves Messages
+
+After the comms stage and the open chat (comms.md, "A view change while the chat is open keeps the
+sheet's height and remembers the view it left"), Back closes a message's menu, then the open
+conversation, then the recipient picker, then the new message (keeping what was written), then the
+header search, then Alpha's filter chip. While a delete is in flight Back is held, so it never
+reads as leaving in the middle of it. Only the plain list leaves Messages.
+
+```quint
+type MessagesBack = MessagesDeleteHolds | MenuCloses | ThreadCloses | PickerCloses | ComposeCloses | SearchCloses | MessagesChipClears | LeavesMessages
+pure def messagesBack(m: Messages): MessagesBack =
+  if (m.deleting) MessagesDeleteHolds
+  else if (m.menu != NoMenu) MenuCloses
+  else if (openThreadId(m.view) != "") ThreadCloses
+  else if (pickerOpen(m.picker)) PickerCloses
+  else if (m.view == Composing) ComposeCloses
+  else if (m.searching) SearchCloses
+  else if (isAlphaQuery(m.listQuery)) MessagesChipClears
+  else LeavesMessages
+pure def lawBackLeavesMessagesOnlyFromThePlainList(m: Messages): bool =
+  messagesBack(m) == LeavesMessages implies
+    (m.view == ThreadList and m.menu == NoMenu and not(m.deleting) and not(m.searching) and not(isAlphaQuery(m.listQuery)))
+pure def lawBackClosesTheMenuBeforeTheConversation(m: Messages): bool =
+  (m.menu != NoMenu and not(m.deleting)) implies messagesBack(m) == MenuCloses
+```
+
 ## Story: Start a new message
 
 > As the owner, I want to write to a number or pick people from my contacts, and close the new

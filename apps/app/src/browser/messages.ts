@@ -173,4 +173,5 @@ export const AGENT_REFUSALS: Readonly<Record<AgentOutcome, string>> = {
   RefusedCovered: "Close Browser’s menu, tab list, library, share sheet or address editor first.",
   RefusedNotShowing: "Browser is not showing.",
   FailedOpen: "Browser couldn’t open that page.",
+  RefusedListChanged: "Browser’s tabs changed after you reviewed them. Nothing was closed. Ask again to see the tabs that are open now.",
 };

@@ -11,7 +11,8 @@ import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type OwnerScope, WorkflowApi } from "./api.vibe"
-import { instant, newId, sha256Hex } from "./ids.ts"
+import { instant, sha256Hex } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
 
 export const DIGESTS_KEY = ownerKey("device", "workflows/digests")
 

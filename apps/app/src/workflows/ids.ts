@@ -1,13 +1,5 @@
 // spec/workflows/runs.md, "Run is reviewed first, and the confirmation saves one fresh submission before anything is sent"; spec/workflows/hostedResults.md, "Story: Be told when my digest is ready, and open exactly that result"
 
-/**
- * A fresh UUID v4 for a submission or mutation id.
- * @throws {never}
- */
-export function newId(): string {
-  return globalThis.crypto.randomUUID();
-}
-
 export { sha256Hex } from "../calendar/digest.ts";
 export { deviceZone } from "../calendar/time.ts";
 

@@ -1,12 +1,16 @@
-// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"
+// spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"; spec/shell/navigation.md, "The assistant moves between its detents, and Home keeps its bar"; spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"
 import { appInert, talking, type Nav } from "../../gen/shell__navigation.effect.vibe"
 import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "../platform/native.vibe"
+import { KeyguardFacts } from "./native.schema.vibe"
+import { pageEvents, pageHidden } from "./page.ts"
 
 /** What is in front of the owner now, for areas that show something only while nothing covers it. */
 export interface ForegroundState {
   /** The page is in front and lit. */
   readonly visible: boolean
-  /** A locked or private surface shows; Alpha draws no lock screen of its own, so it is Android's keyguard only. */
+  /** Android's keyguard shows over the page; Alpha draws no lock screen of its own. */
   readonly locked: boolean
   /** The phone's screen: `home` while Alpha's page shows. */
   readonly screen: "home" | "off"
@@ -18,14 +22,16 @@ export interface ForegroundState {
   readonly chat: "closed" | "sheet" | "full"
   /** A sheet, menu or dialog, or another surface's hold, owns the phone. */
   readonly modal: boolean
+  /** This page is Android's assistant surface (`AlphaAssistActivity`), not the phone's own app or launcher. */
+  readonly assistantSurface?: boolean
 }
 
-/** The foreground as the navigation shows it. */
-export function foregroundOf(nav: Nav): ForegroundState {
-  const chat = talking(nav) ? (nav.chat === "ChatSheet" ? "sheet" : "full") : "closed"
+/** The foreground as the navigation shows it, with Android's keyguard as last read. */
+export function foregroundOf(nav: Nav, locked = false): ForegroundState {
+  const chat = talking(nav) ? (nav.chat === "Sheet" ? "sheet" : "full") : "closed"
   return {
-    visible: !nav.hidden, locked: false, screen: nav.hidden ? "off" : "home", view: nav.app,
-    shade: nav.shade, chat, modal: appInert(nav),
+    visible: !nav.hidden, locked, screen: nav.hidden ? "off" : "home", view: nav.app,
+    shade: nav.shade, chat, modal: appInert(nav), assistantSurface: nav.host === "AssistantSurface",
   }
 }
 
@@ -35,12 +41,53 @@ export service Foreground {
   get(): ForegroundState!!
 }
 
-/** The foreground service over the navigation machine. */
+/**
+ * Android's keyguard as `Agent.takeInvocation` reports it (`locked`), a read that consumes nothing. A host without that
+ * bridge (the browser, a build that does not list it) has no keyguard over the page; a failed or unreadable answer counts as locked.
+ */
+export effect function keyguardLocked() {
+  const native = try Native
+  if (!(try native.available("Agent"))) return false
+  const answer = native.invoke("Agent", "takeInvocation") catch (error) => error
+  if (answer instanceof NativeUnavailable) return false
+  if (answer instanceof NativeFailed) return true
+  const facts = Schema.decodeUnknownEffect(KeyguardFacts)(answer) catch () => undefined
+  return facts === undefined ? true : facts.locked
+}
+
+function same(a: ForegroundState, b: ForegroundState): boolean {
+  return a.visible === b.visible && a.locked === b.locked && a.screen === b.screen && a.view === b.view && a.shade === b.shade &&
+    a.chat === b.chat && a.modal === b.modal && a.assistantSurface === b.assistantSurface
+}
+
+/** The foreground service over the navigation machine and the keyguard, read again whenever the page returns, takes focus or is invoked again. */
 export const foregroundLive = Layer.effect(Foreground, effect {
   const machine = try NavigationMachine
+  const build = try Build
+  const locked = try SubscriptionRef.make(try keyguardLocked())
+
+  effect function reread() {
+    if (pageHidden()) return
+    try SubscriptionRef.set(locked, try keyguardLocked())
+  }
+
+  fork.scoped (effect { for try (const _ of pageEvents("visibilitychange", "document")) try reread() })
+  fork.scoped (effect { for try (const _ of pageEvents("focus")) try reread() })
+  fork.scoped (effect { for try (const _ of pageEvents("alpha:assist-invocation")) try reread() })
+  if (build.info.testMocks) {
+    fork.scoped (effect {
+      for try (const detail of pageEvents("alpha:dev-command")) {
+        const command = typeof detail === "object" && detail !== null && "command" in detail ? (detail as { command?: unknown }).command : detail
+        if (command === "power") try SubscriptionRef.set(locked, true)
+        if (command === "unlock") try SubscriptionRef.set(locked, false)
+      }
+    })
+  }
+
+  const fromNav = Stream.mapEffect(machine.changes, (nav: Nav) => effect { return foregroundOf(nav, try SubscriptionRef.get(locked)) })
+  const fromLock = Stream.mapEffect(SubscriptionRef.changes(locked), (now: boolean) => effect { return foregroundOf(try machine.get(), now) })
   return {
-    changes: Stream.changesWith(Stream.map(machine.changes, foregroundOf), (a, b) =>
-      a.visible === b.visible && a.locked === b.locked && a.screen === b.screen && a.view === b.view && a.shade === b.shade && a.chat === b.chat && a.modal === b.modal),
-    effect get() { return foregroundOf(try machine.get()) },
+    changes: Stream.changesWith(Stream.merge(fromNav, fromLock), same),
+    effect get() { return foregroundOf(try machine.get(), try SubscriptionRef.get(locked)) },
   }
 })

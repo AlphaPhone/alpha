@@ -17,7 +17,7 @@ export const nativePlugins = {
     methods: [
       "residentAttachment", "setGoogleAgentAccess", "configureProvider", "prepareProviderConfiguration",
       "cancelProviderConfiguration", "clearProvider", "configureCloudProvider", "providerStatus", "selectProvider",
-      "removeProviderKey", "revealProviderKey",
+      "removeProviderKey", "revealProviderKey", "launchSurface", "takeInvocation",
     ],
     events: [],
   },
@@ -137,6 +137,7 @@ export const nativePlugins = {
     ],
     events: ["navigationStopped"],
   },
+  AlphaNetworkLocation: { reach: "AnyNative", methods: ["locate"], events: [] },
   AlphaNoteAudio: {
     reach: "AnyNative",
     methods: ["describe", "play", "stop", "state", "remove", "purge", "deletionStatus"],
@@ -199,7 +200,7 @@ export const nativePlugins = {
       "checkPermissions", "requestPermissions", "perform", "surfaceInfo", "clockHandoff", "listReminders", "selectedReminder",
       "scheduleReminder", "operateReminder", "reminderOperationReceipt", "saveTodo", "todoDecision", "pendingReminderTap",
       "consumeReminderTap", "dismissReminderTap", "releaseReminderQuestion", "restoreSelected", "renameSelected",
-      "pdfSelected", "describeSelected", "readSelected", "openSelected", "shareSelected", "forgetSelected",
+      "pdfSelected", "describeSelected", "readSelected", "openSelected", "shareSelected", "forgetSelected", "closeAssistant",
     ],
     events: ["assistantInvoked", "pendingReminderTap", "appResumed", "reminderOpened"],
   },

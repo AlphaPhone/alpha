@@ -1,17 +1,46 @@
-// spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
-import { type BrowserControlOperation, browserControlRunsUnreviewed, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
+// spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/session.md, "Closing every tab is negotiated only beside Browser tabs, and it never runs without the owner's review"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
+import { BROWSER_FIND_CAPABILITY, BROWSER_HISTORY_CAPABILITY, BROWSER_OPEN_NEW_TAB_CAPABILITY, BROWSER_SEARCH_CAPABILITY, BROWSER_TABS_CAPABILITY, type BrowserControlOperation, browserControlRunsUnreviewed, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
 import { browserDestinationMatches, groundBrowserDestination, groundBrowserSearchQuery } from "@elizaos/plugin-browser/grounding"
+import { closeAllNegotiated, closeAllRunsUnreviewed } from "../../gen/browser__session.ts"
+import type { Listing } from "../../gen/assistant__review.ts"
 import { browserNavigationSummary, copy } from "../assistant/presentation.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
-import { BrowserAgent, BrowserOpenRefused } from "./agent.vibe"
+import { BrowserAgent, BrowserOpenRefused, type BrowserTabLine } from "./agent.vibe"
 
 const ASSISTANT_NAME = "Alpha"
+
+/** The capability a phone advertises to close every open tab from one reviewed card that lists them: `browser_tab_close {all: true}`. */
+export const BROWSER_TABS_CLOSE_ALL_CAPABILITY = "browser.tabs.close-all.v1"
+
+/** The notice shown instead of a close-every-tab card when Browser could not list its tabs, or they changed after they were listed. */
+export const TABS_UNLISTED_NOTICE = "Browser couldn’t list its open tabs for this request, or they changed after they were listed. Nothing was closed. Ask again."
+/** The notice shown instead of a close-every-tab card when no tab would close. */
+export const NO_TABS_TO_CLOSE_NOTICE = "No tabs are open to close. Nothing was closed."
+
+/** The close-every-tab operation: the only form of `browser_tab_close` that names no tab and closes every listed one. */
+export interface BrowserCloseAll {
+  readonly type: "browser_tab_close"
+  readonly all: true
+}
 
 type BrowserOperation =
   | { readonly kind: "navigate"; readonly url: string; readonly newTab: boolean }
   | { readonly kind: "control"; readonly operation: BrowserControlOperation }
+  | { readonly kind: "closeAll" }
+
+function field(value: object, key: string): unknown {
+  return Object.getOwnPropertyDescriptor(value, key)?.value
+}
+
+/** Reads an untrusted value as the close-every-tab operation: exactly `{type: "browser_tab_close", all: true}`; one tab and every tab together is refused, never narrowed. */
+export function parseBrowserCloseAll(value: unknown): BrowserCloseAll | undefined {
+  if (typeof value !== "object" || value === null || field(value, "type") !== "browser_tab_close" || !Object.hasOwn(value, "all")) return undefined
+  if (field(value, "all") !== true || Object.keys(value).some((key) => key !== "type" && key !== "all")) return undefined
+  return { type: "browser_tab_close", all: true }
+}
 
 function decoded(operation: unknown): BrowserOperation | undefined {
+  if (parseBrowserCloseAll(operation) !== undefined) return { kind: "closeAll" }
   const navigate = parseBrowserNavigate(operation)
   if (navigate.ok) return { kind: "navigate", url: navigate.operation.url, newTab: navigate.operation.newTab === true }
   const control = parseBrowserControl(operation)
@@ -31,10 +60,20 @@ function wordsTyped(operation: BrowserControlOperation, text: string): boolean {
   }
 }
 
-/** Whether the owner's own message asks for this Browser operation: the address or search words as typed, or a control that needs no typed words. */
+/** The Browser capabilities this phone advertises in `x-eliza-device-capabilities`, of those the agent offered: find only with the native tab host, and closing every tab only beside Browser tabs. */
+export function browserDeviceCapabilities(offered: readonly string[], onDevice: boolean): string[] {
+  const wanted = [
+    BROWSER_SEARCH_CAPABILITY, BROWSER_TABS_CAPABILITY, BROWSER_HISTORY_CAPABILITY, ...(onDevice ? [BROWSER_FIND_CAPABILITY] : []), BROWSER_OPEN_NEW_TAB_CAPABILITY,
+    ...(closeAllNegotiated(offered.includes(BROWSER_TABS_CAPABILITY), offered.includes(BROWSER_TABS_CLOSE_ALL_CAPABILITY)) ? [BROWSER_TABS_CLOSE_ALL_CAPABILITY] : []),
+  ]
+  return wanted.filter((capability) => offered.includes(capability))
+}
+
+/** Whether the owner's own message asks for this Browser operation: the address or search words as typed, or a control that needs no typed words; closing every tab never runs on the message alone. */
 export function groundedIn(raw: unknown, text: string): boolean {
   const op = decoded(raw)
   if (op === undefined) return false
+  if (op.kind === "closeAll") return closeAllRunsUnreviewed(true, true)
   if (op.kind === "navigate") return browserDestinationMatches(raw, groundBrowserDestination(text, op.url, ASSISTANT_NAME))
   return browserControlRunsUnreviewed(op.operation, { boundToMessage: true, wordsTyped: wordsTyped(op.operation, text) })
 }
@@ -51,34 +90,73 @@ export function controlSummary(operation: BrowserControlOperation): string {
   }
 }
 
-/** The Browser family of agent device operations for `DeviceExecutors`: an approved HTTPS open or Browser control, run once by Browser's own agent service and refused before any effect when Browser changed. */
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`
+
+/** The card of closing every tab: the tabs it lists by name, private tabs only counted, or what it would do when nothing was listed. */
+export function describeCloseAll(closing: readonly BrowserTabLine[] | undefined): { readonly title: string; readonly detail: string } {
+  if (closing === undefined) return { title: "Close all tabs", detail: "Closes every open tab in Browser. The agent does not see your tabs." }
+  const named = closing.filter((tab) => tab.private !== true)
+  const hidden = closing.length - named.length
+  const lines = [
+    ...named.map((tab) => `• ${tab.title}${tab.host !== undefined && tab.host !== tab.title ? ` (${tab.host})` : ""}`),
+    ...(hidden > 0 ? [`• ${plural(hidden, "private tab")}`] : []),
+  ]
+  return { title: `Close ${plural(closing.length, "tab")}`, detail: `${lines.join("\n")}\n\nCloses every tab listed here. The agent does not see your tabs.` }
+}
+
+/** What a proposal's card shows when it acts on a set it lists: not itemized, the listed card, or the notice shown instead of a card. */
+export type Itemized =
+  | { readonly listing: Extract<Listing, "NotItemized"> }
+  | { readonly listing: Extract<Listing, "Unlisted" | "ListedEmpty">; readonly notice: string }
+  | { readonly listing: Extract<Listing, "Listed">; readonly title: string; readonly detail: string }
+
+/** Browser's executors, plus the itemized card of closing every tab, which the assistant draws per proposal and approves only from the latest review that listed it. */
+export interface BrowserOperationPorts extends OperationPorts {
+  /** Whether the operation's card must list the set it acts on before it is offered. */
+  itemized(operation: unknown): boolean
+  /** Lists that set on this phone for `proposalId`, bound by its first listing; a later listing that no longer matches Browser is Unlisted. */
+  itemize(operation: unknown, proposalId: string): Promise<Itemized>
+  /** Whether the card of `proposalId` still lists what would close, without listing it again. */
+  stillListed(operation: unknown, proposalId: string): Promise<boolean>
+}
+
+/** The Browser family of agent device operations for `DeviceExecutors`: an approved HTTPS open, a Browser control, or closing every listed tab, run once by Browser's own agent service and refused before any effect when Browser changed. */
 export const operationPorts = effect {
   const browser = try BrowserAgent
 
-  effect function presentation(op: BrowserOperation) {
+  effect function presentation(op: BrowserOperation, proposalId: string) {
+    if (op.kind === "closeAll") return try browser.closeAll(proposalId)
     if (op.kind === "navigate") return (try browser.openApproved(op.url, op.newTab)).present
     const observed = op.operation.type === "browser_history" ? try browser.selection() : undefined
     return try browser.control(op.operation, observed, () => succeed(null))
   }
 
-  effect function run(op: BrowserOperation) {
-    const present = presentation(op) catch (error) => error
+  effect function run(op: BrowserOperation, proposalId: string) {
+    const present = presentation(op, proposalId) catch (error) => error
     if (present instanceof BrowserOpenRefused) return { kind: "refused", code: "not_started", result: { message: present.message } }
     runFork(present)
     return { kind: "applied" }
   }
 
-  const ports: OperationPorts = {
+  effect function itemize(proposalId: string) {
+    const closing = try browser.tabsClosing(proposalId)
+    if (closing === null) return { listing: "Unlisted", notice: `Close all tabs: ${TABS_UNLISTED_NOTICE}` } satisfies Itemized
+    if (closing.length === 0) return { listing: "ListedEmpty", notice: `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}` } satisfies Itemized
+    return { listing: "Listed", ...describeCloseAll(closing) } satisfies Itemized
+  }
+
+  const ports: BrowserOperationPorts = {
     validate: (operation) => decoded(operation) === undefined ? undefined : operation,
-    execute: async (operation) => {
+    execute: async (operation, call) => {
       const op = decoded(operation)
       if (op === undefined) return { kind: "refused", code: "unsupported" }
-      return await runPromise(run(op))
+      return await runPromise(run(op, call.proposalId))
     },
     readBack: async () => ({ kind: "refused", code: "no_readback" }),
     describe: (operation) => {
       const op = decoded(operation)
       if (op === undefined) return { title: "Action", detail: "" }
+      if (op.kind === "closeAll") return describeCloseAll(undefined)
       if (op.kind === "navigate") return { title: op.newTab ? "Open in a new tab" : "Open in Browser", detail: op.url }
       const described = describeBrowserControl(op.operation)
       return { title: described.title, detail: described.description }
@@ -88,8 +166,12 @@ export const operationPorts = effect {
     summarize: (operation, result) => {
       const op = decoded(operation)
       if (op === undefined || result !== "Applied") return copy.unconfirmed
+      if (op.kind === "closeAll") return "Closed all tabs."
       return op.kind === "navigate" ? browserNavigationSummary(op.url) : controlSummary(op.operation)
     },
+    itemized: (operation) => decoded(operation)?.kind === "closeAll",
+    itemize: async (operation, proposalId) => decoded(operation)?.kind === "closeAll" ? await runPromise(itemize(proposalId)) : { listing: "NotItemized" },
+    stillListed: async (operation, proposalId) => decoded(operation)?.kind === "closeAll" && await runPromise(browser.closingListed(proposalId)),
   }
   return ports
 }

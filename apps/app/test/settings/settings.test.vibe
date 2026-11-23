@@ -10,7 +10,6 @@ import { Machine as PrivacyMachine, machine as privacyMachine } from "../../gen/
 import { Machine as NetworkMachine, machine as networkMachine } from "../../gen/settings__network.effect.vibe"
 import { Machine as DiagnosticsMachine, machine as diagnosticsMachine } from "../../gen/settings__diagnostics.effect.vibe"
 import { StorageUsage } from "../../src/files/usage.vibe"
-import { MapsPreferences } from "../../src/maps/ports.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { CrashJournal } from "../../src/platform/crash-journal.vibe"
 import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
@@ -55,13 +54,13 @@ function android(answers: Record<string, Answer>) {
   return { calls, native }
 }
 
-/** A service whose every method succeeds and is recorded as `Service.method [args]`. */
-function recorder(name: string, calls: string[]): never {
+/** A service whose every method succeeds and is recorded as `Service.method [args]`; it answers true, or what `answers` names for that method. */
+function recorder(name: string, calls: string[], answers: Record<string, unknown> = {}): never {
   const shape = new Proxy({}, {
     get: (_target, method) => typeof method === "symbol" || method === "then" ? undefined
       : (...args: unknown[]) => effect {
         calls.push(args.length === 0 ? `${name}.${method}` : `${name}.${method} ${JSON.stringify(args)}`)
-        return true
+        return Object.hasOwn(answers, method) ? answers[method] : true
       },
   })
   return shape as never
@@ -84,7 +83,7 @@ it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a
     Layer.succeed(Navigation, recorder("Navigation", calls)), Layer.succeed(Permissions, recorder("Permissions", calls)),
     Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
     Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
-    Layer.succeed(Vault, recorder("Vault", calls)), Layer.succeed(Diagnostics, recorder("Diagnostics", calls)),
+    Layer.succeed(Vault, recorder("Vault", calls, { back: false })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: false })),
   )
   provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build())) {
     const pages = try SettingsPages
@@ -115,8 +114,35 @@ it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a
       { refused, section, up, atRoot, vaultPage, inboxPage, left, calls },
       {
         refused: "Root", section: "Privacy", up: true, atRoot: false, vaultPage: "Passwords", inboxPage: "AppInbox", left: "Root",
-        calls: ["Navigation.open [\"account\",\"provider\"]", "PrivacyRow.readListener", "Navigation.open [\"calendar\"]", "Vault.open", "Vault.leave", "Permissions.reopen [0]"],
+        calls: ["Navigation.open [\"account\",\"provider\"]", "PrivacyRow.readListener", "Navigation.open [\"calendar\"]", "Vault.open", "Vault.back", "Vault.leave", "Permissions.reopen [0]"],
       },
+    ))
+  }
+})
+
+it.effect("Back closes what a page holds open before the page (spec/settings/index.md, \"A page opens from its parent, and Back returns to that parent\")", () => effect {
+  const calls: string[] = []
+  const fakes = Layer.mergeAll(
+    Layer.succeed(Navigation, recorder("Navigation", calls)), Layer.succeed(Permissions, recorder("Permissions", calls)),
+    Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
+    Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
+    Layer.succeed(Vault, recorder("Vault", calls, { back: true })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: true })),
+  )
+  provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build())) {
+    const pages = try SettingsPages
+    try pages.open("Apps")
+    try pages.open("Passwords")
+    const onVault = try pages.back()
+    const vaultPage = (try pages.current()).page
+    try pages.leave()
+    try pages.open("About")
+    try pages.open("Problems")
+    const onLog = try pages.back()
+    const logPage = (try pages.current()).page
+    try pages.leave()
+    try Effect.try(() => assert.deepStrictEqual(
+      { onVault, vaultPage, onLog, logPage, backs: calls.filter((c) => c.endsWith(".back")), leftVault: calls.filter((c) => c === "Vault.leave").length },
+      { onVault: true, vaultPage: "Passwords", onLog: true, logPage: "Problems", backs: ["Vault.back", "Diagnostics.back"], leftVault: 1 },
     ))
   }
 })
@@ -228,8 +254,7 @@ it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md
       const p = try Preferences
       const before = [try p.sharesLocation(), try p.asksBeforeActions()]
       try p.set("AgentLocation", false)
-      const followed = Option.getOrUndefined(try Stream.runHead((try MapsPreferences).locationForAlpha))
-      return [...before, try p.sharesLocation(), followed]
+      return [...before, try p.sharesLocation()]
     }
   }
   // spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"
@@ -242,7 +267,7 @@ it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md
       return [...before, try p.sharesLocation(), (try p.current()).readable]
     }
   }
-  try Effect.try(() => assert.deepStrictEqual({ fresh, damaged }, { fresh: [true, false, false, false], damaged: [true, false, "PreferencesUnreadable", true, true] }))
+  try Effect.try(() => assert.deepStrictEqual({ fresh, damaged }, { fresh: [true, false, false], damaged: [true, false, "PreferencesUnreadable", true, true] }))
 })
 
 it.effect("Choose how Alpha looks (spec/settings/appearance.md, \"Story: Choose how Alpha looks\")", () => effect {
@@ -491,6 +516,15 @@ it.effect("Delete or reset only on purpose (spec/settings/passwords.md, \"Story:
     // spec/settings/passwords.md, "A removal acts on the revision the owner selected, after a second tap"
     try v.run("Removing", "a")
     const firstTap = calls.some((c) => c.name === "ElizaPasswords.remove")
+    try (held.send({ type: "openEntry", id: "a" }))
+    try (held.send({ type: "askRemove", id: "a" }))
+    // spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"
+    const cancelled = try v.back()
+    const afterCancel = try held.get()
+    const closed = try v.back()
+    const afterClose = (try held.get()).selected
+    const onList = try v.back()
+    try (held.send({ type: "openEntry", id: "a" }))
     try (held.send({ type: "askRemove", id: "a" }))
     try v.run("Removing", "a")
     const removed = calls.find((c) => c.name === "ElizaPasswords.remove")?.args
@@ -504,8 +538,14 @@ it.effect("Delete or reset only on purpose (spec/settings/passwords.md, \"Story:
     try v.run("Resetting", "")
     const after = try held.get()
     try Effect.try(() => assert.deepStrictEqual(
-      { firstTap, removed, damaged, unasked, reset: calls.filter((c) => c.name === "ElizaPasswords.reset").length, after: [after.phase, after.entries.length] },
-      { firstTap: false, removed: { id: "a", expectedRevision: 3 }, damaged: { tag: "Damaged" }, unasked: false, reset: 1, after: [{ tag: "Locked" }, 0] },
+      {
+        firstTap, back: [cancelled, afterCancel.confirmRemove, afterCancel.selected, closed, afterClose, onList], removed, damaged, unasked,
+        reset: calls.filter((c) => c.name === "ElizaPasswords.reset").length, after: [after.phase, after.entries.length, after.selected],
+      },
+      {
+        firstTap: false, back: [true, "", "a", true, "", false], removed: { id: "a", expectedRevision: 3 }, damaged: { tag: "Damaged" }, unasked: false,
+        reset: 1, after: [{ tag: "Locked" }, 0, ""],
+      },
     ))
   }
 })
@@ -549,7 +589,7 @@ it("The report copies only allowlisted fields (spec/settings/diagnostics.md, \"S
 })
 
 it.effect("Reset, store and journal honestly (spec/settings/native.md, \"Story: Reset, store and journal honestly\")", () => effect {
-  const entries: Array<{ readonly at: number; readonly source: "inference" }> = Array.from({ length: 60 }, (_, i) => ({ at: i + 1, source: "inference" as const }))
+  const entries: Array<{ readonly at: number; readonly source: "inference"; readonly detail?: string }> = Array.from({ length: 60 }, (_, i) => i === 59 ? { at: i + 1, source: "inference" as const, detail: "text · rate-limit · HTTP 429" } : { at: i + 1, source: "inference" as const })
   let clears = 0
   const journal = Layer.succeed(CrashJournal, {
     record: () => effect { return undefined },
@@ -574,11 +614,22 @@ it.effect("Reset, store and journal honestly (spec/settings/native.md, \"Story: 
     // spec/settings/diagnostics.md, "Clearing the log asks first, and runs once"
     try d.clearLog()
     try (held.send({ type: "askClear" }))
+    // spec/settings/diagnostics.md, "Clearing the log asks first, and runs once"
+    const cancelled = try d.back()
+    const unasked = try d.back()
+    const stillAsked = (try held.get()).confirmClear
+    try (held.send({ type: "askClear" }))
     try d.clearLog()
     const failed = try held.get()
     try Effect.try(() => assert.deepStrictEqual(
-      { shown: [shown.problems.length, shown.problems[49]?.at, shown.problems[0]?.title], asked: asked.problems[49]?.at, clears, failed: [failed.clearFailed, failed.problems.length] },
-      { shown: [50, 60, "Cloud AI request failed"], asked: 61, clears: 1, failed: [true, 50] },
+      {
+        shown: [shown.problems.length, shown.problems[49]?.at, shown.problems[0]?.title, shown.problems[0]?.detail, shown.problems[49]?.detail],
+        asked: asked.problems[49]?.at, back: [cancelled, unasked, stillAsked], clears, failed: [failed.clearFailed, failed.problems.length],
+      },
+      {
+        shown: [50, 60, "Cloud AI request failed", "Details unavailable", "text · rate-limit · HTTP 429"],
+        asked: 61, back: [true, false, false], clears: 1, failed: [true, 50],
+      },
     ))
   }
 })

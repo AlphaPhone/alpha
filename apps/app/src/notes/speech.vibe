@@ -1,25 +1,11 @@
 // spec/notes/recorder.md, "Segments are transcribed in order while the recording goes on, and never past the audio"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
-import type { Route } from "../../gen/voice__route.ts"
-import { Native } from "../platform/native.vibe"
-import { VoiceRoute, attemptFailed, type VoiceAccount } from "../voice/route.vibe"
-import { transcription } from "../voice/transcription.vibe"
-import { decodeTranscribe } from "./notes.schema.vibe"
-import { randomId } from "./platform.ts"
+import type { RecordingTranscriber } from "../voice/transcription.vibe"
 
 /** The window of a saved voice note's recording a transcript request reads. */
 export interface SavedWindow { readonly savedNoteId: string; readonly savedDurationMs: number; readonly offsetMs: number }
 
 /** A transcription that gave no words: the refusal code the route or the recorder gave, if any. */
 export interface SpeechRefused { readonly code: string | undefined }
-
-const plugin = "AlphaVoiceCloud"
-
-function request(route: Route, account: VoiceAccount, recordingId: string, requestId: string, saved: SavedWindow | undefined) {
-  const call = transcription(route, account, recordingId, requestId)
-  if (saved === undefined) return call
-  if (call.method === "transcribeLocalRecording") return undefined
-  return { method: call.method, args: { ...call.args, savedNoteId: saved.savedNoteId, savedDurationMs: saved.savedDurationMs, offsetMs: saved.offsetMs } }
-}
 
 /** The first string `code` on an error or the causes it carries. */
 export function refusalCode(error: unknown): string | undefined {
@@ -31,17 +17,11 @@ export function refusalCode(error: unknown): string | undefined {
   return undefined
 }
 
-/** Transcribe a live segment or a saved window on the speech route voice admits now; a saved window is read only over Cloud or the owner's own provider. */
-export effect function transcribeOnRoute(routes: VoiceRoute.Shape, native: Native.Shape, recordingId: string, saved?: SavedWindow): string | SpeechRefused!! {
-  const requestId = randomId()
-  return routes.run((route: Route, heard) => effect {
-    const account = try routes.account()
-    const call = request(route, account, recordingId, requestId, saved)
-    if (call === undefined) throw attemptFailed({ code: "unavailable" })
-    const raw = try (native.invoke(plugin, call.method, call.args) catch effect (error) => { throw attemptFailed(error) })
-    const reply = try (decodeTranscribe(raw) catch effect () => { throw attemptFailed({ code: "voice-stt-response" }) })
-    if (reply.local !== undefined && reply.local !== (route === "Device")) throw attemptFailed({ code: "voice-stt-response" })
-    try heard()
-    return reply.text
-  }) catch (error): SpeechRefused => ({ code: refusalCode(error.cause) ?? refusalCode(error) })
+/** Transcribe a live segment or a saved window through voice's recording transcriber; a saved window heard on the phone is refused, since the phone's own path reads no saved window. */
+export effect function transcribeKept(transcriber: RecordingTranscriber.Shape, recordingId: string, saved?: SavedWindow): string | SpeechRefused!! {
+  const details = saved === undefined ? {} : { savedNoteId: saved.savedNoteId, savedDurationMs: saved.savedDurationMs, offsetMs: saved.offsetMs }
+  const heard = try (transcriber.transcribe(recordingId, details) catch (error): SpeechRefused => ({ code: refusalCode(error.cause) ?? refusalCode(error) }))
+  if ("code" in heard) return heard
+  if (saved !== undefined && heard.local) return { code: "unavailable" }
+  return heard.text
 }

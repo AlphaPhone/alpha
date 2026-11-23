@@ -100,7 +100,10 @@ export function neighbors(log: Calls, options: { readonly mailImages?: boolean; 
   return Layer.mergeAll(
     Layer.succeed(CloudSession, { changes: Stream.make(session), notices: Stream.empty, current: () => succeed(session), owner: () => succeed(1), ownerKey: (key: string) => succeed(`alpha/1/${key}`), run: () => Effect.void, adopt: () => Effect.void, attempt: () => Effect.void, signOut: () => succeed(true), rejected: () => Effect.void, admit: () => Effect.void } as unknown as CloudSession.Shape),
     Layer.succeed(GoogleAccounts, { changes: Stream.empty, accounts: Stream.make(rows), list: () => succeed(rows), run: () => Effect.void, open: () => Effect.void, close: () => Effect.void, reload: () => Effect.void, connect: (capabilities: unknown) => sync(() => { log.connected.push(capabilities) }), connectCalendar: () => Effect.void, allowCalendar: () => Effect.void, cancel: () => Effect.void, disconnect: () => Effect.void, showCache: () => Effect.void, prepareReview: () => Effect.void } as unknown as GoogleAccounts.Shape),
-    Layer.succeed(Navigation, { open: (app: string) => sync(() => { log.opened.push(app); return true }) } as unknown as Navigation.Shape),
+    Layer.succeed(Navigation, {
+      changes: Stream.empty, open: (app: string) => sync(() => { log.opened.push(app); return true }),
+      openLayer: () => succeed(true), closeLayer: () => succeed(true)
+    } as unknown as Navigation.Shape),
     Layer.succeed(Overview, { reportAttention: (_: unknown, unread: number, more: boolean, _at: number, connected: boolean) => sync(() => { log.attention.push({ unread, more, connected }) }) } as unknown as Overview.Shape),
     Layer.succeed(ResidentControl, { changes: Stream.empty, session: () => succeed({ agent: "agent-test", generation: 1 }), refreshAccount: () => Effect.void, stop: () => Effect.void, recovered: () => Effect.void } as unknown as ResidentControl.Shape),
     Layer.succeed(ShellMail, { send: () => succeed("Unsent" as SendAnswer), fill: (sender: MailSender) => sync(() => { log.filled.push(sender) }) } as unknown as ShellMail.Shape),

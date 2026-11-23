@@ -1,5 +1,6 @@
-// spec/inbox/operations.md, "A chat-reviewed email is sent once per reviewed version, only as a new email of the selected, checked account"; spec/inbox/attachments.md, "A shared file always starts a new local draft for the account it was reviewed for"
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/operations.md, "A chat-reviewed email is sent once per reviewed version, only as a new email of the selected, checked account"; spec/inbox/attachments.md, "A shared file always starts a new local draft for the account it was reviewed for"
 import type { CameraHandoffs, ReviewedFile } from "../camera/ports.vibe"
+import type { AssistantEmail } from "../assistant/ports.vibe"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 import { chatEmailSendable, chatBodyLimit } from "../../gen/inbox__operations.ts"
 import { ShellMail, type ReviewedEmail } from "../shell/ports.vibe"
@@ -50,6 +51,21 @@ export const assistantEmailSender = effect {
       return answerOf(outcome)
     }
   }
+}
+
+/** The assistant's email port as Inbox answers it, for the shell to put in its `AssistantEmail` slot: the reviewed send, and the selected connected account's address for a To of "self". */
+export const assistantEmail = effect {
+  const sender = try assistantEmailSender
+  const accounts = try InboxAccounts
+  const port: AssistantEmail.Shape = {
+    send: sender.send,
+    effect address() {
+      const a = try accounts.get()
+      const row = a.rows.find((r) => r.id === a.selected && r.connected)
+      return row === undefined || row.address === "" ? undefined : row.address
+    }
+  }
+  return port
 }
 
 /** Fills the shell's mail port with Inbox's send, so the assistant's email cards are delivered through this layer. */

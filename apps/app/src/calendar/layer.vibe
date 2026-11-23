@@ -1,5 +1,5 @@
 // spec/calendar/index.md
-// Every Calendar service, over the platform's Native, Resident, ResidentControl, Build and KeyValueStore, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground.
+// Every Calendar service, over the platform's Native, Resident, Build and KeyValueStore, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground.
 import { Machine as PresentationMachine, stored as presentationStored } from "../../gen/calendar__presentation.effect.vibe"
 import { machine as agentMachine } from "../../gen/calendar__agent.effect.vibe"
 import { machine as deviceMachine } from "../../gen/calendar__device.effect.vibe"
@@ -13,13 +13,13 @@ import { stored as controlStored } from "../../gen/calendar__sync.effect.vibe"
 import { machine as linkMachine } from "../../gen/calendar__googleLink.effect.vibe"
 import { stored as nativeStored } from "../../gen/calendar__nativeSync.effect.vibe"
 import { machine as disconnectMachine } from "../../gen/calendar__disconnect.effect.vibe"
+import { AccountBindings } from "../account/bindings.vibe"
 import { Native } from "../platform/native.vibe"
-import { ResidentControl } from "../platform/resident-control.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
-import { agentLayer } from "./agent.vibe"
+import { type AgentBinding, agentLayer } from "./agent.vibe"
 import { approvalsLayer } from "./approvals.vibe"
-import { bindCalendar, enterCalendar, hideCalendar, leaveCalendar, residentBinding } from "./binding.vibe"
+import { bindCalendar, enterCalendar, hideCalendar, leaveCalendar } from "./binding.vibe"
 import { deletionsLayer } from "./deletions.vibe"
 import { deviceLayer } from "./device.vibe"
 import { draftsLayer } from "./drafts.vibe"
@@ -53,21 +53,21 @@ export const services = Layer.mergeAll(
   Layer.provideMerge(requestsLayer, actionMachine()),
 )
 
-/** Calendar follows the resident agent's verified session, bound at once and rebound whenever its owner, agent or generation changes, and the phone's calendar changes that sync must carry. */
-const followResident = Layer.effectDiscard(effect {
-  const control = try ResidentControl
+/** Calendar follows the account's agent binding, bound at once and rebound whenever its owner, agent, generation or usability changes, and the phone's calendar changes that sync must carry. */
+const followAccount = Layer.effectDiscard(effect {
+  const bindings = try AccountBindings
   const native = try Native
   const sync = try CalendarSync
   let bound = ""
-  effect function follow() {
-    const binding = residentBinding(try control.session())
-    const key = JSON.stringify([binding.owner, binding.session, binding.usable])
+  effect function follow(binding: AgentBinding) {
+    const key = JSON.stringify([binding.owner, binding.session, binding.agentId, binding.usable])
     if (key === bound) return
     bound = key
-    try bindCalendar(binding)
+    const usable = binding.usable && binding.owner !== ""
+    try bindCalendar(usable ? { ...binding, usable } : { owner: "", session: 0, agentId: "", usable: false })
   }
-  try follow()
-  try fork.scoped Stream.runForEach(control.changes, () => follow())
+  try follow(try bindings.agentNow())
+  try fork.scoped Stream.runForEach(bindings.agent, (binding) => follow(binding))
   try fork.scoped (Stream.runForEach(native.listen("AlphaCalendar", "calendarSyncChanged"), () => sync.localChanged()) catch () => undefined)
 })
 
@@ -95,5 +95,5 @@ const followForeground = Layer.effectDiscard(effect {
   try fork.scoped Stream.runForEach(foreground.changes, (state) => follow(state))
 })
 
-/** Every Calendar service, bound to the resident's session and following the foreground, with the hand-over of note and scan drafts; it needs the platform, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground. */
-export const layer = Layer.provideMerge(Layer.mergeAll(followResident, followForeground, handoffLayer), services)
+/** Every Calendar service, bound to the account's agent binding and following the foreground, with the hand-over of note and scan drafts; it needs the platform, Account's AccountBindings, Notes' NotesHandoff and the shell's Navigation, Notices and Foreground. */
+export const layer = Layer.provideMerge(Layer.mergeAll(followAccount, followForeground, handoffLayer), services)

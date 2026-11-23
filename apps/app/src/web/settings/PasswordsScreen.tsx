@@ -17,6 +17,10 @@ export interface VaultActs {
   readonly edit: (id: string) => void;
   readonly askRemove: (id: string) => void;
   readonly askReset: () => void;
+  /** Show one listed entry's metadata. */
+  readonly openEntry: (id: string) => void;
+  /** Return from an entry to the list. */
+  readonly closeEntry: () => void;
   readonly refresh: () => void;
 }
 
@@ -30,17 +34,16 @@ export interface PasswordsScreenProps { readonly vault: Vault; readonly acts: Va
  */
 export function PasswordsScreen({ vault, acts, onClose }: PasswordsScreenProps) {
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState("");
   const busy = (task: Task) => vault.task === task;
   const phase = vault.phase;
   const needle = query.trim().toLowerCase();
   const shown = [...vault.entries].sort((a, b) => a.label.localeCompare(b.label) || a.username.localeCompare(b.username))
     .filter((e) => !needle || [e.label, e.username, ...e.sites].some((v) => v.toLowerCase().includes(needle)));
-  const entry = vault.entries.find((e) => e.id === selected);
+  const entry = vault.selected === "" ? undefined : vault.entries.find((e) => e.id === vault.selected);
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
       <header className="flex items-center gap-2 px-2 py-3">
-        <Button variant="ghost" size="icon" aria-label={entry ? "Back to passwords" : "Close Passwords"} onClick={() => (entry ? setSelected("") : onClose())}><ArrowLeft aria-hidden className="size-5" /></Button>
+        <Button variant="ghost" size="icon" aria-label={entry ? "Back to passwords" : "Close Passwords"} onClick={() => (entry ? acts.closeEntry() : onClose())}><ArrowLeft aria-hidden className="size-5" /></Button>
         <h1 className="font-serif text-2xl">{entry ? entry.label : "Passwords"}</h1>
       </header>
       <ScrollArea className="flex-1">
@@ -69,7 +72,7 @@ export function PasswordsScreen({ vault, acts, onClose }: PasswordsScreenProps) 
               <Button onClick={() => acts.edit("")} loading={busy("Editing")}><Plus aria-hidden className="size-4" />Add password</Button>
               <Section>
                 {shown.length === 0 && <SettingRow label={vault.entries.length ? "No matching passwords" : "No saved passwords"} />}
-                {shown.map((e) => <SettingRow key={e.id} label={e.label} state={{ word: e.username }} icon={<Globe aria-hidden className="size-5" />} ariaLabel={`Open ${e.label}`} onOpen={() => setSelected(e.id)} />)}
+                {shown.map((e) => <SettingRow key={e.id} label={e.label} state={{ word: e.username }} icon={<Globe aria-hidden className="size-5" />} ariaLabel={`Open ${e.label}`} onOpen={() => acts.openEntry(e.id)} />)}
               </Section>
               {vault.backupReady && <Section><SettingRow label="Back up passwords" icon={<UploadCloud aria-hidden className="size-5" />} busy={busy("ApprovingBackup")} onOpen={() => acts.run("ApprovingBackup", "")} /></Section>}
             </>
@@ -83,7 +86,7 @@ export function PasswordsScreen({ vault, acts, onClose }: PasswordsScreenProps) 
                 <SettingRow label="Copy password" icon={<Copy aria-hidden className="size-5" />} busy={busy("Copying")} onOpen={() => acts.run("Copying", entry.id)} />
                 <SettingRow label="Edit" icon={<Pencil aria-hidden className="size-5" />} busy={busy("Editing")} onOpen={() => acts.edit(entry.id)} />
                 {vault.confirmRemove === entry.id
-                  ? <SettingRow label="Confirm delete" ariaLabel="Confirm delete, can’t be undone" destructive busy={busy("Removing")} onOpen={() => { acts.run("Removing", entry.id); setSelected(""); }} />
+                  ? <SettingRow label="Confirm delete" ariaLabel="Confirm delete, can’t be undone" destructive busy={busy("Removing")} onOpen={() => acts.run("Removing", entry.id)} />
                   : <SettingRow label="Delete" destructive icon={<Trash2 aria-hidden className="size-5" />} onOpen={() => acts.askRemove(entry.id)} />}
               </Section>
             </>

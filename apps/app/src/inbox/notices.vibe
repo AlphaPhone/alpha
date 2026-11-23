@@ -1,4 +1,4 @@
-// spec/inbox/notices.md, "Story: Be told about new mail while the launcher is in the background"; spec/inbox/notices.md, "Story: Open the Inbox or ask about the exact notification I tapped"
+// spec/inbox/notices.md, "Story: Be told about new mail while the launcher is in the background"; spec/inbox/notices.md, "Story: Open the Inbox or ask about the exact notification I tapped"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"
 import { type Event as NoticesEvent, type MailNotices as NoticesState, type BackgroundStatus, type Watch, type Excerpt, Machine as NoticesMachine, askFailure, type AskFailure } from "../../gen/inbox__notices.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
@@ -17,6 +17,8 @@ const statuses: Record<WireBackgroundStatus["status"], BackgroundStatus> = {
   "watching-new-mail": "WatchingNewMail", "catching-up": "CatchingUp", "history-expired": "HistoryExpired", unsupported: "BackgroundUnsupported",
   retrying: "BackgroundRetrying", "grant-unavailable": "GrantUnavailable", "capacity-reached": "CapacityReached"
 }
+
+const ASK_LAYER = "inbox-notice-ask"
 
 /** The background watch of the selected account and the handling of notice taps. */
 export service MailNoticesShell {
@@ -47,6 +49,7 @@ export const layer = Layer.effect(MailNoticesShell, effect {
   const gmail = try Gmail
   const mailbox = try Mailbox
   const tapRef = try Ref.make<WireNoticeTap | undefined>(undefined)
+  const askListed = try Ref.make(false)
 
   effect function send(event: NoticesEvent) {
     return machine.send(event) catch () => undefined
@@ -142,6 +145,25 @@ export const layer = Layer.effect(MailNoticesShell, effect {
     fork.scoped (effect {
       for try (const _ of accounts.changes) {
         try watchSelected()
+      }
+    })
+    fork.scoped (effect {
+      for try (const s of machine.changes) {
+        const reviewing = (s.tap === "ReviewingAsk" || s.tap === "RecheckingAsk") && !s.canceled
+        const listed = try Ref.get(askListed)
+        if (reviewing && !listed) try Ref.set(askListed, try navigation.openLayer(ASK_LAYER, "SheetLayer", true))
+        else if (!reviewing && listed) {
+          try Ref.set(askListed, false)
+          try navigation.closeLayer(ASK_LAYER)
+        }
+      }
+    })
+    fork.scoped (effect {
+      for try (const _ of navigation.changes) {
+        if (!(try Ref.get(askListed)) || (try navigation.get()).layers.some((l) => l.id === ASK_LAYER)) continue
+        try Ref.set(askListed, false)
+        const tap = (try machine.get()).tap
+        if (tap === "ReviewingAsk" || tap === "RecheckingAsk") try send({ type: "cancelAsk", explicitDismissal: false })
       }
     })
   }

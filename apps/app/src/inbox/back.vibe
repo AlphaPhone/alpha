@@ -1,0 +1,19 @@
+// spec/inbox/drafts.md, "Back sets the draft aside, leaving keeps it open, and Drafts reopens it"; spec/inbox/reader.md, "Story: Read a message and its conversation"; spec/inbox/selection.md, "Story: Change several messages at once"; spec/inbox/mailbox.md, "Story: Read my mailbox page by page"
+import { MailComposer, type ComposerBack } from "./composer.vibe"
+import { Reader } from "./reader.vibe"
+import { MailSelection } from "./selection.vibe"
+import { Mailbox } from "./mailbox.vibe"
+
+/** One Back inside the Inbox, innermost first: the composer, an attachment view, the open message, a selection, then a search; not taken at the folder list. */
+export effect function inboxBack(): ComposerBack {
+  const composer = try MailComposer
+  const reader = try Reader
+  const selection = try MailSelection
+  const mailbox = try Mailbox
+  const drafted = try composer.back()
+  if (drafted.taken) return drafted
+  if (try reader.closeAttachment()) return { taken: true }
+  if (try reader.close()) return { taken: true }
+  if (try selection.back()) return { taken: true }
+  return { taken: try mailbox.endSearch() }
+}

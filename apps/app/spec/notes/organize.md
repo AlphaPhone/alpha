@@ -2,7 +2,8 @@
 
 The phone's executor of the agent's Notes device actions: `notes_record` to start or stop a voice note,
 `notes_filter` to show part of the list, `notes_move`, `notes_folder_create` and `notes_restore` to change
-saved notes once the owner reviewed them. The canonical list filter has its own
+saved notes once the owner reviewed them, and a workflow's `read_selected_notes` to share the notes the
+owner selected for it. The canonical list filter has its own
 [machine](./listFilter.md). Each operation is offered only under the capabilities the phone negotiated, runs
 only on the screen it is bound to, and returns a receipt that never claims more than happened.
 
@@ -92,4 +93,30 @@ shared.
 type DeviceNoteOp = CreateNoteOp | QueryOp | ReadSelectedOp | UpdateOp | DeleteOp
 pure def deviceNoteOpRuns(op: DeviceNoteOp, reviewed: bool): bool = false
 pure def lawPhoneHoldsNoNotesRecord(op: DeviceNoteOp, reviewed: bool): bool = not(deviceNoteOpRuns(op, reviewed))
+```
+
+## Story: Let a workflow read the notes I selected for it
+
+> As the owner, I want a workflow I approved to read only the notes I selected for it, and only while
+> each still says what it said when I reviewed it.
+
+### A workflow read shares the selected notes only while each still holds the text the owner reviewed
+
+A workflow's `read_selected_notes` names up to sixteen notes, each with the digest of the title and text
+the owner reviewed. It runs only on a visible screen that is neither locked nor private. Each selected
+note must be in the current collection once, and its title and text must still digest to the reviewed
+revision; the collection must not change while the read is prepared. Anything else shares nothing. This
+read is the workflow's own reviewed read, distinct from the agent's phone record operations above.
+
+```quint
+type NotesReadResult = NotesReadShared | NotesReadNotHere | NotesReadMissing | NotesReadChanged | NotesReadUnverified
+pure def notesReadResult(screenAllows: bool, allPresent: bool, allReviewed: bool, collectionSteady: bool, resultChecks: bool): NotesReadResult =
+  if (not(screenAllows)) NotesReadNotHere
+  else if (not(allPresent)) NotesReadMissing
+  else if (not(allReviewed) or not(collectionSteady)) NotesReadChanged
+  else if (not(resultChecks)) NotesReadUnverified else NotesReadShared
+pure def lawChangedNoteIsNeverShared(screenAllows: bool, allPresent: bool, collectionSteady: bool, resultChecks: bool): bool =
+  notesReadResult(screenAllows, allPresent, false, collectionSteady, resultChecks) != NotesReadShared
+pure def lawHiddenScreenSharesNothing(allPresent: bool, allReviewed: bool, collectionSteady: bool, resultChecks: bool): bool =
+  notesReadResult(false, allPresent, allReviewed, collectionSteady, resultChecks) == NotesReadNotHere
 ```

@@ -27,6 +27,7 @@ import { NotesSources } from "../../notes/sources.vibe";
 import { NotesTrash, type TrashNotice, type TrashRow } from "../../notes/trash.vibe";
 import { copyText } from "../../notes/platform.ts";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
+import { useLayer } from "../shell/useLayer.ts";
 import { FoldersSheet } from "./FoldersSheet.tsx";
 import { shareNoticeText, statusText, trashNoticeText } from "./messages.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
@@ -35,7 +36,7 @@ import { NotesList } from "./NotesList.tsx";
 import { NotesReviewBar } from "./NotesReviewBar.tsx";
 import { NotesTrash as TrashView } from "./NotesTrash.tsx";
 import { runtime } from "./runtime.ts";
-import { call, useServiceStream } from "./services.ts";
+import { call, useServiceStream } from "../shell/services.ts";
 import { WebSourceDialog } from "./WebSourceDialog.tsx";
 
 const snapshots = (collection: NotesCollection.Shape) => collection.snapshots;
@@ -68,20 +69,20 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
   const trashMachine = useTrash(runtime);
   const recorderMachine = useRecorder(runtime);
   const sourceMachine = useSourceDialog(runtime);
-  const owned = useServiceStream(NotesCollection, snapshots, undefined);
-  const draft = useServiceStream(NotesEditor, drafts, undefined);
-  const kept = useServiceStream(NotesEditor, keptReviews, undefined);
-  const deleted = useServiceStream(NotesTrash, trashRows, []);
-  const display = useServiceStream(NotesRecorder, displays, { durationMs: 0, levels: [], transcript: "", positionMs: 0 });
-  const folders = useServiceStream(NotesFolders, folderLists, []);
-  const agentFilter = useServiceStream(NotesListFilter, agentFilters, undefined);
-  const requestedFilter = useServiceStream(NotesHandoff, requestedFilters, undefined);
-  const receipt = useServiceStream(NotesShare, documentReceipts, undefined);
+  const owned = useServiceStream("notes.snapshots", Effect.map(Effect.service(NotesCollection), snapshots), undefined);
+  const draft = useServiceStream("notes.drafts", Effect.map(Effect.service(NotesEditor), drafts), undefined);
+  const kept = useServiceStream("notes.keptReviews", Effect.map(Effect.service(NotesEditor), keptReviews), undefined);
+  const deleted = useServiceStream("notes.trashRows", Effect.map(Effect.service(NotesTrash), trashRows), []);
+  const display = useServiceStream("notes.displays", Effect.map(Effect.service(NotesRecorder), displays), { durationMs: 0, levels: [], transcript: "", positionMs: 0 });
+  const folders = useServiceStream("notes.folderLists", Effect.map(Effect.service(NotesFolders), folderLists), []);
+  const agentFilter = useServiceStream("notes.agentFilters", Effect.map(Effect.service(NotesListFilter), agentFilters), undefined);
+  const requestedFilter = useServiceStream("notes.requestedFilters", Effect.map(Effect.service(NotesHandoff), requestedFilters), undefined);
+  const receipt = useServiceStream("notes.documentReceipts", Effect.map(Effect.service(NotesShare), documentReceipts), undefined);
   const [seenReceipt, setSeenReceipt] = useState<DocumentReceipt>();
   const [search, setSearch] = useState("");
   const [searching, setSearching] = useState(false);
   const [folder, setFolder] = useState<string>();
-  const [foldersOpen, setFoldersOpen] = useState(false);
+  const foldersLayer = useLayer("notes-folders");
   const [asked, setAsked] = useState<TrashRow>();
   const [transcribing, setTranscribing] = useState(false);
   const [notice, setNotice] = useState<{ text: string; action?: { label: string; onAction: () => void }; onDismiss?: () => void }>();
@@ -169,7 +170,7 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
         <header className="flex items-center gap-2 px-4 pt-4">
           <h1 className="flex-1 font-serif text-3xl">Notes</h1>
           <Button variant="ghost" size="icon" aria-label="Search notes" onClick={() => setSearching(!searching)}><Search aria-hidden /></Button>
-          <Button variant="ghost" size="icon" aria-label="Folders" onClick={() => { setFoldersOpen(true); void call(NotesFolders, (service) => service.list()); }}><Folder aria-hidden /></Button>
+          <Button variant="ghost" size="icon" aria-label="Folders" onClick={() => { foldersLayer.show(); void call(NotesFolders, (service) => service.list()); }}><Folder aria-hidden /></Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Notes options"><Ellipsis aria-hidden /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -216,8 +217,8 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
             onCopy={() => void copyText([kept.title, kept.body].filter(Boolean).join("\n")).then(() => tell("Draft copied."), () => tell("Draft could not be copied."))} />
         )}
         {body}
-        <FoldersSheet open={foldersOpen} folders={folders} {...(folder === undefined ? {} : { selected: folder })} onOpenChange={setFoldersOpen}
-          onSelect={(id) => { setFolder(id); setFoldersOpen(false); }}
+        <FoldersSheet open={foldersLayer.open} folders={folders} {...(folder === undefined ? {} : { selected: folder })} onOpenChange={(open) => { if (!open) foldersLayer.hide(); }}
+          onSelect={(id) => { setFolder(id); foldersLayer.hide(); }}
           onCreate={(name) => void call(NotesFolders, (service) => service.create(name)).catch(() => tell("Not created"))}
           onRename={(id, name) => void call(NotesFolders, (service) => service.rename(id, name)).catch(() => tell("Rename failed"))}
           onDelete={(id) => { if (folder === id) setFolder(undefined); void call(NotesFolders, (service) => service.remove(id)).catch(() => tell("Delete failed")); }} />

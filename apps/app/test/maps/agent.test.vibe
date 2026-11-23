@@ -11,11 +11,12 @@ import { MapsContent } from "../../src/maps/content.vibe"
 import { MapsHandoff } from "../../src/maps/handoff.vibe"
 import { MapsSession } from "../../src/maps/layer.vibe"
 import { MapsNavigation } from "../../src/maps/navigation.vibe"
+import { MapsPlane } from "../../src/maps/plane.vibe"
 import { MapsScreen } from "../../src/maps/screen.vibe"
 import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
 
 const open = { id: "alpha-osm", data: "OpenStreetMap" }
-const offer = (message: number) => ({ message, session: 1, conversation: 1, revision: 0 })
+const offer = (message: number) => ({ message, revision: 0 })
 const pierCard = {
   kind: "place" as const, attribution: "© data",
   place: { name: "Pier 39", latitude: pier.latitude, longitude: pier.longitude, provider: "alpha-osm", providerPlaceId: "p1", categories: [] },
@@ -161,6 +162,56 @@ it.live("One tap answers the newest question once, and a card's map opens once (
     try Effect.try(() => assert.deepStrictEqual(
       { answered, afterDraft, notice: draft.notice, opened: h.opened.filter((a) => a === "maps").length, shown: shown.choice },
       { answered: 1, afterDraft: 1, notice: "DraftOpen", opened: 1, shown: "AgentChoice" },
+    ))
+  }
+})
+
+it.live("Every message counts however long the chat runs, and a card counted before the chat moved no longer opens (spec/maps/cards.md, \"Only the newest agent message offers its choice and its card, in the session and conversation that showed them\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const handoff = try MapsHandoff
+    try (try MapsSession).open()
+    try until((try ConnectionMachine).changes, (s) => s.phase === "Installed")
+    for (let i = 0; i < 4; i++) {
+      try handoff.ownerMessage()
+      try handoff.agentReply(false)
+    }
+    const counted = (try (try CardsMachine).get()).newest
+    try handoff.chatMoved(1, 2)
+    try handoff.openCard(pierCard, offer(8))
+    const stale = h.opened.filter((a) => a === "maps").length
+    try handoff.agentReply(false)
+    try handoff.openCard(pierCard, offer(9))
+    const shown = try until((try ScreenMachine).changes, (s) => s.choice === "AgentChoice")
+    try Effect.try(() => assert.deepStrictEqual(
+      { counted, stale, opened: h.opened.filter((a) => a === "maps").length, shown: shown.choice },
+      { counted: 8, stale: 0, opened: 1, shown: "AgentChoice" },
+    ))
+  }
+})
+
+it.live("Back closes the credits sheet, then the rename field, then the place and the search, and only then leaves Maps (spec/maps/screen.md, \"Back closes one layer at a time\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    try shownPier()
+    const session = try MapsSession
+    const plane = try MapsPlane
+    const content = try MapsContent
+    try plane.mount(1, "WorldMap")
+    try plane.openInfo()
+    const credits = try session.back()
+    const shownId = (try content.get()).shown?.id ?? 0
+    try content.update((c) => ({ ...c, renaming: { id: shownId, text: "Sea lions" } }))
+    const rename = try session.back()
+    const renaming = (try content.get()).renaming
+    const place = try session.back()
+    const choice = (try (try ScreenMachine).get()).choice
+    const search = try session.back()
+    const leaves = try session.back()
+    const infoClosed = !(try plane.closeInfo())
+    try Effect.try(() => assert.deepStrictEqual(
+      { credits, infoClosed, rename, renaming, place, choice, search, leaves },
+      { credits: true, infoClosed: true, rename: true, renaming: undefined, place: true, choice: "NoChoice", search: true, leaves: false },
     ))
   }
 })

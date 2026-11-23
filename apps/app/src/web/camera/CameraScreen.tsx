@@ -10,14 +10,13 @@ import { attachViewfinder } from "../../camera/browserCamera.ts";
 import { CameraHandoffs } from "../../camera/ports.vibe";
 import { Scanner } from "../../camera/scanner.vibe";
 import { Viewfinder } from "../../camera/viewfinder.vibe";
-import { Build } from "../../platform/build.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { CameraView } from "./CameraView.tsx";
 import { ScanReview } from "./ScanReview.tsx";
-import { runtime } from "./runtime.ts";
+import { act, buildInfo, runtime } from "../shell/services.ts";
 
-const camera = (use: (v: Viewfinder.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(Viewfinder), use));
-const scanner = (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(Scanner), use));
+const camera = (use: (v: Viewfinder.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Viewfinder), use));
+const scanner = (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Scanner), use));
 
 /** Mount the viewfinder for this visit, and hear the volume keys while it is shown; the foreground itself reaches the viewfinder through its service. */
 function mountViewfinder(element: HTMLElement | null): void | (() => void) {
@@ -45,7 +44,7 @@ export function CameraScreen({ onClose }: CameraScreenProps) {
   const { state: notices, send: sendNotice } = useNotices(runtime);
   const { state: dialogs, can: canDialog } = useDialogs(runtime);
   const { state: scan, can: canScan } = useScan(runtime);
-  const [browser] = useState(() => runtime.runSync(Build.use((b) => Effect.succeed(b.info.variant === "browser"))));
+  const [browser] = useState(() => buildInfo().variant === "browser");
   const searchLines = dialogs?.searchable.ready === true ? runtime.runSync(Effect.flatMap(Effect.service(Scanner), (s) => s.searchablePages())) : [];
   return (
     <>
@@ -69,7 +68,7 @@ export function CameraScreen({ onClose }: CameraScreenProps) {
           allow: () => camera((v) => v.allow()),
           noSound: () => camera((v) => v.answerMicNotice(false)),
           micRetry: () => camera((v) => v.answerMicNotice(true)),
-          openLast: () => runtime.runFork(Effect.flatMap(Effect.service(CameraHandoffs), (h) => h.open("photos", state.lastId === "" ? undefined : `item:${state.lastId}`))),
+          openLast: () => act(Effect.flatMap(Effect.service(CameraHandoffs), (h) => h.open("photos", state.lastId === "" ? undefined : `item:${state.lastId}`))),
           dismissNotice: () => void sendNotice({ type: "dismiss" }),
           viewfinder: mountViewfinder,
         }}

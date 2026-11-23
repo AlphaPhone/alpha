@@ -50,7 +50,7 @@ it.effect("Open an app from Home and keep my place (spec/shell/index.md, \"Story
     }
     try Effect.try(() => assert.deepStrictEqual({ walked, restarted }, {
       walked: { pushed: ["notes", ["calendar"]], returned: ["calendar", "ClosedStack", { app: "calendar", route: "event-1", inner: true }] },
-      restarted: { restored: ["calendar", true], inner: "ClosedInner", home: ["", "RendererBack", "ChatInput"], phone: false },
+      restarted: { restored: ["calendar", true], inner: "ClosedInner", home: ["", "RendererBack", "Input"], phone: false },
     }))
   }
 })

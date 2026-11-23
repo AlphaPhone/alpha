@@ -1,4 +1,4 @@
-// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/draft.md, "Story: Keep what I typed"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "Story: Reply to or edit a message I sent"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "Story: Attach only what fits"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "Story: Tell my agent what my screen shows, and nothing more"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/index.md, "Story: Ask my assistant from anywhere"
+// spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Story: Size the sheet to what it shows"; spec/assistant/draft.md, "Story: Keep what I typed"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "Story: Reply to or edit a message I sent"; spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/attachments.md, "Story: Attach only what fits"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/context.md, "Story: Let my agent know where I am when I allow it"; spec/assistant/context.md, "Story: Tell my agent what my screen shows, and nothing more"; spec/assistant/entry.md, "Story: Summon my assistant from anywhere on the phone"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/index.md, "Story: Ask my assistant from anywhere"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"
 import { assert, it } from "@effect/vitest"
 import { Machine as DockMachine, clampSheet, halfHeight } from "../../gen/assistant__dock.effect.vibe"
 import { Machine as DraftsMachine, shown } from "../../gen/assistant__draft.effect.vibe"
@@ -11,13 +11,14 @@ import { PhoneLocation } from "../../src/assistant/location.vibe"
 import { OwnNotices, WorkflowStepDecisions } from "../../src/assistant/ports.vibe"
 import { copy } from "../../src/assistant/presentation.vibe"
 import { DeviceReview } from "../../src/assistant/review.vibe"
+import { AgentRestart } from "../../src/assistant/restart.vibe"
 import { ChatSearch } from "../../src/assistant/search.vibe"
 import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import { textOf } from "../../src/assistant/units.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
 import {
-  assistNative, assistantOver, assistantWith, countingExecutors, fakeHost, fakePreferences, fakeResident, journalNative, locationNative,
-  privateScreen, type Seen,
+  assistNative, assistantOver, assistantWith, countingExecutors, fakeHost, fakePreferences, fakeResident, fakeResidentControl, itemizingExecutors, journalNative,
+  locationNative, networkNative, noNative, privateScreen, type Seen,
 } from "./fakes.vibe"
 
 const futureExpiry = "2099-01-01T00:00:00.000Z"
@@ -86,7 +87,7 @@ it.effect("The dock rests where the shell puts it (spec/assistant/dock.md, \"Hom
     const home = try dock.get()
     try Effect.try(() => assert.deepStrictEqual(
       { view: onPill.view, rest: onPill.chat, shell, homeView: home.view, homeChat: home.chat },
-      { view: "PillView", rest: "Hidden", shell: "ChatSheet", homeView: "HomeView", homeChat: "Input" },
+      { view: "PillView", rest: "Hidden", shell: "Sheet", homeView: "HomeView", homeChat: "Input" },
     ))
   }
 })
@@ -269,6 +270,7 @@ it.effect("Let my agent know where I am when I allow it (spec/assistant/context.
   const reads = { count: 0 }
   provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), locationNative({ latitude: 37.1234567, longitude: -122.7654321, accuracy: 4.6 }, reads), fakePreferences(said)) {
     const location = try PhoneLocation
+    try location.warm()
     const first = try location.forTurn(true, true)
     const reused = try location.forTurn(true, true)
     const unobserved = try location.forTurn(false, true)
@@ -277,7 +279,23 @@ it.effect("Let my agent know where I am when I allow it (spec/assistant/context.
     const off = try location.forTurn(true, true)
     try Effect.try(() => assert.deepStrictEqual(
       { first, reused: reused?.latitude, unobserved, olderPeer, off, reads: reads.count },
-      { first: { latitude: 37.12346, longitude: -122.76543, accuracyMeters: 5, capturedAt: "1970-01-01T00:00:00.000Z" }, reused: 37.12346, unobserved: undefined, olderPeer: undefined, off: undefined, reads: 1 },
+      { first: { latitude: 37.12346, longitude: -122.76543, accuracyMeters: 5, capturedAt: 0 }, reused: 37.12346, unobserved: undefined, olderPeer: undefined, off: undefined, reads: 1 },
+    ))
+  }
+})
+
+it.effect("Let my agent know where I am when I allow it, indoors (spec/assistant/context.md, \"The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again\")", () => effect {
+  const said = { asks: false, shares: true }
+  const lookups = { count: 0 }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), networkNative({ latitude: 48.8566, longitude: 2.3522, accuracy: 25000 }, lookups), fakePreferences(said)) {
+    const location = try PhoneLocation
+    const beforeWarm = try location.forTurn(true, true)
+    try location.warm()
+    const afterWarm = try location.forTurn(true, true)
+    try location.warm()
+    try Effect.try(() => assert.deepStrictEqual(
+      { beforeWarm, afterWarm: afterWarm?.accuracyMeters, lookups: lookups.count },
+      { beforeWarm: undefined, afterWarm: 25000, lookups: 1 },
     ))
   }
 })
@@ -351,5 +369,64 @@ it.effect("See what still waits for me without the phone polling my agent (spec/
     try TestClock.adjust("10 minutes")
     const later = listings()
     try Effect.try(() => assert.deepStrictEqual({ first, later }, { first: 1, later: 1 }))
+  }
+})
+
+it.effect("Act only on what I asked for (spec/assistant/review.md, \"A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it\")", () => effect {
+  const proposal = { id: "p9", digest: "c".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Close all tabs", operation: { type: "browser_tab_close", all: true } }
+  const runs = { count: 0 }
+  const listed = { lines: ["Weather · weather.com"], unnamed: 1, unnamedLabel: "private tab" }
+  provide assistantOver(quietResident([proposal]), fakeHost([]), itemizingExecutors(runs, listed), journalNative(new Map())) {
+    const composer = try Composer
+    const review = try DeviceReview
+    try composer.open("c1", false)
+    const row = (try transcriptNow()).rows.find((each) => each.kind === "card")
+    const items = row?.kind === "card" ? row.card.items : undefined
+    const done = row?.kind === "card" ? try review.approve(row.card) : undefined
+    try Effect.try(() => assert.deepStrictEqual({ items, state: done?.card.state, runs: runs.count }, { items: listed, state: "DoneCard", runs: 1 }))
+  }
+})
+
+it.effect("Act only on what I asked for, when the set cannot be listed (spec/assistant/review.md, \"A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it\")", () => effect {
+  const proposal = { id: "p10", digest: "d".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Close all tabs", operation: { type: "browser_tab_close", all: true } }
+  const runs = { count: 0 }
+  const notice = "Close all tabs: Browser couldn't list its open tabs for this request. Nothing was closed. Ask again."
+  provide assistantOver(quietResident([proposal]), fakeHost([]), itemizingExecutors(runs, notice), journalNative(new Map())) {
+    const composer = try Composer
+    try composer.open("c1", false)
+    const rows = (try transcriptNow()).rows
+    try Effect.try(() => assert.deepStrictEqual(
+      { cards: rows.filter((each) => each.kind === "card").length, notices: rows.flatMap((each) => each.kind === "notice" ? [each.text] : []), runs: runs.count },
+      { cards: 0, notices: [notice], runs: 0 },
+    ))
+  }
+})
+
+it.effect("Restart my agent when it stopped for review (spec/assistant/recovery.md, \"Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap\")", () => effect {
+  const held = { reviewable: true, restarts: 0 }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), noNative, fakePreferences({ asks: false, shares: false }), fakeResidentControl(true, held)) {
+    const restart = try AgentRestart
+    const offered = try Stream.runHead(restart.offered)
+    const first = try restart.restart()
+    const second = try restart.restart()
+    try Effect.try(() => assert.deepStrictEqual(
+      { offered: Option.getOrUndefined(offered), first, second, restarts: held.restarts },
+      { offered: true, first: true, second: false, restarts: 1 },
+    ))
+  }
+})
+
+it.effect("Ask my assistant from anywhere, and leave with Back (spec/assistant/index.md, \"Back closes what the assistant opened before it leaves the assistant\")", () => effect {
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 })) {
+    const assistant = try Assistant
+    const composer = try Composer
+    const search = try ChatSearch
+    const idle = try assistant.back()
+    try composer.aim({ kind: "reply", quote: { messageId: "m1", text: "Hi", from: "agent" } })
+    try search.start()
+    const closedSearch = try assistant.back()
+    const droppedAim = try assistant.back()
+    const shells = try assistant.back()
+    try Effect.try(() => assert.deepStrictEqual({ idle, closedSearch, droppedAim, shells }, { idle: false, closedSearch: true, droppedAim: true, shells: false }))
   }
 })

@@ -54,8 +54,8 @@ export service AiProvider {
   confirmRemove(): void!!
   /** Show a saved key in the host's secure dialog. */
   reveal(key: KeyName): void!!
-  /** The form closed: a sign-in page that sent the owner here returns. */
-  leave(): void!!
+  /** The form closed: a sign-in page that sent the owner here returns; whether one did. */
+  leave(): boolean!!
 }
 
 /** The provider service over its in-memory machine. */
@@ -95,7 +95,8 @@ export const providerService = Layer.effect(AiProvider, effect {
   effect function follow() {
     const p = try machine.get()
     const s = try signIn.current()
-    if (p.route === "OwnRoute" && !s.ownKeys) try signIn.useOwnKeys(true)
+    if (p.known && p.route === "OwnRoute" && s.work === "SavingOwnKeys") try signIn.ownKeys(false, true)
+    else if (p.route === "OwnRoute" && !s.ownKeys) try signIn.useOwnKeys(true)
     if (p.route === "CloudRoute" && s.ownKeys) try signIn.useOwnKeys(false)
     const mode = p.route === "OwnRoute" ? "DirectMode" : "CloudMode"
     if ((try sheet.current()).mode !== mode) try sheet.switchMode(mode)
@@ -204,7 +205,9 @@ export const providerService = Layer.effect(AiProvider, effect {
       try send({ type: "reveal", key })
     },
     effect leave() {
-      if ((try signIn.current()).work === "SavingOwnKeys") try signIn.ownKeys(false, false)
+      if ((try signIn.current()).work !== "SavingOwnKeys") return false
+      try signIn.ownKeys(false, false)
+      return true
     }
   }
 })

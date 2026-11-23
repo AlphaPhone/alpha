@@ -176,3 +176,14 @@ pure def queryCleared(p: Phone): Phone = { ...p, listQuery: NoQuery }
 pure def alwaysTheQueryOnlyWhileShown(p: Phone): bool = p.listQuery != NoQuery implies p.shown
 pure def sometimesAlphaFilteredRecents(p: Phone): bool = isAlphaQuery(p.listQuery) and p.tab == RecentsTab
 ```
+
+### Back clears Alpha's filter before it leaves Phone
+
+After the comms stage, the open chat and the open voicemail (voicemail.md), Back clears a chip
+Alpha applied to Recents. Tabs are places side by side, not layers: Back never moves between them.
+
+```quint
+type PhoneBack = PhoneChipClears | LeavesPhone
+pure def phoneBack(p: Phone): PhoneBack = if (isAlphaQuery(p.listQuery)) PhoneChipClears else LeavesPhone
+pure def lawBackLeavesPhoneOnlyWithoutAlphasFilter(p: Phone): bool = phoneBack(p) == LeavesPhone implies not(isAlphaQuery(p.listQuery))
+```

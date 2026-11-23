@@ -249,3 +249,18 @@ pure def stepARequestNeverTouchesADraft(before: Drafts, via: str, after: Drafts)
   (via == "requestTyped" or via == "requestSent") implies after.slots == before.slots
 pure def sometimesBothDraftsKept(d: Drafts): bool = d.requests.length() > 0 and d.slots.some(x => x.text != "")
 ```
+
+### What I wrote signed out becomes the account's that signs in, only where that account kept nothing
+
+Drafts, requests and the comms stage are kept under the account signed in at each read and write.
+What was kept while signed out (the phone's own `device` namespace) moves to the first account
+that signs in when that account has nothing kept, and is then removed from the phone's namespace,
+so a later account never receives it. An account's own kept state is never replaced; a damaged
+record is never moved. Nothing is sent or proposed by the move.
+
+```quint
+type Kept = NothingKept | KeptState | KeptDamaged
+pure def adoptsDeviceSlot(device: Kept, account: Kept): bool = device == KeptState and account == NothingKept
+pure def lawAnAccountsOwnStateIsNeverReplaced(device: Kept, account: Kept): bool = account != NothingKept implies not(adoptsDeviceSlot(device, account))
+pure def lawADamagedRecordIsNeverMoved(account: Kept): bool = not(adoptsDeviceSlot(KeptDamaged, account))
+```

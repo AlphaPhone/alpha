@@ -1,8 +1,10 @@
-// spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"; spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/drafts.md, "Each subject keeps one request to Alpha, separate from its draft slot"
+// spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"; spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/drafts.md, "Each subject keeps one request to Alpha, separate from its draft slot"
+import { useMemo } from "react";
 import { useMachine as useCommsMachine } from "../../../gen/telephony__comms.react.ts";
 import { initial as commsInitial, type CommsApp, type Subject } from "../../../gen/telephony__comms.ts";
 import { useMachine as useDraftsMachine } from "../../../gen/telephony__drafts.react.ts";
 import { initial as draftsInitial } from "../../../gen/telephony__drafts.ts";
+import { CommsStage, type OpenCard } from "../../telephony/comms.vibe";
 import { openApp } from "./open.ts";
 import type { TelephonyRuntime } from "./runtime.ts";
 
@@ -13,6 +15,16 @@ export function useComms(runtime: TelephonyRuntime) {
   const state = comms.state ?? commsInitial;
   const draftsState = drafts.state ?? draftsInitial;
   const request = draftsState.requests.find((r) => r.subject === state.key)?.request ?? "";
+  const openId = state.proposal.tag === "Proposed" ? state.proposal.proposalId : "";
+  const live = state.proposal.tag === "Proposed" && state.proposal.live;
+  const card = useMemo<OpenCard | null>(() => {
+    if (openId === "") return null;
+    try {
+      return runtime.runSync(CommsStage.use((s) => s.openCard()));
+    } catch {
+      return { proposalId: openId, live, words: null };
+    }
+  }, [runtime, openId, live]);
   return {
     comms: state,
     drafts: draftsState,
@@ -42,20 +54,11 @@ export function useComms(runtime: TelephonyRuntime) {
       openApp("assistant", `comms:${state.key}:ask:${encodeURIComponent(request)}`);
       drafts.send({ type: "requestSent", subject: state.key }, "Owner");
     },
-    /** Back: the stage first, then the chat, then the app's own Back (false). */
-    back: () => {
-      if (comms.can({ type: "stageReturned" }, "Owner")) {
-        comms.send({ type: "stageReturned" }, "Owner");
-        return true;
-      }
-      if (comms.can({ type: "chatClosed" }, "Owner")) {
-        comms.send({ type: "chatClosed" }, "Owner");
-        return true;
-      }
-      return false;
-    },
-    /** Approve or decline the open proposal: only the owner's tap. */
-    approve: (proposalId: string) => comms.send({ type: "proposalApproved", proposalId }, "Owner"),
-    decline: (proposalId: string) => comms.send({ type: "proposalDeclined", proposalId }, "Owner"),
+    /** The open proposal and its kept words; a restored one is shown and never approved. */
+    card,
+    /** Approve the open, live proposal: only the owner's tap. */
+    approve: (proposalId: string) => void runtime.runPromise(CommsStage.use((s) => s.approve(proposalId))),
+    /** Dismiss the open proposal, live or restored. */
+    decline: (proposalId: string) => void runtime.runPromise(CommsStage.use((s) => s.decline(proposalId))),
   };
 }

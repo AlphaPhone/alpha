@@ -2,7 +2,7 @@
 import { ReadingSpeechFailed, ReadingVoice } from "../browser/ports.vibe"
 import { Native } from "../platform/native.vibe"
 import { ResidentControl } from "../platform/resident-control.vibe"
-import { newId } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
 import { LocalSpeechStatus } from "./native.schema.vibe"
 import { Speech, type ReadingBinding } from "./speech.vibe"
 

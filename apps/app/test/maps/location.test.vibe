@@ -1,0 +1,83 @@
+// spec/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"; spec/maps/networkFix.md, "Story: Find me by Wi-Fi and cell towers when GPS has no fix"
+import { assert, it } from "@effect/vitest"
+import { Machine as NetworkMachine } from "../../gen/maps__networkFix.effect.vibe"
+import { MapsLocation } from "../../src/maps/location.vibe"
+import { MapsNetworkLocation } from "../../src/maps/networkLocation.vibe"
+import { ferry, fixTakenAt, harness, pier } from "./fakes.vibe"
+
+const open = { id: "alpha-osm", data: "OpenStreetMap" }
+const beacon = { latitude: pier.latitude, longitude: pier.longitude, accuracy: 25000, fingerprint: "ab12cd34" }
+
+effect function seconds(n: number) {
+  for (let i = 0; i < n; i++) try TestClock.adjust("1 second")
+}
+
+it.effect("Without a GPS fix for 4 seconds a locate finishes with an approximate network position, and the next one reuses it at once (spec/maps/location.md, \"When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers\"; spec/maps/networkFix.md, \"An answer is reused for 15 minutes, then confirmed without a request while the same networks are visible, for up to an hour\")", () => effect {
+  const h = try harness(open, { network: beacon })
+  provide h.layer {
+    const location = try MapsLocation
+    const first = fork location.once("OwnerFix")
+    try seconds(3)
+    const early = h.nativeCalls.filter((c) => c === "AlphaNetworkLocation.locate").length
+    try seconds(2)
+    const fix = join first
+    const second = fork location.once("OwnerFix")
+    try seconds(1)
+    const again = join second
+    const locator = try Stream.runHead(location.states)
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        early, lookups: h.nativeCalls.filter((c) => c === "AlphaNetworkLocation.locate").length,
+        fix: [fix.precision, fix.accuracyMeters, fix.coordinate.latitude], again: [again.precision, again.coordinate.latitude],
+        approximate: locator._tag === "Some" && locator.value.approximate,
+      },
+      { early: 0, lookups: 1, fix: ["approximate", 25000, pier.latitude], again: ["approximate", pier.latitude], approximate: true },
+    ))
+  }
+})
+
+it.effect("A GPS fix inside the grace period means no lookup (spec/maps/location.md, \"When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers\")", () => effect {
+  const h = try harness(open, { network: beacon })
+  provide h.layer {
+    const location = try MapsLocation
+    const first = fork location.once("OwnerFix")
+    try seconds(1)
+    try Queue.offer(h.fixes, fixTakenAt(ferry, try Clock.currentTimeMillis))
+    const fix = join first
+    try seconds(6)
+    try Effect.try(() => assert.deepStrictEqual(
+      { precision: fix.precision, latitude: fix.coordinate.latitude, lookups: h.nativeCalls.filter((c) => c === "AlphaNetworkLocation.locate").length },
+      { precision: "precise", latitude: ferry.latitude, lookups: 0 },
+    ))
+  }
+})
+
+it.effect("A refused lookup waits two minutes before the next, and the same networks are confirmed without a new answer (spec/maps/networkFix.md, \"An answer is kept only when it is at most an hour old, not ahead of the phone, and carries a positive accuracy\"; spec/maps/networkFix.md, \"An answer is reused for 15 minutes, then confirmed without a request while the same networks are visible, for up to an hour\")", () => effect {
+  const refusing = try harness(open)
+  const backedOff = try Effect.provide(effect {
+    const network = try MapsNetworkLocation
+    const first = try network.locate()
+    const soon = try network.locate()
+    try TestClock.adjust("2 minutes")
+    try TestClock.adjust("1 second")
+    const later = try network.locate()
+    return { first, soon, later, lookups: refusing.nativeCalls.filter((c) => c === "AlphaNetworkLocation.locate").length }
+  }, refusing.layer)
+  const kept = try harness(open, { network: beacon })
+  const confirmed = try Effect.provide(effect {
+    const network = try MapsNetworkLocation
+    const fixes = try NetworkMachine
+    const first = try network.locate()
+    try TestClock.adjust("16 minutes")
+    const second = try network.locate()
+    const state = try fixes.get()
+    return { first: first?.timestamp, second: second?.timestamp, fixAt: state.fixAt, resolvedAt: state.resolvedAt }
+  }, kept.layer)
+  try Effect.try(() => assert.deepStrictEqual(
+    { backedOff, confirmed },
+    {
+      backedOff: { first: undefined, soon: undefined, later: undefined, lookups: 2 },
+      confirmed: { first: 0, second: 960000, fixAt: 960000, resolvedAt: 0 },
+    },
+  ))
+})

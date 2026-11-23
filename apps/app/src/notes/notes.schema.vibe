@@ -65,9 +65,6 @@ export const AudioReceipt = Schema.Struct({
 /** The device's playback state. */
 export const PlaybackState = Schema.Struct({ playing: Schema.Boolean, audioId: Schema.optionalKey(Schema.String), positionMs: Schema.Number })
 
-/** A transcribed window or segment, and whether the phone itself heard it. */
-export const TranscribeAnswer = Schema.Struct({ text: Schema.String, local: Schema.optionalKey(Schema.Boolean) })
-
 /** The recording notification's one-use tap record, taken by the read. */
 export const RecordingOpenAnswer = Schema.Struct({ open: Schema.Boolean })
 
@@ -152,8 +149,19 @@ export const LegacyTrashEntry = Schema.Struct({
 /** The earlier device Trash slot `notes-trash:v1:device`. */
 export const LegacyTrashDocument = Schema.Struct({ version: Schema.Literal(1), entries: Schema.Array(LegacyTrashEntry).check(Schema.isMaxLength(10000)) })
 
-/** One secure slot read of `AlphaConnection`. */
-export const SecureRead = Schema.Struct({ value: Schema.NullOr(Schema.String) })
+/** One `ElizaSecureStore.get` answer: the stored text, a refusal, or the phone's plain `{ value }` with null for an empty slot. */
+export const SecureRead = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), value: Schema.String }),
+  Schema.Struct({ ok: Schema.Literal(false), error: Schema.String }),
+  Schema.Struct({ value: Schema.NullOr(Schema.String) }),
+])
+
+/** One `ElizaSecureStore.compareAndExchange` answer: written or removed, a refusal, or the phone's plain `{ exchanged }`. */
+export const SecureExchange = Schema.Union([
+  Schema.Struct({ ok: Schema.Literal(true), outcome: Schema.String }),
+  Schema.Struct({ ok: Schema.Literal(false), error: Schema.String, outcome: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ exchanged: Schema.Boolean }),
+])
 
 export type RecordingStatus = typeof RecordingStatus.Type
 export type SavedNoteAudio = typeof SavedNoteAudio.Type
@@ -172,7 +180,6 @@ export const decodeSavedAudio = Schema.decodeUnknownEffect(SavedNoteAudio)
 export const decodeAudioDescription = Schema.decodeUnknownEffect(AudioDescription)
 export const decodeAudioReceipt = Schema.decodeUnknownEffect(AudioReceipt)
 export const decodePlayback = Schema.decodeUnknownEffect(PlaybackState)
-export const decodeTranscribe = Schema.decodeUnknownEffect(TranscribeAnswer)
 export const decodeClaim = Schema.decodeUnknownEffect(ClaimAnswer)
 export const decodeRecordingOpen = Schema.decodeUnknownEffect(RecordingOpenAnswer)
 export const decodeFolders = Schema.decodeUnknownEffect(Schema.fromJsonString(FoldersDocument))
@@ -180,4 +187,5 @@ export const decodeOrigins = Schema.decodeUnknownEffect(Schema.fromJsonString(Or
 export const decodeDocumentResult = Schema.decodeUnknownEffect(DocumentResult)
 export const decodeKeptDraft = Schema.decodeUnknownEffect(Schema.fromJsonString(KeptDraft))
 export const decodeSecureRead = Schema.decodeUnknownEffect(SecureRead)
+export const decodeSecureExchange = Schema.decodeUnknownEffect(SecureExchange)
 export const decodeLegacyTrash = Schema.decodeUnknownEffect(Schema.fromJsonString(LegacyTrashDocument))

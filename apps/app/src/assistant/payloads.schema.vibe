@@ -61,6 +61,13 @@ export schema AssistInvocation {
   readonly cold?: boolean
 }
 
+/** What `Agent.takeInvocation` says of the assistant surface's own launch, consumed on read. */
+export schema SurfaceLaunch {
+  readonly assistant: boolean
+  readonly invocation?: "assist" | "listener" | null
+  readonly locked?: boolean
+}
+
 /** The location permission as `ElizaLocation.checkPermissions` reports it. */
 export schema LocationPermission { readonly location: string }
 
@@ -69,6 +76,12 @@ export schema Coordinates { readonly latitude: number; readonly longitude: numbe
 
 /** A position fix of `ElizaLocation.getCurrentPosition`. */
 export schema PositionFix { readonly coords: Coordinates; readonly timestamp: number }
+
+/** A Wi-Fi and cell position of `AlphaNetworkLocation.locate`, with the fingerprint of the networks it was resolved from. */
+export schema NetworkFix { readonly latitude: number; readonly longitude: number; readonly accuracy: number; readonly timestamp: number; readonly fingerprint: string }
+
+/** `AlphaNetworkLocation.locate` found the visible networks unchanged since `unchangedFrom`. */
+export schema NetworkUnchanged { readonly unchanged: true; readonly fingerprint: string }
 
 /** One file saved beside a sent message, its bytes as base64. */
 export schema SavedFile { readonly id: string; readonly name: string; readonly mimeType: string; readonly data: string }

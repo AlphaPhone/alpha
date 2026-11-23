@@ -1,0 +1,108 @@
+// spec/telephony/phoneInfo.md, "The page reads only while it is in front, and leaving forgets what it read"; spec/telephony/phoneInfo.md, "Without phone-state access the SIM list reads as unread, never as no SIM"; spec/telephony/phoneInfo.md, "An identifier the launcher cannot read is shown on Android's own status screen"
+import type { PhoneInfo, PhoneLine, PhoneNetworkType, TelephonyStatus, VoicemailListing } from "@elizaos/os/bridges/phone"
+import { Machine as FactsMachine, type Event as FactsEvent, type Holders, type Line, type Network, type VoicemailSetup } from "../../gen/telephony__phoneInfo.effect.vibe"
+import { Native } from "../platform/native.vibe"
+import { callerOf, TelephonyBridges } from "./bridges.vibe"
+import { frontChanges, whileInFront } from "./front.vibe"
+
+/** The Android settings screens the page hands off to: device status (IMEI), mobile network and default apps. */
+export type StatusPage = "about" | "mobile" | "default-apps"
+
+const NETWORKS: Record<PhoneNetworkType, Network> = {
+  none: "NoService", "2g": "Network2g", "3g": "Network3g", "4g": "Network4g", "5g": "Network5g", "wifi-calling": "WifiCalling", unknown: "NetworkUnknown",
+}
+
+/** One line as the page shows it: the carrier's name, a SIM name only where it differs, and what Android allowed of the rest. */
+export function lineOf(line: PhoneLine): Line {
+  const carrier = line.carrierName || line.displayName
+  const signal = line.signalLevel
+  return {
+    slot: line.slot, carrier, simName: line.displayName !== carrier ? line.displayName : "", number: line.number ?? "",
+    network: NETWORKS[line.networkType] ?? "NetworkUnknown", roaming: line.roaming === true,
+    signal: typeof signal === "number" && Number.isSafeInteger(signal) && signal >= 0 && signal <= 4 ? signal : -1,
+    embedded: line.embedded, imei: line.imei ?? "", simSerial: line.iccid ?? "",
+  }
+}
+
+/** Which apps Android uses for calls and texts, and whether Alpha is the one. */
+export function holdersOf(status: TelephonyStatus): Holders {
+  return {
+    phoneApp: status.defaultDialer ?? "", phoneAlpha: status.roles.dialer.held,
+    smsApp: status.defaultSms ?? "", smsAlpha: status.roles.sms.held,
+  }
+}
+
+/** The carrier's voicemail setup the phone's voicemail store already knows; an unread store says nothing. */
+export function voicemailSetupOf(listing: VoicemailListing | undefined): VoicemailSetup {
+  if (listing === undefined) return "VoicemailUnknown"
+  return listing.carrier === "CarrierReady" ? "VoicemailOn"
+    : listing.carrier === "CarrierUnconfigured" ? "VoicemailNotSetUp"
+    : listing.carrier === "CarrierUnsupported" ? "VoicemailNotOffered" : "VoicemailUnknown"
+}
+
+/** Settings → Phone's effects: the one bounded read while the page is in front, Allow, and the hand-offs to Android's own screens. */
+export service PhoneInfoView {
+  /** One visit of the page: each stretch in front on an unlocked phone reads once, and leaving forgets what it read. */
+  visit(): void!!
+  /** Read again, as Try again does. */
+  refresh(): void!!
+  /** Ask Android for phone-state access, then read again. */
+  allow(): void!!
+  /** Open one of Android's own settings screens; false when it did not open. */
+  openStatus(page: StatusPage): boolean!!
+}
+
+/** The page over its in-memory machine, the image's phone bridge and Android's settings hand-off. */
+export const phoneInfoViewLayer = Layer.effect(PhoneInfoView, effect {
+  const bridges = try TelephonyBridges
+  const bridgeCall = callerOf(bridges)
+  const native = try Native
+  const facts = try FactsMachine
+  const front = try frontChanges()
+  const tell = (event: FactsEvent) => facts.send(event) catch () => undefined
+
+  effect function readNow(asking: boolean) {
+    const status: TelephonyStatus = asking
+      ? try bridgeCall("requestAccess", (c) => c.phone.requestAccess("phoneState"))
+      : try bridgeCall("status", (c) => c.phone.status())
+    const info: PhoneInfo = try bridgeCall("phoneInfo", (c) => c.phone.phoneInfo())
+    const listing = try (bridgeCall("voicemail", (c) => c.phone.voicemail()) catch () => undefined)
+    return { status, info, listing }
+  }
+
+  effect function read() {
+    const { epoch, asking } = try facts.get()
+    const answer = try (readNow(asking) catch () => undefined)
+    if (answer === undefined) {
+      try tell({ type: "infoFailed", ticket: epoch })
+      return
+    }
+    const phoneState = answer.info.access.phoneState
+    try tell({
+      type: "infoAnswered", ticket: epoch, phoneState,
+      lines: phoneState ? answer.info.lines.map(lineOf) : [], holders: holdersOf(answer.status), voicemail: voicemailSetupOf(answer.listing),
+    })
+  }
+
+  return {
+    effect visit() {
+      try whileInFront(front, effect () => {
+        try ensuring(effect {
+          if ((try tell({ type: "infoShown" })) === undefined) return
+          try read()
+          try Effect.never
+        }, effect { try tell({ type: "infoHidden" }) })
+      })
+    },
+    effect refresh() {
+      if ((try tell({ type: "infoAsked", request: false })) !== undefined) try read()
+    },
+    effect allow() {
+      if ((try tell({ type: "infoAsked", request: true })) !== undefined) try read()
+    },
+    effect openStatus(page: StatusPage) {
+      const opened = try (native.invoke("AlphaDevice", "openSettings", { page }) catch () => undefined)
+      return typeof opened === "object" && opened !== null && (opened as { status?: unknown }).status === "opened"
+    },
+  }
+})

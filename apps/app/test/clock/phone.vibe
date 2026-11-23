@@ -9,10 +9,13 @@ import { Assistant } from "../../src/assistant/assistant.vibe"
 import { WorkflowRuns } from "../../src/workflows/runs.vibe"
 import { NotesOrigins } from "../../src/notes/origins.vibe"
 import { AssistantHost } from "../../src/assistant/host.vibe"
+import { AssistantFlows } from "../../src/assistant/flows.vibe"
+import { DeviceFacts } from "../../src/settings/facts.vibe"
 import { Reminders } from "../../src/clock/reminders.vibe"
+import { RemindersPage } from "../../src/clock/reminder-page.vibe"
 import { initial as navInitial } from "../../gen/shell__navigation.ts"
 import { initial as sessionInitial } from "../../gen/account__session.ts"
-import { machine as facts } from "../../gen/settings__facts.effect.vibe"
+import { initial as factsInitial } from "../../gen/settings__facts.ts"
 import { machine as ringer } from "../../gen/clock__ringer.effect.vibe"
 import { machine as alarms } from "../../gen/clock__alarms.effect.vibe"
 import { machine as timers } from "../../gen/clock__timers.effect.vibe"
@@ -23,6 +26,7 @@ import { machine as history } from "../../gen/clock__handoffHistory.effect.vibe"
 import { machine as reminders } from "../../gen/clock__reminders.effect.vibe"
 import { machine as journal } from "../../gen/clock__reminderJournal.effect.vibe"
 import { machine as drafts } from "../../gen/clock__reminderDrafts.effect.vibe"
+import { machine as page } from "../../gen/clock__reminderPage.effect.vibe"
 import { machine as taps } from "../../gen/clock__reminderTaps.effect.vibe"
 import { machine as shade } from "../../gen/clock__notifications.effect.vibe"
 import { machine as canonical } from "../../gen/clock__canonicalTaps.effect.vibe"
@@ -89,16 +93,37 @@ export function fakeNavigation() {
   return { opened, layer: Layer.succeed(Navigation, shape as unknown as Navigation.Shape) }
 }
 
-/** The assistant: a composer that is quiet unless `busy` writes a reply or `holding` keeps a draft, and the drafts reviewed questions opened. */
-export function fakeAssistant(busy = false, holding = false) {
+/** One of Alpha's own notices as the phone lists it now, for the assistant's notice question. */
+export type Listed = (id: string) => { readonly id: string; readonly revision: string } | undefined
+
+/**
+ * The assistant: a composer that is quiet unless `busy` writes a reply or `holding` keeps a draft, the drafts reviewed
+ * questions opened, and a notice question that drafts only for an askable notice still `listed` at the revision asked.
+ */
+export function fakeAssistant(busy = false, holding = false, listed?: Listed) {
   const asked: string[] = []
   const composer = { transcript: Stream.make({ conversation: null, rows: [], hasMore: false, typing: busy }) }
-  const assistant = { holdingDraft: () => succeed(holding), openWith: (draft: string) => sync(() => { asked.push(draft) }) }
+  const assistant = { holdingDraft: () => succeed(holding), holdingDraftChanges: Stream.make(holding), openWith: (draft: string) => sync(() => { asked.push(draft) }) }
+  const flows = {
+    askAboutNotice: (noticeId: string, revision: string, kind: string, question: string) => sync(() => {
+      const now = listed === undefined ? { id: noticeId, revision } : listed(noticeId)
+      if (kind !== "ValidNotice" || holding || now === undefined || now.revision !== revision || question.trim() === "") return false
+      asked.push(question)
+      return true
+    }),
+  }
   return {
     asked,
-    layer: Layer.merge(Layer.succeed(Composer, composer as unknown as Composer.Shape), Layer.succeed(Assistant, assistant as unknown as Assistant.Shape)),
+    layer: Layer.mergeAll(
+      Layer.succeed(Composer, composer as unknown as Composer.Shape),
+      Layer.succeed(Assistant, assistant as unknown as Assistant.Shape),
+      Layer.succeed(AssistantFlows, flows as unknown as AssistantFlows.Shape),
+    ),
   }
 }
+
+/** Settings' device facts with every fact unread, as before Android answers. */
+export const fakeFacts = Layer.succeed(DeviceFacts, { read: () => succeed(factsInitial.read) } as unknown as DeviceFacts.Shape)
 
 /** The signed-in Cloud account `organization:user`, or none. */
 export function session(ownerId: string | undefined) {
@@ -129,14 +154,18 @@ export function fakeHost(signedIn = true) {
   return Layer.succeed(AssistantHost, shape as unknown as AssistantHost.Shape)
 }
 
-/** The Reminders screen, counting the refreshes an agent change asked for. */
-export function fakeReminders() {
+/** The Reminders screen, counting the refreshes an agent change asked for, with `chosen` the reminder it shows under the name the agent gave. */
+export function fakeReminders(chosen?: { readonly id: string; readonly name: string }) {
   const refreshes: number[] = []
   const shape = { refresh: () => sync(() => { refreshes.push(refreshes.length + 1) }) }
-  return { refreshes, layer: Layer.succeed(Reminders, shape as unknown as Reminders.Shape) }
+  const page = { chosen: (name: string) => succeed(chosen !== undefined && chosen.name.toLowerCase() === name.trim().toLowerCase() ? chosen.id : undefined) }
+  return {
+    refreshes,
+    layer: Layer.merge(Layer.succeed(Reminders, shape as unknown as Reminders.Shape), Layer.succeed(RemindersPage, page as unknown as RemindersPage.Shape)),
+  }
 }
 
-/** Every Clock machine, in memory. */
+/** Every Clock machine, in memory, and Settings' unread device facts. */
 export const machines = Layer.mergeAll(
-  facts(), ringer(), alarms(), timers(), stopwatch(), world(), handoff(), history(), reminders(), journal(), drafts(), taps(), shade(), canonical(), workflow(), deletions(), mirror(), notices(),
+  fakeFacts, page(), ringer(), alarms(), timers(), stopwatch(), world(), handoff(), history(), reminders(), journal(), drafts(), taps(), shade(), canonical(), workflow(), deletions(), mirror(), notices(),
 )

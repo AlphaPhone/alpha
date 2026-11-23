@@ -1,4 +1,4 @@
-// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"
+// spec/assistant/attachments.md, "Story: Attach a photo or file to my message"; spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/attachments.md, "A shared text file is asked about as a reviewed excerpt, a file that cannot be attached goes as its name, and anything else is attached"
 import { FilePicker } from "../files/picker.vibe"
 import { FilesAgent } from "../files/agent.vibe"
 import type { FileShareTargets } from "../files/share.vibe"
@@ -6,7 +6,8 @@ import { Assistant } from "./assistant.vibe"
 import { AssistantHost } from "./host.vibe"
 import { copy } from "./presentation.vibe"
 import type { ChatFile } from "./transcript.vibe"
-import { maxAttachments } from "../../gen/assistant__attachments.effect.vibe"
+import { imageIntakeBytes, maxAttachments, mediaBase64Cap, rawCap } from "../../gen/assistant__attachments.effect.vibe"
+import { AssistantDraft, excerptLimit, questionDraft } from "./draft.vibe"
 
 const chatTypes = new Set(["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "text/markdown", "application/json"])
 
@@ -15,18 +16,43 @@ export function chatAccepts(mimeType: string): boolean {
   return chatTypes.has(mimeType) || mimeType.startsWith("image/")
 }
 
-/** The Ask Alpha target of Files' share sheet, for the shell to merge into `FileShareTargets`: the file and question go to the composer, never sent. */
+const excerptTypes = new Set(["text/plain", "text/markdown", "text/csv", "application/json"])
+
+function utf8Of(base64: string): string | undefined {
+  try {
+    const binary = atob(base64)
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+  } catch {
+    return undefined
+  }
+}
+
+/** The Ask Alpha target of Files' share sheet, for the shell to merge into `FileShareTargets`: a text file opens the reviewed excerpt, a file too large to attach is named as the source, any other is attached; nothing is sent. */
 export effect function askAlphaTarget() {
   const assistant = try Assistant
+  const draft = try AssistantDraft
   const target: Pick<FileShareTargets.Shape, "ask" | "attachToChat"> = {
     ask: true,
     attachToChat: (file, question) => effect {
+      const asked = question.trim() === "" ? copy.explainFile : question
+      const cap = file.mimeType.startsWith("image/") ? imageIntakeBytes : rawCap(mediaBase64Cap)
+      if (file.size > cap || !chatAccepts(file.mimeType)) {
+        try assistant.openWith(questionDraft(asked, file.name, undefined, ""))
+        return true
+      }
       const bytes = file.read catch () => undefined
       if (bytes === undefined) return false
+      const text = excerptTypes.has(bytes.mimeType) ? utf8Of(bytes.dataBase64) : undefined
+      if (text !== undefined && text.trim() !== "") {
+        try draft.askAbout({ name: bytes.name, text: text.slice(0, excerptLimit + 1), question: asked })
+        return true
+      }
       const encoded: ChatFile = { id: `files-${bytes.sha256}`, name: bytes.name, mimeType: bytes.mimeType, data: bytes.dataBase64 }
       const attached = map(assistant.attach({ kind: "encoded", files: [encoded] }), () => true) catch () => false
-      if (attached) try assistant.openWith(question.trim() === "" ? copy.explainFile : question)
-      return attached
+      if (attached) try assistant.openWith(asked)
+      else try assistant.openWith(questionDraft(asked, bytes.name, undefined, ""))
+      return true
     },
   }
   return target

@@ -12,6 +12,7 @@ notice opens the exact run or result it names, and only for the account it belon
 `@elizaos/plugin-workflow`, its triggers and scheduled tasks own the definitions, the runs and the
 receipts; these specs state what Alpha shows, sends and keeps.
 
+- [Place](./place.md): where the owner is inside Workflows, what Back closes, and the run view's generation.
 - [Vocabulary](./vocabulary.md): how runs, occurrences and rows read, committed receipts, and the routes Workflows sends.
 - [Automations list](./automations.md): every source in one list, and the one change held per owner.
 - [Prompts and scheduled items](./agentSchedules.md): saving, switching and running prompts; answering scheduled items.

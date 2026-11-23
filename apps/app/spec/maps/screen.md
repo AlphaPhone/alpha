@@ -296,7 +296,9 @@ pure def sometimesAlternativeChosen(s: Screen): bool = s.route == Ready and s.ro
 ### Swapping ends keeps each end's identity and plans the reverse route
 
 A located origin becomes the phone's position as the destination; the old
-destination becomes the starting point under its label.
+destination becomes the starting point under its label. Swap stays on the
+route sheet and says it is unavailable while the reverse route is planned, so
+it keeps the owner's focus.
 
 ```quint
 pure def canSwapEnds(s: Screen, id: int, label: str): bool =
@@ -311,7 +313,8 @@ pure def swapEnds(s: Screen, id: int, label: str): Screen = owned(Owner, planned
 
 ### Back closes one layer at a time
 
-Origin choice, then directions, then the place, then the search. With nothing
+The map's credits sheet and a place's open rename field close first, then
+origin choice, then directions, then the place, then the search. With nothing
 open Back leaves Maps. Back from the search a Calendar event handed over
 returns to that event.
 

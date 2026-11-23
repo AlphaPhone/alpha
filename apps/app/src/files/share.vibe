@@ -48,7 +48,7 @@ export service FilesShare {
   readonly emails: Stream.Stream<EmailShare>
   /** Open a panel for what is selected now; `same` tells later whether it still is. */
   open(email: boolean, messages: boolean, same: boolean!!): number!!
-  /** The owner chose `destination` on panel `id`: run `deliver` only while that panel is on screen for an unchanged selection. */
+  /** The owner chose `destination` on panel `id`: only the panel on screen for an unchanged selection closes, records the send and then runs `deliver` once, whose outcome is reported. */
   choose(id: number, destination: Destination, deliver: DeliveryOutcome!!): boolean!!
   retire(): void!!
   hidden(hidden: boolean): void!!
@@ -111,12 +111,15 @@ export const layer = Layer.effect(FilesShare, effect {
       if (s.active !== id || s.hidden) return false
       if (panel === id && !(try same)) {
         panels.send({ type: "invalidate" }) catch () => undefined
-        panels.send({ type: "choose", id, destination, outcome: "Delivered" }) catch () => undefined
+        panels.send({ type: "choose", id, destination }) catch () => undefined
         return false
       }
-      const outcome: DeliveryOutcome = destination === "CancelShare" ? "Delivered" : try deliver
-      const after = panels.send({ type: "choose", id, destination, outcome }) catch () => undefined
-      return after !== undefined && outcome === "Delivered"
+      const after = panels.send({ type: "choose", id, destination }) catch () => undefined
+      if (destination === "CancelShare") return after !== undefined
+      if (after === undefined || !after.effects.some((e) => e.panel === id)) return false
+      const outcome: DeliveryOutcome = try deliver
+      panels.send({ type: "reportDelivery", id, outcome }) catch () => undefined
+      return outcome === "Delivered"
     },
     effect retire() {
       panels.send({ type: "retirePanel" }) catch () => undefined

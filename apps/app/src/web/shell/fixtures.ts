@@ -2,6 +2,8 @@
 import { CalendarDays, Folder, Inbox, NotebookText, Settings } from "lucide-react";
 import type { Overview } from "../../../gen/shell__overview.ts";
 import { initial as overviewStart } from "../../../gen/shell__overview.ts";
+import type { Mirror as MirrorState } from "../../../gen/clock__mirror.ts";
+import { initial as mirrorStart } from "../../../gen/clock__mirror.ts";
 import type { Permissions } from "../../../gen/shell__permissions.ts";
 import { initial as permissionsStart } from "../../../gen/shell__permissions.ts";
 import type { Toasts } from "../../../gen/shell__toasts.ts";
@@ -68,7 +70,39 @@ export const reviewedStep: Permissions = {
   target: 0, reopened: true, review: true, completed: true, progress: -1,
 };
 
+/** A native walkthrough at Photos, with Location allowed approximately and Photos allowed for selected items only. */
+export const grantedSteps: Permissions = {
+  ...reviewedStep, target: -1, reopened: false, review: false, completed: false, progress: 5,
+  states: { ...reviewedStep.states, $PermCamera: "AccessReady", $PermLocation: "AccessReady", $PermCalendar: "AccessReady", $PermPhotos: "AccessReady" } as Permissions["states"],
+  grants: { ...permissionsStart.grants, $PermLocation: "GrantApproximate", $PermPhotos: "GrantSelected" } as Permissions["grants"],
+};
+
+/** A browser walkthrough whose Allow the browser left off. */
+export const stillOffStep: Permissions = {
+  ...cameraStep, states: { ...cameraStep.states, $PermCamera: "AccessSettings" } as Permissions["states"], attempted: ["PermCamera"], notice: "NoticeStillOff",
+};
+
 /** Gesture handlers that do nothing, for stories. */
 export const idleControls: GestureControls = {
   down: () => {}, move: () => {}, up: () => {}, cancel: () => {}, context: () => {}, tap: () => {}, arrow: () => {}, erase: () => {},
 };
+
+/** The notification mirror read from the phone: on, two apps chosen, history kept, reminder alerts blocked in Android. */
+export const mirrorShown: MirrorState = {
+  ...mirrorStart, loaded: true, revision: "r1", enabled: true, history: true, granted: true, remindersBlocked: true,
+  apps: [{ packageName: "org.fixture.mail", preview: true, available: true }, { packageName: "org.fixture.chat", preview: false, available: false }],
+};
+
+/** The mirror paused by Android, without notification access. */
+export const mirrorPaused: MirrorState = { ...mirrorShown, paused: true, granted: false, remindersBlocked: false, report: "SettingsChanged" };
+
+/** The apps the owner may add to the mirror. */
+export const mirrorChoices = [
+  { packageName: "org.fixture.mail", label: "Mail" }, { packageName: "org.fixture.chat", label: "Chat" }, { packageName: "org.fixture.bank", label: "Bank" },
+] as const;
+
+/** A day of mirror history. */
+export const mirrorHistory = [
+  { id: "h1", appLabel: "Mail", at: Date.UTC(2026, 10, 20, 9, 30), state: "Shown" },
+  { id: "h2", appLabel: "Chat", at: Date.UTC(2026, 10, 20, 11, 5), state: "Dismissed" },
+] as const;

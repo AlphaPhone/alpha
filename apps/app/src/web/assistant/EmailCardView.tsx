@@ -1,7 +1,7 @@
-// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"
+// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/emailCard.md, "Send is offered for a draft with an account, valid recipients and a body, and dispatches once per version"; spec/assistant/emailCard.md, "Send needs literal recipients, each listed once, under the account the card was drafted for; a word for me stands for that account until the first edit"
 import { Mail, Send } from "lucide-react";
 import { useState } from "react";
-import { canSendEmail, type EmailCard } from "../../../gen/assistant__emailCard.ts";
+import { canSendEmail, sendRecipientsOk, type EmailCard } from "../../../gen/assistant__emailCard.ts";
 import { Button, Card, CardFooter, CardTitle, Input, Label, Textarea } from "../components/ui/index.ts";
 
 /** An email card's state, its fields as the agent drafted them, and the owner's answers. */
@@ -30,19 +30,25 @@ const status = {
 } as const;
 
 const recipientsOf = (to: string) => to.split(/[,;]/).map((entry) => entry.trim()).filter((entry) => entry !== "");
-const valid = (to: string) => { const list = recipientsOf(to); return list.length > 0 && list.every((entry) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry)); };
+const selfWord = /^(self|me|myself)$/i;
+const valid = (to: string, literal: boolean) => {
+  const list = recipientsOf(to);
+  const distinct = new Set(list.map((entry) => entry.toLowerCase())).size;
+  return sendRecipientsOk(list.length, distinct, literal && !list.some((entry) => selfWord.test(entry)), true) && list.every((entry) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry));
+};
 
 /**
  * An email the agent drafted, edited and sent inside the conversation; every recipient is listed before Send.
  * @model spec/assistant/emailCard.md
  */
 export function EmailCardView({ card, to, subject, body, ownAddress, onEdit, onSend, onDecline }: EmailCardViewProps) {
-  const self = /^(self|me|myself)$/i.test(to.trim()) && ownAddress !== undefined;
+  const self = selfWord.test(to.trim()) && ownAddress !== undefined;
   const [fields, setFields] = useState({ to: self ? ownAddress ?? to : to, subject, body });
+  const [edited, setEdited] = useState(false);
   const draft = card.state === "DraftEmail";
-  const change = (next: typeof fields) => { setFields(next); onEdit(next); };
+  const change = (next: typeof fields) => { setFields(next); setEdited(true); onEdit(next); };
   const recipients = recipientsOf(fields.to);
-  const offered = canSendEmail({ ...card, recipients: valid(fields.to), body: fields.body.trim() !== "" });
+  const offered = canSendEmail({ ...card, recipients: valid(fields.to, !selfWord.test(to.trim()) || edited), body: fields.body.trim() !== "" });
   return (
     <Card className="gap-3 p-4" aria-label="Email draft">
       <CardTitle className="flex items-center gap-2"><Mail aria-hidden className="size-4" />{fields.subject || "Email"}</CardTitle>

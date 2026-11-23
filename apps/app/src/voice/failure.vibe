@@ -25,6 +25,8 @@ export function refusalOf(cause: unknown, now: number): RefusalFacts {
   const data = raw?.data === undefined ? undefined : Option.getOrUndefined(decodeData(raw.data))
   const code = raw?.code ?? ""
   const http = HTTP_CODE.exec(code)
+  const reported = raw?.status
+  const status = http ? Number(http[1]) : typeof reported === "number" && Number.isSafeInteger(reported) && reported >= 400 && reported <= 599 ? reported : undefined
   const wait = data?.retryAfterSeconds
   const bounded = typeof wait === "number" && Number.isSafeInteger(wait) ? boundedWaitSeconds(wait) : 0
   const limitCode = data?.limitCode
@@ -32,7 +34,7 @@ export function refusalOf(cause: unknown, now: number): RefusalFacts {
   return {
     code,
     name: raw?.name ?? "",
-    ...(http ? { status: Number(http[1]) } : {}),
+    ...(status === undefined ? {} : { status }),
     ...(bounded > 0 ? { retryAfterSeconds: bounded } : {}),
     ...(typeof limitCode === "string" && LIMIT_CODE.test(limitCode) ? { limitCode } : {}),
     ...(typeof resetAt === "number" && Number.isSafeInteger(resetAt) && resetAt > now && resetAt - now <= MAX_RESET_AHEAD_MS ? { resetAt } : {}),
@@ -51,6 +53,16 @@ export function limitKindOf(facts: RefusalFacts): LimitKind {
 /** Whether a failure is a call taking the microphone or the speaker. */
 export function callCaused(facts: RefusalFacts): boolean {
   return facts.code === "call-active" || facts.code === "capture-call-active"
+}
+
+/** Whether the phone ended a capture because Alpha left the front, which is a hidden page and never a voice failure. */
+export function pausedByPhone(facts: RefusalFacts): boolean {
+  return facts.code === "paused"
+}
+
+/** Whether the phone cancelled a capture itself, such as when its speech bridge closed, which ends voice as a stop does. */
+export function cancelledByPhone(facts: RefusalFacts): boolean {
+  return facts.code === "cancelled"
 }
 
 /** Said once when a call ends a voice conversation or a dictation. */

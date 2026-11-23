@@ -102,6 +102,21 @@ pure def lawNoFilterShowsEverything(kindMatches: bool, folderMatches: bool, text
 pure def lawDeletedFolderReadsAsNone(noteFolder: str): bool = shownFolder(noteFolder, false) == ""
 ```
 
+### A Notes route opens one note or shows one list filter, and the plain list otherwise
+
+Another app opens Notes at a route: a note's ID opens that note, and a filter route (`filter?` with text,
+kind and folder) shows that filter on the list, clearable with the same one tap. An empty route, or a
+filter route that names nothing Notes knows, shows the plain list. Notes reports the note it has open as
+its route, and the empty route once the editor closes, so Back to Notes returns to what was shown.
+
+```quint
+type RouteAsk = RouteList | RouteNote | RouteFilter
+pure def routeAsk(empty: bool, filterRoute: bool, namesFilter: bool): RouteAsk =
+  if (empty) RouteList else if (not(filterRoute)) RouteNote else if (namesFilter) RouteFilter else RouteList
+pure def lawEmptyFilterShowsList(namesFilter: bool): bool = not(namesFilter) implies routeAsk(false, true, namesFilter) == RouteList
+pure def lawEmptyRouteShowsList(filterRoute: bool, namesFilter: bool): bool = routeAsk(true, filterRoute, namesFilter) == RouteList
+```
+
 ## Story: Start a note with a title I can tell apart
 
 > As the owner, I want a new note or voice note named so that it differs from the ones I already have,

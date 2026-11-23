@@ -9,6 +9,7 @@ import { useMachine as useListener } from "../../../gen/voice__listener.react.ts
 import { initial as listenerInitial } from "../../../gen/voice__listener.ts";
 import { Listener } from "../../voice/listener.vibe";
 import { VoiceIndicatorView } from "./VoiceIndicatorView.tsx";
+import { act } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 
 /** What the shell gives every top surface: a way to open an app. */
@@ -34,7 +35,7 @@ export function VoiceIndicator(_props: VoiceIndicatorProps) {
       listenerMicrophoneOpen={listener.microphoneOpen}
       wakeStop={listener.wakeStop}
       canPause={listener.mode === "ListeningOn" && can({ type: "beginStop", stop: "PauseListening" })}
-      onPause={() => { runtime.runFork(Effect.flatMap(Effect.service(Listener), (l) => l.pause())); }}
+      onPause={() => { act(Effect.flatMap(Effect.service(Listener), (l) => l.pause())); }}
     />
   );
 }

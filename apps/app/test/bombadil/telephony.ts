@@ -1,4 +1,4 @@
-// spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"; spec/telephony/voicemail.md, "Playing marks a voicemail heard, and nothing plays during a call or behind the lock"; spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/phone.md, "Dial hands one number at a time to Telecom, and only from the showing it started in"; spec/telephony/callBar.md, "The bar is about the call that needs me first: a ringing call, then the connected one"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/contacts.md, "A write holds the gate while it runs, and a lost answer blocks every write until an explicit read that began after it"; spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"; spec/telephony/callBar.md, "An ended call's bar holds its place for a moment and takes no taps"; spec/telephony/drafts.md, "Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation"
+// spec/telephony/comms.md, "The bar addresses Alpha exactly while the chat is open, and the left slot holds the other target"; spec/telephony/voicemail.md, "Playing marks a voicemail heard, and nothing plays during a call or behind the lock"; spec/telephony/messages.md, "Delete passes the exact listed row after confirmation, and an unconfirmed delete keeps the row and blocks another"; spec/telephony/phone.md, "Dial hands one number at a time to Telecom, and only from the showing it started in"; spec/telephony/callBar.md, "The bar is about the call that needs me first: a ringing call, then the connected one"; spec/telephony/voicemail.md, "A delete needs the owner's confirmation of the open voicemail, and a refused delete keeps it"; spec/telephony/contacts.md, "A write holds the gate while it runs, and a lost answer blocks every write until an explicit read that began after it"; spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"; spec/telephony/callBar.md, "An ended call's bar holds its place for a moment and takes no taps"; spec/telephony/drafts.md, "Only the owner's Send binds a draft to an operation, and Send again reuses the bound operation"; spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/phoneInfo.md, "Without phone-state access the SIM list reads as unread, never as no SIM"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -96,3 +96,22 @@ const editingHeldWhileUnknown = extract(({ document }) => {
 
 /** After a contact write the phone could not confirm, no new contact or edit can start until an explicit read. */
 export const telephonyUnknownWriteHoldsContactWrites = always(() => editingHeldWhileUnknown.current);
+
+const restoredInert = extract(({ document }) => {
+  const cards = [...document.querySelectorAll('[role="status"][aria-label^="Saved suggestion"]')];
+  return cards.every((card) => [...card.querySelectorAll("button")].every((b) => b.textContent?.trim() === "Dismiss"));
+});
+
+/** A proposal restored from the phone's store offers only Dismiss: nothing on it calls, texts or approves. */
+export const telephonyRestoredProposalNeverActs = always(() => restoredInert.current);
+
+const unreadIsNotNoSim = extract(({ document }) => {
+  const page = document.querySelector('section[aria-label="Phone details"]');
+  if (!page) return true;
+  const asksAccess = [...page.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Allow");
+  const saysNone = [...page.querySelectorAll("span")].some((s) => s.textContent?.trim() === "SIM" && s.nextElementSibling?.textContent?.trim() === "None");
+  return !(asksAccess && saysNone);
+});
+
+/** Settings → Phone never says there is no SIM while it is asking for the access that would list one. */
+export const telephonyUnreadSimsAreNeverNoSim = always(() => unreadIsNotNoSim.current);

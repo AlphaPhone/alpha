@@ -1,7 +1,7 @@
 import { expect, fn, userEvent, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { ActionCardViewProps } from "./ActionCardView.tsx";
-import { doneCard, expiredCard, liveCard } from "./fixtures.ts";
+import { closeTabsCard, doneCard, expiredCard, liveCard } from "./fixtures.ts";
 
 export const meta: ComponentMeta<ActionCardViewProps> = {
   args: { card: liveCard, emergency: false, busy: false, now: Date.UTC(2030, 0, 1, 12, 0), onApprove: fn(), onDecline: fn() },
@@ -9,6 +9,7 @@ export const meta: ComponentMeta<ActionCardViewProps> = {
     Done: { card: doneCard },
     Expired: { card: expiredCard },
     Emergency: { emergency: true },
+    CloseAllTabs: { card: closeTabsCard },
   },
   play: {
     Emergency: async ({ args, canvasElement }: { args: ActionCardViewProps; canvasElement: HTMLElement }) => {
@@ -17,6 +18,7 @@ export const meta: ComponentMeta<ActionCardViewProps> = {
       await userEvent.click(canvas.getByRole("button", { name: /Decline/ }));
       await expect(args.onDecline).toHaveBeenCalled();
     },
+    CloseAllTabs: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("list", { name: "What Close all tabs acts on" })).toHaveTextContent("1 private tab"),
     Expired: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: /Approve/ })).toBeNull(),
   },
 };

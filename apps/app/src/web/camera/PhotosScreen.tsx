@@ -16,7 +16,6 @@ import { ScanReview } from "./ScanReview.tsx";
 import { useMachine as useVideo } from "../../../gen/camera__videoEdit.react.ts";
 import { scopeOffer, type Catalog, type Row } from "../../../gen/camera__library.ts";
 import { messagesPictureLimit } from "../../../gen/camera__media.ts";
-import { Build } from "../../platform/build.vibe";
 import type { Browse, Tab } from "../../../gen/camera__browse.ts";
 import { AgentPhotos, reviewText } from "../../camera/agentPhotos.vibe";
 import { MediaEditor } from "../../camera/editor.vibe";
@@ -30,27 +29,20 @@ import { cn, focusRing } from "../lib/cn.ts";
 import { PhotoEditor } from "./PhotoEditor.tsx";
 import { VideoEditor } from "./VideoEditor.tsx";
 import { PhotoGrid } from "./PhotoGrid.tsx";
-import { runtime } from "./runtime.ts";
+import { act, buildInfo, runtime } from "../shell/services.ts";
 
-const library = (use: (l: PhotoLibrary.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(PhotoLibrary), use));
-const agent = (use: (a: AgentPhotos.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(AgentPhotos), use));
-const media = (use: (m: MediaReview.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(MediaReview), use));
-const scanner = (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(Scanner), use));
-const edit = (use: (e: MediaEditor.Shape) => Effect.Effect<unknown>) => runtime.runFork(Effect.flatMap(Effect.service(MediaEditor), use));
+const library = (use: (l: PhotoLibrary.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(PhotoLibrary), use));
+const agent = (use: (a: AgentPhotos.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(AgentPhotos), use));
+const media = (use: (m: MediaReview.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(MediaReview), use));
+const scanner = (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Scanner), use));
+const edit = (use: (e: MediaEditor.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(MediaEditor), use));
 
-/** Follow the Photos visit and the page's visibility while the grid is mounted. */
+/** Follow the Photos visit while the grid is mounted; the page's visibility reaches Photos through the foreground. */
 function mountPhotos(element: HTMLElement | null): void | (() => void) {
   if (element === null) return;
   library((l) => l.enter());
   agent((a) => a.visit(true));
-  const visibility = () => {
-    library((l) => l.visibility(document.hidden));
-    agent((a) => a.page(document.hidden));
-    media((m) => (document.hidden ? m.invalidate("AppPaused") : m.resume()));
-  };
-  document.addEventListener("visibilitychange", visibility);
   return () => {
-    document.removeEventListener("visibilitychange", visibility);
     agent((a) => a.visit(false));
     library((l) => l.leave());
   };
@@ -298,7 +290,7 @@ export function PhotosScreen({ onClose, route }: PhotosScreenProps) {
   const { state: catalog } = useCatalog(runtime);
   const { state: browse } = useBrowse(runtime);
   const { state: notices } = useNotices(runtime);
-  const [variant] = useState(() => runtime.runSync(Build.use((b) => Effect.succeed(b.info.variant))));
+  const [variant] = useState(() => buildInfo().variant);
   if (catalog === undefined || browse === undefined) return null;
   const now = Date.now();
   const pool = new Set(browse.pool);

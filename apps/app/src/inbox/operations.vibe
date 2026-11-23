@@ -7,7 +7,8 @@ import { type Event as DraftsEvent, type DraftFields, type Draft, type Mode, Mac
 import { InboxAccounts } from "./accounts.vibe"
 import { Gmail, GmailFailed, SignInExpired, wireProposal } from "./gmail.vibe"
 import { Mailbox } from "./mailbox.vibe"
-import { canonicalJson, jsonBytes, newId } from "./text.ts"
+import { canonicalJson, jsonBytes } from "./text.ts"
+import { newId } from "../platform/ids.ts"
 
 /** What a send or change came to, as the owner is told. */
 export type OperationOutcome = "Sent" | "SentBefore" | "AwaitingReview" | "Changed" | "Rejected" | "Uncertain" | "NotStarted" | "Unsent" | "Refused" | "Discarded" | "SignedOut"

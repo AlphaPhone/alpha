@@ -21,10 +21,13 @@ export service MailSelection {
   toggle(item: Picked): void!!
   pickAll(items: Picked[]): void!!
   review(action: SelectAction): void!!
-  backToPicking(): void!!
+  backToPicking(): boolean!!
   /** Applies the reviewed change, one message at a time, stopping at the first that is not confirmed. */
   apply(): number!!
-  finish(): void!!
+  /** Ends the selection; false while nothing is selected or a change is being applied. */
+  finish(): boolean!!
+  /** Back while selecting: from the review to the picking, otherwise the end of the selection; held while a change is applied, not taken when nothing is selected. */
+  back(): boolean!!
 }
 
 /** The selection shell over its machine, the list scope and the reviewed operations. */
@@ -65,7 +68,7 @@ export const layer = Layer.effect(MailSelection, effect {
     toggle: (item: Picked) => effect { try send({ type: "toggle", item }) },
     pickAll: (items: Picked[]) => effect { try send({ type: "pickAll", items }) },
     review: (action: SelectAction) => effect { try send({ type: "review", action }) },
-    backToPicking: () => effect { try send({ type: "backToPicking" }) },
+    backToPicking: () => effect { return (try send({ type: "backToPicking" })) !== undefined },
     effect apply() {
       const approved = try send({ type: "approve" })
       if (approved === undefined) return 0
@@ -99,6 +102,14 @@ export const layer = Layer.effect(MailSelection, effect {
       }
       return applied
     },
-    finish: () => effect { try send({ type: "finish" }) }
+    finish: () => effect { return (try send({ type: "finish" })) !== undefined },
+    effect back() {
+      const s = try machine.get()
+      if (s.phase === "NotSelecting") return false
+      if (s.phase === "Applying") return true
+      if (s.phase === "ReviewingSelection") try send({ type: "backToPicking" })
+      else try send({ type: "finish" })
+      return true
+    }
   }
 })

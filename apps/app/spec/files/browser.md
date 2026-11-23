@@ -257,3 +257,32 @@ pure def canToggleGrid(s: Browser): bool = s.active and isListing(s.place)
 pure def toggleGrid(s: Browser): Browser = { ...s, grid: not(s.grid) }
 pure def sometimesReversedGrid(s: Browser): bool = s.reverse and s.grid
 ```
+
+## Story: Go back one layer at a time
+
+> As the owner, I want Back to close what Files shows on top first: the share panel, a Trash review or
+> item, the document viewer, the preview, the selection, then each place up to Browse and the agent's
+> filter; only Back on a plain Browse leaves Files.
+
+### Back closes the topmost Files layer, and leaves Files only when none is open
+
+A preview being renamed holds Back without closing. A folder walk goes back the way `goUp` does.
+
+```quint
+type BackLayer = BackShare | BackTrashReview | BackTrashItem | BackViewer | BackPreview | BackSelection
+  | BackTrashSelection | BackPlace | BackFilter | BackLeaves
+pure def backLayer(share: bool, review: bool, item: bool, viewer: bool, preview: bool, selecting: bool,
+  trashSelecting: bool, away: bool, filtered: bool): BackLayer =
+  if (share) BackShare else if (review) BackTrashReview else if (item) BackTrashItem
+  else if (viewer) BackViewer else if (preview) BackPreview else if (selecting) BackSelection
+  else if (trashSelecting) BackTrashSelection else if (away) BackPlace else if (filtered) BackFilter else BackLeaves
+pure def lawBackLeavesOnlyWithNothingOpen(share: bool, review: bool, item: bool, viewer: bool, preview: bool, selecting: bool,
+  trashSelecting: bool, away: bool, filtered: bool): bool =
+  (backLayer(share, review, item, viewer, preview, selecting, trashSelecting, away, filtered) == BackLeaves) iff
+    not(share or review or item or viewer or preview or selecting or trashSelecting or away or filtered)
+pure def lawTheSharePanelClosesFirst(review: bool, item: bool, viewer: bool, preview: bool, selecting: bool,
+  trashSelecting: bool, away: bool, filtered: bool): bool =
+  backLayer(true, review, item, viewer, preview, selecting, trashSelecting, away, filtered) == BackShare
+pure def lawTheViewerClosesBeforeThePreview(selecting: bool, trashSelecting: bool, away: bool, filtered: bool): bool =
+  backLayer(false, false, false, true, true, selecting, trashSelecting, away, filtered) == BackViewer
+```

@@ -1,6 +1,6 @@
 // spec/clock/reminders.md, "Story: See my reminders as the phone holds them"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderJournal.md, "Story: Never create or change a reminder twice"
 import { navigationPeer } from "./peers.vibe"
-import { Machine as RemindersMachine, type ReminderRow, type Readback, type Refusal, type SendAnswer, type WriteKind, type DeletionAnswer, type Precheck } from "../../gen/clock__reminders.effect.vibe"
+import { Machine as RemindersMachine, type ReminderRow, type RepeatRule, type Readback, type Refusal, type SendAnswer, type WriteKind, type DeletionAnswer, type Precheck } from "../../gen/clock__reminders.effect.vibe"
 import { Machine as JournalMachine, type OpKind } from "../../gen/clock__reminderJournal.effect.vibe"
 import { DeletionReviewAnswer, ReminderListing, ReminderReceipt, ReminderTarget, ScheduleAnswer, SurfaceInfo, TodoDecided } from "./native.schema.vibe"
 import { DAILY, DELETIONS, call } from "./plugins.vibe"
@@ -16,6 +16,8 @@ const REFUSAL: Readonly<Partial<Record<string, Refusal>>> = {
   "storage-full": "RefusedStorageFull",
   failed: "RefusedFailed",
 }
+
+const RULE: Readonly<Record<"daily" | "weekdays" | "weekly", RepeatRule>> = { daily: "RepeatDaily", weekdays: "RepeatWeekdays", weekly: "RepeatWeekly" }
 
 const DELETION: Readonly<Partial<Record<string, DeletionAnswer>>> = {
   queued: "DeletionQueued",
@@ -40,6 +42,7 @@ export function rowOf(r: StoreRecord): ReminderRow {
     hasAlert: !undated && r.alertMinutes !== null,
     alertMinutes: r.alertMinutes ?? 0,
     repeats: r.recurrence !== undefined,
+    rule: r.recurrence === undefined ? "RepeatNever" : RULE[r.recurrence.rule],
     deleting: r.pendingDeletion !== undefined,
   }
 }

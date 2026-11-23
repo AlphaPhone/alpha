@@ -96,7 +96,7 @@ it.live("leaving Files ends the filter, so a late answer never brings it back (s
   }
 })
 
-it.live("\"open the first one\" opens the first result shown, and a position beyond the results opens nothing (spec/files/filter.md, \"Story: Let the agent name a file by its place in the results\")", () => effect {
+it.live("\"open the first one\" opens the first result shown, a position beyond the results or a path not there opens nothing, and a path opens with its listed type (spec/files/filter.md, \"Story: Let the agent name a file by its place in the results\")", () => effect {
   provide files(noNative) {
     try scoped(effect {
       const browser = try FilesBrowser
@@ -110,9 +110,13 @@ it.live("\"open the first one\" opens the first result shown, and a position bey
       try untilFilter((f) => f.shown !== 0 && f.pending === 0)
       const beyond = try agent.run({ type: "files_open", shown: 4 }, onFiles, succeed(true))
       const first = try agent.run({ type: "files_open", shown: 1 }, onFiles, succeed(true))
+      const openedFirst = (try preview.get()).doc.name
+      const absent = try agent.run({ type: "files_open", path: "Download/none.pdf" }, onFiles, succeed(true))
+      const byPath = try agent.run({ type: "files_open", path: "Download/lease.pdf" }, onFiles, succeed(true))
+      const shown = try preview.get()
       try Effect.try(() => assert.deepStrictEqual(
-        { beyond: beyond.status, first: first.status, opened: (try preview.get()).doc.name },
-        { beyond: "failed", first: "succeeded", opened: "notes.txt" },
+        { beyond: beyond.status, first: first.status, opened: openedFirst, absent, byPath: byPath.status, path: [shown.doc.name, shown.doc.mimeType] },
+        { beyond: "failed", first: "succeeded", opened: "notes.txt", absent: { status: "failed", summary: "That file is not there." }, byPath: "succeeded", path: ["lease.pdf", "application/pdf"] },
       ))
     })
   }

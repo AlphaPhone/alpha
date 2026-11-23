@@ -1,8 +1,18 @@
-// spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/shell/navigation.md, "Story: Keep the assistant within reach"
-import { AssistantHost, type ScreenFacts } from "../assistant/host.vibe"
+// spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/shell/navigation.md, "Story: Keep the assistant within reach"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/voice/conversation.md, "Voice starts only from the owner, on a lit, visible phone with no sensitive screen, no reset and no call"
+import { AssistantHost, type AgentIdentity, type PeerFacts, type ScreenFacts } from "../assistant/host.vibe"
 import { DeviceExecutors, type OperationPorts } from "../assistant/review.vibe"
-import { AccountBindings } from "../account/bindings.vibe"
+import { AccountBindings, ownRouteOf, usableSession } from "../account/bindings.vibe"
+import { Entitlement } from "../account/entitlement.vibe"
+import { AiProvider } from "../account/provider.vibe"
 import { CloudSession } from "../account/session.vibe"
+import { browserDeviceCapabilities } from "../browser/operations.vibe"
+import { PLUGIN as BROWSER_TAB_HOST } from "../browser/tabHost.vibe"
+import { cameraCapabilities } from "../camera/agentContext.vibe"
+import { FilesAgent } from "../files/agent.vibe"
+import { NotesOrganize } from "../notes/organize.vibe"
+import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
+import { Resident } from "../platform/resident.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
 import { VoiceConversation } from "../voice/conversation.vibe"
 import type { AppId } from "../web/app-screen.ts"
@@ -14,6 +24,36 @@ import { Notices } from "./notices.vibe"
 /** Apps whose screen the assistant never observes. */
 export const PRIVATE_APPS: ReadonlySet<string> = new Set(["passwords", "account"])
 
+/** What a client knows of the agent process it talks to: nothing yet, the one instance it learned, or ordinary context only. */
+export type PeerSupport = { readonly tag: "NotLearned" } | { readonly tag: "SamePeer"; readonly instance: string } | { readonly tag: "OrdinaryOnly" }
+
+/** One authenticated status read: the process instance it named, none, or a failed read. */
+export type StatusRead = { readonly tag: "Read"; readonly instance: string } | { readonly tag: "NoInstance" } | { readonly tag: "ReadFailed" }
+
+/** The first learn of a connection: the instance a status names, ordinary context for a status that names none, and nothing from a failed read. */
+export function learnPeer(support: PeerSupport, read: StatusRead): PeerSupport {
+  if (support.tag !== "NotLearned") return support
+  return read.tag === "Read" ? { tag: "SamePeer", instance: read.instance } : read.tag === "NoInstance" ? { tag: "OrdinaryOnly" } : support
+}
+
+/** A turn's comparison: the learned instance stays only while the status names exactly it; anything else ends optional fields. */
+export function comparePeer(support: PeerSupport, read: StatusRead): PeerSupport {
+  if (support.tag !== "SamePeer") return support
+  return read.tag === "Read" && read.instance === support.instance ? support : { tag: "OrdinaryOnly" }
+}
+
+/** The status read of an agent's `GET /api/status` answer. */
+export function statusReadOf(status: unknown): StatusRead {
+  const instance = typeof status === "object" && status !== null && !Array.isArray(status) ? (status as { serverInstanceId?: unknown }).serverInstanceId : undefined
+  return typeof instance === "string" && instance !== "" ? { tag: "Read", instance } : { tag: "NoInstance" }
+}
+
+function connectionOf(identity: AgentIdentity): string {
+  return JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+}
+
+const ORDINARY: PeerFacts = { optionalFields: false, takesLocation: false }
+
 /** The shell's side of the assistant: the verified agent session, the screen in front, the views it opens and its toasts. */
 export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const navigation = try Navigation
@@ -21,13 +61,46 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
   const notices = try Notices
   const session = try CloudSession
   const bindings = try AccountBindings
+  const provider = try AiProvider
+  const entitlement = try Entitlement
   const calls = try CallWatch
   const voice = try VoiceConversation
+  const resident = try Resident
+  const learned = try Ref.make<{ readonly connection: string; readonly support: PeerSupport }>({ connection: "", support: { tag: "NotLearned" } })
+
+  effect function status() {
+    const answer = resident.json("GET", "/api/status") catch () => undefined
+    return answer === undefined || answer.status < 200 || answer.status >= 300 ? { tag: "ReadFailed" } as StatusRead : statusReadOf(answer.data)
+  }
+
+  effect function peer() {
+    const identity = try bindings.identity()
+    if (identity === undefined) return ORDINARY
+    const connection = connectionOf(identity)
+    const kept = try Ref.get(learned)
+    let support: PeerSupport = kept.connection === connection ? kept.support : { tag: "NotLearned" }
+    if (support.tag === "NotLearned") support = learnPeer(support, try status())
+    if (support.tag === "SamePeer") support = comparePeer(support, try status())
+    try Ref.set(learned, { connection, support })
+    const sends = support.tag === "SamePeer"
+    return { optionalFields: sends, takesLocation: sends } satisfies PeerFacts
+  }
+
+  fork.scoped (effect {
+    let inPrivate = false
+    let locked = false
+    for try (const front of foreground.changes) {
+      const nowPrivate = PRIVATE_APPS.has(front.view)
+      if ((nowPrivate && !inPrivate) || (front.locked && !locked)) try voice.left()
+      inPrivate = nowPrivate
+      locked = front.locked
+    }
+  })
 
   effect function open(app: AppId, route: string | undefined) {
     const before = (try navigation.get()).chat
     const opened = try navigation.open(app, route)
-    if (opened && (before === "ChatSheet" || before === "ChatFull")) try navigation.moveChat(before)
+    if (opened && (before === "Sheet" || before === "Full")) try navigation.moveChat(before)
     return opened
   }
 
@@ -46,10 +119,11 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
         contextKey: `${view}:${route}`,
       } satisfies ScreenFacts
     },
-    peer: () => sync(() => ({ optionalFields: false, takesLocation: false })),
+    peer,
     effect inference() {
-      const current = try session.current()
-      return current.phase === "SignedIn" ? { where: "CloudHosted" as const, provider: "Eliza Cloud" } : { where: "OwnKeyHosted" as const, provider: "Your provider" }
+      if (ownRouteOf(try provider.current())) return { where: "OwnKeyHosted" as const, provider: "Your provider" }
+      const cloud = usableSession(try session.current()) && (try entitlement.current()).host !== "HostRemoved"
+      return cloud ? { where: "CloudHosted" as const, provider: "Eliza Cloud" } : { where: "OwnKeyHosted" as const, provider: "Your provider" }
     },
     effect emergency() { return !(try calls.allowed()) },
     effect openView(app: string, route?: string) {
@@ -78,7 +152,40 @@ export function composeExecutors(families: readonly OperationPorts[]): Operation
     classOf: (operation) => owner(operation)?.classOf(operation) ?? "SettingsWrite",
     target: (operation, text) => owner(operation)?.target(operation, text) ?? { tag: "NoTarget" },
     summarize: (operation, result) => owner(operation)?.summarize(operation, result) ?? "",
+    itemize: (operation, proposalId) => owner(operation)?.itemize?.(operation, proposalId),
+    handoff: (operation) => owner(operation)?.handoff?.(operation) ?? true,
+    present: (operation, call) => owner(operation)?.present?.(operation, call),
   }
+}
+
+/** The capabilities this phone advertises in `x-eliza-device-capabilities`; unprovided, it advertises none, so the agent offers only ordinary turns. */
+export service DeviceCapabilities {
+  /** Of the capabilities the agent `offered`, those this phone advertises: Files', Notes', Browser's and Camera's and Photos' own selections. */
+  advertise(offered: readonly string[]): readonly string[]!!
+  static readonly defaultValue = () => ({
+    advertise: (_offered: readonly string[]) => succeed([] as readonly string[]),
+  })
+}
+
+/** The phone's device capabilities over Files, Notes, Browser and Camera, for the shell's fills once the last of those areas is built. */
+export const deviceCapabilities = effect {
+  const files = try FilesAgent
+  const notes = try NotesOrganize
+  const build = try Build
+  const native = try Native
+  const tabHost = build.info.variant !== "browser" && (try (native.available(BROWSER_TAB_HOST) catch () => false))
+  const port: DeviceCapabilities.Shape = {
+    effect advertise(offered: readonly string[]) {
+      const advertised = [
+        ...(try files.advertise(offered)),
+        ...(try notes.capabilities()).filter((capability) => offered.includes(capability)),
+        ...browserDeviceCapabilities(offered, tabHost),
+        ...cameraCapabilities.filter((capability) => offered.includes(capability)),
+      ]
+      return [...new Set(advertised)] as readonly string[]
+    },
+  }
+  return port
 }
 
 /** Where each area's executors are registered once that area's services are built, so areas after the assistant can run device operations. */

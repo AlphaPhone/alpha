@@ -1,13 +1,13 @@
-// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "The owner's Not now, leaving the app or a changed context ends a run that has not dispatched"; spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"
+// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "The owner's Not now, leaving the app or a changed context ends a run that has not dispatched"; spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"
 import { operationOf, readLatestSender, type DeviceOperationType } from "@elizaos/agent/operations"
 import { contactWriteAdvertised, type ContactDetail, type ContactDraft, type ContactId, type ContactVersion } from "@elizaos/os/bridges/contacts"
 import { operationIdOf } from "@elizaos/os/bridges/definitions/messages"
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import {
-  Machine as ActionsMachine, isChoosing, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type Settled, type TargetForm,
+  Machine as ActionsMachine, isChoosing, readBackOf, runIdOf, type ActionKind, type Candidate, type Event as ActionsEvent, type SendRecord, type Settled, type TargetForm,
 } from "../../gen/telephony__actions.effect.vibe"
 import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
-import { sameLine, writtenNumbers } from "../assistant/grounding.vibe"
+import { sameLine, withoutBody, writtenNumbers } from "../assistant/grounding.vibe"
 import { AlphaOperation, OwnerRequest } from "./actions.schema.vibe"
 import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
 import { CallWatch } from "./call-bar.vibe"
@@ -42,7 +42,12 @@ export service TelephonyActions {
   dismiss(): void!!
   /** What the open review shows beside its candidates: a text's body, a contact's fields before and after. */
   review(): ReviewDetails!!
+  /** Read back an operation whose answer was lost: a text by its operation ID in the phone's send history; undefined while it stays unconfirmed. */
+  readBack(operation: unknown, operationId: string): ReadBack | undefined!!
 }
+
+/** What a read-back found: the outcome the phone recorded, and the result the run would have reported. */
+export interface ReadBack { readonly settled: Settled; readonly result: unknown }
 
 /** What a review card shows beside its candidates. */
 export interface ReviewDetails {
@@ -50,11 +55,23 @@ export interface ReviewDetails {
   readonly changes?: Readonly<Record<string, { readonly before: ContactDetail; readonly after?: ContactDraft }>>
 }
 
-/** A number target is grounded only when the owner wrote that number (#1393); a contact is refused in place of a number the owner wrote, unless the owner also wrote its name (#1396). */
-export function grounded(text: string, target: { kind: "number"; number: string } | { kind: "contact"; query: string }): boolean {
-  const written = writtenNumbers(text)
+/**
+ * A number target is grounded only when the owner wrote that number (#1393); a contact is refused in place of a number the owner wrote, unless the
+ * owner also wrote its name (#1396). The text's `body`, where the owner's request quotes it, is cut out first, so a number only in the body grounds nothing.
+ */
+export function grounded(text: string, target: { kind: "number"; number: string } | { kind: "contact"; query: string }, body?: string): boolean {
+  const own = withoutBody(text, body)
+  const written = writtenNumbers(own)
   if (target.kind === "number") return written.some((d) => sameLine(d, target.number))
-  return written.length === 0 || text.toLowerCase().includes(target.query.toLowerCase())
+  return written.length === 0 || own.toLowerCase().includes(target.query.toLowerCase())
+}
+
+/** What the phone's send record says of a text: taken by the radio, not sent, still unknown, or no record at all. */
+export function sendRecordOf(status: string | undefined): SendRecord {
+  if (status === undefined) return "NoRecord"
+  if (status === "submitted" || status === "sent" || status === "delivered") return "RecordTaken"
+  if (status === "cancelled" || status === "denied" || status === "failed") return "RecordNotSent"
+  return "RecordUnknown"
 }
 
 const KINDS: Record<string, ActionKind> = {
@@ -318,8 +335,8 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       const form: TargetForm = op.target?.kind === "number" || op.type === "sms_send" ? "WrittenNumber"
         : op.target?.kind === "contact" || op.query !== undefined && op.type !== "contact_show" ? "ContactLookup"
         : op.type === "contact_create" ? "ContactLookup" : "NoTarget"
-      const isGrounded = op.type === "sms_send" ? op.recipients.every((n: string) => grounded(owner.text, { kind: "number", number: n }))
-        : op.target !== undefined ? grounded(owner.text, op.target) : true
+      const isGrounded = op.type === "sms_send" ? op.recipients.every((n: string) => grounded(owner.text, { kind: "number", number: n }, op.body))
+        : op.target !== undefined ? grounded(owner.text, op.target, typeof op.body === "string" ? op.body : undefined) : true
       try Ref.set(review, {})
       const started = try tell({ type: "actionStarted", runId: operationId, kind, form, grounded: isGrounded }, "Device")
       if (started === undefined) throw new AlreadyRan({ operationId })
@@ -377,6 +394,19 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       }
     },
     review: () => Ref.get(review),
+    effect readBack(operation: unknown, operationId: string) {
+      const op = telephonyOperationOf(operation)
+      const kind = op === undefined ? undefined : KINDS[op.type]
+      const id = operationIdOf(operationId)
+      if (op === undefined || kind === undefined || id === null || readBackOf(kind, "RecordTaken") === "StaysUnconfirmed") return undefined
+      const history = try (bridgeCall("smsSendHistory", (c) => c.messages.smsSendHistory()) catch () => undefined)
+      if (history === undefined) return undefined
+      const entry = history.find((record) => record.operationId === id)
+      const answer = readBackOf(kind, sendRecordOf(entry?.status))
+      if (answer === "StaysUnconfirmed" || entry === undefined) return undefined
+      const settled: Settled = answer === "ReadApplied" ? "Applied" : SETTLED_OF_STATUS[entry.status] ?? "NotDone"
+      return { settled, result: op.type === "sms_send" ? entry : { kind: "sms-compose", status: entry.status } } satisfies ReadBack
+    },
     effect dismiss() {
       const { run } = try actions.get()
       const runId = runIdOf(run)

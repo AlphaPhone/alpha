@@ -1,12 +1,12 @@
 // spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Native } from "../platform/native.vibe"
-import { decodeSecureRead } from "./notes.schema.vibe"
+import { decodeSecureExchange, decodeSecureRead } from "./notes.schema.vibe"
 
 /** The slot could not be read or written; nothing was changed. */
 export error SlotUnavailable { slot: string }
 
-const plugin = "AlphaConnection"
+const plugin = "ElizaSecureStore"
 
 /** The encrypted, no-backup device slots Notes keeps beside the canonical collection. */
 export const slots = {
@@ -16,12 +16,16 @@ export const slots = {
   legacyTrash: "notes-trash:v1:device",
 } as const
 
-/** One slot's raw value: the Keystore slot on Android, the WebView's private storage elsewhere. */
+/** One slot's raw value: the hardware-backed secure store on Android, the WebView's private storage elsewhere. */
 export effect function readSlot(slot: string): string | undefined!SlotUnavailable {
   const native = try Native
   if (try native.available(plugin)) {
-    const answer = try (native.invoke(plugin, "secureRead", { slot }) catch effect () => { throw new SlotUnavailable({ slot }) })
+    const answer = try (native.invoke(plugin, "get", { key: slot }) catch effect () => { throw new SlotUnavailable({ slot }) })
     const read = try (decodeSecureRead(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
+    if ("error" in read) {
+      if (read.error === "not_found") return undefined
+      throw new SlotUnavailable({ slot })
+    }
     return read.value ?? undefined
   }
   const store = try KeyValueStore.KeyValueStore
@@ -32,9 +36,13 @@ export effect function readSlot(slot: string): string | undefined!SlotUnavailabl
 export effect function compareExchangeSlot(slot: string, expected: string | undefined, value: string | undefined): boolean!SlotUnavailable {
   const native = try Native
   if (try native.available(plugin)) {
-    const answer = try (native.invoke(plugin, "secureCompareExchange", { slot, expectedValue: expected ?? null, value: value ?? null })
+    const answer = try (native.invoke(plugin, "compareAndExchange", { key: slot, expected: expected ?? null, value: value ?? null })
       catch effect () => { throw new SlotUnavailable({ slot }) })
-    return typeof answer === "object" && answer !== null && "status" in answer && answer.status === "saved"
+    const result = try (decodeSecureExchange(answer) catch effect () => { throw new SlotUnavailable({ slot }) })
+    if ("exchanged" in result) return result.exchanged
+    if (result.ok) return true
+    if (result.error === "conflict") return false
+    throw new SlotUnavailable({ slot })
   }
   const store = try KeyValueStore.KeyValueStore
   const key = `alpha.browser.${slot}`

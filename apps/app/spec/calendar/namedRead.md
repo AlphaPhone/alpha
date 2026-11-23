@@ -35,3 +35,19 @@ A read in flight is cancelled at the phone when the request is cancelled.
 pure def shareOffered(calendarView: bool, sensitive: bool, selected: bool): bool = calendarView and not(sensitive) and selected
 pure def lawSensitiveNeverShares(calendarView: bool, selected: bool): bool = not(shareOffered(calendarView, true, selected))
 ```
+
+## Story: Let the agent change an event I named only when it is the one I have open
+
+> As the owner, I want "change" or "delete" for an event I named to touch the event I have open only
+> when its title is that name, so that a different open event is never changed by mistake.
+
+### A named change or deletion runs only for the selected event whose title is the name given
+
+Titles are compared trimmed, with runs of spaces folded and case folded. The phone's own review
+still checks the event's revision before anything is written.
+
+```quint
+pure def namedChangeAllowed(selected: bool, titleMatches: bool): bool = selected and titleMatches
+pure def lawADifferentTitleIsNeverChanged(selected: bool): bool = not(namedChangeAllowed(selected, false))
+pure def lawNothingOpenIsNeverChanged(titleMatches: bool): bool = not(namedChangeAllowed(false, titleMatches))
+```

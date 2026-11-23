@@ -7,7 +7,9 @@ import type { Contacts, Detail, Editor } from "../../../gen/telephony__contacts.
 import type { Slot } from "../../../gen/telephony__drafts.ts";
 import type { MessageRow, Messages } from "../../../gen/telephony__messages.ts";
 import type { Phone } from "../../../gen/telephony__phone.ts";
+import type { PhoneFacts } from "../../../gen/telephony__phoneInfo.ts";
 import type { Voicemail } from "../../../gen/telephony__voicemail.ts";
+import type { OpenCard } from "../../telephony/comms.vibe";
 import type { UndoView } from "../../telephony/undo.vibe";
 
 const at = 1_763_800_000_000;
@@ -141,3 +143,32 @@ export const undoUncertain: UndoView = {
 };
 /** What a refused Undo said. */
 export const undoRefused: UndoView = { notices: [], said: "It could not be restored." };
+
+/** A call proposal kept from before a restart: shown, never approved. */
+export const restoredCard: OpenCard = { proposalId: "p1", live: false, words: { text: "Call Maya back?", title: "Call Maya Chen", detail: "(415) 555-0100" } };
+/** A restored proposal whose words were not kept. */
+export const restoredWordless: OpenCard = { proposalId: "p2", live: false, words: null };
+
+/** Settings → Phone with one SIM read, Alpha holding both roles and voicemail set up. */
+export const phoneFacts: PhoneFacts = {
+  shown: true, epoch: 1, phase: "InfoShown", asking: false, phoneState: true,
+  lines: [{ slot: 0, carrier: "Carrier", simName: "Personal", number: "4155550100", network: "Network5g", roaming: false, signal: 3, embedded: false, imei: "", simSerial: "" }],
+  holders: { phoneApp: "ai.alphacompute.alphaphone", phoneAlpha: true, smsApp: "ai.alphacompute.alphaphone", smsAlpha: true },
+  voicemail: "VoicemailOn",
+};
+/** Two SIMs, one roaming on an eSIM, and another app holding the SMS role. */
+export const phoneFactsTwoSims: PhoneFacts = {
+  ...phoneFacts,
+  lines: [
+    phoneFacts.lines[0]!,
+    { slot: 1, carrier: "Other", simName: "", number: "", network: "Network4g", roaming: true, signal: 1, embedded: true, imei: "", simSerial: "" },
+  ],
+  holders: { ...phoneFacts.holders, smsApp: "com.android.messaging", smsAlpha: false },
+  voicemail: "VoicemailNotSetUp",
+};
+/** Phone-state access not granted: the SIM list is unread, not empty. */
+export const phoneFactsUnread: PhoneFacts = { ...phoneFacts, phoneState: false, lines: [], voicemail: "VoicemailUnknown" };
+/** The read failed. */
+export const phoneFactsFailed: PhoneFacts = { ...phoneFacts, phase: "InfoFailed", lines: [], holders: { phoneApp: "", phoneAlpha: false, smsApp: "", smsAlpha: false }, voicemail: "VoicemailUnknown" };
+/** The read in flight. */
+export const phoneFactsReading: PhoneFacts = { ...phoneFactsFailed, phase: "InfoReading" };

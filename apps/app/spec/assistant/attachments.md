@@ -118,3 +118,28 @@ pure val nameLengthValues = Set(0, 1, 255, 256)
 pure val base64TotalValues = Set(0, 19922944, 19922945)
 pure val countValues = Set(0, 4, 5)
 ```
+
+## Story: Ask Alpha about a file from Files
+
+> As the owner, I want Ask Alpha on a file to put the file or its text in
+> front of my question, reviewed before anything joins my draft, so that a
+> long or sensitive document never leaves the phone by surprise.
+
+### A shared text file is asked about as a reviewed excerpt, a file that cannot be attached goes as its name, and anything else is attached
+
+A plain-text, Markdown, CSV or JSON file opens the question review with its
+text as the excerpt ("Use excerpt"), truncated to the review's limit and
+refused while it holds a secret. A file that does not fit a chat message
+is named as the source of the question instead, and nothing of it is sent.
+Any other file is attached to the composer. Nothing is sent from Files.
+
+```quint
+type Shared = TextShared | AttachableShared | TooLargeShared
+pure def asExcerpt(s: Shared): bool = s == TextShared
+pure def asSourceName(s: Shared): bool = s == TooLargeShared
+pure def attached(s: Shared): bool = s == AttachableShared
+pure def lawOneWayPerFile(s: Shared): bool =
+  (if (asExcerpt(s)) 1 else 0) + (if (asSourceName(s)) 1 else 0) + (if (attached(s)) 1 else 0) == 1
+pure def lawATooLargeFileIsNeverAttached(s: Shared): bool = s == TooLargeShared implies not(attached(s))
+pure val sValues = Set(TextShared, AttachableShared, TooLargeShared)
+```

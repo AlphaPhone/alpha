@@ -1,7 +1,9 @@
-// spec/notes/collection.md, "A collection is bound to one owner, and a new owner or a retirement starts over"; spec/notes/recordingOpen.md, "A read starts only while Notes can be shown and none is in flight, and opens Notes at most once per tap"; spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"; spec/notes/webSource.md, "One action per dialog, only while the dialog is fresh over the note it reviewed"; spec/notes/listFilter.md, "A turn names the list only while the plain list is in front, owned and settled"; spec/notes/attachment.md, "A document's grant is released only when neither a saved note nor Trash still refers to it"; spec/notes/recorder.md, "Another owner or leaving Notes detaches the view and keeps the recording"; spec/notes/trash.md, "An earlier device Trash row comes into the canonical Trash once, and the device slot clears only after every row is settled"
+// spec/notes/collection.md, "A collection is bound to one owner, and a new owner or a retirement starts over"; spec/notes/recordingOpen.md, "A read starts only while Notes can be shown and none is in flight, and opens Notes at most once per tap"; spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"; spec/notes/webSource.md, "One action per dialog, only while the dialog is fresh over the note it reviewed"; spec/notes/listFilter.md, "A turn names the list only while the plain list is in front, owned and settled"; spec/notes/attachment.md, "A document's grant is released only when neither a saved note nor Trash still refers to it"; spec/notes/recorder.md, "Another owner or leaving Notes detaches the view and keeps the recording"; spec/notes/trash.md, "An earlier device Trash row comes into the canonical Trash once, and the device slot clears only after every row is settled"; spec/notes/list.md, "A Notes route opens one note or shows one list filter, and the plain list otherwise"
 import { CloudSession, ownerOf } from "../account/layer.vibe"
+import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
 import { Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { Navigation } from "../shell/navigation.vibe"
 import { audioLayer } from "./audio.vibe"
 import { cleanupLayer } from "./cleanup.vibe"
 import { clientLayer } from "./client.vibe"
@@ -10,6 +12,7 @@ import { draftsLayer } from "./drafts.vibe"
 import { NotesEditor, editorLayer } from "./editor.vibe"
 import { foldersLayer } from "./folders.vibe"
 import { importLegacyTrash } from "./legacyTrash.vibe"
+import { notesRouteRequest } from "./list.vibe"
 import { type ListScene, NotesListFilter, listFilterLayer } from "./listFilter.vibe"
 import { organizeLayer } from "./organize.vibe"
 import { NotesHandoff, handoffLayer, originsLayer } from "./origins.vibe"
@@ -23,6 +26,13 @@ const records = Layer.provideMerge(Layer.mergeAll(editorLayer, handoffLayer), La
 const devices = Layer.provideMerge(Layer.mergeAll(trashLayer, cleanupLayer, recorderLayer, audioLayer, originsLayer, shareLayer, sourcesLayer, recordingOpenLayer), records)
 const agent = Layer.provideMerge(organizeLayer, Layer.provideMerge(Layer.mergeAll(foldersLayer, listFilterLayer), devices))
 
+effect function openUnlessShown(editor: NotesEditor.Shape, noteId: string): void!! {
+  const machine = try EditorMachine
+  const state = try machine.get()
+  if (state.present && state.draftId === noteId) return
+  try editor.leave(noteId)
+}
+
 const followOwner = Layer.effectDiscard(effect {
   const session = try CloudSession
   const collection = try NotesCollection
@@ -32,7 +42,7 @@ const followOwner = Layer.effectDiscard(effect {
   const handoff = try NotesHandoff
   const sources = try NotesSources
   try fork.scoped Stream.runForEach(handoff.requests, (request) =>
-    request.kind === "open-notes" && request.noteId !== undefined ? Effect.asVoid(editor.leave(request.noteId)) : Effect.void)
+    request.kind === "open-notes" && request.noteId !== undefined ? openUnlessShown(editor, request.noteId) : Effect.void)
   try fork.scoped Stream.runForEach(Stream.changesWith(collection.snapshots, (a, b) => a?.snapshot.revision === b?.snapshot.revision && a?.owner === b?.owner),
     () => filter.collectionChanged())
   try fork.scoped Stream.runForEach(Stream.changes(Stream.map(collection.snapshots, (owned) => owned?.owner)), (owner) =>
@@ -80,10 +90,41 @@ const followForeground = Layer.effectDiscard(effect {
   try fork.scoped Stream.runForEach(Stream.changesWith(scenes, (a, b) => a.onList === b.onList && a.sensitive === b.sensitive && a.obstructed === b.obstructed), (scene) => filter.scene(scene))
 })
 
+const routeKey = "notes:"
+
+const followRoutes = Layer.effectDiscard(effect {
+  const navigation = try Navigation
+  const collection = try NotesCollection
+  const editor = try NotesEditor
+  const handoff = try NotesHandoff
+  const machine = try EditorMachine
+  const routeNow = (nav: { readonly places: readonly { readonly app: string; readonly route: string }[] }) => nav.places.find((place) => place.app === "notes")?.route ?? ""
+  const owners = Stream.changes(Stream.map(collection.snapshots, (owned) => owned?.owner))
+  const asked = Stream.changes(Stream.map(Stream.zipLatest(navigation.changes, owners), ([nav, owner]) =>
+    nav.app === "notes" && owner !== undefined ? `${owner}\n${routeKey}${routeNow(nav)}` : ""))
+  try fork.scoped Stream.runForEach(asked, (key) => effect {
+    if (key === "") return
+    const request = notesRouteRequest(key.slice(key.indexOf("\n") + 1 + routeKey.length))
+    if (request.filter !== undefined) try handoff.showFilter(request.filter)
+    if (request.noteId !== undefined) try openUnlessShown(editor, request.noteId)
+  })
+  const shown = Stream.changes(Stream.map(machine.changes, (state) => state.present ? state.draftId : ""))
+  let closed = ""
+  try fork.scoped Stream.runForEach(shown, (noteId) => effect {
+    const left = closed
+    closed = noteId
+    const nav = try navigation.get()
+    if (nav.app !== "notes") return
+    const route = routeNow(nav)
+    if (noteId !== "" && route !== noteId) try navigation.send({ type: "setRoute", route: noteId })
+    if (noteId === "" && left !== "" && route === left) try navigation.send({ type: "setRoute", route: "" })
+  })
+})
+
 export { scannedNoteHandoff } from "./handoffs.vibe"
 export { NotesHandoff, NotesOrigins, type NotesRequest } from "./origins.vibe"
 export { NotesOrganize } from "./organize.vibe"
 export { NotesRecordingOpen } from "./recordingOpen.vibe"
 
-/** Every Notes service and machine; it needs the platform's Native, Resident, Build and KeyValueStore, the account's CloudSession, voice's VoiceRoute and the shell's Foreground. */
-export const layer = Layer.provideMerge(Layer.merge(followOwner, followForeground), agent)
+/** Every Notes service and machine; it needs the platform's Native, Resident, Build and KeyValueStore, the account's CloudSession, voice's VoiceRoute and RecordingTranscriber, and the shell's Foreground and Navigation. */
+export const layer = Layer.provideMerge(Layer.mergeAll(followOwner, followForeground, followRoutes), agent)

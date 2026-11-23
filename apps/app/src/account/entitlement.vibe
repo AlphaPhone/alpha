@@ -5,10 +5,11 @@ import {
 } from "../../gen/account__plan.effect.vibe"
 import { checkEntitlement, nextRefreshDelay, parseEntitlementKeys, snapshotFromResponse, subscriptionView, type SubscriptionView } from "@elizaos/cloud/client"
 import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment } from "../platform/build-live.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { ownerKey } from "../platform/storage.vibe"
-import { authorityOf, deployment, environmentFor } from "./deployment.ts"
+import { authorityOf, deployment } from "./deployment.ts"
 import { bindInference, unbindInference } from "./inference.vibe"
 import { CloudSession, ownerOf } from "./session.vibe"
 import { NetworkStatus } from "./signIn.schema.vibe"
@@ -79,7 +80,7 @@ export const entitlementService = Layer.effect(Entitlement, effect {
   const build = try Build
   const scope = try Scope.Scope
   const host = try Semaphore.make(1)
-  const authority = authorityOf(deployment, environmentFor(build.info.testMocks))
+  const authority = authorityOf(deployment, buildCloudEnvironment(build.info))
   const summary = try SubscriptionRef.make<PlanSummary>({ owner: 0, view: undefined, planEndsAt: null })
   const failures = try Ref.make(0)
   const expiresAt = try Ref.make(0)

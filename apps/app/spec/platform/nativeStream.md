@@ -36,7 +36,7 @@ pure val initial: Relay = {
 
 pure val bodyLimit = 2097152
 pure val httpStatusValues = Set(200, 401, 429, 503)
-pure val sizeValues = Set(1, 1048576, 2097152)
+pure val byteCountValues = Set(1, 1048576, 2097152)
 
 pure def failed(why: Failure, revoke: bool, r: Relay): Relay =
   if (r.outcome != Open) r else { ...r, outcome: Failed, failure: why, readyRevoked: revoke }
@@ -89,10 +89,10 @@ pure def sometimesRefusedBeforeDispatch(r: Relay): bool = r.failure == BeforeDis
 
 ```quint
 pure def canChunk(r: Relay): bool = r.started and r.outcome == Open
-pure def chunk(r: Relay, size: int): Relay =
+pure def chunk(r: Relay, byteCount: int): Relay =
   if (not(r.responded)) failed(Invalid, true, r)
-  else if (size < 0 or r.bytes + size > bodyLimit) failed(TooLarge, false, r)
-  else { ...r, bytes: r.bytes + size, chunks: r.chunks + 1 }
+  else if (byteCount < 0 or r.bytes + byteCount > bodyLimit) failed(TooLarge, false, r)
+  else { ...r, bytes: r.bytes + byteCount, chunks: r.chunks + 1 }
 
 pure def alwaysChunksNeedAResponse(r: Relay): bool = r.chunks > 0 implies r.responded
 

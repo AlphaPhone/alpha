@@ -6,7 +6,7 @@ import { memoryStore } from "../../src/platform/storage.vibe"
 import { Foreground } from "../../src/shell/foreground.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
 import { layer } from "../../src/workflows/layer.vibe"
-import { WorkflowClockPort } from "../../src/workflows/ports.vibe"
+import { type AlarmRequest, WorkflowClockPort } from "../../src/workflows/ports.vibe"
 
 /** What the fake agent answers one request with. */
 export interface Answer { readonly status: number; readonly data?: unknown }
@@ -62,9 +62,12 @@ export function buildOf(variant: "launcher" | "aosp" | "browser", testMocks = fa
   return Layer.succeed(Build, { info: { version: "test", variant, testMocks } })
 }
 
-/** Navigation that records each app and route it opened. */
-export function navigationOf(opened: Array<{ app: string; route?: string }>) {
+/** Navigation that records each app and route it opened, and shows Workflows at each route of `routes` in turn. */
+export function navigationOf(opened: Array<{ app: string; route?: string }>, routes: ReadonlyArray<string> = []) {
+  const at = (route: string) => ({ app: "workflows", places: [{ app: "workflows", route, inner: false }] })
   return Layer.succeed(Navigation, {
+    changes: Stream.fromIterable(routes.map(at)),
+    get: () => succeed(at(routes.at(-1) ?? "")),
     open: (app: string, route?: string) => sync(() => { opened.push(route === undefined ? { app } : { app, route }); return true }),
   } as unknown as Navigation.Shape)
 }
@@ -77,7 +80,7 @@ export const inFront = Layer.succeed(Foreground, {
 
 /** A Clock that reviews the alarm and answers that it opened. */
 export const openingClock = Layer.succeed(WorkflowClockPort, {
-  prepare: () => succeed(true),
+  prepare: (_request: AlarmRequest) => succeed(true),
   confirm: () => succeed(true),
   retire: () => succeed(undefined),
 })
@@ -90,13 +93,15 @@ export interface Rig {
   readonly calls?: NativeCall[]
   readonly opened?: Array<{ app: string; route?: string }>
   readonly clock?: boolean
+  /** The routes the shell opens Workflows at, in order. */
+  readonly routes?: ReadonlyArray<string>
 }
 
 /** Workflows' layer over the fake agent, bridge, build, navigation and memory storage. */
 export function workflowsOf(handlers: ReadonlyArray<Handler>, sent: Sent[], rig: Rig = {}) {
   const platform = Layer.mergeAll(
     residentOf(handlers, sent), nativeOf(rig.native, rig.calls ?? []), buildOf(rig.variant ?? "launcher", rig.testMocks ?? false), memoryStore,
-    navigationOf(rig.opened ?? []), inFront,
+    navigationOf(rig.opened ?? [], rig.routes ?? []), inFront,
   )
   return Layer.provide(layer, rig.clock === true ? Layer.merge(platform, openingClock) : platform)
 }

@@ -23,10 +23,13 @@ review, a snooze without an alert, or a store too old for timed alerts or to-dos
 
 ### The screen holds the latest listing, its refreshes and what the phone supports
 
+Each row names its repeat rule, so an edit of a repeating reminder starts from the repeat it has.
+
 ```quint
 type ReminderStatus = RScheduled | RPending | RPosted | RPermissionDenied | RSchedulingFailed | RCompleted | RCancelled | RTodo
+type RepeatRule = RepeatNever | RepeatDaily | RepeatWeekdays | RepeatWeekly
 type ReminderRow = { id: str, occurrence: str, revision: str, title: str, body: str, status: ReminderStatus, undated: bool,
-  dueAt: int, hasAlert: bool, alertMinutes: int, repeats: bool, deleting: bool }
+  dueAt: int, hasAlert: bool, alertMinutes: int, repeats: bool, rule: RepeatRule, deleting: bool }
 type OpenIntent = NoIntent | Intent({ id: str, occurrence: str, visit: int, at: int })
 type OpenTarget = NoOpen | OpenList | OpenDetail({ id: str })
 type WriteKind = NoWrite | CreateWrite | EditWrite | RescheduleWrite | DoneWrite | SnoozeWrite | ReopenWrite | DeleteWrite
@@ -51,13 +54,14 @@ pure val initial: Reminders = { rows: List(), loaded: false, stale: false, faile
 pure def rowOf(r: Reminders, id: str): List[ReminderRow] = r.rows.select(x => x.id == id)
 pure def listedAt(r: Reminders, id: str, revision: str): bool = r.rows.some(x => x.id == id and x.revision == revision and not(x.deleting))
 pure val dated: ReminderRow = { id: "r1", occurrence: "o1", revision: "v1", title: "Call", body: "", status: RScheduled, undated: false,
-  dueAt: 60000, hasAlert: true, alertMinutes: 0, repeats: false, deleting: false }
+  dueAt: 60000, hasAlert: true, alertMinutes: 0, repeats: false, rule: RepeatNever, deleting: false }
 pure val rowsValues = Set(List(), List(dated), List({ ...dated, revision: "v2", status: RCompleted }),
-  List({ ...dated, id: "t1", undated: true, status: RTodo, hasAlert: false }), List({ ...dated, status: RPosted, repeats: true }))
+  List({ ...dated, id: "t1", undated: true, status: RTodo, hasAlert: false }), List({ ...dated, status: RPosted, repeats: true, rule: RepeatDaily }))
 pure val idValues = Set("r1", "t1")
 pure val revisionValues = Set("v1", "v2")
 pure val occurrenceValues = Set("", "o1")
 pure val generationValues = Set(1, 2, 3)
+pure def alwaysARepeatingRowNamesItsRule(r: Reminders): bool = r.rows.forall(x => x.repeats == (x.rule != RepeatNever))
 pure val visitValues = Set(0, 1)
 pure val nowValues = Set(0, 1000, 40000)
 pure val atValues = Set(0, 1000)

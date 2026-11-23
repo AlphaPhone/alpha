@@ -21,12 +21,21 @@ import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 
 const CLOUD_PROVIDER = "eliza-cloud"
 
-/** Where a chat card's Map button was pressed: its message and the session, conversation and revision that showed it. */
+/** Where a chat card's Map button was pressed: its message and the revision that showed it; Maps checks it under the session and conversation it counted that message in. */
 export interface CardOffer {
+  readonly message: number
+  readonly revision: number
+  /** Ignored: the session is the one Maps counted the message under. */
+  readonly session?: number
+  /** Ignored: the conversation is the one Maps counted the message under. */
+  readonly conversation?: number
+}
+
+/** The newest chat message Maps counted, with the session and conversation it arrived under. */
+interface Counted {
   readonly message: number
   readonly session: number
   readonly conversation: number
-  readonly revision: number
 }
 
 /** Maps opened from elsewhere: chat cards and their share choices, a Calendar event, the navigation notification, and Maps' own links out. */
@@ -36,6 +45,8 @@ export service MapsHandoff {
   setComposer(composer: Composer): void!!
   agentReply(question: boolean): void!!
   ownerMessage(): void!!
+  /** The chat's account session or open conversation changed; a message counted before no longer opens or answers. */
+  chatMoved(session: number, conversation: number): void!!
   enterFromEvent(origin: EventOrigin, where: string): void!!
   returnToEvent(): void!!
   readonly returnOffered: Stream.Stream<boolean>
@@ -92,6 +103,17 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
   const location = try MapsLocation
   const calendar = try AgentCalendar
   const aosp = (try Build).info.variant === "aosp"
+  let newest: Counted = { message: 0, session: 0, conversation: 0 }
+
+  effect function count(event: { readonly type: "agentReply"; readonly question: boolean } | { readonly type: "ownerMessage" }) {
+    const after = cards.send(event) catch () => undefined
+    if (after) newest = { message: after.newest, session: after.session, conversation: after.conversation }
+  }
+
+  function under(offer: CardOffer) {
+    const counted = newest.message === offer.message ? newest : { message: offer.message, session: 0, conversation: 0 }
+    return { message: offer.message, session: counted.session, conversation: counted.conversation, revision: offer.revision }
+  }
 
   /** A device event is still there with the same id and start; a canonical one is checked by Calendar for the same owner and revision. */
   effect function checkEvent(origin: EventOrigin) {
@@ -193,20 +215,24 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
 
   return {
     effect openCard(card: MapsCard, offer: CardOffer) {
-      const opened = cards.send({ type: "openCard", ...offer }) catch () => undefined
+      const opened = cards.send({ type: "openCard", ...under(offer) }) catch () => undefined
       if (!opened) return
       try shell.open("maps")
       fork.detached runFlow(card)
     },
     effect answerChoice(offer: CardOffer, send: boolean!!) {
-      const tapped = cards.send({ type: "tapChoice", ...offer }) catch () => undefined
+      const tapped = cards.send({ type: "tapChoice", ...under(offer) }) catch () => undefined
       if (!tapped || !tapped.inflight.includes(offer.message)) return
       const ok = try send
       cards.send({ type: "sendSettles", message: offer.message, ok }) catch () => undefined
     },
     effect setComposer(composer: Composer) { cards.send({ type: "setComposer", composer }) catch () => undefined },
-    effect agentReply(question: boolean) { cards.send({ type: "agentReply", question }) catch () => undefined },
-    effect ownerMessage() { cards.send({ type: "ownerMessage" }) catch () => undefined },
+    effect agentReply(question: boolean) { try count({ type: "agentReply", question }) },
+    effect ownerMessage() { try count({ type: "ownerMessage" }) },
+    effect chatMoved(session: number, conversation: number) {
+      cards.send({ type: "changeSession", session }) catch () => undefined
+      cards.send({ type: "changeConversation", conversation }) catch () => undefined
+    },
     effect enterFromEvent(origin: EventOrigin, where: string) {
       returns.send({ type: "enterFromEvent" }) catch () => undefined
       try content.update((c) => ({ ...c, eventOrigin: origin }))

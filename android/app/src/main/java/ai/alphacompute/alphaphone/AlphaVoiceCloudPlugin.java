@@ -1,6 +1,5 @@
 package ai.alphacompute.alphaphone;
 
-import ai.eliza.voice.LiveCaptureController;
 import ai.eliza.voice.CartesiaSpeech;
 import ai.eliza.voice.LocalSpeechBridgePlugin;
 import ai.eliza.voice.RecordingPcm;
@@ -64,7 +63,7 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
 
 
  /** VAD segments go only to the on-device agent of the owner who started the capture. */
- @Override protected LiveCaptureController.Route residentRoute(String owner){return ()->AlphaLocalAgentPlugin.openNativeVoiceTransport(owner);}
+ @Override protected ResidentRoute residentRoute(String owner){return ()->AlphaLocalAgentPlugin.openNativeVoiceTransport(owner);}
  @Override protected boolean residentTransport(){return true;}
  /** Alpha's one refusal for a prompt the activity can no longer show; see {@link LateLaunch}. */
  @Override protected boolean launch(PluginCall call,Runnable request){if(sensitiveSurfaceActive()){call.reject("Close the protected credential surface before using speech.");return false;}return LateLaunch.ask(call,request);}

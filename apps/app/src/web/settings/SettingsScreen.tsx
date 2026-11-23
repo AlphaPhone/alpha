@@ -4,7 +4,7 @@ import {
   Monitor, NotebookText, Calendar, Folder, Images, KeyRound, RotateCw, Settings as Gear, Shield, Trash2, UserRound, Workflow,
   Wifi as WifiIcon,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 import type { AppRow, Page, Settings } from "../../../gen/settings.ts";
 import { appListed } from "../../../gen/settings.ts";
 import type { Appearance, Choice } from "../../../gen/settings__appearance.ts";
@@ -20,6 +20,7 @@ import type { Updates } from "../../../gen/settings__updates.ts";
 import { Alert, Button, Dialog, DialogContent, DialogTitle, Input, RadioGroup, RadioGroupItem, ScrollArea } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 import { AboutPages, type AboutPagesProps } from "./AboutPages.tsx";
+import type { PageDialog } from "./dialogs.ts";
 import { DeveloperPage, type DeveloperPageProps } from "./DeveloperPage.tsx";
 import { PrivacyPages, type PrivacyPagesProps } from "./PrivacyPages.tsx";
 import { Section, SettingRow, ToggleRow } from "./Rows.tsx";
@@ -84,8 +85,15 @@ export interface SettingsActions {
   readonly eraseAll: () => void;
 }
 
-/** The Settings screen: every page's state, what the owner can do there, and the Privacy, About and Developer parts. */
-export type SettingsScreenProps = { readonly model: SettingsModel; readonly act: SettingsActions; readonly onClose: () => void }
+/** The Settings screen: every page's state, what the owner can do there, the dialog the shown page holds open, and the Privacy, About and Developer parts. */
+export type SettingsScreenProps = {
+  readonly model: SettingsModel;
+  readonly act: SettingsActions;
+  readonly onClose: () => void;
+  readonly dialog: PageDialog | undefined;
+  /** Open a dialog on the page shown, or close it with undefined. */
+  readonly onDialog: (dialog: PageDialog | undefined) => void;
+}
   & Pick<PrivacyPagesProps, "privacy" | "privacyActs"> & Pick<AboutPagesProps, "diagnostics" | "aboutActs"> & Pick<DeveloperPageProps, "developerActs">;
 
 function handoffWord(facts: Facts): string {
@@ -99,7 +107,7 @@ function handoffWord(facts: Facts): string {
  * @model spec/settings/index.md
  * @design design.md
  */
-export function SettingsScreen({ model, act, onClose, privacy, privacyActs, diagnostics, aboutActs, developerActs }: SettingsScreenProps) {
+export function SettingsScreen({ model, act, onClose, dialog, onDialog, privacy, privacyActs, diagnostics, aboutActs, developerActs }: SettingsScreenProps) {
   const { nav, facts } = model;
   const native = model.variant !== "browser";
   const notices = [handoffWord(facts), SHADE[facts.shade], facts.roleRefused ? ROLE_NOT_CHANGED : ""].filter((n) => n !== "");
@@ -115,9 +123,9 @@ export function SettingsScreen({ model, act, onClose, privacy, privacyActs, diag
         <div className="flex flex-col gap-6 px-3 pb-8">
           {notices.map((notice) => <p key={notice} role="status" aria-live="polite" className="px-4 text-sm text-muted-foreground">{notice}</p>)}
           {nav.page === "Root" && <Root nav={nav} native={native} act={act} micMayBeOn={micMayBeOn(privacy.listener)} />}
-          {nav.page === "General" && <General model={model} act={act} native={native} />}
+          {nav.page === "General" && <General model={model} act={act} native={native} erasing={dialog?.kind === "erase"} onDialog={onDialog} />}
           {nav.page === "Display" && <Display model={model} act={act} native={native} />}
-          {nav.page === "Network" && <WifiPage network={model.network} act={act} />}
+          {nav.page === "Network" && <WifiPage network={model.network} act={act} chosen={dialog?.kind === "join" ? dialog.network : undefined} onDialog={onDialog} />}
           {nav.page === "Apps" && <AppsPage aosp={model.variant === "aosp"} act={act} />}
           {(nav.page === "AppInbox" || nav.page === "AppCamera" || nav.page === "AppMaps" || nav.page === "AppNotes" || nav.page === "AppPhotos") && (
             <AppPage page={nav.page} model={model} act={act} native={native} />
@@ -125,7 +133,8 @@ export function SettingsScreen({ model, act, onClose, privacy, privacyActs, diag
           {(nav.page === "Privacy" || nav.page === "Permissions") && (
             <PrivacyPages page={nav.page} facts={facts} preferences={model.preferences} native={native} privacy={privacy} privacyActs={privacyActs}
               onPermissions={() => act.open("Permissions")} onPreference={act.preference} onResetPreferences={act.resetPreferences}
-              onHandoff={act.openPage} onAccessSetup={act.accessSetup} />
+              onHandoff={act.openPage} onAccessSetup={act.accessSetup}
+              resetAsked={dialog?.kind === "resetPreferences"} onAskReset={(open) => onDialog(open ? { kind: "resetPreferences" } : undefined)} />
           )}
           {(nav.page === "About" || nav.page === "Problems" || nav.page === "Licenses" || nav.page === "LicenseDetail") && (
             <AboutPages nav={nav} facts={facts} native={native} diagnostics={diagnostics} aboutActs={aboutActs}
@@ -166,10 +175,12 @@ function Root({ nav, native, act, micMayBeOn: micOpen }: { readonly nav: Setting
   );
 }
 
-function General({ model, act, native }: { readonly model: SettingsModel; readonly act: SettingsActions; readonly native: boolean }) {
+function General({ model, act, native, erasing, onDialog }: {
+  readonly model: SettingsModel; readonly act: SettingsActions; readonly native: boolean; readonly erasing: boolean;
+  readonly onDialog: (dialog: PageDialog | undefined) => void;
+}) {
   const { facts, updates, reset } = model;
   const read = facts.read;
-  const [erasing, setErasing] = useState(false);
   const canAskHome = read.launcher && !facts.roleAsking && (read.home === "NotHeldByAlpha" || read.home === "HeldElsewhere");
   const offerLabel = updates.offerName ? `${updates.offerName} (${updates.offer})` : String(updates.offer);
   return (
@@ -209,17 +220,17 @@ function General({ model, act, native }: { readonly model: SettingsModel; readon
       {native && (
         <Section caption="Reset">
           <SettingRow label="Erase all data" ariaLabel="Reset Alpha data" destructive icon={<Trash2 aria-hidden className="size-5 text-destructive" />}
-            busy={reset.open} onOpen={() => setErasing(true)} />
+            busy={reset.open} onOpen={() => onDialog({ kind: "erase" })} />
           {RESET[reset.notice] && <Alert role="alert">{RESET[reset.notice]}</Alert>}
         </Section>
       )}
-      <Dialog open={erasing} onOpenChange={setErasing}>
+      <Dialog open={erasing} onOpenChange={(open) => onDialog(open ? { kind: "erase" } : undefined)}>
         <DialogContent>
           <DialogTitle>Erase all of Alpha’s data?</DialogTitle>
           <p className="text-sm text-muted-foreground">Android asks for your screen lock next.</p>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setErasing(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => { setErasing(false); act.eraseAll(); }}>Continue</Button>
+            <Button variant="ghost" onClick={() => onDialog(undefined)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { onDialog(undefined); act.eraseAll(); }}>Continue</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -296,15 +307,17 @@ function AppPage({ page, model, act, native }: { readonly page: "AppInbox" | "Ap
   );
 }
 
-function WifiPage({ network, act }: { readonly network: Network; readonly act: SettingsActions }) {
-  const [chosen, setChosen] = useState<Nearby | null>(null);
+function WifiPage({ network, act, chosen, onDialog }: {
+  readonly network: Network; readonly act: SettingsActions; readonly chosen: Nearby | undefined;
+  readonly onDialog: (dialog: PageDialog | undefined) => void;
+}) {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const field = event.currentTarget.elements.namedItem("passphrase");
     const passphrase = field instanceof HTMLInputElement ? field.value : "";
     if (field instanceof HTMLInputElement) field.value = "";
     if (chosen) act.join(chosen.name, chosen.security, passphrase);
-    setChosen(null);
+    onDialog(undefined);
   };
   const scanWord = { NotScanned: "", Scanning: "", Found: "", NeedsLocation: "Allow precise location to see networks", LocationOff: "Turn on Location to see networks", ScanUnavailable: "Scanning isn’t available" }[network.scan];
   return (
@@ -317,12 +330,12 @@ function WifiPage({ network, act }: { readonly network: Network; readonly act: S
         {network.networks.map((n) => (
           <SettingRow key={n.name} label={n.name} state={{ word: n.joinable ? (n.secured ? "Secured" : "Open") : "Join in Android settings" }}
             disabled={!n.joinable || network.join === "AwaitingAndroid"}
-            onOpen={() => (n.security === "Wpa2" || n.security === "Wpa3" ? setChosen(n) : act.join(n.name, n.security, ""))} />
+            onOpen={() => (n.security === "Wpa2" || n.security === "Wpa3" ? onDialog({ kind: "join", network: n }) : act.join(n.name, n.security, ""))} />
         ))}
         <SettingRow label="Scan" icon={<RotateCw aria-hidden className="size-5" />} busy={network.scan === "Scanning"} ariaLabel="Scan for networks" onOpen={act.scan} />
         {scanWord && <p role="status" className="px-4 py-2 text-sm text-muted-foreground">{scanWord}</p>}
       </Section>
-      <Dialog open={chosen !== null} onOpenChange={(open) => { if (!open) setChosen(null); }}>
+      <Dialog open={chosen !== undefined} onOpenChange={(open) => { if (!open) onDialog(undefined); }}>
         <DialogContent>
           <DialogTitle>{chosen?.name}</DialogTitle>
           <form className="flex flex-col gap-3" onSubmit={submit}>

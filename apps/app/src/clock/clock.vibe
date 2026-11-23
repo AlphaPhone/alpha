@@ -1,6 +1,6 @@
 // spec/clock/ringer.md, "Story: Hear an alarm once, from the page in front"; spec/clock/ringer.md, "Story: Hear an alarm as loud as my phone's alarm volume, and through Do Not Disturb only as Android lets alarms through"; spec/clock/alarms.md, "Story: Set an alarm in the browser build"; spec/clock/alarms.md, "Story: Stop a ringing alarm"; spec/clock/timers.md, "Story: Time something"; spec/clock/timers.md, "Story: Hear a timer end"; spec/clock/stopwatch.md, "Story: Measure elapsed time"; spec/clock/worldClock.md, "Story: See the time where others are"
 import { Build } from "../platform/build.vibe"
-import { Machine as FactsMachine } from "../../gen/settings__facts.effect.vibe"
+import { DeviceFacts } from "../settings/facts.vibe"
 import type { AlarmFilter } from "../../gen/clock__ringer.ts"
 import { DeviceVolumes, InterruptionFacts } from "./native.schema.vibe"
 import { call, present } from "./plugins.vibe"
@@ -133,7 +133,7 @@ export effect function keepTime() {
   const alarms = try AlarmsMachine
   const timers = try TimersMachine
   const watch = try StopwatchMachine
-  const facts = try FactsMachine
+  const facts = try DeviceFacts
   const held = try Ref.make<(() => void) | undefined>(undefined)
   const android = try present(SYSTEM)
   let wasSounding = false
@@ -141,7 +141,7 @@ export effect function keepTime() {
   let toneAt = 0
 
   effect function readSoundFacts() {
-    const dnd = (try facts.get()).read.dnd
+    const dnd = (try facts.read()).dnd
     const mode = android ? (call(SYSTEM, "getSystemFacts", InterruptionFacts) catch () => undefined) : undefined
     const volumes = android ? (call(SYSTEM, "getDeviceSettings", DeviceVolumes) catch () => undefined) : undefined
     ringer.send(soundEventOf(dnd, mode, volumes)) catch () => undefined

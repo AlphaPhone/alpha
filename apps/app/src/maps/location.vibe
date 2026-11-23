@@ -1,13 +1,14 @@
-// spec/maps/location.md, "A start is admitted one at a time and retires the session before it"; spec/maps/location.md, "Only the owner's own request or the guidance they started may prompt for permission"; spec/maps/location.md, "Fixes count only from the current watch; a one-shot session ends at its first fix or after 15 seconds"
-import { type Locator, Machine as LocatorMachine, type Purpose, oneShotTimeoutMs } from "../../gen/maps__location.effect.vibe"
+// spec/maps/location.md, "A start is admitted one at a time and retires the session before it"; spec/maps/location.md, "Only the owner's own request or the guidance they started may prompt for permission"; spec/maps/location.md, "Fixes count only from the current watch; a one-shot session ends at its first fix or after 15 seconds"; spec/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"
+import { gpsGraceMs, type Locator, Machine as LocatorMachine, type Purpose, oneShotTimeoutMs } from "../../gen/maps__location.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { MapsFailure, failure } from "./failure.vibe"
 import type { Position } from "./geometry.vibe"
 import { LocationError, LocationEvent, Permission, WatchId } from "./maps.schema.vibe"
+import { MapsNetworkLocation } from "./networkLocation.vibe"
 
 const PLUGIN = "ElizaLocation"
 
-/** The phone's location for Maps: one session at a time, each step fenced by the session that started it. */
+/** The phone's location for Maps: one session at a time, each step fenced by the session that started it; without a GPS fix, a network position stands in as approximate. */
 export service MapsLocation {
   /** One fix for a quiet, owner or agent request; only the owner's request may prompt. */
   once(purpose: "QuietFix" | "OwnerFix" | "AgentFix"): Position!MapsFailure
@@ -41,10 +42,15 @@ function positionOf(event: typeof LocationEvent.Type, accuracy: Permission["accu
   }
 }
 
-/** Location over `ElizaLocation` and the location custody machine. */
+function sameFix(a: Position | undefined, b: Position): boolean {
+  return a !== undefined && a.timestamp === b.timestamp && a.coordinate.latitude === b.coordinate.latitude && a.coordinate.longitude === b.coordinate.longitude
+}
+
+/** Location over `ElizaLocation`, the network position and the location custody machine. */
 export const locationLayer = Layer.effect(MapsLocation, effect {
   const native = try Native
   const locator = try LocatorMachine
+  const network = try MapsNetworkLocation
 
   effect function permission() {
     const raw = native.invoke(PLUGIN, "checkPermissions") catch effect () => { throw failure("unavailable", "Native location is unavailable in this build.") }
@@ -101,7 +107,7 @@ export const locationLayer = Layer.effect(MapsLocation, effect {
       Stream.map(native.listen(PLUGIN, "locationChange"), (raw) => ({ kind: "fix" as const, raw })),
       Stream.map(native.listen(PLUGIN, "error"), (raw) => ({ kind: "error" as const, raw })),
     )
-    const queue = try Queue.unbounded<{ kind: "fix" | "error"; raw: unknown }>()
+    const queue = try Queue.unbounded<{ kind: "fix" | "error"; raw: unknown } | { kind: "network"; raw: Position }>()
     fork.scoped Stream.runForEach(events, (event) => Queue.offer(queue, event)) catch () => undefined
     try acquireRelease(
       effect {
@@ -123,8 +129,25 @@ export const locationLayer = Layer.effect(MapsLocation, effect {
         try confirmCleanup(id)
       },
     )
+    const known = try network.cached()
+    if (known) try Queue.offer(queue, { kind: "network", raw: known })
+    fork.scoped effect {
+      try sleep(gpsGraceMs)
+      const s = try locator.get()
+      if (s.generation !== owner || s.gps || s.phase !== "Watching") return
+      const found = try network.locate()
+      if (found && !sameFix(known, found)) try Queue.offer(queue, { kind: "network", raw: found })
+    }
     while (true) {
       const event = try Queue.take(queue)
+      if (event.kind === "network") {
+        const before = try locator.get()
+        const after = locator.send({ type: "networkFixArrives", owner }) catch () => undefined
+        if (after === undefined) continue
+        if (after.fixes > before.fixes) yield event.raw
+        if (after.phase === "Idle") return
+        continue
+      }
       if (event.kind === "error") {
         const code = (Schema.decodeUnknownEffect(LocationError)(event.raw) catch () => ({ code: "UNKNOWN" })).code
         locator.send({ type: "watchFails", owner }) catch () => undefined

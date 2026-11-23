@@ -1,4 +1,4 @@
-// spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"
+// spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"
 import { Check, Clock, X } from "lucide-react";
 import type { PointerEvent } from "react";
 import { canTapApprove, canTapDecline, initial } from "../../../gen/assistant__approvals.ts";
@@ -46,6 +46,12 @@ export function ActionCardView({ card, emergency, busy, now, onApprove, onDeclin
     <Card className="gap-2 p-4" aria-busy={busy || undefined}>
       <CardTitle>{settled ?? card.title}</CardTitle>
       <p className="text-sm whitespace-pre-wrap text-muted-foreground">{detail}</p>
+      {card.items !== undefined && settled === undefined && (
+        <ul aria-label={`What ${card.title} acts on`} className="flex flex-col gap-1 text-sm">
+          {card.items.lines.map((line, at) => <li key={`${at}:${line}`} className="truncate">{line}</li>)}
+          {card.items.unnamed > 0 && <li className="text-muted-foreground">{card.items.unnamed} {card.items.unnamedLabel ?? "more"}{card.items.unnamed === 1 || card.items.unnamedLabel === undefined ? "" : "s"}</li>}
+        </ul>
+      )}
       {settled === undefined && expiry !== "" && <p className="flex items-center gap-1 font-mono text-xs uppercase text-muted-foreground"><Clock aria-hidden className="size-3" />{expiry}</p>}
       {settled === undefined && (
         <CardFooter className="gap-2">

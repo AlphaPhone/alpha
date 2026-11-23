@@ -1,4 +1,4 @@
-// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
 import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type TurnResult } from "@elizaos/agent/client"
 import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
 import { Machine as SendsMachine, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
@@ -8,12 +8,14 @@ import { Machine as ClientMachine, canReplyWith } from "../../gen/assistant__con
 import { Machine as RecoveryMachine } from "../../gen/assistant__recovery.effect.vibe"
 import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
+import { sendsDay } from "../../gen/assistant__context.effect.vibe"
+import { Preferences } from "../settings/preferences.vibe"
 import { ChatAttachments } from "./attachments.vibe"
 import { Conversations } from "./conversations.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
 import { PhoneLocation } from "./location.vibe"
-import { MapsChatCards } from "./ports.vibe"
-import { copy, failureKindOf, failureText, planActionOf } from "./presentation.vibe"
+import { CameraComposer, MapsChatCards, MapsRelay, ReplyChanges, TurnSources } from "./ports.vibe"
+import { changeWords, copy, failureKindOf, failureText, planActionOf } from "./presentation.vibe"
 import { DeviceReview, type Approval } from "./review.vibe"
 import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
 import { moveFirstDraft } from "./first-send.vibe"
@@ -31,8 +33,8 @@ export service Composer {
   readonly target: Stream.Stream<Target | undefined>
   /** The owner typed. */
   edit(text: string): void!!
-  /** Send the composer's text, or a prompt handed over from elsewhere that leaves the composer alone. */
-  send(handed?: string): void!!
+  /** Send the composer's text, or a prompt handed over from elsewhere that leaves the composer alone; true when the turn was taken, by the agent or by Camera. */
+  send(handed?: string): boolean!!
   /** Stop the reply being written. */
   stop(): void!!
   /** Open a conversation the owner chose, or one the phone reopened by itself; null starts a new chat. */
@@ -45,6 +47,8 @@ export service Composer {
   replaceRow(row: Row): void!!
   /** The screen under the assistant changed to `contextKey`; `sensitive` when it is one the assistant never observes. */
   screenChanged(contextKey: string, sensitive: boolean): void!!
+  /** Back while a reply or an edit is aimed: drop the aim; false when nothing was aimed. */
+  back(): boolean!!
   static readonly key = "alpha/assistant/Composer"
 }
 
@@ -69,6 +73,11 @@ export const composerLayer = Layer.effect(Composer, effect {
   const location = try PhoneLocation
   const review = try DeviceReview
   const mapsChat = try MapsChatCards
+  const relay = try MapsRelay
+  const camera = try CameraComposer
+  const changes = try ReplyChanges
+  const sources = try TurnSources
+  const preferences = try Preferences
   const transport = try turnTransport()
   const transcript = try SubscriptionRef.make<Transcript>(emptyTranscript)
   const target = try SubscriptionRef.make<Target | undefined>(undefined)
@@ -98,6 +107,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     }
     try quiet(recovery.send({ type: "rekey" }))
     fork.detached review.sync()
+    fork.detached location.warm()
     session = { key, controller: new TurnController(transport), records: new Map() }
     try quiet(client.send({ type: "attach", session: (try client.get()).session + 1 }))
     return session
@@ -155,12 +165,15 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (!found.ok || (try recovery.get()).dropped > dropped) return
     const pending = found.cards
     const shown = (try SubscriptionRef.get(transcript)).rows
+    const said = found.notices.filter((text) => !shown.some((row) => row.kind === "notice" && row.text === text))
+    const listingAt = try Clock.currentTimeMillis
     const listed = new Set(pending.map((card) => card.proposalId))
     const fresh = pending.filter((card) => !shown.some((row) => row.kind === "card" && row.card.proposalId === card.proposalId))
     try rows((list) => [
       ...list.map((row) => row.kind === "card" && (row.card.state === "LiveCard" || row.card.state === "RecoveredCard") && !listed.has(row.card.proposalId)
         ? { ...row, card: { ...row.card, state: "UnavailableCard" as const } } : row),
       ...fresh.map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
+      ...said.map((text, at): Row => ({ kind: "notice", id: `listing-notice:${listingAt}:${at}`, text, system: false })),
     ])
     try watch(fresh)
   }
@@ -236,22 +249,27 @@ export const composerLayer = Layer.effect(Composer, effect {
     const identity = try host.identity()
     if (identity === undefined) {
       try host.toast(copy.noAgent)
-      return
+      return false
     }
     const current = try controllerFor(identity)
     const draftState = try drafts.get()
     if (handed === undefined && slotOf(draftState, draftState.active).unsettled) {
       try host.toast(copy.maySent)
-      return
+      return false
     }
     const composed = handed ?? textOf(shown(draftState))
     const files = try attachments.pending()
-    if (composed.trim() === "" && files.length === 0) return
+    if (composed.trim() === "" && files.length === 0) return false
     const aimed = try SubscriptionRef.get(target)
+    const taken = try camera.intercept({ text: composed, attachments: files.length, editing: aimed?.kind === "edit" })
+    if (taken !== "none") {
+      if (handed === undefined) try quiet(drafts.send({ type: "edit", text: [] }))
+      return true
+    }
     const sendsBefore = try sends.get()
     if (!(try quiet(sends.send({ type: "send", handed: handed !== undefined, fresh: true, prompt: unitsOf(handed ?? "") })))) {
       try host.toast(copy.busy)
-      return
+      return false
     }
     const attempt = sendsBefore.nextId
     ownKey = undefined
@@ -273,7 +291,7 @@ export const composerLayer = Layer.effect(Composer, effect {
         try unbind()
         try typing()
         try host.toast("Couldn’t open the edited conversation. Nothing was sent.")
-        return
+        return false
       }
       current.records.set(forked.id, { id: forked.id, roomId: forked.roomId })
       promise(() => current.controller.bind({ id: forked.id, roomId: forked.roomId })) catch () => undefined
@@ -288,7 +306,17 @@ export const composerLayer = Layer.effect(Composer, effect {
     const observed = observes(screen.exposure)
     const peer = try host.peer()
     const place = try location.forTurn(observed, peer.takesLocation)
-    const observation = observed ? { ...screen.observation, ...(place === undefined ? {} : { location: place }) } : undefined
+    try sources.preferReview(try preferences.asksBeforeActions())
+    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
+    const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
+    const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
+    const observation = observed ? {
+      ...screen.observation,
+      ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
+      ...(notesList === undefined ? {} : { selectedObject: notesList }),
+      ...(day === undefined ? {} : { calendarDay: day }),
+      ...(place === undefined ? {} : { location: place }),
+    } : undefined
     const context = encodeTurnContext(observation === undefined ? {} : { observation }, { optionalFields: peer.optionalFields })
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
@@ -305,7 +333,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       try settleView(replyId, try view.get(), text)
     })
     try quiet(sends.send({ type: "transportCall", id: attempt }))
-    const result = try promise(() => current.controller.send(
+    const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
       { text: composed, metadata: { ...context }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
       { stream: {
         onPreview: (text, provisional) => {
@@ -324,7 +352,7 @@ export const composerLayer = Layer.effect(Composer, effect {
           pushView("")
         }),
       } },
-    ))
+    )))
     const outcome = try classify(result, attempt, streamed)
     try typing()
     if (outcome === "restored") {
@@ -338,7 +366,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       try host.toast(handed !== undefined ? "Not sent." : restoredHere ? copy.backInComposer : copy.notRestored)
       try quiet(stopped.send({ type: "sendSettled", dispatched: false }))
       try stoppedNotice()
-      return
+      return false
     }
     if (durable) try quiet(drafts.send({ type: "commit", binding: heldBinding }))
     ordinal += 1
@@ -355,7 +383,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       try quiet(stopped.send({ type: "cancelOutcome", aborted: answer.kind === "Stopped" }))
       const open = (try SubscriptionRef.get(transcript)).conversation ?? current.controller.conversation?.id ?? null
       if (open !== null) fork.detached check(open, result.clientMessageId)
-      return
+      return true
     }
     try quiet(stopped.send({ type: "sendSettled", dispatched: true }))
     try stoppedNotice()
@@ -364,7 +392,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       try quiet(view.send({ type: "failReply", kind: "OtherFailure" }))
       try settleView(replyId, try view.get(), `${shownText}${shownText === "" ? "" : "\n\n"}${copy.replyFailed} ${copy.maybeSent}`)
       try rows((list) => list.map((row) => row.id === userId && row.kind === "user" ? { ...row, status: "unconfirmed" } : row))
-      return
+      return true
     }
     const reply = result.kind === "Replied" ? result.reply : result.kind === "AgentFailed" ? result.reply : undefined
     if (result.kind === "AgentFailed") {
@@ -379,7 +407,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     }
     if (reply === undefined) {
       try unbind()
-      return
+      return true
     }
     const live = current.controller.conversation
     if (live !== null) current.records.set(live.id, live)
@@ -402,8 +430,16 @@ export const composerLayer = Layer.effect(Composer, effect {
     if (bound && !delivered) try quiet(client.send({ type: "sendFailed" }))
     const cardsShown = delivered ? pass.cards : []
     const staged = emailDraftOf(reply.actionResults)
-    const emailRows: Row[] = staged === undefined || !(live !== null && live.id === (try SubscriptionRef.get(transcript)).conversation) ? []
+    const inConversation = live !== null && live.id === (try SubscriptionRef.get(transcript)).conversation
+    const emailRows: Row[] = staged === undefined || !inConversation ? []
       : [{ kind: "email", id: `email:${reply.messageId}`, card: { ...emailStart, recipients: staged.to.trim() !== "", body: staged.body.trim() !== "" }, ...staged }]
+    const changed = delivered && inConversation ? try changes.settle(reply.actionResults) : undefined
+    const changeRows: Row[] = changed === undefined ? [] : [
+      ...changed.workflows.map((change): Row => ({ kind: "change", id: `change:${reply.messageId}:workflow:${change.workflowId}`, text: `${changeWords[change.word]} workflow`, app: "workflows", route: change.workflowId })),
+      ...(changed.notesRevision === undefined ? [] : [{ kind: "change", id: `change:${reply.messageId}:notes`, text: copy.notesChanged, app: "notes" } satisfies Row]),
+      ...(changed.calendar ? [{ kind: "change", id: `change:${reply.messageId}:calendar`, text: copy.calendarChanged, app: "calendar" } satisfies Row] : []),
+      ...(changed.openWorkflows ? [{ kind: "change", id: `change:${reply.messageId}:open-workflows`, text: copy.openWorkflows, app: "workflows" } satisfies Row] : []),
+    ]
     try rows((list) => [
       ...list.map((row) =>
         row.id === userId && row.kind === "user" ? { ...row, id: reply.userMessageId, status: "recorded" as const }
@@ -415,8 +451,10 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...cardsShown.map((card): Row => ({ kind: "card", id: `card:${card.proposalId}`, card })),
       ...(bound && !delivered ? [{ kind: "notice", id: `stale:${reply.messageId}`, text: copy.stale, system: false } satisfies Row] : []),
       ...emailRows,
+      ...changeRows,
     ])
     try watch(cardsShown)
+    return true
   }
   return {
     transcript: SubscriptionRef.changes(transcript),
@@ -469,6 +507,11 @@ export const composerLayer = Layer.effect(Composer, effect {
       if (next?.kind === "edit") try quiet(drafts.send({ type: "handOver", text: unitsOf(next.text) }))
     },
     replaceRow: (row: Row) => rows((list) => list.map((each) => each.id === row.id ? row : each)),
+    back: () => effect {
+      if ((try SubscriptionRef.get(target)) === undefined) return false
+      try SubscriptionRef.set(target, undefined)
+      return true
+    },
     screenChanged: (contextKey: string, sensitive: boolean) => effect {
       const own = !sensitive && (acting > 0 || contextKey === ownKey)
       ownKey = undefined

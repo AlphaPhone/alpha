@@ -1,0 +1,94 @@
+// spec/workflows/deviceSteps.md, "Story: Hear or see a phone step's result only as I reviewed it"; spec/workflows/deviceSteps.md, "Speech and notices run only on the visible, unlocked, non-private screen; speech cut off after its audio began is unknown"
+import type { ExecutorCall } from "@elizaos/agent/client"
+import { readOperation, type DeviceOperation } from "@elizaos/agent/operations"
+import { type Presented, presentationAdmitted, spokenOutcome } from "../../gen/workflows__deviceSteps.effect.vibe"
+import { copy } from "../assistant/presentation.vibe"
+import { AssistantHost } from "../assistant/host.vibe"
+import type { OperationPorts } from "../assistant/review.vibe"
+import { Notices } from "../shell/notices.vibe"
+import { Speech } from "../voice/speech.vibe"
+
+type SpeakOperation = Extract<DeviceOperation, { type: "speak_text" }>
+type NoticeOperation = Extract<DeviceOperation, { type: "post_notification" }>
+type Owned = SpeakOperation | NoticeOperation
+
+const refused = (code: string) => ({ kind: "refused", code })
+const applied = { kind: "applied" }
+const lost = { kind: "lost" }
+
+/** The speech and notification steps of an approved workflow this area runs, or undefined for every other wire type. */
+export function ownedOperation(operation: unknown): Owned | undefined {
+  const op = readOperation(operation)?.operation
+  return op?.type === "speak_text" || op?.type === "post_notification" ? op as Owned : undefined
+}
+
+/** The card's title and detail for a speech or notification step, with the exact text it presents. */
+export function describeOwned(op: Owned): { readonly title: string; readonly detail: string } {
+  return op.type === "speak_text"
+    ? { title: "Read this aloud", detail: op.text }
+    : { title: "Post a notice in Alpha", detail: `${op.title}\n${op.body}` }
+}
+
+/** The receipt sentence for a settled speech or notification step. */
+export function summarizeOwned(op: Owned, result: "NoResult" | "Applied" | "Failed" | "NotStarted" | "Unknown"): string {
+  if (op.type === "speak_text") {
+    if (result === "Applied") return "Finished reading the reviewed text aloud."
+    if (result === "Failed" || result === "NotStarted") return "Nothing was read aloud."
+    return "Alpha can’t tell whether the whole text was read aloud."
+  }
+  if (result === "Applied") return "Posted the reviewed notice in Alpha."
+  if (result === "Failed" || result === "NotStarted") return "No notice was posted."
+  return copy.unconfirmed
+}
+
+/** Workflows' family of agent device operations for `DeviceExecutors`: an approved step reads its reviewed text aloud or posts its reviewed notice, only on the screen in front. */
+export const operationPorts = effect {
+  const host = try AssistantHost
+  const speech = try Speech
+  const notices = try Notices
+
+  effect function admitted() {
+    const exposure = (try host.screen()).exposure
+    return presentationAdmitted(!exposure.hidden, exposure.locked, exposure.privateView)
+  }
+
+  effect function speak(op: SpeakOperation) {
+    const front = try admitted()
+    if (!front) return refused("screen_not_current")
+    const started = try Ref.make(false)
+    const spoken = try (effect {
+      try speech.speak(op.text, "AppSpeech", { onStarted: () => Ref.set(started, true) })
+      return "finished"
+    } catch (error) => error._tag === "SpeechInterrupted" && error.started ? "cut" : "silent")
+    const outcome: Presented = spokenOutcome(front, spoken === "cut" || (try Ref.get(started)), spoken === "finished")
+    if (outcome === "PresentedApplied") return applied
+    return outcome === "PresentedUnknown" ? lost : refused("speech_unavailable")
+  }
+
+  effect function post(op: NoticeOperation) {
+    if (!(try admitted())) return refused("screen_not_current")
+    try notices.persist(`${op.title.trim()}: ${op.body.trim()}`)
+    return applied
+  }
+
+  const ports: OperationPorts = {
+    validate: (operation) => ownedOperation(operation),
+    execute: (operation: unknown, _call: ExecutorCall) => {
+      const op = ownedOperation(operation)
+      if (op === undefined) return Promise.resolve(refused("unsupported"))
+      return runPromise(op.type === "speak_text" ? speak(op) : post(op))
+    },
+    readBack: () => Promise.resolve({ kind: "refused", code: "no_readback" }),
+    describe: (operation) => {
+      const op = ownedOperation(operation)
+      return op === undefined ? { title: "Action", detail: "" } : describeOwned(op)
+    },
+    classOf: () => "CreateReminder",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: (operation, result) => {
+      const op = ownedOperation(operation)
+      return op === undefined ? "" : summarizeOwned(op, result)
+    },
+  }
+  return ports
+}

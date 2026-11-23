@@ -152,6 +152,31 @@ pure def canExpire(x: Steps): bool = engaged(x) and not(x.expired)
 pure def expire(x: Steps): Steps = { ...x, expired: true }
 ```
 
+## Story: Hear or see a phone step's result only as I reviewed it
+
+> As the owner, I want a workflow step that reads text aloud or posts a notification on my phone to
+> say exactly the reviewed text, only while I am looking at Alpha, and never to report speech that
+> was cut off as done.
+
+### Speech and notices run only on the visible, unlocked, non-private screen; speech cut off after its audio began is unknown
+
+The notification is posted as a notice in Alpha that the owner dismisses; the Android notification
+path waits for the phone's own workflow notification bridge.
+
+```quint
+type Presented = PresentedApplied | PresentedRefused | PresentedUnknown
+pure def presentationAdmitted(visible: bool, locked: bool, privateView: bool): bool = visible and not(locked) and not(privateView)
+pure def spokenOutcome(admitted: bool, started: bool, finished: bool): Presented =
+  if (not(admitted)) PresentedRefused else if (finished) PresentedApplied else if (started) PresentedUnknown else PresentedRefused
+pure val visibleValues = Set(true, false)
+pure val privateViewValues = Set(true, false)
+pure val startedValues = Set(true, false)
+pure val finishedValues = Set(true, false)
+pure def lawALockedScreenNeverPresents(visible: bool, privateView: bool): bool = not(presentationAdmitted(visible, true, privateView))
+pure def lawSpeechCutAfterItsAudioBeganIsUnknown(started: bool): bool = started implies spokenOutcome(true, true, false) == PresentedUnknown
+pure def lawUnadmittedSpeechIsRefused(started: bool, finished: bool): bool = spokenOutcome(false, started, finished) == PresentedRefused
+```
+
 ## Story: Read my calendar for the run's own day
 
 > As the owner, I want a workflow that reads "today's calendar" to read the day of the run I
@@ -169,4 +194,27 @@ pure def runDayReadAdmitted(peer: int, anchored: bool, sinceReview: int): bool =
 pure val peerValues = Set(4, 5)
 pure val sinceReviewValues = Set(0, 900000, 900001)
 pure def lawAnOldPhoneNeverReadsARunDay(anchored: bool, sinceReview: int): bool = not(runDayReadAdmitted(4, anchored, sinceReview))
+```
+
+### A named calendar range reads today, tomorrow, the next three days or this week from local midnight, and an all-day event counts by its civil dates
+
+The browser simulator and dated sources name a range by its label; "this week" starts on Monday.
+An event is a meeting now when it is timed, under way, and has a video link or attendees (legacy
+`workflow-calendar.ts`).
+
+```quint
+pure def rangeStartDay(label: str, weekday: int): int =
+  if (label == "tomorrow's calendar") 1 else if (label == "this week's calendar") 0 - ((weekday + 6) % 7) else 0
+pure def rangeDays(label: str): int =
+  if (label == "today's calendar" or label == "tomorrow's calendar") 1
+  else if (label == "calendar next 3 days") 3 else if (label == "this week's calendar") 7 else 0
+pure def inMeeting(allDay: bool, begin: int, end: int, now: int, video: bool, attendees: int): bool =
+  not(allDay) and begin <= now and end > now and (video or attendees > 0)
+pure val labelValues = Set("today's calendar", "this week's calendar", "next month")
+pure val weekdayValues = Set(0, 1, 6)
+pure val nowValues = Set(0, 5, 10)
+pure def lawAWeekStartsOnTheMondayBefore(weekday: int): bool =
+  (weekday >= 0 and weekday <= 6) implies (rangeStartDay("this week's calendar", weekday) <= 0 and rangeStartDay("this week's calendar", weekday) > 0 - 7)
+pure def lawAnUnknownLabelReadsNothing(label: str): bool = label == "next month" implies rangeDays(label) == 0
+pure def lawAnAllDayEventIsNeverAMeeting(now: int): bool = not(inMeeting(true, 0, 10, now, true, 1))
 ```

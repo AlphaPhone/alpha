@@ -1,43 +1,27 @@
-// spec/account/session.md, "The build addresses one deployment, and staging only with test mocks"; spec/account/google.md, "Google's consent page is the only page consent opens"
+// spec/account/session.md, "The build addresses one deployment, and staging only with test mocks or the Cloud resident's browser preview"; spec/account/google.md, "Google's consent page is the only page consent opens"
 import type { ConsentPage } from "../../gen/account__google.ts";
 import type { Deployment, Environment } from "../../gen/account__session.ts";
+import { alphaCloud, alphaCloudCutover, elizaCloud, type CloudAuthority as PlatformAuthority } from "../platform/build-flags.ts";
 
-/** The public identity of one Cloud environment: never a credential. */
-export interface CloudAuthority {
-  readonly name: string;
-  readonly api: string;
-  readonly web: string;
+/** The public identity of one Cloud environment, with the agents host its Google callbacks may name: never a credential. */
+export interface CloudAuthority extends PlatformAuthority {
   readonly agents: string;
-  readonly entitlementAudience: string;
 }
 
-const authorities: Record<Deployment, Record<Environment, CloudAuthority>> = {
-  ElizaCloud: {
-    Production: { name: "Eliza Cloud", api: "https://api.eliza.app", web: "https://eliza.app", agents: "cloud.eliza.app", entitlementAudience: "eliza-alpha-phone" },
-    Staging: { name: "Eliza Cloud", api: "https://api-staging.eliza.app", web: "https://staging.eliza.app", agents: "cloud-staging.eliza.app", entitlementAudience: "eliza-alpha-phone" },
-  },
-  AlphaCloud: {
-    Production: { name: "Alpha Cloud", api: "https://api.alphacompute.ai", web: "https://cloud.alphacompute.ai", agents: "cloud.alphacompute.ai", entitlementAudience: "ai.alphacompute.alphaphone" },
-    Staging: { name: "Alpha Cloud", api: "https://api-staging.alphacompute.ai", web: "https://cloud-staging.alphacompute.ai", agents: "cloud-staging.alphacompute.ai", entitlementAudience: "ai.alphacompute.alphaphone" },
-  },
+const clouds = { ElizaCloud: elizaCloud, AlphaCloud: alphaCloud } as const;
+
+const agentHosts: Record<Deployment, Record<Environment, string>> = {
+  ElizaCloud: { Production: "cloud.eliza.app", Staging: "cloud-staging.eliza.app" },
+  AlphaCloud: { Production: "cloud.alphacompute.ai", Staging: "cloud-staging.alphacompute.ai" },
 };
 
-/** `ALPHA_CLOUD_CUTOVER`: Alpha Cloud instead of the shipped Eliza Cloud. Off unless the build sets `VITE_ALPHA_CLOUD_CUTOVER=1`. */
-export const deployment: Deployment = import.meta.env?.VITE_ALPHA_CLOUD_CUTOVER === "1" ? "AlphaCloud" : "ElizaCloud";
-
-/** The environment a build addresses: staging only when test mocks allow it and the build asks for it. */
-export function environmentFor(testMocks: boolean): Environment {
-  return testMocks && import.meta.env?.VITE_ALPHA_CLOUD_ENVIRONMENT === "staging" ? "Staging" : "Production";
-}
+/** The deployment this build addresses: Alpha Cloud only once the platform's cutover flag is set, Eliza Cloud otherwise. */
+export const deployment: Deployment = alphaCloudCutover ? "AlphaCloud" : "ElizaCloud";
 
 /** The public authority of a deployment's environment. */
 export function authorityOf(of: Deployment, environment: Environment): CloudAuthority {
-  return authorities[of][environment];
-}
-
-/** The native host's name for an environment. */
-export function hostEnvironment(environment: Environment): "production" | "staging" {
-  return environment === "Staging" ? "staging" : "production";
+  const cloud = clouds[of];
+  return { ...(environment === "Staging" ? cloud.staging : cloud.production), agents: agentHosts[of][environment] };
 }
 
 /** The registered App Link a Stripe page returns to. */
@@ -79,10 +63,7 @@ export function googleWorkspaceCallback(authority: CloudAuthority): string {
   return `${authority.web}/alphaphone/gmail/callback`;
 }
 
-/** A fresh idempotency key or request id. */
-export function freshKey(): string {
-  return crypto.randomUUID();
-}
+export { newId as freshKey } from "../platform/ids.ts";
 
 /** The native secure slot that keeps one account's pending Cloud delegation. */
 export async function delegationSlot(owner: string): Promise<string> {

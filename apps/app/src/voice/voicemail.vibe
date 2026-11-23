@@ -1,7 +1,7 @@
 // spec/voice/speech.md, "Story: Keep a page I read and my voicemail on my phone"; spec/voice/speech.md, "A reviewed page, a local reading and voicemail audio use only the phone; replies and turn guidance use the route in use"
 import { Native } from "../platform/native.vibe"
 import { TranscriptFailed, VoicemailTranscriber } from "../telephony/ports.vibe"
-import { newId } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
 import { LocalSpeechStatus, TranscriptReply } from "./native.schema.vibe"
 
 const decodeTranscript = Schema.decodeUnknownOption(TranscriptReply)

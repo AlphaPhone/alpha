@@ -9,6 +9,7 @@ export type RouteAsk =
   | { readonly tag: "Keypad"; readonly number: string }
   | { readonly tag: "Recents" }
   | { readonly tag: "Voicemail" }
+  | { readonly tag: "Info" }
   | { readonly tag: "Compose"; readonly number: string }
   | { readonly tag: "Thread"; readonly threadId: string }
   | { readonly tag: "Notice" }
@@ -16,7 +17,7 @@ export type RouteAsk =
   | { readonly tag: "FromPhone" }
   | { readonly tag: "NoRoute" }
 
-/** Phone's route, or NoRoute for anything else: the keypad keeps only its own keys, at most 40, and a malformed route opens Phone as it is and never dials. */
+/** Phone's route, or NoRoute for anything else: the keypad keeps only its own keys, at most 40, `info` is Settings → Phone's details, and a malformed route opens Phone as it is and never dials. */
 export function phoneRouteOf(route: string | undefined): RouteAsk {
   const ok = route === undefined ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(PhoneRoute)(route))
   if (ok === undefined) return { tag: "NoRoute" }
@@ -25,7 +26,7 @@ export function phoneRouteOf(route: string | undefined): RouteAsk {
     const number = keys.startsWith("+") ? `+${keys.slice(1).replace(/\+/g, "")}` : keys.replace(/\+/g, "")
     return { tag: "Keypad", number: number.slice(0, KEYPAD_MAX) }
   }
-  return ok === "recents" ? { tag: "Recents" } : { tag: "Voicemail" }
+  return ok === "recents" ? { tag: "Recents" } : ok === "info" ? { tag: "Info" } : { tag: "Voicemail" }
 }
 
 /** Messages' route, or NoRoute: a malformed route opens the list and never composes or opens a lookalike. */

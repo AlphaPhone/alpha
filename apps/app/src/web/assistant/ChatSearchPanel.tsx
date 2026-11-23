@@ -7,13 +7,13 @@ import { useMachine as useSearch } from "../../../gen/assistant__search.react.ts
 import { ChatSearch } from "../../assistant/search.vibe";
 import { Button, EmptyState, Input, ListRow, ScrollArea } from "../components/ui/index.ts";
 import { runtime } from "./runtime.ts";
-import { hitsStream, run } from "./services.ts";
-import { useServiceStream } from "./use-stream.ts";
+import { hitsStream } from "./services.ts";
+import { act, useServiceStream } from "../shell/services.ts";
 
-/** How search returns to the conversation. */
+/** How search returns to the conversation; search closes itself, so this only tells the caller. */
 export type ChatSearchPanelProps = {
-  /** Leave search and return to the conversation. */
-  onClose: () => void;
+  /** Search was left for the conversation. */
+  onClose?: () => void;
 };
 
 /**
@@ -23,12 +23,12 @@ export type ChatSearchPanelProps = {
 export function ChatSearchPanel({ onClose }: ChatSearchPanelProps) {
   const [query, setQuery] = useState("");
   const { state = searchStart } = useSearch(runtime);
-  const hits = useServiceStream(runtime, "assistant/hits", hitsStream, []);
-  const search = (use: (s: ChatSearch.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ChatSearch), use));
+  const hits = useServiceStream("assistant/hits", hitsStream, []);
+  const search = (use: (s: ChatSearch.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ChatSearch), use));
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 px-3">
       <div className="flex items-center gap-2">
-        <Button size="icon" variant="ghost" aria-label="Back to chat" onClick={() => { search((s) => s.close()); onClose(); }}><ArrowLeft className="size-5" /></Button>
+        <Button size="icon" variant="ghost" aria-label="Back to chat" onClick={() => { search((s) => s.close()); onClose?.(); }}><ArrowLeft className="size-5" /></Button>
         <Input aria-label="Search chats" placeholder="Search chats" value={query} autoFocus
           onChange={(event) => { setQuery(event.target.value); search((s) => s.query(event.target.value)); }} />
       </div>
@@ -38,7 +38,7 @@ export function ChatSearchPanel({ onClose }: ChatSearchPanelProps) {
           {hits.map((hit) => (
             <li key={hit.id}>
               <ListRow title={hit.snippet ?? hit.text} detail={hit.createdAt ? new Date(hit.createdAt).toLocaleDateString() : undefined}
-                onClick={() => search((s) => Effect.map(s.openHit(hit), (opened) => { if (opened) onClose(); }))} />
+                onClick={() => search((s) => Effect.flatMap(s.openHit(hit), (opened) => opened ? Effect.map(s.close(), () => onClose?.()) : Effect.void))} />
             </li>
           ))}
         </ul>

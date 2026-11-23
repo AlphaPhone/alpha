@@ -1,9 +1,10 @@
-// spec/telephony/phone.md, "The bar's query filters Recents on the phone, and Alpha's filter returns to Recents"; spec/telephony/callBar.md, "The bar says Calling until the call is active, and only an active call counts a clock from its connect time"; spec/telephony/comms.md, "A subject is briefed once, only with the chat open, and never from fixtures in production"
+// spec/telephony/phone.md, "The bar's query filters Recents on the phone, and Alpha's filter returns to Recents"; spec/telephony/phoneInfo.md, "Story: See my SIM, carrier and number on the image"; spec/telephony/callBar.md, "The bar says Calling until the call is active, and only an active call counts a clock from its connect time"; spec/telephony/comms.md, "A subject is briefed once, only with the chat open, and never from fixtures in production"
 import type { BarWords } from "../../../gen/telephony__callBar.ts";
 import type { CallOutcome, ListQuery } from "../../../gen/telephony__common.ts";
 import type { ContactsNotice } from "../../../gen/telephony__contacts.ts";
 import type { DeleteNotice } from "../../../gen/telephony__messages.ts";
 import type { PhoneNotice } from "../../../gen/telephony__phone.ts";
+import type { Holders, Line, Network, VoicemailSetup } from "../../../gen/telephony__phoneInfo.ts";
 import type { BriefingFacts } from "../../telephony/comms.vibe";
 import type { SendProblem } from "../../telephony/drafts.vibe";
 
@@ -263,4 +264,41 @@ export function callCardText(target: { number: string } | { contact: string }, p
   const name = party?.name || target.contact;
   const numbers = party?.numbers ?? [];
   return { title: `Call ${name}`, detail: numbers.length === 1 ? displayNumber(numbers[0]!) : numbers.length > 1 ? `${numbers.length} numbers · you choose one before it dials` : "You confirm the number before it dials" };
+}
+
+/** One labelled value on Settings → Phone. */
+export interface InfoRow { readonly label: string; readonly value: string }
+
+const NETWORK: Record<Network, string> = {
+  NoService: "No service", Network2g: "2G", Network3g: "3G", Network4g: "4G", Network5g: "5G", WifiCalling: "Wi-Fi calling", NetworkUnknown: "Unknown",
+};
+const SIGNAL = ["None", "Poor", "Fair", "Good", "Excellent"];
+
+/** One line's rows: carrier, SIM name, own number, network and roaming, signal, slot or eSIM, and the identifiers only when Android returned them. */
+export function lineRows(line: Line): InfoRow[] {
+  const rows: InfoRow[] = [];
+  if (line.carrier) rows.push({ label: "Carrier", value: line.carrier });
+  if (line.simName) rows.push({ label: "SIM name", value: line.simName });
+  if (line.number) rows.push({ label: "Number", value: displayNumber(line.number) });
+  rows.push({ label: "Network", value: `${NETWORK[line.network]}${line.roaming ? " · Roaming" : ""}` });
+  if (line.signal >= 0 && line.network !== "NoService") rows.push({ label: "Signal", value: SIGNAL[line.signal] ?? "Unknown" });
+  rows.push({ label: "SIM", value: line.embedded ? "eSIM" : `Slot ${line.slot + 1}` });
+  if (line.imei) rows.push({ label: "IMEI", value: line.imei });
+  if (line.simSerial) rows.push({ label: "SIM serial", value: line.simSerial });
+  return rows;
+}
+
+/** A line's caption, only when there is more than one SIM to tell apart. */
+export const lineCaption = (line: Line, count: number) => (count > 1 ? `SIM ${line.slot + 1}` : "");
+
+const holder = (app: string, alpha: boolean) => (alpha ? "Alpha" : app || "None");
+
+/** Which apps Android uses for calls and texts, and whether the carrier's voicemail is set up. */
+export function holderRows(holders: Holders, voicemail: VoicemailSetup): InfoRow[] {
+  const rows: InfoRow[] = [
+    { label: "Phone app", value: holder(holders.phoneApp, holders.phoneAlpha) },
+    { label: "Messages app", value: holder(holders.smsApp, holders.smsAlpha) },
+  ];
+  if (voicemail !== "VoicemailUnknown") rows.push({ label: "Voicemail", value: voicemail === "VoicemailOn" ? "On" : voicemail === "VoicemailNotSetUp" ? "Not set up" : "Not available" });
+  return rows;
 }

@@ -1,4 +1,4 @@
-// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"
+// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"
 import type { ExecutorCall } from "@elizaos/agent/client"
 import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
 import type { Result } from "../../gen/assistant__receipts.effect.vibe"
@@ -46,7 +46,7 @@ export function classOf(op: TelephonyOperation | undefined): Op {
 /** What a telephony operation targets against the owner's words: a written number, a contact name, or nothing. */
 export function targetOf(op: TelephonyOperation | undefined, text: string): Target {
   if (op === undefined) return { tag: "NoTarget" }
-  if (op.type === "sms_send") return { tag: "NumberTarget", matches: (op.recipients as readonly string[]).every((n) => grounded(text, { kind: "number", number: n })) }
+  if (op.type === "sms_send") return { tag: "NumberTarget", matches: (op.recipients as readonly string[]).every((n) => grounded(text, { kind: "number", number: n }, op.body)) }
   if (op.type === "phone_keypad" && typeof op.number === "string") return { tag: "NumberTarget", matches: grounded(text, { kind: "number", number: op.number }) }
   if (op.type === "contact_create" && (op.contact.phoneNumbers as readonly string[]).length > 0)
     return { tag: "NumberTarget", matches: (op.contact.phoneNumbers as readonly string[]).some((n) => grounded(text, { kind: "number", number: n })) }
@@ -119,10 +119,19 @@ export const operationPorts = effect {
       : { kind: "refused" as const, code: CODES[done.settled], result: done.result }
   }
 
+  effect function readBack(operation: unknown, call: ExecutorCall) {
+    const found = try actions.readBack(operation, call.operationId)
+    if (found === undefined) return undefined
+    remember(operation, found.settled)
+    return APPLIED.has(found.settled)
+      ? { kind: "found" as const, result: found.result }
+      : { kind: "refused" as const, code: CODES[found.settled], result: found.result }
+  }
+
   const ports: OperationPorts = {
     validate: (operation) => bridges.offered ? telephonyOperationOf(operation) : undefined,
     execute: (operation, call) => runPromise(run(operation, call)),
-    readBack: () => Promise.resolve(undefined),
+    readBack: (operation, call) => runPromise(readBack(operation, call)),
     describe: (operation) => {
       const op = telephonyOperationOf(operation)
       return op === undefined ? { title: "Action", detail: "" } : { title: TITLES[op.type] ?? "Action", detail: detailOf(op) }

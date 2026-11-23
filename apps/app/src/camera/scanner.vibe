@@ -33,7 +33,8 @@ export service Scanner {
   tickRepeat(): void!!
   offerEvent(): void!!
   closeText(): void!!
-  back(): void!!
+  /** Back over the scan's dialogs: the innermost one closes first; false when no dialog is open. */
+  back(): boolean!!
   openDocument(): void!!
   addPage(from: "camera" | "picker"): void!!
   movePage(index: number, by: -1 | 1): void!!
@@ -207,6 +208,32 @@ export const scanner = Layer.effect(Scanner, effect {
     return ["cancelled", "failed", "unavailable", "too-large"].includes(answer.status) ? "ExportRetryable" : answer.status === "exported" || answer.status === "requested" ? "ExportConfirmed" : "ExportUnknown"
   }
 
+  effect function closeDocumentNow() {
+    try dialog({ type: "closeDocument" })
+    const ids = (try scan.get()).pageIds
+    try doc({ type: "closeScan" })
+    for (const id of ids) {
+      pages.delete(id)
+      revokeUrl(id)
+    }
+  }
+
+  effect function closeSearchableNow() {
+    try dialog({ type: "searchableClose" })
+    searchLines = []
+  }
+
+  effect function closeCorrectionNow() {
+    try dialog({ type: "correctionClose" })
+    if (corrected?.previewUrl !== undefined && corrected.previewUrl !== "") revokeUrl(corrected.previewUrl)
+    corrected = undefined
+  }
+
+  effect function closeCaptureNow() {
+    try dialog({ type: "captureClose" })
+    captured = undefined
+  }
+
   return {
     effect scanFrame() {
       const view = try viewfinder.get()
@@ -292,11 +319,13 @@ export const scanner = Layer.effect(Scanner, effect {
     },
     effect back() {
       const now = try dialogs.get()
-      if (now.capture.shown) return try dialog({ type: "captureClose" })
-      if (now.correction.shown) return try dialog({ type: "correctionClose" })
-      if (now.searchable.shown) return try dialog({ type: "searchableClose" })
-      if (now.text.shown) return try dialog({ type: "textBack" })
-      if (now.document) return try dialog({ type: "closeDocument" })
+      if (now.capture.shown) try closeCaptureNow()
+      else if (now.correction.shown) try closeCorrectionNow()
+      else if (now.searchable.shown) try closeSearchableNow()
+      else if (now.text.shown) try dialog({ type: "textBack" })
+      else if (now.document) try closeDocumentNow()
+      else return false
+      return true
     },
     effect openDocument() {
       try dialog({ type: "openDocument" })
@@ -374,15 +403,7 @@ export const scanner = Layer.effect(Scanner, effect {
       const deleted = try doc({ type: "deleteDraft", stored, approved: true, committed: removed !== false })
       if (deleted === undefined) try doc({ type: "endDraftAction" })
     },
-    effect closeDocument() {
-      try dialog({ type: "closeDocument" })
-      const ids = (try scan.get()).pageIds
-      try doc({ type: "closeScan" })
-      for (const id of ids) {
-        pages.delete(id)
-        revokeUrl(id)
-      }
-    },
+    closeDocument: closeDocumentNow,
     effect exportDocument(searchable: boolean) {
       const ids = (try scan.get()).pageIds
       const entries = ids.map((id) => pages.get(id)).filter((page) => page !== undefined)
@@ -443,10 +464,7 @@ export const scanner = Layer.effect(Scanner, effect {
       }
       try settleAutosave()
     },
-    effect closeSearchable() {
-      try dialog({ type: "searchableClose" })
-      searchLines = []
-    },
+    closeSearchable: closeSearchableNow,
     effect openCorrection(index: number) {
       if ((try dialog({ type: "openCorrection" })) === undefined) return
       corrected = { index, corners: fullPage(), preview: undefined, previewUrl: "" }
@@ -491,11 +509,7 @@ export const scanner = Layer.effect(Scanner, effect {
       }
       corrected = undefined
     },
-    effect closeCorrection() {
-      try dialog({ type: "correctionClose" })
-      if (corrected?.previewUrl !== undefined && corrected.previewUrl !== "") revokeUrl(corrected.previewUrl)
-      corrected = undefined
-    },
+    closeCorrection: closeCorrectionNow,
     corners: () => effect { return corrected?.corners ?? fullPage() },
     correctionPreview: () => effect { return corrected?.previewUrl ?? "" },
     effect openCapture() {
@@ -526,10 +540,7 @@ export const scanner = Layer.effect(Scanner, effect {
         try finishPages([...(try scan.get()).pageIds, id])
       }
     },
-    effect closeCapture() {
-      try dialog({ type: "captureClose" })
-      captured = undefined
-    },
+    closeCapture: closeCaptureNow,
     effect pageShown(hidden: boolean) {
       try dialog({ type: hidden ? "hideEvent" : "showEvent" })
       if (hidden) {

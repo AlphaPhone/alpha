@@ -3,7 +3,8 @@
 Asking the assistant about one of Alpha Phone's own notifications from the
 shade ("Help me with this notification."). Only a reminder, calendar or
 navigation notice that the owner can read is askable; a hosted result, a
-digest, a workflow or focus notice, and a redacted one ("Unlock to view",
+digest, a workflow step or focus notice (a workflow approval notice has its
+own reviewed question, below), and a redacted one ("Unlock to view",
 "Content hidden") fall back to opening the notice. The owner edits the
 question in a review; submitting rechecks that exactly that notice is still
 listed with the same revision, that the owner and screen are unchanged and
@@ -73,4 +74,26 @@ pure def alwaysDiscardedOrConsumedNotBoth(a: Asking): bool = a.discards + a.cons
 pure def alwaysResolveFailuresFollowTaps(a: Asking): bool = a.resolveFailures <= a.resolveCalls
 pure def sometimesComposed(a: Asking): bool = a.composed == 1
 pure def sometimesFellBack(a: Asking): bool = a.fallback == 1
+```
+
+## Story: Ask Alpha about a workflow approval notice
+
+> As the owner, I want Ask Alpha on a workflow approval notice to open the
+> same reviewed question about that step, so that I can understand what I
+> am approving before I decide, without asking ever deciding it.
+
+### A workflow approval notice is asked about through a reviewed excerpt, rechecked and consumed at Add to chat, and asking never decides the step
+
+Clock resolves the exact run under the current agent and hands the step's
+excerpt to the assistant's question review; Add to chat rereads the notice
+and composes the draft only when exactly that notice is still listed with
+the revision the owner saw, and consumes it once. Cancelling leaves the
+approval waiting; an expired, withdrawn or other owner's notice supplies no
+context (#472, #461).
+
+```quint
+pure def workflowAskComposes(listed: bool, sameRevision: bool, consumed: bool): bool = listed and sameRevision and consumed
+pure def decidesStep(asked: bool, approvedOnCard: bool): bool = approvedOnCard
+pure def lawAChangedNoticeComposesNothing(consumed: bool): bool = not(workflowAskComposes(true, false, consumed))
+pure def lawAskingNeverDecides(asked: bool): bool = not(decidesStep(asked, false))
 ```

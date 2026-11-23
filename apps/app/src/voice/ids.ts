@@ -1,14 +1,6 @@
 // spec/voice/latency.md, "A trial starts for a new turn before its reply is synthesized, and every started turn is recorded once"
 
 /**
- * A fresh random id for a native request, a capture or a trial.
- * @throws {never}
- */
-export function newId(): string {
-  return globalThis.crypto.randomUUID();
-}
-
-/**
  * Whether the page reports the network as offline.
  * @throws {never}
  */

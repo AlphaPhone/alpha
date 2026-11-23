@@ -1,7 +1,6 @@
 // spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Preference, type Preferences as State, Machine, asksBefore, decodeState, loadsMailImages, machine, sensorAllowed, sharesLocation, stored, allowsCalendarEdits, allowsGmailChanges } from "../../gen/settings__preferences.effect.vibe"
-import { MapsPreferences } from "../maps/ports.vibe"
 import { Build } from "../platform/build.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 
@@ -37,7 +36,7 @@ effect function readable() {
   return value !== null && (try (decodeState(value) catch () => undefined)) !== undefined
 }
 
-/** The preferences Machine kept under the owner's key, or in memory while the key cannot be read; and Maps' view of Location for Alpha. */
+/** The preferences Machine kept under the owner's key, or in memory while the key cannot be read. */
 export const preferences = Layer.unwrap(effect {
   const ok = try readable()
   const kept = ok ? stored(PREFERENCES_KEY) : machine()
@@ -69,10 +68,6 @@ export const preferences = Layer.unwrap(effect {
       },
     }
   })
-  const maps = Layer.effect(MapsPreferences, effect {
-    const held = try Machine
-    return { locationForAlpha: Stream.changes(Stream.map(held.changes, (value) => sharesLocation(value, lock.open))) }
-  })
-  return Layer.provideMerge(Layer.merge(service, maps), kept)
+  return Layer.provideMerge(service, kept)
 })
 

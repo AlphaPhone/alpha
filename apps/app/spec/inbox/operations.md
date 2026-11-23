@@ -348,7 +348,8 @@ pure def sometimesWithdrawnReviewDiscarded(s: Journal): bool = s.notice == Acces
 
 Cleanup of the local draft runs for a send that Gmail confirmed with a message id, for the account
 it was sent from. A confirmed send restored after a restart holds cleanup until a fresh receipt read
-agrees on the request, kind, review digest and message id. Sent is announced once per request.
+agrees on the request, kind, review digest and message id. Sent is announced once per request; the
+phone remembers the last fifty announced requests, more than the accounts that can each hold one.
 
 ```quint
 pure def cleanupReady(r: OperationRecord): bool =
@@ -363,7 +364,12 @@ pure def canAnnounce(s: Journal, requestId: str): bool = {
   val r = recordOf(s.owner, s)
   hasRecord(s.owner, s) and r.requestId == requestId and r.phase == Observed and r.receipt.receiptState == SucceededReceipt and not(s.announced.includes(requestId))
 }
-pure def announce(s: Journal, requestId: str): Journal = { ...s, announced: s.announced.append(requestId) }
+pure val announcedLimit = 50
+pure def announce(s: Journal, requestId: str): Journal = {
+  val next = s.announced.append(requestId)
+  { ...s, announced: if (next.length() > announcedLimit) next.slice(next.length() - announcedLimit, next.length()) else next }
+}
+pure def alwaysTheAnnouncedListIsBounded(s: Journal): bool = s.announced.length() <= announcedLimit
 pure def alwaysAHeldCleanupFollowsAnObservedSend(s: Journal): bool = s.records.every(r => r.sourceHeld implies (r.kind == SendKind and r.phase == Observed))
 pure def alwaysSentIsAnnouncedOnce(s: Journal): bool = s.announced.every(id => s.announced.select(o => o == id).length() == 1)
 pure def sometimesCleanupReady(s: Journal): bool = s.records.some(r => cleanupReady(r))

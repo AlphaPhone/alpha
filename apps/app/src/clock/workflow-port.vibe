@@ -1,15 +1,39 @@
-// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"
-import { WorkflowClockPort } from "../workflows/ports.vibe"
-import { Machine as HandoffMachine } from "../../gen/clock__handoff.effect.vibe"
+// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"; spec/clock/handoff.md, "Any change to the draft retires its review"
+import { WorkflowClockPort, type AlarmRequest } from "../workflows/ports.vibe"
+import { Machine as HandoffMachine, type Event as HandoffEvent } from "../../gen/clock__handoff.effect.vibe"
 import { answeredWith } from "../../gen/clock__handoff.ts"
 import { ClockHandoff } from "./handoff.vibe"
 
-/** Workflows' Clock draft over Clock's own handoff: the same review, the same recorded dispatch, and only Clock's answer reported. */
+const WEEK = [1, 2, 3, 4, 5, 6, 7] as const
+
+/** Whether Clock's draft now holds exactly the alarm a workflow asked for. */
+function holds(draft: { readonly handoffAction: string; readonly hour: number; readonly minute: number; readonly label: string; readonly days: ReadonlyArray<number> }, request: AlarmRequest): boolean {
+  const wanted = [...new Set(request.days)].sort((a, b) => a - b)
+  const held = [...draft.days].sort((a, b) => a - b)
+  return draft.handoffAction === "SetAlarm" && draft.hour === request.hour && draft.minute === request.minute &&
+    draft.label === request.label && held.length === wanted.length && held.every((day, i) => day === wanted[i])
+}
+
+/** Workflows' Clock draft over Clock's own handoff: the workflow's alarm in the same draft, the same review, the same recorded dispatch, and only Clock's answer reported. */
 export const workflowClockPort = Layer.effect(WorkflowClockPort, effect {
   const handoff = try ClockHandoff
   const draft = try HandoffMachine
+  const step = (event: HandoffEvent) => draft.send(event) catch () => undefined
+
   return {
-    prepare: () => handoff.prepare(),
+    effect prepare(request: AlarmRequest) {
+      const before = try draft.get()
+      if (before.phase === "Saving" || before.phase === "Opening") return false
+      if (before.handoffAction !== "SetAlarm") step({ type: "chooseAction", handoffAction: "SetAlarm" })
+      step({ type: "setTime", hour: request.hour, minute: request.minute })
+      if ((try draft.get()).label !== request.label) step({ type: "setLabel", label: request.label })
+      const wanted = new Set(request.days)
+      for (const day of WEEK) {
+        if ((try draft.get()).days.includes(day) !== wanted.has(day)) step({ type: "toggleDay", day })
+      }
+      if (!holds(try draft.get(), request)) return false
+      return try handoff.prepare()
+    },
     effect confirm() {
       try handoff.confirm()
       return answeredWith((try draft.get()).message, "ClockOpened")

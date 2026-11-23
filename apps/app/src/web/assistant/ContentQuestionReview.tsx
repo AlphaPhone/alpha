@@ -4,9 +4,8 @@ import { useState } from "react";
 import type { AppId } from "../app-screen.ts";
 import { AssistantDraft, excerptLimit, questionLimit, type QuestionReview } from "../../assistant/draft.vibe";
 import { Button, Dialog, DialogContent, DialogTitle, Label, Textarea } from "../components/ui/index.ts";
-import { runtime } from "./runtime.ts";
-import { reviewStream, run } from "./services.ts";
-import { useServiceStream } from "./use-stream.ts";
+import { reviewStream } from "./services.ts";
+import { act, perform, useServiceStream } from "../shell/services.ts";
 
 /** What the shell gives an overlay surface. */
 export type ContentQuestionReviewProps = {
@@ -21,10 +20,10 @@ function ReviewForm({ review }: FormProps) {
   const [excerpt, setExcerpt] = useState(review.text);
   const [preview] = useState(() => (review.image === undefined ? undefined : URL.createObjectURL(review.image)));
   const release = () => { if (preview !== undefined) URL.revokeObjectURL(preview); };
-  const dismiss = () => { release(); run(Effect.flatMap(Effect.service(AssistantDraft), (draft) => draft.dismiss(review.id))); };
+  const dismiss = () => { release(); act(Effect.flatMap(Effect.service(AssistantDraft), (draft) => draft.dismiss(review.id))); };
   const ready = question.trim() !== "" && (excerpt.trim() !== "" || review.image !== undefined);
   const add = () => {
-    void runtime.runPromise(Effect.flatMap(Effect.service(AssistantDraft), (draft) => draft.compose(review.id, question, excerpt)))
+    void perform(Effect.flatMap(Effect.service(AssistantDraft), (draft) => draft.compose(review.id, question, excerpt)))
       .then((composed) => { if (composed) release(); }, () => undefined);
   };
   return (
@@ -55,6 +54,6 @@ function ReviewForm({ review }: FormProps) {
  * @model spec/assistant/index.md
  */
 export function ContentQuestionReview(_props: ContentQuestionReviewProps) {
-  const review = useServiceStream(runtime, "assistant/question-review", reviewStream, undefined);
+  const review = useServiceStream("assistant/question-review", reviewStream, undefined);
   return review === undefined ? null : <ReviewForm key={review.id} review={review} />;
 }

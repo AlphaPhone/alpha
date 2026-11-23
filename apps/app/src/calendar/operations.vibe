@@ -1,16 +1,20 @@
-// spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/deviceActions.md, "There is no direct path: the only way in is the owner's card on the bound screen"; spec/calendar/deviceActions.md, "A deletion is only queued, and its receipt says unknown while Undo can still win"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"
+// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "A named change or deletion runs only for the selected event whose title is the name given"; spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/deviceActions.md, "There is no direct path: the only way in is the owner's card on the bound screen"; spec/calendar/deviceActions.md, "A deletion is only queued, and its receipt says unknown while Undo can still win"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"
 import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
-import { readOperation } from "@elizaos/agent/operations"
+import { readOperation, readResult } from "@elizaos/agent/operations"
 import { deleteUndoMs } from "@elizaos/os/bridges/deletion-window"
 import type { CalendarOperation, ScreenView } from "../../gen/calendar__deviceActions.effect.vibe"
+import { namedChangeAllowed } from "../../gen/calendar__namedRead.effect.vibe"
+import { overlapsRange, rangeOutcome, rangeReadAdmitted } from "../../gen/calendar__rangeRead.ts"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { Native } from "../platform/native.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { AgentCalendar } from "./agent.vibe"
-import { decodeAccess } from "./device.schema.vibe"
+import { type DeviceEventRecord, decodeAccess, decodeList } from "./device.schema.vibe"
+import { sha256Hex } from "./digest.ts"
+import { DAY } from "./model.vibe"
 import { DeviceCalendar, type SelectedObject } from "./device.vibe"
 import { AgentRequests, type ApprovedAction } from "./requests.vibe"
-import { deviceZone, formatDateTime } from "./time.ts"
+import { civilDay, deviceZone, formatDateTime, isoInstant } from "./time.ts"
 
 const PLUGIN = "AlphaCalendar"
 
@@ -28,8 +32,58 @@ type Wire =
   | { readonly type: "calendar_availability"; readonly start: string; readonly end: string; readonly timeZone: string }
   | { readonly type: "calendar_named"; readonly action: "read" | "delete"; readonly name: string }
   | { readonly type: "calendar_named"; readonly action: "update"; readonly name: string; readonly fields: Fields }
+  | RangeRead
 
-const TYPES = new Set(["calendar_create_local", "calendar_read_next", "calendar_create", "calendar_read_selected", "calendar_update", "calendar_delete", "calendar_availability", "calendar_named"])
+/** A reviewed range read of the phone's calendars, as an approved workflow step names it. */
+type RangeRead = {
+  readonly type: "read_calendar_range"; readonly calendarIds: readonly string[]
+  readonly start: string; readonly end: string; readonly timeZone: string; readonly maximumEvents: number
+}
+
+/** One event a range read shares: identity, title and times only, with the revision that binds them. */
+interface SharedOccurrence {
+  readonly id: string; readonly calendarId: string; readonly revision: string; readonly title: string
+  readonly start: string; readonly end: string; readonly allDay: boolean
+}
+
+const TYPES = new Set(["calendar_create_local", "calendar_read_next", "calendar_create", "calendar_read_selected", "calendar_update", "calendar_delete", "calendar_availability", "calendar_named", "read_calendar_range"])
+
+/** The first instant of a UTC-midnight date as the same date begins in `zone`. */
+function firstOfLocalDay(wallDay: number, zone: string): number {
+  const target = Math.round(wallDay / DAY)
+  let low = wallDay - 72_000_000
+  let high = wallDay + 72_000_000
+  while (high - low > 1_000) {
+    const candidate = low + Math.floor((high - low) / 2_000) * 1_000
+    if (civilDay(candidate, zone) < target) low = candidate
+    else high = candidate
+  }
+  return high
+}
+
+/** Whether a device event belongs to a reviewed calendar and overlaps the reviewed range; an all-day event by its dates in the step's zone. */
+export function inReviewedRange(event: DeviceEventRecord, op: RangeRead): boolean {
+  if (!op.calendarIds.includes(event.calendarId) || event.end < event.begin) return false
+  let begins = event.begin
+  let ends = event.end
+  if (event.allDay === true) {
+    if (begins % DAY !== 0 || ends % DAY !== 0 || begins === ends) return false
+    begins = firstOfLocalDay(begins, op.timeZone)
+    ends = firstOfLocalDay(ends, op.timeZone)
+  }
+  return overlapsRange(begins, ends, Date.parse(op.start), Date.parse(op.end))
+}
+
+/** The fields a range read shares of one device event, before its revision is bound. */
+export function sharedFields(event: DeviceEventRecord): Omit<SharedOccurrence, "revision"> {
+  return { id: event.id, calendarId: event.calendarId, title: event.title.slice(0, 1000), start: isoInstant(event.begin), end: isoInstant(event.end), allDay: event.allDay === true }
+}
+
+/** Titles compared as a named change compares them: trimmed, spaces folded and case folded. */
+export function sameTitle(title: string, name: string): boolean {
+  const fold = (text: string) => text.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase()
+  return fold(title) !== "" && fold(title) === fold(name)
+}
 
 /** The Calendar operation an untrusted value is, or undefined when it is not exactly one the agent's vocabulary admits. */
 function calendarOperation(operation: unknown): Wire | undefined {
@@ -71,7 +125,7 @@ function detailOf(fields: Fields): string {
 }
 
 function isRead(op: Wire): boolean {
-  return op.type === "calendar_read_next" || op.type === "calendar_read_selected" || op.type === "calendar_availability" || (op.type === "calendar_named" && op.action === "read")
+  return op.type === "read_calendar_range" || op.type === "calendar_read_next" || op.type === "calendar_read_selected" || op.type === "calendar_availability" || (op.type === "calendar_named" && op.action === "read")
 }
 
 /** How the card names one Calendar operation, and where the owner reviews it. */
@@ -91,6 +145,13 @@ export function describeCalendarOperation(op: Wire): { readonly title: string; r
         detail: `From ${formatDateTime(start, op.timeZone)} to ${formatDateTime(end, op.timeZone)} (${op.timeZone}). You choose which calendars this phone reads. Only busy times are shared, not event titles or details.`,
       }
     }
+    case "read_calendar_range": {
+      const count = op.calendarIds.length
+      return {
+        title: "Share your calendar for these dates",
+        detail: `From ${formatDateTime(Date.parse(op.start), op.timeZone)} to ${formatDateTime(Date.parse(op.end), op.timeZone)} (${op.timeZone}), from ${count === 1 ? "one calendar" : `${count} calendars`} on this phone, up to ${op.maximumEvents} events. Titles and times only, never places, notes or guests.`,
+      }
+    }
     case "calendar_named": return op.action === "read"
       ? { title: `Share “${op.name}”`, detail: "Choose the matching event, then review what to share. Nothing changes yet.", destination: "calendar" }
       : op.action === "delete"
@@ -102,6 +163,7 @@ export function describeCalendarOperation(op: Wire): { readonly title: string; r
 /** The receipt sentence for a settled Calendar operation. */
 export function summarizeCalendarOperation(op: Wire, result: string): string {
   if (result === "Applied") {
+    if (op.type === "read_calendar_range") return "Shared the titles and times of those dates."
     if (op.type === "calendar_availability") return "Shared your free and busy times."
     if (isRead(op)) return "Shared from Calendar."
     if (op.type === "calendar_create_local" || op.type === "calendar_create") return "Added to Calendar."
@@ -199,16 +261,61 @@ export const operationPorts = effect {
       : { kind: "refused", code: "not_shared", result: { summary: read.sentence } }
   }
 
+  effect function rangeRead(op: RangeRead) {
+    const shown = try screen()
+    let permission = false
+    if (!shown.hidden) permission = try access("ReadNext")
+    if (!rangeReadAdmitted(!shown.hidden, permission)) return { kind: "refused", code: NOT_DISPATCHED }
+    const begin = Date.parse(op.start)
+    const end = Date.parse(op.end)
+    const raw = native.invoke(PLUGIN, "list", { begin: begin - DAY, end: end + DAY }) catch () => undefined
+    const read = raw === undefined ? undefined : (decodeList(raw) catch () => undefined)
+    const ready = read !== undefined && read.status === "ready" ? read : undefined
+    const picked = ready === undefined ? [] : ready.events.filter((event) => inReviewedRange(event, op))
+    const unique = [...new Map(picked.map((event) => [JSON.stringify([event.calendarId, event.id, event.begin]), event])).values()]
+      .sort((a, b) => a.begin - b.begin || a.id.localeCompare(b.id))
+    const events: SharedOccurrence[] = []
+    if (ready !== undefined && !ready.truncated && unique.length <= op.maximumEvents) {
+      for (const event of unique) {
+        const fields = sharedFields(event)
+        const revision = try tryPromise({ try: () => sha256Hex(JSON.stringify([fields.id, fields.calendarId, fields.title, fields.start, fields.end, fields.allDay])), catch: () => "" }) catch () => ""
+        if (revision === "") return { kind: "refused", code: "calendar_unavailable" }
+        events.push({ ...fields, revision })
+      }
+    }
+    const result = { kind: "calendar", events }
+    const outcome = rangeOutcome(ready !== undefined, ready !== undefined && !ready.truncated, unique.length, op.maximumEvents,
+      events.length === unique.length && readResult(op as unknown as Parameters<typeof readResult>[0], result) !== undefined)
+    if ((try screen()).hidden) return { kind: "refused", code: NOT_DISPATCHED }
+    switch (outcome) {
+      case "RangeShared": return { kind: "applied", result }
+      case "RangeTooMany": return { kind: "refused", code: "calendar_overflow", result: { maximumEvents: op.maximumEvents } }
+      case "RangeIncomplete": return { kind: "refused", code: "calendar_incomplete" }
+      case "RangeUnverified": return { kind: "refused", code: "calendar_unverified" }
+      default: return { kind: "refused", code: read?.status === "permission-required" ? "calendar_permission" : "calendar_unavailable" }
+    }
+  }
+
+  effect function namedTitle(target: Target) {
+    const head = try Stream.runHead(device.reads)
+    const events = head._tag === "Some" ? head.value.events : []
+    return events.find((event) => event.id === target.eventId && event.revision === target.revision)?.title
+  }
+
   effect function run(operation: unknown, call: ExecutorCall) {
     const op = calendarOperation(operation)
     if (op === undefined) return { kind: "refused", code: "unsupported" }
+    if (op.type === "read_calendar_range") return try rangeRead(op)
     if (op.type === "calendar_availability") return try availability(op)
     if (op.type === "calendar_named" && op.action === "read") return try namedRead(op, call)
     const machineOp = machineOperation(op)
     if (machineOp === undefined) return { kind: "refused", code: "unsupported" }
     if (op.type !== "calendar_named") return try onPhone(op, machineOp, call, (result) => result)
     const target = targetOf(try device.selected())
-    if (target === undefined) return { kind: "refused", code: NOT_DISPATCHED }
+    const title = target === undefined ? undefined : try namedTitle(target)
+    if (target === undefined || !namedChangeAllowed(true, title !== undefined && sameTitle(title, op.name))) {
+      return { kind: "refused", code: target === undefined ? NOT_DISPATCHED : "name_differs" }
+    }
     const exact: Wire = op.action === "update" ? { type: "calendar_update", target, fields: op.fields } : { type: "calendar_delete", target }
     return try onPhone(exact, machineOp, call, (record) => ({ version: 1, kind: "calendar_named", action: op.action, name: op.name, basis: "owner-chosen", operation: exact, record }))
   }
@@ -216,7 +323,7 @@ export const operationPorts = effect {
   const ports: OperationPorts = {
     validate: (operation) => calendarOperation(operation) === undefined ? undefined : operation,
     execute: (operation, call) => runPromise(run(operation, call)),
-    readBack: async () => undefined,
+    readBack: async () => ({ kind: "unresolved" }),
     describe: (operation) => {
       const op = calendarOperation(operation)
       return op === undefined ? { title: "Action", detail: "" } : describeCalendarOperation(op)

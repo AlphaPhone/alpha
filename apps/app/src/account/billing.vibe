@@ -8,9 +8,11 @@ import {
   snapshotFromResponse, type BillingSnapshot
 } from "@elizaos/cloud/client"
 import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment } from "../platform/build-live.vibe"
 import { Cloud } from "../platform/cloud.vibe"
+import { CloudServices } from "../platform/cloud-services.vibe"
 import { Native } from "../platform/native.vibe"
-import { authorityOf, billingReturnUrl, deployment, environmentFor, freshKey, stripePageAllowed } from "./deployment.ts"
+import { authorityOf, billingReturnUrl, deployment, freshKey, stripePageAllowed } from "./deployment.ts"
 import { AuthorityAnswer, AuthorityStatus, FundsCheckout, PlanList, Referral } from "./billing.schema.vibe"
 import { Entitlement } from "./entitlement.vibe"
 import { CloudSession, ownerOf } from "./session.vibe"
@@ -74,10 +76,11 @@ export const billingService = Layer.effect(Membership, effect {
   const machine = try BillingMachine
   const cloud = try Cloud
   const native = try Native
+  const services = try CloudServices
   const build = try Build
   const session = try CloudSession
   const entitlement = try Entitlement
-  const authority = authorityOf(deployment, environmentFor(build.info.testMocks))
+  const authority = authorityOf(deployment, buildCloudEnvironment(build.info))
   const details = try SubscriptionRef.make<BillingDetails>({ offers: [], referral: undefined, email: undefined, quote: undefined, renewsAt: undefined })
   const snapshot = try Ref.make<BillingSnapshot | undefined>(undefined)
   const checkoutSession = try Ref.make("")
@@ -96,8 +99,11 @@ export const billingService = Layer.effect(Membership, effect {
 
   effect function openPage(url: string) {
     if (!stripePageAllowed(url)) return false
-    const opened = native.invoke("AlphaConnection", "openExternal", { url, requestId: freshKey() }) catch () => false
-    return opened !== false
+    const opened = effect {
+      try services.openExternal(url)
+      return true
+    } catch () => false
+    return opened
   }
 
   effect function performAuthority(operation: Record<string, unknown>) {

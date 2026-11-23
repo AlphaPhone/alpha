@@ -6,13 +6,13 @@ import {
 } from "../../gen/notes__recorder.effect.vibe"
 import { type Event as JournalEvent, Machine as JournalMachine, machine as journalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
 import { Native } from "../platform/native.vibe"
-import { VoiceRoute } from "../voice/route.vibe"
+import { RecordingTranscriber } from "../voice/transcription.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { NotesEditor } from "./editor.vibe"
 import { contentOf, nextDefaultTitle, type NoteRow, voiceAudio } from "./list.vibe"
 import { decodeAudioDescription, decodeClaim, decodePlayback, decodeRecordingStatus, decodeSavedAudio, type RecordingStatus } from "./notes.schema.vibe"
 import { sha256Hex } from "./platform.ts"
-import { transcribeOnRoute } from "./speech.vibe"
+import { transcribeKept } from "./speech.vibe"
 
 const voicePlugin = "AlphaVoiceCloud"
 const audioPlugin = "AlphaNoteAudio"
@@ -42,9 +42,11 @@ export service NotesRecorder {
   stop(): boolean!!
   finish(): boolean!!
   askDiscard(): void!!
-  keep(): void!!
+  /** Keep the recording the owner was asked to discard; false when no discard was asked. */
+  keep(): boolean!!
   discard(): void!!
-  leave(): void!!
+  /** Detach the recorder sheet and keep the recording; false when no recording was open. */
+  leave(): boolean!!
   ownerChanged(present: boolean): void!!
   play(row: NoteRow): boolean!!
   stopPlayback(): boolean!!
@@ -77,7 +79,7 @@ const idle: RecorderDisplay = { durationMs: 0, levels: [], transcript: "", posit
 
 const make = effect {
   const native = try Native
-  const routes = try VoiceRoute
+  const transcriber = try RecordingTranscriber
   const collection = try NotesCollection
   const editor = try NotesEditor
   const machine = try RecorderMachine
@@ -135,7 +137,7 @@ const make = effect {
       const state = try machine.get()
       if (state.transcriptionFailed || state.savePending) return
       if ((try Ref.get(texts)).has(segment.segmentId)) continue
-      const answer = try transcribeOnRoute(routes, native, segment.segmentId)
+      const answer = try transcribeKept(transcriber, segment.segmentId)
       if (typeof answer !== "string") {
         const code = answer.code
         if (code === "no-speech") {
@@ -374,7 +376,7 @@ const make = effect {
     },
     finish,
     effect askDiscard() { try send({ type: "askDiscard" }) },
-    effect keep() { try send({ type: "keepRecording" }) },
+    effect keep() { return (try send({ type: "keepRecording" })) !== undefined },
     effect discard() {
       const id = try recordingId()
       if ((try send({ type: "discardRecording" })) === undefined) return
@@ -384,7 +386,9 @@ const make = effect {
       try close()
     },
     effect leave() {
-      if ((try send({ type: "leaveNotes" })) !== undefined) try close()
+      if ((try send({ type: "leaveNotes" })) === undefined) return false
+      try close()
+      return true
     },
     effect ownerChanged(present: boolean) {
       const state = try machine.get()

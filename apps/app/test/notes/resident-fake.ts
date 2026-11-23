@@ -134,17 +134,20 @@ export class DeviceFake {
   released: string[][] = [];
 
   available(plugin: string): boolean {
-    return plugin === "AlphaNoteAudio" ? this.host : ["AlphaVoiceCloud", "AlphaConnection", "DailyApps", "AlphaMailAttachments", "AlphaNoteDocuments"].includes(plugin);
+    return plugin === "AlphaNoteAudio" ? this.host : ["AlphaVoiceCloud", "ElizaSecureStore", "DailyApps", "AlphaMailAttachments", "AlphaNoteDocuments"].includes(plugin);
   }
 
   invoke(plugin: string, method: string, args: Record<string, unknown> = {}): unknown {
-    if (plugin === "AlphaConnection" && method === "secureRead") return { value: this.slots.get(String(args.slot)) ?? null };
-    if (plugin === "AlphaConnection" && method === "secureCompareExchange") {
-      const slot = String(args.slot);
-      if ((this.slots.get(slot) ?? null) !== args.expectedValue) return { status: "conflict" };
-      if (args.value === null) this.slots.delete(slot);
-      else this.slots.set(slot, String(args.value));
-      return { status: "saved" };
+    if (plugin === "ElizaSecureStore" && method === "get") {
+      const value = this.slots.get(String(args.key));
+      return value === undefined ? { ok: false, error: "not_found" } : { ok: true, value };
+    }
+    if (plugin === "ElizaSecureStore" && method === "compareAndExchange") {
+      const key = String(args.key);
+      if ((this.slots.get(key) ?? null) !== args.expected) return { ok: false, error: "conflict", outcome: "Conflict" };
+      if (args.value === null) this.slots.delete(key);
+      else this.slots.set(key, String(args.value));
+      return { ok: true, outcome: args.value === null ? "Removed" : "Written" };
     }
     if (plugin === "AlphaVoiceCloud") return this.voice(method, args);
     if (plugin === "AlphaNoteAudio") return this.audio(method, args);

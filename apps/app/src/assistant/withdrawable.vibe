@@ -1,47 +1,34 @@
 // spec/assistant/withdrawal.md, "A request withdrawn before its worker dispatched it never reaches the agent, and every call is answered at most once"
 import { Machine as BridgeMachine, type Event as BridgeEvent } from "../../gen/assistant__withdrawal.effect.vibe"
-import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
-import { BridgeAnswer } from "./payloads.schema.vibe"
 import { AgentUnreachable, ask } from "./transport.vibe"
 
-const plugin = "ElizaAgent"
-
-/** Requests the assistant may give up on: an interrupted request is withdrawn from the native bridge before its worker dispatches it. */
+/** Requests the assistant may give up on: interrupting one stops the wait at once, and the resident withdraws the call by its id. */
 export service WithdrawableRequests {
-  /** One JSON request; interrupting it withdraws it with `abort({ id })` and its late answer is dropped. */
+  /** One JSON request; interrupting it withdraws it and its late answer is dropped. */
   ask(method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown): unknown!AgentUnreachable
 }
 
-/** Withdrawable requests over the native agent bridge, or the resident's plain API where the bridge is absent. */
+/** Withdrawable requests over the resident's local API, which withdraws an interrupted call by its id. */
 export const withdrawableLayer = Layer.effect(WithdrawableRequests, effect {
-  const native = try Native
   const resident = try Resident
   const bridge = try BridgeMachine
   const quiet = (event: BridgeEvent) => map(bridge.send(event), () => true) catch () => false
   return {
     ask: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => effect {
-      if (!(try native.available(plugin))) return try Effect.provideService(ask(method, path, body), Resident, resident)
       try quiet({ type: "request" })
       const id = (try bridge.get()).nextId - 1
-      const callId = `assistant-${try Clock.currentTimeMillis}-${id}`
+      try quiet({ type: "takeUp", id })
+      try quiet({ type: "dispatch", id })
       const answered = try onInterrupt(
-        native.invoke(plugin, "request", { id: callId, method, path, ...(body === undefined ? {} : { body }) }) catch effect (error) => {
-          throw new AgentUnreachable({ status: 0, code: "unavailable", message: error._tag })
-        },
+        Effect.provideService(ask(method, path, body), Resident, resident),
         () => effect {
           try quiet({ type: "abort", id })
-          native.invoke(plugin, "abort", { id: callId }) catch () => undefined
           try quiet({ type: "cancelRequest", id })
         },
       )
-      try quiet({ type: "takeUp", id })
-      try quiet({ type: "dispatch", id })
       try quiet({ type: "transportAnswers", id })
-      const reply = Schema.decodeUnknownOption(BridgeAnswer)(answered)
-      const status = Option.isSome(reply) ? reply.value.status : 0
-      if (Option.isNone(reply) || status < 200 || status >= 400) throw new AgentUnreachable({ status, message: "refused" })
-      return reply.value.data
+      return answered
     },
   }
 })

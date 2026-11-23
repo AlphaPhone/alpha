@@ -1,5 +1,6 @@
-// spec/shell/navigation.md, "Story: Open an app and find it where I left it"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/navigation.md, "Story: Keep sheets and dialogs above the phone"; spec/shell/navigation.md, "Story: Let the agent switch my screen only while I am still looking"; spec/shell/navigation.md, "Story: Leave an app Alpha may no longer show"
-import { Machine as NavigationMachine, backTaken, type Event as NavigationEvent, type Host, type LayerKind, type Nav, type Detent } from "../../gen/shell__navigation.effect.vibe"
+// spec/shell/navigation.md, "Story: Open an app and find it where I left it"; spec/shell/navigation.md, "Story: Go back one step at a time"; spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/permissions.md, "Back leaves a review and finishes the Ready card; on a first-run step it does nothing"; spec/shell/navigation.md, "Story: Keep sheets and dialogs above the phone"; spec/shell/navigation.md, "Story: Let the agent switch my screen only while I am still looking"; spec/shell/navigation.md, "Story: Leave an app Alpha may no longer show"
+import { Machine as NavigationMachine, backTaken, type Event as NavigationEvent, type Host, type LayerKind, type Nav } from "../../gen/shell__navigation.effect.vibe"
+import type { Detent } from "../../gen/assistant__detents.ts"
 import type { AppId } from "../web/app-screen.ts"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
@@ -62,11 +63,24 @@ export function setAppBack(resolve: (app: string) => (() => Promise<boolean>) | 
   appBack = resolve
 }
 
-/** One Back: the front app's own first while nothing lies above it, then the shell's order. */
+const holdBacks = new Map<string, () => boolean!!>()
+
+/** Names the Back of a surface that holds the phone (`hold` with this id), asked before the shell's while it holds and no layer lies above it; true when it took Back. */
+export function setHoldBack(id: string, back: () => boolean!!): void {
+  holdBacks.set(id, back)
+}
+
+/** One Back: a holding surface's own while nothing is listed above it, then the front app's own while nothing lies above it, then the shell's order. */
 export effect function backOnce(machine: NavigationMachine.Shape) {
   const state = try machine.get()
+  if (state.layers.length === 0) {
+    for (const id of state.holds) {
+      const own = holdBacks.get(id)
+      if (own !== undefined && (try own())) return true
+    }
+  }
   const front = state.app !== "" && state.layers.length === 0 && state.holds.length === 0 && !state.voice && !state.shade &&
-    state.chat !== "ChatSheet" && state.chat !== "ChatFull"
+    state.chat !== "Sheet" && state.chat !== "Full"
   const own = front ? appBack(state.app) : undefined
   if (own !== undefined) {
     const handled = tryPromise(own) catch () => false
@@ -87,6 +101,14 @@ effect function followHome(machine: NavigationMachine.Shape) {
   }
 }
 
+effect function followEnd(machine: NavigationMachine.Shape, native: Native.Shape) {
+  let ended = false
+  for try (const state of machine.changes) {
+    if (state.ended && !ended && state.host === "AssistantSurface") native.invoke("DailyApps", "closeAssistant") catch () => undefined
+    ended = state.ended
+  }
+}
+
 effect function followVisibility(machine: NavigationMachine.Shape, admitted: string[]) {
   for try (const _ of pageEvents("visibilitychange", "document")) {
     if (pageHidden()) try sendTo(machine, { type: "hide" })
@@ -101,7 +123,7 @@ const DEV_COMMANDS: Readonly<Record<string, NavigationEvent>> = {
   home: { type: "goHome" },
   back: { type: "nativeBack" },
   shade: { type: "openShade" },
-  assistant: { type: "moveChat", detent: "ChatFull" },
+  assistant: { type: "moveChat", detent: "Full" },
   background: { type: "hide" },
   resume: { type: "show" },
   power: { type: "hide" },
@@ -125,6 +147,7 @@ export const navigationLive = Layer.effect(Navigation, effect {
   fork.scoped followBack(machine)
   fork.scoped followHome(machine)
   fork.scoped followVisibility(machine, admitted)
+  fork.scoped followEnd(machine, try Native)
   if (build.info.testMocks) fork.scoped followDevCommands(machine)
   const send = (event: NavigationEvent) => sendTo(machine, event)
   return {

@@ -245,3 +245,26 @@ pure def chipCleared(c: Contacts): Contacts = { ...c, chip: "", query: "", epoch
 pure def alwaysAChipOnlyWhileShown(c: Contacts): bool = c.chip != "" implies c.shown
 pure def sometimesAlphaFilteredContacts(c: Contacts): bool = c.chip != "" and visibleRows(c).length() > 0
 ```
+
+### Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts
+
+After the comms stage and the open chat, Back closes the editor (an unsaved edit is dropped, as
+Cancel does), then a delete confirmation, then the open contact, then Alpha's chip, then the
+owner's own search. While a save or a delete is in flight Back is held. Only the unfiltered list
+leaves Contacts.
+
+```quint
+type ContactsBack = ContactsWriteHolds | EditorCloses | DeleteDeclines | ContactCloses | ChipClears | SearchClears | LeavesContacts
+pure def contactsBack(c: Contacts): ContactsBack =
+  if (c.writeKind != NoWrite) ContactsWriteHolds
+  else if (editorOpen(c.editor)) EditorCloses
+  else if (c.confirming) DeleteDeclines
+  else if (c.openId != "") ContactCloses
+  else if (c.chip != "") ChipClears
+  else if (c.query != "") SearchClears
+  else LeavesContacts
+pure def lawBackLeavesContactsOnlyFromTheWholeList(c: Contacts): bool =
+  contactsBack(c) == LeavesContacts implies
+    (c.writeKind == NoWrite and not(editorOpen(c.editor)) and not(c.confirming) and c.openId == "" and c.chip == "" and c.query == "")
+pure def lawBackNeverInterruptsAWrite(c: Contacts): bool = c.writeKind != NoWrite implies contactsBack(c) == ContactsWriteHolds
+```

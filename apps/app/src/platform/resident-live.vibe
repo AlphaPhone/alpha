@@ -10,7 +10,8 @@ import { ResidentControl, ResidentRecovery, type HeldRecovery, type ResidentSess
 import { agentBridge, agentReport, agentRequest, stopAgent, withdraw } from "./resident-bridge.vibe"
 import { FeatureStarting, RecoveryArchive, RecoveryReview, ResidentAgents, ResidentRefusal, ResidentWhoAmI } from "./native.schema.vibe"
 import { developmentAgentBase } from "./build-flags.ts"
-import { capacitor, newId } from "./native-capacitor.ts"
+import { capacitor } from "./native-capacitor.ts"
+import { newId } from "./ids.ts"
 import ownerRoutes from "./owner-routes.json" with { type: "json" }
 
 const STARTUP_TIMEOUT_MS = 120000

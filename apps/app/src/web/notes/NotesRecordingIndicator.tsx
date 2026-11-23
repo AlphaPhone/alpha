@@ -5,7 +5,8 @@ import { Button } from "../components/ui/index.ts";
 import { useMachine } from "../../../gen/notes__recorder.react.ts";
 import { NotesRecorder, recordingClock } from "../../notes/recorder.vibe";
 import { runtime } from "./runtime.ts";
-import { useServiceStream } from "./services.ts";
+import { Effect } from "effect";
+import { useServiceStream } from "../shell/services.ts";
 
 export type NotesRecordingIndicatorProps = {
   /** Open an app, as the shell gives every surface. */
@@ -20,7 +21,7 @@ const displays = (recorder: NotesRecorder.Shape) => recorder.display;
  */
 export function NotesRecordingIndicator({ open }: NotesRecordingIndicatorProps) {
   const { state } = useMachine(runtime);
-  const display = useServiceStream(NotesRecorder, displays, { durationMs: 0, levels: [], transcript: "", positionMs: 0 });
+  const display = useServiceStream("notes.displays", Effect.map(Effect.service(NotesRecorder), displays), { durationMs: 0, levels: [], transcript: "", positionMs: 0 });
   if (state === undefined || (state.phase !== "RecRecording" && state.phase !== "RecPaused")) return null;
   return (
     <Button size="sm" variant="secondary" className="m-2 font-mono text-xs uppercase tabular-nums" aria-label={`Voice note ${state.phase === "RecPaused" ? "paused" : "recording"}, ${recordingClock(display.durationMs)}`} onClick={() => open("notes")}>

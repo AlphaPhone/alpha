@@ -3,7 +3,7 @@ import type { ComponentMeta } from "vibestack/stories";
 import type { TranscriptProps } from "./Transcript.tsx";
 import { conversation, streaming } from "./fixtures.ts";
 
-const handlers = { onQuote: fn(), onEdit: fn(), onApprove: fn(), onDecline: fn(), onOpenCard: fn(), onChoose: fn(), onPlan: fn(), onOpenRun: fn(), onEmail: fn() };
+const handlers = { onQuote: fn(), onEdit: fn(), onApprove: fn(), onDecline: fn(), onOpenCard: fn(), onChoose: fn(), onPlan: fn(), onOpenRun: fn(), onEmail: fn(), onListen: fn(), onOpenChange: fn() };
 
 export const meta: ComponentMeta<TranscriptProps> = {
   args: { rows: conversation, typing: false, draftEmpty: true, canFork: true, cloud: "Eliza Cloud", emergency: false, now: Date.UTC(2030, 0, 1, 12, 0), emptyText: "Ask me anything.", ...handlers },

@@ -1,13 +1,14 @@
 // spec/account/signIn.md, "Story: Choose how to sign in"; spec/account/signIn.md, "Story: Sign in with Google"; spec/account/signIn.md, "Story: Sign in with a code"; spec/account/signIn.md, "Story: Leave sign-in"; spec/account/signIn.md, "Story: Read the service's terms before signing in"
 import {
   type CodeMethod, type FactorKind, type Host, type Methods, type Net, type SignIn, type SignInEffect, type VerifyOutcome,
-  Machine as SignInMachine, enabled, machine as signInMachine
+  Machine as SignInMachine, enabled, entryOf, machine as signInMachine
 } from "../../gen/account__signIn.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
-import { environmentFor, freshKey, hostEnvironment } from "./deployment.ts"
+import { freshKey } from "./deployment.ts"
 import { ensureResident } from "./inference.vibe"
 import { CloudSession, noNews, newsOf, type SignInNews } from "./session.vibe"
 import { CodeStarted, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
@@ -31,7 +32,8 @@ export service SignInScreen {
   submit(address: string): void!!
   verify(code: string): void!!
   resend(address: string): void!!
-  back(): void!!
+  /** Back one step out of sign-in; whether sign-in took it, the required page holding its chooser included. */
+  back(): boolean!!
   /** Saving own provider keys started, or ended; a start behind another step is refused and says so. Whether a start was admitted. */
   ownKeys(started: boolean, saved: boolean): boolean!!
   /** The host holds own keys in use, or no longer: the entry ends, or comes back. */
@@ -78,7 +80,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const build = try Build
   const session = try CloudSession
   const scope = try Scope.Scope
-  const environment = hostEnvironment(environmentFor(build.info.testMocks))
+  const environment = environmentName(buildCloudEnvironment(build.info))
   const android = build.info.variant !== "browser"
   const attemptId = try Ref.make("")
   const requestId = try Ref.make("")
@@ -301,6 +303,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
       else try send({ type: "back" })
       const after = try machine.get()
       if (after.work !== before.work || after.screen !== before.screen) try Ref.update(epoch, (n) => n + 1)
+      return entryOf(before) !== "NoEntry"
     },
     effect ownKeys(started: boolean, saved: boolean) {
       if (!started) return try send({ type: "ownKeysEnd", saved })

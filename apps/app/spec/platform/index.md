@@ -99,9 +99,12 @@ pure def lawOnlyRootedPathsAreSent(path: PathShape): bool = pathAdmitted(path) i
 
 ### A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts
 
-The owner route table ([routes](../shell/routes.md)) decides a path one of its groups claims: its
-method, path, query keys and id. A path no group claims is read with GET or sent with POST, never
-put, patched or deleted. A refused request is answered as an invalid request and nothing is sent.
+The owner route table is one asset, the same bytes the renderer reads and Android ships, so the two
+gates never disagree. The group with the longest prefix that claims a path decides it by the rules
+of [routes](../shell/routes.md): its method, path, query keys and id. Notes' state, interactions,
+Trash erase and recording cleanup are the owner's records, as calendar's routes are. A path no group
+claims is read with GET or sent with POST, never put, patched or deleted. A refused request is
+answered as an invalid request and nothing is sent.
 
 ```quint
 pure def methodAdmitted(claimed: bool, tableAllows: bool, readOrPost: bool): bool =

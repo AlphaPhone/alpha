@@ -25,6 +25,7 @@ import { layer as agentLayer } from "./agent.vibe"
 import { layer as pickerLayer } from "./picker.vibe"
 import { layer as downloadsLayer } from "./downloads.vibe"
 import { layer as usageLayer } from "./usage.vibe"
+import { layer as backLayer } from "./back.vibe"
 
 /** The device's storage and documents: the native bridges on the phone, the browser's own library in the browser build, and the development volume only in a build with test mocks that has neither. */
 export const devices = Layer.unwrap(effect {
@@ -45,5 +46,5 @@ export const machines = Layer.mergeAll(
 const base = Layer.provideMerge(browserLayer, Layer.merge(devices, machines))
 const viewing = Layer.provideMerge(Layer.mergeAll(changesLayer, previewLayer, shareLayer, downloadsLayer, pickerLayer, usageLayer), base)
 
-/** Every Files service: FilesBrowser, FilesChanges, FilesPreview, FilesShare, FilesDownloads, FilePicker, StorageUsage and FilesAgent, with their machines; LibraryImport where the browser keeps its library. */
-export const layer = Layer.provideMerge(agentLayer, viewing)
+/** Every Files service: FilesBrowser, FilesChanges, FilesPreview, FilesShare, FilesDownloads, FilePicker, StorageUsage, FilesAgent and FilesBack, with their machines; LibraryImport where the browser keeps its library. */
+export const layer = Layer.provideMerge(Layer.merge(agentLayer, backLayer), viewing)

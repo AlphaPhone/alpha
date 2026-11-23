@@ -3,10 +3,11 @@ import type { NoteJson } from "@elizaos/plugin-notes/types"
 import { mayUploadWindow, transcriptSaved, windowAllowed, windowCount, windowMs } from "../../gen/notes__audio.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { VoiceRoute } from "../voice/route.vibe"
+import { RecordingTranscriber } from "../voice/transcription.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { contentOf, type NoteRow } from "./list.vibe"
 import { decodeAudioDescription } from "./notes.schema.vibe"
-import { transcribeOnRoute } from "./speech.vibe"
+import { transcribeKept } from "./speech.vibe"
 
 /** What Generate transcript did: saved, heard nothing and kept the recording, or could not run. */
 export type TranscriptOutcome = "saved" | "no-speech" | "unavailable" | "not-saved"
@@ -16,10 +17,11 @@ export service NotesAudio {
   transcribe(row: NoteRow): TranscriptOutcome!!
 }
 
-/** The transcription service over the device's recording store and speech route. */
+/** The transcription service over the device's recording store and voice's recording transcriber. */
 export const audioLayer = Layer.effect(NotesAudio, effect {
   const native = try Native
   const routes = try VoiceRoute
+  const transcriber = try RecordingTranscriber
   const collection = try NotesCollection
 
   effect function exactAt(row: NoteRow, offset: number): boolean!! {
@@ -39,12 +41,13 @@ export const audioLayer = Layer.effect(NotesAudio, effect {
     effect transcribe(row: NoteRow) {
       const audio = row.audio
       if (audio === undefined || !Number.isSafeInteger(audio.durationMs) || audio.durationMs <= 0) return "unavailable"
+      if ((try routes.route()) === "Device") return "unavailable"
       const parts: string[] = []
       for (let index = 0; index < windowCount(audio.durationMs); index += 1) {
         const offset = index * windowMs
         const exact = try exactAt(row, offset)
         if (!mayUploadWindow(true, exact, true, false)) return "unavailable"
-        const text = try transcribeOnRoute(routes, native, audio.audioId, { savedNoteId: row.id, savedDurationMs: audio.durationMs, offsetMs: offset })
+        const text = try transcribeKept(transcriber, audio.audioId, { savedNoteId: row.id, savedDurationMs: audio.durationMs, offsetMs: offset })
         if (typeof text !== "string") {
           if (text.code === "no-speech") continue
           return "unavailable"

@@ -1,4 +1,4 @@
-// spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"; spec/workflows/scheduling.md, "Story: Schedule a typed workflow at a local time"; spec/workflows/scheduling.md, "Story: Have my schedules run only while my phone and agent are on"
+// spec/workflows/lifecycle.md, "Story: Remove a workflow only once its runs have settled, and restore it safely"; spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/scheduling.md, "A generated draft that changes the schedule is refused"; spec/workflows/scheduling.md, "Story: Schedule a typed workflow at a local time"; spec/workflows/scheduling.md, "Story: Have my schedules run only while my phone and agent are on"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import {
   type PhoneWorkflowCatalog, type PhoneWorkflowSpec, type PhoneWorkflowTrigger, type RemoteWorkflow, WorkflowActivationRejected, WorkflowLifecycleRejected,
@@ -7,7 +7,7 @@ import {
 import { type TypedTrigger, generatedKeepsSchedule, missedWindowMs, validTrigger } from "../../gen/workflows__scheduling.effect.vibe"
 import { type WorkflowScopeCategory, checkWorkflowScope } from "@elizaos/plugin-workflow/scope"
 import { type LifeOp, type LifeReply, Machine as LifecycleMachine, stored as lifecycleStored } from "../../gen/workflows__lifecycle.effect.vibe"
-import { type Category, Machine as DraftMachine, scopeRefused, stored as draftStored } from "../../gen/workflows__authoring.effect.vibe"
+import { type Category, Machine as DraftMachine, keptTextShown, scopeRefused, stored as draftStored } from "../../gen/workflows__authoring.effect.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { WorkflowApi } from "./api.vibe"
 import { WorkflowVersions } from "./runs.vibe"
@@ -15,6 +15,7 @@ import { WorkflowVersions } from "./runs.vibe"
 export const LIFECYCLE_KEY = ownerKey("device", "workflows/lifecycle")
 export const DRAFT_KEY = ownerKey("device", "workflows/draft")
 export const DRAFT_BYTES_KEY = ownerKey("device", "workflows/draft-bytes")
+export const DRAFT_TEXT_KEY = ownerKey("device", "workflows/draft-text")
 
 /** What a definition change ended as, for the screen to word. */
 export type ChangeOutcome = "saved" | "replayed" | "refused" | "unknown" | "busy" | "cancelling"
@@ -66,8 +67,8 @@ export service WorkflowDefinitions {
   /** Review, then send, a kept change again under its own mutation id. */
   reviewResend(): boolean!!
   resend(): ChangeOutcome!!
-  /** Leave a review. */
-  back(): void!!
+  /** Leave a review or a resend review; false when none was open, so Back is someone else's. */
+  back(): boolean!!
   /** Turn a workflow on or off at its current version; a manual typed workflow is never activated. */
   setActive(workflowId: string, on: boolean): ChangeOutcome!!
   /** Describe a phone workflow; a refused description sends nothing. */
@@ -82,6 +83,10 @@ export service WorkflowDefinitions {
   discard(): void!!
   /** When the reviewed draft runs, as its review discloses it. */
   scheduleNote(spec: PhoneWorkflowSpec): ScheduleNote!!
+  /** Keep the description the owner is still typing for this owner; false when the phone did not keep it. */
+  keepText(text: string): boolean!!
+  /** The unsent description this owner last typed, or "". */
+  keptText(): string!!
 }
 
 function manualTyped(workflow: RemoteWorkflow): boolean {
@@ -192,6 +197,7 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
       drafts.send({ type: "agentApplied" }) catch () => undefined
       drafts.send({ type: "receiptReply" }) catch () => undefined
       store.remove(DRAFT_BYTES_KEY) catch () => undefined
+      store.remove(DRAFT_TEXT_KEY) catch () => undefined
       return "saved" satisfies ChangeOutcome
     }
     if (answer === "refused") {
@@ -246,7 +252,7 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
       return try send(false)
     },
     effect back() {
-      life.send({ type: "back" }) catch () => undefined
+      return (try (life.send({ type: "back" }) catch () => undefined)) !== undefined
     },
     effect setActive(workflowId: string, on: boolean) {
       const workflow = try (client.detail(workflowId) catch () => undefined)
@@ -313,7 +319,10 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
     },
     effect discard() {
       drafts.send({ type: "discardTap" }) catch () => undefined
-      if (!(try drafts.get()).draft) store.remove(DRAFT_BYTES_KEY) catch () => undefined
+      if (!(try drafts.get()).draft) {
+        store.remove(DRAFT_BYTES_KEY) catch () => undefined
+        store.remove(DRAFT_TEXT_KEY) catch () => undefined
+      }
     },
     effect scheduleNote(spec: PhoneWorkflowSpec) {
       const now = try Clock.currentTimeMillis
@@ -322,6 +331,19 @@ export const definitions = Layer.provideMerge(Layer.provideMerge(Layer.effect(Wo
         manual: trigger.kind === "manual", missedAfterMinutes: missedWindowMs / 60000,
         clockChange: trigger.kind === "time" ? phoneTriggerClockChangeNote(trigger, now) : "",
       } satisfies ScheduleNote
+    },
+    effect keepText(text: string) {
+      const owner = try ownerOf()
+      if (owner === "") return false
+      const wrote = try (store.set(DRAFT_TEXT_KEY, JSON.stringify({ owner, text: text.slice(0, 20000) })) catch () => "failed")
+      return wrote !== "failed"
+    },
+    effect keptText() {
+      const owner = try ownerOf()
+      const raw = try (store.get(DRAFT_TEXT_KEY) catch () => undefined)
+      if (owner === "" || raw === undefined) return ""
+      const kept = try (Effect.try(() => JSON.parse(raw) as { owner?: unknown; text?: unknown }) catch () => undefined)
+      return kept !== undefined && keptTextShown(kept.owner === owner, typeof kept.text === "string") ? String(kept.text) : ""
     },
   }
 }), lifecycleStored(LIFECYCLE_KEY)), draftStored(DRAFT_KEY))

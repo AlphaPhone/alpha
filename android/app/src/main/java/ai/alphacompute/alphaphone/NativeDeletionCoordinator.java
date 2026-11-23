@@ -53,9 +53,20 @@ final class NativeDeletionCoordinator {
    },
    new DeferredDeletionCoordinator.Records(){
     public String refusal(String kind,JSONObject owner,JSONObject target){
-     if("contact".equals(kind))return AlphaImageCapabilities.aospImage(context)?null:"image-unavailable";
-     return AlphaImageCapability.verified(context)?null:"image-unavailable";
+     switch(kind){
+      case "contact":
+       if(!AlphaImageCapabilities.aospImage(context))return "image-unavailable";
+       return granted(android.Manifest.permission.READ_CONTACTS)&&granted(android.Manifest.permission.WRITE_CONTACTS)?null:"contacts-access";
+      case "message":case "thread":
+       if(!AlphaImageCapability.verified(context))return "image-unavailable";
+       return ai.eliza.plugins.messages.MessageDeletion.roleGuard(context).getAsBoolean()?null:"sms-role";
+      case "voicemail":
+       if(!AlphaImageCapability.verified(context))return "image-unavailable";
+       return AlphaTelephonyBase.voicemailDeletable(context)?null:"voicemail-access";
+      default:return "unknown-kind";
+     }
     }
+    private boolean granted(String permission){return context.checkSelfPermission(permission)==android.content.pm.PackageManager.PERMISSION_GRANTED;}
     public JSONObject dispatch(String kind,JSONObject target){
      switch(kind){
       case "message":return ai.eliza.plugins.messages.MessageDeletion.dispatch(context,target,ai.eliza.plugins.messages.MessageDeletion.roleGuard(context));

@@ -16,8 +16,8 @@ export service ChatSearch {
   query(text: string): void!!
   /** The next page of the current query. */
   more(): void!!
-  /** Close search. */
-  close(): void!!
+  /** Close search; false when it was not open. */
+  close(): boolean!!
   /** The owner, agent or account changed: the question is retired. */
   retire(): void!!
   /** Open a hit in its conversation, unless an attachment waits in another chat. */
@@ -60,9 +60,11 @@ export const searchLayer = Layer.effect(ChatSearch, effect {
       if (try quiet(search.send({ type: "loadMore" }))) try ask(latest, (try search.get()).page * pageSize)
     },
     close: () => effect {
+      const open = (try search.get()).open
       asked++
       try quiet(search.send({ type: "closeSearch" }))
       try SubscriptionRef.set(hits, [])
+      return open
     },
     retire: () => effect {
       asked++

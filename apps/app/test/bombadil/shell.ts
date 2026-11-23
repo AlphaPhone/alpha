@@ -1,4 +1,4 @@
-// spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/navigation.md, "The library, its entry menu and Home's edit mode exist only over Home"; spec/shell/toasts.md, "A toast leaves when its time is up or its Undo ran, and the next one takes its place"; spec/shell/toasts.md, "A persistent notice is listed until dismissed, at most three, each once"; spec/shell/permissions.md, "The first-run walkthrough says which step of how many it shows"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"; spec/shell/navigation.md, "The stand-in shade opens only over Home"
+// spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/navigation.md, "The library, its entry menu and Home's edit mode exist only over Home"; spec/shell/toasts.md, "A toast leaves when its time is up or its Undo ran, and the next one takes its place"; spec/shell/toasts.md, "A persistent notice is listed until dismissed, at most three, each once"; spec/shell/permissions.md, "The first-run walkthrough says which step of how many it shows"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"; spec/shell/navigation.md, "The stand-in shade opens only over Home"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -68,3 +68,12 @@ export const shellHomeInertUnderLayers = always(() => homeInertUnderLayers.curre
 
 /** The stand-in shade is drawn only over Home. */
 export const shellShadeOnlyOverHome = always(() => shadeOnlyOverHome.current);
+
+const checkNoticeIsTheBrowsers = extract(({ document }) => {
+  const lines = Array.from(document.querySelectorAll('[role="dialog"] [role="status"]')).map((row) => (row.textContent ?? "").trim());
+  const noticed = lines.some((line) => line === "Still off" || line === "Couldn’t confirm");
+  return !noticed || !lines.some((line) => /^Step \d+ of 7$/.test(line));
+});
+
+/** "Still off" and "Couldn’t confirm" are a browser's lines; Android's seven-step walkthrough never shows them. */
+export const shellCheckNoticeIsTheBrowsers = always(() => checkNoticeIsTheBrowsers.current);

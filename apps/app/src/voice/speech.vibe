@@ -6,7 +6,7 @@ import { Machine, voiceEntry, type Channel, type Event, type SpeechChains, type 
 import type { Route } from "../../gen/voice__route.ts"
 import { VoiceRoute, attemptFailed, type VoiceAccount } from "./route.vibe"
 import { refusalOf } from "./failure.vibe"
-import { newId } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
 import { PlaybackEvent, PreparedSpeech } from "./native.schema.vibe"
 import { planReading, planReply, refusalMessage, type SpokenRefusal } from "./spoken-text.ts"
 
@@ -41,8 +41,8 @@ export service Speech {
   get(): SpeechChains!!
   /** Speak a reply or a reading on `channel`, on the route in use, on the phone when a network route fails before audio. */
   speak(text: string, channel: Channel, options?: SpeakOptions): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
-  /** Speak already planned reply pieces in order, telling `played` after each. */
-  speakPieces(pieces: readonly string[], played: () => void!!): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  /** Speak already planned reply pieces in order, telling `played` after each; on the phone they carry `voiceTurnId`, the phone trial of the turn they answer. */
+  speakPieces(pieces: readonly string[], played: () => void!!, voiceTurnId?: string): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
   /** Play the page the owner reviewed from its one-use token, synthesized only on the phone, on the reading channel. */
   speakReviewed(readingToken: string, binding: ReadingBinding): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
   /** Speak a reading on `channel` with the phone's own voice only, whatever the route in use. */
@@ -68,7 +68,7 @@ const decodePlayback = Schema.decodeUnknownOption(PlaybackEvent)
 type Ending = { readonly event: (typeof PLAYBACK_EVENTS)[number] | "stopped"; readonly reason?: string }
 type PhoneCall = { readonly method: string; readonly args: object; readonly deviceOnly: boolean }
 
-function synthesis(route: Route, account: VoiceAccount, text: string, requestId: string, queue: boolean) {
+function synthesis(route: Route, account: VoiceAccount, text: string, requestId: string, queue: boolean, voiceTurnId: string | undefined) {
   const replace = queue ? { replace: false } : {}
   if (route === "Cloud" && account.kind === "cloud") {
     return { method: "synthesize", args: { text, requestId, environment: account.environment, credentialId: account.credentialId, ...replace } }
@@ -76,7 +76,7 @@ function synthesis(route: Route, account: VoiceAccount, text: string, requestId:
   if (route === "Direct" && account.kind === "own") {
     return { method: "synthesizeOwn", args: { text, requestId, providerRevision: account.revision, ...replace } }
   }
-  return { method: "synthesizeLocal", args: { text, requestId, ...replace } }
+  return { method: "synthesizeLocal", args: { text, requestId, ...replace, ...(voiceTurnId === undefined ? {} : { voiceTurnId }) } }
 }
 
 /** The speech service over the speech Machine it is given. */
@@ -143,13 +143,13 @@ export const speechService = Layer.effect(Speech, effect {
     }
   }
 
-  effect function playPiece(channel: Channel, text: string, queue: boolean, started: () => void!!) {
+  effect function playPiece(channel: Channel, text: string, queue: boolean, started: () => void!!, voiceTurnId: string | undefined) {
     const stopSignal = stops.get(channel)
     const requestId = newId()
     let playbackId: string | undefined
     const playing = routes.run((route: Route, heard) => effect {
       const account = try routes.account()
-      const call = synthesis(route, account, text, requestId, queue)
+      const call = synthesis(route, account, text, requestId, queue, voiceTurnId)
       const id = try untilBusyClears(() => effect {
         const raw = native.invoke("AlphaVoiceCloud", call.method, call.args) catch effect (error) => { throw attemptFailed(error) }
         const prepared = Option.getOrUndefined(decodePrepared(raw))
@@ -180,7 +180,7 @@ export const speechService = Layer.effect(Speech, effect {
     }, effect { retire(channel, requestId, playbackId) catch () => undefined })
   }
 
-  effect function speakPlanned(channel: Channel, pieces: readonly string[], queue: boolean, started: () => void!!, played: () => void!!) {
+  effect function speakPlanned(channel: Channel, pieces: readonly string[], queue: boolean, started: () => void!!, played: () => void!!, voiceTurnId?: string) {
     if (pieces.length === 0) {
       try started()
       return
@@ -190,7 +190,7 @@ export const speechService = Layer.effect(Speech, effect {
     let first = true
     timeout(effect {
       for (const piece of pieces) {
-        try playPiece(channel, piece, queue || !first, first ? started : () => sync(() => undefined))
+        try playPiece(channel, piece, queue || !first, first ? started : () => sync(() => undefined), voiceTurnId)
         first = false
         try played()
       }
@@ -256,8 +256,8 @@ export const speechService = Layer.effect(Speech, effect {
       if (plan.kind === "refused") throw new SpeechRefused({ reason: plan.reason, message: refusalMessage(plan.reason, channel === "Replies") })
       try speakPlanned(channel, plan.pieces, options?.queue ?? false, options?.onStarted ?? (() => sync(() => undefined)), () => sync(() => undefined))
     },
-    effect speakPieces(pieces: readonly string[], played: () => void!!) {
-      try speakPlanned("Replies", pieces, true, () => sync(() => undefined), played)
+    effect speakPieces(pieces: readonly string[], played: () => void!!, voiceTurnId?: string) {
+      try speakPlanned("Replies", pieces, true, () => sync(() => undefined), played, voiceTurnId)
     },
     effect speakReviewed(readingToken: string, binding: ReadingBinding) {
       try speakOnPhoneOnly("Reading", [{ method: "synthesizeLocalBrowserReading", args: { ...binding, readingToken }, deviceOnly: true }])

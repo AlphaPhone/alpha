@@ -1,7 +1,10 @@
-// spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/agent.md, "A write runs only between reads, from a ready feed, for the current binding"; spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"
-import { Machine as PresentationMachine, type EventSource } from "../../gen/calendar__presentation.effect.vibe"
+// spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/agent.md, "A write runs only between reads, from a ready feed, for the current binding"; spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"
+import { Machine as PresentationMachine, type EventSource, canBack } from "../../gen/calendar__presentation.effect.vibe"
 import { agentCalendarAccepts, defaultStart, recurrenceEditAllowed, timingChangeAllowed, timingLocked, wallTimeSavable, type WallTime } from "../../gen/calendar__editor.effect.vibe"
-import { AgentCalendar } from "./agent.vibe"
+import { NotesOrigins, type OriginView } from "../notes/origins.vibe"
+import { Native } from "../platform/native.vibe"
+import { Notices } from "../shell/notices.vibe"
+import { AgentCalendar, eventSourceRevision } from "./agent.vibe"
 import { enterCalendar, readCalendar } from "./binding.vibe"
 import { type CalendarWriteScope, HeldDeletions } from "./deletions.vibe"
 import { DeviceCalendar } from "./device.vibe"
@@ -24,20 +27,85 @@ effect function agentEvent(row: CalendarRow): EventRecord | undefined {
   return view.feed?.events.find((event) => `agent:${agentEventKey(event)}` === row.id)
 }
 
-/** Open a row's detail; a device row is also inspected for the assistant. */
+/** The id a note's back-link names an agent event by: a digest of its exact key, short enough for the origin index. */
+export effect function noteRecordId(rowId: string) {
+  if (!rowId.startsWith("agent:")) return ""
+  const digest = try tryPromise({ try: () => sha256Hex(rowId.slice("agent:".length)), catch: () => "" }) catch () => ""
+  return digest === "" ? "" : `agent-event:${digest}`
+}
+
+/** The note an event was made from, as its detail names it; undefined when it was not made from a note. */
+export effect function rowOrigin(row: CalendarRow) {
+  const recordId = try noteRecordId(row.id)
+  if (recordId === "") return undefined as OriginView | undefined
+  return try (try NotesOrigins).view("event", recordId)
+}
+
+/** Open the note an event was made from; the notice says when it is gone or Notes cannot tell. */
+export effect function openRowOrigin(row: CalendarRow) {
+  const recordId = try noteRecordId(row.id)
+  const opened = recordId === "" ? "unavailable" : try (try NotesOrigins).open("event", recordId)
+  if (opened === "gone") try (try Notices).show("That note was deleted.")
+  else if (opened === "unavailable") try (try Notices).show("Open Notes to find that note.")
+  else if (opened === "edited") try (try Notices).show("The note changed since this event was made.")
+  return opened
+}
+
+/** Open a row's detail; a device row is also inspected for the assistant. Returns the note it was made from, if any. */
 export effect function openRow(row: CalendarRow) {
   const presentation = try PresentationMachine
   const shown = presentation.send({ type: "showEvent", id: row.id, source: sourceOf(row), day: row.offset }) catch () => undefined
-  if (shown === undefined || row.source !== "device") return
-  const [, id, begin] = row.id.split(":")
-  const calendarId = row.sourceKey.replace(/^native:/, "")
-  try (try DeviceCalendar).open(id ?? "", calendarId, row.revision, { title: row.title, body: row.notes, location: row.where, begin: Number(begin), end: row.end, revision: row.revision })
+  if (shown === undefined) return undefined as OriginView | undefined
+  if (row.source === "device") {
+    const [, id, begin] = row.id.split(":")
+    const calendarId = row.sourceKey.replace(/^native:/, "")
+    try (try DeviceCalendar).open(id ?? "", calendarId, row.revision, { title: row.title, body: row.notes, location: row.where, begin: Number(begin), end: row.end, revision: row.revision })
+    return undefined as OriginView | undefined
+  }
+  return try rowOrigin(row)
 }
 
 /** Close the open detail. */
 export effect function closeRow() {
   (try PresentationMachine).send({ type: "closeEvent" }) catch () => undefined
   try (try DeviceCalendar).close()
+}
+
+/** Back inside Calendar: the form, the delete sheet, the event, the Calendars sheet, the date picker or search closes, one at a time; false when none was open and Back is the shell's. */
+export effect function calendarBack() {
+  const presentation = try PresentationMachine
+  const before = try presentation.get()
+  if (!canBack(before)) return false
+  const after = presentation.send({ type: "back" }) catch () => undefined
+  if (after === undefined) return false
+  if (before.form !== "NoForm") {
+    try (try CalendarDrafts).close()
+    try (try DeviceCalendar).closeForm()
+  } else if (!before.deleteSheet && before.openEvent !== "") {
+    try (try DeviceCalendar).close()
+  }
+  return true
+}
+
+/** Open the Calendars sheet with the source switches and Google Calendar sync. */
+export effect function openSources() {
+  return ((try PresentationMachine).send({ type: "openSources" }) catch () => undefined) !== undefined
+}
+
+/** Close the Calendars sheet. */
+export effect function closeSources() {
+  (try PresentationMachine).send({ type: "closeSources" }) catch () => undefined
+}
+
+/** Open an event's checked HTTPS link in the phone's browser; "web" where the phone's apps cannot be reached, so the page opens it itself. */
+export effect function openEventLink(url: string) {
+  const native = try Native
+  if (!/^https:\/\/[^\s/@]+(\/\S*)?$/i.test(url)) return "refused" as const
+  if (!(try native.available("DailyApps"))) return "web" as const
+  const reply = native.invoke("DailyApps", "perform", { action: "browser", url }) catch () => undefined
+  const opened = typeof reply === "object" && reply !== null && (reply as { readonly status?: unknown }).status === "opened"
+  if (!opened) try (try Notices).show("Couldn’t open")
+  return opened ? "opened" as const : "failed" as const
 }
 
 /** What a deletion came to, for its notice. */
@@ -61,12 +129,16 @@ export effect function deleteRow(row: CalendarRow, scope: CalendarWriteScope | "
   const agent = try AgentCalendar
   const key = agentEventKey(event)
   const operation = `delete-${civilDay(Date.parse(event.startAt), "UTC")}-${row.revision.replace(/[^-a-zA-Z0-9_]/g, "").slice(0, 60)}`
+  const recordId = try noteRecordId(row.id)
+  const origins = try NotesOrigins
   const send = effect {
     const outcome = try agent.remove({ eventKey: key, admitted: true, request: {
       calendarId: event.calendarId, grantId: event.grantId, side: event.side, expectedProviderVersion: row.revision, idempotencyKey: operation,
       cancellationMode: mode, ...(scope !== "event" ? { recurrenceScope: scope } : {}),
     } })
-    return outcome === "Deleted" || outcome === "DeletedByReceipt"
+    const done = outcome === "Deleted" || outcome === "DeletedByReceipt"
+    if (done && recordId !== "" && mode !== "decline_invitation" && scope !== "instance") try origins.forget("event", recordId, true)
+    return done
   }
   const id = try (try HeldDeletions).confirm({ target: event.id, decline: mode === "decline_invitation", source: event.calendarId,
     series: event.recurringEventId ?? event.externalId, start: Date.parse(event.startAt), scope, send })
@@ -120,6 +192,19 @@ export effect function closeEditor() {
 function wallTime(text: string, zone: string): { readonly kind: WallTime; readonly at: number } {
   const found = resolveWall(text.length === 16 ? `${text}:00` : text, zone)
   return found.kind === "exists" ? { kind: "WallExists", at: found.at } : found.kind === "twice" ? { kind: "WallTwice", at: found.at } : { kind: "WallMissing", at: Number.NaN }
+}
+
+/** After a saved form made from a note, link the event to that note; only an event a readback confirmed is linked, and the notice says when it is not. */
+export effect function linkSavedNote(creationId: string, link: unknown) {
+  const key = try (try AgentCalendar).createdEvent(creationId)
+  const notices = try Notices
+  if (key === undefined) {
+    try notices.show("Saved · note not linked")
+    return
+  }
+  const recordId = try noteRecordId(`agent:${key}`)
+  const linked = recordId !== "" && (try (try NotesOrigins).remember("event", recordId, link, true))
+  if (!linked) try notices.show("Saved · note not linked")
 }
 
 /** Save the form from what it shows; returns the problem to show, or "" when it saved. */
@@ -223,7 +308,7 @@ export effect function placeRow(row: CalendarRow) {
   const event = try agentEvent(row)
   if (event === undefined || row.revision === "") return false
   const view = try (try AgentCalendar).view()
-  const sourceRevision = try tryPromise({ try: () => sha256Hex(JSON.stringify([row.sourceKey, row.revision])), catch: () => "" }) catch () => ""
+  const sourceRevision = try eventSourceRevision(view.calendars, event)
   if (sourceRevision === "") return false
   return try maps.enterFromEvent({ version: 2, id: event.id, begin: row.begin, rowId: row.id, day: row.offset, title: row.title,
     binding: `${view.state.portOwner}:${view.state.portSession}`, eventKey: agentEventKey(event), revision: row.revision, sourceRevision }, row.where)
@@ -231,6 +316,9 @@ export effect function placeRow(row: CalendarRow) {
 
 /** The route Calendar opens a note's or a scan's draft at, in a new event form. */
 export const DRAFT_ROUTE = "draft"
+
+/** The route Calendar opens its Calendars sheet at, with the source switches and Google Calendar sync. */
+export const SETTINGS_ROUTE = "settings"
 
 /** Open Calendar at a route: a handed-over draft's form, or the day it names, then its event once a read has it. */
 export effect function openRoute(route: string) {
@@ -240,6 +328,10 @@ export effect function openRoute(route: string) {
     if (!draft.alive || draft.origin === "TypedHere") return
     const opened = (try PresentationMachine).send({ type: "newForm" }) catch () => undefined
     if (opened !== undefined) try (try DeviceCalendar).openForm("new", false)
+    return
+  }
+  if (route === SETTINGS_ROUTE) {
+    try openSources()
     return
   }
   const match = /^event\/([^?]+)\?day=(-?\d+)$/.exec(route)

@@ -26,7 +26,7 @@ import { entryOf, initial as signInInitial } from "../../../gen/account__signIn.
 import { GoogleAgentAccess } from "../../account/agentAccess.vibe";
 import { Membership } from "../../account/billing.vibe";
 import { CloudDelegation } from "../../account/delegation.vibe";
-import { authorityOf, deployment, environmentFor } from "../../account/deployment.ts";
+import { authorityOf } from "../../account/deployment.ts";
 import { DedicatedSetup, DevBridgeSignIn } from "../../account/devBridge.vibe";
 import { Entitlement } from "../../account/entitlement.vibe";
 import { GoogleAccounts } from "../../account/google.vibe";
@@ -45,7 +45,8 @@ import { MembershipPanel } from "./MembershipPanel.tsx";
 import { PlanManager } from "./PlanManager.tsx";
 import { ProviderPanel } from "./ProviderPanel.tsx";
 import { SignInHost } from "./SignInHost.tsx";
-import { act, runtime, useAccountStream } from "./runtime.ts";
+import { act, useServiceStream } from "../shell/services.ts";
+import { runtime } from "./runtime.ts";
 
 /** What the shell gives the Account screen: the route it opened at and how to leave. */
 export type AccountScreenProps = ScreenProps;
@@ -75,11 +76,11 @@ export function AccountScreen({ onClose }: AccountScreenProps) {
   const { state: provider = providerInitial } = useProvider(runtime);
   const { state: bridge = bridgeInitial } = useBridge(runtime);
   const { state: dedicated = dedicatedInitial } = useDedicated(runtime);
-  const summary = useAccountStream("account/plan-summary", Effect.map(Effect.service(Entitlement), (e) => e.summaries), { owner: 0, view: undefined, planEndsAt: null });
-  const details = useAccountStream("account/billing-details", Effect.map(Effect.service(Membership), (m) => m.details), { offers: [], referral: undefined, email: undefined, quote: undefined, renewsAt: undefined });
-  const rows = useAccountStream("account/google-accounts", Effect.map(Effect.service(GoogleAccounts), (g) => g.accounts), []);
-  const delegationDetails = useAccountStream("account/delegation-details", Effect.map(Effect.service(CloudDelegation), (d) => d.details), { grantId: undefined, pendingRevocations: [], email: true, calendar: true });
-  const authority = authorityOf(deployment, environmentFor(session.testMocks));
+  const summary = useServiceStream("account/plan-summary", Effect.map(Effect.service(Entitlement), (e) => e.summaries), { owner: 0, view: undefined, planEndsAt: null });
+  const details = useServiceStream("account/billing-details", Effect.map(Effect.service(Membership), (m) => m.details), { offers: [], referral: undefined, email: undefined, quote: undefined, renewsAt: undefined });
+  const rows = useServiceStream("account/google-accounts", Effect.map(Effect.service(GoogleAccounts), (g) => g.accounts), []);
+  const delegationDetails = useServiceStream("account/delegation-details", Effect.map(Effect.service(CloudDelegation), (d) => d.details), { grantId: undefined, pendingRevocations: [], email: true, calendar: true });
+  const authority = authorityOf(session.deployment, session.environment);
   const section = (target: Section) => present((p) => p.openSection(target));
   const back = () => present((p) => p.back());
   const providerForm = (

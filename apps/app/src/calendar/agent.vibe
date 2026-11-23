@@ -11,6 +11,7 @@ import { ownerKey } from "../platform/storage.vibe"
 import { type CalendarRecord as CalendarSummary, type EventRecord, type FeedRecord, decodeCalendars, decodeFeed, decodeNext } from "./feed.schema.vibe"
 import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar/client"
 import { residentClients } from "./client.vibe"
+import { sha256Hex } from "./digest.ts"
 import { type InstantRange, agentEventKey, eventSourceKey, readableSource, windowKey } from "./model.vibe"
 import { LegacyCalendar } from "./preservation.vibe"
 import { isoInstant } from "./time.ts"
@@ -41,6 +42,20 @@ export interface UpdateRequest { readonly eventKey: string; readonly request: Ca
 /** A reviewed deletion or decline of one event at the version reviewed. */
 export interface DeleteRequest { readonly eventKey: string; readonly request: CalendarDeleteRequest; readonly admitted: boolean }
 
+/** The text an agent event's source revision hashes: its calendar's key and selection version, and the event's etag. */
+export function sourceRevisionText(calendar: CalendarSummary, etag: string): string {
+  return JSON.stringify([sourceKeyId(calendar), calendar.selectionVersion ?? null, etag])
+}
+
+/** The source revision Maps' "Back to event" carries for an agent event: the SHA-256 of its calendar's key and selection version and the event's etag; "" when it cannot be worked out. */
+export effect function eventSourceRevision(calendars: readonly CalendarSummary[], event: EventRecord) {
+  const key = eventSourceKey(event)
+  const calendar = calendars.find((candidate) => sourceKeyId(candidate) === key)
+  const etag = typeof event.metadata.etag === "string" ? event.metadata.etag.trim() : ""
+  if (calendar === undefined || etag === "") return ""
+  return try tryPromise({ try: () => sha256Hex(sourceRevisionText(calendar, etag)), catch: () => "" }) catch () => ""
+}
+
 /** The agent's Calendar: reads for the bound account and reviewed writes through it. */
 export service AgentCalendar {
   readonly changes: Stream.Stream<AgentView>
@@ -52,8 +67,10 @@ export service AgentCalendar {
   create(request: CreateRequest): WriteOutcome!!
   update(request: UpdateRequest): WriteOutcome!!
   remove(request: DeleteRequest): WriteOutcome!!
-  /** Whether an event left for Maps is still the version left, for the same binding. */
-  verifyReturn(eventKey: string, revision: string, begin: number): EventReturn!!
+  /** Whether an event left for Maps is still the version left, for the same binding; with `sourceRevision`, also from the same calendar selection. */
+  verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string): EventReturn!!
+  /** The key of the event a confirmed create with this idempotency key read back, for the note it came from. */
+  createdEvent(idempotencyKey: string): string | undefined!!
   /** One complete read of one calendar at an instant, for a review of an event outside the loaded window. */
   readSourceAt(sourceKey: string, at: number): { readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined!!
   /** Drop an ended next event. */
@@ -78,6 +95,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
   const windows = try Ref.make<Map<string, CalendarWindow>>(new Map())
   const agent = try Ref.make("")
   const saved = try Ref.make<SavedFeed | undefined>(undefined)
+  const created = try Ref.make<ReadonlyMap<string, string>>(new Map())
   const initialState = try machine.get()
   const shown = try SubscriptionRef.make<AgentView>({ state: initialState, feed: undefined, calendars: [], upcoming: undefined, savedAt: undefined, window: undefined })
 
@@ -312,13 +330,21 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     effect create(write: CreateRequest) {
       const request = write.request
       const at = utcInstant(request.startAt) ?? Number.NaN
+      let foundKey = ""
       const find = (events: readonly EventRecord[], reply: CalendarChangeReply): Readback => {
-        const created = "event" in reply ? reply.event : null
-        return events.some((event) => created !== null && (event.id === created.id || event.externalId === created.externalId)
-          && event.title === request.title && event.startAt === request.startAt && event.endAt === request.endAt) ? "ReadbackFound" : "ReadbackMissing"
+        const made = "event" in reply ? reply.event : null
+        const found = events.find((event) => made !== null && (event.id === made.id || event.externalId === made.externalId)
+          && event.title === request.title && event.startAt === request.startAt && event.endAt === request.endAt)
+        foundKey = found === undefined ? "" : agentEventKey(found)
+        return found !== undefined ? "ReadbackFound" : "ReadbackMissing"
       }
-      return try write("CreateEvent", write.admitted && request.idempotencyKey !== "" && Number.isFinite(at),
+      const outcome = try write("CreateEvent", write.admitted && request.idempotencyKey !== "" && Number.isFinite(at),
         () => api.createLifeOpsCalendarEvent(request), find, receiptSource(write.sourceKey), at, request.timeZone ?? "UTC")
+      if (outcome === "Saved" && foundKey !== "" && request.idempotencyKey !== "") {
+        const entry = [request.idempotencyKey, foundKey] as const
+        try Ref.update(created, (all) => new Map<string, string>([...[...all].slice(-63), entry]))
+      }
+      return outcome
     },
     effect update(write: UpdateRequest) {
       const request = write.request
@@ -347,7 +373,10 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
         receiptSource(event === undefined ? "" : eventSourceKey(event)), at, event?.timezone ?? "UTC")
       return outcome
     },
-    effect verifyReturn(eventKey: string, revision: string, begin: number) {
+    effect createdEvent(idempotencyKey: string) {
+      return (try Ref.get(created)).get(idempotencyKey)
+    },
+    effect verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string) {
       const before = try machine.get()
       const event = try currentEvent(eventKey)
       const source = event === undefined ? "" : eventSourceKey(event)
@@ -355,9 +384,11 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
       const after = try machine.get()
       const found = read?.events.filter((candidate) => agentEventKey(candidate) === eventKey) ?? []
       const readable = (read?.calendars ?? []).some((calendar) => sourceKeyId(calendar) === source && readableSource(calendar))
+      const sourceHolds = sourceRevision === undefined || (found.length === 1 && read !== undefined
+        && (try eventSourceRevision(read.calendars, found[0]!)) === sourceRevision)
       const feed: ReturnFeed = read === undefined ? "ReturnFailed" : found.length === 0 ? "ReturnMoved"
         : found.length > 1 ? "ReturnForeign"
-        : found[0]!.metadata.etag === revision && utcInstant(found[0]!.startAt) === begin && found[0]!.status !== "cancelled" ? "ReturnExact" : "ReturnMoved"
+        : found[0]!.metadata.etag === revision && utcInstant(found[0]!.startAt) === begin && found[0]!.status !== "cancelled" && sourceHolds ? "ReturnExact" : "ReturnMoved"
       return eventReturn(
         after.portOwner === before.portOwner && after.portSession === before.portSession && after.portUsable,
         after.epoch === before.epoch, after.write.id !== 0, event !== undefined, feed, readable,

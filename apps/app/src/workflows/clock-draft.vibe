@@ -1,7 +1,7 @@
-// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"
-import { Machine, initial, machine } from "../../gen/workflows__clockDraft.effect.vibe"
+// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/workflows/clockDraft.md, "The alarm the owner sets in the draft reaches Clock's review exactly: a real time, a short label and distinct days"
+import { Machine, initial, machine, validAlarm } from "../../gen/workflows__clockDraft.effect.vibe"
 import { Build } from "../platform/build.vibe"
-import { WorkflowClockPort } from "./ports.vibe"
+import { type AlarmRequest, WorkflowClockPort } from "./ports.vibe"
 
 /** The Clock draft Workflows opens over itself, handed to Clock once the owner approves it. */
 export service WorkflowClockDraft {
@@ -12,7 +12,8 @@ export service WorkflowClockDraft {
   open(retained: boolean): boolean!!
   close(): void!!
   visibility(hidden: boolean): void!!
-  prepare(): boolean!!
+  /** Hand the alarm the owner set to Clock's draft and show Clock's review; false when it is not a valid alarm or Clock offers no review. */
+  prepare(request: AlarmRequest): boolean!!
   /** Approve the reviewed draft and hand it to Clock once: "opened" or "unknown" after a handoff, "failed" when the save was retired. */
   approve(): "opened" | "unknown" | "failed" | "refused"!!
   /** What Clock answered a handoff made outside this service. */
@@ -42,8 +43,11 @@ export const clockDraft = Layer.unwrap(effect {
         try sent({ type: "visibility", hidden })
         if (hidden) try clock.retire()
       },
-      effect prepare() {
-        if (!(try held.get()).shown || !(try clock.prepare())) return false
+      effect prepare(request: AlarmRequest) {
+        const label = request.label.trim()
+        if (!validAlarm(request.hour, request.minute, label.length, [...request.days])) return false
+        const exact: AlarmRequest = { hour: request.hour, minute: request.minute, label, days: [...request.days].sort((a, b) => a - b) }
+        if (!(try held.get()).shown || !(try clock.prepare(exact))) return false
         return (try sent({ type: "prepare" })) !== undefined
       },
       effect approve() {

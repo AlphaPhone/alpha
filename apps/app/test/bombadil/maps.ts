@@ -1,4 +1,4 @@
-// spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"; spec/maps/guidance.md, "Story: Reroute the guidance I started only when my agent asks, from a fresh fix"; spec/maps/eventReturn.md, "Story: Go back to the event whose place I opened"; spec/maps/screen.md, "Story: Find a place"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/screen.md, "The provider's routes are listed in order and choosing one sends no new request"; spec/maps/screen.md, "Typing waits 350 milliseconds; Enter searches once for the text, and repeating it reuses the answer"
+// spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"; spec/maps/guidance.md, "Story: Reroute the guidance I started only when my agent asks, from a fresh fix"; spec/maps/eventReturn.md, "Story: Go back to the event whose place I opened"; spec/maps/screen.md, "Story: Find a place"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/screen.md, "The provider's routes are listed in order and choosing one sends no new request"; spec/maps/screen.md, "Typing waits 350 milliseconds; Enter searches once for the text, and repeating it reuses the answer"; spec/maps/screen.md, "Swapping ends keeps each end's identity and plans the reverse route"
 // What must hold on the Maps screen in every state Bombadil reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -77,3 +77,12 @@ const noReturnWhileGuiding = extract(({ document }) => {
 
 /** Back to event is never offered while guiding. */
 export const mapsNoReturnToEventWhileGuiding = always(() => noReturnWhileGuiding.current);
+
+const swapNeedsRoute = extract(({ document }) => {
+  const swap = document.querySelector('button[aria-label="Swap start and destination"]');
+  if (!swap || swap.getAttribute("aria-disabled") === "true") return true;
+  return document.querySelector('ol[aria-label="Steps"]') !== null;
+});
+
+/** Swap can run only with a planned route on screen; otherwise it stays on the sheet and says it is unavailable. */
+export const mapsSwapNeedsAPlannedRoute = always(() => swapNeedsRoute.current);

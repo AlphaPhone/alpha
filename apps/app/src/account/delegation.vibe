@@ -3,6 +3,7 @@ import {
   type CloudSide, type Delegation, type DelegationEffect, type Retained,
   Machine as DelegationMachine, machine as delegationMachine
 } from "../../gen/account__delegation.effect.vibe"
+import { CloudServices } from "../platform/cloud-services.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { delegationSlot, freshKey } from "./deployment.ts"
@@ -30,12 +31,15 @@ export service CloudDelegation {
   retryDisconnect(grantId: string): void!!
 }
 
+const secureStore = "ElizaSecureStore"
+
 const cloudSides = { waiting: "CloudWaiting", finishing: "CloudFinishing", complete: "CloudComplete", failed: "CloudFailed" } as const satisfies Record<string, CloudSide>
 
 /** The delegation service over its in-memory machine, restored from the account's secure slot. */
 export const delegationService = Layer.effect(CloudDelegation, effect {
   const machine = try DelegationMachine
   const native = try Native
+  const services = try CloudServices
   const resident = try Resident
   const session = try CloudSession
   const details = try SubscriptionRef.make<DelegationDetails>({ grantId: undefined, pendingRevocations: [], email: true, calendar: true })
@@ -51,9 +55,9 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
   effect function readRecord() {
     const key = try Ref.get(slot)
     if (key === "") return undefined
-    const read = try Schema.decodeUnknownEffect(SecureValue)(try native.invoke("AlphaConnection", "secureRead", { slot: key }))
+    const read = try Schema.decodeUnknownEffect(SecureValue)(try native.invoke(secureStore, "get", { key }))
     const value = read.value
-    if (value === undefined) return undefined
+    if (value === undefined || value === null) return undefined
     const record = try Schema.decodeUnknownEffect(PendingRecord)(try Effect.try(() => JSON.parse(value) as unknown))
     try watchDeadline(record)
     return record
@@ -61,10 +65,11 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
 
   effect function swapRecord(expected: PendingRecord | undefined, next: PendingRecord | undefined) {
     const key = try Ref.get(slot)
-    const answer = try Schema.decodeUnknownEffect(SwapAnswer)(try native.invoke("AlphaConnection", "secureCompareExchange", {
-      slot: key, expectedValue: expected === undefined ? null : JSON.stringify(expected), value: next === undefined ? null : JSON.stringify(next)
+    if (key === "") return false
+    const answer = try Schema.decodeUnknownEffect(SwapAnswer)(try native.invoke(secureStore, "compareAndExchange", {
+      key, expected: expected === undefined ? null : JSON.stringify(expected), value: next === undefined ? null : JSON.stringify(next)
     }))
-    return answer.status === "saved"
+    return answer.exchanged
   }
 
   effect function readCallback() {
@@ -122,7 +127,7 @@ export const delegationService = Layer.effect(CloudDelegation, effect {
             const record: PendingRecord = { state, authUrl: started.authUrl, expiresAt: started.expiresAt, phase: "waiting" }
             const saved = swapRecord(undefined, record) catch () => false
             if (saved) try watchDeadline(record)
-            if (saved) native.invoke("AlphaConnection", "openExternal", { url: started.authUrl, requestId: freshKey() }) catch () => undefined
+            if (saved) services.openExternal(started.authUrl) catch () => undefined
           }
           try send({ type: "startEnds" })
         };

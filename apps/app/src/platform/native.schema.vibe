@@ -97,3 +97,32 @@ export schema DeviceJournalEdit { readonly kept: boolean }
 
 /** `AlphaActionJournal.list` without a scope: every device-execution entry, oldest first. */
 export schema DeviceJournalList { readonly entries: readonly Schema.Unknown[] }
+
+/** `AlphaNetworkLocation.locate` with a position: what BeaconDB resolved from the Wi-Fi and cell signals the phone sees, `accuracy` in meters and `fingerprint` naming those signals. */
+export const NetworkFix = Schema.Struct({
+  latitude: Schema.Finite.check(Schema.isBetween({ minimum: -90, maximum: 90 })),
+  longitude: Schema.Finite.check(Schema.isBetween({ minimum: -180, maximum: 180 })),
+  accuracy: Schema.Finite.check(Schema.isGreaterThan(0)),
+  timestamp: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  fingerprint: Schema.String,
+  wifi: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  cells: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+})
+
+/** `AlphaNetworkLocation.locate` when the visible signals are the ones `unchangedFrom` named: nothing was sent, and the earlier position stands. */
+export schema NetworkUnchanged { readonly unchanged: true; readonly fingerprint: string }
+
+/** `AlphaNetworkLocation.locate`: a fresh position, or the earlier one confirmed unchanged. */
+export const NetworkLocationReply = Schema.Union([NetworkFix, NetworkUnchanged])
+
+/** Why `AlphaNetworkLocation.locate` gave no position, as the code of its refusal. */
+export schema NetworkLocationRefusal = "permission-denied" | "location-off" | "no-signals" | "not-found" | "invalid-response" | "unavailable"
+
+/** `Agent.launchSurface`: whether Alpha's own assistant surface hosts this page, never what a caller passed. */
+export schema LaunchSurface { readonly assistant: boolean }
+
+/** `Agent.takeInvocation`: how the assistant surface was opened, consumed on read, and whether the keyguard shows now; Android counts an unknown keyguard as locked. */
+export schema AssistantInvocation { readonly assistant: boolean; readonly invocation?: "listener" | "assist"; readonly locked: boolean }
+
+/** `DailyApps.closeAssistant`: whether the assistant surface was the page's host and is now closing. */
+export schema AssistantClosed { readonly closed: boolean }

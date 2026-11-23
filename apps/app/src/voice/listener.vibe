@@ -1,10 +1,12 @@
 // spec/voice/listener.md, "Story: Use the listener only on the image that admits it"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"; spec/voice/listener.md, "Invocations are bound to the agent session the resident verified, and none is taken while no session is bound"; spec/voice/listener.md, "A pending power press is discarded, never kept, while the screen cannot start voice"
+import { parseAssistantInvocation, parseInvocationUnlocked, parseListenerStatus, parseListenerStopReceipt, type AssistantInvocation } from "@elizaos/os/bridges/sense"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { ResidentControl, type ResidentSession } from "../platform/resident-control.vibe"
 import { Machine, screenFree, type Event, type Listener as ListenerState, type ListenerMode, type Origin, type Stop } from "../../gen/voice__listener.effect.vibe"
-import { newId, sessionKey } from "./ids.ts"
-import { InvocationReceipt, ListenerStatusReply, SettingsOpened } from "./native.schema.vibe"
+import { sessionKey } from "./ids.ts"
+import { newId } from "../platform/ids.ts"
+import { SettingsOpened } from "./native.schema.vibe"
 
 /** The listener as Alpha shows it: whether the image has one, what it is doing, whether it listens and holds the microphone, and the Sense bridge's own state. */
 export interface ListenerStatus {
@@ -29,6 +31,8 @@ export interface InvocationScreen {
   readonly dialogOpen: boolean
   readonly connectionPrompt: boolean
   readonly voiceActive: boolean
+  /** The signed-in account a protected power launch was granted for, when the account area knows it; the cold launch is claimed once under it. */
+  readonly powerAccountRef?: string
 }
 
 /** The always-on listener of the Alpha image: status, Pause, Turn off, its settings, the startup stop and invocations. Never turns listening on. */
@@ -49,16 +53,12 @@ export service Listener {
   openSettings(): boolean!!
   /** Bind a verified session's opaque authority, or none, to the listener's invocation bridge; the resident's session is bound by itself. */
   bindSession(authority: string | null): void!!
-  /** Take the pending invocation once; true when it starts a voice conversation. A screen that cannot start voice discards a pending power press instead. */
+  /** Take the pending invocation once, first claiming the protected power launch that started Alpha cold; true when it starts a voice conversation. A screen that cannot start voice discards a pending power press and that launch instead. */
   takeInvocation(screen: InvocationScreen): boolean!!
 }
 
 const SENSE = "ElizaSense"
 const STOP_DEADLINE = "5 seconds"
-const PAUSE_STOP_STATES = new Set(["OFF", "PERMISSION_REQUIRED", "NOTIFICATIONS_REQUIRED", "STOPPED_AFTER_ERRORS", "STOPPED_INDICATOR_LOST",
-  "PAUSED_OTHER_USER", "WAITING_FOR_UNLOCK", "SPEECH_UNAVAILABLE", "PAUSED_USER"])
-const decodeStatus = Schema.decodeUnknownOption(ListenerStatusReply)
-const decodeReceipt = Schema.decodeUnknownOption(InvocationReceipt)
 const decodeOpened = Schema.decodeUnknownOption(SettingsOpened)
 
 /** The Sense bridge's state as the mode Alpha shows. */
@@ -71,8 +71,8 @@ export function modeOf(state: string | undefined): ListenerMode {
   return "NeedsSetup"
 }
 
-function originOf(invocation: string | undefined, assistant: boolean): Origin {
-  if (!assistant) return "NothingPending"
+function originOf(invocation: AssistantInvocation): Origin {
+  if (invocation === null) return "NothingPending"
   if (invocation === "listener") return "ListenerWake"
   if (invocation === "system") return "SystemGesture"
   if (invocation === "power") return "PowerPress"
@@ -95,24 +95,23 @@ export const listenerService = Layer.effect(Listener, effect {
   const bindingId = newId()
   let generation = 0
   let boundKey: string | null = null
+  let launchSettled = false
 
   effect function send(event: Event) {
     held.send(event) catch () => undefined
   }
 
   function statusOf(raw: unknown): ListenerStatus {
-    const reply = Option.getOrUndefined(decodeStatus(raw))
-    if (reply === undefined || !reply.available) return unavailable
+    const reply = parseListenerStatus(raw)
+    if (!reply.available) return unavailable
     const mode = modeOf(reply.state)
-    return { available: mode !== "Unavailable", mode, consented: reply.consented === true, listening: reply.listening === true, microphoneOpen: reply.microphoneOpen === true, ...(reply.state === undefined ? {} : { state: reply.state }) }
+    return { available: mode !== "Unavailable", mode, consented: reply.consented, listening: reply.listening, microphoneOpen: reply.microphoneOpen, state: reply.state }
   }
 
   function confirmsStop(raw: unknown, stop: Stop): boolean {
-    const reply = Option.getOrUndefined(decodeStatus(raw))
-    if (reply === undefined) return false
-    if (!reply.available) return reply.reason === "not-installed" && reply.listening !== true && reply.microphoneOpen !== true
-    if (reply.saved !== true || reply.listening !== false || reply.microphoneOpen !== false || reply.state === undefined) return false
-    return stop === "TurnOffListening" ? reply.state === "OFF" : PAUSE_STOP_STATES.has(reply.state)
+    const shown = parseListenerStatus(raw)
+    if (!shown.available && shown.reason === "not-installed") return true
+    return parseListenerStopReceipt(raw, stop === "TurnOffListening" ? "turnOff" : "pause").available
   }
 
   effect function admitted() {
@@ -176,19 +175,30 @@ export const listenerService = Layer.effect(Listener, effect {
     try bindSession(authorityOf(try control.session()))
   }
 
+  effect function claimedLaunch(binding: { readonly generation: number; readonly bindingId: string; readonly sessionKey: string }, accountRef: string | undefined) {
+    if (launchSettled || accountRef === undefined) return undefined
+    launchSettled = true
+    const launch = timeout(native.invoke(SENSE, "claimProtectedPowerLaunch", { ...binding, accountRef }), STOP_DEADLINE) catch () => undefined
+    return parseAssistantInvocation(launch) === "power" ? launch : undefined
+  }
+
   effect function takeInvocation(screen: InvocationScreen) {
     if (!(try admitted()) || boundKey === null) return false
-    const key = boundKey
+    const binding = { generation, bindingId, sessionKey: boundKey }
     if (!screenFree(screen.visible, screen.dialogOpen, screen.connectionPrompt, screen.voiceActive)) {
       try send({ type: "powerDiscarded", visible: screen.visible, dialogOpen: screen.dialogOpen, connectionPrompt: screen.connectionPrompt, voiceActive: screen.voiceActive })
-      timeout(native.invoke(SENSE, "discardProtectedPowerInvocation", { generation, bindingId, sessionKey: key }), STOP_DEADLINE) catch () => undefined
+      if (!launchSettled) {
+        launchSettled = true
+        timeout(native.invoke(SENSE, "discardProtectedPowerLaunch", binding), STOP_DEADLINE) catch () => undefined
+      }
+      timeout(native.invoke(SENSE, "discardProtectedPowerInvocation", binding), STOP_DEADLINE) catch () => undefined
       return false
     }
-    const raw = timeout(native.invoke(SENSE, "takeInvocation", { generation, bindingId, sessionKey: key }), STOP_DEADLINE) catch () => undefined
-    const receipt = raw === undefined ? undefined : Option.getOrUndefined(decodeReceipt(raw))
-    const origin = originOf(receipt?.invocation, receipt?.assistant === true)
+    const launch = try claimedLaunch(binding, screen.powerAccountRef)
+    const raw = launch ?? (timeout(native.invoke(SENSE, "takeInvocation", binding), STOP_DEADLINE) catch () => undefined)
+    const origin = originOf(parseAssistantInvocation(raw))
     if (origin === "NothingPending") return false
-    const out = held.send({ type: "invocationTaken", origin, unlocked: screen.unlocked && receipt?.locked === false, visible: screen.visible,
+    const out = held.send({ type: "invocationTaken", origin, unlocked: screen.unlocked && parseInvocationUnlocked(raw), visible: screen.visible,
       dialogOpen: screen.dialogOpen, connectionPrompt: screen.connectionPrompt, voiceActive: screen.voiceActive }) catch () => undefined
     return out !== undefined && out.out.includes("StartVoice")
   }

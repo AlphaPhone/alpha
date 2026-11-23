@@ -13,8 +13,10 @@ import { InboxAccounts, mailOwnerKey } from "./accounts.vibe"
 import { Gmail } from "./gmail.vibe"
 import { MailOperations, type OperationOutcome } from "./operations.vibe"
 import { FilePicker } from "../files/picker.vibe"
+import { Navigation } from "../shell/navigation.vibe"
 import { checkMailFile, isRefusal, supportedMimeTypes, type FileRefusal } from "./files.ts"
-import { addressKey, forwardBody, forwardSubject, jsonBytes, literalMailAddress, newId, oneLineSubject, replySubject } from "./text.ts"
+import { addressKey, forwardBody, forwardSubject, jsonBytes, literalMailAddress, oneLineSubject, replySubject } from "./text.ts"
+import { newId } from "../platform/ids.ts"
 
 /** Why the composer did not do what was asked, so the owner can be told in a word or two. */
 export type ComposerRefusal =
@@ -23,6 +25,9 @@ export type ComposerRefusal =
 
 /** A file the owner picked or shared, before it is checked. */
 export interface PickedFile { readonly name: string; readonly mimeType: string; readonly dataBase64: string; readonly sha256?: string }
+
+/** What Back did in the composer: `taken` when the composer was showing; `refusal` when the draft could not be set aside and stays open. */
+export interface ComposerBack { readonly taken: boolean; readonly refusal?: ComposerRefusal }
 
 /** What a new email starts with. */
 export interface Prefill { readonly toList: string[]; readonly subject: string; readonly body: string; readonly files: OutgoingFile[] }
@@ -45,10 +50,10 @@ export service MailComposer {
   attach(file: PickedFile): ComposerRefusal | Admission | undefined!!
   /** Lets the owner choose files through Files' picker and attaches each, stopping at the first refusal. */
   pickAndAttach(): ComposerRefusal | Admission | undefined!!
-  /** Sets the open draft aside to Drafts, as Back does. */
-  back(): ComposerRefusal | undefined!!
-  /** Hides the composer, keeping the draft open, as leaving the Inbox does. */
-  hide(): void!!
+  /** Back while the composer shows: sets the open draft aside to Drafts; not taken while the composer is hidden. */
+  back(): ComposerBack!!
+  /** Hides the composer, keeping the draft open, as leaving the Inbox does; false when it was not showing. */
+  hide(): boolean!!
   /** Shows the open draft again. */
   resume(): void!!
   /** Opens a shelved draft; an earlier version of a sent email needs `confirmed`. */
@@ -98,6 +103,7 @@ export const layer = Layer.effect(MailComposer, effect {
   const gmail = try Gmail
   const operations = try MailOperations
   const picker = try FilePicker
+  const navigation = try Navigation
   const scope = try Effect.scope
   const waiting = try Ref.make<{ fields: DraftFields; pendingTo: string; first: number } | undefined>(undefined)
   const timer = try Ref.make<Fiber.Fiber<unknown, unknown> | undefined>(undefined)
@@ -165,6 +171,21 @@ export const layer = Layer.effect(MailComposer, effect {
     const done = try send({ type: "attach", id: open.id, revision: open.revision, file: candidate, policy, bytes: jsonBytes(next) })
     return done === undefined ? "changed" : undefined
   }
+
+  effect function hide() {
+    if (!(try mine()).composing) return false
+    try flush()
+    return (try send({ type: "hide" })) !== undefined
+  }
+
+  fork.scoped (effect {
+    let shown = ""
+    for try (const nav of navigation.changes) {
+      const left = shown === "inbox" && nav.app !== "inbox"
+      shown = nav.app
+      if (left) try hide()
+    }
+  })
 
   fork.scoped (effect {
     for try (const _ of accounts.changes) {
@@ -246,23 +267,22 @@ export const layer = Layer.effect(MailComposer, effect {
       }
       return undefined
     },
-    effect back() {
+    effect back(): ComposerBack {
+      if (!(try mine()).composing) return { taken: false }
       const refusal = try flush()
-      if (refusal !== undefined) return refusal
+      if (refusal !== undefined) return { taken: true, refusal }
       const a = try mine()
-      if (!hasDraft(a.open)) return undefined
+      if (!hasDraft(a.open)) return { taken: (try hide()) }
       if (!meaningful(a.open)) {
         try send({ type: "setAside", shelfBytes: 0 })
-        return undefined
+        return { taken: true }
       }
       const shelfBytes = jsonBytes([...a.shelf.filter((d) => d.id !== a.open.id), a.open])
       const done = try send({ type: "setAside", shelfBytes })
-      return done === undefined ? (shelfBytes > draftBytesLimit || !shelfRoom(a.shelf, a.open) ? "drafts-full" : "changed") : undefined
+      if (done !== undefined) return { taken: true }
+      return { taken: true, refusal: shelfBytes > draftBytesLimit || !shelfRoom(a.shelf, a.open) ? "drafts-full" : "changed" }
     },
-    effect hide() {
-      try flush()
-      try send({ type: "hide" })
-    },
+    hide,
     effect resume() {
       try Ref.set(conflict, false)
       try send({ type: "resume" })

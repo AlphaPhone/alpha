@@ -13,7 +13,7 @@ import { Machine as GeometryMachine, largeText } from "../../gen/shell__geometry
 import { Machine as InventoryMachine } from "../../gen/shell__inventory.effect.vibe"
 import { Machine as AppInfoMachine } from "../../gen/shell__appInfo.effect.vibe"
 import { Machine as ToastsMachine } from "../../gen/shell__toasts.effect.vibe"
-import { BrowserTabs } from "../../src/browser/session.vibe"
+import { BrowserAgent, BrowserOpenRefused } from "../../src/browser/agent.vibe"
 import { MailComposer } from "../../src/inbox/composer.vibe"
 import { NotesHandoff } from "../../src/notes/origins.vibe"
 import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
@@ -131,14 +131,14 @@ describe("Navigation (spec/shell/navigation.md, \"Story: Go back one step at a t
       provide shell {
         const navigation = try Navigation
         const machine = try NavigationMachine
-        try navigation.moveChat("ChatHidden")
+        try navigation.moveChat("Hidden")
         const hidden = (try machine.get()).chat
-        try navigation.moveChat("ChatFull")
+        try navigation.moveChat("Full")
         try navigation.back()
         const half = (try machine.get()).chat
         try navigation.back()
         const rest = (try machine.get()).chat
-        try Effect.try(() => assert.deepStrictEqual([hidden, half, rest], ["ChatInput", "ChatSheet", "ChatInput"]))
+        try Effect.try(() => assert.deepStrictEqual([hidden, half, rest], ["Input", "Sheet", "Input"]))
       }
     }
   })
@@ -329,7 +329,7 @@ describe("Startup access (spec/shell/permissions.md, \"Story: Grant Alpha what i
         const permissions = try Permissions
         const machine = try PermissionsMachine
         try permissions.connection({ account: true, ownKeys: false, signingIn: false, busy: false, residentStarting: false, background: false, created: false })
-        try machine.send({ type: "platformStatus", key: "PermNotifications", access: "AccessChecking" })
+        try machine.send({ type: "platformStatus", key: "PermNotifications", access: "AccessChecking", grant: "GrantNone" })
         const early = skippable(try machine.get())
         try TestClock.adjust("21 seconds")
         const late = skippable(try machine.get())
@@ -448,12 +448,13 @@ describe("Recovery and Home (spec/shell/recovery.md, \"Story: Get my phone back 
 })
 
 describe("Handoffs (spec/shell/handoffs.md, \"Story: Carry what I asked for in Notes into the app that does it\")", () => {
-  it.effect("an email draft opens Inbox and a page that does not parse opens nothing and says so (spec/shell/handoffs.md, \"Story: Carry what I asked for in Notes into the app that does it\")", () => effect {
+  it.effect("an email draft opens Inbox and a page that is not a secure address opens nothing and says so (spec/shell/handoffs.md, \"Story: Carry what I asked for in Notes into the app that does it\")", () => effect {
     let drafts = 0
+    let opens = 0
     const fakes = Layer.mergeAll(
-      Layer.succeed(NotesHandoff, { requests: Stream.make({ kind: "email-draft", subject: "Lunch", body: "Bring the notes" }, { kind: "open-web-source", url: "" }) } as never),
+      Layer.succeed(NotesHandoff, { requests: Stream.make({ kind: "email-draft", subject: "Lunch", body: "Bring the notes" }, { kind: "open-web-source", url: "http://example.com/a" }) } as never),
       Layer.succeed(MailComposer, { compose: () => sync(() => { drafts = drafts + 1; return undefined }) } as never),
-      Layer.succeed(BrowserTabs, { get: () => succeed({ host: "BrowserHost" }), dispatch: () => succeed({ accepted: true, failed: false }) } as never),
+      Layer.succeed(BrowserAgent, { openApproved: () => sync(() => { opens = opens + 1; return { tab: "t1", present: succeed(undefined) } }) } as never),
     )
     provide memoryStore, inBrowser {
       provide shell {
@@ -463,10 +464,48 @@ describe("Handoffs (spec/shell/handoffs.md, \"Story: Carry what I asked for in N
           try TestClock.adjust("1 millis")
           const nav = try navigation.get()
           const shown = (try toasts.get()).shown
-          try Effect.try(() => assert.deepStrictEqual([drafts, nav.app, shown.failure], [1, "inbox", true]))
+          try Effect.try(() => assert.deepStrictEqual([drafts, opens, nav.app, shown.failure], [1, 0, "inbox", true]))
         }
       }
     }
+  })
+
+  it.effect("a note's secure web page opens in Browser, and one Browser refuses says why (spec/shell/handoffs.md, \"A note's web page opens only as a secure web address, through Browser's approved open\")", () => effect {
+    let presented = 0
+    const opened = Layer.mergeAll(
+      Layer.succeed(NotesHandoff, { requests: Stream.make({ kind: "open-web-source", url: "https://example.com/recipe" }) } as never),
+      Layer.succeed(MailComposer, { compose: () => succeed(undefined) } as never),
+      Layer.succeed(BrowserAgent, { openApproved: () => succeed({ tab: "t1", present: sync(() => { presented = presented + 1 }) }) } as never),
+    )
+    const refused = Layer.mergeAll(
+      Layer.succeed(NotesHandoff, { requests: Stream.make({ kind: "open-web-source", url: "https://example.com/blocked" }) } as never),
+      Layer.succeed(MailComposer, { compose: () => succeed(undefined) } as never),
+      Layer.succeed(BrowserAgent, { openApproved: () => Effect.fail(new BrowserOpenRefused({ message: "Browser is busy" })) } as never),
+    )
+    const shownApp = try effect {
+      provide memoryStore, inBrowser {
+        provide shell {
+          const navigation = try NavigationMachine
+          provide Layer.provide(handoffsLive, opened) {
+            try TestClock.adjust("1 millis")
+            return (try navigation.get()).app
+          }
+        }
+      }
+    }
+    const refusal = try effect {
+      provide memoryStore, inBrowser {
+        provide shell {
+          const navigation = try NavigationMachine
+          const toasts = try ToastsMachine
+          provide Layer.provide(handoffsLive, refused) {
+            try TestClock.adjust("1 millis")
+            return [(try navigation.get()).app, (try toasts.get()).shown.failure] as const
+          }
+        }
+      }
+    }
+    try Effect.try(() => assert.deepStrictEqual([shownApp, presented, refusal], ["browser", 1, ["", true]]))
   })
 
   it.effect("an approved open_view is applied only once its view is in front (spec/shell/navigation.md, \"An approved open_view shows Home or an admitted app, and is applied only once it is in front\")", () => effect {

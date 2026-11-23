@@ -1,12 +1,13 @@
-// spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Story: Ask about a page once I approve the excerpt"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"
-import { type Event, type ReadPage, type Reading, type ReadingEffect, Machine, machine } from "../../gen/browser__reading.effect.vibe"
+// spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Back closes the excerpt review the owner sees: Ask about page is closed, and a local reading is stopped"; spec/browser/reading.md, "Story: Ask about a page once I approve the excerpt"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"
+import { type Event, type ReadPage, type Reading, type ReadingEffect, Machine, machine, reviewShown } from "../../gen/browser__reading.effect.vibe"
 import { type Session, curTab } from "../../gen/browser__session.effect.vibe"
 import { settled } from "../../gen/browser__page.effect.vibe"
 import { Assistant } from "../assistant/assistant.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Toasts } from "../shell/toasts.vibe"
 import { READING_NOTICES, refusalText } from "./messages.ts"
-import { MAX_EXCERPT, publicPageText, sensitiveAddress, sensitiveText } from "./page-text.ts"
+import { MAX_EXCERPT, publicPageText, sensitiveAddress } from "./page-text.ts"
+import { sensitiveText } from "../platform/sensitive.ts"
 import { ReadingVoice } from "./ports.vibe"
 import { BrowserTabs } from "./session.vibe"
 import { BrowserCallFailed, TabHost } from "./tabHost.vibe"
@@ -27,6 +28,8 @@ export service BrowserReading {
   editLocal(text: string): void!!
   readLocal(): void!!
   stopLocal(): void!!
+  /** Hardware or gesture Back: closes the excerpt review that shows; false when none does. */
+  back(): boolean!!
   /** Asks the device once whether it can read privately, and ends a reading whose page or foreground changed; never returns. */
   follow(): void!!
 }
@@ -87,11 +90,11 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
           try send({ type: "readingReturned", ok: true, sensitive: false })
         }
       }
-      when { tag: "SpendToken" }: {
+      when { tag: "SpendToken", let generation }: {
         const spent = try Ref.getAndSet(token, "")
         fork.detached effect {
           const ok = (voice.speakToken(spent) catch () => false) !== false
-          try send({ type: "speechEnded", ok })
+          try send({ type: "speechEnded", generation, ok })
         }
       }
       when { tag: "CancelReading" }: {
@@ -182,6 +185,12 @@ export const readingLayer = Layer.provideMerge(Layer.effect(BrowserReading, effe
     editLocal: (text: string) => send({ type: "localTyped", sensitive: sensitiveText(text), empty: text.trim() === "", body: text.slice(0, MAX_EXCERPT) }),
     effect readLocal() { try send({ type: "localRead", current: try current() }) },
     stopLocal: () => send({ type: "localStopped" }),
+    effect back() {
+      const now = try reading.get()
+      if (!reviewShown(now)) return false
+      try send(now.kind === "AskAboutPage" ? { type: "questionClosed" } : { type: "stopReading" })
+      return true
+    },
     effect follow() {
       try send({ type: "supportNeeded" })
       try.all [

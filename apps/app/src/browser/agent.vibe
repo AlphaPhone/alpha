@@ -1,11 +1,12 @@
-// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
+// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
 import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
 import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
-import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, curTab, isPrivateTab, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
+import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, curTab, isPrivateTab, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
 import { type Preference, Machine, machine } from "../../gen/browser__agent.effect.vibe"
 import type { PageCommand } from "../../gen/browser__page.ts"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
-import { matchingTabs, newId, newTabId, searchAddress } from "./address.ts"
+import { matchingTabs, newTabId, searchAddress } from "./address.ts"
+import { newId } from "../platform/ids.ts"
 import { AGENT_REFUSALS } from "./messages.ts"
 import { BrowserReviews } from "./reviews.vibe"
 import { BrowserTabs } from "./session.vibe"
@@ -25,6 +26,22 @@ export interface BrowserTabSelection {
   readonly kind: "browser-tab"
   readonly id: string
   readonly revision: string
+}
+
+/** One tab as a close-every-tab card lists it: its title, else its address; the card counts a private tab and never names it. */
+export interface BrowserTabLine {
+  readonly title: string
+  readonly host?: string
+  readonly private?: true
+}
+
+/** The lines of a close-every-tab card for the tabs its listing holds, in Browser's order. */
+export function tabLines(tabs: readonly ListedTab[]): BrowserTabLine[] {
+  return tabs.map((t) => {
+    const host = t.title !== "" ? URL.parse(t.url)?.host : undefined
+    const line: BrowserTabLine = { title: t.title || t.url || (t.priv ? "New private tab" : "New tab"), ...(host === undefined || host === "" ? {} : { host }), ...(t.priv ? { private: true as const } : {}) }
+    return line
+  })
 }
 
 /** The receipt a view command answers with: a dispatch, never a finished page, or a typed refusal before any effect. */
@@ -48,6 +65,12 @@ export service BrowserAgent {
   tabNeedsChoice(target: string): boolean!!
   /** Asks the owner to approve a reviewed control on the shown, unlocked phone. */
   review(operation: unknown): boolean!BrowserOpenRefused
+  /** The tabs the close-every-tab card of `proposalId` lists: bound by its first listing, and null once Browser's tabs differ from it. */
+  tabsClosing(proposalId: string): readonly BrowserTabLine[] | null!!
+  /** Whether the card of `proposalId` was listed and still lists the tabs that would close; it never binds a listing. */
+  closingListed(proposalId: string): boolean!!
+  /** Closes exactly the tabs the card of `proposalId` listed, or refuses before any effect; the returned presentation closes the tab showing in Browser. */
+  closeAll(proposalId: string): Effect.Effect<Effect.Effect<void>, BrowserOpenRefused>
 }
 
 const historyOf = { back: "GoBack", forward: "GoForward", reload: "Reload", stop: "StopLoading" } as const satisfies Record<string, PageCommand>
@@ -217,6 +240,32 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
       if (notice !== undefined) throw new BrowserOpenRefused({ message: notice })
       const card = describeBrowserControl(parsed.operation)
       return try reviews.confirm(`browser-control-${newId()}`, "BrowserControl", `${card.title}\n${card.description}`)
+    },
+    effect tabsClosing(proposalId: string) {
+      if (proposalId === "") return null
+      const shown = inBrowser(try foreground.get())
+      const listed = try tabs.dispatch({ type: "listClosing", proposal: proposalId, inBrowser: shown })
+      if (!listed.accepted) return null
+      const state = try tabs.get()
+      return listingCurrent(state, proposalId, shown) ? tabLines(listingOf(state, proposalId)) : null
+    },
+    effect closingListed(proposalId: string) {
+      if (proposalId === "") return false
+      const state = try tabs.get()
+      return listingCurrent(state, proposalId, inBrowser(try foreground.get())) && listingOf(state, proposalId).length > 0
+    },
+    effect closeAll(proposalId: string) {
+      const state = try tabs.get()
+      const selected = state.cur
+      const shown = inBrowser(try foreground.get())
+      const hidePrivate = !(shown && isPrivateTab(state, selected))
+      const request = newId()
+      const settled = try outcome({ type: "agentCloseAll", request, proposal: proposalId, inBrowser: shown, fallback: newTabId() }, request)
+      if (settled.tab === "") {
+        const left = (try tabs.get()).cur
+        return effect { try tabs.dispatch({ type: "agentPresent", tab: left, selected: left, edit: false }) }
+      }
+      return effect { try tabs.dispatch({ type: "agentCloseAllShown", tab: selected, selected, fallback: newTabId(), hidePrivate }) }
     },
   }
 }), machine())

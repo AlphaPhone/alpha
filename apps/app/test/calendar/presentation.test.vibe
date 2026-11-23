@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/selection.md, "Story: Let the assistant know which day I am looking at"
+// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/selection.md, "Story: Let the assistant know which day I am looking at"
 import { assert, describe, it } from "@effect/vitest"
 import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
 import { bindCalendar, hideCalendar, leaveCalendar, readCalendar } from "../../src/calendar/binding.vibe"
@@ -6,7 +6,7 @@ import { HeldDeletions } from "../../src/calendar/deletions.vibe"
 import { HomeAgenda } from "../../src/calendar/home.vibe"
 import type { CalendarRow } from "../../src/calendar/model.vibe"
 import { calendarDayObservation } from "../../src/calendar/observation.vibe"
-import { eventRoute, openEditor, rowFields } from "../../src/calendar/screen.vibe"
+import { calendarBack, eventRoute, openEditor, openSources, rowFields } from "../../src/calendar/screen.vibe"
 import { repeatText } from "../../src/calendar/model.vibe"
 import { intervalDetail, listGroups, monthGrid, rowMatches, timeline, visibleDays } from "../../src/web/calendar/layout.ts"
 import { binding, calendarOver, check, foregroundAt, otherBinding, same } from "./harness.vibe"
@@ -47,6 +47,41 @@ describe("Calendar views (spec/calendar/presentation.md)", () => {
       const state = try (try PresentationMachine).get()
       const fields = rowFields(trip, "c-1")
       try same([opened, state.form, fields.start, fields.end, fields.allDay], [true, "NewForm", "2026-11-21", "2026-11-22", true])
+    }
+  })
+
+  it.effect("Back closes the form, the Calendars sheet and search one at a time, then leaves Back to the shell (spec/calendar/presentation.md, \"Story: Open an event and come back\")", () => effect {
+    // spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const presentation = try PresentationMachine
+      try openEditor(undefined)
+      const formClosed = try calendarBack()
+      const afterForm = try presentation.get()
+      // spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"
+      const sheet = try openSources()
+      const sheetClosed = try calendarBack()
+      const afterSheet = try presentation.get()
+      presentation.send({ type: "openSearch" }) catch () => undefined
+      const searchClosed = try calendarBack()
+      const afterSearch = try presentation.get()
+      const nothingLeft = try calendarBack()
+      try same([formClosed, afterForm.form, sheet, sheetClosed, afterSheet.sourcesSheet, searchClosed, afterSearch.searching, nothingLeft],
+        [true, "NoForm", true, true, false, true, false, false])
+    }
+  })
+
+  it.effect("the Calendars sheet ends with the visit and gives way to a form (spec/calendar/presentation.md, \"Story: Choose which calendars I see\")", () => effect {
+    // spec/calendar/presentation.md, "Leaving Calendar ends its transient overlays and any pending save request"
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const presentation = try PresentationMachine
+      try openSources()
+      try openEditor(undefined)
+      const underForm = (try presentation.get()).sourcesSheet
+      try calendarBack()
+      try openSources()
+      try leaveCalendar()
+      const left = (try presentation.get()).sourcesSheet
+      try same([underForm, left], [false, false])
     }
   })
 

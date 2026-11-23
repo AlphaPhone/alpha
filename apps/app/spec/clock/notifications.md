@@ -131,6 +131,9 @@ pure def sometimesSelected(n: Shade): bool = n.selected != ""
 ### A question is offered only for an own reminder, calendar or navigation row that is not hidden, and drafted only if it is still listed unchanged
 
 Workflow notices, hosted results and digests can carry mail-derived text and are never offered.
+The check and the draft are the assistant's [notice question](../assistant/noticeQuestion.md), at
+the revision the owner reviewed: it reads Clock's own notices again from the phone, consumes the
+notice once and composes the question; Clock records only whether it was drafted.
 
 ```quint
 pure def reviewable(x: NoticeRow): bool =

@@ -1,19 +1,27 @@
 // spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"; spec/platform/index.md, "Eliza Cloud stays the live host until the Alpha Cloud cutover flag is set"
-import appConfig from "../../../../app.config.json" with { type: "json" };
+import appConfigText from "../../../../app.config.json?raw";
 
 declare const __ALPHA_TEST_MOCKS__: boolean | undefined;
 
 /** ELIZA_DEV_ALLOW_TEST_MOCKS=1 at build time, as vite.config.ts defines `__ALPHA_TEST_MOCKS__`; off everywhere else. */
 export const testMocksBuilt: boolean = typeof __ALPHA_TEST_MOCKS__ === "boolean" && __ALPHA_TEST_MOCKS__;
 
+const appConfig: unknown = JSON.parse(appConfigText);
+
+function configured(name: "version" | "appId"): string {
+  const value = typeof appConfig === "object" && appConfig !== null ? (appConfig as Record<string, unknown>)[name] : undefined;
+  if (typeof value !== "string" || value.length === 0) throw new Error(`app.config.json has no ${name}`);
+  return value;
+}
+
 /** The app version every distributed build carries, from app.config.json. */
-export const appVersion: string = appConfig.version;
+export const appVersion: string = configured("version");
 
 /** The development server serves the page, as Vite reports it. */
 export const developmentServer: boolean = import.meta.env?.DEV === true;
 
 /** The app id, which is always Alpha's own. */
-export const appId: string = appConfig.appId;
+export const appId: string = configured("appId");
 
 /** The Alpha Cloud cutover flag, `VITE_ALPHA_CLOUD_CUTOVER=1` at build time as account's deployment reads it: off, the shipped default, every build keeps Eliza Cloud. */
 export const alphaCloudCutover: boolean = import.meta.env?.VITE_ALPHA_CLOUD_CUTOVER === "1";

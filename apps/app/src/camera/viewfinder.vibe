@@ -41,6 +41,8 @@ export service Viewfinder {
   allow(): void!!
   resumed(): void!!
   volumeKey(): void!!
+  /** Back while Camera is in front: a recording stops and is kept, and Camera stays; false when Back is the shell's. */
+  back(): boolean!!
   /** Follow what is in front of the owner: the page shown, the conversation's detent and any sheet or dialog. */
   foreground(state: ForegroundState): void!!
   /** One of Camera's own dialogs, such as a scan review, opened over the viewfinder or closed. */
@@ -447,6 +449,14 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
       ownDialog = open
       try covered()
       try send({ type: "sync" })
+    },
+    effect back() {
+      const now = try view.get()
+      if (now.recording === "RecordingFinishing") return true
+      if (now.recording !== "RecordingActive") return false
+      try send({ type: "stopRecording" })
+      if (bridge.browser) recorder.send({ type: "finish" }) catch () => undefined
+      return true
     },
     effect volumeKey() {
       const pressed = try send({ type: "volumeKey" })

@@ -16,6 +16,12 @@ export const liveCard: ProposalCard = {
 /** A card whose action ran. */
 export const doneCard: ProposalCard = { ...liveCard, proposalId: "p-2", state: "DoneCard", summary: "Saved note “Groceries”." };
 
+/** A close-every-tab card listing the tabs that will close, one of them private and counted only. */
+export const closeTabsCard: ProposalCard = {
+  ...liveCard, proposalId: "p-4", title: "Close all tabs", detail: "Closes every tab listed here in Browser.",
+  items: { lines: ["Weather in Paris · weather.com", "The New York Times · nytimes.com"], unnamed: 1, unnamedLabel: "private tab" },
+};
+
 /** A card whose review time passed. */
 export const expiredCard: ProposalCard = { ...liveCard, proposalId: "p-3", state: "ExpiredCard" };
 
@@ -27,6 +33,7 @@ export const conversation: readonly Row[] = [
   agent("a-2", "Here it is:\n```\n[INFO] started\n[CHOICE:maps-share id=x]\n```"),
   { kind: "receipt", id: "device-receipt:p-2", proposalId: "p-2", title: "Completed", summary: "Saved note “Groceries”." },
   { kind: "card", id: "card:p-1", card: liveCard },
+  { kind: "change", id: "change:a-2:notes", text: "Notes changed", app: "notes" },
 ];
 
 /** A reply being written, after a brief acknowledgment. */

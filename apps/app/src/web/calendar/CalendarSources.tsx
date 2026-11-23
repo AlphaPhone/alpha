@@ -1,5 +1,6 @@
-// spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Revoked access hides a source at once; hiding the agent calendar is a preference of that account"
-import { Sheet, SheetContent, Switch } from "../components/ui/index.ts";
+// spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Revoked access hides a source at once; hiding the agent calendar is a preference of that account"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"
+import type { ReactNode } from "react";
+import { Separator, Sheet, SheetContent, Switch } from "../components/ui/index.ts";
 
 /** Which sources Calendar shows, whether each may be read, and the switches that change them. */
 export type CalendarSourcesProps = {
@@ -15,13 +16,15 @@ export type CalendarSourcesProps = {
   onAgent: (shown: boolean) => void;
   onDevice: () => void;
   onClose: () => void;
+  /** What the sheet shows below the switches: Google Calendar sync, when the agent's calendars offer it. */
+  children?: ReactNode;
 };
 
 /**
  * "Calendars": show or hide the agent's calendar for this account, and the phone's calendars, on Calendar and Home.
  * @model spec/calendar/presentation.md
  */
-export function CalendarSources({ open, agentShown, deviceShown, agentAccess, deviceAccess, onAgent, onDevice, onClose }: CalendarSourcesProps) {
+export function CalendarSources({ open, agentShown, deviceShown, agentAccess, deviceAccess, onAgent, onDevice, onClose, children }: CalendarSourcesProps) {
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>
       <SheetContent side="bottom" title="Calendars">
@@ -41,6 +44,12 @@ export function CalendarSources({ open, agentShown, deviceShown, agentAccess, de
             <Switch aria-label="Show phone calendars" checked={deviceAccess && deviceShown} disabled={!deviceAccess} onCheckedChange={() => onDevice()} />
           </label>
         </div>
+        {children !== undefined && children !== null && children !== false && (
+          <>
+            <Separator />
+            {children}
+          </>
+        )}
       </SheetContent>
     </Sheet>
   );

@@ -84,6 +84,8 @@ export service PhotoLibrary {
   prepareDelete(): void!!
   confirmDelete(): void!!
   cancelDelete(): void!!
+  /** Back inside Photos: the delete confirmation, the album dialog, the viewer, the selection, then the open album close in that order; false when Back is the shell's. */
+  back(): boolean!!
   setFilter(filter: PhotosFilter): number!!
   clearFilter(): void!!
   openAlbumDialog(target: string, forSelection: boolean): void!!
@@ -264,6 +266,12 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
     return read === undefined ? undefined : rowOf(read)
   }
 
+  effect function cancelDeleteNow() {
+    if (pendingDelete !== undefined) store.cancelDeleteTrash(pendingDelete) catch () => undefined
+    pendingDelete = undefined
+    try sendBrowse({ type: "cancelDelete" })
+  }
+
   try forkDetach(Stream.runForEach(store.changed, () => effect {
     const c = try catalog.get()
     if (!c.hidden && c.active && !c.disposed) try reload()
@@ -428,10 +436,32 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
       try sendCatalog({ type: "requestTrash", paging: false })
       try forkDetach(readTrash())
     },
-    effect cancelDelete() {
-      if (pendingDelete !== undefined) store.cancelDeleteTrash(pendingDelete) catch () => undefined
-      pendingDelete = undefined
-      try sendBrowse({ type: "cancelDelete" })
+    cancelDelete: cancelDeleteNow,
+    effect back() {
+      const b = try browse.get()
+      if (b.work === "Deleting") {
+        try cancelDeleteNow()
+        return true
+      }
+      const a = try albums.get()
+      if (a.stage !== "DialogClosed") {
+        albums.send({ type: "closeDialog", gen: a.generation }) catch () => undefined
+        return true
+      }
+      if (b.viewer !== "") {
+        try sendBrowse({ type: "closeViewer" })
+        return true
+      }
+      if (b.selecting) {
+        try sendBrowse({ type: "cancelSelection" })
+        return true
+      }
+      if (b.album === "") return false
+      if ((try sendBrowse({ type: "openAlbum", album: "" })) !== undefined) {
+        album = undefined
+        try publishPool()
+      }
+      return true
     },
     effect setFilter(next: PhotosFilter) {
       const listed = (try albums.get()).albums

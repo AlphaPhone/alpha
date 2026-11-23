@@ -1,5 +1,4 @@
-// spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"
-import { useState } from "react";
+// spec/workflows/authoring.md, "Story: Describe a workflow and keep only what this phone can do"; spec/workflows/authoring.md, "Story: Save exactly the draft I reviewed, once"; spec/workflows/authoring.md, "The unsent description is kept for its owner across closing and reopening"
 import { WORKFLOW_OPERATION_LABELS } from "@elizaos/plugin-workflow/scope";
 import type { Authoring } from "../../../gen/workflows__authoring.ts";
 import type { ChangeOutcome, Described, ScheduleNote } from "../../workflows/definitions.vibe";
@@ -9,6 +8,10 @@ import { Alert, Button, Sheet, SheetContent, Textarea } from "../components/ui/i
 export interface DraftSheetProps {
   open: boolean;
   authoring: Authoring;
+  /** The description the owner is typing, kept for this owner across closing and reopening. */
+  text: string;
+  /** False when the phone could not keep the description; it stays on screen with a warning. */
+  textKept: boolean;
   /** The last description's answer. */
   described?: Described;
   /** When the described draft runs, as its review discloses it. */
@@ -16,6 +19,7 @@ export interface DraftSheetProps {
   outcome?: ChangeOutcome;
   can: { readonly edit: boolean; readonly save: boolean; readonly resend: boolean; readonly recover: boolean; readonly discard: boolean };
   onOpenChange: (open: boolean) => void;
+  onTextChange: (text: string) => void;
   onDescribe: (prompt: string) => void;
   onSave: () => void;
   onRecover: () => void;
@@ -28,16 +32,16 @@ export interface DraftSheetProps {
  * @model spec/workflows/authoring.md
  * @design design.md
  */
-export function DraftSheet({ open, authoring, described, note, outcome, can, onOpenChange, onDescribe, onSave, onRecover, onResend, onDiscard }: DraftSheetProps) {
-  const [prompt, setPrompt] = useState("");
+export function DraftSheet({ open, authoring, text, textKept, described, note, outcome, can, onOpenChange, onTextChange, onDescribe, onSave, onRecover, onResend, onDiscard }: DraftSheetProps) {
   const reviewing = authoring.review === authoring.spec && authoring.spec > 0 && authoring.pending === 0;
   const steps = described?.kind === "draft" ? described.spec.steps : [];
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="full" title="New workflow">
         <div className="flex flex-col gap-3 overflow-y-auto px-5 pb-5">
-          <Textarea aria-label="Describe the workflow" value={prompt} maxLength={4000} onChange={(e) => setPrompt(e.target.value)} disabled={!can.edit} />
-          <Button size="lg" variant="outline" disabled={!can.edit || prompt.trim() === ""} onClick={() => onDescribe(prompt)}>Draft</Button>
+          <Textarea aria-label="Describe the workflow" value={text} maxLength={4000} onChange={(e) => onTextChange(e.target.value)} disabled={!can.edit} />
+          {!textKept && <Alert variant="warn" role="status" className="text-sm">This phone couldn’t keep your description. Copy it before closing.</Alert>}
+          <Button size="lg" variant="outline" disabled={!can.edit || text.trim() === ""} onClick={() => onDescribe(text)}>Draft</Button>
           {described?.kind === "refused" && <Alert variant="warn" role="status">{described.message}</Alert>}
           {described?.kind === "unavailable" && <Alert variant="warn" role="status">A draft isn’t available from your agent right now. Nothing was saved.</Alert>}
           {described?.kind === "draft" && (

@@ -1,6 +1,6 @@
-// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"
+// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/conversation.md, "Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"
 import type { MapsCard } from "@elizaos/plugin-maps/cards";
-import { CircleAlert, CircleCheck, CircleHelp, Paperclip, Quote as QuoteIcon, SquarePen } from "lucide-react";
+import { ArrowUpRight, CircleAlert, CircleCheck, CircleHelp, Paperclip, Quote as QuoteIcon, SquarePen, Volume2 } from "lucide-react";
 import { editable, quotable } from "../../../gen/assistant__conversation.ts";
 import { copy, cutOffText, planCardTitle } from "../../assistant/presentation.vibe";
 import type { ProposalCard, Quote, Row } from "../../assistant/transcript.vibe";
@@ -40,8 +40,12 @@ export type TranscriptProps = {
   onDecline: (card: ProposalCard) => void;
   /** Open the view a navigation card names. */
   onOpenCard: (card: ProposalCard) => void;
-  /** Answer a reply's choice with its value. */
-  onChoose: (value: string) => void;
+  /** Answer a reply's choice with its value, from the agent message counted `ordinal`. */
+  onChoose: (value: string, ordinal: number | undefined) => void;
+  /** Read a settled reply aloud. */
+  onListen?: (row: Extract<Row, { kind: "agent" }>) => void;
+  /** Open what a reply changed. */
+  onOpenChange?: (row: Extract<Row, { kind: "change" }>) => void;
   /** Act on a reply's plan card. */
   onPlan: (row: Extract<Row, { kind: "agent" }>) => void;
   /** Open a workflow run a reply announced. */
@@ -90,14 +94,18 @@ export function Transcript(props: TranscriptProps) {
               <li key={row.id} data-alpha-message-id={row.id} className="flex flex-col items-start gap-2">
                 {row.reply.status === "Planning" || (row.reply.status === "Working" && row.text === "")
                   ? <p className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner size="sm" aria-hidden />{row.label ?? "Thinking"}</p>
-                  : <ReplyText segments={row.segments} onChoose={props.onChoose} onOpenRun={props.onOpenRun}
+                  : <ReplyText segments={row.segments} onChoose={(value) => props.onChoose(value, row.id === newestAgent ? row.ordinal : undefined)} onOpenRun={props.onOpenRun}
                       live={row.id === newestAgent && row.ordinal !== undefined && !typing}
                       onOpenMap={props.onOpenMap === undefined || row.ordinal === undefined ? undefined : (card) => props.onOpenMap?.(card, row.ordinal ?? 0)} />}
                 {row.notices.map((notice) => <p key={notice} className="text-sm text-muted-foreground">{notice}</p>)}
                 {row.cutOff !== "NotCutOff" && <p className="font-mono text-xs uppercase text-muted-foreground">{cutOffText(row.cutOff)}</p>}
                 {row.plan !== undefined && <Button variant="outline" onClick={() => props.onPlan(row)}>{planCardTitle(row.plan, props.cloud)}</Button>}
-                {row.recorded && row.reply.status === "Settled" && quotable({ recorded: true, sameSession: true, settledRow: true, mine: false }, typing) &&
-                  <Button size="icon" variant="ghost" aria-label="Reply to this message" onClick={() => props.onQuote({ messageId: row.id, text: row.text, from: "agent" })}><QuoteIcon className="size-4" /></Button>}
+                <div className="flex gap-1">
+                  {row.recorded && row.reply.status === "Settled" && quotable({ recorded: true, sameSession: true, settledRow: true, mine: false }, typing) &&
+                    <Button size="icon" variant="ghost" aria-label="Reply to this message" onClick={() => props.onQuote({ messageId: row.id, text: row.text, from: "agent" })}><QuoteIcon className="size-4" /></Button>}
+                  {props.onListen !== undefined && row.reply.status === "Settled" && row.text.trim() !== "" &&
+                    <Button size="icon" variant="ghost" aria-label={copy.listen} onClick={() => props.onListen?.(row)}><Volume2 className="size-4" /></Button>}
+                </div>
               </li>
             );
           case "receipt": {
@@ -106,6 +114,8 @@ export function Transcript(props: TranscriptProps) {
           }
           case "notice":
             return <li key={row.id} role="status" className="text-sm text-muted-foreground">{row.text}</li>;
+          case "change":
+            return <li key={row.id}><Button variant="outline" size="sm" onClick={() => props.onOpenChange?.(row)}><ArrowUpRight aria-hidden className="size-4" />{row.text}</Button></li>;
           case "email":
             return <li key={row.id}><EmailCardView card={row.card} to={row.to} subject={row.subject} body={row.body} ownAddress={props.ownAddress}
               onEdit={(fields) => props.onEmail(row, "edit", fields)} onSend={(fields) => props.onEmail(row, "send", fields)}

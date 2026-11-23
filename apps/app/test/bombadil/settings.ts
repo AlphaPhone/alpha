@@ -1,4 +1,4 @@
-// spec/settings/passwords.md, "Each visit of the page has its own generation, and only its own answers count"; spec/settings/passwords.md, "Only Android's own authentication unlocks the vault, and the list follows the unlock"; spec/settings/index.md, "Developer pages open only in a build with test mocks"; spec/settings/updates.md, "One check or install runs at a time, and an explicit check keeps its answer in Settings"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/reset.md, "Settings offers no backup, import or export of the owner's data"; spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"; spec/settings/diagnostics.md, "One export runs at a time, and it is shared only when Android's chooser opened"; spec/settings/vocabulary.md, "A reported switch is on or off, and anything else is unknown"
+// spec/settings/passwords.md, "An entry opens from the list, and only a listed entry stays open"; spec/settings/passwords.md, "Each visit of the page has its own generation, and only its own answers count"; spec/settings/passwords.md, "Only Android's own authentication unlocks the vault, and the list follows the unlock"; spec/settings/index.md, "Developer pages open only in a build with test mocks"; spec/settings/updates.md, "One check or install runs at a time, and an explicit check keeps its answer in Settings"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/reset.md, "Settings offers no backup, import or export of the owner's data"; spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"; spec/settings/diagnostics.md, "One export runs at a time, and it is shared only when Android's chooser opened"; spec/settings/vocabulary.md, "A reported switch is on or off, and anything else is unknown"
 // What Bombadil checks of Settings and Passwords in every state it reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -18,6 +18,11 @@ const eraseIsReviewed = extract(({ document }) =>
 const vault = extract(({ document }) => ({
   locked: document.querySelector('[aria-label="Unlock passwords"]') !== null,
   listed: document.querySelector('input[aria-label="Search passwords"]') !== null,
+}));
+
+const entry = extract(({ document }) => ({
+  shown: Array.from(document.querySelectorAll("button")).some((b) => b.textContent?.includes("Show password") === true),
+  locked: document.querySelector('[aria-label="Unlock passwords"]') !== null,
 }));
 
 const askSwitch = extract(({ document }) => {
@@ -53,6 +58,9 @@ export const settingsNeverClaimsAnErasure = always(() => eraseIsReviewed.current
 
 /** A locked vault never shows its list of passwords. */
 export const settingsVaultListOnlyWhileUnlocked = always(() => !(vault.current.locked && vault.current.listed));
+
+/** An open password entry is shown only while the vault is unlocked. */
+export const settingsVaultEntryOnlyWhileUnlocked = always(() => !(entry.current.shown && entry.current.locked));
 
 /** Preferences that need recovery keep Ask before Alpha acts on and locked. */
 export const settingsUnreadablePreferencesAskFirst = always(() => !askSwitch.current.recovering || (askSwitch.current.locked && askSwitch.current.on));

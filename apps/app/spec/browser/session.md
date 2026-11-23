@@ -19,7 +19,8 @@ it and `Live` once it exists. A restored tab keeps the address it was saved with
 until it is first shown. `savedUrl` is the tab's last committed web address, kept while a later load
 is pending or failed. `nav` is the navigation the tab is waiting on; `request` names the agent
 request it serves, empty for the owner's own. A new tab the agent or a tapped link opens waits in
-`openings` until its WebView exists. `revision` moves with every new document of a tab.
+`openings` until its WebView exists. `revision` moves with every new document of a tab. `listings`
+holds, per close-every-tab proposal, the tabs its review card listed.
 
 ```quint
 import page.* from "./page"
@@ -37,16 +38,19 @@ type Layers = { editing: bool, tabsOpen: bool, menu: bool, library: Library, sha
 type FindBar = { tab: str, query: str, count: int, index: int, done: bool }
 type Hydration = Unread | Reading | Hydrated | ReadFailed
 type HostKind = UnknownHost | NativeHost | WebHost
+type ListedTab = { id: str, url: str, title: str, priv: bool }
+type Listing = { proposal: str, tabs: List[ListedTab] }
 type Session = {
   host: HostKind, tabs: List[BrowserTab], cur: str, openings: List[Opening], agentTab: str,
   visits: List[Visit], hydration: Hydration, clearing: bool, layers: Layers, find: FindBar,
-  profileUnsupported: str,
+  profileUnsupported: str, listings: List[Listing],
 }
 pure val noLayers: Layers = { editing: false, tabsOpen: false, menu: false, library: NoLibrary, share: false }
 pure val noFind: FindBar = { tab: "", query: "", count: 0, index: 0, done: true }
 pure val initial: Session = {
   host: UnknownHost, tabs: List(), cur: "", openings: List(), agentTab: "", visits: List(),
   hydration: Unread, clearing: false, layers: noLayers, find: noFind, profileUnsupported: "",
+  listings: List(),
 }
 pure def freshTab(id: str, profile: Profile): BrowserTab = {
   id: id, profile: profile, opener: "", stage: Unborn, page: blankPage, revision: 0,
@@ -97,6 +101,7 @@ pure val observedTabValues = Set("", "t1")
 pure val observedRevisionValues = Set(0, 1, 2)
 pure val atValues = Set(1, 2)
 pure val closedValues: Set[List[str]] = Set(List(), List("t1"))
+pure val proposalValues = Set("p1", "p2")
 ```
 
 ## Story: Browse in tabs
@@ -126,7 +131,7 @@ type FindSearch = { id: str, query: str }
 type FindMove = { id: str, forward: bool }
 type AgentOutcome = Dispatched | Done | RefusedFull | RefusedChanged | RefusedPrivate | RefusedShowing
   | RefusedNoPage | RefusedUnloaded | RefusedNoHistory | RefusedNotLoading | RefusedNoFind | RefusedCovered
-  | RefusedNotShowing | FailedOpen
+  | RefusedNotShowing | FailedOpen | RefusedListChanged
 type AgentSettled = { request: str, tab: str, outcome: AgentOutcome }
 type BrowserNotice = TabLimit | InvalidAddress | SavedTabsUnreadable | ClearedData | ClearFailed
   | NoSecureConnection | TabFailed | ProfileUnsupported
@@ -744,4 +749,100 @@ pure def selectionOf(s: Session): TabSelection =
 pure def visibleTabs(s: Session, inBrowser: bool): List[BrowserTab] =
   s.tabs.select(t => t.profile == Normal or fromPrivate(s, inBrowser))
 pure def alwaysTheSelectionNamesOnlyAnOpenTab(s: Session): bool = selectionOf(s).tab == "" or isTab(s, selectionOf(s).tab)
+```
+
+## Story: Close every tab from one listed review
+
+> As the owner, I want "close all my tabs" to show me one card that lists the tabs it will close,
+> and to close exactly those tabs, or nothing when Browser's tabs changed after I read the card.
+
+### A close-every-tab card lists the tabs it would close once per proposal, and a listing that no longer matches Browser's tabs is withdrawn
+
+The tabs are every normal tab, and a private tab only for a request made from a private tab shown in
+Browser. The first listing binds the proposal; a later listing of the same proposal never redraws
+it. The shell names each line by its title, else its address, and counts a private tab without
+naming it. The agent never receives the list. At most sixteen proposals keep a listing; the oldest
+is forgotten first.
+
+```quint
+pure val maxListings = 16
+pure def listedOf(t: BrowserTab): ListedTab =
+  { id: t.id, url: if (t.page.url != "") t.page.url else t.restoreUrl,
+    title: if (t.page.title != "") t.page.title else t.restoreTitle, priv: t.profile == Private }
+pure def closableTabs(s: Session, inBrowser: bool): List[ListedTab] = visibleTabs(s, inBrowser).listMap(t => listedOf(t))
+pure def isListed(s: Session, proposal: str): bool = proposal != "" and s.listings.some(l => l.proposal == proposal)
+pure def listingOf(s: Session, proposal: str): List[ListedTab] =
+  s.listings.foldl(List(), (found, l) => if (l.proposal == proposal) l.tabs else found)
+pure def listingCurrent(s: Session, proposal: str, inBrowser: bool): bool =
+  isListed(s, proposal) and listingOf(s, proposal) == closableTabs(s, inBrowser)
+pure def canListClosing(s: Session, proposal: str, inBrowser: bool): bool = proposal != "" and s.host != UnknownHost
+pure def listClosing(s: Session, proposal: str, inBrowser: bool): Session = {
+  val kept = if (s.listings.length() >= maxListings) s.listings.removeAt(0) else s.listings
+  if (isListed(s, proposal)) s else { ...s, listings: kept.append({ proposal: proposal, tabs: closableTabs(s, inBrowser) }) }
+}
+pure def alwaysListingsAreFewAndOnePerProposal(s: Session): bool =
+  s.listings.length() <= maxListings and s.listings.every(a => a.proposal != "" and s.listings.select(b => b.proposal == a.proposal).length() == 1)
+pure def stepAListingIsNeverRedrawn(before: Session, after: Session): bool =
+  before.listings.every(l => not(isListed(after, l.proposal)) or listingOf(after, l.proposal) == l.tabs)
+pure def sometimesAListingNamesSeveralTabs(s: Session): bool = s.listings.some(l => l.tabs.length() > 1)
+```
+
+### Closing every tab closes exactly the tabs its proposal's card listed, or nothing once Browser's tabs changed, and one approval closes once
+
+A proposal without a listing, an empty listing, or tabs opened, closed or moved to another page since
+the listing refuse before any effect, and the owner is told to ask again. The listing is spent
+either way. Every listed tab closes in one state change. Outside Browser all of them close at once;
+in Browser the others close at once and the tab showing closes when the action is presented, after
+its receipt. A request made outside a private tab never leaves a private tab showing: Browser shows
+a new tab instead.
+
+```quint
+pure def dropTabs(ids: List[str], fallback: str, hidePrivate: bool, s: Session): Session = {
+  val rest = s.tabs.select(t => not(ids.includes(t.id)))
+  val kept = if (ids.includes(s.cur)) firstId(rest) else s.cur
+  val fresh = kept == "" or (hidePrivate and rest.some(t => t.id == kept and t.profile == Private))
+  { ...s, tabs: if (fresh) rest.append(freshTab(fallback, Normal)) else rest, cur: if (fresh) fallback else kept,
+    find: if (ids.includes(s.find.tab)) noFind else s.find,
+    agentTab: if (ids.includes(s.agentTab)) "" else s.agentTab,
+    profileUnsupported: if (ids.includes(s.profileUnsupported)) "" else s.profileUnsupported }
+}
+pure def closeNatives(s: Session, ids: List[str]): List[SessionEffect] =
+  ids.foldl(List(), (acc, id) => if (isTab(s, id) and tabOf(s, id).stage != Unborn) acc.append(CloseNative({ id: id })) else acc)
+pure def canAgentCloseAll(s: Session, request: str, proposal: str, inBrowser: bool, fallback: str): bool =
+  request != "" and fallback != "" and not(known(s, fallback)) and s.host != UnknownHost
+pure def agentCloseAll(s: Session, request: str, proposal: str, inBrowser: bool, fallback: str): SessionChange = {
+  val listed = listingOf(s, proposal)
+  val spent = { ...s, listings: s.listings.select(l => l.proposal != proposal) }
+  val closing = listed.listMap(t => t.id)
+  val showing = inBrowser and closing.includes(s.cur)
+  val now = if (showing) closing.select(id => id != s.cur) else closing
+  if (not(listingCurrent(s, proposal, inBrowser)) or listed.length() == 0) { state: spent, out: settle(request, "", RefusedListChanged) }
+  else { state: dropTabs(now, fallback, not(fromPrivate(s, inBrowser)), spent),
+    out: closeNatives(s, now).concat(settle(request, if (showing) s.cur else "", Done)) }
+}
+pure def canAgentCloseAllShown(s: Session, tab: str, selected: str, fallback: str, hidePrivate: bool): bool =
+  isTab(s, tab) and s.cur == selected and selected == tab and fallback != "" and not(known(s, fallback))
+pure def agentCloseAllShown(s: Session, tab: str, selected: str, fallback: str, hidePrivate: bool): SessionChange =
+  { state: { ...dropTabs(List(tab), fallback, hidePrivate, s), layers: noLayers }, out: closeNatives(s, List(tab)).concat(List(ShowBrowser)) }
+pure def stepClosingEveryTabClosesOnlyAListedTab(before: Session, via: str, after: Session): bool =
+  via == "agentCloseAll" implies before.tabs.every(t =>
+    after.tabs.some(a => a.id == t.id) or before.listings.some(l => not(isListed(after, l.proposal)) and l.tabs.some(x => x.id == t.id)))
+pure def stepClosingEveryTabSpendsItsListing(before: Session, via: str, after: Session): bool =
+  via == "agentCloseAll" implies after.listings.length() <= before.listings.length()
+pure def stepClosingEveryTabNeverShowsAPrivateTabItLeft(before: Session, via: str, after: Session): bool =
+  via == "agentCloseAll" implies (after.cur == before.cur or not(isPrivateTab(after, after.cur)))
+pure def sometimesEveryListedTabClosed(s: Session): bool =
+  s.tabs.length() == 1 and untouched(curTab(s)) and s.listings.length() == 0 and s.hydration == Hydrated and s.agentTab == ""
+```
+
+### Closing every tab is negotiated only beside Browser tabs, and it never runs without the owner's review
+
+The phone advertises `browser.tabs.close-all.v1` only when the agent offers it together with
+`browser.tabs.v1`. "Close this tab" and a named close stay one tab each.
+
+```quint
+pure def closeAllNegotiated(agentOffersTabs: bool, agentOffersCloseAll: bool): bool = agentOffersTabs and agentOffersCloseAll
+pure def closeAllRunsUnreviewed(boundToMessage: bool, wordsTyped: bool): bool = false
+pure def lawClosingEveryTabNeedsTabs(offersCloseAll: bool): bool = not(closeAllNegotiated(false, offersCloseAll))
+pure def lawClosingEveryTabAlwaysWaitsForReview(boundToMessage: bool, wordsTyped: bool): bool = not(closeAllRunsUnreviewed(boundToMessage, wordsTyped))
 ```

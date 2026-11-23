@@ -5,6 +5,7 @@ import type { Stopwatch } from "../../../gen/clock__stopwatch.ts";
 import type { WorldClock } from "../../../gen/clock__worldClock.ts";
 import { initial as handoffInitial, type Handoff } from "../../../gen/clock__handoff.ts";
 import { initial as remindersInitial, type ReminderRow, type Reminders } from "../../../gen/clock__reminders.ts";
+import { initial as pageInitial, type ReminderPage } from "../../../gen/clock__reminderPage.ts";
 import type { DeletionNotices } from "../../../gen/clock__deletions.ts";
 import { initial as shadeInitial, type Shade } from "../../../gen/clock__notifications.ts";
 import type { Ringer } from "../../../gen/clock__ringer.ts";
@@ -50,7 +51,7 @@ export const reviewing: Handoff = { ...handoffInitial, phase: "Reviewing", revie
 /** After Clock opened. */
 export const answered: Handoff = { ...handoffInitial, message: { tag: "Answered", status: "ClockOpened", reason: "" }, reviews: 1, admissions: 1, settled: 1, opens: 1 };
 
-const row: ReminderRow = { id: "r1", occurrence: "o1", revision: "v1", title: "Call the dentist", body: "Ask about Friday", status: "RScheduled", undated: false, dueAt: NOW + 7_200_000, hasAlert: true, alertMinutes: 0, repeats: false, deleting: false };
+const row: ReminderRow = { id: "r1", occurrence: "o1", revision: "v1", title: "Call the dentist", body: "Ask about Friday", status: "RScheduled", undated: false, dueAt: NOW + 7_200_000, hasAlert: true, alertMinutes: 0, repeats: false, rule: "RepeatNever", deleting: false };
 
 /** A loaded listing: one upcoming, one overdue, one completed and a to-do. */
 export const reminders: Reminders = {
@@ -103,3 +104,12 @@ export const savingReminders: Reminders = { ...reminders, kind: "CreateWrite", s
 
 /** The question review of an own reminder notification. */
 export const question = { name: "Alpha Phone notification", excerpt: "Call the dentist\nAsk about Friday" };
+
+/** The Reminders page showing reminder `id`'s detail. */
+export const detailPage = (id: string): ReminderPage => ({ ...pageInitial, detail: id });
+
+/** The Reopen question about the completed reminder shown. */
+export const reopenPage: ReminderPage = { ...pageInitial, detail: "r3", reopen: "ReopenOpen" };
+
+/** The edit form of the reminder shown. */
+export const editPage: ReminderPage = { ...pageInitial, detail: "r1", form: "EditForm" };

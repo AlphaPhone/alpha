@@ -170,6 +170,28 @@ pure def sometimesUnconfirmed(a: Actions): bool = resultOf(a.run) == Unconfirmed
 pure def sometimesApplied(a: Actions): bool = resultOf(a.run) == Applied and a.dispatches > 0
 ```
 
+### An unconfirmed text is settled only by the phone's own send record for its operation ID
+
+The agent's device execution reads an unknown outcome back once. A text, sent to a written
+number or to the number the owner picked, is looked up in the phone's send history by its exact
+operation ID: a record the radio took, sent or delivered reads applied; a cancelled, denied or
+failed one reads not sent; no record, or one still unknown, leaves it unconfirmed. A call, a dial
+handoff or a contact write is never read back, since nothing on the phone can tell, and stays
+unconfirmed. Nothing is sent again to find out.
+
+```quint
+type SendRecord = NoRecord | RecordUnknown | RecordTaken | RecordNotSent
+type ReadBackAnswer = StaysUnconfirmed | ReadApplied | ReadNotSent
+pure def readBackOf(kind: ActionKind, record: SendRecord): ReadBackAnswer =
+  if (not(kind == SendText or kind == ComposeText)) StaysUnconfirmed
+  else if (record == RecordTaken) ReadApplied
+  else if (record == RecordNotSent) ReadNotSent
+  else StaysUnconfirmed
+pure def lawOnlyATextsOwnRecordSettlesIt(kind: ActionKind, record: SendRecord): bool =
+  readBackOf(kind, record) != StaysUnconfirmed implies ((kind == SendText or kind == ComposeText) and (record == RecordTaken or record == RecordNotSent))
+pure def lawNoRecordIsNeverNotSent(kind: ActionKind): bool = readBackOf(kind, NoRecord) == StaysUnconfirmed
+```
+
 ### A read, a keypad, a filtered list or a draft settles without any effect
 
 Reads of the open thread, contact or voicemail share only what is open, whole and within bounds,

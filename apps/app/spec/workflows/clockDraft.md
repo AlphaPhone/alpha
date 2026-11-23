@@ -63,3 +63,20 @@ pure def alwaysARetiredSaveCannotDispatch(c: ClockDraft): bool = c.retired impli
 pure def alwaysTheBrowserNeverHandsOver(c: ClockDraft): bool = c.browser implies (c.record == NoHandoff and c.handoffs == 0)
 pure def sometimesOpened(c: ClockDraft): bool = c.record == HandoffOpened
 ```
+
+### The alarm the owner sets in the draft reaches Clock's review exactly: a real time, a short label and distinct days
+
+Preparing hands Clock's own draft the hour, minute, label and repeat days the owner set over
+Workflows; a request that is not an alarm Clock can show is not handed over and nothing is reviewed.
+
+```quint
+pure val alarmLabelLimit = 120
+pure def validAlarm(hour: int, minute: int, labelLength: int, days: List[int]): bool =
+  hour >= 0 and hour <= 23 and minute >= 0 and minute <= 59 and labelLength >= 0 and labelLength <= alarmLabelLimit and
+  days.length() <= 7 and days.every(d => d >= 1 and d <= 7) and days.every(d => days.select(e => e == d).length() == 1)
+pure val minuteValues = Set(0, 59, 60)
+pure val labelLengthValues = Set(0, 120, 121)
+pure val daysValues = Set(List(), List(1, 7), List(1, 1), List(0))
+pure def lawAMidnightAlarmWithNoDaysIsValid(minute: int): bool = (minute >= 0 and minute <= 59) implies validAlarm(0, minute, 0, List())
+pure def lawARepeatedDayIsNeverHandedOver(minute: int, labelLength: int): bool = not(validAlarm(7, minute, labelLength, List(1, 1)))
+```

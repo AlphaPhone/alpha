@@ -12,7 +12,8 @@ export service AccountSheet {
   run(): void!!
   show(): void!!
   openSection(section: Section): void!!
-  back(): void!!
+  /** Back to the account section, ending a sign-out review; whether there was a section or review to leave. */
+  back(): boolean!!
   close(): void!!
   /** Android returned Home: the sheet and its panels close. */
   returnHome(): void!!
@@ -36,6 +37,7 @@ export const sheetService = Layer.effect(AccountSheet, effect {
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
     if (step !== undefined && "out" in step) try perform(step.out)
+    return step !== undefined
   }
 
   effect function perform(out: ReadonlyArray<SheetEffect>): void!! {
@@ -92,7 +94,7 @@ export const sheetService = Layer.effect(AccountSheet, effect {
     effect run() { try.all [ignore(followSession()), ignore(followPlan()), expiryClock()] },
     effect show() { try send({ type: "showSheet" }) },
     effect openSection(section: Section) { try send({ type: "openSection", section, fundsOffered: deployment === "ElizaCloud" }) },
-    effect back() { try send({ type: "back" }) },
+    effect back() { return try send({ type: "back" }) },
     effect close() { try send({ type: "closeSheet" }) },
     effect returnHome() { try send({ type: "returnHome" }) },
     effect askSignOut() { try send({ type: "askSignOut" }) },

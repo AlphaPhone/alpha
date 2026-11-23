@@ -10,5 +10,7 @@ export const meta: ComponentMeta<EventDetailProps> = {
     Deleting: { row: run, facts: organizerFacts, deleting: true, held: false, canEdit: true, canDelete: true, ...handlers },
     Invitation: { row: standup, facts: inviteFacts, deleting: false, held: false, canEdit: true, canDelete: true, ...handlers },
     Held: { row: run, facts: organizerFacts, deleting: false, held: true, canEdit: true, canDelete: true, ...handlers },
+    FromNote: { row: standup, facts: organizerFacts, deleting: false, held: false, canEdit: true, canDelete: true, origin: { label: "FromNoteTitled", title: "Team offsite", noteId: "n-1" }, onOpenOrigin: () => undefined, ...handlers },
+    FromDeletedNote: { row: standup, facts: organizerFacts, deleting: false, held: false, canEdit: true, canDelete: true, origin: { label: "DeletedNoteLabel", title: "" }, ...handlers },
   },
 };

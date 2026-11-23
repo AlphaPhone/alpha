@@ -72,12 +72,16 @@ pure val revisionValues = Set(0, 1)
 
 ### Only the newest agent message offers its choice and its card, in the session and conversation that showed them
 
+Every message of the chat is counted once, however long the conversation
+runs. Maps keeps the session and conversation each message arrived under: an
+account change starts a new session and opening another conversation a new
+conversation, and a card or choice of a message counted under an earlier one
+no longer opens or answers.
+
 ```quint
-pure def canAgentReply(s: ChatCards, question: bool): bool = s.newest < 3
 pure def agentReply(s: ChatCards, question: bool): ChatCards = { ...s, newest: s.newest + 1, fromAgent: true, question: question, revision: 0 }
-pure def canOwnerMessage(s: ChatCards): bool = s.newest < 3
 pure def ownerMessage(s: ChatCards): ChatCards = { ...s, newest: s.newest + 1, fromAgent: false, question: false, revision: 0 }
-pure def canReplaceText(s: ChatCards, question: bool): bool = s.newest > 0 and s.fromAgent and s.revision < 1
+pure def canReplaceText(s: ChatCards, question: bool): bool = s.newest > 0 and s.fromAgent
 pure def replaceText(s: ChatCards, question: bool): ChatCards = { ...s, revision: s.revision + 1, question: question }
 pure def canChangeSession(s: ChatCards, session: int): bool = session != s.session
 pure def changeSession(s: ChatCards, session: int): ChatCards = { ...s, session: session }

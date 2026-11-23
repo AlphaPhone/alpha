@@ -1,4 +1,4 @@
-// spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/phone.md, "Only the latest read publishes, and rows already shown stay until it answers"; spec/telephony/phone.md, "Dial hands one number at a time to Telecom, and only from the showing it started in"; spec/telephony/common.md, "A call is reported started only when Telecom accepted it, and a lost answer is never \"not called\""
+// spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/phone.md, "Only the latest read publishes, and rows already shown stay until it answers"; spec/telephony/phone.md, "Dial hands one number at a time to Telecom, and only from the showing it started in"; spec/telephony/common.md, "A call is reported started only when Telecom accepted it, and a lost answer is never "not called""
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
 import type { TelephonyCallLogEntry } from "@elizaos/os/bridges/phone"
 import { callOutcome, type CallOutcome, type HandoffAnswer, type PlaceAnswer } from "../../gen/telephony__common.effect.vibe"

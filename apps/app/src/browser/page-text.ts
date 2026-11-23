@@ -1,12 +1,11 @@
 // spec/browser/reading.md, "The review opens on a settled page, fetches its public text once, and a sensitive address or text refuses it for good"; spec/browser/reading.md, "Ask takes an excerpt of the shown settled HTTPS page, or opens an empty review where the page cannot be read in isolation"
+import { sensitiveText } from "../platform/sensitive.ts";
 
 /** The most text a reading or question carries. */
 export const MAX_EXCERPT = 5000;
 const MAX_SOURCE_BYTES = 262_144;
 const SOURCE_TIMEOUT_MS = 5_000;
 
-const SENSITIVE =
-  /(?:api[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|password|passphrase|passcode|credential|(?<![a-z])vaults?(?![a-z])|one[\s-]*time[\s-]*(?:password|code)|verification[\s-]*code|security[\s-]*code|authentication[\s-]*code|recovery[\s-]*(?:code|key|phrase)|backup[\s-]*(?:code|key)|seed[\s-]*phrase|secret[\s-]*key|private[\s-]*key|authenticator|two[\s-]*factor|multi[\s-]*factor|(?<![a-z])sign[\s-]*in(?![a-z])|(?<![a-z])log[\s-]*in(?![a-z])|\botp\b|\bmfa\b|\b2fa\b)/i;
 const SENSITIVE_ROUTE =
   /(?:^|[^a-z0-9])(?:api[\s_-]*key|vault|passwords?|passphrase|signin|sign-in|login|log-in|logout|auth|oauth|sso|account|accounts|security|mfa|2fa|otp|recovery|reset-password|credentials?|access_token|id_token|refresh_token|secret|token)(?:$|[^a-z0-9])/;
 const PASSWORD_SERVICES = [
@@ -16,15 +15,6 @@ const PASSWORD_SERVICES = [
 const CREDENTIAL_FIELD = /(?:^|[^a-z0-9])(?:otp|totp|mfa|2fa)(?:$|[^a-z0-9])|password|passcode|one[\s_-]*time|verification[\s_-]*code|security[\s_-]*code|auth(?:entication)?[\s_-]*code/i;
 const REMOVED = "script,style,noscript,template,nav,header,footer,form,input,select,textarea,button,iframe,svg,[hidden],[aria-hidden=true]";
 const BLOCK = /^(?:P|DIV|SECTION|ARTICLE|MAIN|H[1-6]|LI|UL|OL|BR|TR|TD|TH|BLOCKQUOTE|PRE)$/;
-
-const words = (value: string) => value.replace(/([a-z\d])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
-const normalize = (value: string) => value.normalize("NFKC").replace(/[​-‍﻿]/g, "");
-
-/** Credential prose or an unlabelled six-to-eight digit code. */
-export function sensitiveText(text: string): boolean {
-  const value = normalize(text);
-  return SENSITIVE.test(value) || SENSITIVE.test(words(value)) || /(?:^|\D)\d{6,8}(?:\D|$)/.test(value);
-}
 
 /** An address that must not be read: not HTTP(S), credentials, a password service, or a route naming sign-in, account or token material. */
 export function sensitiveAddress(address: string): boolean {

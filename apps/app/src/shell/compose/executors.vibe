@@ -1,13 +1,54 @@
-// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/review.md, "Story: Act only on what I asked for"
-import { operationPorts as browserOperations } from "../../browser/operations.vibe"
+// spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"
+import { telephonyCallsFromAssistant } from "../../assistant/call-facts.vibe"
+import type { OperationPorts } from "../../assistant/review.vibe"
+import type { ItemizedSet } from "../../assistant/transcript.vibe"
+import { BrowserAgent, type BrowserTabLine } from "../../browser/agent.vibe"
+import { NO_TABS_TO_CLOSE_NOTICE, TABS_UNLISTED_NOTICE, operationPorts as browserOperations } from "../../browser/operations.vibe"
 import { operationPorts as calendarOperations } from "../../calendar/operations.vibe"
 import { operationPorts as cameraOperations } from "../../camera/operations.vibe"
 import { operationPorts as clockOperations } from "../../clock/operations.vibe"
 import { operationPorts as filesOperations } from "../../files/operations.vibe"
 import { operationPorts as notesOperations } from "../../notes/operations.vibe"
 import { operationPorts as telephonyOperations } from "../../telephony/operations.vibe"
+import { TelephonyCalls } from "../../telephony/ports.vibe"
+import { operationPorts as workflowsOperations } from "../../workflows/operations.vibe"
 import { registerFamily } from "../assistantHost.vibe"
 import { operationPorts as shellOperations } from "../operations.vibe"
+
+/** The set a close-every-tab card lists: each tab's title, with its host where that differs, and private tabs only counted. */
+export function closingSetOf(closing: readonly BrowserTabLine[]): ItemizedSet {
+  const named = closing.filter((tab) => tab.private !== true)
+  return {
+    lines: named.map((tab) => tab.host !== undefined && tab.host !== tab.title ? `${tab.title} (${tab.host})` : tab.title),
+    unnamed: closing.length - named.length,
+    unnamedLabel: "private tab",
+  }
+}
+
+/**
+ * Browser's family in the assistant's terms: closing every tab is listed on this phone when its card is first drawn, bound to its
+ * proposal, and a listing Browser cannot make, or that holds no tab, is the notice shown instead of a card.
+ */
+export effect function browserFamily() {
+  const ports = try browserOperations
+  const agent = try BrowserAgent
+  function itemize(operation: unknown, proposalId: string): ItemizedSet | string | undefined {
+    if (!ports.itemized(operation)) return undefined
+    const listed = runSyncExit(agent.tabsClosing(proposalId))
+    const closing = Exit.isSuccess(listed) ? listed.value : null
+    if (closing === null) return `Close all tabs: ${TABS_UNLISTED_NOTICE}`
+    if (closing.length === 0) return `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`
+    return closingSetOf(closing)
+  }
+  const family: OperationPorts = { ...ports, itemize }
+  return family
+}
+
+/** Telephony's family over the assistant's per-call facts: whether a call was reviewed, the owner's words, and the end of the reply carrying it. */
+export effect function telephonyFamily() {
+  const calls = try telephonyCallsFromAssistant()
+  return try Effect.provideService(telephonyOperations, TelephonyCalls, calls)
+}
 
 /** Every area's agent device operations, registered in this order once the last of those areas is built; an operation goes to the first family that validates it. */
 export const executorsLive = Layer.effectDiscard(effect {
@@ -15,8 +56,9 @@ export const executorsLive = Layer.effectDiscard(effect {
   try registerFamily(filesOperations)
   try registerFamily(notesOperations)
   try registerFamily(calendarOperations)
-  try registerFamily(telephonyOperations)
-  try registerFamily(browserOperations)
+  try registerFamily(telephonyFamily())
+  try registerFamily(browserFamily())
   try registerFamily(cameraOperations)
   try registerFamily(clockOperations)
+  try registerFamily(workflowsOperations)
 })

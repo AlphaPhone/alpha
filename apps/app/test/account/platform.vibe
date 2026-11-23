@@ -1,6 +1,9 @@
 // spec/account/session.md, "Story: Sign in once for Cloud's managed services"
+import { createCloudClient } from "@elizaos/cloud/client"
 import { Build } from "../../src/platform/build.vibe"
+import { elizaCloud } from "../../src/platform/build-flags.ts"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
+import { CloudServices } from "../../src/platform/cloud-services.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
@@ -41,7 +44,6 @@ export const signedInNative: Record<string, Answer> = {
   "Agent.prepareProviderConfiguration": { requestId: "lease-1" },
   "Agent.cancelProviderConfiguration": {},
   "Agent.setGoogleAgentAccess": {},
-  "AlphaConnection.openExternal": {},
   "AlphaConnection.prepareGoogleWorkspaceReturn": { supported: false },
   "AlphaBillingAuthority.clear": {},
   "AlphaBillingAuthority.status": { status: "required" },
@@ -78,7 +80,7 @@ function refused(value: Answer): value is Refusal {
   return typeof value === "object" && value !== null && typeof (value as { refuse?: unknown }).refuse === "string"
 }
 
-/** The platform at its boundary: the native host, Cloud and the resident answer from tables; nothing leaves the test. */
+/** The platform at its boundary: the native host, Cloud and the resident answer from tables, and a Cloud page opened is recorded as `CloudServices.openExternal`; nothing leaves the test. */
 export function platform(calls: Calls, native: Record<string, Answer>, cloud: Record<string, Answer>, options: {
   readonly events?: Record<string, ReadonlyArray<unknown>>
   readonly resident?: ResidentAnswers
@@ -104,6 +106,11 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
         const found = answer(cloud, `${method} ${path}`, body)
         return found === undefined ? Effect.fail(new CloudUnavailable({ status: 404, message: "absent" })) : Effect.succeed(found)
       }
+    }),
+    Layer.succeed(CloudServices, {
+      client: createCloudClient({ baseUrl: "https://api.eliza.app", credential: () => undefined, fetch: () => Promise.reject(new Error("absent")) }),
+      authority: elizaCloud.production,
+      openExternal: (url: string) => Effect.sync(() => { calls.push({ name: "CloudServices.openExternal", args: { url } }) })
     }),
     Layer.succeed(Resident, {
       status: () => Effect.succeed("running" as const),

@@ -83,12 +83,6 @@ export function jsonBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).length;
 }
 
-
-/** A fresh random id. */
-export function newId(): string {
-  return crypto.randomUUID();
-}
-
 /** The request id of one content version of an agent email: the same version always gets the same id. */
 export async function versionRequestId(parts: readonly unknown[]): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`alphacompute.ai/id/gmail-send\u0000${JSON.stringify(parts)}`)));

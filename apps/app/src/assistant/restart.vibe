@@ -1,0 +1,45 @@
+// spec/assistant/recovery.md, "Story: Restart my agent when it stopped for review"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"
+import { restartOffered } from "../../gen/assistant__recovery.effect.vibe"
+import { ResidentControl, ResidentRecovery } from "../platform/resident-control.vibe"
+import { AssistantHost } from "./host.vibe"
+import { copy } from "./presentation.vibe"
+
+/** The composer's guarded restart of an agent the service holds for review. */
+export service AgentRestart {
+  /** Whether Restart is offered now, then each change of it. */
+  readonly offered: Stream.Stream<boolean>
+  /** Archive what the service kept and start the agent again; false when nothing is held or the restart failed. */
+  restart(): boolean!!
+}
+
+/** The restart offer over the resident connection and the agent service's recovery review. */
+export const restartLayer = Layer.effect(AgentRestart, effect {
+  const control = try ResidentControl
+  const recovery = try ResidentRecovery
+  const host = try AssistantHost
+  const shown = try SubscriptionRef.make(false)
+  let restarting = false
+  effect function offer(refused: boolean) {
+    const held = refused ? try recovery.review() : { reviewable: false as const }
+    try SubscriptionRef.set(shown, restartOffered(refused, held.reviewable, restarting))
+  }
+  return {
+    offered: Stream.changes(Stream.mapEffect(control.changes, (connection) => effect {
+      try offer(connection.phase === "Refused")
+      return try SubscriptionRef.get(shown)
+    })),
+    restart: () => effect {
+      const held = try recovery.review()
+      if (restarting || !held.reviewable) return false
+      restarting = true
+      try SubscriptionRef.set(shown, false)
+      const done = map(recovery.restart(held.reviewToken), () => true) catch () => false
+      restarting = false
+      if (!done) {
+        try host.toast(copy.restartFailed)
+        try offer(true)
+      }
+      return done
+    },
+  }
+})

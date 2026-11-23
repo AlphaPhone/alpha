@@ -1,6 +1,5 @@
-// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"
+// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/screen.md, "Back closes one layer at a time"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"; spec/maps/savedPlaces.md, "A place is saved with a name and a valid identity; saving it again updates the same row"
 import { Bookmark, BookmarkCheck, Copy, Globe, Pencil, Phone, Share2, Navigation, X } from "lucide-react";
-import { useState } from "react";
 import type { Phase } from "../../../gen/maps__screen.ts";
 import { callOffered, copyOffered } from "../../../gen/maps__screen.ts";
 import type { Shown } from "../../maps/content.vibe";
@@ -20,6 +19,10 @@ export type PlaceSheetProps = {
   canDirections: boolean;
   /** Phone exists on this build (the AOSP image), so Call is offered for a dialable number. */
   canCall: boolean;
+  /** The name being typed while the rename field is open; Back closes it first. */
+  editing?: string;
+  /** Open the rename field with `text`, or close it with undefined. */
+  onEditing: (text: string | undefined) => void;
   onDirections: () => void;
   onToggleSaved: (label: string) => void;
   onRename: (label: string) => void;
@@ -36,7 +39,7 @@ export type PlaceSheetProps = {
  * @design design.md
  */
 export function PlaceSheet(p: PlaceSheetProps) {
-  const [editing, setEditing] = useState<string | undefined>();
+  const editing = p.editing;
   const place = p.shown.place && p.shown.place.id === p.shown.providerPlaceId ? p.shown.place : undefined;
   const name = p.shown.label === "Your location" ? "My location" : p.shown.label;
   const dialable = place?.phone && /^\+?[0-9]+$/.test(place.phone.replace(/[() .-]/g, "")) ? place.phone : undefined;
@@ -46,13 +49,13 @@ export function PlaceSheet(p: PlaceSheetProps) {
         {editing === undefined ? (
           <h2 className="flex-1 font-serif text-2xl">{name}</h2>
         ) : (
-          <form className="flex flex-1 gap-2" onSubmit={(e) => { e.preventDefault(); p.onRename(editing); setEditing(undefined); }}>
-            <Input aria-label="Place name" value={editing} maxLength={300} onChange={(e) => setEditing(e.target.value)} />
+          <form className="flex flex-1 gap-2" onSubmit={(e) => { e.preventDefault(); p.onRename(editing); p.onEditing(undefined); }}>
+            <Input autoFocus aria-label="Place name" value={editing} maxLength={300} onChange={(e) => p.onEditing(e.target.value)} />
             <Button type="submit" size="sm">Save name</Button>
           </form>
         )}
         {!p.restricted && editing === undefined && (p.saved || !p.shown.providerPlaceId) && (
-          <Button variant="ghost" size="icon" aria-label="Rename" onClick={() => setEditing(p.shown.label)}><Pencil aria-hidden /></Button>
+          <Button variant="ghost" size="icon" aria-label="Rename" onClick={() => p.onEditing(p.shown.label)}><Pencil aria-hidden /></Button>
         )}
         <Button variant="ghost" size="icon" aria-label="Close" onClick={p.onClose}><X aria-hidden /></Button>
       </header>

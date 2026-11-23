@@ -1,0 +1,71 @@
+// spec/files/browser.md, "Back closes the topmost Files layer, and leaves Files only when none is open"; spec/files/browser.md, "Story: Walk my folders and categories"; spec/files/preview.md, "The document viewer opens over the preview and closes exactly once"; spec/files/share.md, "The owner's choice sends once, from the panel on screen, after it closed"; spec/files/trash.md, "Story: Restore or delete several Trash items together"; spec/files/filter.md, "Story: Let the agent show me the files I asked about"
+import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
+import { backLayer } from "../../gen/files__browser.ts"
+import { Machine as TrashMachine } from "../../gen/files__trash.effect.vibe"
+import { Machine as FilterMachine } from "../../gen/files__filter.effect.vibe"
+import { Machine as PreviewMachine } from "../../gen/files__preview.effect.vibe"
+import { Machine as PanelMachine } from "../../gen/files__share.effect.vibe"
+import { FilesBrowser } from "./browser.vibe"
+import { FilesPreview } from "./preview.vibe"
+import { FilesShare } from "./share.vibe"
+
+/** Back inside Files: the topmost layer Files shows closes first, and the shell's Back leaves only from Browse with nothing open. */
+export service FilesBack {
+  /** One Back: true when Files closed or held a layer of its own, false when Back is the shell's. */
+  back(): boolean!!
+}
+
+/** Files' Back over its machines: share panel, Trash review and item, document viewer, preview, selection, place, then the agent's filter. */
+export const layer = Layer.effect(FilesBack, effect {
+  const files = try FilesBrowser
+  const previews = try FilesPreview
+  const share = try FilesShare
+  const browser = try BrowserMachine
+  const trash = try TrashMachine
+  const filter = try FilterMachine
+  const preview = try PreviewMachine
+  const panels = try PanelMachine
+
+  effect function back() {
+    const panel = try panels.get()
+    const t = try trash.get()
+    const shown = try preview.get()
+    const s = try browser.get()
+    const f = try filter.get()
+    const layer = backLayer(panel.active !== 0 && !panel.hidden, t.active && t.confirm !== "NoConfirm", t.active && t.opened !== "",
+      shown.viewer, shown.shown, s.selecting, t.active && t.selecting, s.active && s.place.tag !== "Browse", f.shown !== 0)
+    switch (layer) {
+      case "BackShare":
+        try share.choose(panel.active, "CancelShare", succeed("Delivered" as const))
+        return true
+      case "BackTrashReview":
+        try files.dispatchTrash({ type: "cancelReview" })
+        return true
+      case "BackTrashItem":
+        try files.dispatchTrash({ type: "hideItem" })
+        return true
+      case "BackViewer":
+        try previews.closeViewer()
+        return true
+      case "BackPreview":
+        if (!shown.renaming) try previews.close(false)
+        return true
+      case "BackSelection":
+        try files.dispatch({ type: "endSelecting" })
+        return true
+      case "BackTrashSelection":
+        try files.dispatchTrash({ type: "endSelectingItems" })
+        return true
+      case "BackPlace":
+        try files.goUp()
+        return true
+      case "BackFilter":
+        filter.send({ type: "clearFilter" }) catch () => undefined
+        return true
+      case "BackLeaves":
+        return false
+    }
+  }
+
+  return { back }
+})

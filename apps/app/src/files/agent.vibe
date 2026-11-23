@@ -3,7 +3,8 @@ import { type AgentOp, type AgentView, type Proposal, type Target, Machine as Pr
 import { type Criteria, type FilterKind, Machine as FilterMachine, rowAt } from "../../gen/files__filter.effect.vibe"
 import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
 import { rowDone } from "../../gen/files__mutations.effect.vibe"
-import { baseName, rowKey, toRow } from "./paths.vibe"
+import type { Row } from "../../gen/files__storage.ts"
+import { baseName, parentOf, rowKey, toRow } from "./paths.vibe"
 import { FilesStorage } from "./storage.vibe"
 import { FilesBrowser, accessOf, queryFilter } from "./browser.vibe"
 import { FilesPreview } from "./preview.vibe"
@@ -126,17 +127,29 @@ export const layer = Layer.effect(FilesAgent, effect {
     return { status: "failed", summary: "Files could not read this filter." } satisfies AgentResult
   }
 
+  effect function listedRow(path: string): Row | null | undefined!! {
+    const answer = storage.list(parentOf(path), "") catch () => undefined
+    const entry = answer?.status === "ready" ? (answer.entries ?? []).find((e) => e.path === path) : undefined
+    if (entry !== undefined) return toRow("", entry)
+    return answer?.status === "missing" || (answer?.status === "ready" && answer.truncated !== true) ? null : undefined
+  }
+
   effect function openNow(op: Extract<FilesAgentOperation, { type: "files_open" }>) {
     const before = try filter.get()
     const row = "shown" in op ? rowAt(before, op.shown) : undefined
     if ("shown" in op && (row === undefined || row.key === "")) return { status: "failed", summary: "Files does not show that item." } satisfies AgentResult
-    if (row !== undefined && row.kind === "KindFolder") {
-      try files.navigate({ tag: "InFolder", path: row.path, volume: "" })
+    const path = row?.path ?? ("path" in op ? op.path : "")
+    const listed = row ?? (try listedRow(path))
+    if (listed === null) {
+      try send({ type: "openFile", found: false })
+      return { status: "failed", summary: "That file is not there." } satisfies AgentResult
+    }
+    if (listed !== undefined && listed.kind === "KindFolder") {
+      try files.navigate({ tag: "InFolder", path: listed.path, volume: "" })
       try send({ type: "openFile", found: true })
       return { status: "succeeded", summary: "Opened the folder in Files." } satisfies AgentResult
     }
-    const path = row?.path ?? ("path" in op ? op.path : "")
-    const target = row ?? toRow("", { path, name: baseName(path), directory: false, mimeType: "application/octet-stream", size: -1, modified: 0 })
+    const target = listed ?? toRow("", { path, name: baseName(path), directory: false, mimeType: "application/octet-stream", size: -1, modified: 0 })
     const opened = try preview.openRow({ ...target, key: rowKey("", path) })
     const now = try filter.get()
     const stillShown = !("shown" in op) || (now.generation === before.generation && now.shown === before.shown && now.pending === 0)

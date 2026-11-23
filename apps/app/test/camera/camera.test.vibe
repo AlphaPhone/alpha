@@ -266,3 +266,25 @@ it.live("a dialog over Camera hands the volume keys back to Android until it clo
     ))
   }
 })
+
+// spec/camera/recorder.md, "The shutter, Back, the recording poll or leaving finalises once, and finalisation saves one row for a settled recording"
+it.live("Back stops a recording and keeps Camera, and hands Back to the shell when nothing records (spec/camera/recorder.md, \"The shutter, Back, the recording poll or leaving finalises once, and finalisation saves one row for a settled recording\")", () => effect {
+  const device = camera()
+  provide cameraOver(device) {
+    const view = try Viewfinder
+    try view.enter()
+    try until(() => effect { return (try view.get()).phase === "PreviewReady" })
+    const idle = try view.back()
+    try view.pickMode("VideoMode")
+    try until(() => effect { return !(try view.get()).binding })
+    try view.shutter()
+    const recording = (try view.get()).recording
+    const stopped = try view.back()
+    try until(() => effect { return (try view.get()).recording === "RecordingIdle" })
+    const after = try view.back()
+    try Effect.try(() => assert.deepStrictEqual(
+      { idle, recording, stopped, after, finalised: device.calls.filter((call) => call.method === "ElizaCamera.stopRecording").length },
+      { idle: false, recording: "RecordingActive", stopped: true, after: false, finalised: 1 },
+    ))
+  }
+})

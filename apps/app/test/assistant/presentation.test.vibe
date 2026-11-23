@@ -89,3 +89,13 @@ it.effect("An email the agent staged becomes its card only when its body reads (
   ])
   try Effect.try(() => assert.deepStrictEqual(staged, { to: "ann@example.com, bo@example.com", subject: "Lunch", body: "Noon?" }))
 })
+
+it.effect("A turn with two email drafts offers no card (spec/assistant/emailCard.md, \"A turn offers at most one email card: exactly one valid draft, with one to twenty recipients, a one-line subject and a body\")", () => effect {
+  const two = emailDraftOf([
+    { action: "GMAIL_DRAFT", data: { to: "ann@example.com", subject: "Lunch", body: "Noon?" } },
+    { action: "GMAIL_DRAFT", data: { to: "bo@example.com", subject: "Dinner", body: "Seven?" } },
+  ])
+  const crowded = emailDraftOf([{ action: "GMAIL_DRAFT", data: { to: Array.from({ length: 21 }, (_, at) => `p${at}@example.com`), subject: "All", body: "Hi" } }])
+  const twoLines = emailDraftOf([{ action: "GMAIL_DRAFT", data: { to: "ann@example.com", subject: "Lunch\nand more", body: "Noon?" } }])
+  try Effect.try(() => assert.deepStrictEqual({ two, crowded, twoLines }, { two: undefined, crowded: undefined, twoLines: undefined }))
+})

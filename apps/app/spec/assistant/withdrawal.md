@@ -1,13 +1,15 @@
 # Withdrawal
 
-A plain request the assistant makes to the resident agent across the native
-bridge (a conversation read, a decision, a claim, a receipt) carries a fresh
-withdrawal id on the `ElizaAgent` bridge (`request({ id, … })`). When the assistant gives up on it (Stop, the screen retired,
-the owner or agent changed), it stops waiting at once and asks the bridge
-to withdraw the call (`abort({ id })`); a build without the bridge sends the plain request. Two native workers dispatch owned
-calls; a call that is no longer pending when its worker reaches the guard
-before dispatch never reaches the agent. A lifecycle change of the bridge
-answers every pending call of the surface.
+A plain request the assistant makes to the resident agent (a conversation
+read, a decision, a claim, a receipt) goes through the resident's local API,
+which sends it under a fresh withdrawal id on the `ElizaAgent` bridge
+(`request({ id, … })`). When the assistant gives up on it (Stop, the screen
+retired, the owner or agent changed), it stops waiting at once and the
+resident asks the bridge to withdraw the call (`abort({ id })`); a build
+without the bridge sends the plain request. Two native workers dispatch
+owned calls; a call that is no longer pending when its worker reaches the
+guard before dispatch never reaches the agent. A lifecycle change of the
+bridge answers every pending call of the surface.
 
 ## Story: Give up on a request without it happening later
 

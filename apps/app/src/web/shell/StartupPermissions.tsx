@@ -1,7 +1,7 @@
-// spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"
+// spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"
 import { Bell, CalendarDays, Camera, Check, Folder, Images, MapPin, Mic, type LucideIcon } from "lucide-react";
-import type { Access, Perm, Permissions } from "../../../gen/shell__permissions.ts";
-import { accessOf, keyAt, offersSettings, panelShown, selected, skippable, stepCount } from "../../../gen/shell__permissions.ts";
+import type { Access, CheckNotice, Grant, Perm, Permissions } from "../../../gen/shell__permissions.ts";
+import { accessOf, grantOf, keyAt, offersSettings, panelShown, selected, skippable, stepCount } from "../../../gen/shell__permissions.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Spinner } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 
@@ -18,6 +18,19 @@ const DETAILS: Readonly<Record<Perm, { title: string; reason: string; icon: Luci
 const WORDS: Readonly<Record<Access, string>> = {
   AccessChecking: "Checking", AccessAsk: "Ask", AccessSettings: "Off", AccessReady: "Allowed", AccessUnavailable: "Couldn’t check",
 };
+
+const GRANTS: Readonly<Record<Grant, string>> = {
+  GrantNone: "Allowed", GrantPrecise: "Precise", GrantApproximate: "Approximate", GrantAll: "All", GrantSelected: "Selected", GrantLimited: "Limited",
+};
+
+const NOTICES: Readonly<Record<CheckNotice, string>> = {
+  NoCheckNotice: "", NoticeStillOff: "Still off", NoticeUnconfirmed: "Couldn’t confirm",
+};
+
+/** What an allowed step's row says: how much Android allowed where it tells, else Allowed. */
+export function allowedWord(walkthrough: Permissions, index: number): string {
+  return GRANTS[grantOf(walkthrough, index)];
+}
 
 /** The walkthrough panel's state and the owner's choices on it. */
 export interface StartupPermissionsProps {
@@ -73,16 +86,17 @@ export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onC
                 <Icon aria-hidden className="size-5 shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block">{detail.title}</span>
-                  {here && <span className="block text-sm text-muted-foreground">{detail.reason}</span>}
+                  {here && <span className="block text-sm text-muted-foreground">{walkthrough.native && key === "PermLocation" ? "Alpha chat, nearby places and directions" : detail.reason}</span>}
                 </span>
                 {access === "AccessChecking" ? <Spinner label="Checking" /> : (
-                  <span className={cn("font-mono text-xs uppercase tracking-widest", access === "AccessReady" ? "text-ok" : access === "AccessUnavailable" ? "text-warn" : "")}>{WORDS[access]}</span>
+                  <span className={cn("font-mono text-xs uppercase tracking-widest", access === "AccessReady" ? "text-ok" : access === "AccessUnavailable" ? "text-warn" : "")}>{access === "AccessReady" ? allowedWord(walkthrough, index) : WORDS[access]}</span>
                 )}
               </li>
             );
           })}
         </ol>
         {walkthrough.progressError && <p className="text-sm text-warn">Progress couldn’t be saved on this phone.</p>}
+        {walkthrough.notice !== "NoCheckNotice" && <p role="status" className="text-sm text-muted-foreground">{NOTICES[walkthrough.notice]}</p>}
         <div className="flex justify-end gap-2">
           {review ? (
             <Button variant="ghost" onClick={onClose}>Done</Button>

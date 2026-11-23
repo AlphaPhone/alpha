@@ -21,7 +21,7 @@ type FormKind = NoForm | NewForm | EditForm
 type EventSource = DeviceSource | AgentSource
 type Presentation = {
   view: CalendarView, day: int, month: int, active: bool,
-  datePicker: bool, deleteSheet: bool, searching: bool,
+  datePicker: bool, deleteSheet: bool, searching: bool, sourcesSheet: bool,
   openEvent: str, openSource: EventSource, openDay: int,
   form: FormKind, formDay: int, saveRequested: bool, saved: bool,
   owner: str, hiddenAgentOwners: Set[str],
@@ -37,7 +37,7 @@ type Presentation = {
 ```quint
 pure val initial: Presentation = {
   view: DayView, day: 0, month: 0, active: true,
-  datePicker: false, deleteSheet: false, searching: false,
+  datePicker: false, deleteSheet: false, searching: false, sourcesSheet: false,
   openEvent: "", openSource: DeviceSource, openDay: 0,
   form: NoForm, formDay: 0, saveRequested: false, saved: false,
   owner: "", hiddenAgentOwners: Set(),
@@ -94,14 +94,14 @@ selected day's month.
 ```quint
 pure def canOpenDatePicker(s: Presentation): bool =
   s.active and not(s.datePicker) and not(s.deleteSheet) and s.form == NoForm
-pure def openDatePicker(s: Presentation): Presentation = { ...s, datePicker: true }
+pure def openDatePicker(s: Presentation): Presentation = { ...s, datePicker: true, sourcesSheet: false }
 pure def canChooseMonth(s: Presentation, month: int): bool = s.active and (s.view == MonthView or s.datePicker)
 pure def chooseMonth(s: Presentation, month: int): Presentation = { ...s, month: month, generation: s.generation + 1 }
 pure def canCloseDatePicker(s: Presentation): bool = s.datePicker
 pure def closeDatePicker(s: Presentation): Presentation =
   { ...s, datePicker: false, month: if (s.view == MonthView) s.month else 0 }
 pure def alwaysMonthOffsetScoped(s: Presentation): bool = s.view == MonthView or s.datePicker or s.month == 0
-pure def alwaysOneTransientOverlay(s: Presentation): bool = not(s.datePicker and s.deleteSheet)
+pure def alwaysOneTransientOverlay(s: Presentation): bool = not(s.datePicker and s.deleteSheet) and not(s.datePicker and s.sourcesSheet)
 ```
 
 ### Crossing midnight keeps the chosen dates
@@ -197,7 +197,7 @@ pure def closeEvent(s: Presentation): Presentation =
 ```quint
 pure def canAskDelete(s: Presentation, editable: bool): bool =
   s.active and s.openEvent != "" and editable and s.form == NoForm and not(s.deleteSheet)
-pure def askDelete(s: Presentation, editable: bool): Presentation = { ...s, deleteSheet: true, datePicker: false }
+pure def askDelete(s: Presentation, editable: bool): Presentation = { ...s, deleteSheet: true, datePicker: false, sourcesSheet: false }
 pure def canCloseDeleteSheet(s: Presentation): bool = s.deleteSheet
 pure def closeDeleteSheet(s: Presentation): Presentation = { ...s, deleteSheet: false }
 pure def canDeletionStaged(s: Presentation): bool = s.deleteSheet
@@ -207,33 +207,38 @@ pure def alwaysDeleteSheetHasEvent(s: Presentation): bool = s.deleteSheet implie
 pure def alwaysFormNeverOverDeleteSheet(s: Presentation): bool = not(s.form != NoForm and s.deleteSheet)
 ```
 
-### Back closes one layer at a time: the form, the delete sheet, the event, the date picker, then search
+### Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search
 
-The shell lowers the conversation before Calendar sees Back.
+The shell lowers the conversation before Calendar sees Back. Back that finds none of these open is
+the shell's, which leaves Calendar.
 
 ```quint
 pure def canBack(s: Presentation): bool =
-  s.form != NoForm or s.deleteSheet or s.openEvent != "" or s.datePicker or s.searching
+  s.form != NoForm or s.deleteSheet or s.openEvent != "" or s.sourcesSheet or s.datePicker or s.searching
 pure def back(s: Presentation): Presentation =
   if (s.form != NoForm) { ...s, form: NoForm, saveRequested: false }
   else if (s.deleteSheet) { ...s, deleteSheet: false }
   else if (s.openEvent != "") { ...s, openEvent: "", day: if (s.view == ScheduleView) 0 else s.openDay }
+  else if (s.sourcesSheet) { ...s, sourcesSheet: false }
   else if (s.datePicker) { ...s, datePicker: false, month: if (s.view == MonthView) s.month else 0 }
   else { ...s, searching: false, day: if (s.view == ScheduleView) 0 else s.day, generation: s.generation + 1 }
 pure def stepBackClosesOneLayer(before: Presentation, via: str, after: Presentation): bool =
   via == "back" and before.form != NoForm implies after.openEvent == before.openEvent and after.deleteSheet == before.deleteSheet
+pure def stepBackKeepsTheEventUnderTheSheet(before: Presentation, via: str, after: Presentation): bool =
+  via == "back" and before.form == NoForm and before.deleteSheet implies after.openEvent == before.openEvent
+pure def sometimesBackClosesCalendars(s: Presentation): bool = s.sourcesSheet and s.openEvent == ""
 ```
 
 ### Leaving Calendar ends its transient overlays and any pending save request
 
 ```quint
 pure def leave(s: Presentation): Presentation =
-  { ...s, active: false, datePicker: false, deleteSheet: false, saveRequested: false,
+  { ...s, active: false, datePicker: false, deleteSheet: false, sourcesSheet: false, saveRequested: false,
     month: if (s.view == MonthView) s.month else 0 }
 pure def canLeave(s: Presentation): bool = s.active
 pure def canEnter(s: Presentation): bool = not(s.active)
 pure def enter(s: Presentation): Presentation = { ...s, active: true }
-pure def alwaysTransientsEndWithVisit(s: Presentation): bool = not(s.active) implies not(s.datePicker or s.deleteSheet or s.saveRequested)
+pure def alwaysTransientsEndWithVisit(s: Presentation): bool = not(s.active) implies not(s.datePicker or s.deleteSheet or s.sourcesSheet or s.saveRequested)
 ```
 
 ## Story: Create or edit an event in a form
@@ -245,10 +250,10 @@ pure def alwaysTransientsEndWithVisit(s: Presentation): bool = not(s.active) imp
 
 ```quint
 pure def canNewForm(s: Presentation): bool = s.active and s.form == NoForm and not(s.deleteSheet) and not(s.datePicker)
-pure def newForm(s: Presentation): Presentation = { ...s, form: NewForm, formDay: s.day, saveRequested: false, saved: false }
+pure def newForm(s: Presentation): Presentation = { ...s, form: NewForm, formDay: s.day, sourcesSheet: false, saveRequested: false, saved: false }
 pure def canEditForm(s: Presentation, editable: bool): bool =
   s.active and s.form == NoForm and s.openEvent != "" and editable and not(s.deleteSheet)
-pure def editForm(s: Presentation, editable: bool): Presentation = { ...s, form: EditForm, formDay: s.openDay, saveRequested: false, saved: false }
+pure def editForm(s: Presentation, editable: bool): Presentation = { ...s, form: EditForm, formDay: s.openDay, sourcesSheet: false, saveRequested: false, saved: false }
 pure def canCloseForm(s: Presentation): bool = s.form != NoForm and not(s.saveRequested)
 pure def closeForm(s: Presentation): Presentation = { ...s, form: NoForm }
 ```
@@ -369,6 +374,20 @@ pure def lawDisconnectedNeverRetries(failed: bool): bool = statusAction(false, f
 
 > As the owner, I want to hide my agent's calendar or my phone's calendars from Calendar and Home,
 > and have that choice kept for my account.
+
+### The Calendars sheet is a modal over the view, opened only with no form or delete sheet open
+
+The header's Calendars button, and Calendar's settings route, open the sheet with the source
+switches and Google Calendar sync. It closes the date picker, and the date picker closes it.
+
+```quint
+pure def canOpenSources(s: Presentation): bool =
+  s.active and not(s.sourcesSheet) and not(s.deleteSheet) and s.form == NoForm
+pure def openSources(s: Presentation): Presentation =
+  { ...s, sourcesSheet: true, datePicker: false, month: if (s.view == MonthView) s.month else 0 }
+pure def canCloseSources(s: Presentation): bool = s.sourcesSheet
+pure def closeSources(s: Presentation): Presentation = { ...s, sourcesSheet: false }
+```
 
 ### A hidden source's rows show neither in Calendar nor on Home, and Home never calls a hidden calendar empty
 

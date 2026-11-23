@@ -10,7 +10,7 @@ import { Suggestions } from "../../src/assistant/suggestion.vibe"
 import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import { textOf, unitsOf } from "../../src/assistant/units.vibe"
 import { WithdrawableRequests } from "../../src/assistant/withdrawable.vibe"
-import { assistantOver, countingExecutors, fakeHost, fakeResident, homeScreen, silentAgentNative, type Seen } from "./fakes.vibe"
+import { assistantOver, countingExecutors, fakeHost, fakeResident, homeScreen, silentResident, type Seen } from "./fakes.vibe"
 
 const quietResident = (proposals: readonly unknown[] = []) => fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals })
 
@@ -111,12 +111,12 @@ it.effect("A proposal this phone cannot review is named, not carded (spec/assist
 })
 
 it.effect("Give up on a request without it happening later (spec/assistant/withdrawal.md, \"A request withdrawn before its worker dispatched it never reaches the agent, and every call is answered at most once\")", () => effect {
-  const aborts: string[] = []
-  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), silentAgentNative(aborts)) {
+  const withdrawn: string[] = []
+  provide assistantOver(silentResident(withdrawn), fakeHost([]), countingExecutors({ count: 0 })) {
     const requests = try WithdrawableRequests
     const asking = fork requests.ask("GET", "/api/client-devices/proposals")
     try yieldNow
     try Fiber.interrupt(asking)
-    try Effect.try(() => assert.deepStrictEqual({ aborts: aborts.length, named: aborts[0]?.startsWith("assistant-") }, { aborts: 1, named: true }))
+    try Effect.try(() => assert.deepStrictEqual(withdrawn, ["GET /api/client-devices/proposals"]))
   }
 })

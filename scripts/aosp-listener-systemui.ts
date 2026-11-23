@@ -1,15 +1,19 @@
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {prepareListenerSystemui as prepare, verifyListenerSystemui as verify} from './os-ported/os/sense-systemui.mjs';
+import * as osImage from '@elizaos/os/image';
+import {run} from './upstream-os.ts';
 
-export function prepareListenerSystemui(source: string,output: string,bundle='ops'){return prepare(source,output,bundle);}
-export function verifyListenerSystemui(source: string,state='before',bundle='ops'){return verify(source,state,bundle);}
+type Bundle = 'ops' | 'chip' | 'assist' | 'power';
+/** Prepare a reviewed SystemUI overlay for the wake listener from an unpatched AOSP source (@elizaos/os/image). */
+export function prepareListenerSystemui(source: string,output: string,bundle: Bundle='ops'){return run(osImage.prepareListenerSystemui(source,output,bundle));}
+/** Verify an AOSP source before or after the reviewed SystemUI patch for the wake listener (@elizaos/os/image). */
+export function verifyListenerSystemui(source: string,state: 'before'|'after'='before',bundle: Bundle='ops'){return run(osImage.verifyListenerSystemui(source,state,bundle));}
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
  const args=process.argv.slice(2),source=args[args.indexOf('--source')+1];
  if(!args.includes('--source')||!source)throw Error('Use --source AOSP_ROOT [--chip | --assist] [--output NEW_OVERLAY | --after]');
  if(args.includes('--chip')&&args.includes('--assist'))throw Error('Choose one SystemUI bundle');
- const bundle=args.includes('--chip')?'chip':args.includes('--assist')?'assist':'ops',output=args.includes('--output')?args[args.indexOf('--output')+1]:null;
+ const bundle: Bundle=args.includes('--chip')?'chip':args.includes('--assist')?'assist':'ops',output=args.includes('--output')?args[args.indexOf('--output')+1]:null;
  if(args.includes('--output')&&(!output||output.startsWith('--')))throw Error('--output needs a new directory');
  if(output&&args.includes('--after'))throw Error('--output requires unpatched source');
- console.log(JSON.stringify(output?prepareListenerSystemui(source,path.resolve(output),bundle):verifyListenerSystemui(source,args.includes('--after')?'after':'before',bundle),null,2));
+ console.log(JSON.stringify(output?await prepareListenerSystemui(source,path.resolve(output),bundle):await verifyListenerSystemui(source,args.includes('--after')?'after':'before',bundle),null,2));
 }

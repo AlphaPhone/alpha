@@ -1,9 +1,10 @@
-// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/reply.md, "At most five reply notices of at most 500 characters reach the transcript, and only the latest system notice stays, until a real reply follows it"; spec/assistant/receipts.md, "A receipt's title says what the journal proves"
+// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/reply.md, "At most five reply notices of at most 500 characters reach the transcript, and only the latest system notice stays, until a real reply follows it"; spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/emailCard.md, "A turn offers at most one email card: exactly one valid draft, with one to twenty recipients, a one-line subject and a body"
 import type { CutOff } from "../../gen/assistant__receipts.ts"
 import type { PlanAction, ReplyView } from "../../gen/assistant__reply.ts"
 import { initial as replyStart, keptNotices, noticeFits, systemNoticeShown } from "../../gen/assistant__reply.effect.vibe"
 import type { CardState } from "../../gen/assistant__approvals.ts"
 import type { EmailCard } from "../../gen/assistant__emailCard.ts"
+import { offerAccepted, validDraft } from "../../gen/assistant__emailCard.effect.vibe"
 import { StagedEmail } from "./payloads.schema.vibe"
 import { classify, type Segment } from "./reply-lines.vibe"
 
@@ -12,6 +13,14 @@ export interface ChatFile { readonly id: string; readonly name: string; readonly
 
 /** The message a reply quotes. */
 export interface Quote { readonly messageId: string; readonly text: string; readonly from: "user" | "agent" }
+
+/** The set an itemized card lists, read on this phone and bound to its proposal: one line per named item, and how many are counted but not named. */
+export interface ItemizedSet {
+  readonly lines: readonly string[]
+  readonly unnamed: number
+  /** How a counted, unnamed item is called, such as "private tab". */
+  readonly unnamedLabel?: string
+}
 
 /** An action card in the transcript. */
 export interface ProposalCard {
@@ -25,6 +34,7 @@ export interface ProposalCard {
   readonly session: string
   readonly destination?: "home" | "notes" | "calendar"
   readonly summary?: string
+  readonly items?: ItemizedSet
 }
 
 /** One row of the transcript. */
@@ -35,6 +45,7 @@ export type Row =
   | { readonly kind: "notice"; readonly id: string; readonly text: string; readonly system: boolean }
   | { readonly kind: "card"; readonly id: string; readonly card: ProposalCard }
   | { readonly kind: "email"; readonly id: string; readonly card: EmailCard; readonly to: string; readonly subject: string; readonly body: string }
+  | { readonly kind: "change"; readonly id: string; readonly text: string; readonly app: "workflows" | "notes" | "calendar"; readonly route?: string }
 
 /** The transcript of the open conversation, as the assistant shows it. */
 export interface Transcript {
@@ -76,16 +87,22 @@ export function collapseSystemNotices(rows: readonly Row[]): readonly Row[] {
   return rows.filter((row, at) => !(row.kind === "notice" && row.system) || systemNoticeShown(at === latest, rows.slice(at + 1).some(ordinaryReply)))
 }
 
-/** The email draft an agent reply staged, from its action results, or none. */
+/** The email draft an agent reply staged, from its action results: exactly one valid draft (one to twenty recipients, a one-line subject, a body), or none. */
 export function emailDraftOf(actionResults: readonly { readonly action: string; readonly data: unknown }[]): { readonly to: string; readonly subject: string; readonly body: string } | undefined {
+  const offers: { readonly to: string; readonly subject: string; readonly body: string; readonly valid: boolean }[] = []
   for (const result of actionResults) {
     if (!/EMAIL|GMAIL|MAIL_DRAFT/i.test(result.action)) continue
     const staged = Schema.decodeUnknownOption(StagedEmail)(result.data)
-    if (Option.isNone(staged) || staged.value.body.trim() === "") continue
+    if (Option.isNone(staged)) continue
     const to = staged.value.to
-    return { to: to === undefined ? "" : typeof to === "string" ? to : to.join(", "), subject: staged.value.subject ?? "", body: staged.value.body }
+    const listed = to === undefined ? [] : typeof to === "string" ? to.split(/[,;]/).map((entry) => entry.trim()).filter((entry) => entry !== "") : to.map((entry) => entry.trim()).filter((entry) => entry !== "")
+    const subject = staged.value.subject ?? ""
+    const valid = validDraft(listed.length, subject === "" ? 0 : subject.split(/\r?\n/).length, staged.value.body.trim() === "")
+    offers.push({ to: listed.join(", "), subject, body: staged.value.body, valid })
   }
-  return undefined
+  const only = offers[0]
+  if (only === undefined || !offerAccepted(offers.length, only.valid)) return undefined
+  return { to: only.to, subject: only.subject, body: only.body }
 }
 
 /** Rows of history as the transcript shows them. */

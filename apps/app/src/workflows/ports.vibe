@@ -1,15 +1,23 @@
-// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"
+// spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/workflows/clockDraft.md, "The alarm the owner sets in the draft reaches Clock's review exactly: a real time, a short label and distinct days"
+
+/** The alarm the owner set over Workflows, as Clock's draft takes it: days are Android Clock's 1 (Sunday) to 7. */
+export interface AlarmRequest {
+  readonly hour: number
+  readonly minute: number
+  readonly label: string
+  readonly days: ReadonlyArray<number>
+}
 
 /** Clock's alarm handoff as Workflows' Clock draft reaches it; the clock area fills it, and until then nothing is shown or handed over. */
 export service WorkflowClockPort {
-  /** Show Clock's exact alarm request for review with the phone's time zone now; false when Clock offers no review. */
-  prepare(): boolean!!
+  /** Put `request` into Clock's draft and show its exact alarm request for review with the phone's time zone now; false when Clock offers no review. */
+  prepare(request: AlarmRequest): boolean!!
   /** Send the reviewed request to Android Clock once; whether Clock answered that it opened. */
   confirm(): boolean!!
   /** Leaving Workflows, Back or hiding the page retires Clock's review. */
   retire(): void!!
   static readonly defaultValue = () => ({
-    prepare: () => succeed(false),
+    prepare: (_request: AlarmRequest) => succeed(false),
     confirm: () => succeed(false),
     retire: () => succeed(undefined),
   })

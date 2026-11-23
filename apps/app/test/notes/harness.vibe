@@ -7,7 +7,9 @@ import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
 import { VoiceRoute, VoiceRouteFailed, type RouteAttempt } from "../../src/voice/route.vibe"
+import { recordingTranscriber } from "../../src/voice/transcription.vibe"
 import { NotesCollection } from "../../src/notes/collection.vibe"
 import { layer } from "../../src/notes/layer.vibe"
 import type { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
@@ -24,21 +26,37 @@ export effect function check(run: () => void) {
 }
 
 /** The platform, account, voice and shell services the Notes layer needs, over the in-memory resident and device. */
-export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: SubscriptionRef.SubscriptionRef<ForegroundState>) {
+export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: SubscriptionRef.SubscriptionRef<ForegroundState>, routes?: Layer.Layer<Navigation>) {
+  const native = Layer.succeed(Native, {
+    available: (plugin: string) => sync(() => device.available(plugin)),
+    invoke: (plugin: string, method: string, args?: unknown) => Effect.try({
+      try: () => device.invoke(plugin, method, (args ?? {}) as Record<string, unknown>),
+      catch: (error) => new NativeFailed({ plugin, method, message: String(error), code: (error as { code?: string }).code }),
+    }),
+    listen: () => Stream.empty,
+  })
+  const speech = Layer.succeed(VoiceRoute, {
+    changes: Stream.empty,
+    route: () => succeed("Cloud" as const),
+    account: () => succeed({ kind: "cloud" as const, environment: "test", credentialId: "credential-test" }),
+    observeAccount: () => Effect.void,
+    observeLimit: () => Effect.void,
+    probeOnDevice: () => succeed(false),
+    run: <A>(attempt: RouteAttempt<A>) => mapError(attempt("Cloud", () => Effect.void), (cause) => new VoiceRouteFailed({ route: "Cloud", cause })),
+    privacy: () => succeed("ViaCloud" as const),
+    sends: () => succeed(sendsOf("Cloud")),
+  })
+  const navigation = routes ?? Layer.succeed(Navigation, { changes: Stream.empty, send: () => succeed(false) } as unknown as Navigation.Shape)
   return Layer.mergeAll(
+    native,
+    speech,
+    Layer.provide(recordingTranscriber, Layer.merge(native, speech)),
+    navigation,
     Layer.succeed(Resident, {
       status: () => succeed("running" as const),
       ensureRunning: () => Effect.void,
       json: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown) => sync(() => agent.json(method, path, body)),
       stream: () => Stream.empty,
-    }),
-    Layer.succeed(Native, {
-      available: (plugin: string) => sync(() => device.available(plugin)),
-      invoke: (plugin: string, method: string, args?: unknown) => Effect.try({
-        try: () => device.invoke(plugin, method, (args ?? {}) as Record<string, unknown>),
-        catch: (error) => new NativeFailed({ plugin, method, message: String(error), code: (error as { code?: string }).code }),
-      }),
-      listen: () => Stream.empty,
     }),
     Layer.succeed(Build, { info: { version: "test", variant: "browser", testMocks: true } }),
     Layer.succeed(CloudSession, {
@@ -49,17 +67,6 @@ export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: Subscri
       ownerKey: (key: string) => succeed(`alpha/1/${key}`),
       run: () => Effect.void, adopt: () => Effect.void, attempt: () => Effect.void, signOut: () => succeed(true), rejected: () => Effect.void, admit: () => Effect.void,
     }),
-    Layer.succeed(VoiceRoute, {
-      changes: Stream.empty,
-      route: () => succeed("Cloud" as const),
-      account: () => succeed({ kind: "cloud" as const, environment: "test", credentialId: "credential-test" }),
-      observeAccount: () => Effect.void,
-      observeLimit: () => Effect.void,
-      probeOnDevice: () => succeed(false),
-      run: <A>(attempt: RouteAttempt<A>) => mapError(attempt("Cloud", () => Effect.void), (cause) => new VoiceRouteFailed({ route: "Cloud", cause })),
-      privacy: () => succeed("ViaCloud" as const),
-      sends: () => succeed(sendsOf("Cloud")),
-    }),
     shown === undefined
       ? Layer.succeed(Foreground, { changes: Stream.make(home), get: () => succeed(home) })
       : Layer.succeed(Foreground, { changes: SubscriptionRef.changes(shown), get: () => SubscriptionRef.get(shown) }),
@@ -68,8 +75,8 @@ export function fakes(agent: NotesAgentFake, device: DeviceFake, shown?: Subscri
 }
 
 /** The whole Notes layer over the fakes. */
-export const notesOver = (agent: NotesAgentFake, device: DeviceFake, shown?: SubscriptionRef.SubscriptionRef<ForegroundState>) =>
-  Layer.provide(layer, fakes(agent, device, shown))
+export const notesOver = (agent: NotesAgentFake, device: DeviceFake, shown?: SubscriptionRef.SubscriptionRef<ForegroundState>, routes?: Layer.Layer<Navigation>) =>
+  Layer.provide(layer, fakes(agent, device, shown, routes))
 
 /** The first snapshot of the bound collection. */
 export effect function bound() {

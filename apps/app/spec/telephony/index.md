@@ -10,8 +10,9 @@ the owner sends, calls and approves, and automatic suggestions are deferred.
 
 The renderer reads the providers only while their view is in front on an unlocked phone and keeps
 what it read in memory for that visit. Drafts, the stage and an open proposal are the owner's and
-survive process death; nothing is sent, dialed or written on restore. The native side (Telecom,
-the SMS journal, the voicemail and contacts providers) is specified upstream in
+survive process death; nothing is sent, dialed or written on restore. Back closes each app's own
+layers, innermost first, after the comms stage and the open chat, before it is the shell's. The
+native side (Telecom, the SMS journal, the voicemail and contacts providers) is specified upstream in
 `spec/os/android/{phone,messages,contacts,voicemail}.md`; these specs state what Alpha's renderer
 does with what the native side answers. A confirmed delete of a message, voicemail or contact waits in
 the upstream deletion window (`spec/os/android/deletionWindow.md`, `deferredDeletion.md`): its row is
@@ -21,6 +22,7 @@ hidden from its list, and the window's own notice offers Undo while Undo can sti
 - [Ongoing-call bar](./callBar.md): the calls Telecom reports, the bar over every view, Return and End.
 - [Phone](./phone.md): Recents, the keypad, the owner's own call and the dial handoff.
 - [Voicemail](./voicemail.md): the carrier's visual voicemail, playback, on-device transcripts and deletion.
+- [Phone details](./phoneInfo.md): Settings → Phone on the image: each line's SIM, carrier, number and network, and the role holders.
 - [Messages](./messages.md): threads, a conversation, a new message, links, Copy and Delete.
 - [Drafts and sends](./drafts.md): one draft slot per conversation, Alpha's draft, pictures, and the reviewed SMS or MMS send.
 - [Contacts](./contacts.md): the address book read, the in-app editor and the write gate.

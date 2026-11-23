@@ -51,3 +51,25 @@ pure def cardExpires(r: Recovery): Recovery = { ...r, doneKey: noKey, triggers: 
 pure def stepAnExpiryNeverChangesTheKey(before: Recovery, via: str, after: Recovery): bool = via == "cardExpires" implies after.key == before.key
 pure def sometimesReadAgainAfterExpiry(r: Recovery): bool = r.applied == 2 and r.reads == 2 and r.key == 0
 ```
+
+## Story: Restart my agent when it stopped for review
+
+> As the owner, when my agent stopped and the phone holds what it kept for
+> my review, I want the chat to say "Restart needed" and restart it with
+> one tap, so that I can keep chatting without anything it kept being
+> replayed.
+
+### Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap
+
+The composer offers Restart while the resident connection is refused and
+the agent service reports a reviewable hold; the tap archives what the
+owner reviewed under its one-use token and starts the agent again. A
+failed restart says so and offers it again; nothing kept is replayed
+(#1302).
+
+```quint
+pure def restartOffered(refused: bool, reviewable: bool, restarting: bool): bool = refused and reviewable and not(restarting)
+pure def lawNoRestartWhileConnected(reviewable: bool): bool = not(restartOffered(false, reviewable, false))
+pure def lawNoRestartWithoutAHold(refused: bool): bool = not(restartOffered(refused, false, false))
+pure def lawOneRestartPerTap(refused: bool, reviewable: bool): bool = not(restartOffered(refused, reviewable, true))
+```

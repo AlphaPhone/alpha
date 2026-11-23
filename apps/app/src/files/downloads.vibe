@@ -2,6 +2,7 @@
 import { type Export, Machine as ExportMachine } from "../../gen/files__downloads.effect.vibe"
 import { Machine as BrowserMachine } from "../../gen/files__browser.effect.vibe"
 import { type DownloadFile, fromBase64, handOver, pageVisible, storedZip } from "./download.ts"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { keyPath } from "./paths.vibe"
 import { Documents, FilesStorage } from "./storage.vibe"
 
@@ -61,7 +62,9 @@ export const layer = Layer.effect(FilesDownloads, effect {
     if (encoded === undefined) return "refused" satisfies DownloadResult
     const reread = (try identities(paths, volume)) === reviewed
     const now = try view.get()
-    const visible = Effect.try(() => pageVisible()) catch () => false
+    const lifecycle = try Effect.serviceOption(AppLifecycle)
+    const foreground = Option.isSome(lifecycle) ? (try lifecycle.value.get()).foreground : true
+    const visible = foreground && (Effect.try(() => pageVisible()) catch () => false)
     const handed = exports.send({ type: "checkAndHand", exportId, batch: now.generation, reread, ownerCurrent: now.active, visible }) catch () => undefined
     if (!handed?.handed) return (reread ? "refused" : "changed") satisfies DownloadResult
     const handedOver = Effect.try(() => {

@@ -7,7 +7,8 @@ import { checkOutputs, deploymentOutputs, selectDeployment, writeOutputs } from 
 import { localProfile, OperatorInputs, readAlphaProfile, type OperatorInputs as Inputs } from "./profile.vibe"
 import { applyArguments, environmentRegistration, registrationFile, seedDocument, type AppIdentity, type ReleaseSigner } from "./registration.vibe"
 import { checkRuntimeConfig } from "./runtime-config.vibe"
-import { renderEnvironment, type CloudResources } from "./wrangler.vibe"
+import { PROFILE_ASSET } from "./profile-asset.ts"
+import { assetsDirectory, renderEnvironment, type CloudResources } from "./wrangler.vibe"
 
 module node {
   /** @throws {never} */
@@ -28,7 +29,7 @@ const usage = [
   "     | alpha-cloud profile --inputs <file> --out <file> [--local <origin>…]",
   "     | alpha-cloud seed --inputs <file> --environment production|staging --out <file>",
   "     | alpha-cloud registration --inputs <file> --environment production|staging --out <file>",
-  "     | alpha-cloud render --inputs <file> --environment production|staging [--resources <file>] [--out <dir>]",
+  "     | alpha-cloud render --inputs <file> --environment production|staging [--resources <file>] [--out <dir>]   (after the cloud package build)",
 ].join("\n")
 
 effect function flags(args: ReadonlyArray<string>, valued: ReadonlyArray<string>, repeated: ReadonlyArray<string> = [], switches: ReadonlyArray<string> = []) {
@@ -151,15 +152,24 @@ effect function render(args: ReadonlyArray<string>) {
   const root = try repositoryRoot()
   const resources = (try readJson(found.single.get("resources") ?? path.join(root, "cloud/resources.json"))) as Record<CloudEnvironment, CloudResources>
   const templates = { api: try readJson(path.join(root, "cloud/wrangler/api.template.json")), edge: try readJson(path.join(root, "cloud/wrangler/edge.template.json")) }
-  const rendered = try renderEnvironment(templates, profile, environment, resources[environment], inputs[environment], client)
-  const out = found.single.get("out") ?? path.join(root, "cloud/rendered")
+  const out = path.resolve(found.single.get("out") ?? path.join(root, "cloud/rendered"))
+  const assets = path.join(out, assetsDirectory(environment))
+  const paths = { apiMain: path.join(root, "cloud/dist/src/worker.js"), edgeMain: path.join(root, "cloud/dist/src/edge.js"), assets }
+  const rendered = try renderEnvironment(templates, profile, environment, resources[environment], inputs[environment], client, paths)
   const fs = try FileSystem.FileSystem
   try fs.makeDirectory(out, { recursive: true })
   const api = path.join(out, `wrangler.${environment}.json`)
   const edge = path.join(out, `wrangler.edge.${environment}.json`)
+  const pages = path.join(root, "cloud/dist/pages")
+  if (!(try fs.exists(pages))) throw new InputUnreadable({ file: `${pages} (build the cloud package first)` })
+  try fs.remove(assets, { recursive: true, force: true })
+  try fs.copy(pages, assets)
+  const profileFile = path.join(assets, PROFILE_ASSET)
+  try fs.makeDirectory(path.dirname(profileFile), { recursive: true })
+  try fs.writeFileString(profileFile, rendered.profile)
   try fs.writeFileString(api, JSON.stringify(rendered.api, null, 2) + "\n")
   try fs.writeFileString(edge, JSON.stringify(rendered.edge, null, 2) + "\n")
-  return { api, edge }
+  return { api, edge, assets, profile: profileFile }
 }
 
 /** The Alpha Cloud command line: client deployment outputs, runtime check, profile, seed, client registration and Wrangler rendering. */

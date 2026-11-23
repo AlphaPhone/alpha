@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "Story: Choose which calendars I see"
+// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "A day is free only when the read covering it was complete"; spec/calendar/presentation.md, "Without an agent session Calendar says Not connected and offers Settings, never a dead Connect"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"
 import { Effect } from "effect";
 import { CalendarDays, Layers, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
 import { useState } from "react";
@@ -9,7 +9,12 @@ import { readCalendar } from "../../calendar/binding.vibe";
 import { CalendarDrafts } from "../../calendar/drafts.vibe";
 import type { DraftFieldsRecord } from "../../calendar/drafts.schema.vibe";
 import { type CalendarRow, agentEventKey, eventSourceKey } from "../../calendar/model.vibe";
-import { closeEditor, closeRow, deleteRow, newFields, openEditor, openRow, placeRow, rowFields, rowTimingLocked, saveEditor, timingChanged } from "../../calendar/screen.vibe";
+import {
+  closeEditor, closeRow, closeSources, deleteRow, linkSavedNote, newFields, openEditor, openEventLink, openRow, openRowOrigin, openSources, placeRow,
+  rowFields, rowTimingLocked, saveEditor, timingChanged,
+} from "../../calendar/screen.vibe";
+import { googleSyncOffer } from "../../calendar/sync.vibe";
+import type { OriginView } from "../../notes/origins.vibe";
 import { deviceZone, formatLongDate, midnightAfter } from "../../calendar/time.ts";
 import { Navigation } from "../../shell/navigation.vibe";
 import type { ScreenProps } from "../app-screen.ts";
@@ -21,8 +26,10 @@ import { EventEditor } from "./EventEditor.tsx";
 import { PreservationReview } from "./Surfaces.tsx";
 import { MonthGrid } from "./MonthGrid.tsx";
 import { ScheduleList } from "./ScheduleList.tsx";
+import { SyncSettings } from "./SyncSettings.tsx";
 import { Timeline } from "./Timeline.tsx";
-import { run, useAgentView, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
+import { useAgentView, useDeviceRead, useDeviceWrites, useDraft, useHeld, useRouteOpen } from "./hooks.ts";
+import { perform } from "../shell/services.ts";
 import { calendarRows, coveredRange, listGroups, visibleDays } from "./layout.ts";
 import { runtime } from "./runtime.ts";
 
@@ -66,7 +73,12 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<{ fields: DraftFieldsRecord; row: CalendarRow | undefined; owner: string } | undefined>(undefined);
   const [problem, setProblem] = useState("");
-  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [origin, setOrigin] = useState<{ readonly rowId: string; readonly view: OriginView | undefined } | undefined>(undefined);
+  const [formWas, setFormWas] = useState(p.form);
+  if (formWas !== p.form) {
+    setFormWas(p.form);
+    if (p.form === "NoForm" && editing !== undefined) setEditing(undefined);
+  }
   const zone = deviceZone();
   const now = Date.now();
   const heldTargets = new Set(held.held.map((entry) => entry.target));
@@ -79,9 +91,13 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
   const openEvent = open?.source === "agent" ? agent.feed?.events.find((event) => `agent:${agentEventKey(event)}` === open.id) : undefined;
   const openCalendar = openEvent === undefined ? undefined : agent.calendars.find((calendar) => JSON.stringify([calendar.provider, calendar.side, calendar.grantId, calendar.connectorAccountId, calendar.calendarId]) === eventSourceKey(openEvent));
   const facts = eventFacts(openEvent, openCalendar);
+  const sync = googleSyncOffer(agent.calendars);
+  const shownOrigin = open !== undefined && origin?.rowId === open.id ? origin.view : undefined;
+  const showRow = (row: CalendarRow) => void perform(openRow(row)).then((view) => setOrigin({ rowId: row.id, view }));
+  const openLink = (url: string) => void perform(openEventLink(url)).then((how) => { if (how === "web") window.open(url, "_blank", "noopener,noreferrer"); });
   const go = (event: PresentationEvent, read = false) => {
     if (!can(event)) return;
-    void send(event).then(() => (read ? run(readCalendar(false, false)) : undefined));
+    void send(event).then(() => (read ? perform(readCalendar(false, false)) : undefined));
   };
   const readComplete = agent.state.status === "Ready" && !device.truncated;
   const empty = dayEmptiness(readComplete, p.truncated, p.lastReadToken > 0);
@@ -97,7 +113,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
   const shown = editing ?? (handedOver === undefined ? undefined : { fields: handedOver, row: undefined, owner: agent.state.owner });
   const startEditor = (row: CalendarRow | undefined) => {
     setProblem("");
-    void run(Effect.gen(function* () {
+    void perform(Effect.gen(function* () {
       const creationId = crypto.randomUUID().replace(/[^-a-zA-Z0-9_]/g, "");
       const opened = yield* openEditor(row);
       if (!opened) return;
@@ -114,7 +130,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
           {formatLongDate(midnightAfter(now, zone, p.day), zone)}
         </Button>
         <Button variant="ghost" size="icon" aria-label="Search events" onClick={() => go({ type: "openSearch" })}><Search /></Button>
-        <Button variant="ghost" size="icon" aria-label="Calendars" onClick={() => setSourcesOpen(true)}><Layers /></Button>
+        <Button variant="ghost" size="icon" aria-label="Calendars" disabled={!can({ type: "openSources" })} onClick={() => void perform(openSources())}><Layers /></Button>
         <Button variant="ghost" size="icon" aria-label="New event" disabled={!can({ type: "newForm" })} onClick={() => startEditor(undefined)}><Plus /></Button>
       </header>
       <Tabs value={p.view} onValueChange={(view) => go({ type: "chooseView", view: view as CalendarView }, true)} className="px-4">
@@ -125,15 +141,15 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
         <div role="status" className="flex items-center justify-between gap-2 px-4 py-1 text-sm text-muted-foreground">
           <span>{[status, device.status === "limited" ? "2,000 max" : device.status === "failed" ? "Couldn’t load device calendars" : ""].filter(Boolean).join(" · ")}</span>
           {action === "OfferSettings" && (
-            <Button variant="outline" size="sm" aria-label="Open Calendar settings" onClick={() => void run(Navigation.use((navigation) => navigation.open("account", "google")))}><Settings aria-hidden />Settings</Button>
+            <Button variant="outline" size="sm" aria-label="Open Calendar settings" onClick={() => void perform(Navigation.use((navigation) => navigation.open("account", "google")))}><Settings aria-hidden />Settings</Button>
           )}
           {action === "OfferRetry" && (
-            <Button variant="ghost" size="icon" aria-label="Retry calendar and reminders" onClick={() => void run(readCalendar(true, false))}><RefreshCw /></Button>
+            <Button variant="ghost" size="icon" aria-label="Retry calendar and reminders" onClick={() => void perform(readCalendar(true, false))}><RefreshCw /></Button>
           )}
         </div>
       )}
       {device.status === "connect" && (
-        <Button variant="outline" className="mx-4" onClick={() => void run(readCalendar(true, true))}>
+        <Button variant="outline" className="mx-4" onClick={() => void perform(readCalendar(true, true))}>
           <CalendarDays aria-hidden />Connect device calendars
         </Button>
       )}
@@ -148,36 +164,45 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
       ) : p.view === "ScheduleView" || p.searching ? (
         <ScheduleList groups={groups} range={p.searching ? `Searching ${coveredRange(from, windowEnd, zone)}` : `Through ${coveredRange(from, windowEnd, zone).split(" – ")[1]}`}
           emptyText={p.lastReadToken === 0 ? status || "Loading" : p.searching ? (query.trim() ? "No matching events" : "No events") : "No upcoming events"}
-          onOpen={(row) => void run(openRow(row))} />
+          onOpen={showRow} />
       ) : (
         <Timeline rows={rows} days={days} day={p.day} zone={zone} now={now} emptyText={emptyText}
-          onOpen={(row) => void run(openRow(row))} onPickDay={(day) => go({ type: "chooseDay", day }, true)} />
+          onOpen={showRow} onPickDay={(day) => go({ type: "chooseDay", day }, true)} />
       )}
-      <CalendarSources open={sourcesOpen} agentShown={!agentHidden} deviceShown={p.deviceVisible} agentAccess={p.agentAccess && p.owner !== ""} deviceAccess={p.deviceAccess}
-        onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => setSourcesOpen(false)} />
+      <CalendarSources open={p.sourcesSheet} agentShown={!agentHidden} deviceShown={p.deviceVisible} agentAccess={p.agentAccess && p.owner !== ""} deviceAccess={p.deviceAccess}
+        onAgent={(shown) => go(shown ? { type: "showAgent" } : { type: "hideAgent" })} onDevice={() => go({ type: "toggleDevice" })} onClose={() => void perform(closeSources())}>
+        {p.owner !== "" && sync.grant !== "NoGoogleGrant" && <SyncSettings grant={sync.grant} destinations={sync.destinations} />}
+      </CalendarSources>
       <DatePicker open={p.datePicker} rows={rows} day={p.day} month={p.month} zone={zone} now={now}
         onMonth={(month) => go({ type: "chooseMonth", month }, true)} onPickDay={(day) => { go({ type: "chooseDay", day }, true); }} onClose={() => go({ type: "closeDatePicker" })} />
       {p.form === "NoForm" && (
         <EventDetail row={open} facts={facts} deleting={p.deleteSheet} held={open !== undefined && open.source === "device" && writes.held !== "" && open.id.startsWith(`device:${writes.held}:`)}
           canEdit={open !== undefined && can({ type: "editForm", editable: open.writable })} canDelete={open !== undefined && can({ type: "askDelete", editable: open.writable })}
           onEdit={() => startEditor(open)} onAskDelete={() => open && go({ type: "askDelete", editable: open.writable })}
-          onDelete={(scope) => open && void run(deleteRow(open, SCOPE[scope], facts.mode === "DeclineInvitation" ? "decline_invitation" : "organizer_cancel"))}
-          onCloseDelete={() => go({ type: "closeDeleteSheet" })} onCheckAgain={() => void run(readCalendar(true, false))}
-          onOpenLink={(url) => window.open(url, "_blank", "noopener")} onPlace={() => open && void run(placeRow(open))} onClose={() => void run(closeRow())} />
+          onDelete={(scope) => open && void perform(deleteRow(open, SCOPE[scope], facts.mode === "DeclineInvitation" ? "decline_invitation" : "organizer_cancel"))}
+          onCloseDelete={() => go({ type: "closeDeleteSheet" })} onCheckAgain={() => void perform(readCalendar(true, false))}
+          onOpenLink={openLink} onPlace={() => open && void perform(placeRow(open))}
+          {...(shownOrigin === undefined ? {} : { origin: shownOrigin, onOpenOrigin: () => open && void perform(openRowOrigin(open)) })}
+          onClose={() => void perform(closeRow())} />
       )}
       {p.form !== "NoForm" && shown !== undefined && (
         <EventEditor fields={shown.fields} draft={draft} recurring={shown.row?.recurring === true} timingLocked={rowTimingLocked(shown.row)} deviceZone={zone}
           loading={agent.state.read.id !== 0} otherAccount={shown.owner !== agent.state.owner}
           eventChanged={shown.row !== undefined && rows.find((row) => row.id === shown.row?.id)?.revision !== shown.row.revision} problem={problem}
-          onEdit={(fields) => void run(CalendarDrafts.use((drafts) => drafts.edit(fields)))}
-          onRestore={() => run(CalendarDrafts.use((drafts) => drafts.restore()))}
-          onReview={(kind) => void run(CalendarDrafts.use((drafts) => drafts.openReview(kind)))}
-          onAnswerReview={(confirmed) => void run(CalendarDrafts.use((drafts) => drafts.answerReview(confirmed)))}
-          onRetry={() => void run(CalendarDrafts.use((drafts) => drafts.retry()))}
-          onRecovery={(step) => void run(CalendarDrafts.use((drafts) => step === "open" ? Effect.flatMap(drafts.openRecovery(), () => drafts.captureRecovery())
+          onEdit={(fields) => void perform(CalendarDrafts.use((drafts) => drafts.edit(fields)))}
+          onRestore={() => perform(CalendarDrafts.use((drafts) => drafts.restore()))}
+          onReview={(kind) => void perform(CalendarDrafts.use((drafts) => drafts.openReview(kind)))}
+          onAnswerReview={(confirmed) => void perform(CalendarDrafts.use((drafts) => drafts.answerReview(confirmed)))}
+          onRetry={() => void perform(CalendarDrafts.use((drafts) => drafts.retry()))}
+          onRecovery={(step) => void perform(CalendarDrafts.use((drafts) => step === "open" ? Effect.flatMap(drafts.openRecovery(), () => drafts.captureRecovery())
             : step === "request" ? drafts.requestReset() : step === "confirm" ? drafts.confirmReset() : drafts.closeRecovery()))}
-          onSave={(fields) => void run(saveEditor(fields, shown.row, rowTimingLocked(shown.row), timingChanged(shown.fields, fields))).then((text) => { setProblem(text); if (text === "") setEditing(undefined); })}
-          onClose={() => { setEditing(undefined); void run(closeEditor()); }} />
+          onSave={(fields) => void perform(saveEditor(fields, shown.row, rowTimingLocked(shown.row), timingChanged(shown.fields, fields))).then((text) => {
+            setProblem(text);
+            if (text !== "") return;
+            setEditing(undefined);
+            if (shown.row === undefined && fields.noteLink !== undefined) void perform(linkSavedNote(fields.creationId, fields.noteLink));
+          })}
+          onClose={() => { setEditing(undefined); void perform(closeEditor()); }} />
       )}
     </main>
   );

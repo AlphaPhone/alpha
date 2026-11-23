@@ -13,7 +13,7 @@ import { files, noNative, until } from "./harness.vibe"
 
 const notes = toRow("", { path: "Download/notes.txt", name: "notes.txt", directory: false, mimeType: "text/plain", size: 40, modified: 1 })
 
-it.live("a share sends once from the panel on screen, a stale selection sends nothing, and a folder or a missing file is refused before the share sheet (spec/files/share.md, \"Story: Share the files I selected, to the place I chose\")", () => effect {
+it.live("a share sends once from the panel on screen, even when its destination hides Files, a stale selection sends nothing, and a folder or a missing file is refused before the share sheet (spec/files/share.md, \"Story: Share the files I selected, to the place I chose\")", () => effect {
   provide files(noNative) {
     try scoped(effect {
       const browser = try FilesBrowser
@@ -38,10 +38,20 @@ it.live("a share sends once from the panel on screen, a stale selection sends no
       const second = try share.open(false, false, succeed(false))
       const stale = try share.choose(second, "SystemSheet", deliver)
       const panel = try panels.get()
+      // spec/files/share.md, "The owner's choice sends once, from the panel on screen, after it closed"
+      const third = try share.open(false, false, succeed(true))
+      const covered = try share.choose(third, "SystemSheet", effect {
+        try share.hidden(true)
+        return "Delivered" as const
+      })
+      try share.hidden(false)
+      const after = try panels.get()
       try Effect.try(() => assert.deepStrictEqual(
         { folder: folder.kind === "refused" ? folder.status : folder.kind, missing: missing.kind === "refused" ? missing.status : missing.kind,
-          sent, again, stale, delivered, effects: panel.effects.length, alerts: panel.alerts, notice: panel.notice },
-        { folder: "folders", missing: "missing", sent: false, again: false, stale: false, delivered: 1, effects: 1, alerts: 1, notice: true },
+          sent, again, stale, delivered, effects: panel.effects.length, alerts: panel.alerts, notice: panel.notice, reported: panel.reported.length,
+          covered, coveredEffects: after.effects.map((e) => e.panel), coveredReported: after.reported, active: after.active },
+        { folder: "folders", missing: "missing", sent: false, again: false, stale: false, delivered: 1, effects: 1, alerts: 1, notice: true, reported: 1,
+          covered: true, coveredEffects: [first, third], coveredReported: [first, third], active: 0 },
       ))
     })
   }

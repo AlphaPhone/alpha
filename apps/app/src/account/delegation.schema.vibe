@@ -9,14 +9,14 @@ export schema PendingRecord {
   code?: string
 }
 
-/** `AlphaConnection.secureRead`: the slot's value, absent when the slot is empty. */
+/** `ElizaSecureStore.get`: the slot's value, absent or null when the slot is empty. */
 export schema SecureValue {
-  value?: string
+  value?: string | null
 }
 
-/** `AlphaConnection.secureCompareExchange`: whether the expected value was replaced. */
+/** `ElizaSecureStore.compareAndExchange`: whether the slot held the expected value and now holds the new one. */
 export schema SwapAnswer {
-  status: "saved" | "conflict"
+  exchanged: boolean
 }
 
 /** The resident's start answer. */

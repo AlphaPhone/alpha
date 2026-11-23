@@ -299,7 +299,7 @@ it.live(`Subscribing opens Stripe's page and Cloud's confirmation on return acti
       const active = try found(try until(membership.changes, (b) => b.outcome === "PlanActive"))
       try Effect.try(() => assert.deepStrictEqual({
         asked: (calls.find((c) => c.name === "POST /api/v1/subscriptions/checkout")?.args as { planKey?: string } | undefined)?.planKey,
-        opened: calls.filter((c) => c.name === "AlphaConnection.openExternal").map((c) => (c.args as { url: string }).url),
+        opened: calls.filter((c) => c.name === "CloudServices.openExternal").map((c) => (c.args as { url: string }).url),
         waitingCurrent: waiting.current, current: active.current, checkout: active.checkout.tag,
         confirmed: calls.find((c) => c.name === "POST /api/v1/subscriptions/checkout/confirm")?.args
       }, {
@@ -465,7 +465,18 @@ it.live(`The switches are published in order, and an outdated change is refused 
 it.live(`Authorizing keeps the pending record in the account's slot and opens Cloud's page (spec/account/delegation.md, "Story: Let Cloud run my hosted results")`, () => effect {
   const calls: Calls = []
   const authUrl = `https://api.eliza.app/app-auth/authorize?state=${"s".repeat(43)}`
-  const native = { ...signedInNative, "AlphaConnection.secureRead": {}, "AlphaConnection.secureCompareExchange": { status: "saved" } }
+  const slots = new Map<string, string>()
+  const native = {
+    ...signedInNative,
+    "ElizaSecureStore.get": (args: unknown) => ({ value: slots.get((args as { key: string }).key) ?? null }),
+    "ElizaSecureStore.compareAndExchange": (args: unknown) => {
+      const { key, expected, value } = args as { key: string; expected: string | null; value: string | null }
+      if ((slots.get(key) ?? null) !== expected) return { exchanged: false }
+      if (value === null) slots.delete(key)
+      else slots.set(key, value)
+      return { exchanged: true }
+    }
+  }
   const resident = {
     "POST /api/workflow/hosted/cloud-delegation/revocations": { grants: [] },
     "POST /api/workflow/hosted/cloud-delegation/start": { authUrl, expiresAt: new Date(now + 600000).toISOString() }
@@ -479,13 +490,13 @@ it.live(`Authorizing keeps the pending record in the account's slot and opens Cl
       try until(delegation.changes, (d) => d.owner === 1)
       try delegation.start(true, false)
       const waiting = try found(try until(delegation.changes, (d) => d.record === "WaitingRecord" && d.running === "NoStep"))
-      const saved = calls.find((c) => c.name === "AlphaConnection.secureCompareExchange")?.args as { slot: string; value: string } | undefined
+      const saved = calls.find((c) => c.name === "ElizaSecureStore.compareAndExchange")?.args as { key: string; value: string } | undefined
       try Effect.try(() => assert.deepStrictEqual({
         kinds: (calls.find((c) => c.name === "POST /api/workflow/hosted/cloud-delegation/start")?.args as { kinds?: Array<string> } | undefined)?.kinds,
-        slot: saved?.slot.startsWith("cloud-delegation:v1:"), phase: saved === undefined ? undefined : (JSON.parse(saved.value) as { phase: string }).phase,
-        opened: calls.filter((c) => c.name === "AlphaConnection.openExternal").map((c) => (c.args as { url: string }).url),
+        slot: saved?.key.startsWith("cloud-delegation:v1:"), never: names(calls).some((n) => n.startsWith("AlphaConnection.secure")), phase: saved === undefined ? undefined : (JSON.parse(saved.value) as { phase: string }).phase,
+        opened: calls.filter((c) => c.name === "CloudServices.openExternal").map((c) => (c.args as { url: string }).url),
         grant: waiting.grant, cloud: waiting.cloud
-      }, { kinds: ["email"], slot: true, phase: "waiting", opened: [authUrl], grant: false, cloud: "CloudWaiting" }))
+      }, { kinds: ["email"], slot: true, never: false, phase: "waiting", opened: [authUrl], grant: false, cloud: "CloudWaiting" }))
     })
   }
 })

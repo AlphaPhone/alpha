@@ -10,7 +10,7 @@ import { Button } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
 import { ChatPanel } from "./ChatPanel.tsx";
 import { runtime } from "./runtime.ts";
-import { run } from "./services.ts";
+import { act } from "../shell/services.ts";
 
 /** What the shell gives the dock: a way to open an app. */
 export type AssistantDockProps = {
@@ -94,7 +94,7 @@ export function AssistantDock({ open }: AssistantDockProps) {
             </Button>
           </div>
           <div className="min-h-0 flex-1">
-            <ChatPanel open={(app, route) => open(app as AppId, route)} onTalk={() => run(Effect.flatMap(Effect.service(Assistant), (assistant) => assistant.requestVoice()))} />
+            <ChatPanel open={(app, route) => open(app as AppId, route)} onTalk={() => act(Effect.flatMap(Effect.service(Assistant), (assistant) => assistant.requestVoice()))} />
           </div>
         </div>
       ) : state.chat === "Input" ? (

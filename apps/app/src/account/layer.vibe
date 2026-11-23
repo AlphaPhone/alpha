@@ -19,11 +19,14 @@ export { GoogleAccounts, type GoogleAccount } from "./google.vibe"
 export { VoiceLimit, type LimitFacts } from "./limits.vibe"
 export { AiProvider } from "./provider.vibe"
 export { AccountPresentation } from "./presentation.vibe"
-export { AccountBindings, usableSession, type AgentBinding, type AgentSession, type ConnectionIdle } from "./bindings.vibe"
+export {
+  AccountBindings, accountRowsOf, attentionOf, powerLaunchOf, readyChipsOf, usableSession,
+  type AccountRows, type AgentBinding, type AgentSession, type ConnectionIdle, type PowerLaunch, type ReadyChips
+} from "./bindings.vibe"
 
 /**
- * Every account service with its machine, needing only Native, Resident, Cloud, Build and a KeyValueStore; nothing runs
- * until `run()`.
+ * Every account service with its machine, needing only Native, Resident, Cloud, CloudServices, Build and a KeyValueStore;
+ * nothing runs until `run()`.
  */
 export const services = Layer.mergeAll(
   agentAccessLayer,
@@ -60,8 +63,8 @@ const running = Layer.effectDiscard(effect {
 
 /**
  * Every account service running for the app's life, with AccountBindings, Maps' MapsAccount port and the sheet following
- * the Account app in front, keeping the resident's account, speech's key and plan limit and the startup walkthrough
- * current. Needs the platform's Native, Resident, ResidentControl, Cloud, Build and KeyValueStore, the shell's Navigation
- * and Permissions, and voice's VoiceRoute.
+ * the Account app in front, keeping the device storage owner, the resident's account, speech's key and plan limit and the
+ * startup walkthrough current. Needs the platform's Native, Resident, ResidentControl, Cloud, CloudServices, Build,
+ * DeviceStorage and KeyValueStore, the shell's Navigation and Permissions, and voice's VoiceRoute.
  */
 export const layer = Layer.provideMerge(Layer.mergeAll(bindingsService, mapsAccountLive, followersLive, presentationLive, running), services)

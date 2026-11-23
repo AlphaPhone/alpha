@@ -15,7 +15,8 @@ sheet with an editable draft that the owner sends, and `attach(item)` adds a
 reviewed attachment to the composer. Nothing handed over is ever sent by the
 handing area.
 
-- [Dock](./dock.md): the dock's detents and the one effect of each gesture.
+- [Detents](./detents.md): the chat's four heights, where each surface rests it, and how Back lowers it; the shell's navigation uses them too.
+- [Dock](./dock.md): the dock's gestures and the one effect of each.
 - [Drafts](./draft.md): composer text that survives layout, conversation changes and restarts.
 - [Send](./send.md): composer and handed-over sends, the typing indicator and what a failed send restores.
 - [First send](./firstSend.md): moving a new chat's draft into the conversation its first send created.
@@ -67,4 +68,24 @@ type Handoff = { typed: bool, handed: bool }
 pure def keepsTyped(h: Handoff): bool = h.typed
 pure def placesHanded(h: Handoff): bool = h.handed and not(h.typed)
 pure def lawAHandoffNeverOverwritesTyping(h: Handoff): bool = h.typed implies not(placesHanded(h))
+```
+
+### Back closes what the assistant opened before it leaves the assistant
+
+While the assistant is in front, Back first leaves a question review,
+then closes chat search, then drops a reply or edit aim; only with none of
+them open does Back belong to the shell. A Messages or Phone list-bar
+question routed to the assistant is sent as the owner's own message, once
+per route, and the asking screen learns whether a turn took it.
+
+```quint
+type Opened = { review: bool, search: bool, aim: bool }
+pure def consumesBack(o: Opened): bool = o.review or o.search or o.aim
+pure def afterBack(o: Opened): Opened =
+  if (o.review) { ...o, review: false } else if (o.search) { ...o, search: false } else { ...o, aim: false }
+pure def lawBackClosesOneThing(o: Opened): bool =
+  consumesBack(o) implies ((if (o.review) 1 else 0) + (if (o.search) 1 else 0) + (if (o.aim) 1 else 0)
+    == (if (afterBack(o).review) 1 else 0) + (if (afterBack(o).search) 1 else 0) + (if (afterBack(o).aim) 1 else 0) + 1)
+pure def lawNothingOpenIsTheShellsBack(o: Opened): bool = not(o.review or o.search or o.aim) implies not(consumesBack(o))
+pure val oValues = Set({ review: true, search: true, aim: false }, { review: false, search: false, aim: true }, { review: false, search: false, aim: false })
 ```

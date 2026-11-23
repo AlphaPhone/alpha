@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { Component, type ReactNode } from "react";
 import type { AppId } from "../app-screen.ts";
 import { Recovery } from "../../shell/recovery.vibe";
-import { perform } from "./useLayer.ts";
+import { act } from "./services.ts";
 
 /** The app whose render is caught, by id and title. */
 export interface ViewBoundaryProps {
@@ -18,7 +18,7 @@ export class ViewBoundary extends Component<ViewBoundaryProps, { failed: boolean
   static getDerivedStateFromError() { return { failed: true }; }
   override componentDidCatch(error: unknown) {
     const { app, title } = this.props;
-    perform(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.viewFailed(app, title, error)));
+    act(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.viewFailed(app, title, error)));
   }
   override render() { return this.state.failed ? null : this.props.children; }
 }
@@ -35,7 +35,7 @@ export class ShellBoundary extends Component<ShellBoundaryProps, { failed: boole
   override state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   override componentDidCatch(error: unknown) {
-    perform(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.rootFailed(error)));
+    act(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.rootFailed(error)));
   }
   override render() { return this.state.failed ? this.props.fallback : this.props.children; }
 }

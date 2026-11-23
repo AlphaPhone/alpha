@@ -87,7 +87,10 @@ export const handoffLayer = Layer.effect(CalendarHandoff, effect {
     if (draft.kind !== "event") return false
     const creationId = creationKey(try sync(() => crypto.randomUUID()))
     const fields = try newFields(0, creationId)
-    return try admit("FromNote", { ...fields, title: draft.title.slice(0, 2048), body: draft.notes.slice(0, 32768), origin: "note" })
+    const link = draft.origin
+    const noteLink = link.version === 2 && link.noteId !== "" && link.noteId.length <= 512 && link.revision.length <= 512
+      ? { noteLink: { version: 2 as const, noteId: link.noteId, revision: link.revision } } : {}
+    return try admit("FromNote", { ...fields, title: draft.title.slice(0, 2048), body: draft.notes.slice(0, 32768), origin: "note", ...noteLink })
   }
 
   try fork.scoped Stream.runForEach(notes.requests, (request) =>

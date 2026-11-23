@@ -116,8 +116,9 @@ Ask reads the exact message and thread; an unavailable message opens the Inbox l
 wrong one does nothing. The owner reviews an excerpt of subject and snippet only, never the body or
 attachments, and may edit it; a blank or sensitive question is refused. Confirming rechecks the same
 pending token and generation and a fresh read of the same revision, message, thread, subject and
-snippet. Cancelling keeps the notice; only an explicit dismissal releases the question. The question
-is placed in the composer and nothing is sent.
+snippet. Cancelling keeps the notice; only an explicit dismissal releases the question. Back closes
+the review as a cancel, never as a dismissal. The question is placed in the composer and nothing is
+sent.
 
 ```quint
 type InitialReply = UnavailableMail | WrongMail | ExactMail

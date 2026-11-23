@@ -14,12 +14,12 @@ import { useMachine as useScreen } from "../../../gen/maps__screen.react.ts";
 import { maySpeak, restricted } from "../../../gen/maps__vocabulary.ts";
 import { basemapFor } from "../../../gen/maps__plane.ts";
 import { offered, outsideShown, savedFor } from "../../maps/screen.vibe";
-import { Build } from "../../platform/build.vibe";
+import { buildInfo } from "../shell/services.ts";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
 import { DirectionsSheet } from "./DirectionsSheet.tsx";
 import { MapCredits } from "./MapCredits.tsx";
-import { type MapPin, MapPlane } from "./MapPlane.tsx";
+import { MapPlane } from "./MapPlane.tsx";
 import { NavigationView } from "./NavigationView.tsx";
 import { PlaceSheet } from "./PlaceSheet.tsx";
 import { ResultsSheet } from "./ResultsSheet.tsx";
@@ -40,7 +40,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
   const eventReturn = useReturn(runtime).state;
   const locator = useLocator(runtime).state;
   const c = useMapsContent();
-  const [aosp] = useState(() => runtime.runSync(Build.use((b) => Effect.succeed(b.info.variant === "aosp"))));
+  const [aosp] = useState(() => buildInfo().variant === "aosp");
 
   const opened = useCallback((node: HTMLElement | null) => {
     if (!node) return;
@@ -62,9 +62,6 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
   const savedShown = savedFor(shown, saved) !== undefined;
   const status = c.message || (shown && outsideShown(c) ? "This location is outside Cloud Maps coverage. Its coordinates are retained." : "")
     || (plane?.state === "PlaneFailed" ? "Map rendering is unavailable. Retry the map, or use coordinates and saved places." : "");
-  const pins: MapPin[] = view === "OriginMode" ? candidates.map((p, i) => ({ id: `o${i}`, label: p.name, coordinate: p.coordinate }))
-    : view === "ResultsMode" ? results.map((p, i) => ({ id: `r${i}`, label: p.name, coordinate: p.coordinate }))
-    : shown ? [{ id: "shown", label: shown.label, coordinate: shown.coordinate }] : [];
   const label = basemap === "GoogleRaster" ? "Google Maps" : basemap === "WorldMap" ? "World map" : basemap === "OpenRaster" ? "Cloud map" : "Map";
 
   const mountPlane = useCallback((node: HTMLSpanElement | null) => {
@@ -121,6 +118,8 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
                 onDirections={() => act((s) => s.screen.openDirections())}
                 onToggleSaved={(name) => act((s) => s.screen.toggleSaved(name))}
                 onRename={(name) => act((s) => s.screen.renamePlace(name))}
+                editing={c.renaming?.id === shown.id ? c.renaming.text : undefined}
+                onEditing={(text) => act((s) => s.content.update((x) => ({ ...x, renaming: text === undefined ? undefined : { id: shown.id, text } })))}
                 onShare={() => act((s) => s.handoff.sharePlace(shown))} onCall={(phone) => act((s) => s.handoff.call(phone))}
                 onCopy={(phone) => act((s) => s.handoff.copyNumber(phone))} onWebsite={(url) => act((s) => s.handoff.openWebsite(url))}
                 onClose={() => act((s) => s.screen.closePlace())} />
@@ -129,7 +128,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
               <DirectionsSheet destination={shown.label} originText={screen.originKind === "LocatedOrigin" ? "Your location" : screen.originText} travel={screen.travel}
                 offered={(t) => offered(c, t)} route={screen.route} routes={routes} chosen={screen.chosen} choosing={view === "OriginMode"} candidates={candidates}
                 savedMatches={saved.filter((i) => screen.originText !== "" && i.label.toLowerCase().includes(screen.originText.toLowerCase()))}
-                canSwap={screen.route === "Ready" && screen.origin && !screen.choosingOrigin} canStart={screen.route === "Ready"} restricted={googleContent}
+                swapShown={screen.origin && !screen.choosingOrigin} canSwap={screen.route === "Ready" && screen.origin && !screen.choosingOrigin} canStart={screen.route === "Ready"} restricted={googleContent}
                 onOriginText={(text) => act((s) => s.screen.editOrigin(text))} onSubmitOrigin={() => act((s) => s.screen.submitOrigin())}
                 onUseLocation={() => act((s) => s.screen.locate())} onTravel={(t) => act((s) => s.screen.setTravel(t))}
                 onChooseRoute={(i) => act((s) => s.screen.chooseRoute(i))} onChooseCandidate={(i) => act((s) => s.screen.chooseOrigin(i))}
@@ -146,10 +145,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
         {plane?.built && (
           <MapPlane
             basemap={basemap} generation={plane.generation} tileSize={coverage?.tiles?.tileSize} maxZoom={coverage?.tiles?.maxZoom}
-            pins={pins} selection={shown?.coordinate ?? (view === "BaseMode" ? c.centerOn : undefined)} label={label}
-            position={c.position ? { coordinate: c.position.coordinate, accuracyMeters: c.position.accuracyMeters, headingDegrees: c.position.headingDegrees } : undefined}
-            route={guiding ? c.guidance?.route.geometry : view === "DirectionsMode" ? routes[screen.chosen]?.geometry : undefined}
-            follow={guiding && guidance.follow && c.guidance?.fix !== undefined}
+            label={label} follow={guiding && guidance.follow && c.guidance?.fix !== undefined}
             onPin={(id) => act((s) => id.startsWith("r") ? s.screen.pickResult(Number(id.slice(1))) : id.startsWith("o") ? s.screen.chooseOrigin(Number(id.slice(1))) : s.screen.closePlace())}
             onLongPress={(coordinate) => { if (!guiding) act((s) => s.screen.dropPin(coordinate)); }}
             onPressStart={(coordinate, x, y) => { if (!guiding) act((s) => s.plane.pressStarted(coordinate, x, y)); }}

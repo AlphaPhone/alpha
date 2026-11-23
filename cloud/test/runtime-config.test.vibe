@@ -19,6 +19,6 @@ describe("the resident agent's cloud runtime configuration", () => {
     // spec/agent/host/launch.md, "Story: Keep the credential out of every file and reply"
     const text = JSON.stringify(cloudLaunchDocument(alphaDeployment, "production"))
     try check(() => assert.ok(!/apiKey|credential|token/i.test(text)))
-    try check(() => assert.strictEqual(cloudModel(alphaDeployment, "staging").cloudBaseUrl, "https://api-staging.alphacompute.ai"))
+    try check(() => assert.strictEqual(cloudModel(alphaDeployment, "staging").cloudBaseUrl, "https://api-staging.alphacompute.cc"))
   })
 })

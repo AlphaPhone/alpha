@@ -1,11 +1,17 @@
 // spec/cloud/returnPages.md, "A return URL on the web origin shows ReturnToApp only for the one enabled registration of the served environment that holds it"; spec/cloud/returnPages.md, "An address that shows no page is a final 404, and a web-origin address whose registry cannot be read is a retryable 503"; spec/cloud/deployment.md, "Story: Serve the deployment from a Worker"
-import { edgeFetch, EdgeRequest, EdgeResponse } from "./edge-platform.ts"
+import { EdgeRequest, EdgeResponse } from "./edge-platform.ts"
 
-/** The web host Worker's bindings: the origins of its environment, the same the API Worker reads. */
+/** The API Worker as the web host reaches it: a Cloudflare service binding, never a public fetch. */
+export interface ApiService {
+  fetch(request: Request): Promise<Response>
+}
+
+/** The web host Worker's bindings: the origins of its environment, the same the API Worker reads, and the service binding to that API Worker. */
 export interface EdgeEnv {
   readonly CLOUD_ENVIRONMENT: "production" | "staging"
   readonly PUBLIC_API_ORIGIN: string
   readonly WEB_ORIGIN: string
+  readonly API: ApiService
 }
 
 /** What the web host does with one address: answer its own health, forward it to the API Worker as the web origin, or refuse it. */
@@ -40,7 +46,7 @@ export function forwardedHeaders(incoming: Headers, webHost: string): Headers {
 
 const noStore = { "Cache-Control": "no-store" }
 
-/** The web host Worker: its own health, and every other web-origin address answered by the API Worker as the web origin (return pages, asset links). */
+/** The web host Worker: its own health, and every other web-origin address answered by the API Worker, through its service binding, as the web origin (return pages, asset links). */
 export const edgeWorker = {
   async fetch(request: Request, env: EdgeEnv): Promise<Response> {
     const url = new URL(request.url)
@@ -53,7 +59,7 @@ export const edgeWorker = {
       case "Forward": {
         const bodied = request.method !== "GET" && request.method !== "HEAD"
         try {
-          return await edgeFetch(new EdgeRequest(route.target, {
+          return await env.API.fetch(new EdgeRequest(route.target, {
             method: request.method,
             headers: forwardedHeaders(request.headers, url.host),
             redirect: "manual",

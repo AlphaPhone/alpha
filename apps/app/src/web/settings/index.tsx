@@ -1,4 +1,4 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "A page opens from its parent, and Back returns to that parent"; spec/settings/passwords.md, "Story: Use my saved passwords only after Android unlocks them"; spec/settings/passwords.md, "Android's Back cancels a pending confirmation first, then closes the entry shown"; spec/settings/updates.md, "Story: Let Android finish an update without losing what I typed"
 import { Effect } from "effect";
 import { KeyRound, Settings as Gear } from "lucide-react";
 import { useState } from "react";
@@ -36,28 +36,28 @@ import { Reset } from "../../settings/reset.vibe";
 import { Updates } from "../../settings/updates.vibe";
 import type { AppScreen, AppSurface, ScreenProps } from "../app-screen.ts";
 import type { DevCommand } from "./DeveloperPage.tsx";
+import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import { UpdateActivation } from "./UpdateActivation.tsx";
-import { type AppServices, runtime } from "./runtime.ts";
+import { now, perform } from "../shell/services.ts";
+import { runtime } from "./runtime.ts";
 
 const mocks = __ALPHA_TEST_MOCKS__;
 
-/** Run one Settings effect for a control; it cannot fail, so nothing is awaited. */
-function perform<A>(program: Effect.Effect<A, never, AppServices>): Promise<A> {
-  return runtime.runPromise(program);
-}
-
-/** A value read now from the app runtime, or `fallback` while the runtime is still being built. */
-function now<A>(program: Effect.Effect<A, never, AppServices>, fallback: A): A {
-  try {
-    return runtime.runSync(program);
-  } catch {
-    return fallback;
-  }
-}
-
 const pages = <A,>(use: (p: SettingsPages.Shape) => Effect.Effect<A>) => perform(Effect.flatMap(Effect.service(SettingsPages), use));
+
+/** Settings' Back: the shown page's dialog, then the vault's or the problem log's own, then one page up; false on the root. */
+async function settingsBack(): Promise<boolean> {
+  const nav = await pages((p) => p.current());
+  if (backDialog(nav)) return true;
+  return pages((p) => p.back());
+}
+
+/** The Passwords app's Back: a pending confirmation, then an open entry; false on the list, where Back leaves. */
+function passwordsBack(): Promise<boolean> {
+  return perform(Effect.flatMap(Effect.service(Vault), (v) => v.back()));
+}
 
 /** The theme and legible text the shell draws its root with: `.dark` or `.light`, and `font-legible`. */
 export function useAppearanceClass(): string {
@@ -79,6 +79,7 @@ function SettingsApp({ onClose }: ScreenProps) {
   const variant = now(Effect.map(Effect.service(Build), (b) => b.info.variant), "browser");
   const readable = now(Effect.flatMap(Effect.service(Preferences), (p) => Effect.map(p.current(), (c) => c.readable)), false);
   const route = now(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.route()), "RouteUnavailable");
+  const dialog = useDialog(nav);
   if (nav.page === "Passwords") return <PasswordsApp onClose={() => void pages((p) => p.back())} />;
   return (
     <SettingsScreen
@@ -110,6 +111,8 @@ function SettingsApp({ onClose }: ScreenProps) {
         eraseAll: () => void perform(Effect.flatMap(Effect.service(Reset), (r) => r.review())),
       }}
       onClose={onClose}
+      dialog={dialog}
+      onDialog={(next) => (next === undefined ? closeDialog() : openDialog(nav, next))}
       privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),
@@ -142,6 +145,8 @@ function PasswordsApp({ onClose }: ScreenProps) {
       edit: (id) => void perform(Effect.flatMap(Effect.service(Vault), (v) => v.edit(id))),
       askRemove: (id) => void vault.send({ type: "askRemove", id }),
       askReset: () => void vault.send({ type: "askReset" }),
+      openEntry: (id) => void vault.send({ type: "openEntry", id }),
+      closeEntry: () => void vault.send({ type: "closeEntry" }),
       refresh: () => void perform(Effect.flatMap(Effect.service(Vault), (v) => Effect.andThen(v.leave(), v.open()))),
     }} />
   );
@@ -152,10 +157,10 @@ function UpdateSurface() {
   return <UpdateActivation updates={updates} onContinue={() => void perform(Effect.flatMap(Effect.service(Updates), (u) => u.continueInstall()))} />;
 }
 
-/** Settings and Passwords; Android's Back pops one Settings page and leaves from the root. */
+/** Settings and Passwords; Android's Back closes what a page holds open, pops one Settings page, and leaves from the root or the vault's list. */
 export const screens: AppScreen[] = [
-  { id: "settings", title: "Settings", icon: Gear, availability: "everywhere", Screen: SettingsApp, back: () => pages((p) => p.back()) },
-  { id: "passwords", title: "Passwords", icon: KeyRound, availability: "everywhere", Screen: PasswordsApp },
+  { id: "settings", title: "Settings", icon: Gear, availability: "everywhere", Screen: SettingsApp, back: () => settingsBack().catch(() => false) },
+  { id: "passwords", title: "Passwords", icon: KeyRound, availability: "everywhere", Screen: PasswordsApp, back: () => passwordsBack().catch(() => false) },
 ];
 
 /** The update activation hold, above every screen. */

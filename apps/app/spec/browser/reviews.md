@@ -59,6 +59,18 @@ pure def stepApprovalOnlyWhileShown(before: Reviews, via: str, after: Reviews, o
 pure def sometimesApproved(r: Reviews): bool = r.open.length() == 0 and shown(r) and r.foreground
 ```
 
+### Back denies the newest open review first, and is Browser's to pass on only when no review is open
+
+The newest review is the dialog on top.
+
+```quint
+pure def newest(r: Reviews): str = r.open.foldl("", (last, x) => x.id)
+pure def canBack(r: Reviews): bool = r.open.length() > 0
+pure def back(r: Reviews): ReviewsChange = dismiss(r, newest(r))
+pure def stepBackDeniesOnlyTheNewest(before: Reviews, via: str, after: Reviews): bool =
+  via == "back" implies (after.open.length() == before.open.length() - 1 and not(isOpen(after, newest(before))))
+```
+
 ### Hiding Alpha or locking the phone ends every open review as not confirmed
 
 A reviewed Browser control the agent proposed is therefore never approved on a locked phone.

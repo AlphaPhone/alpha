@@ -1,4 +1,4 @@
-// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/screen.md, "Typing waits 350 milliseconds; Enter searches once for the text, and repeating it reuses the answer"
+// spec/maps/screen.md, "A place opens from a result, a saved place, a pin, the phone's position or the agent"; spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Typing waits 350 milliseconds; Enter searches once for the text, and repeating it reuses the answer"
 import { Bookmark, Clock, MapPin } from "lucide-react";
 import type { Phase } from "../../../gen/maps__screen.ts";
 import type { SavedItem } from "../../../gen/maps__savedPlaces.ts";
@@ -41,7 +41,11 @@ export function ResultsSheet({ phase, places, saved, recent, emptyQuery, here, o
           <div className="flex flex-col">
             <div className="flex items-center justify-between px-4">
               <span className="font-mono text-xs uppercase text-muted-foreground">Recent</span>
-              <Button variant="ghost" size="sm" onClick={onClearRecent}>Clear</Button>
+              <Button variant="ghost" size="sm" onClick={(event) => {
+                const sheet = event.currentTarget.closest("section");
+                onClearRecent();
+                sheet?.querySelector<HTMLElement>("button")?.focus();
+              }}>Clear</Button>
             </div>
             {recent.map((text) => <ListRow key={text} title={text} leading={<Clock aria-hidden />} onClick={() => onSearch(text)} />)}
           </div>

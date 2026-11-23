@@ -16,15 +16,22 @@ export service DeviceStorage {
   bindOwner(owner: string): void!StorageRefused
   /** The owner signed out: their namespace stays for their return. */
   signedOut(): void!!
-  /** Holds a stored value that is not a state for the owner's review. */
-  hold(key: string): void!!
-  /** The owner reviewed a held value. */
-  resolve(key: string): void!!
+  /** Holds the value stored under `key` (the whole stored key, such as `ownerKey(owner, "notes")`) that is not a state, first keeping it apart so the area may start fresh; false when it could not be kept and stays unheld. */
+  hold(key: string): boolean!!
+  /** The value kept apart for a held `key`, as it was stored; undefined when none is kept. */
+  held(key: string): string | undefined!!
+  /** The owner reviewed a held value: only its kept copy is removed, never what the area saved since. */
+  resolve(key: string): void!StorageRefused
   /** Removes everything kept in the bound owner's namespace; startup waits until it has. */
   reset(): void!StorageRefused
 }
 
 const DEVICE_KEY = "alpha/device/storage"
+
+/** Where the copy of a held value is kept: beside the value, in the same owner namespace, so a reset removes it too. */
+export function heldKeyOf(storedKey: string): string {
+  return `${storedKey}~held`
+}
 
 /** Device storage over the KeyValueStore the program provides. */
 export const deviceStorageLive = Layer.effect(DeviceStorage, effect {
@@ -53,10 +60,24 @@ export const deviceStorageLive = Layer.effect(DeviceStorage, effect {
     effect signedOut() {
       device.send({ type: "signedOut" }) catch () => undefined
     },
-    effect hold(key: string) {
+    effect hold(key: string): boolean {
+      const copy = heldKeyOf(key)
+      const earlier = store.get(copy) catch () => null
+      const value = store.get(key) catch () => null
+      if (earlier === null || value === null) return false
+      if (earlier === undefined && value !== undefined) {
+        const copied = store.set(copy, value) catch () => false
+        if (copied === false) return false
+      }
       device.send({ type: "corruptFound", key }) catch () => undefined
+      return true
+    },
+    effect held(key: string): string | undefined {
+      const kept = store.get(heldKeyOf(key)) catch () => undefined
+      return kept
     },
     effect resolve(key: string) {
+      try mapError(store.remove(heldKeyOf(key)), refused("The kept copy could not be removed. Try again."))
       device.send({ type: "reviewResolved", key }) catch () => undefined
     },
     effect reset() {

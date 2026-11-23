@@ -28,6 +28,10 @@ export service MediaEditor {
   beginVideo(id: string): void!!
   videoEvent(event: VideoEvent): void!!
   saveVideo(): void!!
+  /** Settle a video copy whose save Alpha could not confirm, by the owner's review of what Photos finds. */
+  reviewVideoCopy(): void!!
+  /** Back inside an editor: the close question, the crop, then the editor itself; false when no editor is open. */
+  back(): boolean!!
 }
 
 function answerOf(status: string, replaced: boolean | undefined): SaveAnswer {
@@ -104,6 +108,22 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
     return true
   }
 
+  effect function askCloseNow() {
+    const after = try send({ type: "askClose" })
+    if (after?.status === "EditClosed" && session !== undefined) {
+      store.cancelEdit(session.sessionId) catch () => undefined
+      session = undefined
+    }
+  }
+
+  effect function videoEventNow(event: VideoEvent) {
+    const after = video.send(event) catch () => undefined
+    if (after?.closed === true && videoSession !== undefined && (event.type === "closeEditor" || event.type === "hide")) {
+      if (!after.busy) store.cancelVideoEdit(videoSession.sessionId) catch () => undefined
+      if (!after.busy) videoSession = undefined
+    }
+  }
+
   return {
     photo: edit.changes,
     effect begin(id: string) {
@@ -135,7 +155,7 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
       if (receipt.operationId !== session.operationId) return try settle("unknown", undefined, undefined)
       try settle(receipt.status, receipt.replaced, receipt.id)
     },
-    askClose: () => effect { try send({ type: "askClose" }) },
+    askClose: askCloseNow,
     keepEditing: () => effect { try send({ type: "keepEditing" }) },
     effect confirmClose() {
       try send({ type: "confirmClose" })
@@ -156,13 +176,7 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
       video.send({ type: "openEditor", source: row.id, length }) catch () => undefined
       video.send({ type: "sourceLoaded" }) catch () => undefined
     },
-    effect videoEvent(event: VideoEvent) {
-      const after = video.send(event) catch () => undefined
-      if (after?.closed === true && videoSession !== undefined && (event.type === "closeEditor" || event.type === "hide")) {
-        if (!after.busy) store.cancelVideoEdit(videoSession.sessionId) catch () => undefined
-        if (!after.busy) videoSession = undefined
-      }
-    },
+    videoEvent: videoEventNow,
     effect saveVideo() {
       const after = video.send({ type: "commit" }) catch () => undefined
       if (after === undefined || videoSession === undefined) return
@@ -183,6 +197,32 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
         try library.refresh()
         if (receipt?.id !== undefined) try library.openViewer(receipt.id)
       } else try say(result === "VideoNotSaved" ? photosText(receipt?.message, "Not saved") : "Save unconfirmed")
+    },
+    effect reviewVideoCopy() {
+      const current = videoSession
+      if (current === undefined || (try video.get()).outcome !== "VideoUnconfirmed") return
+      const receipt = store.reviewRemovedVideoCopy(current.operationId) catch () => undefined
+      if (receipt === undefined || receipt.status === "unknown" || receipt.status === "incomplete") return try say("Save unconfirmed")
+      intents.send({ type: "acknowledge", caller: EDITOR }) catch () => undefined
+      videoSession = undefined
+      video.send({ type: "closeEditor" }) catch () => undefined
+      try library.refresh()
+      if (receipt.status === "saved") {
+        try say("Copy saved")
+        if (receipt.id !== undefined) try library.openViewer(receipt.id)
+      } else try say(photosText(receipt.message, "Not saved"))
+    },
+    effect back() {
+      const now = try edit.get()
+      if (now.status !== "EditClosed") {
+        if (now.closeAsked) try send({ type: "keepEditing" })
+        else if (now.cropping && !now.previewing) try send({ type: "cancelCrop" })
+        else try askCloseNow()
+        return true
+      }
+      if ((try video.get()).closed) return false
+      try videoEventNow({ type: "closeEditor" })
+      return true
     },
   }
 })

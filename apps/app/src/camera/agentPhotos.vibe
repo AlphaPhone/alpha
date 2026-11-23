@@ -30,6 +30,8 @@ export service AgentPhotos {
   card(): ReviewCard | undefined!!
   confirm(): void!!
   cancel(): void!!
+  /** Back while the assistant's review card shows: the card is cancelled; false when no card shows. */
+  back(): boolean!!
 }
 
 const n = (count: number) => count === 1 ? "1 item" : `${count} items`
@@ -113,6 +115,18 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
     if (after.refusedReview > before.refusedReview) throw new PhotosRefused({ message: "Finish the open review first." })
     if (after.refusedForm > before.refusedForm) throw new PhotosRefused({ message: "Open the photo in Photos, then ask again." })
     return after.answers[after.answers.length - 1]!
+  }
+
+  effect function cancelNow() {
+    if ((try reviews.get()).review !== 0) {
+      try reviewSend({ type: "cancel" })
+      try hostSend({ type: "libraryReviewEnds" })
+      pending = undefined
+    }
+    if (opened !== undefined) {
+      try hostSend({ type: "cancelReview" })
+      opened = undefined
+    }
   }
 
   return {
@@ -239,16 +253,14 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
         }
       }
     },
-    effect cancel() {
-      if ((try reviews.get()).review !== 0) {
-        try reviewSend({ type: "cancel" })
-        try hostSend({ type: "libraryReviewEnds" })
-        pending = undefined
-      }
-      if (opened !== undefined) {
-        try hostSend({ type: "cancelReview" })
-        opened = undefined
-      }
+    cancel: cancelNow,
+    effect back() {
+      const r = try reviews.get()
+      const h = try host.get()
+      const shown = (r.review !== 0 && pending !== undefined) || (opened !== undefined && (opened.kind === "album" ? h.albumReview.length > 0 : h.shareReview.length > 0))
+      if (!shown) return false
+      try cancelNow()
+      return true
     },
   }
 })

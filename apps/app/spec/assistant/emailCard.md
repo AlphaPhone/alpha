@@ -44,3 +44,42 @@ pure def sometimesSentAfterAnEdit(e: EmailCard): bool = e.state == SentEmail and
 pure def sometimesUnsentBackToDraft(e: EmailCard): bool = e.state == DraftEmail and e.dispatches >= 1
 pure def sometimesUncertain(e: EmailCard): bool = e.state == UncertainEmail
 ```
+
+### A turn offers at most one email card: exactly one valid draft, with one to twenty recipients, a one-line subject and a body
+
+An offer is taken from a turn only when exactly one matching action result
+carries a valid draft (one to twenty recipients, a subject on one line, a
+body that is not blank); any second or invalid offer means none. A thread
+reply, copies, attachments or a scheduled time are left to Inbox. The card
+is staged only while the turn's conversation and session are the current
+ones, and only once.
+
+```quint
+pure val cardRecipientLimit = 20
+pure def validDraft(recipients: int, subjectLines: int, bodyBlank: bool): bool =
+  recipients >= 1 and recipients <= cardRecipientLimit and subjectLines <= 1 and not(bodyBlank)
+pure def offerAccepted(matching: int, valid: bool): bool = matching == 1 and valid
+pure def staged(matching: int, valid: bool, inTurn: bool, alreadyStaged: bool): bool = offerAccepted(matching, valid) and inTurn and not(alreadyStaged)
+pure def lawAnAmbiguousTurnOffersNoCard(valid: bool): bool = not(offerAccepted(2, valid)) and not(offerAccepted(0, valid))
+pure def lawACardIsStagedOnce(matching: int, valid: bool): bool = not(staged(matching, valid, true, true))
+pure def lawTooManyRecipientsIsNoDraft(lines: int): bool = not(validDraft(cardRecipientLimit + 1, lines, false))
+pure val matchingValues = Set(0, 1, 2)
+pure val linesValues = Set(0, 1, 2)
+```
+
+### Send needs literal recipients, each listed once, under the account the card was drafted for; a word for me stands for that account until the first edit
+
+A To of "self", "me" or "myself" shows the selected account's address and
+is sent as that address only once the owner's first edit made it literal.
+Edits show exactly as typed. Sent, rejected and unconfirmed are final; an
+unconfirmed send is checked in Inbox, never sent again.
+
+```quint
+pure def sendRecipientsOk(count: int, distinct: int, literal: bool, sameAccount: bool): bool =
+  literal and sameAccount and count >= 1 and count <= cardRecipientLimit and distinct == count
+pure def finalState(s: EmailState): bool = s == SentEmail or s == RejectedEmail or s == UncertainEmail or s == DeclinedEmail
+pure def lawARepeatedRecipientBlocksSend(count: int): bool = count >= 2 implies not(sendRecipientsOk(count, count - 1, true, true))
+pure def lawAnotherAccountNeverSends(count: int): bool = not(sendRecipientsOk(count, count, true, false))
+pure def alwaysAFinalCardIsNeverSendable(e: EmailCard): bool = finalState(e.state) implies not(sendable(e))
+pure val countValues = Set(1, 2, 21)
+```

@@ -5,7 +5,7 @@ import { Assistant } from "../../assistant/assistant.vibe";
 import { HostedResults, type ResolvedTap } from "../../workflows/results.vibe";
 import type { AppId } from "../app-screen.ts";
 import { ResultNotice } from "./ResultNotice.tsx";
-import { perform, runtime } from "./connect.ts";
+import { perform, runtime } from "../shell/services.ts";
 
 /** How the result notice surface opens the app it hands a result to. */
 export interface ResultNoticeSurfaceProps {

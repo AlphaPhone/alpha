@@ -1,5 +1,7 @@
-// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
+// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
+import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
+import type { ChangeSummary } from "../workflows/changes.vibe"
 
 /** An email the owner reviewed in the chat, under the request id its version sends once. */
 export interface ReviewedEmail {
@@ -60,5 +62,60 @@ export service MapsChatCards {
   static readonly defaultValue = () => ({
     agentReply: () => succeed(undefined),
     ownerMessage: () => succeed(undefined),
+  })
+}
+
+/** Camera's part of the composer, owned by Camera; unprovided, every message goes to the conversation. */
+export service CameraComposer {
+  /** Take a short scan request or frame question sent over the visible Camera; "none" leaves it to the conversation. */
+  intercept(message: ChatMessage): ChatTaken!!
+  static readonly defaultValue = () => ({
+    intercept: () => succeed("none" as const),
+  })
+}
+
+/** Maps' navigation relay for one resident turn, owned by Maps; unprovided, the turn runs without it. */
+export service MapsRelay {
+  /** Offer this phone's Maps navigation to the agent for the length of `send`, a turn of `conversationId`. */
+  withRelay<A, E, R>(conversationId: string, send: A!E!R): A!E!R
+  static readonly defaultValue = () => ({
+    withRelay: <A, E, R>(_conversationId: string, send: Effect.Effect<A, E, R>) => send,
+  })
+}
+
+/** What one reply's action results changed, as Workflows reads them; unprovided, nothing changed. */
+export service ReplyChanges {
+  /** Read the reply's untrusted action results and refresh the Workflows list once when it shows a changed record. */
+  settle(results: ReadonlyArray<unknown>): ChangeSummary!!
+  static readonly defaultValue = () => ({
+    settle: () => succeed({ workflows: [], automations: false, calendar: false, openWorkflows: false } satisfies ChangeSummary),
+  })
+}
+
+/** The record a turn names, as the turn context's `selectedObject` carries it. */
+export interface TurnRecord {
+  readonly kind: string
+  readonly id: string
+  readonly revision?: string
+}
+
+/** The civil day Calendar shows, as the turn context's `calendarDay` carries it. */
+export interface TurnDay {
+  readonly date: string
+  readonly timeZone: string
+}
+
+/** What the screens before the assistant add to a turn: Calendar's shown day and Notes' list; unprovided, a turn names neither. */
+export service TurnSources {
+  /** The day Calendar shows now, or undefined unless a plain day of the current owner is in front. */
+  calendarDay(): TurnDay | undefined!!
+  /** The Notes list the turn is sent from, or undefined off the list. */
+  notesList(): TurnRecord | undefined!!
+  /** The owner's "Ask before Alpha acts" preference as Notes' list filter reads it, before each turn. */
+  preferReview(reviewFirst: boolean): void!!
+  static readonly defaultValue = () => ({
+    calendarDay: () => succeed(undefined),
+    notesList: () => succeed(undefined),
+    preferReview: () => succeed(undefined),
   })
 }

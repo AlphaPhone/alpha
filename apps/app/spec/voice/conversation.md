@@ -224,7 +224,8 @@ pure def alwaysMutingNeedsItsControl(c: Conversation): bool = c.muted implies (c
 ### Stop, a call, a hidden or sensitive screen, sign-out and reset retire voice; a call says so once
 
 Retiring holds the panel until the media's stop is confirmed. A conversation with no media closes
-at once. A screen change made inside the agent's own claim is not a departure; the claim's
+at once. A capture the phone ended for a call retires voice as the call does, one it ended because
+Alpha left the front is a hidden page, and one it cancelled is a stop; none is shown as a failure. A screen change made inside the agent's own claim is not a departure; the claim's
 settlement decides it.
 
 ```quint

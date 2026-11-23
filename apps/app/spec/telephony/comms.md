@@ -25,7 +25,7 @@ type Target = PersonTarget | AlphaTarget
 type Height = SheetClosed | SheetOpen | SheetFull
 type StageEntry = { app: CommsApp, subject: Subject, key: str }
 type ProposalKind = CallProposal | ScreenProposal | OtherProposal
-type Proposal = NoProposal | Proposed({ proposalId: str, kind: ProposalKind, acts: bool, ring: str })
+type Proposal = NoProposal | Proposed({ proposalId: str, kind: ProposalKind, acts: bool, ring: str, live: bool })
 type Fate = Replaced | Done | Declined | Retired
 type PastProposal = { pastId: str, fate: Fate }
 type Comms = {
@@ -42,6 +42,7 @@ pure def openId(p: Proposal): str = match p { | Proposed(x) => x.proposalId | No
 pure def openActs(p: Proposal): bool = match p { | Proposed(x) => x.acts | NoProposal => false }
 pure def openKind(p: Proposal): ProposalKind = match p { | Proposed(x) => x.kind | NoProposal => OtherProposal }
 pure def openRing(p: Proposal): str = match p { | Proposed(x) => x.ring | NoProposal => "" }
+pure def openLive(p: Proposal): bool = match p { | Proposed(x) => x.live | NoProposal => false }
 pure def hasPerson(subject: Subject): bool = subject == ThreadSubject or subject == ContactSubject or subject == CallSubject
 pure def wasProposed(past: List[PastProposal], id: str): bool = past.some(x => x.pastId == id)
 pure def retire(p: Proposal, fate: Fate, past: List[PastProposal]): List[PastProposal] =
@@ -205,11 +206,12 @@ names the person and the number (AC-20).
 
 ```quint
 pure def canProposed(c: Comms, proposalId: str, kind: ProposalKind, acts: bool, ring: str, by: Actor): bool =
-  by == Alpha and proposalId != "" and proposalId != openId(c.proposal) and not(wasProposed(c.past, proposalId))
+  by == Alpha and proposalId != "" and (proposalId != openId(c.proposal) or not(openLive(c.proposal))) and not(wasProposed(c.past, proposalId))
     and (kind == ScreenProposal implies (ring != "" and ring == c.ring)) and (kind != ScreenProposal implies ring == "")
 pure def proposed(c: Comms, proposalId: str, kind: ProposalKind, acts: bool, ring: str, by: Actor): Comms =
   if (c.emergency and acts) c
-  else { ...c, proposal: Proposed({ proposalId: proposalId, kind: kind, acts: acts, ring: ring }), past: retire(c.proposal, Replaced, c.past),
+  else { ...c, proposal: Proposed({ proposalId: proposalId, kind: kind, acts: acts, ring: ring, live: true }),
+    past: if (proposalId == openId(c.proposal)) c.past else retire(c.proposal, Replaced, c.past),
     height: if (c.height == SheetClosed) SheetOpen else c.height, target: AlphaTarget }
 pure def alwaysTheOpenProposalWasNeverRetired(c: Comms): bool = openId(c.proposal) == "" or not(wasProposed(c.past, openId(c.proposal)))
 pure def stepNothingActsDuringAnEmergencyCall(before: Comms, via: str, after: Comms): bool =
@@ -224,7 +226,7 @@ never be approved again.
 
 ```quint
 pure def canProposalApproved(c: Comms, proposalId: str, by: Actor): bool =
-  ownerOnly(by) and proposalId != "" and proposalId == openId(c.proposal) and not(c.emergency and openActs(c.proposal))
+  ownerOnly(by) and proposalId != "" and proposalId == openId(c.proposal) and openLive(c.proposal) and not(c.emergency and openActs(c.proposal))
     and (openKind(c.proposal) == ScreenProposal implies c.ring != "")
 pure def proposalApproved(c: Comms, proposalId: str, by: Actor): Comms =
   { ...c, proposal: NoProposal, past: retire(c.proposal, Done, c.past), approved: c.approved + 1 }
@@ -233,8 +235,29 @@ pure def proposalDeclined(c: Comms, proposalId: str, by: Actor): Comms = { ...c,
 pure def stepOnlyTheOwnersTapApproves(before: Comms, via: str, after: Comms): bool = after.approved > before.approved implies via == "proposalApproved"
 pure def stepAnApprovalNeverActsOverAnEmergencyCall(before: Comms, via: str, after: Comms): bool =
   (via == "proposalApproved" and before.emergency) implies not(openActs(before.proposal))
+pure def stepOnlyALiveProposalIsApproved(before: Comms, via: str, after: Comms): bool = via == "proposalApproved" implies openLive(before.proposal)
 pure def sometimesACallApproved(c: Comms): bool = c.approved > 0 and c.past.some(x => x.fate == Done)
 pure def sometimesAProposalWaitsOverAnEmergencyCall(c: Comms): bool = c.emergency and openId(c.proposal) != "" and not(openActs(c.proposal))
+```
+
+### A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again
+
+The stage keeps the open proposal across process death (AC-30), and its card's words are kept beside
+it in the phone's comms record (`alpha-proposal:v1`: at most one open card, its text at most 4,000
+characters), only to redraw it (spec/assistant/approvals.md, "A card restored from the phone's own
+store is shown but never executed"). Every proposal the stage holds when it is loaded, at start or
+for the account that signs in, is a restored one: it can be dismissed, and only the live or
+recovered route proposing the same ID again makes it approvable.
+
+```quint
+pure def canRestored(c: Comms, by: Actor): bool = by == Device and openLive(c.proposal)
+pure def restored(c: Comms, by: Actor): Comms = {
+  val p = c.proposal
+  { ...c, proposal: match p { | Proposed(x) => Proposed({ ...x, live: false }) | NoProposal => NoProposal } }
+}
+pure def stepARestoredProposalKeepsItsPlace(before: Comms, via: str, after: Comms): bool =
+  via == "restored" implies (openId(after.proposal) == openId(before.proposal) and not(openLive(after.proposal)) and after.past == before.past)
+pure def sometimesARestoredProposalWaits(c: Comms): bool = openId(c.proposal) != "" and not(openLive(c.proposal))
 ```
 
 ## Story: Hear what Alpha knows when I open it

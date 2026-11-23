@@ -62,6 +62,24 @@ export const copy = {
   agentUnavailable: "Your agent isn’t available right now.",
   hostedDisclosure: (provider: string) => `Prompts and the context you share go to ${provider}.`,
   locationShared: "Location shared with this chat",
+  nothingListed: "The phone couldn’t list what this would act on. Nothing was done. Ask again.",
+  reviewListAgain: "Review this card again before approving it. Nothing was done.",
+  phoneAction: "Phone action",
+  historyRefused: "That action can’t be settled that way. Check it again later.",
+  historyUnavailable: "Phone action history couldn’t be read.",
+  conversationsUnavailable: "Saved conversations couldn’t load.",
+  restartNeeded: "Restart needed",
+  restartExplained: "Your agent stopped and is held for review. Restart it to keep chatting; nothing it kept is replayed.",
+  restartFailed: "Your agent couldn’t restart. Try again.",
+  notesChanged: "Notes changed",
+  calendarChanged: "Calendar changed",
+  openWorkflows: "Change this in Workflows",
+  listen: "Listen",
+} as const
+
+/** The word a workflow change card shows. */
+export const changeWords = {
+  Created: "Created", Updated: "Updated", TurnedOn: "Turned on", PausedWord: "Paused", Restored: "Restored", Renamed: "Renamed", RemovedWord: "Removed", Changed: "Changed",
 } as const
 
 /** The title of a receipt for what the journal proves. */

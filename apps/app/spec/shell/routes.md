@@ -1,7 +1,8 @@
 # Routes
 
-The owner route table is shared by the renderer and Android's request gate: Android ships it as an
-asset, byte for byte what the renderer serializes, and the APK check compares the bytes. It lists
+The owner route table is shared by the renderer and Android's request gate: there is one table,
+`src/platform/owner-routes.json`, which the renderer reads and Android ships as an asset, and the
+APK check compares the bytes. It lists
 the resident routes a renderer may call on the owner's behalf, in four groups: records (notes and
 the calendar), automations (workflows, reminders, scheduled tasks and triggers), telephony (the
 reply draft) and approvals. Domain validation and mutation authority stay in the agent's services;

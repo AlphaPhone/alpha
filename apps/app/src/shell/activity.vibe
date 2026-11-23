@@ -30,7 +30,7 @@ export const activityLive = Layer.effect(Activity, effect {
         voiceOff: !nav.voice,
         voiceInactive: !nav.voice,
         typing: window.field !== "NoField" || field !== "NoField",
-        chatResting: nav.chat === "ChatInput" || nav.chat === "ChatHidden",
+        chatResting: nav.chat === "Input" || nav.chat === "Hidden",
         editor: window.field === "ComposerField" || field === "ComposerField",
         drawer: nav.library || nav.menu !== "",
         shade: nav.shade,

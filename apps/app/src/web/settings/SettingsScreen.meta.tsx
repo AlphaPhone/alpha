@@ -13,7 +13,7 @@ const act = {
 
 export const meta: ComponentMeta<SettingsScreenProps> = {
   args: {
-    model: general, act, onClose: none, privacy: { route: "OnPhone", listener: listenerOn, aosp: true }, privacyActs: { stop: none, listenerSettings: none },
+    model: general, act, onClose: none, dialog: undefined, onDialog: none, privacy: { route: "OnPhone", listener: listenerOn, aosp: true }, privacyActs: { stop: none, listenerSettings: none },
     diagnostics, aboutActs: { readLog: none, askClear: none, cancelClear: none, clear: none, exportReport: none, loadLicences: none },
     developerActs: { profile: "app", command: none, requestRole: none, toggleProfile: none },
   },
@@ -23,10 +23,14 @@ export const meta: ComponentMeta<SettingsScreenProps> = {
     Apps: { model: apps },
     Inbox: { model: inbox },
     Nearby: { model: nearby },
+    JoinPassword: { model: nearby, dialog: { kind: "join", network: { name: "home", secured: true, joinable: true, strength: -50, security: "Wpa3" } } },
+    EraseAsked: { model: general, dialog: { kind: "erase" } },
     UnsavedDisplay: { model: unsavedDisplay },
     BroaderHandoff: { model: broaderHandoff },
     UnreadablePreferences: { model: unreadablePrivacy },
+    ResetPreferencesAsked: { model: unreadablePrivacy, dialog: { kind: "resetPreferences" } },
     Developer: { model: developer },
     ProblemLog: { model: { ...general, nav: { ...general.nav, page: "Problems" } }, diagnostics: problems },
+    ClearAsked: { model: { ...general, nav: { ...general.nav, page: "Problems" } }, diagnostics: { ...problems, confirmClear: true } },
   },
 };

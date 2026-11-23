@@ -2,7 +2,10 @@
 
 One machine holds what the shell shows: the open app (none is Home), the apps Back returns to,
 each app's kept place, where the assistant sits, the library over Home and Home's edit mode, the
-stand-in shade, voice, and the sheets, menus and dialogs above everything. Android Back, the HOME
+stand-in shade, voice, and the sheets, menus and dialogs above everything. The chat's heights, where
+each app rests it, Home's bar and how Back lowers it are the assistant's own model
+(spec/assistant/detents.md); navigation keeps the height the phone shows and uses those definitions.
+Android Back, the HOME
 intent, an owner's tap and an agent's request all change it here, so Back always closes exactly
 what is drawn on top. The machine is kept in the owner's storage, so a phone Android restarted comes
 back to the same app and history; layers that belonged to the old page are dropped on boot.
@@ -12,8 +15,8 @@ page only while it holds. Otherwise the HOME app stays on Home, the launcher fla
 back and any other activity finishes.
 
 ```quint
+import detents.* from "../assistant/detents"
 type Host = Standalone | LauncherApp | HomeApp | AssistantSurface
-type Detent = ChatHidden | ChatInput | ChatSheet | ChatFull
 type LayerKind = MenuLayer | DialogLayer | SheetLayer
 type Layer = { id: str, kind: LayerKind, covers: bool }
 type Place = { app: str, route: str, inner: bool }
@@ -32,7 +35,7 @@ type Nav = {
 }
 pure val initial: Nav = {
   host: Standalone, admitted: Set(), app: "", stack: List(), places: List(),
-  chat: ChatInput, voice: false, shade: false,
+  chat: Input, voice: false, shade: false,
   library: false, query: "", visible: Set(), menu: "", editing: false, adding: false,
   layers: List(), holds: Set(), hidden: false, ended: false,
   revision: 0, claim: NoClaim, captured: 0, destination: "",
@@ -64,7 +67,7 @@ at most six deep; any other open starts a new history. Opening a different app c
 revision, which retires an agent's claim made on the screen before.
 
 ```quint
-pure def restOf(app: str): Detent = if (app == "" or BarApps.contains(app)) ChatInput else ChatHidden
+pure def restOf(app: str): Detent = restFor(not(app == "" or BarApps.contains(app)))
 pure def placeOf(s: Nav, app: str): Place =
   s.places.select(p => p.app == app).nthOr(0, { app: app, route: "", inner: false })
 pure def withPlace(p: Place, places: List[Place]): List[Place] = places.select(q => q.app != p.app).append(p)
@@ -117,13 +120,15 @@ Android may restart Alpha at any time (process death, a renderer recovery, a con
 change). Boot names the host and the apps admitted now. The app, the Back history, the kept places
 and an open conversation stay; an app no longer admitted is left for Home and dropped from the
 history. Sheets, menus, holds, voice, the shade and edit mode belonged to the old page and are
-gone; the assistant surface never shows the library.
+gone; the assistant surface never shows the library. A kept navigation that is not a state is
+held for the owner's review (spec/platform/storage.md) and never written over; that session starts
+on Home in memory.
 
 ```quint
 pure def boot(s: Nav, host: Host, admitted: Set[str]): Nav = {
   val kept = s.app == "" or admitted.contains(s.app)
   val app = if (kept) s.app else ""
-  val conversing = s.chat == ChatSheet or s.chat == ChatFull
+  val conversing = isOpen(s.chat)
   { ...s, host: host, admitted: admitted, app: app,
     stack: if (app == "") List() else s.stack.select(a => admitted.contains(a)),
     chat: if (conversing and kept) s.chat else restOf(app),
@@ -151,12 +156,14 @@ above them, the library's entry menu, the Add sheet and edit mode close innermos
 stand-in shade, the assistant surface itself, voice, a full conversation to half, a half sheet to
 its rest, the library, a raised bar over an app that rests on the pill, an app's inner page, the
 previous app, and finally Home. The assistant surface has no Home under its apps: leaving its last
-app closes it.
+app closes it, and closing it finishes Android's assistant activity. While a surface holds the
+phone and nothing is listed above it, that surface answers Back first: the walkthrough's own Back is
+in spec/shell/permissions.md.
 
 ```quint
 pure def chatOf(s: Nav): Detent =
-  if (s.host == AssistantSurface and s.app == "" and (s.chat == ChatInput or s.chat == ChatHidden)) ChatFull else s.chat
-pure def talking(s: Nav): bool = chatOf(s) == ChatSheet or chatOf(s) == ChatFull
+  if (s.host == AssistantSurface and s.app == "" and not(isOpen(s.chat))) Full else s.chat
+pure def talking(s: Nav): bool = isOpen(chatOf(s))
 pure def one(flag: bool): int = if (flag) 1 else 0
 pure def depth(s: Nav): int =
   s.layers.length() + one(s.app != "") + one(s.library) + one(s.menu != "") + one(s.editing) +
@@ -177,7 +184,7 @@ pure def backTarget(s: Nav): Closed = {
   else if (s.voice) ClosedVoice
   else if (talking(s)) ClosedConversation
   else if (s.library and s.app == "") ClosedLibrary
-  else if (s.app != "" and s.chat == ChatInput and restOf(s.app) == ChatHidden) ClosedBar
+  else if (s.app != "" and s.chat == Input and restOf(s.app) == Hidden) ClosedBar
   else if (innerOf(s)) ClosedInner
   else if (s.app != "" and s.stack.length() > 0) ClosedStack
   else if (s.app != "" and s.host == AssistantSurface) ClosedAssistant
@@ -186,7 +193,7 @@ pure def backTarget(s: Nav): Closed = {
 }
 pure def homed(revision: int, s: Nav): Nav =
   { ...s, app: "", stack: List(), library: false, query: "", menu: "", editing: false, adding: false,
-    shade: false, chat: ChatInput, layers: List(), revision: revision, claim: NoClaim, destination: "" }
+    shade: false, chat: Input, layers: List(), revision: revision, claim: NoClaim, destination: "" }
 pure def closing(c: Closed, s: Nav): Nav = {
   val previous = s.stack.nthOr(s.stack.length() - 1, "")
   match c {
@@ -197,9 +204,9 @@ pure def closing(c: Closed, s: Nav): Nav = {
     | ClosedShade => { ...s, shade: false }
     | ClosedAssistant => { ...s, ended: true }
     | ClosedVoice => { ...s, voice: false }
-    | ClosedConversation => { ...s, chat: if (chatOf(s) == ChatFull) ChatSheet else restOf(s.app) }
+    | ClosedConversation => { ...s, chat: lowered(chatOf(s), restOf(s.app)) }
     | ClosedLibrary => { ...s, library: false, query: "", menu: "" }
-    | ClosedBar => { ...s, chat: ChatHidden }
+    | ClosedBar => { ...s, chat: Hidden }
     | ClosedInner => { ...s, places: withPlace({ ...placeOf(s, s.app), inner: false }, s.places) }
     | ClosedStack => { ...s, app: previous, stack: s.stack.removeAt(s.stack.length() - 1), chat: restOf(previous),
         revision: s.revision + 1, claim: NoClaim, destination: "" }
@@ -296,21 +303,22 @@ pure def sometimesAddSheetOpen(s: Nav): bool = s.adding
 
 ### The assistant moves between its detents, and Home keeps its bar
 
-A drag or flick that would hide the bar on Home settles on the bar instead. Voice runs above the
-conversation and stops before it lowers. The assistant does not move while a sheet covers it or the
+The heights and their rests are spec/assistant/detents.md; the gesture that picks one is the dock's
+(spec/assistant/dock.md). A drag or flick that would hide the bar on Home settles on the bar instead.
+Voice runs above the conversation and stops before it lowers. The assistant does not move while a sheet covers it or the
 phone is held.
 
 ```quint
 pure def canMoveChat(s: Nav, detent: Detent): bool =
   running(s) and not(s.hidden) and not(s.voice) and s.holds.size() == 0 and not(s.layers.some(l => l.covers))
 pure def moveChat(s: Nav, detent: Detent): Nav =
-  { ...s, chat: if (s.app == "" and detent == ChatHidden) ChatInput else detent, shade: false }
+  { ...s, chat: settledOn(s.app == "", detent), shade: false }
 pure def canStartVoice(s: Nav): bool = unblocked(s) and not(s.voice)
 pure def startVoice(s: Nav): Nav = { ...s, voice: true, shade: false }
 pure def canStopVoice(s: Nav): bool = s.voice
 pure def stopVoice(s: Nav): Nav = { ...s, voice: false }
-pure def alwaysHomeKeepsItsBar(s: Nav): bool = s.app == "" implies s.chat != ChatHidden
-pure def sometimesVoiceOverConversation(s: Nav): bool = s.voice and s.chat == ChatFull
+pure def alwaysHomeKeepsItsBar(s: Nav): bool = keepsItsBar(s.app == "", s.chat)
+pure def sometimesVoiceOverConversation(s: Nav): bool = s.voice and s.chat == Full
 ```
 
 ### On Phone, Messages and Contacts the app's own bar stands in for the dock until a conversation opens

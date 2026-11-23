@@ -1,0 +1,48 @@
+// spec/files/browser.md, "Story: Walk my folders and categories"; spec/files/preview.md, "The document viewer opens over the preview and closes exactly once"; spec/files/share.md, "The owner's choice sends once, from the panel on screen, after it closed"
+import { assert, it } from "@effect/vitest"
+import { Machine as PanelMachine } from "../../gen/files__share.effect.vibe"
+import { FilesBack } from "../../src/files/back.vibe"
+import { FilesBrowser } from "../../src/files/browser.vibe"
+import { FilesPreview } from "../../src/files/preview.vibe"
+import { FilesShare } from "../../src/files/share.vibe"
+import { toRow } from "../../src/files/paths.vibe"
+import { files, noNative, until } from "./harness.vibe"
+
+const notes = toRow("", { path: "Download/notes.txt", name: "notes.txt", directory: false, mimeType: "text/plain", size: 40, modified: 1 })
+
+it.live("Back closes the share panel, the viewer, the preview and the selection in turn, goes up a place, and is the shell's only on Browse with nothing open (spec/files/browser.md, \"Story: Walk my folders and categories\")", () => effect {
+  provide files(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      const preview = try FilesPreview
+      const share = try FilesShare
+      const back = try FilesBack
+      const panels = try PanelMachine
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      try preview.enter()
+      try browser.navigate({ tag: "InFolder", path: "Download", volume: "" })
+      try until((s) => s.place.tag === "InFolder" && s.listing === "Complete")
+      try browser.dispatch({ type: "beginSelecting" })
+      try preview.openRow(notes)
+      try preview.openViewer()
+      try share.open(false, false, succeed(true))
+      const step = effect {
+        const handled = try back.back()
+        const panel = try panels.get()
+        const shown = try preview.get()
+        const s = try browser.get()
+        return [handled, panel.active !== 0, shown.viewer, shown.shown, s.selecting, s.place.tag] as const
+      }
+      const steps = [try step, try step, try step, try step, try step, try step]
+      try Effect.try(() => assert.deepStrictEqual(steps, [
+        [true, false, true, true, true, "InFolder"],
+        [true, false, false, true, true, "InFolder"],
+        [true, false, false, false, true, "InFolder"],
+        [true, false, false, false, false, "InFolder"],
+        [true, false, false, false, false, "Browse"],
+        [false, false, false, false, false, "Browse"],
+      ]))
+    })
+  }
+})

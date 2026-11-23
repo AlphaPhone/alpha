@@ -49,7 +49,7 @@ export effect function ownerPeer() {
   }
 }
 
-/** The assistant: quiet enough to be navigated away from only while the owner holds no draft, no reply is being written and the connection chooser is closed; and the draft a reviewed question opens. */
+/** The assistant: quiet enough to be navigated away from only while the owner holds no draft, no reply is being written and the connection chooser is closed; each moment the owner stops holding a draft; and the draft a reviewed question opens. */
 export effect function assistantPeer() {
   const composer = try Composer
   const assistant = try Assistant
@@ -61,6 +61,7 @@ export effect function assistantPeer() {
       const transcript = try Stream.runHead(composer.transcript)
       return !(Option.getOrUndefined(transcript)?.typing ?? false)
     },
+    releases: (): Stream.Stream<void> => Stream.map(Stream.filter(assistant.holdingDraftChanges, (held) => !held), () => undefined),
     draft: (question: string) => assistant.openWith(question),
   }
 }

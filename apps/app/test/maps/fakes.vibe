@@ -1,7 +1,7 @@
 // spec/maps/index.md: the Maps layer over a fake Cloud, phone, resident and launcher, faked only at their boundary.
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { Build } from "../../src/platform/build.vibe"
-import { Native } from "../../src/platform/native.vibe"
+import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident, ResidentUnavailable } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { AgentCalendar } from "../../src/calendar/agent.vibe"
@@ -38,6 +38,8 @@ export interface FakeOptions {
   readonly permission?: "granted" | "denied"
   readonly variant?: "launcher" | "aosp" | "browser"
   readonly claim?: unknown
+  /** What `AlphaNetworkLocation.locate` resolves, taken at the clock's now; undefined refuses every lookup as not found. */
+  readonly network?: { readonly latitude: number; readonly longitude: number; readonly accuracy: number; readonly fingerprint: string }
 }
 
 /** The Maps core over fakes, and the handles a test drives and reads. */
@@ -86,6 +88,12 @@ export effect function harness(provider: { id: string; data: string }, options: 
       if (method === "updateNavigation") return { active: true }
       if (method === "consumeNavigationOpen") return { open: true }
       if (method === "list") return { status: "ready", events: try Ref.get(events) }
+      if (plugin === "AlphaNetworkLocation") {
+        if (options.network === undefined) throw new NativeFailed({ plugin, method, message: "No position is known for these signals", code: "not-found" })
+        const from = (args as { unchangedFrom?: string } | undefined)?.unchangedFrom
+        if (from === options.network.fingerprint) return { unchanged: true, fingerprint: from }
+        return { ...options.network, timestamp: try Clock.currentTimeMillis }
+      }
       return {}
     },
     listen: (plugin: string, event: string) =>
@@ -135,3 +143,6 @@ export effect function until<S>(changes: Stream.Stream<S>, ok: (s: S) => boolean
 
 /** A `locationChange` event at `coordinate`, taken now unless `ageMs` says how long ago. */
 export const fixAt = (coordinate: typeof ferry, accuracy = 8, ageMs = 0) => ({ coords: { ...coordinate, accuracy, timestamp: Date.now() - ageMs }, cached: false })
+
+/** A `locationChange` event at `coordinate` taken at `timestamp`, for tests on the test clock. */
+export const fixTakenAt = (coordinate: typeof ferry, timestamp: number, accuracy = 8) => ({ coords: { ...coordinate, accuracy, timestamp }, cached: false })

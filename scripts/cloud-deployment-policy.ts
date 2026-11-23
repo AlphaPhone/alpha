@@ -25,7 +25,7 @@ export const CLOUD_SIGN_IN_REGISTRATION = Object.freeze(deployment.signIn);
 export const STORAGE_NAMESPACES: readonly string[] = Object.freeze([...deployment.storageNamespaces]);
 /** The Cloud every distributed build uses until the cutover release. */
 export const SHIPPED_CLOUD_DEPLOYMENT: CloudDeploymentPolicy = Object.freeze(deployment.shipped);
-/** Alpha Cloud's client rows (alphacompute.ai), the same hosts cloud/src/profile.vibe serves. */
+/** Alpha Cloud's client rows (alphacompute.cc), the same hosts cloud/src/profile.vibe serves. */
 export const ALPHA_CLOUD_DEPLOYMENT: CloudDeploymentPolicy = Object.freeze(Object.fromEntries(cloudEnvironments.map(environment => [environment,
   {...deployment.alphaCloudHosts[environment], name: 'Alpha Cloud', entitlementAudience: 'ai.alphacompute.alphaphone', alphaCloud: true}])) as Record<CloudEnvironment, CloudDeploymentPolicyRow>);
 

@@ -10,7 +10,8 @@ import { AgentRequests } from "../../calendar/requests.vibe";
 import { formatDateTime } from "../../calendar/time.ts";
 import type { AppId } from "../app-screen.ts";
 import { Button, Checkbox, Sheet, SheetContent, Toast, ToastProvider, ToastViewport } from "../components/ui/index.ts";
-import { useAgentView, useApprovalSheet, useHeld, useRequestSheet, run } from "./hooks.ts";
+import { useAgentView, useApprovalSheet, useHeld, useRequestSheet } from "./hooks.ts";
+import { perform } from "../shell/services.ts";
 
 /** What the shell gives an always-mounted Calendar surface: a way to open an app. */
 export type SurfaceProps = { readonly open: (app: AppId, route?: string) => void };
@@ -38,8 +39,8 @@ export function UndoNotices(_props: UndoNoticesProps) {
     <ToastProvider duration={10_000}>
       {waiting && (
         <Toast key={waiting.id} title={waiting.decline ? "Invitation declined" : "Event deleted"}
-          onOpenChange={(open) => void run(HeldDeletions.use((service) => service.offered(waiting.id, open)))}
-          action={{ label: "Undo", onAction: () => void run(HeldDeletions.use((service) => service.undo(waiting.id))) }} />
+          onOpenChange={(open) => void perform(HeldDeletions.use((service) => service.offered(waiting.id, open)))}
+          action={{ label: "Undo", onAction: () => void perform(HeldDeletions.use((service) => service.undo(waiting.id))) }} />
       )}
       <ToastViewport />
     </ToastProvider>
@@ -65,7 +66,7 @@ export function ApprovalReview(_props: ApprovalReviewProps) {
   const actionable = state.found && state.verified && (state.approval === "ApprovalPending" || state.approval === "ApprovalRetryable");
   const busy = state.phase === "Rechecking" || state.phase === "Deciding" || state.phase === "ReadingRequest";
   return (
-    <Sheet open onOpenChange={(next) => !next && void run(ApprovalReviews.use((service) => service.close()))}>
+    <Sheet open onOpenChange={(next) => !next && void perform(ApprovalReviews.use((service) => service.close()))}>
       <SheetContent side="bottom" title={sheet.presentation?.heading ?? "Calendar change"}>
         <div className="flex flex-col gap-3 px-5 pb-6">
           <p role="status" aria-live="polite" className="text-sm">{busy ? "Checking request…" : status}</p>
@@ -78,9 +79,9 @@ export function ApprovalReview(_props: ApprovalReviewProps) {
           )}
           {actionable && <p className="text-sm text-muted-foreground">{sheet.presentation?.complete ? "Dates and times are shown in this phone’s time zone." : "Current event details could not be verified. Decline this request or open Calendar and review the event before trying again."}</p>}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => void run(ApprovalReviews.use((service) => service.close()))}>Close</Button>
-            {pending && <Button variant="outline" disabled={busy} onClick={() => void run(ApprovalReviews.use((service) => service.choose("RejectChange")))}>Decline</Button>}
-            {actionable && <Button disabled={busy || !sheet.presentation?.complete} onClick={() => void run(ApprovalReviews.use((service) => service.choose("ApproveChange")))}>Approve</Button>}
+            <Button variant="ghost" onClick={() => void perform(ApprovalReviews.use((service) => service.close()))}>Close</Button>
+            {pending && <Button variant="outline" disabled={busy} onClick={() => void perform(ApprovalReviews.use((service) => service.choose("RejectChange")))}>Decline</Button>}
+            {actionable && <Button disabled={busy || !sheet.presentation?.complete} onClick={() => void perform(ApprovalReviews.use((service) => service.choose("ApproveChange")))}>Approve</Button>}
           </div>
         </div>
       </SheetContent>
@@ -99,7 +100,7 @@ export function AgentRequestReview(_props: AgentRequestReviewProps) {
   if (sheet.kind === "choose-calendars") {
     const operation = sheet.operation;
     return (
-      <Sheet open onOpenChange={(next) => !next && void run(AgentRequests.use((service) => service.chooseCalendars(null)))}>
+      <Sheet open onOpenChange={(next) => !next && void perform(AgentRequests.use((service) => service.chooseCalendars(null)))}>
         <SheetContent side="bottom" title="Check availability">
           <div className="flex flex-col gap-3 px-5 pb-6">
             <p className="text-sm">{`${formatDateTime(Date.parse(operation.start), operation.timeZone)} to ${formatDateTime(Date.parse(operation.end), operation.timeZone)} (${operation.timeZone})`}</p>
@@ -113,8 +114,8 @@ export function AgentRequestReview(_props: AgentRequestReviewProps) {
               ))}
             </fieldset>
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" onClick={() => void run(AgentRequests.use((service) => service.chooseCalendars(null)))}>Cancel</Button>
-              <Button disabled={!checkOffered(ticked.length)} onClick={() => void run(AgentRequests.use((service) => service.chooseCalendars(ticked)))}>Check</Button>
+              <Button variant="ghost" onClick={() => void perform(AgentRequests.use((service) => service.chooseCalendars(null)))}>Cancel</Button>
+              <Button disabled={!checkOffered(ticked.length)} onClick={() => void perform(AgentRequests.use((service) => service.chooseCalendars(ticked)))}>Check</Button>
             </div>
           </div>
         </SheetContent>
@@ -124,7 +125,7 @@ export function AgentRequestReview(_props: AgentRequestReviewProps) {
   const result = sheet.result;
   const free = shownAnswer(result.busy.length) === "ShowsFree";
   return (
-    <Sheet open onOpenChange={(next) => !next && void run(AgentRequests.use((service) => service.confirmResult(false)))}>
+    <Sheet open onOpenChange={(next) => !next && void perform(AgentRequests.use((service) => service.confirmResult(false)))}>
       <SheetContent side="bottom" title={free ? "Free" : "Busy"}>
         <div className="flex flex-col gap-3 px-5 pb-6">
           <ul className="flex flex-col gap-1 text-sm">
@@ -134,8 +135,8 @@ export function AgentRequestReview(_props: AgentRequestReviewProps) {
           </ul>
           <p className="text-sm text-muted-foreground">{`Read from: ${sheet.chosen.map((source) => `${source.name} · ${source.account}`).join("; ")}. Shares times only.`}</p>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => void run(AgentRequests.use((service) => service.confirmResult(false)))}>Cancel</Button>
-            <Button onClick={() => void run(AgentRequests.use((service) => service.confirmResult(true)))}>Share with agent</Button>
+            <Button variant="ghost" onClick={() => void perform(AgentRequests.use((service) => service.confirmResult(false)))}>Cancel</Button>
+            <Button onClick={() => void perform(AgentRequests.use((service) => service.confirmResult(true)))}>Share with agent</Button>
           </div>
         </div>
       </SheetContent>
@@ -157,7 +158,7 @@ export function PreservationReview(_props: PreservationReviewProps = {}) {
       <p className="text-sm">{recovery ? "The saved app calendar needs recovery before the agent’s Calendar can start. Nothing was changed." : "Keep your saved app calendar, read only, alongside the agent’s Calendar."}</p>
       {notice && <p role="status" className="text-sm text-destructive">{notice}</p>}
       {!recovery && (
-        <Button className="self-end" onClick={() => void run(LegacyCalendar.use((service) => Effect.zipRight(service.openReview(), service.confirmReadOnly()))).then(
+        <Button className="self-end" onClick={() => void perform(LegacyCalendar.use((service) => Effect.zipRight(service.openReview(), service.confirmReadOnly()))).then(
           () => setNotice(""), () => setNotice("The saved calendar changed or couldn’t be recorded. Review it again."))}>Keep read only</Button>
       )}
     </section>

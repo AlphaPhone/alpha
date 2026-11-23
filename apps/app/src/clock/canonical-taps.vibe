@@ -83,15 +83,17 @@ export const canonicalTapsLayer = Layer.effect(CanonicalTaps, effect {
   }
 })
 
-/** Wakes the canonical tap handler on Android's tap event and on each change of the signed-in owner. Never returns while the plugin is present. */
+/** Wakes the canonical tap handler on Android's tap event, on each change of the signed-in owner and when the owner stops holding a draft. Never returns while the plugin is present. */
 export effect function followCanonicalTaps() {
   const native = try Native
   const taps = try CanonicalTaps
   const owners = try ownerPeer()
+  const composer = try assistantPeer()
   if (!(try native.available(NOTIFICATIONS))) return
   try taps.wake()
   try.all [
     effect { Stream.runForEach(native.listen(NOTIFICATIONS, "canonicalNotificationTap"), () => taps.wake()) catch () => undefined },
     effect { Stream.runForEach(owners.changes(), () => taps.wake()) catch () => undefined },
+    effect { Stream.runForEach(composer.releases(), () => taps.wake()) catch () => undefined },
   ]
 }

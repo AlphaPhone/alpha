@@ -1,6 +1,5 @@
 // spec/settings/privacy.md, "Story: Know where my voice goes"; spec/settings/privacy.md, "Story: Pause or turn off listening and see what the listener did"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"
 import { ListChecks } from "lucide-react";
-import { useState } from "react";
 import type { Facts, SettingsPage } from "../../../gen/settings__facts.ts";
 import type { Preference, Preferences } from "../../../gen/settings__preferences.ts";
 import { asksBefore, sharesLocation } from "../../../gen/settings__preferences.ts";
@@ -33,15 +32,18 @@ export interface PrivacyPagesProps {
   readonly onHandoff: (page: SettingsPage) => void;
   /** Reopen the first-run access walkthrough. */
   readonly onAccessSetup: () => void;
+  /** Whether the reset of unreadable preferences awaits confirmation. */
+  readonly resetAsked: boolean;
+  /** Ask for that confirmation, or dismiss it. */
+  readonly onAskReset: (open: boolean) => void;
 }
 
 /**
  * Privacy and App permissions.
  * @model spec/settings/privacy.md
  */
-export function PrivacyPages({ page, facts, preferences, native, privacy, privacyActs, onPermissions, onPreference, onResetPreferences, onHandoff, onAccessSetup }: PrivacyPagesProps) {
+export function PrivacyPages({ page, facts, preferences, native, privacy, privacyActs, onPermissions, onPreference, onResetPreferences, onHandoff, onAccessSetup, resetAsked, onAskReset }: PrivacyPagesProps) {
   const { value, readable } = preferences;
-  const [confirmReset, setConfirmReset] = useState(false);
   const read = facts.read;
   if (page === "Permissions") {
     const rows: [string, keyof typeof read][] = [["Camera", "camera"], ["Microphone", "microphone"], ["Location", "locationAccess"], ["Photos", "photos"], ["Files", "files"], ["Notifications", "notifications"], ...(native ? [["Calendar", "calendar"] as [string, keyof typeof read]] : [])];
@@ -65,7 +67,7 @@ export function PrivacyPages({ page, facts, preferences, native, privacy, privac
         <SettingRow label="Permissions" ariaLabel="App permissions" onOpen={onPermissions} />
         <ToggleRow label="Ask before Alpha acts" detail={readable ? ASKS_ABOUT : undefined} on={asksBefore(value, readable)} locked={!readable} onChange={(on) => onPreference("AskBeforeActions", on)} />
         {native && <ToggleRow label="Location for Alpha" detail="Hosted models can receive it." on={sharesLocation(value, readable)} locked={!readable} onChange={(on) => onPreference("AgentLocation", on)} />}
-        {!readable && <SettingRow label="Reset device preferences" destructive onOpen={() => setConfirmReset(true)} />}
+        {!readable && <SettingRow label="Reset device preferences" destructive onOpen={() => onAskReset(true)} />}
       </Section>
       <Section caption="Voice">
         <SettingRow label="Speech" state={{ word: speech, tone: voice.leaves ? "warn" : undefined }} ariaLabel={`Speech, ${speech}${voice.leaves ? ", audio leaves the phone" : ""}`} />
@@ -80,12 +82,12 @@ export function PrivacyPages({ page, facts, preferences, native, privacy, privac
       <Section>
         <SettingRow label="Access setup" ariaLabel="Review access setup" icon={<ListChecks aria-hidden className="size-5" />} onOpen={onAccessSetup} />
       </Section>
-      <Dialog open={confirmReset} onOpenChange={setConfirmReset}>
+      <Dialog open={resetAsked} onOpenChange={onAskReset}>
         <DialogContent>
           <DialogTitle>Reset device preferences?</DialogTitle>
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setConfirmReset(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={() => { setConfirmReset(false); onResetPreferences(); }}>Reset</Button>
+            <Button variant="ghost" onClick={() => onAskReset(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => { onAskReset(false); onResetPreferences(); }}>Reset</Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -28,13 +28,13 @@ describe("Alpha Phone's native client registration", () => {
     const profile = alphaCloudProfile(operatorInputs)
     const client = try environmentRegistration(profile, "production", identity, rotatedSigner)
     try check(() => assert.strictEqual(client.clientId, "ai.alphacompute.alphaphone"))
-    try check(() => assert.strictEqual(client.signInReturn, "https://cloud.alphacompute.ai/alphaphone/auth/callback"))
-    try check(() => assert.strictEqual(client.billingReturn, "https://cloud.alphacompute.ai/alphaphone/billing/return"))
-    try check(() => assert.strictEqual(client.connectReturn, "https://cloud.alphacompute.ai/alphaphone/gmail/callback"))
-    const onApi = { ...client, billingReturn: "https://api.alphacompute.ai/alphaphone/billing/return" }
-    try check(() => assert.ok(registrationProblems(onApi, "https://api.alphacompute.ai").some((problem) => problem.includes("API origin"))))
+    try check(() => assert.strictEqual(client.signInReturn, "https://cloud.alphacompute.cc/alphaphone/auth/callback"))
+    try check(() => assert.strictEqual(client.billingReturn, "https://cloud.alphacompute.cc/alphaphone/billing/return"))
+    try check(() => assert.strictEqual(client.connectReturn, "https://cloud.alphacompute.cc/alphaphone/gmail/callback"))
+    const onApi = { ...client, billingReturn: "https://api.alphacompute.cc/alphaphone/billing/return" }
+    try check(() => assert.ok(registrationProblems(onApi, "https://api.alphacompute.cc").some((problem) => problem.includes("API origin"))))
     const shared = { ...client, billingReturn: client.signInReturn }
-    try check(() => assert.ok(registrationProblems(shared, "https://api.alphacompute.ai").length > 0))
+    try check(() => assert.ok(registrationProblems(shared, "https://api.alphacompute.cc").length > 0))
   })
 
   it.effect("describes the same registration to the seed, the Worker registry and the applied registration file", () => effect {

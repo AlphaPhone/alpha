@@ -1,6 +1,7 @@
-// spec/account/sheet.md, "The sheet shows one section at a time, and Android Home closes it"; spec/account/signIn.md, "Sign-in is shown as the required page, the first-run page, or the dialog the owner opened"
+// spec/account/sheet.md, "The sheet shows one section at a time, and Android Home closes it"; spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"; spec/account/signIn.md, "Sign-in is shown as the required page, the first-run page, or the dialog the owner opened"
 import type { Section } from "../../gen/account__sheet.ts"
 import { isSignedIn } from "../../gen/account__session.ts"
+import { entryOf } from "../../gen/account__signIn.ts"
 import type { Nav } from "../../gen/shell__navigation.ts"
 import { Navigation } from "../shell/navigation.vibe"
 import { Membership } from "./billing.vibe"
@@ -29,8 +30,11 @@ export function sectionOf(route: string): Section | undefined {
 export service AccountPresentation {
   /** Open one section and the panel it shows. */
   openSection(section: Section): void!!
-  /** Back to the account section, closing the panel the section opened. */
-  back(): void!!
+  /**
+   * Back inside Account, as the screen shows it: the own-keys form returns to sign-in, sign-in steps back, a key removal
+   * review ends, a section returns to the account section and a sign-out review ends. Whether Account took it.
+   */
+  back(): boolean!!
 }
 
 /** The presentation over the sheet and its panels. */
@@ -39,6 +43,8 @@ export const presentationService = Layer.effect(AccountPresentation, effect {
   const membership = try Membership
   const google = try GoogleAccounts
   const provider = try AiProvider
+  const session = try CloudSession
+  const signIn = try SignInScreen
 
   effect function closePanels() {
     try membership.closeManager()
@@ -56,8 +62,18 @@ export const presentationService = Layer.effect(AccountPresentation, effect {
       try sheet.openSection(section)
     },
     effect back() {
+      const entry = try signIn.current()
+      if (entry.work === "SavingOwnKeys") return try provider.leave()
+      const shown = try sheet.current()
+      const signedIn = isSignedIn((try session.current()).phase)
+      if (shown.section !== "ProviderSection" && (!signedIn || entryOf(entry) === "OpenedEntry")) return try signIn.back()
+      if (shown.section === "ProviderSection" && (try provider.current()).review.tag === "Reviewing") {
+        try provider.cancelRemove()
+        return true
+      }
+      if (!shown.open || (shown.section === "AccountSection" && shown.reviewOwner === 0)) return false
       try closePanels()
-      try sheet.back()
+      return try sheet.back()
     }
   }
 })

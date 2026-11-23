@@ -1,9 +1,27 @@
-// spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"; spec/telephony/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"; spec/telephony/comms.md, "A subject is briefed once, only with the chat open, and never from fixtures in production"; spec/telephony/comms.md, "A new proposal replaces the open one, and a replaced or ignored proposal never acts"
+// spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/telephony/comms.md, "Only the owner's tap approves the open proposal, and never one that acts over an emergency call"; spec/telephony/comms.md, "End is beside the bar when closed, in the call card when open, in the strip when full, and on the voice panel during a voice turn"; spec/telephony/comms.md, "A ring shows its card in the stage, and its Screen it proposal retires when the ring ends"; spec/telephony/comms.md, "A subject is briefed once, only with the chat open, and never from fixtures in production"; spec/telephony/comms.md, "A new proposal replaces the open one, and a replaced or ignored proposal never acts"
 import { Machine as CallBarMachine, shownCall } from "../../gen/telephony__callBar.effect.vibe"
 import { emergencyLive } from "../../gen/telephony__common.effect.vibe"
 import { Machine as CommsMachine, type Event as CommsEvent, type ProposalKind } from "../../gen/telephony__comms.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
 import { Machine as VoicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
+import { ProposalWords, StoredProposal } from "./comms.schema.vibe"
+import { ownerKept } from "./owner.vibe"
+
+/** The words of an open proposal's card, as Alpha's reply showed them. */
+export type CardWords = typeof ProposalWords.Type
+/** The phone's comms record. */
+export type ProposalRecord = typeof StoredProposal.Type
+
+/** The empty comms record: nothing briefed, no open card. */
+export const NO_RECORD: ProposalRecord = { v: 1, briefed: null, open: null }
+
+/** The open proposal as the stage shows it: its ID, whether it can be approved now, and its card's kept words. */
+export interface OpenCard {
+  readonly proposalId: string
+  /** False for a proposal restored from the phone's store: shown, never approved. */
+  readonly live: boolean
+  readonly words: CardWords | null
+}
 
 /** The facts a Phone briefing is made of, from what Phone read on this device; Messages and Contacts give none. */
 export interface BriefingFacts {
@@ -19,8 +37,14 @@ export service CommsStage {
   follow(): void!!
   /** The briefing due now for the subject on screen, marked briefed, or null when none is due or nothing is known. */
   briefing(): BriefingFacts | null!!
-  /** Alpha proposes one action card; a newer one replaces the open one. False when it was dropped. */
-  propose(proposalId: string, kind: ProposalKind, acts: boolean, ring: string): boolean!!
+  /** Alpha proposes one action card, with the words its card shows; a newer one replaces the open one, and the same ID again makes a restored one live. False when it was dropped. */
+  propose(proposalId: string, kind: ProposalKind, acts: boolean, ring: string, words?: CardWords): boolean!!
+  /** The owner's tap on the open proposal's one button; false when it is not the open, live proposal. */
+  approve(proposalId: string): boolean!!
+  /** The owner dismissed the open proposal, live or restored. */
+  decline(proposalId: string): boolean!!
+  /** The open proposal and its kept words, or null when none is open. */
+  openCard(): OpenCard | null!!
 }
 
 /** The comms stage over its stored machine and the call bar, Phone and voicemail machines. */
@@ -30,6 +54,18 @@ export const commsStageLayer = Layer.effect(CommsStage, effect {
   const phone = try PhoneMachine
   const voicemail = try VoicemailMachine
   const tell = (event: CommsEvent, by: "Owner" | "Alpha" | "Device") => comms.send(event, by) catch () => undefined
+  const record = try ownerKept("alpha-proposal:v1", NO_RECORD, (input) => Schema.decodeUnknownEffect(StoredProposal)(input))
+  const kept = () => record.load() catch () => NO_RECORD
+
+  effect function keep(words: CardWords | null | undefined) {
+    const c = try comms.get()
+    const before = try kept()
+    const next: ProposalRecord = {
+      v: 1, briefed: c.briefed === "" ? null : c.briefed.slice(0, 512),
+      open: c.proposal.tag !== "Proposed" ? null : words === undefined ? before.open : words,
+    }
+    if (JSON.stringify(next) !== JSON.stringify(before)) try record.keep(next)
+  }
 
   return {
     effect follow() {
@@ -43,6 +79,7 @@ export const commsStageLayer = Layer.effect(CommsStage, effect {
         if (ring !== before.ring) {
           if (before.ring !== "") try tell({ type: "ringEnded" }, "Device")
           if (ring !== "") try tell({ type: "ringStarted", ring }, "Device")
+          try keep(undefined)
         }
       }
     },
@@ -55,11 +92,30 @@ export const commsStageLayer = Layer.effect(CommsStage, effect {
       const fresh = v.rows.filter((r) => r.fresh).map((r) => ({ title: r.title, number: r.number }))
       if (missed.length === 0 && fresh.length === 0) return null
       if ((try tell({ type: "briefingShown", key: c.key }, "Device")) === undefined) return null
+      try keep(undefined)
       return { key: c.key, missed, voicemail: fresh, at: p.readAt } satisfies BriefingFacts
     },
-    effect propose(proposalId: string, kind: ProposalKind, acts: boolean, ring: string) {
+    effect propose(proposalId: string, kind: ProposalKind, acts: boolean, ring: string, words?: CardWords) {
       const after = try tell({ type: "proposed", proposalId, kind, acts, ring }, "Alpha")
-      return after !== undefined && after.proposal.tag === "Proposed" && after.proposal.proposalId === proposalId
+      const open = after !== undefined && after.proposal.tag === "Proposed" && after.proposal.proposalId === proposalId
+      if (open) try keep(words === undefined ? null : Option.getOrNull(Schema.decodeUnknownOption(ProposalWords)(words)))
+      return open
+    },
+    effect approve(proposalId: string) {
+      const after = try tell({ type: "proposalApproved", proposalId }, "Owner")
+      if (after !== undefined) try keep(null)
+      return after !== undefined
+    },
+    effect decline(proposalId: string) {
+      const after = try tell({ type: "proposalDeclined", proposalId }, "Owner")
+      if (after !== undefined) try keep(null)
+      return after !== undefined
+    },
+    effect openCard() {
+      const c = try comms.get()
+      if (c.proposal.tag !== "Proposed") return null
+      const words = (try kept()).open
+      return { proposalId: c.proposal.proposalId, live: c.proposal.live, words } satisfies OpenCard
     },
   }
 })

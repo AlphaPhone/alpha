@@ -10,6 +10,8 @@ import { AgentCalendar, type AgentBinding } from "./agent.vibe"
 import type { LinkedCalendarControlView } from "@elizaos/plugin-calendar/client"
 import { residentClients } from "./client.vibe"
 import { decodeSync } from "./device.schema.vibe"
+import type { CalendarRecord } from "./feed.schema.vibe"
+import { writableSource } from "./model.vibe"
 import { LegacyCalendar } from "./preservation.vibe"
 
 /** Everything the sync sheet shows. */
@@ -24,6 +26,16 @@ export interface SyncView {
 
 /** A writable Google calendar the owner can choose as the sync destination. */
 export interface SyncDestination { readonly connectorAccountId: string; readonly providerCalendarId: string; readonly name: string; readonly account: string; readonly version: number }
+
+/** What Google Calendar sync can offer from the agent's calendars: the grant they show, and the writable Google calendars the owner may choose. */
+export function googleSyncOffer(calendars: readonly CalendarRecord[]): { readonly grant: GoogleGrant; readonly destinations: readonly SyncDestination[] } {
+  const google = calendars.filter((calendar) => calendar.provider === "google" && calendar.connectorAccountId !== "")
+  const destinations = google.filter(writableSource).map((calendar) => ({
+    connectorAccountId: calendar.connectorAccountId, providerCalendarId: calendar.calendarId, name: calendar.summary,
+    account: calendar.accountEmail ?? "", version: calendar.selectionVersion ?? 0,
+  }))
+  return { grant: destinations.length > 0 ? "WriteGrant" : google.length > 0 ? "ReadOnlyGrant" : "NoGoogleGrant", destinations }
+}
 
 /** Linked Google Calendar sync: its control, the owner's consent, setup, device consent and disconnect cleanup. */
 export service CalendarSync {

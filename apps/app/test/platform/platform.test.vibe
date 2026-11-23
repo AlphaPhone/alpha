@@ -15,6 +15,8 @@ import { AppLifecycle, lifecycleLive, lifecycleOver } from "../../src/platform/l
 import { admitMockMode, buildInfoOf, cloudAuthorityOf } from "../../src/platform/build-live.vibe"
 import { buildInfo, fakeNative } from "../../src/platform/layers.vibe"
 import { memoryStore, ownerKey } from "../../src/platform/storage.vibe"
+import { AssistantInvocation, NetworkLocationReply } from "../../src/platform/native.schema.vibe"
+import { nativePlugins } from "../../src/platform/native-plugins.ts"
 
 module device {
   import type { CapacitorPort } from "../../src/platform/native-capacitor.ts"
@@ -200,6 +202,29 @@ it.effect("reach the phone's native capabilities only where this build has them"
   provide Native = nativeOver(port, "Aosp") {
     const status = try (try Native).invoke("AlphaTelephony", "status")
     try Effect.try(() => assert.deepStrictEqual(status, { ready: true }))
+  }
+})
+
+// spec/platform/index.md, "A plugin method is called only when the native bridge lists it"
+it.effect("find the phone by Wi-Fi and cell towers only through the listed plugin, and trust only a real position", () => effect {
+  const port = bridge({
+    AlphaNetworkLocation: { locate: (args) => (args as { unchangedFrom?: string }).unchangedFrom === "a1" ? { unchanged: true, fingerprint: "a1" } : { latitude: 37.77, longitude: -122.42, accuracy: 40, timestamp: 1700000000000, fingerprint: "a1", wifi: 6, cells: 1 } },
+  })
+  provide Native = nativeOver(port, "Launcher") {
+    const native = try Native
+    const fresh = try Schema.decodeUnknownEffect(NetworkLocationReply)(try native.invoke("AlphaNetworkLocation", "locate", {}))
+    const same = try Schema.decodeUnknownEffect(NetworkLocationReply)(try native.invoke("AlphaNetworkLocation", "locate", { unchangedFrom: "a1" }))
+    const offGlobe = Schema.decodeUnknownEffect(NetworkLocationReply)({ latitude: 91, longitude: 0, accuracy: 10, timestamp: 1, fingerprint: "b" }) catch () => undefined
+    const noAccuracy = Schema.decodeUnknownEffect(NetworkLocationReply)({ latitude: 1, longitude: 1, accuracy: 0, timestamp: 1, fingerprint: "b" }) catch () => undefined
+    const locked = try Schema.decodeUnknownEffect(AssistantInvocation)({ assistant: false, locked: true })
+    try Effect.try(() => assert.deepStrictEqual({
+      listed: [...nativePlugins.AlphaNetworkLocation.methods],
+      fresh: "latitude" in fresh ? [fresh.latitude, fresh.longitude, fresh.accuracy] : undefined,
+      same: "unchanged" in same ? same.fingerprint : undefined,
+      offGlobe,
+      noAccuracy,
+      locked: locked.locked,
+    }, { listed: ["locate"], fresh: [37.77, -122.42, 40], same: "a1", offGlobe: undefined, noAccuracy: undefined, locked: true }))
   }
 })
 
@@ -389,17 +414,30 @@ it.effect("open mock mode only in a test-mocks build, after the live collectors 
 
 // spec/platform/index.md, "A request crosses to the resident only as the owner route table allows, and an unclaimed path only reads or posts"
 it.live("send the resident only what the owner route table allows", () => effect {
-  const phone = agent({ ...owned, "DELETE /api/triggers/t1": { status: 200, data: { ok: true } } })
+  const phone = agent({
+    ...owned,
+    "DELETE /api/triggers/t1": { status: 200, data: { ok: true } },
+    "POST /api/notes/interact": { status: 200, data: { ok: true } },
+    "GET /api/notes/trash/recordings": { status: 200, data: { cleanups: [] } },
+  })
   provide residentOver(phone.plugin, true, undefined) {
     const resident = try Resident
     const claimedWrongVerb = try Effect.flip(resident.json("PUT", "/api/notes/state", { notes: [] }))
     const unclaimedDelete = try Effect.flip(resident.json("DELETE", "/api/conversations/c1"))
+    const eraseRead = try Effect.flip(resident.json("GET", "/api/notes/trash/erase"))
+    const strayQuery = try Effect.flip(resident.json("POST", "/api/notes/interact?owner=ben", { capability: "list" }))
     const allowed = try resident.json("DELETE", "/api/triggers/t1")
+    const interacted = try resident.json("POST", "/api/notes/interact", { capability: "list" })
+    const cleanups = try resident.json("GET", "/api/notes/trash/recordings")
     try Effect.try(() => assert.deepStrictEqual({
-      refused: [claimedWrongVerb, unclaimedDelete].map((error) => error instanceof ResidentRefused ? error.code : undefined),
-      allowed: allowed.data,
+      refused: [claimedWrongVerb, unclaimedDelete, eraseRead, strayQuery].map((error) => error instanceof ResidentRefused ? error.code : undefined),
+      allowed: [allowed.data, interacted.data, cleanups.data],
       sent: phone.sent.filter((request) => request.method !== "GET").map((request) => `${request.method} ${request.path}`),
-    }, { refused: ["InvalidRoute", "InvalidRoute"], allowed: { ok: true }, sent: ["DELETE /api/triggers/t1"] }))
+    }, {
+      refused: ["InvalidRoute", "InvalidRoute", "InvalidRoute", "InvalidRoute"],
+      allowed: [{ ok: true }, { ok: true }, { cleanups: [] }],
+      sent: ["DELETE /api/triggers/t1", "POST /api/notes/interact"],
+    }))
   }
 })
 
@@ -599,6 +637,45 @@ it.effect("keep what two pages saved at once, the newer never lost", () => effec
 })
 
 // spec/platform/storage.md, "Story: Reset Alpha's data"
+// spec/platform/storage.md, "A stored value that is not a state is held for review and never written over"
+it.effect("keep a damaged value apart for review while new drafts are saved, and discard only that copy", () => effect {
+  provide memoryStore {
+    const store = try KeyValueStore.KeyValueStore
+    try store.set(ownerKey("ann", "inbox/unsaved"), "{not json")
+    provide deviceStorageLive {
+      const storage = try DeviceStorage
+      try storage.admitStartup()
+      try storage.bindOwner("ann")
+      const kept = try storage.hold(ownerKey("ann", "inbox/unsaved"))
+      try store.set(ownerKey("ann", "inbox/unsaved"), "{\"drafts\":[]}")
+      const again = try storage.hold(ownerKey("ann", "inbox/unsaved"))
+      const copy = try storage.held(ownerKey("ann", "inbox/unsaved"))
+      const review = try Stream.runHead(storage.changes)
+      try storage.resolve(ownerKey("ann", "inbox/unsaved"))
+      const after = try Stream.runHead(storage.changes)
+      const copyLeft = try storage.held(ownerKey("ann", "inbox/unsaved"))
+      const drafts = try store.get(ownerKey("ann", "inbox/unsaved"))
+      try Effect.try(() => assert.deepStrictEqual({
+        kept,
+        again,
+        copy,
+        review: review._tag === "Some" ? [...review.value.review] : undefined,
+        resolved: after._tag === "Some" ? [...after.value.review] : undefined,
+        copyLeft,
+        drafts,
+      }, {
+        kept: true,
+        again: true,
+        copy: "{not json",
+        review: [ownerKey("ann", "inbox/unsaved")],
+        resolved: [],
+        copyLeft: undefined,
+        drafts: "{\"drafts\":[]}",
+      }))
+    }
+  }
+})
+
 it.effect("reset everything Alpha kept for me, and start again with no owner bound", () => effect {
   provide memoryStore {
     const store = try KeyValueStore.KeyValueStore
@@ -617,8 +694,8 @@ it.effect("reset everything Alpha kept for me, and start again with no owner bou
       try Effect.try(() => assert.deepStrictEqual({
         after: after._tag === "Some" ? [after.value.owner, after.value.resets, after.value.resetPending] : undefined,
         rebound: rebound._tag === "Some" ? rebound.value.owner : undefined,
-        kept: kept._tag,
-      }, { after: ["", 1, false], rebound: "ben", kept: "None" }))
+        kept,
+      }, { after: ["", 1, false], rebound: "ben", kept: undefined }))
     }
   }
 })

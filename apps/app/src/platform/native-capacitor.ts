@@ -83,11 +83,6 @@ export const capacitor: CapacitorPort = {
   },
 };
 
-/** A fresh random id for one native request, stream or subscription. @throws {never} */
-export function newId(): string {
-  return crypto.randomUUID();
-}
-
 /** The bytes a base64 text encodes, or undefined where it is not base64. @throws {never} */
 export function bytesOfBase64(text: string): Uint8Array | undefined {
   try {

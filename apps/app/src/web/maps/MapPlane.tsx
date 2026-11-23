@@ -1,34 +1,26 @@
-// spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "The compass shows only while the map is turned or tilted and guidance is not following, and puts north up"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"
+// spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "The compass shows only while the map is turned or tilted and guidance is not following, and puts north up"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"; spec/maps/plane.md, "Story: See the map for what I am looking at"
 import maplibregl, { type GeoJSONSource, type Map as MapLibre, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Compass } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { Basemap } from "../../../gen/maps__plane.ts";
 import { compassShown } from "../../../gen/maps__plane.ts";
 import type { Coordinate } from "../../maps/maps.schema.vibe";
+import type { PlaneDrawing } from "../../maps/plane.vibe";
 import { Button } from "../components/ui/index.ts";
-import { ask } from "./actions.ts";
+import { ask, watch } from "./actions.ts";
 
 const WORLD_STYLE = "https://tiles.openfreemap.org/styles/bright";
 const OPENING: { center: [number, number]; zoom: number } = { center: [-98, 39], zoom: 2.6 };
 
-/** A place drawn on the map; tapping it reports its id. */
-export type MapPin = { readonly id: string; readonly label: string; readonly coordinate: Coordinate };
-
-/** What the plane draws and the reports it makes: basemap, pins, position, route, camera and its callbacks. */
+/** The basemap the plane is built for and the reports it makes; what it draws comes from the Maps plane's drawing. */
 export type MapPlaneProps = {
   /** Which map to draw; NoBasemap draws nothing. */
   basemap: Basemap;
   /** Raster tile size the provider serves. */
   tileSize?: number;
   maxZoom?: number;
-  pins: ReadonlyArray<MapPin>;
-  /** The place the screen shows, kept in view. */
-  selection?: Coordinate;
-  /** The phone's position and heading while known. */
-  position?: { coordinate: Coordinate; accuracyMeters: number; headingDegrees?: number };
-  route?: ReadonlyArray<Coordinate>;
-  /** Keep the camera on the position, rotated to its heading. */
+  /** Guidance follows the position, so the compass stays hidden. */
   follow: boolean;
   /** Accessible name of the map, such as "Google Maps". */
   label: string;
@@ -63,8 +55,68 @@ function lineOf(route: ReadonlyArray<Coordinate> | undefined) {
   return { type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: (route ?? []).map((c) => [c.longitude, c.latitude]) } };
 }
 
+function dot(className: string, label: string, onClick?: () => void): HTMLElement {
+  const element = document.createElement(onClick ? "button" : "span");
+  if (element instanceof HTMLButtonElement) element.type = "button";
+  element.setAttribute("aria-label", label);
+  element.className = className;
+  if (onClick) element.addEventListener("click", onClick);
+  return element;
+}
+
+/** A painter for one MapLibre map: each drawing redraws only the route, pins, position or camera that changed. */
+function painter(map: MapLibre, basemap: Basemap, onPin: (id: string) => void): { paint: (d: PlaneDrawing) => void; clear: () => void } {
+  const markers: maplibregl.Marker[] = [];
+  let here: maplibregl.Marker | undefined;
+  let keys = { route: "", pins: "", here: "", view: "" };
+  const paint = (d: PlaneDrawing) => {
+    const route = JSON.stringify(d.route?.length ? [d.route[0], d.route.at(-1), d.route.length] : []);
+    const pins = JSON.stringify(d.pins.map((p) => [p.id, p.coordinate.latitude, p.coordinate.longitude]));
+    const position = JSON.stringify(d.position ?? null);
+    const view = JSON.stringify([d.selection, d.follow, d.follow ? d.position : undefined]);
+    if (route !== keys.route) {
+      (map.getSource("route") as GeoJSONSource | undefined)?.setData(lineOf(d.route));
+      if (d.route && d.route.length >= 2 && !d.follow) {
+        const bounds = d.route.reduce((b, c) => b.extend([c.longitude, c.latitude]), new maplibregl.LngLatBounds());
+        map.fitBounds(bounds, { padding: { top: 220, bottom: 280, left: 30, right: 30 }, maxZoom: 14, duration: 350 });
+      }
+    }
+    if (pins !== keys.pins) {
+      for (const marker of markers.splice(0)) marker.remove();
+      for (const pin of d.pins) {
+        const element = dot("size-4 rounded-full border-2 border-background bg-primary", pin.label, () => onPin(pin.id));
+        markers.push(new maplibregl.Marker({ element }).setLngLat([pin.coordinate.longitude, pin.coordinate.latitude]).addTo(map));
+      }
+      if (d.pins.length > 1 && !d.selection && !d.route && basemap === "WorldMap") {
+        const bounds = d.pins.reduce((b, p) => b.extend([p.coordinate.longitude, p.coordinate.latitude]), new maplibregl.LngLatBounds());
+        map.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 350 });
+      }
+    }
+    if (position !== keys.here) {
+      here?.remove();
+      here = d.position
+        ? new maplibregl.Marker({ element: dot("size-3 rounded-full border-2 border-background bg-primary ring-4 ring-primary/30", "Your location") })
+          .setLngLat([d.position.coordinate.longitude, d.position.coordinate.latitude]).addTo(map)
+        : undefined;
+    }
+    if (view !== keys.view) {
+      if (d.follow && d.position) {
+        map.easeTo({ center: [d.position.coordinate.longitude, d.position.coordinate.latitude], zoom: Math.max(map.getZoom(), 16.5), bearing: d.position.headingDegrees ?? map.getBearing(), duration: 500 });
+      } else if (d.selection && !d.route) {
+        map.easeTo({ center: [d.selection.longitude, d.selection.latitude], zoom: basemap === "WorldMap" ? 14 : map.getZoom(), bearing: 0, duration: 0 });
+      }
+    }
+    keys = { route, pins, here: position, view };
+  };
+  const clear = () => {
+    for (const marker of markers.splice(0)) marker.remove();
+    here?.remove();
+  };
+  return { paint, clear };
+}
+
 /**
- * The MapLibre plane: one map per element and basemap, tiles fetched through the account-bound Cloud provider.
+ * The MapLibre plane: one map per element and basemap, tiles fetched through the account-bound Cloud provider, drawn from the plane's drawing as it changes.
  * @model spec/maps/plane.md
  * @design design.md
  */
@@ -86,9 +138,12 @@ export function MapPlane(props: MapPlaneProps) {
       container: node, style: styleFor(basemap, protocol, tileSize, maxZoom), center: OPENING.center, zoom: OPENING.zoom,
       attributionControl: false, cancelPendingTileRequestsWhileZooming: false,
     });
+    const drawn = painter(instance, basemap, props.onPin);
+    let stop: (() => void) | undefined;
     instance.on("load", () => {
       instance.addSource("route", { type: "geojson", data: lineOf([]) });
       instance.addLayer({ id: "route-line", type: "line", source: "route", paint: { "line-width": 6, "line-color": getComputedStyle(node).getPropertyValue("--primary") || "currentColor" } });
+      stop = watch((s) => s.plane.drawing, drawn.paint);
       props.onState(generation, "PlaneReady");
     });
     instance.on("error", () => { if (!instance.loaded()) props.onState(generation, "PlaneFailed"); });
@@ -107,52 +162,13 @@ export function MapPlane(props: MapPlaneProps) {
     instance.on("pitch", turned);
     setMap(instance);
     return () => {
+      stop?.();
+      drawn.clear();
       instance.remove();
       maplibregl.removeProtocol(protocol);
       setMap(undefined);
     };
   }, [basemap, tileSize, maxZoom, generation]);
-
-  const markers = useRef<maplibregl.Marker[]>([]).current;
-  const routeKey = JSON.stringify(props.route?.length ? [props.route[0], props.route.at(-1), props.route.length] : []);
-  const pinKey = JSON.stringify(props.pins.map((p) => p.id));
-  const viewKey = JSON.stringify([props.selection, props.follow, props.follow ? props.position : undefined]);
-
-  const syncRoute = useCallback((node: HTMLSpanElement | null) => {
-    if (!node || !map) return;
-    const source = map.getSource("route") as GeoJSONSource | undefined;
-    source?.setData(lineOf(props.route));
-    if (props.route && props.route.length >= 2 && !props.follow) {
-      const bounds = props.route.reduce((b, c) => b.extend([c.longitude, c.latitude]), new maplibregl.LngLatBounds());
-      map.fitBounds(bounds, { padding: { top: 220, bottom: 280, left: 30, right: 30 }, maxZoom: 14, duration: 350 });
-    }
-  }, [map, routeKey]);
-
-  const syncPins = useCallback((node: HTMLSpanElement | null) => {
-    if (!node || !map) return;
-    for (const marker of markers.splice(0)) marker.remove();
-    for (const pin of props.pins) {
-      const element = document.createElement("button");
-      element.type = "button";
-      element.setAttribute("aria-label", pin.label);
-      element.className = "size-4 rounded-full border-2 border-background bg-primary";
-      element.addEventListener("click", () => props.onPin(pin.id));
-      markers.push(new maplibregl.Marker({ element }).setLngLat([pin.coordinate.longitude, pin.coordinate.latitude]).addTo(map));
-    }
-    if (props.pins.length > 1 && !props.selection && !props.route && basemap === "WorldMap") {
-      const bounds = props.pins.reduce((b, p) => b.extend([p.coordinate.longitude, p.coordinate.latitude]), new maplibregl.LngLatBounds());
-      map.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 350 });
-    }
-  }, [map, pinKey]);
-
-  const syncCamera = useCallback((node: HTMLSpanElement | null) => {
-    if (!node || !map) return;
-    if (props.follow && props.position) {
-      map.easeTo({ center: [props.position.coordinate.longitude, props.position.coordinate.latitude], zoom: Math.max(map.getZoom(), 16.5), bearing: props.position.headingDegrees ?? map.getBearing(), duration: 500 });
-    } else if (props.selection && !props.route) {
-      map.easeTo({ center: [props.selection.longitude, props.selection.latitude], zoom: basemap === "WorldMap" ? 14 : map.getZoom(), bearing: 0, duration: 0 });
-    }
-  }, [map, viewKey]);
 
   const northUp = () => {
     if (!map) return;
@@ -169,9 +185,6 @@ export function MapPlane(props: MapPlaneProps) {
           <Compass aria-hidden style={{ transform: `rotate(${-turn.bearing}deg)` }} />
         </Button>
       )}
-      <span ref={syncRoute} hidden />
-      <span ref={syncPins} hidden />
-      <span ref={syncCamera} hidden />
     </div>
   );
 }

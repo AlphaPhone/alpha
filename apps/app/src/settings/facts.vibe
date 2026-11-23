@@ -25,6 +25,8 @@ const SHADE: Record<string, ShadeAnswer> = {
 
 /** The facts Settings reads, the text size, the Home role and Android's own pages. */
 export service DeviceFacts {
+  /** The facts of the newest settled read, such as Do Not Disturb, each unknown until Android answered it. */
+  read(): DeviceRead!!
   /** Read every fact again under a new generation. */
   refresh(): void!!
   /** The app came back: read now if Settings is shown, otherwise when it is next shown. */
@@ -134,6 +136,7 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
   }
 
   return {
+    read: () => effect { return (try facts.get()).read },
     refresh: () => within(refresh()),
     resume: () => within(effect {
       const before = (try facts.get()).generation

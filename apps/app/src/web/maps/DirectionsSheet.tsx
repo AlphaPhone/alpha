@@ -28,6 +28,9 @@ export type DirectionsSheetProps = {
   choosing: boolean;
   candidates: ReadonlyArray<Place>;
   savedMatches: ReadonlyArray<SavedItem>;
+  /** Swap is on the sheet: a starting point is set and none is being chosen. */
+  swapShown: boolean;
+  /** Swap can run now: the route is planned. */
   canSwap: boolean;
   canStart: boolean;
   /** Google content is shown, so the route may not be shared. */
@@ -61,7 +64,10 @@ export function DirectionsSheet(p: DirectionsSheetProps) {
       <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); p.onSubmitOrigin(); }}>
         <Input aria-label="Starting point" placeholder="My location" value={p.originText} enterKeyHint="go" onChange={(e) => p.onOriginText(e.target.value)} />
         <Button variant="ghost" size="icon" aria-label="Use my location" onClick={p.onUseLocation}><LocateFixed aria-hidden /></Button>
-        {p.canSwap && <Button variant="ghost" size="icon" aria-label="Swap start and destination" onClick={p.onSwap}><ArrowDownUp aria-hidden /></Button>}
+        {p.swapShown && (
+          <Button variant="ghost" size="icon" aria-label="Swap start and destination" aria-disabled={!p.canSwap || undefined}
+            className={cn(!p.canSwap && "opacity-50")} onClick={() => { if (p.canSwap) p.onSwap(); }}><ArrowDownUp aria-hidden /></Button>
+        )}
       </form>
       <div role="radiogroup" aria-label="Travel mode" className="flex gap-2">
         {MODES.map(({ travel, label, Icon }) => (

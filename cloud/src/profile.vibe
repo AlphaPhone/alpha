@@ -74,7 +74,7 @@ function environmentProfile(environment: CloudEnvironment, inputs: EnvironmentIn
     api: hosts.api,
     web: hosts.web,
     entitlementAudience: alphaAudience,
-    mailSender: "noreply@alphacompute.ai",
+    mailSender: "noreply@alphacompute.cc",
     databaseIdentity: inputs.databaseIdentity,
     firstPartyOrigins: [hosts.web],
     capabilities: ["inference", "speech", "maps", "managedGoogle", "billing"],

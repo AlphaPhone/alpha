@@ -1,7 +1,7 @@
 // spec/browser/session.md, "A navigation loads the tab's WebView, creating it first when the tab has none"; spec/browser/webSurface.md, "Story: Show a page in a frame I can trust"
 import { Build } from "../platform/build.vibe"
 import { Native, NativeFailed, NativeUnavailable } from "../platform/native.vibe"
-import { newId } from "./address.ts"
+import { newId } from "../platform/ids.ts"
 import { WebTabHost } from "./web-surface.ts"
 
 /** The Capacitor name of Alpha's native tab host. */

@@ -26,13 +26,14 @@ import { HandoffPanel } from "./HandoffPanel.tsx";
 import { StopwatchPanel } from "./StopwatchPanel.tsx";
 import { TimersPanel } from "./TimersPanel.tsx";
 import { WorldClockPanel } from "./WorldClockPanel.tsx";
-import { buildInfo, run, runtime } from "./connect.ts";
+import { runtime } from "../runtime.ts";
+import { act, buildInfo } from "../shell/services.ts";
 
 const TABS = ["alarms", "timers", "stopwatch", "world"] as const;
 type Tab = (typeof TABS)[number];
 
-const act = (use: (actions: ClockActions.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ClockActions), use));
-const handoffDo = (use: (handoff: ClockHandoff.Shape) => Effect.Effect<unknown>) => run(Effect.flatMap(Effect.service(ClockHandoff), use));
+const clockDo = (use: (actions: ClockActions.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ClockActions), use));
+const handoffDo = (use: (handoff: ClockHandoff.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ClockHandoff), use));
 
 /** What the shell gives the Clock app: the tab a route names (alarms, timers, stopwatch or world), and how to leave. */
 export type ClockScreenProps = ScreenProps;
@@ -53,7 +54,7 @@ export function ClockScreen({ route, onClose }: ClockScreenProps) {
   const browser = buildInfo().variant === "browser";
   const close = () => {
     handoffDo((h) => h.retire());
-    act((a) => a.silence());
+    clockDo((a) => a.silence());
     onClose();
   };
   return (
@@ -74,12 +75,12 @@ export function ClockScreen({ route, onClose }: ClockScreenProps) {
             <AlarmsPanel
               clock={alarms}
               now={ringer.now}
-              onAdd={(hour, minute, label, days) => act((a) => a.addAlarm(hour, minute, label, days))}
-              onSnooze={(alarm) => act((a) => a.snoozeAlarm(alarm.id, alarm.revision))}
-              onDismiss={(alarm) => act((a) => Effect.andThen(a.silence(), a.dismissAlarm(alarm.id, alarm.revision)))}
-              onSwitch={(alarm, on) => act((a) => a.switchAlarm(alarm.id, alarm.revision, on))}
-              onDelete={(alarm) => act((a) => a.deleteAlarm(alarm.id, alarm.revision))}
-              onSnoozeMinutes={(minutes) => act((a) => a.setSnoozeMinutes(minutes))}
+              onAdd={(hour, minute, label, days) => clockDo((a) => a.addAlarm(hour, minute, label, days))}
+              onSnooze={(alarm) => clockDo((a) => a.snoozeAlarm(alarm.id, alarm.revision))}
+              onDismiss={(alarm) => clockDo((a) => Effect.andThen(a.silence(), a.dismissAlarm(alarm.id, alarm.revision)))}
+              onSwitch={(alarm, on) => clockDo((a) => a.switchAlarm(alarm.id, alarm.revision, on))}
+              onDelete={(alarm) => clockDo((a) => a.deleteAlarm(alarm.id, alarm.revision))}
+              onSnoozeMinutes={(minutes) => clockDo((a) => a.setSnoozeMinutes(minutes))}
             />
           ) : (
             <HandoffPanel
@@ -97,16 +98,16 @@ export function ClockScreen({ route, onClose }: ClockScreenProps) {
           <TimersPanel
             timers={timers}
             now={ringer.now}
-            onStart={(label, ms) => act((a) => a.startTimer(label, ms))}
-            onTimer={(action, timer) => act((a) => a.timer(action, timer.id))}
-            onDismiss={(timer) => act((a) => Effect.andThen(a.silence(), a.dismissTimer(timer.id, timer.revision)))}
+            onStart={(label, ms) => clockDo((a) => a.startTimer(label, ms))}
+            onTimer={(action, timer) => clockDo((a) => a.timer(action, timer.id))}
+            onDismiss={(timer) => clockDo((a) => Effect.andThen(a.silence(), a.dismissTimer(timer.id, timer.revision)))}
           />
         </TabsContent>
         <TabsContent value="stopwatch" className="pt-4">
-          <StopwatchPanel watch={watch} now={ringer.now} onAction={(action) => act((a) => a.stopwatch(action))} />
+          <StopwatchPanel watch={watch} now={ringer.now} onAction={(action) => clockDo((a) => a.stopwatch(action))} />
         </TabsContent>
         <TabsContent value="world" className="pt-4">
-          <WorldClockPanel world={world} now={ringer.now} known={timeZones()} onAdd={(zone) => act((a) => a.addZone(zone))} onRemove={(zone) => act((a) => a.removeZone(zone))} />
+          <WorldClockPanel world={world} now={ringer.now} known={timeZones()} onAdd={(zone) => clockDo((a) => a.addZone(zone))} onRemove={(zone) => clockDo((a) => a.removeZone(zone))} />
         </TabsContent>
       </Tabs>
     </main>

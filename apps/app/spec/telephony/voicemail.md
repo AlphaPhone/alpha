@@ -82,8 +82,9 @@ pure def sometimesAnUnsupportedCarrier(v: Voicemail): bool = v.carrier == Carrie
 
 ### Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is
 
-Tapping the open voicemail again closes it. Audio not yet on the phone asks its source to
-download it first; a failed fetch can be retried.
+Tapping the open voicemail again closes it, and so does Back on the Voicemail tab: a delete
+confirmation closes first, and a delete in flight holds Back. Audio not yet on the phone asks its
+source to download it first; a failed fetch can be retried.
 
 ```quint
 pure def canVoicemailOpened(v: Voicemail, id: str): bool = v.shown and listed(v.rows, id) and not(v.opened.deleting)
@@ -97,6 +98,14 @@ pure def voicemailOpened(v: Voicemail, id: str): Voicemail = {
 }
 pure def canVoicemailClosed(v: Voicemail): bool = v.opened.openId != "" and not(v.opened.deleting)
 pure def voicemailClosed(v: Voicemail): Voicemail = { ...v, opened: noVoicemail(v.opened.ticket + 1) }
+type VoicemailBack = VoicemailDeleteHolds | ConfirmCloses | VoicemailCloses | NoVoicemailBack
+pure def voicemailBack(v: Voicemail): VoicemailBack =
+  if (v.opened.deleting) VoicemailDeleteHolds
+  else if (v.opened.confirming) ConfirmCloses
+  else if (v.opened.openId != "") VoicemailCloses
+  else NoVoicemailBack
+pure def lawBackClosesTheConfirmationBeforeTheVoicemail(v: Voicemail): bool =
+  (v.opened.confirming and not(v.opened.deleting)) implies voicemailBack(v) == ConfirmCloses
 pure def canAudioAsked(v: Voicemail): bool = v.shown and v.opened.openId != "" and (v.opened.audio == AudioNone or v.opened.audio == AudioFailed)
 pure def audioAsked(v: Voicemail): Voicemail = { ...v, opened: { ...v.opened, audio: AudioFetching } }
 pure def canAudioAnswered(v: Voicemail, ticket: int): bool = v.opened.audio == AudioFetching and ticket == v.opened.ticket

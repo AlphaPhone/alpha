@@ -63,6 +63,8 @@ export interface MapsContentState {
   readonly eventOrigin?: EventOrigin
   /** Whether guidance voice is on. */
   readonly voiceOn: boolean
+  /** The name being typed for the shown place under its `id`, while its rename field is open. */
+  readonly renaming?: { readonly id: number; readonly text: string }
   readonly nextId: number
 }
 

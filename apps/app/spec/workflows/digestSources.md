@@ -96,6 +96,19 @@ pure def canRevokeGrant(s: Sources, confirmed: bool): bool = s.authorization == 
 pure def revokeGrant(s: Sources, confirmed: bool): Sources = if (confirmed) { ...s, authorization: NoAuthorization, grantExpiresAt: 0 } else s
 ```
 
+### Removing a grant Account names needs only Alpha in front, and clears this session's grant only once confirmed
+
+Account's delegation panel opens Workflows at `google-removal/<grantId>`; the same removal review
+lists what reads through Google, and the grant is removed only after the agent confirms it.
+
+```quint
+pure def canRevokeNamedGrant(s: Sources, confirmed: bool): bool = s.session != 0 and s.foreground
+pure def revokeNamedGrant(s: Sources, confirmed: bool): Sources =
+  if (confirmed and s.authorization == Granted) { ...s, authorization: NoAuthorization, grantExpiresAt: 0 } else s
+pure def stepAnUnconfirmedRemovalKeepsTheGrant(before: Sources, via: str, after: Sources): bool =
+  ((via == "revokeGrant" or via == "revokeNamedGrant") and before.authorization == Granted and after.authorization != Granted) implies after.grantExpiresAt == 0
+```
+
 ### Removing Google access first shows every saved source and digest that reads through it, and a changed list asks again
 
 The review lists the Google sources and the digests bound to them; confirming reads them again, and

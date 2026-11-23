@@ -2,7 +2,7 @@
 import { decodeFilesOperation, describeFilesOperation, type FilesAgentOperation } from "@elizaos/plugin-files/contract"
 import { copy } from "../assistant/presentation.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
-import { PRIVATE_APPS } from "../shell/assistantHost.vibe"
+import { AssistantHost } from "../assistant/host.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { FilesAgent, type AgentContext } from "./agent.vibe"
 
@@ -14,11 +14,13 @@ function decoded(operation: unknown): FilesAgentOperation | undefined {
 export const operationPorts = effect {
   const files = try FilesAgent
   const navigation = try Navigation
+  const host = try AssistantHost
 
   effect function context() {
     const nav = try navigation.get()
+    const { exposure } = try host.screen()
     const view: AgentContext["view"] = nav.app === "" ? (nav.library ? "other" : "home") : nav.app === "files" ? "files" : "other"
-    return { view, sensitive: PRIVATE_APPS.has(nav.app), foreground: !nav.hidden } satisfies AgentContext
+    return { view, sensitive: exposure.privateView || exposure.locked, foreground: !nav.hidden && !exposure.hidden } satisfies AgentContext
   }
 
   const ports: OperationPorts = {

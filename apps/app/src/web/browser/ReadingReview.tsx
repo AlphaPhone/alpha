@@ -1,5 +1,5 @@
 // spec/browser/reading.md, "The question goes to the editor only with an excerpt or clean pasted text, and only while the same page is shown"; spec/browser/reading.md, "Read is offered only after the page text settled, speaks a non-empty clean excerpt of the still-current page, and only the latest speech ends the reading"
-import { type Reading, canLocalRead, canQuestionApproved } from "../../../gen/browser__reading.ts";
+import { type Reading, canLocalRead, canQuestionApproved, reviewShown } from "../../../gen/browser__reading.ts";
 import { MAX_EXCERPT } from "../../browser/page-text.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Textarea } from "../components/ui/index.ts";
 
@@ -21,8 +21,7 @@ export interface ReadingReviewProps {
  */
 export function ReadingReview({ reading, onEdit, onApprove, onStop, onClose }: ReadingReviewProps) {
   const asking = reading.kind === "AskAboutPage";
-  const open = reading.phase === "Reviewing" || (reading.kind === "ReadLocally" && reading.phase === "Speaking");
-  if (!open || reading.kind === "ReadAloud") return null;
+  if (!reviewShown(reading)) return null;
   const speaking = reading.phase === "Speaking";
   const ready = asking ? canQuestionApproved(reading, reading.bound) : canLocalRead(reading, true);
   const origin = URL.parse(reading.bound.url)?.origin ?? "";

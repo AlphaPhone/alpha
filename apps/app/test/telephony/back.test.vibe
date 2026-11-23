@@ -1,0 +1,158 @@
+// spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/messages.md, "Back closes Messages' own layers one at a time, innermost first, before it leaves Messages"; spec/telephony/contacts.md, "Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/phone.md, "Back clears Alpha's filter before it leaves Phone"
+import { assert, it } from "@effect/vitest"
+import { Machine as CommsMachine } from "../../gen/telephony__comms.effect.vibe"
+import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
+import { Machine as MessagesMachine } from "../../gen/telephony__messages.effect.vibe"
+import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { Machine as VoicemailMachine } from "../../gen/telephony__voicemail.effect.vibe"
+import { placeOfKey, TelephonyBack } from "../../src/telephony/back.vibe"
+import { ContactsView } from "../../src/telephony/contacts.vibe"
+import { MessagesView } from "../../src/telephony/messages.vibe"
+import { PhoneView } from "../../src/telephony/phone.vibe"
+import { VoicemailView } from "../../src/telephony/voicemail.vibe"
+import { fakePhone, until } from "./fakes.vibe"
+
+it.live("Back returns the stage, then closes the chat, before it is the app's own (spec/telephony/comms.md, \"A view change while the chat is open keeps the sheet's height and remembers the view it left\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const back = try TelephonyBack
+    const comms = try CommsMachine
+    try comms.send({ type: "subjectShown", app: "MessagesApp", subject: "ThreadSubject", key: "messages:thread:thread:1" }, "Owner")
+    try comms.send({ type: "alphaOpened" }, "Owner")
+    try comms.send({ type: "subjectShown", app: "PhoneApp", subject: "CallSubject", key: "phone:call:c1" }, "Owner")
+    const returned = try back.back("phone")
+    const afterReturn = try comms.get()
+    const closed = try back.back("messages")
+    const afterClose = try comms.get()
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        returned, stage: [afterReturn.app, afterReturn.key, afterReturn.stage.length, afterReturn.height],
+        navigated: fake.calls.filter((c) => c.startsWith("navigation.open")),
+        closed, height: afterClose.height, target: afterClose.target,
+        places: [placeOfKey("messages:list:"), placeOfKey("contacts:contact:7"), placeOfKey("phone:recents:")],
+      },
+      {
+        returned: true, stage: ["MessagesApp", "messages:thread:thread:1", 0, "SheetOpen"],
+        navigated: ["navigation.open:messages:thread:thread:1"],
+        closed: true, height: "SheetClosed", target: "PersonTarget",
+        places: [{ app: "messages" }, { app: "contacts" }, { app: "phone", route: "recents" }],
+      },
+    ))
+  }
+})
+
+it.live("Back in Messages closes the menu, the conversation, the search and Alpha's chip before it leaves (spec/telephony/messages.md, \"Back closes Messages' own layers one at a time, innermost first, before it leaves Messages\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const back = try TelephonyBack
+    const view = try MessagesView
+    const messages = try MessagesMachine
+    const comms = try CommsMachine
+    const visit = fork view.visit("thread:thread:1")
+    try until(messages.changes, (m) => m.rows.length > 0)
+    try messages.send({ type: "menuOpened", rowId: "sms:1" })
+    const menu = try back.back("messages")
+    const afterMenu = try messages.get()
+    const thread = try back.back("messages")
+    try until(messages.changes, (m) => m.view.tag === "ThreadList" && m.threads.length > 0)
+    const key = (try comms.get()).key
+    try messages.send({ type: "searchOpened" })
+    const search = try back.back("messages")
+    const afterSearch = try messages.get()
+    try messages.send({ type: "alphaFiltered", query: "five", label: "five" })
+    const chip = try back.back("messages")
+    const afterChip = try messages.get()
+    const leaves = try back.back("messages")
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { menu, menuGone: afterMenu.menu.tag, stillInThread: afterMenu.view.tag, thread, key, search, searching: afterSearch.searching, chip, query: afterChip.listQuery.tag, leaves },
+      { menu: true, menuGone: "NoMenu", stillInThread: "InThread", thread: true, key: "messages:list:", search: true, searching: false, chip: true, query: "NoQuery", leaves: false },
+    ))
+  }
+})
+
+it.live("Back in a new message closes the picker first and keeps what I wrote (spec/telephony/messages.md, \"Back closes Messages' own layers one at a time, innermost first, before it leaves Messages\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const back = try TelephonyBack
+    const view = try MessagesView
+    const messages = try MessagesMachine
+    const visit = fork view.visit()
+    try until(messages.changes, (m) => m.threads.length > 0)
+    try messages.send({ type: "composeOpened" })
+    try view.pickerQuery("maya")
+    const picker = try back.back("messages")
+    const afterPicker = try messages.get()
+    const compose = try back.back("messages")
+    const afterCompose = try messages.get()
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { picker, pickerOpen: afterPicker.picker.tag, view: afterPicker.view.tag, compose, list: afterCompose.view.tag },
+      { picker: true, pickerOpen: "PickerClosed", view: "Composing", compose: true, list: "ThreadList" },
+    ))
+  }
+})
+
+it.live("Back in Contacts closes the confirmation, the contact and Alpha's chip before it leaves (spec/telephony/contacts.md, \"Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const back = try TelephonyBack
+    const view = try ContactsView
+    const contacts = try ContactsMachine
+    const visit = fork view.visit()
+    try until(contacts.changes, (c) => c.rows.length === 1 && !c.loading)
+    try view.open("7")
+    try until(contacts.changes, (c) => c.detail.tag === "DetailRead")
+    try contacts.send({ type: "deleteAsked" })
+    const confirm = try back.back("contacts")
+    const afterConfirm = try contacts.get()
+    const contact = try back.back("contacts")
+    const afterContact = try contacts.get()
+    try view.alphaFilter("maya", "Maya")
+    const chip = try back.back("contacts")
+    const afterChip = try contacts.get()
+    const leaves = try back.back("contacts")
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { confirm, confirming: afterConfirm.confirming, stillOpen: afterConfirm.openId, contact, open: afterContact.openId, chip, chipLeft: afterChip.chip, leaves, removed: fake.calls.includes("contacts.remove") },
+      { confirm: true, confirming: false, stillOpen: "7", contact: true, open: "", chip: true, chipLeft: "", leaves: false, removed: false },
+    ))
+  }
+})
+
+it.live("Back on Phone closes the open voicemail and Alpha's filter, never a tab (spec/telephony/phone.md, \"Back clears Alpha's filter before it leaves Phone\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const back = try TelephonyBack
+    const phoneView = try PhoneView
+    const voicemailView = try VoicemailView
+    const phone = try PhoneMachine
+    const voicemail = try VoicemailMachine
+    try sync(() => {
+      fake.world.carrier = "CarrierReady"
+      fake.world.voicemails = [{ id: "v1", number: "4155550100", cachedName: "Maya Chen", date: 1, durationSeconds: 24, heard: false, audio: "AudioOnPhone", carrierTranscript: "Call me" }]
+    })
+    const visits = [fork phoneView.visit(), fork voicemailView.visit()]
+    try until(voicemail.changes, (v) => v.rows.length === 1)
+    try until(phone.changes, (p) => p.voicemailReady)
+    try phone.send({ type: "tabChosen", tab: "VoicemailTab" })
+    try voicemailView.open("v1")
+    try voicemail.send({ type: "deleteAsked" })
+    const confirm = try back.back("phone")
+    const afterConfirm = try voicemail.get()
+    const open = try back.back("phone")
+    const afterOpen = try voicemail.get()
+    try phone.send({ type: "alphaFiltered", query: "Maya", label: "Maya" })
+    const chip = try back.back("phone")
+    const afterChip = try phone.get()
+    const leaves = try back.back("phone")
+    for (const running of visits) try Fiber.interrupt(running)
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        confirm, confirming: afterConfirm.opened.confirming, stillOpen: afterConfirm.opened.openId, open, closed: afterOpen.opened.openId,
+        chip, query: afterChip.listQuery.tag, tab: afterChip.tab, leaves, deleted: fake.calls.includes("deleteVoicemail"),
+      },
+      { confirm: true, confirming: false, stillOpen: "v1", open: true, closed: "", chip: true, query: "NoQuery", tab: "RecentsTab", leaves: false, deleted: false },
+    ))
+  }
+})

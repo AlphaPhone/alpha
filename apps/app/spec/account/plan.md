@@ -269,3 +269,31 @@ pure def alwaysAConfirmedRemovalLeavesNoBinding(a: Admission): bool = a.host == 
 pure def sometimesRemovalUnconfirmed(a: Admission): bool = a.host == HostRemovalUnconfirmed and a.binding == Unbound
 pure def sometimesBindFailed(a: Admission): bool = a.host == HostBindFailed and a.binding == CloudBound
 ```
+
+## Story: See what my account needs when setup ends
+
+> As the owner, when the access walkthrough ends I see whether my plan is missing, my AI is still
+> being checked or is off, so a quiet setup never hides an account that needs me.
+
+### The Ready card names a missing plan, AI being checked and AI off, and only a missing plan or AI off asks for attention
+
+Own keys, or no Cloud account, leave Cloud's AI chip out. A plan the account needs is named
+first; then a bind the host refused; then a bind not yet answered. Checking is passing, so it
+never reopens a quiet end of the walkthrough (spec/shell/permissions.md).
+
+```quint
+type AiChip = NoPlanChip | AiCheckingChip | AiOffChip | NoAiChip
+pure def aiChip(account: bool, ownKeys: bool, notice: PlanNotice, host: HostInference, binding: Binding): AiChip =
+  if (ownKeys or not(account)) NoAiChip
+  else if (notice == NeedsPlanNotice or notice == PlanEndedNotice) NoPlanChip
+  else if (host == HostBindFailed) AiOffChip
+  else if (host == HostBinding or binding == NotBound) AiCheckingChip
+  else NoAiChip
+pure def chipAsksAttention(c: AiChip): bool = c == NoPlanChip or c == AiOffChip
+pure def lawOwnKeysShowNoCloudChip(notice: PlanNotice, host: HostInference, binding: Binding): bool =
+  aiChip(true, true, notice, host, binding) == NoAiChip
+pure def lawAMissingPlanIsNamedFirst(host: HostInference, binding: Binding): bool =
+  aiChip(true, false, NeedsPlanNotice, host, binding) == NoPlanChip and aiChip(true, false, PlanEndedNotice, host, binding) == NoPlanChip
+pure def lawCheckingNeverAsksAttention(notice: PlanNotice, host: HostInference, binding: Binding): bool =
+  aiChip(true, false, notice, host, binding) == AiCheckingChip implies not(chipAsksAttention(AiCheckingChip))
+```

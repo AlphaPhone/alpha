@@ -1,4 +1,4 @@
-// spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"
+// spec/maps/screen.md, "Back closes one layer at a time"; spec/maps/connection.md, "Changing account retires the provider; rebuilding the client for the same account keeps it"; spec/maps/guidance.md, "A fix guides only when usable, and only for the current session"; spec/maps/connection.md, "A coverage read starts only for a signed-in account, and a signed-out read sends nothing"
 import { machine as agentSurfaceMachine } from "../../gen/maps__agentSurface.effect.vibe"
 import { machine as cardsMachine } from "../../gen/maps__cards.effect.vibe"
 import { type ConnectionStep, Machine as ConnectionMachine, machine as connectionMachine } from "../../gen/maps__connection.effect.vibe"
@@ -6,23 +6,27 @@ import { machine as deliveryMachine } from "../../gen/maps__delivery.effect.vibe
 import { machine as eventReturnMachine } from "../../gen/maps__eventReturn.effect.vibe"
 import { machine as guidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { machine as locatorMachine } from "../../gen/maps__location.effect.vibe"
+import { machine as networkFixMachine } from "../../gen/maps__networkFix.effect.vibe"
 import { machine as notificationOpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
 import { machine as planeMachine } from "../../gen/maps__plane.effect.vibe"
 import { machine as screenMachine } from "../../gen/maps__screen.effect.vibe"
 import { machine as selectedReadMachine } from "../../gen/maps__selectedRead.effect.vibe"
-import { portsLive, pageLinksLive } from "./adapters.vibe"
+import { chatLive, portsLive, pageLinksLive } from "./adapters.vibe"
 import { agentLayer } from "./agent.vibe"
 import { MapsProvider, providerLayer } from "./cloud.vibe"
 import { MapsContent, contentLayer } from "./content.vibe"
 import { handoffLayer } from "./handoff.vibe"
 import { locationLayer } from "./location.vibe"
 import { MapsNavigation, navigationLayer } from "./navigation.vibe"
-import { planeLayer } from "./plane.vibe"
+import { networkLayer } from "./networkLocation.vibe"
+import { MapsPlane, planeLayer } from "./plane.vibe"
 import { MapsAccount, MapsShell } from "./ports.vibe"
 import { MapsHandoff } from "./handoff.vibe"
 import { savedLayer, savedMachine } from "./saved.vibe"
 import { MapsScreen, screenLayer } from "./screen.vibe"
 import { NavigationVoice, voiceLayer } from "./voice.vibe"
+
+export { mapsRelayPort } from "./agent.vibe"
 
 /** The Cloud Maps session: account binding, coverage reads and what an account change retires. */
 export service MapsSession {
@@ -30,6 +34,8 @@ export service MapsSession {
   open(): void!!
   /** The owner's Retry after a failed read. */
   retry(): void!!
+  /** Back while Maps is in front: closes the credits sheet, then a rename field, then one layer of the screen; false when Back leaves Maps. */
+  back(): boolean!!
 }
 
 const sessionLayer = Layer.effect(MapsSession, effect {
@@ -42,6 +48,7 @@ const sessionLayer = Layer.effect(MapsSession, effect {
   const shell = try MapsShell
   const handoff = try MapsHandoff
   const voice = try NavigationVoice
+  const plane = try MapsPlane
   const accounts = new Map<string, number>()
   let client = 0
 
@@ -85,16 +92,25 @@ const sessionLayer = Layer.effect(MapsSession, effect {
   return {
     effect open() { try settle(connection.send({ type: "openMaps" }) catch () => undefined) },
     effect retry() { try settle(connection.send({ type: "retryCoverage" }) catch () => undefined) },
+    effect back() {
+      if (try plane.closeInfo()) return true
+      const c = try content.get()
+      if (c.renaming !== undefined) {
+        try content.update((x) => ({ ...x, renaming: undefined }))
+        if (c.shown?.id === c.renaming.id) return true
+      }
+      return try screen.back()
+    },
   }
 })
 
 const machines = Layer.mergeAll(
-  connectionMachine(), locatorMachine(), screenMachine(), guidanceMachine(), planeMachine(), eventReturnMachine(),
+  connectionMachine(), locatorMachine(), networkFixMachine(), screenMachine(), guidanceMachine(), planeMachine(), eventReturnMachine(),
   notificationOpenMachine(), agentSurfaceMachine(), selectedReadMachine(), deliveryMachine(), cardsMachine(), savedMachine, contentLayer,
 )
 
 /**
- * Every Maps service over the ports of src/maps/ports.vibe: the session, provider, location, screen, guidance, voice, plane, saved
+ * Every Maps service over the ports of src/maps/ports.vibe: the session, provider, location and network position, screen, guidance, voice, plane, saved
  * places, agent glue and hand-offs, over their machines. Requires Native, Resident, Cloud, KeyValueStore,
  * AgentCalendar and the four ports.
  */
@@ -104,12 +120,13 @@ export const mapsCore = sessionLayer.pipe(
   Layer.provideMerge(navigationLayer),
   Layer.provideMerge(Layer.mergeAll(voiceLayer, savedLayer)),
   Layer.provideMerge(Layer.mergeAll(providerLayer, locationLayer)),
+  Layer.provideMerge(networkLayer),
   Layer.provideMerge(machines),
 )
 
 /**
- * Every Maps service with its ports filled from the areas before it and the page's links: requires the platform's Native, Resident,
- * ResidentControl, Cloud, Build and KeyValueStore, account's CloudSession, voice's Speech, telephony's call bar,
- * the shell's Navigation and calendar's AgentCalendar.
+ * Every Maps service with its ports filled from the areas before it, the page's links and the chat it counts: requires the platform's
+ * Native, Resident, Cloud, Build, AppLifecycle and KeyValueStore, account's MapsAccount and AccountSheet, voice's Speech, telephony's call bar, the
+ * shell's Navigation, calendar's AgentCalendar and the assistant's Composer.
  */
-export const layer = Layer.provideMerge(pageLinksLive, Layer.provideMerge(mapsCore, portsLive))
+export const layer = Layer.provideMerge(Layer.mergeAll(pageLinksLive, chatLive), Layer.provideMerge(mapsCore, portsLive))

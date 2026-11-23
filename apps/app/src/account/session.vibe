@@ -4,11 +4,13 @@ import {
   Machine as SessionMachine, isSignedIn, routeAdmitted, stored as storedSession
 } from "../../gen/account__session.effect.vibe"
 import { Build } from "../platform/build.vibe"
+import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
+import { cloudResidentPreview } from "../platform/build-flags.ts"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { ownerKey } from "../platform/storage.vibe"
-import { deployment, environmentFor, hostEnvironment } from "./deployment.ts"
+import { deployment } from "./deployment.ts"
 import { ensureResident, unbindInference } from "./inference.vibe"
 import { Completed, CredentialIdentity, Incomplete, Renewal, Renewed, UserAnswer } from "./signIn.schema.vibe"
 
@@ -93,7 +95,8 @@ export const sessionService = Layer.effect(CloudSession, effect {
   const resident = try Resident
   const build = try Build
   const notices = try PubSub.unbounded<IncompleteNotice>()
-  const environment = hostEnvironment(environmentFor(build.info.testMocks))
+  const cloudEnvironment = buildCloudEnvironment(build.info)
+  const environment = environmentName(cloudEnvironment)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -170,7 +173,7 @@ export const sessionService = Layer.effect(CloudSession, effect {
       return ownerKey(ownerNameOf(s), key)
     },
     effect run() {
-      try send({ type: "load", deployment, environment: environmentFor(build.info.testMocks), testMocks: build.info.testMocks })
+      try send({ type: "load", deployment, environment: cloudEnvironment, testMocks: build.info.testMocks, preview: cloudResidentPreview(build.info.variant !== "browser") })
       const s = try machine.get()
       if (!isSignedIn(s.phase) && (try native.available(plugin))) {
         const read = try readAccount(native, cloud, environment)

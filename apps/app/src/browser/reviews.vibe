@@ -1,4 +1,4 @@
-// spec/browser/reviews.md, "Story: Confirm only what I can see"; spec/browser/reviews.md, "A request while the same review is open, or while Alpha is hidden or the phone is locked, is refused at once and opens nothing"; spec/browser/reviews.md, "Hiding Alpha or locking the phone ends every open review as not confirmed"
+// spec/browser/reviews.md, "Story: Confirm only what I can see"; spec/browser/reviews.md, "Back denies the newest open review first, and is Browser's to pass on only when no review is open"; spec/browser/reviews.md, "A request while the same review is open, or while Alpha is hidden or the phone is locked, is refused at once and opens nothing"; spec/browser/reviews.md, "Hiding Alpha or locking the phone ends every open review as not confirmed"
 import { type ReviewEffect, type ReviewKind, type Reviews, Machine, machine } from "../../gen/browser__reviews.effect.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 
@@ -11,6 +11,8 @@ export service BrowserReviews {
   approve(id: string): void!!
   /** Cancel, Back or Escape. */
   dismiss(id: string): void!!
+  /** Hardware or gesture Back: denies the newest open review; false when none is open. */
+  back(): boolean!!
   /** Follows Alpha's visibility and the lock; never returns. */
   follow(): void!!
 }
@@ -46,6 +48,11 @@ export const reviewsLayer = Layer.provideMerge(Layer.effect(BrowserReviews, effe
     },
     approve: (id: string) => send({ type: "approve", id }),
     dismiss: (id: string) => send({ type: "dismiss", id }),
+    effect back() {
+      if ((try reviews.get()).open.length === 0) return false
+      try send({ type: "back" })
+      return true
+    },
     effect follow() {
       for try (const state of foreground.changes) {
         try send({ type: "foregroundChanged", foreground: state.visible })

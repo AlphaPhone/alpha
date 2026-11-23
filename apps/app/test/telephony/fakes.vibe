@@ -5,6 +5,7 @@ import { Build } from "../../src/platform/build.vibe"
 import { Native } from "../../src/platform/native.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
 import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
+import { Navigation } from "../../src/shell/navigation.vibe"
 import { TelephonyBridges, type TelephonyClients } from "../../src/telephony/bridges.vibe"
 import { telephonyLayer } from "../../src/telephony/layer.vibe"
 import { VoicemailTranscriber } from "../../src/telephony/ports.vibe"
@@ -48,6 +49,8 @@ export interface World {
   messages: { id: string; kind: "sms" | "mms"; threadId: string; direction: "incoming" | "outgoing"; status: string; deliveryReport: string; date: number; body: string; attachments: number }[]
   contacts: { id: string; lookup: string; name: string; revision: string; starred: boolean; phones: string[]; emails: string[] }[]
   smsAnswer: () => Promise<unknown>
+  smsHistory: { operationId: string; status: string }[]
+  phoneState: boolean
   saveAnswer: () => Promise<{ status: string }>
   notice: unknown
   transcript: string
@@ -72,6 +75,8 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
     ],
     contacts: [{ id: "7", lookup: "k7", name: "Maya Chen", revision: "r1", starred: false, phones: ["4155550100"], emails: [] }],
     smsAnswer: () => Promise.reject(new Error("answer lost")),
+    smsHistory: [],
+    phoneState: true,
     saveAnswer: () => Promise.reject(new Error("lost")),
     notice: undefined,
     transcript: "Call me back",
@@ -82,7 +87,12 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
   const clients = {
     phone: {
       status: async () => (log("status"), status({ callLog: world.callLog })),
-      requestAccess: async () => (log("requestAccess"), world.callLog = "granted", status({ callLog: world.callLog })),
+      requestAccess: async (access: string) => {
+        log("requestAccess")
+        if (access === "phoneState") world.phoneState = true
+        else world.callLog = "granted"
+        return status({ callLog: world.callLog })
+      },
       recentCalls: async () => (log("recentCalls"), { calls: [{ id: "1", number: "4155550100", cachedName: "Maya Chen", date: 5, durationSeconds: 0, type: "missed", isNew: true }], next: null }),
       placeCall: async () => {
         log("placeCall")
@@ -90,6 +100,11 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
         return { placeStatus: world.placeStatus, receipt: {} }
       },
       dial: async () => (log("dial"), { dialStatus: "DialHandedOff", handler: "Dialer", receipt: {} }),
+      phoneInfo: async () => (log("phoneInfo"), {
+        access: { phoneState: world.phoneState, phoneNumbers: world.phoneState, deviceIdentifiers: false },
+        lines: world.phoneState ? [{ subscriptionId: 7, slot: 0, displayName: "Personal", carrierName: "Carrier", number: "+14155550100", countryIso: "us", networkType: "5g", roaming: false, signalLevel: 3, embedded: false, iccid: null, imei: null }] : [],
+      }),
+      voicemail: async () => listing(),
       refreshVoicemail: async (kind: string) => (log(`refreshVoicemail:${kind}`), listing()),
       observeVoicemail: async () => async () => {},
       fetchVoicemailAudio: async () => (log("fetchVoicemailAudio"), "ready"),
@@ -120,6 +135,7 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
       },
       sendSms: async () => { log("sendSms"); sent++; return await world.smsAnswer() },
       smsSendResult: async () => (log("smsSendResult"), { kind: "sms-send", operationId: "x", subscriptionId: 7, bindingHash: "", status: "sent", parts: [], createdAt: 9 }),
+      smsSendHistory: async () => (log("smsSendHistory"), world.smsHistory.map((entry) => ({ kind: "sms-send", subscriptionId: 7, bindingHash: "", parts: [], createdAt: 9, ...entry }))),
       sendMms: async () => { log("sendMms"); sent++; return { status: "submitted", createdAt: 9 } },
       mmsSendResult: async () => ({ status: "sent", createdAt: 9 }),
     },
@@ -144,10 +160,10 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
   } as unknown as TelephonyClients
   const native = {
     available: () => succeed(true),
-    invoke: (plugin: string, method: string) => sync(() => {
-      log(`${plugin}.${method}`)
+    invoke: (plugin: string, method: string, args?: { page?: string }) => sync(() => {
+      log(args?.page === undefined ? `${plugin}.${method}` : `${plugin}.${method}:${args.page}`)
       return method === "ongoingCall" ? world.ongoing : method === "callState" ? world.callState : method === "endCall" ? true
-        : method === "smsNoticePending" ? world.notice : undefined
+        : method === "smsNoticePending" ? world.notice : method === "openSettings" ? { status: "opened" } : undefined
     }),
     listen: () => Stream.never,
   }
@@ -165,6 +181,7 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
     Layer.succeed(VoiceConversation, { callStarted: () => sync(() => log("voice.callStarted")) } as unknown as VoiceConversation.Shape),
     Layer.succeed(Microphone, { callChanged: (active: boolean) => sync(() => log(`microphone.callChanged:${active}`)) } as unknown as Microphone.Shape),
     Layer.succeed(VoicemailTranscriber, { ready: () => succeed(true), transcribe: () => sync(() => (log("transcribe"), world.transcript)) }),
+    Layer.succeed(Navigation, { open: (app: string, route?: string) => sync(() => (log(`navigation.open:${app}:${route ?? ""}`), true)) } as unknown as Navigation.Shape),
   )
   return {
     calls, world, sent: () => sent, platform,

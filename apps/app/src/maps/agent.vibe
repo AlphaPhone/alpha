@@ -9,6 +9,7 @@ import {
   type ActiveGuidance, type MapsNavigationSurface, type NavigationOwner, type RoutePlanReceipt, RelayUnavailable,
   deviceMapsNavigation, withMapsNavigationRelay,
 } from "@elizaos/plugin-maps/client/device-navigation"
+import { MapsRelay } from "../assistant/ports.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { modelTravel, wireMode } from "./cloud.vibe"
 import { emptyContent, MapsContent, type MapsContentState } from "./content.vibe"
@@ -264,3 +265,11 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
 
 /** The refusal the shell shows when the agent's request could not bring Maps forward. */
 export const notShown = failure("unavailable", "Open Maps on the phone to continue. Nothing was changed on the map.")
+
+/** The assistant's MapsRelay port filled by Maps: each resident turn offers this phone's Maps navigation through MapsAgent. */
+export const mapsRelayPort = Layer.effect(MapsRelay, effect {
+  const agent = try MapsAgent
+  return {
+    withRelay: <A, E, R>(conversationId: string, send: Effect.Effect<A, E, R>) => agent.withRelay(conversationId, send),
+  }
+})

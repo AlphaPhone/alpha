@@ -1,8 +1,7 @@
 // spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"
-import type { Effect } from "effect";
 import { useMachine } from "../../../gen/shell__navigation.react.ts";
 import type { LayerKind } from "../../../gen/shell__navigation.ts";
-import { type AppServices, runtime } from "../runtime.ts";
+import { runtime } from "../runtime.ts";
 
 /** A sheet, menu or dialog the caller draws, listed in the shell's navigation so Back and HOME close it. */
 export function useLayer(id: string, kind: LayerKind = "SheetLayer", covers = true) {
@@ -18,9 +17,4 @@ export function useLayer(id: string, kind: LayerKind = "SheetLayer", covers = tr
     /** Closes the layer. */
     hide: () => { if (can({ type: "closeLayer", id })) void send({ type: "closeLayer", id }); },
   };
-}
-
-/** Runs one shell effect for a control; it cannot fail, so nothing is awaited. */
-export function perform<A>(program: Effect.Effect<A, never, AppServices>): void {
-  runtime.runFork(program);
 }

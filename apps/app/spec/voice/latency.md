@@ -2,9 +2,13 @@
 
 How long the owner waits: from the last audio of their turn to the first audible sound of the
 reply. Each turn is a trial with a random id, bound before synthesis is queued, and its marks are
-kept for the diagnostics export (`alpha-native-voice-timing-v3`). The phone stamps its marks on its
+kept for the diagnostics export (`alpha-native-voice-timing-v3`). The phone keeps its own trial of
+the turn (`LocalSpeechBridgePlugin` in `@elizaos/os`): the recognizer's final, the request and the
+first token are also stamped there, the first of them binds the renderer's trial to the phone's
+trial id, and the reply's on-phone synthesis carries that id. The phone stamps its marks on its
 monotonic clock (the last user audio, the first PCM write, and the first sample at or above
--40 dBFS once the media clock passes 200 ms); the renderer stamps the rest on its own clock. The two
+-40 dBFS once the media clock passes 200 ms), and they are read from its finished trial; the
+renderer stamps the rest on its own clock. The two
 clocks are never compared directly: each keeps its own order, and the wait is computed on one
 clock, or across them by an offset read once when the trial is bound.
 
@@ -53,6 +57,9 @@ pure def sometimesAbandoned(t: Trial): bool = t.lastOutcome == Abandoned and t.r
 ```
 
 ### The offset between the phone's clock and the renderer's is read once, when the trial is bound
+
+A phone that reports no reading of its clock leaves the offset unknown, and the wait is then taken
+on one clock.
 
 ```quint
 pure def canBindOffset(t: Trial, offset: int): bool = t.open and not(t.offsetKnown)

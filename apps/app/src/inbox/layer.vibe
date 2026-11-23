@@ -31,7 +31,9 @@ export { MailSelection } from "./selection.vibe"
 export { MailNoticesShell } from "./notices.vibe"
 export { MailSuggestions } from "./suggestions.vibe"
 export { emailShareTarget } from "./shareTarget.vibe"
-export { assistantEmailSender, cameraEmailTarget, mailSenderFill } from "./handoffs.vibe"
+export { assistantEmail, assistantEmailSender, cameraEmailTarget, mailSenderFill } from "./handoffs.vibe"
+export { inboxBack } from "./back.vibe"
+export type { ComposerBack } from "./composer.vibe"
 
 /** The Inbox's machines: memory for what is read, the phone's mail store for drafts and operations. */
 export const machines = Layer.mergeAll(
