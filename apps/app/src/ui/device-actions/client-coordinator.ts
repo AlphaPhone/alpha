@@ -1046,12 +1046,6 @@ export class DeviceActionCoordinator<
     )
       throw Error("Files shown items were not negotiated with this agent");
     if (
-      isFilesOperation(op) &&
-      filesShownTarget(op) &&
-      !this.capability(FILES_SHOWN_TARGET_CAPABILITY)
-    )
-      throw Error("Files shown items were not negotiated with this agent");
-    if (
       isNotesOrganizeOperation(op) &&
       !(op.type === "notes_record"
         ? notesRecordCapabilityAvailable(this.credential.capabilities)
