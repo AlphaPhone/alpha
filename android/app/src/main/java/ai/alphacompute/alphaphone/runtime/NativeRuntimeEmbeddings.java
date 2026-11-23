@@ -22,10 +22,12 @@ import java.util.Map;
  * this class only selects the route.
  */
 public final class NativeRuntimeEmbeddings {
-  /** Path of the packaged BGE model under the app files directory. */
-  public static final String LOCAL_MODEL_PATH = ".eliza/local-inference/models/bge-small-en-v1.5-f16.gguf";
+  /** Path of the BGE model under the app files directory: AlphaInferenceHost installs it into the agent's
+   *  local-inference model storage (AGENT_ROOT alpha-agent-host, state/local-inference/models). */
+  public static final String LOCAL_MODEL_PATH = "alpha-agent-host/state/local-inference/models/bge-small-en-v1.5-f16.gguf";
   public static final String LOCAL_DIMENSIONS = "384";
-  static final String[] NATIVE_LIBRARIES = {"libelizainference.so", "libelizavoicejni.so"};
+  /** The inference engine and the os local-inference module's JNI bridge (engine.lock.json jni.library). */
+  static final String[] NATIVE_LIBRARIES = {"libelizainference.so", "libparadeevoicejni.so"};
 
   private NativeRuntimeEmbeddings() {}
 

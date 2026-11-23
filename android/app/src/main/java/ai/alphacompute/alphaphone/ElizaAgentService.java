@@ -66,6 +66,9 @@ public final class ElizaAgentService extends AgentService {
   application = context.getApplicationContext();
   AgentService.useCredentials(new AlphaAgentCredentials(application));
   AgentService.observe(ElizaAgentService::acknowledgeShutdown);
+  // Resident notifications resume when the agent is ready, also after a reboot or restart with Alpha closed
+  // (the legacy generated service's ready hook).
+  AgentService.onReady(() -> AlphaCanonicalNotifications.resumeExisting(application));
  }
 
  @Override public void onCreate() {
