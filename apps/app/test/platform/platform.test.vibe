@@ -615,11 +615,13 @@ it.live("count one return to Alpha once, and none after the screen that watched 
     provide lifecycleOver(shown.watch) {
       const app = try AppLifecycle
       try sleep("25 millis")
-      shown.current?.paused()
-      // spec/platform/lifecycle.md, "Leaving the app pauses it, and one return is counted once"
-      shown.current?.returned(1000)
-      shown.current?.returned(1100)
-      shown.current?.returned(1400)
+      try Effect.try(() => {
+        shown.current?.paused()
+        // spec/platform/lifecycle.md, "Leaving the app pauses it, and one return is counted once"
+        shown.current?.returned(1000)
+        shown.current?.returned(1100)
+        shown.current?.returned(1400)
+      })
       try sleep("25 millis")
       const now = try app.get()
       try Effect.try(() => assert.deepStrictEqual([now.foreground, now.returns, now.lastReturnAt], [true, 2, 1400]))
