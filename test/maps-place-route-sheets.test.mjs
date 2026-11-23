@@ -1,6 +1,6 @@
 // The Maps screen as the launcher mounts it (installPrototypeMapsAdapter over the real
 // MapsScreenController and MapsController, native plugins as controlled ports): the position
-// shown on open when location is already allowed, the place sheet's phone row, a long press dropping a pin, the route's step list,
+// shown on open when location is already allowed, the place sheet's category subtitle and phone row, a long press dropping a pin, the route's step list,
 // swapping a route's ends, recent searches, the compass, guidance copy without
 // a screen-off session, and the arrival notice when guidance ends with Maps off screen.
 import test from 'node:test';
@@ -13,7 +13,7 @@ const from = {latitude: 1, longitude: 1};
 
 async function mount(options = {}) {
   const now = Date.now(), routes = [];
-  const cafe = {providerId, id: 'cafe-1', name: 'Cafe', coordinate: {latitude: 1.01, longitude: 1.01}, phone: '+1 555 123 4567', attribution, fetchedAt: now};
+  const cafe = {providerId, id: 'cafe-1', name: 'Cafe', coordinate: {latitude: 1.01, longitude: 1.01}, phone: '+1 555 123 4567', attribution, fetchedAt: now, ...options.place};
   const provider = {
     providerId, connectionId,
     async search() { return [cafe]; },
@@ -27,7 +27,7 @@ async function mount(options = {}) {
       return Promise.resolve(route);
     },
   };
-  const {granted = true, ...rest} = options;
+  const {granted = true, place: _place, ...rest} = options;
   const m = await mountMapsAdapter(code, {...rest, configure: (app, harness) => { harness.locationGranted = granted; app.configureMapsProvider(providerConfig, provider); }});
   const toasts = [], opened = [];
   m.api.toast = text => toasts.push(text);
@@ -64,6 +64,28 @@ test('a place with a phone number shows it with Copy; Call appears only where Ph
   } finally { m.restore(); }
 });
 
+test('a provider place is subtitled with its most specific category, else "Place"', async () => {
+  const {m} = await mount({place: {categories: ['Pharmacy', 'Health']}});
+  try {
+    const {pc} = await openCafe(m);
+    assert.equal(pc.meta, 'Pharmacy');
+  } finally { m.restore(); }
+  const plain = await mount();
+  try {
+    const {pc} = await openCafe(plain.m);
+    assert.equal(pc.meta, 'Place');
+  } finally { plain.m.restore(); }
+});
+
+test('a category is shown as sent: it never reads as a dropped pin or offers Rename', async () => {
+  const {m} = await mount({place: {categories: ['Coordinates']}});
+  try {
+    const {pc} = await openCafe(m);
+    assert.equal(pc.meta, 'Coordinates');
+    assert.equal(pc.canRename, false);
+  } finally { m.restore(); }
+});
+
 test('Call opens Phone with the number filled in, and dials nothing itself', async () => {
   const {m, opened} = await mount({pluginHeaders: image});
   try {
@@ -85,6 +107,8 @@ test('a long press on the map drops a pin at the pressed point', async () => {
     const data = m.render();
     assert.equal(data.mode, 'place');
     assert.equal(data.pc.name, 'Dropped pin');
+    assert.equal(data.pc.meta, 'Selected location');
+    assert.equal(data.pc.canRename, true);
     assert.deepEqual(m.harness.screen.selected.coordinate, {latitude: 2, longitude: 3});
   } finally { m.restore(); globalThis.MutationObserver = saved; }
 });
