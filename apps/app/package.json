@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node test/eliza/checkout.ts --ready && vite build",
-    "typecheck": "node test/eliza/checkout.ts --ready && vibelang --noEmit -p .",
-    "test": "node test/eliza/checkout.ts --ready && vitest run",
-    "test:browser": "node test/eliza/checkout.ts --ready && vitest run --project browser",
-    "prepare": "node test/eliza/checkout.ts --link",
-    "eliza": "node test/eliza/checkout.ts",
+    "build": "eliza-harness --ready && vite build",
+    "typecheck": "eliza-harness --ready && vibelang --noEmit -p .",
+    "test": "eliza-harness --ready && vitest run",
+    "test:browser": "eliza-harness --ready && vitest run --project browser",
+    "prepare": "eliza-harness --link",
+    "eliza": "eliza-harness",
     "eliza:page": "node test/eliza/page.ts"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@antithesishq/bombadil": "0.7.10",
+    "@repo/eliza-harness": "workspace:*",
     "@effect/platform-node": "4.1.1",
     "@effect/vitest": "4.1.1",
     "@tailwindcss/vite": "catalog:",

@@ -1,0 +1,26 @@
+{
+  "local": {
+    "kind": "local",
+    "profile": "staging"
+  },
+  "staging": {
+    "kind": "hosted",
+    "cloud": "https://api-staging.eliza.app",
+    "appLinkHost": "staging.eliza.app",
+    "profile": "staging",
+    "cutoverCandidate": {
+      "cloud": "https://api-staging.alphacompute.cc",
+      "appLinkHost": "cloud-staging.alphacompute.cc"
+    }
+  },
+  "production": {
+    "kind": "hosted",
+    "cloud": "https://api.eliza.app",
+    "appLinkHost": "eliza.app",
+    "profile": "production",
+    "cutoverCandidate": {
+      "cloud": "https://api.alphacompute.cc",
+      "appLinkHost": "cloud.alphacompute.cc"
+    }
+  }
+}

@@ -280,7 +280,13 @@
         "@repo/app#build",
         "@repo/app#typecheck",
         "@repo/app#test",
-        "@repo/app#test:browser"
+        "@repo/app#test:browser",
+        "@repo/eliza-harness#build",
+        "@repo/eliza-harness#typecheck",
+        "@repo/eliza-harness#test",
+        "@repo/deployment#build",
+        "@repo/deployment#typecheck",
+        "@repo/deployment#test"
       ],
       "cache": false
     },
@@ -288,6 +294,8 @@
       "dependsOn": [
         "@repo/design-system#build",
         "@repo/app#typecheck",
+        "@repo/eliza-harness#typecheck",
+        "@repo/deployment#typecheck",
         "vibestack-studio#typecheck"
       ],
       "inputs": [
