@@ -75,8 +75,8 @@ fixtureTest('the pinned generator accepts the descriptor and owns identity, vers
  assert.deepEqual(profile.manifestPlaceholders, {appOrientation: identity.orientation});
  // One distribution: the launcher, debug and release.
  assert.deepEqual(profile.flavors.map(flavor => [flavor.name, flavor.buildConfigFields]), [['launcher', []]]);
- assert.equal(profile.flavors[0].manifest, fs.realpathSync(path.join(root, 'android/app/src/launcher/AndroidManifest.xml')));
- assert.equal(profile.manifest, fs.realpathSync(path.join(root, 'android/app/src/main/AndroidManifest.xml')));
+ assert.equal(profile.flavors[0].manifest, fs.realpathSync(path.join(root, 'android/app/manifests/launcher/AndroidManifest.xml')));
+ assert.equal(profile.manifest, fs.realpathSync(path.join(root, 'android/app/manifests/main/AndroidManifest.xml')));
  assert.equal(profile.releaseMinify, true);
  assert.equal(profile.buildTypes.release.shrinkResources, true);
  assert.deepEqual(profile.buildTypes.release.abiFilters, ['arm64-v8a']);
@@ -190,8 +190,8 @@ test('the same pinned generator binds a retained installation to its package, so
   assert.equal(receipt.applicationId, RETAINED_ANDROID_APP_ID);
   assert.equal(receipt.sourceApplicationId, identity.appId);
   assert.match(receipt.updateManifestUrl, /alphaphone\/releases\/download\/app-stable\/alpha-update-stable\.json$/);
-  assert.equal(profile.manifest, fs.realpathSync(path.join(root, 'android/app/src/main/AndroidManifest.xml')));
-  const projectedManifest = path.join(path.dirname(profile.assetFiles.find(file => file.name === 'android-identity.json').source), 'android/app/src/main/AndroidManifest.xml');
+  assert.equal(profile.manifest, fs.realpathSync(path.join(root, 'android/app/manifests/main/AndroidManifest.xml')));
+  const projectedManifest = path.join(path.dirname(profile.assetFiles.find(file => file.name === 'android-identity.json').source), 'android/app/manifests/main/AndroidManifest.xml');
   assert.doesNotMatch(fs.readFileSync(projectedManifest, 'utf8'), /ai\.alphacompute\.alphaphone/);
   assert.ok(profile.sourceSets.main.java.some(directory => fs.existsSync(path.join(directory, 'ai/elizaresearch/alphaphone/MainActivity.java'))));
   assert.deepEqual(readHostDescriptor(root).residentHost.sockets, {

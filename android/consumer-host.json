@@ -33,14 +33,14 @@
     },
     "manifest": {
       "root": "consumer",
-      "path": "android/app/src/main/AndroidManifest.xml"
+      "path": "android/app/manifests/main/AndroidManifest.xml"
     },
     "flavors": [
       {
         "name": "launcher",
         "manifest": {
           "root": "consumer",
-          "path": "android/app/src/launcher/AndroidManifest.xml"
+          "path": "android/app/manifests/launcher/AndroidManifest.xml"
         }
       }
     ],

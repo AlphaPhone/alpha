@@ -1,9 +1,11 @@
 // spec/cloud/deployment.md, "Story: Configure a deployment from one reviewed profile"
+import { Schema } from "effect";
+import { OperatorInputs } from "../src/profile.vibe";
 import operator from "./fixtures/operator.json" with { type: "json" };
 import resources from "./fixtures/resources.json" with { type: "json" };
 
 /** Test-only operator inputs: every value is fictitious and accepted by the profile schema. */
-export const operatorInputs = operator;
+export const operatorInputs: OperatorInputs = Schema.decodeUnknownSync(OperatorInputs, { onExcessProperty: "error" })(operator);
 
 /** Test-only Cloudflare resources: production provisioned, staging still a placeholder. */
 export const testResources = resources;

@@ -58,9 +58,26 @@ export function hostOptions(root = ROOT, runtime?: string) {
  };
 }
 
+/** The upstream generator's ownership marker; it lists the files the last generation wrote (git-ignored). */
+export const HOST_MARKER = 'android/.eliza-consumer-host.json';
+
+/**
+ * android/ also holds Alpha's authored sources, so before the first generation in a checkout Alpha claims it for the
+ * generator with an empty file list. The generator still refuses to write over any file it did not write itself
+ * (vendor/eliza packages/os/src/build/android-host.vibe claimOutput), so an authored or stale file is never replaced.
+ */
+export function claimHostOutput(root = ROOT) {
+ const marker = path.join(root, HOST_MARKER);
+ if (fs.existsSync(marker)) return false;
+ const {appId} = hostIdentity(root);
+ fs.writeFileSync(marker, `${JSON.stringify({schema: 2, output: 'android', appId, files: []}, null, 2)}\n`);
+ return true;
+}
+
 /** Write the generated host into android/. */
 export async function generateAlphaAndroidHost(root = ROOT, runtime?: string) {
  const {generateAndroidHost} = await import('./upstream-os.ts');
+ claimHostOutput(root);
  return generateAndroidHost(hostOptions(root, runtime));
 }
 

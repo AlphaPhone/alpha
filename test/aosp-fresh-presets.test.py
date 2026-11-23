@@ -193,7 +193,7 @@ boot-animation-copies:
    target=ET.fromstring(plan[key]).find("string[@name='config_systemSpeechRecognizer']").text
    app=Path(os.environ.get('ALPHA_DICTATION_APP_ROOT',REPO))
    self.assertEqual(target,json.loads((app/'app.config.json').read_text())['appId'])
-   manifest=ET.parse(app/'android/app/src/launcher/AndroidManifest.xml').getroot()
+   manifest=ET.parse(app/'android/app/manifests/launcher/AndroidManifest.xml').getroot()
    a='{http://schemas.android.com/apk/res/android}'
    service=manifest.find("application/service[@"+a+"name='.AlphaKeyboardDictationService']")
    self.assertIsNotNone(service,'staged app source must include the matching auxiliary voice IME')

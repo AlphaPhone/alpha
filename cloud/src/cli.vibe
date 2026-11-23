@@ -4,7 +4,7 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import type { CloudEnvironment } from "@elizaos/cloud/profile"
 import { checkOutputs, deploymentOutputs, selectDeployment, writeOutputs } from "./deployment.vibe"
-import { localProfile, OperatorInputs, readAlphaProfile, type OperatorInputs as Inputs } from "./profile.vibe"
+import { localProfile, OperatorInputs, readAlphaProfile } from "./profile.vibe"
 import { applyArguments, environmentRegistration, registrationFile, seedDocument, type AppIdentity, type ReleaseSigner } from "./registration.vibe"
 import { checkRuntimeConfig } from "./runtime-config.vibe"
 import { PROFILE_ASSET } from "./profile-asset.ts"
@@ -78,7 +78,7 @@ effect function repositoryJson(name: string) {
   return try readJson(path.join(try repositoryRoot(), name))
 }
 
-effect function inputsOf(file: string): Inputs!! {
+effect function inputsOf(file: string) {
   return try Schema.decodeUnknownEffect(OperatorInputs, { onExcessProperty: "error" })(try readJson(file))
 }
 

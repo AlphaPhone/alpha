@@ -51,7 +51,7 @@ test('the tile carries no capture, permission or lock-screen shortcut and is dec
  assert.match(source,/public final class AlphaQuickSettingsTile extends TileService \{/);
  assert.doesNotMatch(source,/ai\.eliza\.plugins\.system\.AssistantEntryTile/);
  // The installed component keeps its name, SystemUI-only binding and non-toggle declaration.
- const manifest=read(join(root,'android/app/src/main/AndroidManifest.xml'));
+ const manifest=read(join(root,'android/app/manifests/main/AndroidManifest.xml'));
  const entry=manifest.match(/<service android:name="\.AlphaQuickSettingsTile"[\s\S]*?<\/service>/)?.[0];
  assert.ok(entry,'Alpha\'s tile is declared under its installed name');
  assert.match(entry,/android:permission="android\.permission\.BIND_QUICK_SETTINGS_TILE"/);

@@ -212,12 +212,21 @@ jobs:
         run: |
           node --conditions=eliza-source --import vibelang/register scripts/app-update-candidate.ts version test-results/resident-ci-candidate/version.json
           echo "ELIZAOS_VERSION_CODE=$(node -p 'require("./test-results/resident-ci-candidate/version.json").versionCode')" >> "$GITHUB_ENV"
+      - name: Build the workflow worker from the pinned source
+        timeout-minutes: 20
+        run: pnpm agent:build-workflow-worker
       - name: Build the resident agent bundle from the pinned source
         timeout-minutes: 30
         run: pnpm agent:bundle
-      - name: Stage the resident runtime payload (pinned Node, agent bundle)
+      - name: Stage the resident runtime payload (pinned Node, agent bundle, workflow worker)
         timeout-minutes: 20
         run: pnpm agent:stage-android
+      - name: Recheck the staged embedding host against its qualification
+        run: node scripts/stage-embedding-host.ts --verify
+      # Behavioural qualification of the bundled agent and workflow packages at the pin.
+      - name: Upstream agent and workflow tests at the pin
+        timeout-minutes: 40
+        run: pnpm --dir vendor/eliza exec turbo run test --filter=@elizaos/agent --filter=@elizaos/plugin-workflow
       - name: Generate notices for the packaged runtime
         timeout-minutes: 2
         env:

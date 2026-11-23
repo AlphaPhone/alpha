@@ -10,7 +10,7 @@ import {fileURLToPath} from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The outer run's own variables would make the inner run read as part of it.
 const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('TURBO_') || name === 'TURBO_TELEMETRY_DISABLED'));
-const result = spawnSync('pnpm', ['exec', 'turbo', 'run', 'build', '--filter=./packages/*', '--filter=vibestack', '--output-logs=errors-only'],
+const result = spawnSync('pnpm', ['exec', 'turbo', 'run', 'build', '--filter=./packages/*', '--filter=//', '--output-logs=errors-only'],
   {cwd: path.join(root, 'vendor/eliza'), stdio: 'inherit', env});
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const read = file => fs.readFileSync(file, 'utf8');
-const MANIFEST = 'android/app/src/main/AndroidManifest.xml';
-const LAUNCHER = 'android/app/src/launcher/AndroidManifest.xml';
+const MANIFEST = 'android/app/manifests/main/AndroidManifest.xml';
+const LAUNCHER = 'android/app/manifests/launcher/AndroidManifest.xml';
 const STRINGS = 'android/app/src/main/res/values/alpha-strings.xml';
 const VALUES = 'android/app/src/main/res/values/';
 

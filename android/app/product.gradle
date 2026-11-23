@@ -27,7 +27,7 @@ if (identityAsset != null) {
     directory.canonicalFile == authoredJava.canonicalFile ? projectedJava : directory
    }.unique())
   }
-  def manifest = new File(projectedRoot, 'android/app/src/' + sources.name + '/AndroidManifest.xml')
+  def manifest = new File(projectedRoot, 'android/app/manifests/' + sources.name + '/AndroidManifest.xml')
   if (manifest.isFile()) sources.manifest.srcFile manifest
  }
 }
