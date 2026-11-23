@@ -1,20 +1,23 @@
 // spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
 import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
 import { AgentCalendar } from "../calendar/agent.vibe"
+import { DeviceCalendar } from "../calendar/device.vibe"
 import { calendarDayObservation } from "../calendar/observation.vibe"
 import { NotesListFilter } from "../notes/listFilter.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 import { TurnSources } from "./ports.vibe"
 
-/** The turn sources over Calendar's shown day and Notes' list filter, for the runtime to provide after Notes and Calendar and before the assistant. */
+/** The turn sources over the Calendar and Notes services. */
 export const turnSourcesLive = Layer.effect(TurnSources, effect {
   const notes = try NotesListFilter
   const foreground = try Foreground
   const presentation = try PresentationMachine
   const agent = try AgentCalendar
+  const device = try DeviceCalendar
   const day = Effect.provideService(Effect.provideService(Effect.provideService(calendarDayObservation(), Foreground, foreground), PresentationMachine, presentation), AgentCalendar, agent)
   return {
     calendarDay: () => day catch () => undefined,
+    calendarSelection: () => device.selected(),
     notesList: () => notes.context(),
     preferReview: (reviewFirst: boolean) => notes.prefer(reviewFirst),
   }

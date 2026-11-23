@@ -145,6 +145,21 @@ pure def lawAnUncomparedPeerGetsNoDay(observed: bool, onCalendar: bool): bool =
   not(sendsDay(observed, onCalendar, { compared: false, declaresLocation: true }))
 ```
 
+### A turn can name an inspected Calendar event or source that is open on the observed screen
+
+The phone sends the selection's identity, calendar source and their
+revisions. Event details stay on the phone until the owner approves a
+request to share them.
+
+```quint
+pure def namesCalendarSelection(observed: bool, onCalendar: bool, alreadySelected: bool): bool =
+  observed and onCalendar and not(alreadySelected)
+pure def lawAHiddenScreenNamesNoCalendarSelection(onCalendar: bool, alreadySelected: bool): bool =
+  not(namesCalendarSelection(false, onCalendar, alreadySelected))
+pure def lawAnotherScreenKeepsItsOwnSelection(observed: bool, alreadySelected: bool): bool =
+  not(namesCalendarSelection(observed, false, alreadySelected))
+```
+
 ## Story: Let my agent read the page I have open in Browser
 
 > As the owner, when I ask about the page I have open in Browser, I want my
