@@ -1,5 +1,6 @@
 // spec/maps/screen.md, "The screen holds the search, the chosen place, the starting point and the route request"; spec/maps/vocabulary.md, "A Google place is never saved, shared, renamed or copied, and Google guidance is never spoken"
 import type { Offer, ProviderKind } from "../../gen/maps__vocabulary.ts"
+import { maxRecent, recentRemembered } from "../../gen/maps__screen.ts"
 import type { Position } from "./geometry.vibe"
 import type { Coordinate, EventOrigin, Place, Recipient, Route } from "./maps.schema.vibe"
 
@@ -94,9 +95,9 @@ export const contentLayer = Layer.effect(MapsContent, effect {
   }
 })
 
-/** Recent searches: newest first, five at most, no case-insensitive repeat, never coordinates or over 300 characters. */
+/** Recent searches (spec/maps/screen.md, "Recent searches list what the owner searched, newest first, and are kept only in memory"): newest first, five at most, no case-insensitive repeat, never coordinates or over 300 characters. */
 export function remembered(recent: ReadonlyArray<string>, query: string, coordinates: boolean): ReadonlyArray<string> {
   const text = query.trim()
-  if (!text || text.length > 300 || coordinates) return recent
-  return [text, ...recent.filter((item) => item.toLowerCase() !== text.toLowerCase())].slice(0, 5)
+  if (!recentRemembered(text.length, coordinates)) return recent
+  return [text, ...recent.filter((item) => item.toLowerCase() !== text.toLowerCase())].slice(0, maxRecent)
 }
