@@ -40,16 +40,45 @@ export function browserNavigationSummary(url: string): string {
   if (destination.protocol !== 'https:') throw Error('Expected an HTTPS destination');
   return `Created a browser tab for ${destination.host}.`;
 }
-/** The one-sentence completion of a reviewed Browser control: the owner reads it and the agent receives it. */
-export function browserControlSummary(operation: BrowserControlOperation): string {
+/** What closing every tab closed: how many tabs, and how many private tabs it left open (a request
+ * made outside a private tab never closes one). Counts only; no tab is named. */
+export type BrowserTabsClosed = {count: number; privateKept: number};
+const tabCount = (count: number) => `${count} ${count === 1 ? 'tab' : 'tabs'}`;
+/** The one-sentence completion of a reviewed Browser control: the owner reads it and the agent
+ * receives it. Closing every tab reports what it closed, never "all" over private tabs it left. */
+export function browserControlSummary(operation: BrowserControlOperation, closed?: BrowserTabsClosed): string {
   switch (operation.type) {
     case 'browser_search': return `Searching the web for “${operation.query}”.`;
     case 'browser_tab_new': return operation.private ? 'Opened a private tab.' : 'Opened a new tab.';
     case 'browser_tab_switch': return 'Switched tabs in Browser.';
-    case 'browser_tab_close': return operation.all ? 'Closed all tabs.' : 'Closed the tab.';
+    case 'browser_tab_close':
+      if (!operation.all) return 'Closed the tab.';
+      if (!closed) return 'Closed the listed tabs.';
+      return `Closed ${tabCount(closed.count)}.${closed.privateKept ? ' Private tabs were left open.' : ''}`;
     case 'browser_find': return `Finding “${operation.text}” in the page.`;
     case 'browser_history': return {back: 'Went back a page.', forward: 'Went forward a page.', reload: 'Reloading the page.', stop: 'Stopped loading the page.'}[operation.action];
   }
+}
+/** The owner's correction when a reviewed Browser control's change to the showing tab did not run
+ * after its receipt (Browser changed or was not on screen): the receipt above it said it did. */
+export function browserControlNotDone(operation: BrowserControlOperation): string {
+  switch (operation.type) {
+    case 'browser_tab_switch': return 'Browser changed or was not on screen, so the tab did not switch. Ask again.';
+    case 'browser_tab_close': return 'Browser changed or was not on screen, so the tab that was showing stayed open. Ask again from Browser.';
+    case 'browser_history': return `The page changed or Browser was not on screen, so it did not ${{back: 'go back', forward: 'go forward', reload: 'reload', stop: 'stop loading'}[operation.action]}. Ask again.`;
+    default: return 'Browser changed or was not on screen, so this was not done. Ask again.';
+  }
+}
+/**
+ * Run a reviewed Browser control's presentation once its receipt is attempted. `ready` is false when
+ * it cannot be shown now (screen off, another request, a changed context or session). A presentation
+ * marked `deferred` carries a change its receipt already reported; when that change did not run, not
+ * ready, refused or thrown, `say` gives the owner the correction.
+ */
+export function runBrowserPresentation(operation: BrowserControlOperation, present: ((() => boolean | void) & {deferred?: true}) | undefined, ready: () => boolean, say: (text: string) => void): void {
+  let ran = false;
+  try { ran = ready() && present?.() !== false; } catch { ran = false; }
+  if (!ran && present?.deferred) say(browserControlNotDone(operation));
 }
 function legacyBrowserNavigationSummary(url: string): string {
   return `Opened ${new URL(url).host}.`;

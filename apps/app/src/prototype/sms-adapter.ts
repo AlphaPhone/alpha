@@ -31,7 +31,7 @@ let askedDraftWriter:((text:string,number?:string,threadId?:string)=>AskedDraft)
  * or has pictures attached. It never sends: Send stays the owner's tap.
  */
 export const placeAskedSmsDraft=(text:string,number?:string,threadId?:string):AskedDraft=>askedDraftWriter?askedDraftWriter(text,number,threadId):'none-selected';
-let draftOpener:((text:string,number:string,threadId:string|undefined,current:()=>void)=>Promise<(()=>void)|null>)|null=null;
+let draftOpener:((text:string,number:string,threadId:string|undefined,current:()=>void)=>Promise<((detent?:string)=>Promise<boolean>)|null>)|null=null;
 /**
  * The step that opens the conversation with exactly `number` (a new message to it when there is
  * none) and puts a draft the owner asked Alpha for in its text field, as `placeAskedSmsDraft` does
@@ -552,9 +552,10 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    seen.add(result.next);cursor=result.next;
   } while(cursor);
   if(threadId&&!target)return null;
-  const place=async()=>{
+  // `detent` is the chat detent a voice turn carries its conversation to Messages with.
+  const place=async(detent?:string)=>{
    if(owner!==shell||document.hidden)return false;
-   if(!inFront()){shell.openView('messages',undefined,'sheet');await new Promise<void>(resolve=>shell.setState({},()=>resolve()));}
+   if(!inFront()){shell.openView('messages',undefined,detent??'sheet');await new Promise<void>(resolve=>shell.setState({},()=>resolve()));}
    if(!await until(idle)||!here())return false;
    if(target)chooseThread(target.id,target.addresses);else compose(wanted,true);
    if(!await until(idle)||!here())return false;
@@ -564,7 +565,10 @@ export function installSmsAdapter(Component:any,views:Bag,draftStore?:SmsDraftSt
    if(!sameRecipients(normalizeRecipients(inputRecipients()),[wanted])){if(body||attachments.length||operationId||mmsOperationId)return false;changeDraft(()=>{recipients=wanted;});}
    return placeAsked(text)==='drafted';
   };
-  return ()=>{void place().catch(()=>false).then(placed=>{if(!placed&&owner===shell)shell.toast('Couldn’t put the draft in Messages.');});};
+  // The returned promise settles once the conversation is open and the draft placed (or refused):
+  // opening the thread publishes it as the selection after Messages is already in front, and a
+  // voice turn carrying its conversation here pins the context only after that (see ViewStep).
+  return (detent?:string)=>place(detent).catch(()=>false).then(placed=>{if(!placed&&owner===shell)shell.toast('Couldn’t put the draft in Messages.');return placed;});
  };
  draftUndoer=()=>{
   if(!active||!editable()||!draft.undo||operationId||mmsOperationId||!openRow())return false;

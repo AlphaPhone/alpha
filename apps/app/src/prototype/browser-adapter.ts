@@ -20,12 +20,15 @@ import { browserNoticeText, browserPageErrorText } from '../ui/browser/browser-m
 import { sectionKey as historySection } from '../ui/mobile-shell/photos-view';
 import { approvedOpenTab, BrowserOpenRefused, matchingTabs, observedTabCurrent, searchAddress, surfacePollIdle, tabLimitRefusal } from '../browser/browser-poll';
 import type {BrowserControlOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
+import type {BrowserTabsClosed} from '../runtime/action-message-presentation';
 import {parseClientBrowserPageObservation,type ClientBrowserPageObservation} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {agentPageTitle,pageAddress,registerBrowserPageSource,type ObservedBrowserTab} from '../runtime/browser-page-context';
 const {tabs: MAX_TABS, history: MAX_HISTORY} = DEFAULT_BROWSING_LIMITS;
 type Bag = Record<string, any>;
 /** What a chat request to switch or close a tab asks the owner when its words match several tabs. */
 export type BrowserTabChoice = {verb: 'Switch to' | 'Close'; options: {title: string; host: string; priv: boolean}[]};
+/** What browserControl returns: the step run after the action's receipt (see runBrowserPresentation). */
+export type BrowserPresentation = (() => boolean | void) & {deferred?: true; closed?: BrowserTabsClosed};
 // The shared native tab host (BrowserTabHostPlugin) under Alpha's Capacitor name; the web build
 // registers its isolated-frame surface under the same name (browser/register.ts).
 const Browser = registerPlugin<any>('AlphaBrowser');
@@ -332,11 +335,15 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     const s = state(), fromPrivate = shell.S?.().view === 'browser' && isPrivate(s.cur);
     return s.tabs.filter((tab: Bag) => fromPrivate || !tab.priv);
   }
+  // The private tabs closing every tab leaves open: counted for the card and the receipt, never named.
+  const privateKept = () => state().tabs.length - closableTabs().length;
   type ClosingLine = {title: string; host?: string; private?: true};
   const closingLines = (closing: (Bag & {id: string})[]): ClosingLine[] => closing.map(tab => { const known = tabPage(tab.id); return {title: known?.title || known?.url || (tab.priv ? 'New private tab' : 'New tab'), ...(known?.title && URL.canParse(known.url) ? {host: new URL(known.url).host} : {}), ...(tab.priv ? {private: true as const} : {})}; });
-  // The tabs as a card listed them, by proposal: ids and what the card said of each.
-  const listedForClosing = new Map<string, {key: string; lines: ClosingLine[]}>();
-  const closingKey = (closing: (Bag & {id: string})[]) => JSON.stringify([closing.map(tab => tab.id), closingLines(closing)]);
+  // The tabs as a card listed them, by proposal: what the card said, and the key of the set it
+  // was bound to. The key is each tab, its page and whether it is private, and how many private tabs
+  // stay open; a title alone (an unread count, a page that finished loading) is not another tab.
+  const listedForClosing = new Map<string, {key: string; listing: {tabs: ClosingLine[]; privateKept: number}}>();
+  const closingKey = (closing: (Bag & {id: string})[]) => JSON.stringify([closing.map(tab => [tab.id, tabPage(tab.id)?.url ?? null, !!tab.priv]), privateKept()]);
   async function command(command: string) {
     const id = state()?.cur; if (!id || !tabs.has(id)) return;
     try { await Browser.command({ session, id, command }); } catch (error) { report(error); }
@@ -687,6 +694,10 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
     // effect, as BrowserOpenRefused. What would change the tab or page the request was made from
     // (selecting or closing the showing tab, page history) runs in the returned presentation,
     // after the action's journal and receipt, as an approved open's selection does.
+    // A presentation that carries a change the receipt already reports (a switch, closing the
+    // showing tab, page history) is `deferred`, and returns whether it made that change, so a
+    // skipped one can be corrected (action-message-presentation runBrowserPresentation).
+    const deferred = (run: () => boolean): BrowserPresentation => Object.assign(run, {deferred: true as const});
     this.browserControl = async (operation: BrowserControlOperation, input: {signal: AbortSignal; observed?: {id: string; revision: string}; proposalId?: string; choose: (choice: BrowserTabChoice, signal: AbortSignal) => Promise<number | null>}) => {
       const {signal} = input, refuse = (message: string): never => { throw new BrowserOpenRefused(message); };
       signal.throwIfAborted();
@@ -704,7 +715,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       if (operation.type === 'browser_tab_close' && operation.all) {
         const listed = input.proposalId === undefined ? undefined : listedForClosing.get(input.proposalId);
         if (input.proposalId !== undefined) listedForClosing.delete(input.proposalId);
-        const tabsNow = closableTabs(), closing = tabsNow.map(tab => tab.id);
+        const tabsNow = closableTabs(), closing = tabsNow.map(tab => tab.id), closed = {count: closing.length, privateKept: privateKept()};
         // The owner approved the tabs this card listed, as it listed them: a tab opened, closed or
         // moved to another page since is not that set, so nothing closes.
         if (!listed || !closing.length || listed.key !== closingKey(tabsNow)) refuse('Browser\'s tabs changed after you reviewed them. Nothing was closed. Ask again to see the tabs that are open now.');
@@ -712,9 +723,9 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
         const finish = () => closeTabs(closing, !fromPrivate);
         // Outside Browser every listed tab closes now. In Browser, as for one tab, the others close
         // now and the tab showing closes in the presentation, after the action's receipt.
-        if (shell.S?.().view !== 'browser') { finish(); return () => { if (still()) show(); }; }
+        if (shell.S?.().view !== 'browser') { finish(); return Object.assign((): boolean => { if (still()) show(); return true; }, {closed}); }
         closeTabs(closing.filter(id => id !== selected), !fromPrivate);
-        return () => { if (still()) { finish(); show(); } };
+        return Object.assign(deferred(() => { if (!still()) return false; finish(); show(); return true; }), {closed});
       }
       if (operation.type === 'browser_tab_switch' || operation.type === 'browser_tab_close') {
         const closing = operation.type === 'browser_tab_close', target = operation.target;
@@ -734,9 +745,9 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
           if (disposed || state()?.cur !== selected || !tabOf(chosen)) refuse('Browser changed while you were choosing. Nothing was done.');
           id = chosen;
         }
-        if (!closing) return () => { if (still() && tabOf(id)) show({cur: id}); };
+        if (!closing) return deferred(() => { if (!still() || !tabOf(id)) return false; show({cur: id}); return true; });
         if (id !== selected) { closeTab(id); return () => { if (still()) show(); }; }
-        return () => { if (still()) { closeTab(id); show(); } };
+        return deferred(() => { if (!still()) return false; closeTab(id); show(); return true; });
       }
       const info = tabInfo(selected);
       // After a restart a restored tab keeps only its saved address until Browser shows it. Reloading
@@ -744,7 +755,7 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       const unloaded = !info && !tabs.has(selected) && restored.has(selected);
       if (unloaded) {
         if (!observedTabCurrent(input.observed, tabs.selection(selected))) refuse('The Browser page changed after the request. Nothing was done.');
-        if (operation.type === 'browser_history' && operation.action === 'reload') return () => { if (still()) show(); };
+        if (operation.type === 'browser_history' && operation.action === 'reload') return deferred(() => { if (!still()) return false; show(); return true; });
         refuse('This tab\'s page has not loaded since Alpha restarted. Open Browser so it can load, then ask again.');
       }
       if (operation.type === 'browser_find') {
@@ -761,20 +772,21 @@ export function installPrototypeBrowserAdapter(Component: any, views: Record<str
       if (action === 'back' && !info.canBack) refuse('There is no previous page in this tab.');
       if (action === 'forward' && !info.canForward) refuse('There is no next page in this tab.');
       if (action === 'stop' && !info.loading) refuse('The page is not loading.');
-      return () => { if (still() && tabInfo(selected)?.navigation === navigation) { show(); void command(action); } };
+      return deferred(() => { if (!still() || tabInfo(selected)?.navigation !== navigation) return false; show(); void command(action); return true; });
     };
     this.browserTabNeedsChoice = (target: string) => !disposed && !!state() && namedTabs(target, false).found.length > 1;
-    // What a proposal's close-every-tab card lists. A private tab is counted on the card, not named.
-    // The first listing binds the proposal; once Browser's tabs differ from it, that card is
-    // withdrawn (null) rather than redrawn over tabs the owner may already have reviewed.
+    // What a proposal's close-every-tab card lists, and how many private tabs it leaves open. A
+    // private tab is counted on the card, not named. The first listing binds the proposal; once
+    // Browser's tabs differ from it, that card is withdrawn (null) rather than redrawn over tabs
+    // the owner may already have reviewed.
     this.browserTabsClosing = (proposalId: string) => {
       if (disposed || !state()) return null;
       const closing = closableTabs(), key = closingKey(closing), listed = listedForClosing.get(proposalId);
-      if (listed) return listed.key === key ? listed.lines : null;
+      if (listed) return listed.key === key ? listed.listing : null;
       while (listedForClosing.size >= 16) listedForClosing.delete(listedForClosing.keys().next().value!);
-      const lines = closingLines(closing);
-      listedForClosing.set(proposalId, {key, lines});
-      return lines;
+      const listing = {tabs: closingLines(closing), privateKept: privateKept()};
+      listedForClosing.set(proposalId, {key, listing});
+      return listing;
     };
     // Identity only: opening the agent transmits no page content, address or history.
     // A chat turn may carry the open page beside it (pageContext, owner setting).

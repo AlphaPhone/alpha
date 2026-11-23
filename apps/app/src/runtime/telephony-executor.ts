@@ -22,14 +22,15 @@ type ContactMatch = {id: string; name: string; number: string};
 export type ContactRecord = {id: string; version: string; displayName: string; phoneNumbers: {number: string; type: string}[]; emailAddresses: {address: string; type: string}[]};
 export type ContactDraft = Omit<ContactRecord, 'id' | 'version'>;
 /** What the owner is shown on the phone before a telephony action takes effect. */
+/** `more`: more contacts match than the lookup lists, so the options are not every match. */
 export type TelephonyReview =
-  | {kind: 'call'; options: ContactMatch[]}
-  | {kind: 'message'; options: ContactMatch[]; body: string}
+  | {kind: 'call'; options: ContactMatch[]; more?: true}
+  | {kind: 'message'; options: ContactMatch[]; body: string; more?: true}
   /** A new contact whose name or number is already in Contacts: the one option adds it anyway. */
   | {kind: 'contact-create'; options: {name: string; numbers: string[]}[]}
   /** `keeps`: one whole-field request shown twice for one contact, adding to its numbers and addresses or replacing them. */
-  | {kind: 'contact-save'; options: {before: ContactRecord; after: ContactDraft; keeps?: 'add' | 'replace'}[]}
-  | {kind: 'contact-delete'; options: ContactRecord[]};
+  | {kind: 'contact-save'; options: {before: ContactRecord; after: ContactDraft; keeps?: 'add' | 'replace'}[]; more?: true}
+  | {kind: 'contact-delete'; options: ContactRecord[]; more?: true};
 /** The conversation the owner has open, as the agent may read it. */
 export type OpenThread = {participant: string | null; messages: {direction: 'in' | 'out'; date: number; body: string}[]; truncated: boolean};
 export type VoicemailDeleteResult = 'deleted' | 'none-selected' | 'cancelled' | 'failed';
@@ -40,6 +41,8 @@ export type TelephonyPorts = {
   ask(review: TelephonyReview, signal: AbortSignal): Promise<number | null>;
   normalize(number: string): string | null;
   searchContacts(query: string, limit: number): Promise<{id: string; displayName: string; phoneNumbers: string[]}[]>;
+  /** The name of the contact holding `number`, by Android's own number matching over the whole address book; null when none does. */
+  contactForNumber(number: string): Promise<string | null>;
   placeCall(number: string): Promise<{status: 'placed' | 'emergency-handoff' | 'busy' | 'unavailable' | 'failed'}>;
   getContact(id: string): Promise<ContactRecord>;
   saveContact(draft: ContactDraft, target?: {id: string; version: string}): Promise<{status: 'saved' | 'stale' | 'not-found' | 'failed' | 'unknown'}>;
@@ -131,8 +134,18 @@ export function refuseTelephonyAction(operation: TelephonyActionOperation, summa
   };
   return {...finish(unavailable()), summary};
 }
-async function numbers(query: string, ports: TelephonyPorts): Promise<ContactMatch[]> {
-  return contactCallOptions(await ports.searchContacts(query, LOOKUP_LIMIT), value => ports.normalize(value));
+/**
+ * The first LOOKUP_LIMIT contacts matching `query`. One row past the limit is read, and never
+ * offered, so `more` tells a list cut short from every match.
+ */
+async function lookup(query: string, ports: Pick<TelephonyPorts, 'searchContacts'>) {
+  const rows = await ports.searchContacts(query, LOOKUP_LIMIT + 1);
+  return {rows: rows.slice(0, LOOKUP_LIMIT), more: rows.length > LOOKUP_LIMIT};
+}
+const flagMore = (more: boolean) => more ? {more: true as const} : {};
+async function numbers(query: string, ports: TelephonyPorts): Promise<{options: ContactMatch[]; more: boolean}> {
+  const {rows, more} = await lookup(query, ports);
+  return {options: contactCallOptions(rows, value => ports.normalize(value)), more};
 }
 
 async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal: AbortSignal): Promise<PhoneCallResult> {
@@ -140,12 +153,12 @@ async function call(operation: PhoneCallOperation, ports: TelephonyPorts, signal
   let number: string;
   if (operation.target.kind === 'number') number = operation.target.number;
   else {
-    let options: ContactMatch[];
-    try { options = await numbers(operation.target.query, ports); } catch { return {kind: 'phone-call', status: 'unavailable', contact: false}; }
+    let options: ContactMatch[], more: boolean;
+    try { ({options, more} = await numbers(operation.target.query, ports)); } catch { return {kind: 'phone-call', status: 'unavailable', contact: false}; }
     ports.current();
     if (!options.length) return {kind: 'phone-call', status: 'not-found', contact: false};
     // A name is never called unseen: the owner confirms or chooses the exact number, even for one match.
-    const choice = await ports.ask({kind: 'call', options}, signal);
+    const choice = await ports.ask({kind: 'call', options, ...flagMore(more)}, signal);
     if (choice === null || !options[choice]) return {kind: 'phone-call', status: 'cancelled', contact: false};
     number = options[choice].number;
   }
@@ -168,15 +181,15 @@ async function compose(operation: SmsComposeOperation, operationId: string, port
     // The approval card showed this exact number (`sms.compose.v2`), so nothing is asked again here.
     number = target.number; placed = inOpenThread(number);
   } else {
-    let options: ContactMatch[];
-    try { options = await numbers(target.query, ports); } catch { return result('unavailable'); }
+    let options: ContactMatch[], more: boolean;
+    try { ({options, more} = await numbers(target.query, ports)); } catch { return result('unavailable'); }
     ports.current();
     if (!options.length) return result('not-found');
     const only = options.length === 1 ? inOpenThread(options[0].number) : null;
     if (only === 'drafted') return result('drafted');
     // A name is never texted unseen: the lookup is a fuzzy filter and the card showed only the name,
     // so the owner confirms or chooses the matched name and number here, even for one match.
-    const choice = await ports.ask({kind: 'message', options, body: operation.body}, signal);
+    const choice = await ports.ask({kind: 'message', options, body: operation.body, ...flagMore(more)}, signal);
     if (choice === null || !options[choice]) return result('cancelled');
     ports.current();
     number = options[choice].number; placed = only ?? inOpenThread(number);
@@ -250,17 +263,18 @@ export function contactChangeOptions(before: ContactRecord, operation: Pick<Cont
 }
 /**
  * The matching contacts the editor can read completely; null when some matched but none can be offered.
- * A change or deletion is offered (and its approval card names them) only for these.
+ * A change or deletion is offered (and its approval card names them) only for these. `more`: more
+ * contacts match than the lookup lists, and the card and review say so.
  */
-export async function contactWriteTargets(query: string, ports: Pick<TelephonyPorts, 'searchContacts' | 'getContact'>): Promise<ContactRecord[] | null> {
-  const rows = await ports.searchContacts(query, LOOKUP_LIMIT), found: ContactRecord[] = [];
+export async function contactWriteTargets(query: string, ports: Pick<TelephonyPorts, 'searchContacts' | 'getContact'>): Promise<{contacts: ContactRecord[]; more: boolean} | null> {
+  const {rows, more} = await lookup(query, ports), found: ContactRecord[] = [];
   for (const row of rows) {
     try { found.push(await ports.getContact(row.id)); }
     // Only a contact that is gone, or holds more than the editor can read, is left out. Any other
     // failed read (Contacts closed or paused) is not "no match".
     catch (error) { const code = refusalCode(error); if (code !== 'incomplete' && code !== 'not-found') throw error; }
   }
-  return rows.length && !found.length ? null : found;
+  return rows.length && !found.length ? null : {contacts: found, more};
 }
 async function write(operation: ContactWriteOperation, ports: TelephonyPorts, signal: AbortSignal): Promise<ContactWriteResult> {
   const result = (status: ContactWriteResult['status']): ContactWriteResult => ({kind: 'contact-write', status});
@@ -269,12 +283,20 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
     if (operation.type === 'contact_create') {
       // The approval the owner already gave showed every field of the new contact. A contact with
       // the same name or one of its numbers is shown first, so the same person is not added twice unseen.
+      // The name search only returns contacts whose names match, so each number is also looked up
+      // on its own: a number saved under another name ("Mother" for "Mom") is found that way.
       const {contact} = operation, key = (number: string) => ports.normalize(number) || number, wanted = contact.phoneNumbers.map(key);
-      const twin = (await ports.searchContacts(contact.displayName, LOOKUP_LIMIT)).find(row =>
+      let twin: {name: string; numbers: string[]} | undefined;
+      const named = (await ports.searchContacts(contact.displayName, LOOKUP_LIMIT)).find(row =>
         row.displayName.trim().toLowerCase() === contact.displayName.toLowerCase() || row.phoneNumbers.some(number => wanted.some(other => sameContactNumber(other, key(number)))));
+      if (named) twin = {name: contactChoiceName(named.displayName), numbers: named.phoneNumbers};
+      for (const number of twin ? [] : contact.phoneNumbers) {
+        const holder = await ports.contactForNumber(number);
+        if (holder !== null) { twin = {name: contactChoiceName(holder), numbers: [number]}; break; }
+      }
       ports.current();
       if (twin) {
-        if (await ports.ask({kind: 'contact-create', options: [{name: contactChoiceName(twin.displayName), numbers: twin.phoneNumbers}]}, signal) !== 0) return result('cancelled');
+        if (await ports.ask({kind: 'contact-create', options: [twin]}, signal) !== 0) return result('cancelled');
         ports.current();
       }
       dispatched=true;
@@ -282,9 +304,10 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
         phoneNumbers: contact.phoneNumbers.map(number => ({number, type: 'mobile'})), emailAddresses: contact.emailAddresses.map(address => ({address, type: 'home'}))});
       return result(saved.status === 'saved' ? 'saved' : saved.status === 'unknown' ? 'unknown' : 'failed');
     }
-    const found = await contactWriteTargets(operation.query, ports);
+    const targets = await contactWriteTargets(operation.query, ports);
     ports.current();
-    if (!found) return result('unavailable');
+    if (!targets) return result('unavailable');
+    const {contacts: found, more} = targets;
     if (!found.length) return result('not-found');
     if (operation.type === 'contact_update') {
       // Each change is worked out against the contact as the phone holds it now, and shown before and after.
@@ -293,14 +316,14 @@ async function write(operation: ContactWriteOperation, ports: TelephonyPorts, si
       // a save. When no matching contact would change, nothing is asked and nothing was changed.
       const options = found.flatMap(before => contactChangeOptions(before, operation, ports.normalize, ports.contactValues)).filter(option => !changesNothing(option));
       if (!options.length) return result('not-found');
-      const choice = await ports.ask({kind: 'contact-save', options}, signal);
+      const choice = await ports.ask({kind: 'contact-save', options, ...flagMore(more)}, signal);
       if (choice === null || !options[choice]) return result('cancelled');
       ports.current();
       // The write names the version the owner was shown; a contact that changed since is stale.
       dispatched=true;
       return result((await ports.saveContact(options[choice].after, {id: options[choice].before.id, version: options[choice].before.version})).status);
     }
-    const choice = await ports.ask({kind: 'contact-delete', options: found}, signal);
+    const choice = await ports.ask({kind: 'contact-delete', options: found, ...flagMore(more)}, signal);
     if (choice === null || !found[choice]) return result('cancelled');
     ports.current();
     dispatched=true;

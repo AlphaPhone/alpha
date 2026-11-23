@@ -93,6 +93,25 @@ export interface VoiceNavigationContinuation {
  apply(view:string,current:()=>void,commit:(chat:string,onCommitted:(context:ContextEnvelope)=>void)=>Promise<boolean>):Promise<boolean>;
  finish(delivered:boolean):ContextEnvelope|undefined;
 }
+/**
+ * A step that brings another view in front after a request (see `AlphaClient.afterRequestSettles`).
+ * `view` names the view it shows, so a voice turn can carry its conversation there; `current`
+ * throws once the step is no longer current; `show` takes the chat detent the view should open with.
+ * A step that keeps changing its view after bringing it in front (Messages opening the draft's
+ * conversation, which publishes that thread as the selection) returns a promise that settles once
+ * it is done, so a voice turn pins the context the step finished on, not the one it passed through.
+ */
+export interface ViewStep { view: string; current: () => void; show: (detent?: string) => void | Promise<unknown> }
+/** The view steps a chat turn's own request performs, held until that turn has delivered its reply. */
+export interface TurnViewSteps {
+  /** The turn's own navigation moved the context from `from` to the context now published. */
+  moved(from: ContextEnvelope): void;
+  /**
+   * Ends the hold. Each held step goes to `run` in order (a step that throws is retired; its
+   * journaled receipt stands); without `run`, each runs as `afterRequestSettles` runs it.
+   */
+  release(run?: (step: ViewStep | (() => void)) => Promise<void> | void): Promise<void>;
+}
 export interface AgentReply {
   /** A voice turn the agent chose not to answer: `text` is empty and no reply was written. */
   ignored?: true;
@@ -195,6 +214,11 @@ export function developmentSessionOrigin(origin: URL, declared: string | undefin
   return allowDevelopment && origin.protocol === "http:" &&
     developmentSessionHosts.includes(origin.hostname) && declared === origin.origin;
 }
+function runViewStep(step: ViewStep | (() => void)): void {
+  if (typeof step === "function") { step(); return; }
+  step.current();
+  step.show();
+}
 export class AlphaClient {
   private transport: VerifiedSessionTransport | null = null;
   private epoch = 0;
@@ -215,6 +239,10 @@ export class AlphaClient {
   /** The session whose approvals `consumed` records. */
   private consumedSession = "";
   private listeners = new Set<() => void>();
+  /** View steps held by chat turns in progress, newest last (see `holdTurnViewSteps`). */
+  private turnHolds: Array<Array<ViewStep | (() => void)>> = [];
+  /** While a turn releases its held steps, the context move its own navigation made. */
+  private turnMove: { from: string; to: string } | undefined;
   getState(): AlphaClientState {
     return {
       connection: this.transport ? "ready" : "unconfigured",
@@ -242,16 +270,60 @@ export class AlphaClient {
    * and a changed agent still end the request exactly as before; the step then runs, and a step that
    * checks it is still current throws once it is not, which retires it (its journaled receipt stands).
    * A request that started meanwhile is waited for too, so the step never cancels it.
+   *
+   * While a chat turn holds its view steps (`holdTurnViewSteps`), the step is kept for that turn,
+   * which runs it once its reply and its own navigation are delivered: a voice turn then carries the
+   * conversation to the step's view, and a step after the turn's own screen change still runs.
    */
-  afterRequestSettles(show: () => void): void {
+  afterRequestSettles(show: ViewStep | (() => void)): void {
     // A background workflow generation is never cancelled by a view change (setViewContext), so it
     // does not hold the step; only a chat request the change would abort does.
-    if (!this.active || this.activeWorkflow) { show(); return; }
+    if (this.activeWorkflow) { runViewStep(show); return; }
+    const hold = this.turnHolds[this.turnHolds.length - 1];
+    if (hold) { hold.push(show); return; }
+    if (!this.active) { runViewStep(show); return; }
     const stop = this.subscribe(() => {
       if (this.active && !this.activeWorkflow) return;
       stop();
       setTimeout(() => { try { this.afterRequestSettles(show); } catch { /* A retired view keeps its journaled receipt. */ } }, 0);
     });
+  }
+  /** True while a chat request a view change would cancel is in flight (a workflow generation is not one). */
+  requestHoldsViews(): boolean {
+    return !!this.active && !this.activeWorkflow;
+  }
+  /**
+   * Called by a chat turn just before it sends: view steps registered until `release` belong to
+   * it (see `afterRequestSettles`). The caller must release it on every path.
+   */
+  holdTurnViewSteps(): TurnViewSteps {
+    const steps: Array<ViewStep | (() => void)> = [];
+    let released = false, move: { from: string; to: string } | undefined;
+    this.turnHolds.push(steps);
+    return {
+      moved: (from) => { if (!released && !this.context.sensitive) move = { from: JSON.stringify(from), to: JSON.stringify(this.context) }; },
+      release: async (run) => {
+        if (released) return;
+        released = true;
+        this.turnHolds = this.turnHolds.filter((held) => held !== steps);
+        const prior = this.turnMove;
+        this.turnMove = move;
+        try {
+          while (steps.length) {
+            const step = steps.shift()!;
+            try { if (run) await run(step); else this.afterRequestSettles(step); } catch { /* A retired view keeps its journaled receipt. */ }
+          }
+        } finally { this.turnMove = prior; }
+      },
+    };
+  }
+  /**
+   * True when the published context is `expected`, or, while a turn releases its held view steps,
+   * the context that turn's own navigation moved to from `expected` with no other change since.
+   */
+  followsTurnContext(expected: ContextEnvelope): boolean {
+    const now = JSON.stringify(this.context), want = JSON.stringify(expected);
+    return now === want || !!this.turnMove && this.turnMove.from === want && this.turnMove.to === now;
   }
   /** Trusted composition-root API, never exposed to arbitrary remote web content. */
   attachVerifiedTransport(transport: VerifiedSessionTransport, options: { developmentOrigin?: string } = {}): void {
