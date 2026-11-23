@@ -50,3 +50,40 @@ lemma lawRenamingKeepsEveryNoteInItsFolder_ensures(rows: seq<Row>, folders: seq<
   }
   assert a == b;
 }
+
+// shownRow, with the heap-free filter the library's lemmas speak of
+lemma ShownRowIs(s: Notes, id: int)
+  ensures shownRow(s, id) == (if 0 < |ProofLib.Filter((r: Row) => (r.id == id), shown(s))| then ProofLib.Filter((r: Row) => (r.id == id), shown(s))[0] else blankRow)
+{
+}
+
+lemma openRow_ensures(s: Notes, id: int, covered: bool, by_: app__notes__note_Actor)
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysARemovedFolderStaysGone(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysALaterReadingIsOwed(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysOnlyAGoodReadingIsShown(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysFoldersAreSound(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysTheFilterNamesAFolder(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysAChangeIsSentOnceWrittenDown(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysAShownProposalIsPending(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> alwaysEverythingIsTheOwners(openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepRemovedFoldersAreRemembered(s, "openRow", openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepTheListNeverGoesBack(s, "openRow", openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepOnlyAReadingChangesTheList(s, "openRow", openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepANoteOpensAsListed(s, "openRow", openRow(s, id, covered, by_).state, openRow(s, id, covered, by_).out))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepOneSoundChangeAtATime(s, "openRow", openRow(s, id, covered, by_).state, openRow(s, id, covered, by_).out))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepAnUnknownChangeStaysUnknown(s, "openRow", openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepTheAgentOnlyProposes(s, "openRow", openRow(s, id, covered, by_).state, openRow(s, id, covered, by_).out))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepLeavingKeepsTheProposal(s, "openRow", openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepNoAnswerForAFormerOwner(s, "openRow", openRow(s, id, covered, by_).state))
+  ensures (inv(s) ==> canOpenRow(s, id, covered, by_) ==> stepNoLateAnswerAfterRestart(s, "openRow", openRow(s, id, covered, by_).state))
+{
+  if inv(s) && canOpenRow(s, id, covered, by_) {
+    var x :| x in shown(s) && x.id == id;
+    ProofLib.FilterMember((r: Row) => (r.id == id), shown(s), x);
+    ShownRowIs(s, id);
+    var f := ProofLib.Filter((r: Row) => (r.id == id), shown(s));
+    assert 0 < |f|;
+    assert f[0] in f;
+    ProofLib.FilterMember((r: Row) => (r.id == id), shown(s), f[0]);
+  }
+}

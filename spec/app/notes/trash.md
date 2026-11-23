@@ -528,12 +528,13 @@ pure def alwaysNoQuestionWhileTheOwnerActs(s: Trash): bool =
 ### A recording is erased only after its action ended, under that action's number, and only for an owner
 
 Discovered by the proof: without it, a recording's erasure could seem to
-overlap the action it follows, or come before it.
+overlap the action it follows, or come before it, or be left written down
+and unsent when another owner takes the phone.
 
 ```quint
 pure def alwaysOneEffectAtATime(s: Trash): bool =
   not(inFlight(s.attempt) and inFlight(s.audio)) and s.audio.id <= s.attempt.id
-    and (inFlight(s.attempt) implies isOwner(s.owner))
+    and (inFlight(s.attempt) implies isOwner(s.owner)) and s.audio.outcome != A::Recorded
 ```
 
 ### A question can go stale, Recently deleted can be emptied, notes can expire, and a voice note's recording can be erased or left unknown

@@ -351,7 +351,9 @@ read, to the view that opens it.
 pure def canOpenRow(s: Notes, id: int, covered: bool, by: Actor): bool =
   mayOpen(covered, by) and id > 0 and shown(s).some(r => r.id == id)
 
-pure def openRow(s: Notes, id: int, covered: bool, by: Actor): Moved = { state: s, out: List(Shows({ row: rowOf(s, id) })) }
+pure def shownRow(s: Notes, id: int): Row = shown(s).select(r => r.id == id).nthOr(0, blankRow)
+
+pure def openRow(s: Notes, id: int, covered: bool, by: Actor): Moved = { state: s, out: List(Shows({ row: shownRow(s, id) })) }
 
 pure def stepANoteOpensAsListed(before: Notes, via: str, after: Notes, out: List[Effect]): bool =
   out.every(e => match e { | Shows(x) => shown(before).includes(x.row) and x.row.id > 0 | _ => true })
@@ -417,6 +419,16 @@ pure def written(c: Change, proposed: bool, s: Notes): Moved =
   val attempt = A::dispatch(A::record(A::plan(s.writing.id + 1)))
   { state: { ...s, writing: attempt, change: c, wrote: s.owner, fromProposal: proposed },
     out: List(Writes({ ticket: attempt.id, owner: s.owner, change: c })) }
+```
+
+### A change written down is sent at once
+
+Discovered by the proof: without it, a change written down and not yet sent
+would outlive a restart or another owner taking the phone as one still on
+its way.
+
+```quint
+pure def alwaysAChangeIsSentOnceWrittenDown(s: Notes): bool = s.writing.outcome != A::Recorded
 ```
 
 ### The owner changes a note or a folder, and keeps as a note what another app hands over

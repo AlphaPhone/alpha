@@ -242,10 +242,11 @@ pure def noteRead(e: Editor, note: int, latest: int, present: bool, link: Source
 ### The revision a draft builds on never goes back while the same note is held
 
 So the owner's next save never collides with a revision they already had.
+A new note is the same note only under the same creation number.
 
 ```quint
 pure def stepTheBaseNeverGoesBack(before: Editor, via: str, after: Editor): bool =
-  (held(before) and held(after) and after.note == before.note and after.fresh == before.fresh
+  (held(before) and held(after) and after.note == before.note and after.fresh == before.fresh and after.made == before.made
     and via != "openNote" and via != "draftFound")
     implies after.draft.base >= before.draft.base
 ```

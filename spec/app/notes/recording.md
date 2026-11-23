@@ -343,7 +343,11 @@ pure def stepTheMicrophoneIsToldFirst(before: Recorder, via: str, after: Recorde
 
 ### A recording being kept, or kept, or that an error stopped, holds some audio, and a kept voice note is one the store confirmed or was found to hold
 
-A keeping on its way is the recording's only state then.
+A keeping on its way is the recording's only state then. Discovered by the
+proof: a recording still being made has no keeping yet, one that failed has
+none that went through or is unaccounted for, and a lookup runs only over a
+keeping whose outcome is unknown; without these a recording could be kept
+twice.
 
 ```quint
 pure def alwaysAKeptRecordingHoldsAudio(r: Recorder): bool =
@@ -354,6 +358,9 @@ pure def alwaysAKeptRecordingHoldsAudio(r: Recorder): bool =
     and (r.phase == Idle implies (r.kept == 0 and r.capture == 0 and not(r.recovered) and not(r.damaged)))
     and (r.keeping.outcome == A::Sent implies r.phase == Keeping)
     and (r.missing implies r.keeping.outcome == A::Unknown)
+    and (live(r) implies r.keeping.outcome == A::Planned)
+    and (r.phase == Failed implies (r.keeping.outcome == A::Planned or r.keeping.outcome == A::Refused or r.missing))
+    and (r.look.status == R::Loading implies (r.phase == Keeping and r.keeping.outcome == A::Unknown))
 ```
 
 ### Keeping a recording sends what was written, for the owner it was recorded for, once, into its folder, and never a damaged one or one whose keeping is unknown or done
@@ -643,12 +650,13 @@ pure def stepNothingForAFormerOwner(before: Recorder, via: str, after: Recorder,
   }) and (via == "ownerChanged" implies (after.keeping.outcome != A::Sent and after.look.status != R::Loading))
 ```
 
-### A recording is held only for an owner
+### A recording is held only for an owner, under its take
 
-Discovered by the proof: without it, a recording could be kept for nobody.
+Discovered by the proof: without it, a recording could be kept for nobody,
+or a discard could name no recording.
 
 ```quint
-pure def alwaysARecordingIsTheOwners(r: Recorder): bool = unfinished(r) implies isOwner(r.owner)
+pure def alwaysARecordingIsTheOwners(r: Recorder): bool = unfinished(r) implies (isOwner(r.owner) and r.take > 0)
 ```
 
 ### A recording kept for its owner can come back, cut off, damaged, or handed to the store

@@ -243,7 +243,7 @@ pure def stepALinkIsSavedOverTheRevisionShown(before: Linker, via: str, after: L
   out.every(e => match e {
     | SavesLink(x) => onShow(before) and x.note == before.note and x.base == before.revision and not(inFlight(before.saving))
         and x.owner == before.owner and isOwner(x.owner)
-        and (if (via == "retained") x.link == { tie: FileLink, id: before.grant, mark: before.mark } and x.ref > 0
+        and (if (via == "retained") x.link.tie == FileLink and x.link.id == before.grant and x.link.mark == before.mark and x.ref > 0
           else via == "remove" and x.link == unlinked and x.ref == 0)
     | Releases(r) => r.file == after.grant and r.file > 0 and after.stage == Releasing
     | Views(v) => v.ref == before.ref and v.ref > 0

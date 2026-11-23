@@ -143,13 +143,14 @@ pure val fair_transcribed = "weak"
 ### The transcript is always a prefix of the audio, and what was added and summarised a prefix of the transcript
 
 What is being written adds to what the note holds, and never goes past
-what was heard.
+what was heard; a summary being written covers at least what the last one
+did (discovered by the proof).
 
 ```quint
 pure def alwaysTheTranscriptIsAPrefixOfTheAudio(v: VoiceNote): bool =
   0 <= v.summary and v.summary <= v.added and v.added <= v.heard and v.heard <= v.asked
     and v.asked <= v.segments and v.upTo <= v.added and v.writeUpTo <= v.heard
-    and (busy(v) and v.part == Summary implies v.writeUpTo <= v.added)
+    and (busy(v) and v.part == Summary implies (v.summary <= v.writeUpTo and v.writeUpTo <= v.added))
     and (busy(v) and v.part == Transcript implies v.writeUpTo >= v.added)
 ```
 
@@ -411,9 +412,12 @@ pure def stepNoAnswerForAFormerOwner(before: VoiceNote, via: str, after: VoiceNo
 
 ### A voice note open, or written to, is one of the owner the phone has now
 
+Discovered by the proof: a write is sent as soon as it is written down, so
+none is left written down and unsent by a restart or another owner.
+
 ```quint
 pure def alwaysTheVoiceNoteIsTheOwners(v: VoiceNote): bool =
-  ((v.note > 0 or busy(v)) implies isOwner(v.owner))
+  ((v.note > 0 or busy(v)) implies isOwner(v.owner)) and v.writing.outcome != A::Recorded
     and ((v.showing or busy(v) or v.summarising.status == R::Loading) implies v.note > 0)
 ```
 

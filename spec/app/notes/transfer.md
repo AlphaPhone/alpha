@@ -152,9 +152,12 @@ pure def dismiss(t: Transfer, by: Actor): Transfer = { ...t, notice: Quiet }
 
 ### One operation runs at a time: a picker open or a write on its way, and an export names its note
 
+Discovered by the proof: a write is sent as soon as it is written down, so
+none is left written down and unsent by a restart or another owner.
+
 ```quint
 pure def alwaysOneOperationAtATime(t: Transfer): bool =
-  (t.job != NoJob) iff (t.pick.status == R::Loading or inFlight(t.writing))
+  ((t.job != NoJob) iff (t.pick.status == R::Loading or inFlight(t.writing))) and t.writing.outcome != A::Recorded
 
 pure def alwaysAWriteIsAfterItsPicker(t: Transfer): bool =
   not(t.pick.status == R::Loading and inFlight(t.writing)) and (t.job == Exporting implies (t.note > 0 and t.revision > 0))
