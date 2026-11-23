@@ -90,6 +90,25 @@ it.effect("Let my agent act only with my say-so (spec/assistant/review.md, \"Sto
   }
 })
 
+it.effect("An interrupted reply leaves a pending action for review without running it (spec/assistant/review.md, \"A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off\")", () => effect {
+  const journal = new Map<string, { readonly revision: number }>()
+  const runs = { count: 0 }
+  const seen: Seen = { calls: [] }
+  const resident = fakeResident(seen, { turn: { kind: "fail", failureKind: "aborted" }, proposals: [noteProposal] })
+  provide assistantOver(resident, fakeHost([]), countingExecutors(runs), journalNative(journal), fakePreferences({ asks: false, shares: false })) {
+    const composer = try Composer
+    try composer.edit("Make a note: milk")
+    try composer.send()
+    const transcript = try transcriptNow()
+    const reply = transcript.rows.find((row) => row.kind === "agent")
+    const review = transcript.rows.some((row) => row.kind === "card" && row.card.proposalId === noteProposal.id)
+    const writes = seen.calls.filter((call) => call.method === "POST" && call.path.startsWith("/api/client-devices/proposals/"))
+    try Effect.try(() => assert.deepStrictEqual({ runs: runs.count, writes, journal: journal.size, review, cutOff: reply?.cutOff }, {
+      runs: 0, writes: [], journal: 0, review: true, cutOff: "NotCutOff",
+    }))
+  }
+})
+
 it.effect("Read a reply with its cards (spec/assistant/reply.md, \"Story: Read a reply with its cards\")", () => effect {
   const maps = "[MAPSCARD]\n{\"kind\":\"place\",\"place\":{\"name\":\"SFO\",\"latitude\":37.62,\"longitude\":-122.38,\"provider\":\"osm\",\"providerPlaceId\":\"1\",\"categories\":[]},\"attribution\":null}\n[/MAPSCARD]"
   const reply = `${maps}\nAbout 25 minutes.\n\`\`\`\n${maps}\n[INFO] ok\n\`\`\`\n[FORM]{"id":"f","fields":[]}[/FORM]`

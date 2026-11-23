@@ -36,6 +36,8 @@ the turn context's `voiceUi.agentActionMode` `direct-request-v1`
 (`spec/agent/conversation/turnContext.md` of Eliza), so that it binds a
 proposal of the owner's own request to the message; with review-first on
 or unreadable the turn says nothing, and every proposal comes as a card.
+An interrupted reply can still show pending cards. Its review sends no
+decision or claim and starts no direct effect.
 
 ```quint
 type Op = OpenView | OpenSettings | CreateNote | BrowserNavigate | CameraCapture | FilesOpen | CreateReminder | NotesRead
@@ -72,6 +74,8 @@ pure def valid(c: Custody): bool = c.fresh and not(c.sensitive or c.expired or c
 pure def asks(c: Custody): bool = c.reviewFirst != PreferenceOff
 pure def eligible(c: Custody): bool =
   directOp(c.op) and not(c.workflow) and (c.op == BrowserNavigate implies (c.grounded and not(c.browserUsed)))
+pure def mayRunReplyProposal(replied: bool, wasListed: bool, sameMessage: bool): bool = replied and not(wasListed) and sameMessage
+pure def lawAnInterruptedReplyStartsNoOperation(wasListed: bool, sameMessage: bool): bool = not(mayRunReplyProposal(false, wasListed, sameMessage))
 pure def canPrefer(c: Custody, value: Preference): bool = not(c.busy)
 pure def prefer(c: Custody, value: Preference): Custody = { ...c, reviewFirst: value }
 pure def canPropose(c: Custody, op: Op, workflow: bool, bound: bool, grounded: bool, listed: bool): bool =
