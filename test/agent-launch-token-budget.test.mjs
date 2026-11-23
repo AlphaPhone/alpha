@@ -38,5 +38,6 @@ test('the pinned runtime sends no output cap and keeps references stable without
 test('the pinned runtime ends a direct Cerebras rate-limit hold before its re-send', () => {
   const hold = Number(/RATE_LIMIT_MAX_HOLD_MS = ([0-9_]+)/.exec(read('vendor/eliza/plugins/plugin-openai/models/text.ts'))?.[1].replaceAll('_', ''));
   assert.ok(hold >= 1000 && hold < 5000, String(hold));
-  assert.match(read('vendor/eliza/plugins/plugin-assistant/src/runtime/evaluator.ts'), /RATE_LIMIT_RETRY_MAX_WAIT_MS = 5_000/);
+  assert.match(read('vendor/eliza/packages/core/src/security/model-failure.ts'), /TURN_RATE_LIMIT_RESEND_MAX_WAIT_MS = 5_000;/);
+  assert.match(read('vendor/eliza/plugins/plugin-assistant/src/runtime/evaluator.ts'), /RATE_LIMIT_RETRY_MAX_WAIT_MS = TURN_RATE_LIMIT_RESEND_MAX_WAIT_MS;/);
 });
