@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { installResidentAgentPlugin } from './helpers/resident-agent-plugin';
+import { seedCompletedAccessSetup } from './flag-off-android';
 // Rendered provider section over a synthetic native Agent bridge. No key reaches Cerebras: the
 // native check is simulated here and covered by LocalAgentProviderInstrumentedTest on Android.
 
 async function stubAgent(page: import('@playwright/test').Page, cloud = false) {
   await installResidentAgentPlugin(page);
+  await seedCompletedAccessSetup(page,'android');
   await page.addInitScript((cloud: boolean) => {
-    // Account navigation models an existing installation whose access review is complete.
-    localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4}));
     const w = window as any; w.androidBridge = {};
     const f = w.providerFixture = { statusReads: 0, statusOverride: null as null | { provider: string; configured: boolean; model: string }, statusUnavailable: false, saved: null as null | { model: string }, configures: [] as any[], leases: [] as string[], cancelled: [] as string[], clears: 0, stops: 0, reject: '' };
     const methods = (names: string[]) => names.map(name => ({ name, rtype: name==='addListener'?'callback':'promise' }));

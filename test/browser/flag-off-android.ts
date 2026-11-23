@@ -482,10 +482,10 @@ export async function seedCompletedAccessSetup(page: Page, platform?: 'android')
   await page.addInitScript(platform=>{
     const w=window as any;
     const seed=(native:boolean)=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify(native?{version:4,status:'completed',step:7}:{version:1,status:'completed',step:4}));
-    if(platform==='android'||'androidBridge' in w){seed(true);return;}
+    if(platform==='android'||w.androidBridge){seed(true);return;}
     seed(false);
     let bridge:unknown;
-    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(true);}});
+    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(Boolean(value));}});
   },platform);
 }
 /** Dismiss the explicit post-auth Ready card; quiet restoration of completed setup opens no card.
