@@ -702,19 +702,9 @@ private static final class ResidentAttachDiagnostic {
   // Pseudonymize secrets and PII using the pinned upstream runtime.
   env.put("ELIZA_SECRET_SWAP_ENABLED","true");
   env.put("ELIZA_PII_SWAP_ENABLED","true");
-  // A phone conversation has one owner, so a contact or credential keeps its reference from turn
-  // to turn. With a fresh reference each turn no two requests shared a prefix, and the hosted
-  // model's per-minute limit counted the whole conversation again on every call.
-  env.put("ELIZA_SECRET_SWAP_STABLE_REFERENCES","true");
-  // No output cap: a call that sends none may write the model's maximum, 40,960 tokens, and holds
-  // 16,384 of the per-minute limit while it runs, the same as any cap of 16,384 or more (measured).
-  // A 4,096 cap cut off calls that reason first: a reminder's planning call spent all of it
-  // reasoning and saved nothing.
-  // The hosted model answers a per-minute refusal with Retry-After 59 and admits the same request
-  // seconds later: its allowance refills 2,500 tokens a second (measured). On an owner's own key
-  // the runtime held the model for the stated minute and failed every turn in it. The runtime
-  // re-sends a refused step once after five seconds, so the hold must end before that.
-  env.put("OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS","4");
+  // The pinned runtime keeps a contact's or credential's reference stable within a conversation,
+  // sends no output cap on any call, and on an own Cerebras key holds a refused model for at most
+  // 4 s, before its 5 s re-send. None of these needs a launch setting.
   java.util.function.Function<JSONObject,java.util.Map<String,String>> fixture=instrumentationLaunchEnvironment;
   if(fixture!=null){
    if(!BuildConfig.DEBUG||android.os.Process.myUid()/100000<=0)throw new java.io.IOException("Invalid instrumentation launch environment");
