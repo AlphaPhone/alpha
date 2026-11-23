@@ -98,7 +98,7 @@ export const assistantLayer = Layer.effect(Assistant, effect {
   const search = try ChatSearch
   const voice = try PubSub.unbounded<void>()
   const asks = try PubSub.unbounded<CommsAsk>()
-  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => Effect.match(work, { onFailure: () => false, onSuccess: () => true })
   let surface = false
   let launchTaken = false
   effect function show(detent: Detent) {
