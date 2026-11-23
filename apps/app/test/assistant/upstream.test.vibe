@@ -106,7 +106,7 @@ it.effect("Send the open inspected Calendar record (spec/assistant/context.md, \
     const sources = Layer.succeed(TurnSources, {
       calendarDay: () => succeed(undefined),
       calendarSelection: () => sync(() => { reads.count += 1; return selected }),
-      notesList: () => succeed(undefined),
+      notesSelection: () => succeed(undefined),
       preferReview: () => succeed(undefined),
     })
     provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Okay." }, proposals: [] }), Layer.merge(fakeHost([], screen), sources), countingExecutors({ count: 0 })) {
@@ -122,6 +122,31 @@ it.effect("Send the open inspected Calendar record (spec/assistant/context.md, \
   const hidden = try sent({ ...shown, exposure: { ...shown.exposure, hidden: true } }, event)
   const elsewhere = try sent({ ...shown, observation: { ...shown.observation, view: "home" }, onCalendar: false }, source)
   try Effect.try(() => assert.deepStrictEqual({ onEvent, onSource, hidden, elsewhere, reads: reads.count }, { onEvent: event, onSource: source, hidden: undefined, elsewhere: undefined, reads: 2 }))
+})
+
+it.effect("A canonical note stays the target when I ask from its editor (spec/assistant/context.md, \"A turn from Notes names the settled note or the visible list\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const selected = { kind: "canonical-note", id: "note-1", revision: "12" }
+  const screen: ScreenFacts = {
+    exposure: { privateView: false, locked: false, hidden: false, connectionDialog: false },
+    observation: { view: "notes", revision: 3, sensitive: false },
+    onCalendar: false,
+    contextKey: "notes:",
+  }
+  const sources = Layer.succeed(TurnSources, {
+    calendarDay: () => succeed(undefined),
+    calendarSelection: () => succeed(undefined),
+    notesSelection: () => succeed(selected),
+    preferReview: () => succeed(undefined),
+  })
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Okay." }, proposals: [] }), Layer.merge(fakeHost([], screen), sources), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.edit("Help with the note in front of me")
+    try composer.send()
+    const observation = (turnBodies(seen)[0] as { metadata?: { observation?: unknown } } | undefined)?.metadata?.observation
+    const decoded = try decodeObservation(observation)
+    try Effect.try(() => assert.deepStrictEqual(decoded.selectedObject, selected))
+  }
 })
 
 it.effect("Approve an action card once, over the agent's own review routes (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {
