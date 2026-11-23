@@ -25,7 +25,7 @@ test('a miscounted missing item is rejected by the replay', {timeout: scaledTime
 });
 test('an open-item review opened after the viewer moved is rejected by the replay', {timeout: scaledTimeout(240000)}, async () => {
   await assert.rejects(replayPhotosAgentHost({traces: 120, maxSteps: 24, rewrite: {[adapter]: text =>
-    text.replace("if (open && ports.openId() !== open) throw new LibraryAgentRefusal('A different item is open now. Ask again.');", '')}}), /trace \d+ step \d+ settle/);
+    text.replace("if (open && ports.openId() !== open) throw new LibraryAgentRefusal('Ask again because a different item is open now.');", '')}}), /trace \d+ step \d+ settle/);
 });
 // The replay mounts a fixture host; the real camera-adapter host must lend the same ports.
 test('camera-adapter lends the visit, busy and review ports the replay assumes', () => {

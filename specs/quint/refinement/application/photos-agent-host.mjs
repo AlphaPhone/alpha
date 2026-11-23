@@ -92,7 +92,7 @@ export async function replayPhotosAgentHost({rewrite, ...options} = {}) {
         if (refusal.message === 'Open Photos, then ask again.') refusedLeft = bump(refusedLeft);
         else if (refusal.message === 'Photos is busy right now.') refusedBusy = bump(refusedBusy);
         else if (refusal.message === 'Finish the open review first.') refusedReview = bump(refusedReview);
-        else if (refusal.message === 'A different item is open now. Ask again.') refusedMoved = bump(refusedMoved);
+        else if (refusal.message === 'Ask again because a different item is open now.') refusedMoved = bump(refusedMoved);
         else { assert.match(refusal.message, /^(None of those items are in Photos|Those items are not in Photos|Open the photo or video in Photos, then ask again)\.$/);refusedNone = bump(refusedNone); }
       };
       const endVisit = () => { visit++;selection = [];albumReview = undefined; };

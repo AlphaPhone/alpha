@@ -93,7 +93,7 @@ export async function runHostItemsRequest<T>(operation: HostItemsOperation, port
   const { rows, missing } = await resolveRequestedRows(ports.loaded(), open ? [open] : operation.ids, ports.idOf, ports.read, signal);
   if (!ports.current()) throw new LibraryAgentRefusal('Open Photos, then ask again.');
   if (ports.busy()) throw new LibraryAgentRefusal('Photos is busy right now.');
-  if (open && ports.openId() !== open) throw new LibraryAgentRefusal('A different item is open now. Ask again.');
+  if (open && ports.openId() !== open) throw new LibraryAgentRefusal('Ask again because a different item is open now.');
   if (operation.type === 'photo_library_select') {
     if (!rows.length) throw new LibraryAgentRefusal('None of those items are in Photos.');
     ports.select(rows);
