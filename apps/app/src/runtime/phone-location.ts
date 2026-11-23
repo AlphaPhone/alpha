@@ -38,7 +38,8 @@ function observation(coords:{latitude:number;longitude:number;accuracy?:number;t
 /**
  * The phone's position for the resident agent while Alpha's setting and Android's permission
  * allow it. A chat turn never waits for it: it sends the last fix (GPS, or else the last network
- * answer) and at most starts one shared background refresh. Rough location is enough, so a GPS
+ * answer) and at most starts one shared background refresh, plus one network lookup when nothing
+ * is known. Rough location is enough, so a GPS
  * read happens at most every PHONE_LOCATION_REUSE_MS, and a failed one waits
  * PHONE_LOCATION_RETRY_MS before the next try.
  */
@@ -48,12 +49,22 @@ export class PhoneLocationReader {
  private last:ClientLocationObservation|undefined;
  private pending:Promise<ClientLocationObservation|undefined>|undefined;
  constructor(private readonly ports:PhoneLocationPorts){}
- /** For a chat turn: the cached position at once, never a wait on the platform. */
+ /**
+  * For a chat turn: the cached position at once, never a wait on the platform. With no position
+  * at all (GPS has none and the warm-up lookup failed or is old), one network lookup runs behind
+  * the turn so the next one has a position; the client shares, caches and backs off lookups.
+  */
  async read(signal:AbortSignal):Promise<ClientLocationObservation|undefined>{
   signal.throwIfAborted();
   if(!this.ports.enabled()){this.clear();return undefined;}
-  void this.refresh();
+  const generation=this.generation;
+  void this.refresh().then(()=>this.lookUpWithoutFix(generation)).catch(()=>undefined);
   return this.cachedFix(this.ports.now());
+ }
+ /** One network lookup when the permission still holds (no clear since) and nothing is known. */
+ private async lookUpWithoutFix(generation:number):Promise<void>{
+  if(!this.ports.network||generation!==this.generation||!this.ports.enabled()||this.cachedFix(this.ports.now()))return;
+  await this.ports.network.locate().catch(()=>undefined);
  }
  /** One shared permission check and GPS read, when the last one is due. */
  private refresh():Promise<ClientLocationObservation|undefined>{
@@ -99,7 +110,7 @@ export class PhoneLocationReader {
   signal.throwIfAborted();
   const fix=this.cachedFix(this.ports.now());
   if(fix||!this.ports.network||!this.ports.enabled()||generation!==this.generation)return fix;
-  await this.ports.network.locate().catch(()=>undefined);
+  await this.lookUpWithoutFix(generation);
   return generation===this.generation&&this.ports.enabled()?this.cachedFix(this.ports.now()):undefined;
  }
  clear(){this.generation++;this.refreshAfter=Number.NEGATIVE_INFINITY;this.last=undefined;this.pending=undefined;}
