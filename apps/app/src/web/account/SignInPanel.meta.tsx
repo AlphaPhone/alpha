@@ -6,7 +6,7 @@ const none = () => undefined;
 
 export const meta: ComponentMeta<SignInPanelProps> = {
   args: {
-    signIn: chooser, serviceName: "Eliza Cloud", android: true, onRetry: none, onChoose: none, onGoogle: none, onSubmit: none, onVerify: none,
+    signIn: chooser, serviceName: "Eliza Cloud", android: true, onRetry: none, onChoose: none, onGoogle: none, onReopenGoogle: none, onSubmit: none, onVerify: none,
     onResend: none, onBack: none, onOwnKeys: none, onWifiSettings: none,
   },
   examples: { Offline: { signIn: offlineChooser }, Code: { signIn: codeStep }, Spent: { signIn: spentCode }, Factor: { signIn: factorStep }, Google: { signIn: googleWait }, Retained: { signIn: retainedFactor }, Busy: { signIn: { ...codeStep, work: "Verifying", fault: "KeysBusy" } } },

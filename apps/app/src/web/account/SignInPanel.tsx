@@ -3,7 +3,7 @@ import { ArrowLeft, KeyRound, Mail, Phone, RotateCw, ShieldCheck, WifiOff } from
 import { type FormEvent, useState } from "react";
 import {
   type CodeMethod, type Fault, type SignIn, canBack, canBackDuringGoogle, canChooseMethod, canOwnKeysStart, canOwnerOpens, canResend,
-  canSubmitAddress, canTapGoogle, canVerify, entryOf, isPage, methodReady,
+  canSubmitAddress, canTapGoogle, canVerify, entryOf, isPage, mayReopenGoogle, methodReady,
 } from "../../../gen/account__signIn.ts";
 import type { ServiceInfo } from "../../account/signIn.vibe";
 import { Alert, Button, Input, Label, Spinner } from "../components/ui/index.ts";
@@ -21,6 +21,8 @@ export interface SignInPanelProps {
   onRetry: () => void;
   onChoose: (method: CodeMethod) => void;
   onGoogle: () => void;
+  /** The Google page was closed or lost: start a new Google attempt. */
+  onReopenGoogle: () => void;
   onSubmit: (address: string) => void;
   onVerify: (code: string) => void;
   onResend: (address: string) => void;
@@ -63,7 +65,7 @@ function CodeBoxes({ value, invalid, disabled, onChange }: { value: string; inva
  * @model spec/account/signIn.md
  * @design design.md
  */
-export function SignInPanel({ signIn, serviceName, terms, android = false, onRetry, onChoose, onGoogle, onSubmit, onVerify, onResend, onBack, onOwnKeys, onWifiSettings }: SignInPanelProps) {
+export function SignInPanel({ signIn, serviceName, terms, android = false, onRetry, onChoose, onGoogle, onReopenGoogle, onSubmit, onVerify, onResend, onBack, onOwnKeys, onWifiSettings }: SignInPanelProps) {
   const [address, setAddress] = useState("");
   const [code, setCode] = useState("");
   const [showTerms, setShowTerms] = useState(false);
@@ -80,7 +82,13 @@ export function SignInPanel({ signIn, serviceName, terms, android = false, onRet
     event.preventDefault();
     if (canVerify(signIn) && code.trim()) onVerify(code);
   };
-  if (signIn.screen === "ScreenClosed") return signIn.work === "Probing" ? <Spinner label={`Loading ${serviceName} sign-in`} className="mx-auto my-16" /> : null;
+  if (signIn.screen === "ScreenClosed") {
+    if (signIn.work === "Probing") return <Spinner label={`Loading ${serviceName} sign-in`} className="mx-auto my-16" />;
+    // A page with no chooser and no check still offers one, so the required page is never blank.
+    return isPage(entry) && canOwnerOpens(signIn)
+      ? <Button variant="ghost" size="sm" className="mx-auto my-16" onClick={onRetry}><RotateCw aria-hidden />Check sign-in options</Button>
+      : null;
+  }
   return (
     <section aria-labelledby="sign-in-title" className="mx-auto flex w-full max-w-sm flex-col gap-5 px-4 py-8">
       <h1 id="sign-in-title" className="font-serif text-3xl">{signIn.screen === "Choose" ? "Alpha" : signIn.screen === "GoogleWait" ? "In browser" : "Enter code"}</h1>
@@ -140,6 +148,9 @@ export function SignInPanel({ signIn, serviceName, terms, android = false, onRet
         </form>
       )}
       {signIn.screen === "GoogleWait" && <Spinner label="Waiting for Google" className="mx-auto my-6" />}
+      {signIn.screen === "GoogleWait" && mayReopenGoogle(signIn) && (
+        <Button variant="outline" size="sm" onClick={onReopenGoogle}>Reopen Google page</Button>
+      )}
       {fault && <p role="alert" className="text-destructive">{fault}</p>}
       {signIn.screen === "Choose" && terms && (
         <div className="flex flex-col gap-2 text-sm">
