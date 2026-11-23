@@ -105,6 +105,10 @@ pure def adoptPrevious(c: PreviousChoices): Preferences = {
   ...initial, askBeforeActions: c.askBeforeActions, agentLocation: c.agentLocation, browserPage: c.browserPage,
   gmailChanges: c.gmailChanges, calendarEdits: c.calendarEdits, mailImages: c.mailImages,
 }
+pure val cValues = Set(
+  { askBeforeActions: true, agentLocation: false, browserPage: false, gmailChanges: false, calendarEdits: false, mailImages: false },
+  { askBeforeActions: false, agentLocation: true, browserPage: true, gmailChanges: true, calendarEdits: true, mailImages: true },
+  { askBeforeActions: true, agentLocation: true, browserPage: false, gmailChanges: true, calendarEdits: false, mailImages: true })
 pure def lawThePreviousChoicesStay(c: PreviousChoices): bool = {
   val p = adoptPrevious(c)
   p.askBeforeActions == c.askBeforeActions and p.agentLocation == c.agentLocation and p.browserPage == c.browserPage
