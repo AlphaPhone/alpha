@@ -1,4 +1,5 @@
 // spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A turn carries the page Browser hands it for the observed tab, beside the observation, only to a peer that declares it"; spec/assistant/context.md, "A turn names the place, route or search Maps shows as its selected object only while Maps is in front"; spec/assistant/context.md, "Every assistant request carries the capabilities this phone advertises of those the agent offered, and none when it offered none"; spec/assistant/views.md, "Maps' view is delivered by Maps, at most once per effect"; spec/assistant/review.md, "A workflow-bound proposal runs only from its own run's step review, once, and its executor knows the run"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
+import type { NoteFolder } from "@elizaos/plugin-notes/organize"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
 import type { ChangeSummary } from "../workflows/changes.vibe"
@@ -113,11 +114,13 @@ export service TurnSources {
   calendarDay(): (TurnDay | undefined)!!
   /** The Notes list the turn is sent from, or undefined off the list. */
   notesList(): (TurnRecord | undefined)!!
+  noteFolders(): (ReadonlyArray<NoteFolder> | undefined)!!
   /** The owner's "Ask before Alpha acts" preference as Notes' list filter reads it, before each turn. */
   preferReview(reviewFirst: boolean): void!!
   static readonly defaultValue = () => ({
     calendarDay: () => succeed(undefined),
     notesList: () => succeed(undefined),
+    noteFolders: () => succeed(undefined),
     preferReview: () => succeed(undefined),
   })
 }

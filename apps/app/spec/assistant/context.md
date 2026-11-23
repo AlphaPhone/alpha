@@ -225,6 +225,17 @@ pure val offeredValues = Set(Set(), Set("maps.selected-read.v1"), Set("maps.sele
 pure val runsValues = Set(Set(), Set("maps.selected-read.v1"))
 ```
 
+### An observed turn on an enrolled phone can carry the owner's Notes folder names to its compared agent
+
+The turn sends the folder IDs and names so a request can name its destination.
+An unreadable list sends nothing. The request carries no other folder fields.
+
+```quint
+pure def sendsNoteFolders(observed: bool, compared: bool, enrolled: bool): bool = observed and compared and enrolled
+pure def lawAHiddenScreenSendsNoNoteFolders(compared: bool, enrolled: bool): bool = not(sendsNoteFolders(false, compared, enrolled))
+pure def lawAChatOnlySessionSendsNoNoteFolders(observed: bool, compared: bool): bool = not(sendsNoteFolders(observed, compared, false))
+```
+
 ## Story: Know when my words leave the phone
 
 > As the owner, I want to see when my assistant's answers come from a

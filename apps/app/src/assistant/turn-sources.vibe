@@ -1,14 +1,17 @@
 // spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
 import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
+import { NOTE_FOLDERS_METADATA_KEY, readNoteFolders } from "@elizaos/plugin-notes/organize"
 import { AgentCalendar } from "../calendar/agent.vibe"
 import { calendarDayObservation } from "../calendar/observation.vibe"
 import { NotesListFilter } from "../notes/listFilter.vibe"
+import { NotesFolders } from "../notes/folders.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 import { TurnSources } from "./ports.vibe"
 
 /** The turn sources over Calendar's shown day and Notes' list filter, for the runtime to provide after Notes and Calendar and before the assistant. */
 export const turnSourcesLive = Layer.effect(TurnSources, effect {
   const notes = try NotesListFilter
+  const folders = try NotesFolders
   const foreground = try Foreground
   const presentation = try PresentationMachine
   const agent = try AgentCalendar
@@ -16,6 +19,10 @@ export const turnSourcesLive = Layer.effect(TurnSources, effect {
   return {
     calendarDay: () => day catch () => undefined,
     notesList: () => notes.context(),
+    effect noteFolders() {
+      const listed = folders.list() catch () => undefined
+      return listed === undefined ? undefined : readNoteFolders({ [NOTE_FOLDERS_METADATA_KEY]: listed })
+    },
     preferReview: (reviewFirst: boolean) => notes.prefer(reviewFirst),
   }
 })

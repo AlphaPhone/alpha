@@ -9,7 +9,8 @@ import { Machine as RecoveryMachine } from "../../gen/assistant__recovery.effect
 import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
 import { statesDirectRequests } from "../../gen/assistant__review.effect.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
-import { namesMaps, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
+import { namesMaps, sendsDay, sendsNoteFolders, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
+import { NOTE_FOLDERS_METADATA_KEY } from "@elizaos/plugin-notes/organize"
 import { Preferences } from "../settings/preferences.vibe"
 import { Latency } from "../voice/latency.vibe"
 import type { DictationTarget } from "../voice/dictation.vibe"
@@ -332,8 +333,11 @@ export const composerLayer = Layer.effect(Composer, effect {
     const screen = try host.screen()
     const observed = observes(screen.exposure)
     const peer = try host.peer()
-    const place = try location.forTurn(observed, peer.takesLocation)
-    const asksFirst = try preferences.asksBeforeActions()
+    const [noteFolders, place, asksFirst] = try.all [
+      sendsNoteFolders(observed, peer.optionalFields, Boolean(identity.enrollmentId)) ? sources.noteFolders() : succeed(undefined),
+      location.forTurn(observed, peer.takesLocation),
+      preferences.asksBeforeActions(),
+    ]
     try sources.preferReview(asksFirst)
     const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
@@ -411,7 +415,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       }),
     }
     const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
-      { text: composed, metadata: { ...context, ...(viewFields ?? {}) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
+      { text: composed, metadata: { ...context, ...(viewFields ?? {}), ...(noteFolders === undefined ? {} : { [NOTE_FOLDERS_METADATA_KEY]: noteFolders }) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
       { stream: hooks },
     )))
     const outcome = try classify(result, attempt, streamed)
