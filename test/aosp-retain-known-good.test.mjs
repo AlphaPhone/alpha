@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ALPHA_OTA_DEFAULTS} from '../scripts/aosp-ota-update.ts';
+import {ALPHA_OTA_DEFAULTS, withAlphaDefaults} from '../scripts/aosp-ota-update.ts';
 import {parseArgs} from '../scripts/os-ported/os/aosp-ota-update.mjs';
 
 // Alpha binds the shared retain-known-good operator command to its Pixel 10a channel. Argument
@@ -8,7 +8,7 @@ import {parseArgs} from '../scripts/os-ported/os/aosp-ota-update.mjs';
 test('retain-known-good runs the shared command with the Alpha channel and every required input', () => {
   const args = ['retain-known-good', '--record', 'r.json', '--signed-target-files', 'tf.zip', '--signed-image', 'img.zip', '--archive-dir', 'kept'];
   assert.match(ALPHA_OTA_DEFAULTS.channel, /android\/aosp\/pixel10a-ota-channel\.json$/);
-  const options = parseArgs([...args, '--channel', ALPHA_OTA_DEFAULTS.channel]);
+  const options = parseArgs(withAlphaDefaults(args));
   assert.equal(options.command, 'retain-known-good');
   assert.equal(options.archiveDir, 'kept');
   assert.throws(() => parseArgs(['retain-known-good', '--record', 'r.json']), /requires --channel|requires --signed-target-files/);

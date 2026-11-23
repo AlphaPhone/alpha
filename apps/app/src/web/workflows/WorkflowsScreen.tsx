@@ -183,7 +183,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
             // spec/workflows/lifecycle.md: turning a workflow on or off is reviewed first, at its current version.
             <header className="flex items-center justify-between gap-3 px-4">
               <div className="min-w-0">
-                <h2 className="truncate font-serif text-2xl">{workflowRow.title}</h2>
+                <h2 className="truncate font-display text-2xl">{workflowRow.title}</h2>
                 {workflowRow.description !== "" && <p className="text-sm text-muted-foreground">{workflowRow.description}</p>}
               </div>
               <Switch aria-label={workflowRow.enabled ? "Turn off" : "Turn on"} checked={workflowRow.enabled} disabled={activation !== undefined} className="min-h-12 min-w-12"

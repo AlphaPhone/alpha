@@ -6,7 +6,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {execFileSync} from 'node:child_process';
 import {embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated} from '../scripts/embedding-native-contract.ts';
-import {nativeRecipe,nativeRecipeDigest,readNativeBuildReceipt,verifyNativeFileBytes,nativeOutputInventory,NATIVE_BUILD_RECEIPT,fileDigest,bytesDigest,withNativeCacheLock,prepareNativeSource,nativeAndroidSdk,clearStagedNativeInputs} from '../scripts/native-build-inputs.ts';
+import {nativeRecipe,nativeRecipeDigest,readNativeBuildReceipt,verifyNativeFileBytes,verifyNativeBuildLibraries,nativeOutputInventory,NATIVE_BUILD_RECEIPT,fileDigest,bytesDigest,withNativeCacheLock,prepareNativeSource,nativeAndroidSdk,clearStagedNativeInputs} from '../scripts/native-build-inputs.ts';
+import {verifyVoiceHost} from '../scripts/voice-host.ts';
 
 const root=path.resolve(import.meta.dirname,'..');
 function fixture(t) {
@@ -61,6 +62,38 @@ fixtureTest('generated native receipts reject qualification claims, incomplete i
     const receipt=structuredClone(original);mutate(receipt);fs.writeFileSync(file,JSON.stringify(receipt));assert.throws(()=>readNativeBuildReceipt(dir));
   }
 });
+fixtureTest('voice admission accepts only the receipt-bound JNI bytes in the main source set',t=>{
+  const dir=fixture(t);
+  const sdk=path.join(dir,'vendor/eliza');
+  fs.unlinkSync(sdk);
+  execFileSync('git',['clone','--shared','--no-checkout',path.join(root,'vendor/eliza'),sdk],{stdio:'pipe'});
+  const pin=JSON.parse(fs.readFileSync(path.join(dir,'upstream.lock.json'))).commit;
+  execFileSync('git',['-C',sdk,'sparse-checkout','set','--cone','packages/os/android/local-inference'],{stdio:'pipe'});
+  execFileSync('git',['-C',sdk,'checkout','--detach',pin],{stdio:'pipe'});
+  const receipt=receiptFor(dir);
+  const name='libparadeevoicejni.so';
+  const relative=`android/app/src/main/jniLibs/arm64-v8a/${name}`;
+  const staged=path.join(dir,relative);
+  fs.mkdirSync(path.dirname(staged),{recursive:true});
+  fs.writeFileSync(staged,'fixture JNI');
+  assert.throws(()=>verifyVoiceHost(dir),/Unrecorded voice JNI payload/);
+
+  const evidence={bytes:fs.statSync(staged).size,sha256:fileDigest(staged)};
+  Object.assign(receipt.embedding.libraries.find(row=>row.name===name),evidence);
+  Object.assign(receipt.files.find(row=>row.path===relative),evidence);
+  const receiptPath=path.join(dir,NATIVE_BUILD_RECEIPT);
+  fs.mkdirSync(path.dirname(receiptPath),{recursive:true});
+  fs.writeFileSync(receiptPath,JSON.stringify(receipt));
+  assert.throws(()=>verifyVoiceHost(dir),/voice outputs are not staged/);
+
+  const overlay=path.join(dir,`android/app/src/debug/jniLibs/arm64-v8a/${name}`);
+  fs.mkdirSync(path.dirname(overlay),{recursive:true});
+  fs.copyFileSync(staged,overlay);
+  assert.throws(()=>verifyVoiceHost(dir),/Unrecorded voice JNI payload/);
+  fs.unlinkSync(overlay);
+  fs.appendFileSync(staged,'changed');
+  assert.throws(()=>verifyVoiceHost(dir),/Native output changed/);
+});
 test('native cache reuse rejects changed, linked and escaping outputs',t=>{
   const dir=fixture(t),file=path.join(dir,'output');fs.writeFileSync(file,'good');
   const files=[{path:'output',bytes:4,sha256:fileDigest(file)}];
@@ -68,6 +101,30 @@ test('native cache reuse rejects changed, linked and escaping outputs',t=>{
   fs.writeFileSync(file,'evil');assert.throws(()=>verifyNativeFileBytes(dir,files),/Native output changed/);
   fs.unlinkSync(file);fs.symlinkSync(path.join(root,'package.json'),file);assert.throws(()=>verifyNativeFileBytes(dir,files),/symbolic link/);
   files[0].path='../output';assert.throws(()=>verifyNativeFileBytes(dir,files),/Invalid native output path/);
+});
+test('native cache inspection loads its inspector from the source checkout',t=>{
+  const dir=fixture(t);
+  const output=path.join(dir,'output');
+  const sdk=path.join(dir,'sdk');
+  const ndk='fixture-ndk';
+  const bin=path.join(sdk,'ndk',ndk,'toolchains/llvm/prebuilt/host/bin');
+  fs.mkdirSync(bin,{recursive:true});
+  fs.writeFileSync(path.join(bin,'llvm-nm'),'');
+  const previousAndroidHome=process.env.ANDROID_HOME;
+  process.env.ANDROID_HOME=sdk;
+  t.after(()=>{
+    if(previousAndroidHome===undefined)delete process.env.ANDROID_HOME;
+    else process.env.ANDROID_HOME=previousAndroidHome;
+  });
+
+  const abi='arm64-v8a';
+  const name='libelizainference.so';
+  const libraries=path.join(output,'android/app/src/main/jniLibs',abi);
+  fs.mkdirSync(libraries,{recursive:true});
+  fs.writeFileSync(path.join(libraries,name),'invalid ELF');
+  const receipt={producer:{ndk},voice:{abis:[{abi,libraries:[{name}]}]}};
+
+  assert.throws(()=>verifyNativeBuildLibraries(dir,output,receipt),/Native library ABI or page alignment differs/);
 });
 for(const linkedAbi of ['arm64-v8a','x86_64'])test(`native refresh refuses linked ${linkedAbi} before deleting any staged inputs`,t=>{
   const temp=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'alpha-native-refresh-')));

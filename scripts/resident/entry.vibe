@@ -2,12 +2,11 @@
 import { runAgentCli } from "@elizaos/agent/cli"
 import type { AgentPlugin, ModuleFactory } from "@elizaos/agent"
 import { localInferenceModule, localInferencePluginName } from "@elizaos/plugin-local-inference"
-import * as localInference from "@elizaos/plugin-local-inference"
 import { AndroidInferenceEngine, androidInferenceLayer } from "@elizaos/os/inference"
 import * as assistant from "@elizaos/plugin-personal-assistant"
 import * as calendar from "@elizaos/plugin-calendar"
 import * as inbox from "@elizaos/plugin-inbox"
-import * as notes from "@elizaos/plugin-notes"
+import { notesModule, notesModuleName } from "@elizaos/plugin-notes"
 import * as files from "@elizaos/plugin-files"
 import * as workflow from "@elizaos/plugin-workflow"
 import * as maps from "@elizaos/plugin-maps"
@@ -42,14 +41,17 @@ runAgentCli({
     entry("@elizaos/plugin-personal-assistant", assistant),
     entry("@elizaos/plugin-calendar", calendar),
     entry("@elizaos/plugin-inbox", inbox),
-    entry("@elizaos/plugin-notes", notes),
+    { packageName: notesModuleName, plugin: undefined },
     entry("@elizaos/plugin-files", files),
     entry("@elizaos/plugin-workflow", workflow),
     { packageName: "@elizaos/plugin-maps", plugin: mapsWithHost },
     entry("@elizaos/plugin-browser", browser),
-    entry(localInferencePluginName, localInference),
+    { packageName: localInferencePluginName, plugin: undefined },
   ],
   runtimeServices: residentServices,
-  hostModules: new Map([[localInferencePluginName, localInferenceHosted]]),
+  hostModules: new Map<string, ModuleFactory<AndroidInferenceEngine>>([
+    [notesModuleName, notesModule],
+    [localInferencePluginName, localInferenceHosted],
+  ]),
   hostServices: () => androidInferenceLayer(inferenceSocket()),
 })

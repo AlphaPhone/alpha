@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {ASR_BACKEND_ROLES, PARADEE_NATIVE, PARADEE_SOURCE, asrSlotFiles, verifyParadeeRuntime, type AsrBackend, type AsrSlot, type ParadeeBuildRecord, type ParadeeVoiceManifest} from './paradee-runtime.ts';
-import {readNativeBuildReceipt} from './native-build-inputs.ts';
+import {readNativeBuildReceipt, verifyNativeFileBytes, type NativeBuildReceipt} from './native-build-inputs.ts';
 
 export const VOICE_HOST_MANIFEST = 'android/voice-host/qualified-voice-host.json';
 export const VOICE_ASR_SLOT = 'android/paradee-voice/asr-inputs.json';
@@ -201,14 +201,21 @@ function voiceStagingState(root: string) {
   for (const relative of [
     'vendor/eliza/packages/os/android/local-inference/native',
   ]) if (at(relative)) throw Error(`Unrecognized voice staging outside the admitted product output: ${relative}`);
+  let receipt: NativeBuildReceipt | null | undefined;
   const checkRawVoiceJni = (rawJni: string) => {
     if (!at(rawJni)) return;
     const entries = fs.readdirSync(path.join(root, rawJni), {withFileTypes: true});
     if (entries.length > 64) throw Error('Voice staging ABI inventory is unbounded');
     for (const entry of entries) {
       if (entry.isSymbolicLink()) throw Error('Voice staging JNI sources contain a link');
-      if (entry.name === 'libparadeevoicejni.so' || entry.isDirectory() && at(`${rawJni}/${entry.name}/libparadeevoicejni.so`))
-        throw Error('Unrecorded voice JNI payload is staged in the application');
+      if (entry.name === 'libparadeevoicejni.so') throw Error('Unrecorded voice JNI payload is staged in the application');
+      if (!entry.isDirectory()) continue;
+      const library = `${rawJni}/${entry.name}/libparadeevoicejni.so`;
+      if (!at(library)) continue;
+      if (receipt === undefined) receipt = readNativeBuildReceipt(root);
+      const recorded = receipt?.files.find(row => row.path === library);
+      if (!recorded) throw Error('Unrecorded voice JNI payload is staged in the application');
+      verifyNativeFileBytes(root, [recorded]);
     }
   };
   // AGP's ordinary main/build-type/flavor/variant overlays stay active in the

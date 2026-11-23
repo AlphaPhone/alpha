@@ -35,7 +35,7 @@ roots.push('android/app/src/main/assets/agent','android/app/src/main/jniLibs',
  'android/app/build/generated/local-agent/java',
  'android/app/build/generated/local-agent/source-manifest.json',
  'upstream.lock.json',
- 'scripts/build-agent-bundle.ts','scripts/stage-agent-runtime.ts','scripts/native-view-policy.ts','scripts/upstream-native-source.ts',
+ 'scripts/build-upstream.ts','scripts/build-agent-bundle.ts','scripts/stage-agent-runtime.ts','scripts/native-view-policy.ts','scripts/upstream-native-source.ts',
  'vendor/eliza/packages/agent/src/bundle','vendor/eliza/packages/os/src/build/runtime-payload.vibe',
  'vendor/eliza/packages/os/android/browser-surface/src/main/java/ai/eliza/plugins/browsersurface/ChromiumBrowserIdentity.java');
 const files: string[]=[];

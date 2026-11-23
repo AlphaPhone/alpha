@@ -14,7 +14,7 @@ export const turnSourcesLive = Layer.effect(TurnSources, effect {
   const agent = try AgentCalendar
   const day = Effect.provideService(Effect.provideService(Effect.provideService(calendarDayObservation(), Foreground, foreground), PresentationMachine, presentation), AgentCalendar, agent)
   return {
-    calendarDay: () => day catch () => undefined,
+    calendarDay: () => Effect.orElseSucceed(day, () => undefined),
     notesList: () => notes.context(),
     preferReview: (reviewFirst: boolean) => notes.prefer(reviewFirst),
   }

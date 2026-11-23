@@ -28,7 +28,7 @@ export schema RecordingMetrics { readonly recordingId: string; readonly peak: nu
 export schema RefusalData { readonly retryAfterSeconds?: number; readonly limitCode?: string; readonly resetAt?: number }
 
 /** A native refusal as the bridge rejects it, or a stream error as it reports it with its HTTP status. */
-export schema NativeRefusal { readonly code?: string; readonly name?: string; readonly data?: unknown; readonly status?: number }
+export schema NativeRefusal { readonly code?: string; readonly name?: string; readonly data?: Schema.Unknown; readonly status?: number }
 
 /** A live capture the bridge opened, and whether its segments go straight to the owner's agent. */
 export schema LiveCaptureStarted { readonly captureId: string; readonly sampleRate: number; readonly echoCancelled: boolean; readonly nativeAsr?: boolean }

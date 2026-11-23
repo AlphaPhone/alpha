@@ -34,7 +34,7 @@ export const searchLayer = Layer.effect(ChatSearch, effect {
   const hits = try SubscriptionRef.make<readonly SearchHit[]>([])
   let latest = ""
   let asked = 0
-  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => Effect.match(work, { onSuccess: () => true, onFailure: () => false })
   effect function ask(text: string, offset: number) {
     const ticket = ++asked
     const page = conversations.search(text, offset) catch () => undefined

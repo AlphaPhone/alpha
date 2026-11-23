@@ -312,7 +312,7 @@ export const enrollmentService = Layer.effect(DeviceEnrollment, effect {
       const named = JSON.stringify([verified.owner, verified.agent, verified.generation, verified.epoch])
       if (named === last) continue
       last = named
-      fork.in(scope) enroll(verified)
+      fork.in(scope) Effect.provideService(enroll(verified), Native, native)
     }
   }
 
