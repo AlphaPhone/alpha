@@ -32,7 +32,7 @@ import {androidIdentity} from './android-identity.ts';
  * checkout of a commit. Two options extend it to a release candidate on the machine that built it:
  *   --packaged-runtime  reads the staged payload (after `pnpm agent:stage-android`): SHA-256 of
  *     every staged file under android/app/src/main/assets/agent and android/app/src/main/jniLibs,
- *     and Bun plus every npm package bundled into the agent and the workflow worker (name, version
+ *     and Node.js plus every npm package bundled into the agent and the workflow worker (name, version
  *     and licence from the prepared source; those packages are bundled, so their bytes are covered
  *     by the hash of the bundle file, not by a hash of their own).
  *   --apks <dir>  reads <dir>/apk-manifest.json written by scripts/verify-apks.ts and lists each
@@ -44,7 +44,7 @@ import {androidIdentity} from './android-identity.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {AGENT_ASSETS, ANDROID_CLASSPATH, BUN_ENTRY, COMMERCIAL_FONT, FONT_LICENSES, HELD_OUTSIDE_REPOSITORY, KNOWN_LICENSES, NO_FONT_LICENCE, ROOT, TESSERACT_CORE_SOURCES, UNKNOWN, UNVERIFIED, VOICE_HOST, collectNotices, exists, fontLicense, fontNames, listFonts, mavenFamily, packagedRuntimePresent, pinnedVoiceModels, productionLockPackages, readJson, voiceHostProblems, type PackageLock} from './generate-licenses.ts';
+import {AGENT_ASSETS, ANDROID_CLASSPATH, COMMERCIAL_FONT, FONT_LICENSES, HELD_OUTSIDE_REPOSITORY, KNOWN_LICENSES, NO_FONT_LICENCE, ROOT, RUNTIME_ENTRY, TESSERACT_CORE_SOURCES, UNKNOWN, UNVERIFIED, VOICE_HOST, collectNotices, exists, fontLicense, fontNames, listFonts, mavenFamily, packagedRuntimePresent, pinnedVoiceModels, productionLockPackages, readJson, voiceHostProblems, type PackageLock} from './generate-licenses.ts';
 import {sha256} from './sha256.ts';
 import {METADATA as GRADLE_METADATA, coordinateChecksum, parseVerificationMetadata} from './gradle-verification.ts';
 import {classifyLicence, orderFlags} from './licence-policy.ts';
@@ -244,9 +244,9 @@ function residentRuntimeComponents(root: string): Component[] {
     }
   const notices = collectNotices(root, {packagedRuntime: true});
   if (notices.errors.length) throw new Error(`--packaged-runtime: ${notices.errors.join('; ')}`);
-  const bun = notices.entries.find(item => item.name === BUN_ENTRY);
-  if (bun) out.push({type: 'application', 'bom-ref': 'resident-runtime:bun', name: bun.name, version: bun.version, licenses: licenses(bun.license), externalReferences: [{type: 'vcs', url: bun.source}],
-    properties: [property('ships-in', 'apk'), property('hash', `the staged libeliza_bun.so files are listed by SHA-256 under ${JNI_LIBS}`), property('source', `${AGENT_ASSETS}/android-agent-runtime-provenance.json`), property('resident-notice-flags', bun.flags.join(',') || 'none')]});
+  const runtime = notices.entries.find(item => item.name === RUNTIME_ENTRY);
+  if (runtime) out.push({type: 'application', 'bom-ref': 'resident-runtime:node', name: runtime.name, version: runtime.version, licenses: licenses(runtime.license), externalReferences: [{type: 'vcs', url: runtime.source}],
+    properties: [property('ships-in', 'apk'), property('hash', `the staged libeliza_node.so files are listed by SHA-256 under ${JNI_LIBS}`), property('source', 'vendor/eliza/packages/os/aosp/runtime/node.lock.json'), property('resident-notice-flags', runtime.flags.join(',') || 'none')]});
   for (const entry of notices.entries) {
     const scope = /^Bundled in the on-device (.*?)\./.exec(entry.text)?.[1];
     if (!scope) continue;
