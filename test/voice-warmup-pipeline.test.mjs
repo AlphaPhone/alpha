@@ -227,14 +227,20 @@ test('VoiceSessionClient starts mic capture immediately in parallel with mint/WS
       await new Promise(resolve => setTimeout(resolve, 5));
     }
     assert.ok(activeSocket, 'WS socket opened after mint');
+    // Feed audio during the WS open -> ready RTT window as well: must stay unmuted and buffered.
+    const rttSamples = new Float32Array(1600).fill(0.5);
+    scriptNode.onaudioprocess({inputBuffer: {getChannelData: () => rttSamples}});
+    assert.equal(sentBinary.length, 0, 'frames during WS open -> ready RTT must remain buffered until ready');
     activeSocket.dispatchEvent(new MessageEvent('message', {
       data: JSON.stringify({t: 'ready', sessionId: 'sess-1', traceId: 't0', resumed: false}),
     }));
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    assert.ok(sentBinary.length >= 1, `queued pre-ready PCM frames must flush once ready arrives; sentBinary=${sentBinary.length}`);
+    assert.ok(sentBinary.length >= 2, `queued pre-ready + open->ready PCM frames must flush once ready arrives; sentBinary=${sentBinary.length}`);
     const sample0 = new Int16Array(sentBinary[0].buffer, sentBinary[0].byteOffset, sentBinary[0].byteLength / 2)[0];
+    const sampleLast = new Int16Array(sentBinary[sentBinary.length - 1].buffer, sentBinary[sentBinary.length - 1].byteOffset, sentBinary[sentBinary.length - 1].byteLength / 2)[0];
     assert.ok(sample0 > 1000, `early buffered audio must NOT be muted to zero (got sample0=${sample0})`);
+    assert.ok(sampleLast > 8000, `open->ready RTT buffered audio must NOT be muted to zero (got sampleLast=${sampleLast})`);
   } finally {
     await client.stop();
   }

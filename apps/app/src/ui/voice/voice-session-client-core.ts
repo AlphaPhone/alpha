@@ -411,7 +411,8 @@ export function createVoiceSessionClient(
       !everLiveThisLifecycle &&
       micSocket === null &&
       state.phase === "connecting" &&
-      (connPhase === "idle" || connPhase === "connecting");
+      connPhase !== "closing" &&
+      connPhase !== "closed";
     mic?.setMuted(
       microphoneMuted ||
         state.phase === "speaking" ||
