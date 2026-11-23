@@ -4,7 +4,7 @@
 Sections 1 to 10 are the review as written before any change; section 0 records what landed
 afterwards.
 
-## 0. Outcome (2026-11-22)
+## 0. Outcome (2026-11-22, updated 2026-11-23)
 
 Landed upstream on elizaOS develop:
 
@@ -29,6 +29,30 @@ Landed upstream on elizaOS develop:
     it is now enforced after decoding, so the evaluator schema stays constant.
   - A test update for develop's compound-photo card rule.
 - **Calendar delete read fix**, elizaOS/eliza#40038 (merge `89baf73d94`).
+- **Rejected proposals read as "never ran"**, elizaOS/eliza#40186 (merge `a3a19afd17`). This
+  fixes a regression from #40037: once the slimmed record folded "rejected" into a noop reason,
+  "Did the text to Sam go out?" after a rejected card got a messages read and a review prompt
+  instead of an answer.
+  - The record now says "Rejected by the owner; it never ran."
+  - The question and a second one, "Did Sam get a text from me?", were answered in 4 of 4
+    whole-turn runs, against 1 of 4 on develop. Overall pass was 83/88 vs 82/88.
+- **Activity status names the app**, elizaOS/eliza#40195 (merge `83d102ca99`,
+  item 4). A tool that serves several apps is labelled by the one context Stage 1 selected
+  ("Using Calendar", "Using Contacts") instead of "Working".
+  - The audience check still covers every declared context.
+  - The label is still sent at tool start, so it does not overwrite the acknowledgement.
+- **Slow planner-less tool calls acknowledge**, elizaOS/eliza#40196 (merge `7e27881ba4`,
+  item 5). The eligible Stage 1 cue is sent only if a deterministic tool call is still running
+  after 400 ms. It never follows the tool's own text or the reply.
+
+Landed on Alpha develop:
+
+- The pin moved to `17e742d454` (#1443), then `a3a19afd17` (#1448), then `7a124190a1` (#1453).
+  It now carries every merge above.
+- **Voice cue hold**, #1450 (item 6):
+  - A voice cue waits 300 ms, so a reply already on its way replaces it.
+  - A cue that is audible finishes before the reply speaks, bounded at 2.5 s.
+  - A cue still being synthesised is dropped.
 
 Measured:
 
@@ -46,14 +70,35 @@ Measured:
 - **Context cost**: the follow-ups measured 894K → 528K charged tokens over the 46-turn run and
   46% → 55% cache reuse. At the old pin a turn used about 34K input tokens, 39–47% cached,
   mostly per-outcome receipt blocks with UUIDs, which the follow-ups slim.
+- **Activity label and planner-less cue** (#40195 + #40196 on develop `8f100c96b3`, 2 arms each,
+  44 cases):
 
-Still open (owned elsewhere or follow-ups):
+  | Arm | Pass | Acknowledgement delivered | Label names the app |
+  |---|---|---|---|
+  | develop | 82/88 | 56 | 10 of 78 labelled turns |
+  | #40195 + #40196 | 82/88 | 53 | 34 of 76 labelled turns |
 
-- The Alpha repin that carries all three upstream merges.
-- The Pixel build and typed device checks.
-- Planner tool order, owned by the context session.
-- A small Stage 1 schema trim (about 1,040 characters per turn), being tested.
-- Acknowledging slow planner-less reads (section 9, item 5).
+  Calls, texts and alarms still read "Working": Stage 1 selects two labelled contexts for them.
+  The 400 ms cue never fired on the desktop rig, where every planner-less call settled sooner.
+  The slow path is covered by unit tests only.
+
+Dropped:
+
+- **The Stage 1 schema trim** (about 1,040 characters per turn, mostly in the cached prefix).
+  Over 4 arms each it passed 155/172 (90%), against 152/164 (93%) for its base once provider
+  failures are excluded. Its misses clustered on reference-following cases.
+
+Still open:
+
+- **Device checks**: no typed or spoken check has run on a build carrying these changes.
+  The v624 run was skipped. Everything above was measured on a desktop resident.
+- **Planner tool order** (item 9), owned by the context session.
+- **Owner decisions**: an instant voice tone at turn accept (item 7), and whether assent
+  ("Sure", "Yeah, one sec") passes the grammar (item 8).
+- **Upstream CI**: #40195 and #40196 were merged before their CI finished. It later failed
+  for reasons outside these changes:
+  - `telephony-target-grounding.test.ts` ("call Sam Back"), which also fails on develop.
+  - Lint in `@elizaos/contracts` and `@elizaos/plugin-wallet`, which these PRs do not touch.
 
 `scripts/eval-phone-actions.ts --stream` reproduces the acknowledgement numbers: each row
 records the acknowledgement status, activity label, first token and done frame, and the summary
