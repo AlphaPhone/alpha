@@ -1,5 +1,7 @@
 // spec/camera/index.md
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Build } from "../platform/build.vibe"
+import { Native } from "../platform/native.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 import { machine as viewfinderMachine } from "../../gen/camera__viewfinder.effect.vibe"
 import { machine as focusMachine } from "../../gen/camera__focus.effect.vibe"
@@ -27,14 +29,15 @@ import { MediaEditor, mediaEditor } from "./editor.vibe"
 import { PhotoLibrary, photoLibrary } from "./library.vibe"
 import { MediaReview, mediaReview } from "./mediaReview.vibe"
 import { cameraNotices } from "./notices.vibe"
-import { nativePhotoStore } from "./photos.vibe"
+import { nativePhotoStore, PhotoStore } from "./photos.vibe"
 import { Scanner, scanner } from "./scanner.vibe"
 import { shownOf, viewfinder } from "./viewfinder.vibe"
 
 /** The photo store the build needs: the browser's own for the browser build, Android's otherwise. */
 export const photoStore = Layer.unwrap(effect {
   const build = try Build
-  return build.info.variant === "browser" ? browserPhotoStore : nativePhotoStore
+  const chosen: Layer.Layer<PhotoStore, never, KeyValueStore.KeyValueStore | Native> = build.info.variant === "browser" ? browserPhotoStore : nativePhotoStore
+  return chosen
 })
 
 const machines = Layer.mergeAll(
@@ -63,7 +66,7 @@ export const pageFollower = Layer.effectDiscard(effect {
     if (now !== pageHidden) {
       pageHidden = now
       try scan.pageShown(now)
-      try editor.videoEvent({ type: now ? "hide" : "show" })
+      try editor.videoEvent({ type: now ? "hideEditor" : "show" })
     }
     if (state.view !== "photos" || now === photosHidden) return
     photosHidden = now

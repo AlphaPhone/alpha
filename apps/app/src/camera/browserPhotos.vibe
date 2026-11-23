@@ -52,11 +52,14 @@ function fileOf(item: Stored): { readonly name: string; readonly type: string; r
   return { name: `Alpha ${item.id}.${type.split("/")[1] ?? "bin"}`, type, dataUrl: item.data }
 }
 
+/** A browser album change's answer: refused with the owner's words, or the album as it now stands. */
+type AlbumAnswer = { readonly refused: string } | { readonly status: "saved" | "deleted"; readonly id: string; readonly revision: string }
+
 function failed(method: string, message: string): PhotosFailed {
   return new PhotosFailed({ method, code: "FAILED", message })
 }
 
-effect function load(): Library!PhotosFailed {
+effect function load(): Library!PhotosFailed!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
   const raw = try mapError(store.get(KEY), () => failed("read", "Saved media could not be loaded"))
   if (raw === undefined) return empty
@@ -220,7 +223,7 @@ export const browserPhotoStore = Layer.effect(PhotoStore, effect {
       return { items: library.albums.map((album) => ({ id: album.id, name: album.name, revision: `a${album.revision}`, count: album.members.length, memberIds: album.members })) } as never
     },
     effect changeAlbum(change: AlbumChange) {
-      const answer = try edit("changeAlbum", (library) => {
+      const answer = try edit("changeAlbum", (library): { readonly next: Library; readonly answer: AlbumAnswer } => {
         const stored = "id" in change ? library.albums.find((album) => album.id === change.id) : undefined
         const media = change.operation === "add" || (change.operation === "create" && change.mediaId !== undefined)
           ? library.items.some((row) => row.id === change.mediaId && revisionOf(row) === change.mediaRevision && row.trashedAt === undefined) : true

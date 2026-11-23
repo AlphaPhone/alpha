@@ -286,7 +286,8 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
   }
 
   effect function cancelDeleteNow() {
-    if (pendingDelete !== undefined) store.cancelDeleteTrash(pendingDelete) catch () => undefined
+    const pending = pendingDelete
+    if (pending !== undefined) store.cancelDeleteTrash(pending) catch () => undefined
     pendingDelete = undefined
     try sendBrowse({ type: "cancelDelete" })
   }
@@ -313,7 +314,7 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
       try sendBrowse({ type: "cancelSelection" })
     },
     effect visibility(hidden: boolean) {
-      try sendCatalog({ type: hidden ? "hide" : "show" })
+      try sendCatalog({ type: hidden ? "hideCatalog" : "show" })
       albums.send({ type: "visibility", shown: !hidden }) catch () => undefined
       store.watch(!hidden) catch () => undefined
       if (!hidden) {
@@ -353,7 +354,7 @@ export const photoLibrary = Layer.effect(PhotoLibrary, effect {
       try publishPool()
     },
     effect openRoute(route: string) {
-      try timeout(loadedIdle(), "5 seconds") catch () => undefined
+      timeout(loadedIdle(), "5 seconds") catch () => undefined
       const [kind, value = ""] = route.split(/:(.*)/s)
       if (kind === "album" && /^(?:favorites|videos|camera|screenshots|custom:[A-Za-z0-9_-]{1,80})$/.test(value)) {
         try sendBrowse({ type: "switchTab", tab: "AlbumsTab" })

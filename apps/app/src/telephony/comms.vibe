@@ -53,9 +53,9 @@ export const commsStageLayer = Layer.effect(CommsStage, effect {
   const calls = try CallBarMachine
   const phone = try PhoneMachine
   const voicemail = try VoicemailMachine
-  const tell = (event: CommsEvent, by: "Owner" | "Alpha" | "Device") => comms.send(event, by) catch () => undefined
+  const tell = effect (event: CommsEvent, by: "Owner" | "Alpha" | "Device") => comms.send(event, by) catch () => undefined
   const record = try ownerKept("alpha-proposal:v1", NO_RECORD, (input) => Schema.decodeUnknownEffect(StoredProposal)(input))
-  const kept = () => record.load() catch () => NO_RECORD
+  const kept = effect () => record.load() catch () => NO_RECORD
 
   effect function keep(words: CardWords | null | undefined) {
     const c = try comms.get()

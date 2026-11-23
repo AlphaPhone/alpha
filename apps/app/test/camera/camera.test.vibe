@@ -82,8 +82,9 @@ it.live("record a video without sound after the microphone is refused, then one 
     refuse = false
     try view.shutter()
     const withSound = try view.get()
+    const said = (try notices.get()).said
     try Effect.try(() => assert.deepStrictEqual(
-      { notice: refused.notice, soundless: [soundless.recording, soundless.withSound], again: [withSound.recording, withSound.withSound], said: typeof (try notices.get()).said },
+      { notice: refused.notice, soundless: [soundless.recording, soundless.withSound], again: [withSound.recording, withSound.withSound], said: typeof said },
       { notice: "MicrophoneNotice", soundless: ["RecordingActive", false], again: ["RecordingActive", true], said: "string" },
     ))
   }
@@ -226,8 +227,9 @@ it.live("\"what am I looking at?\" over the ready Camera sends one reviewed fram
     const attached = try chat.intercept({ text: "what am I looking at?", attachments: 1, editing: false })
     const frame = try chat.intercept({ text: "What am I looking at?", attachments: 0, editing: false })
     const saved = device.calls.filter((call) => call.method === "ElizaCamera.capturePhoto").map((call) => (call.args as { saveToGallery: boolean }).saveToGallery)
+    const photos = (try view.get()).photos
     try Effect.try(() => assert.deepStrictEqual(
-      { closed, other, attached, frame, questions: asked.map((q) => q.question), saved, photos: (try view.get()).photos },
+      { closed, other, attached, frame, questions: asked.map((q) => q.question), saved, photos },
       { closed: "none", other: "none", attached: "none", frame: "frame", questions: ["What am I looking at?"], saved: [false], photos: 0 },
     ))
   }
