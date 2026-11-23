@@ -247,6 +247,26 @@ export const TABS_UNLISTED_NOTICE =
   "Browser couldn't list its open tabs for this request, or they changed after they were listed. Nothing was closed. Ask again.";
 export const NO_TABS_TO_CLOSE_NOTICE =
   "No tabs are open to close. Nothing was closed.";
+/** What a close-every-tab card lists, read on this phone: the tabs that close, and how many
+ * private tabs stay open (a request made outside a private tab never closes one). */
+export type BrowserTabsClosing = {
+  readonly tabs: readonly BrowserTabLine[];
+  readonly privateKept: number;
+};
+/** The private tabs closing every tab leaves open, counted and never named. */
+function privateTabsKeptText(count: number): string {
+  return count === 1
+    ? "1 private tab stays open. Ask from a private tab to close it."
+    : `${count} private tabs stay open. Ask from a private tab to close them.`;
+}
+/** The owner's notice for a close-every-tab request with no card: Browser could not list its
+ * tabs (null), or none would close. Private tabs it may not close are counted, so the owner is
+ * never told that no tab is open while one is. */
+export function closeAllTabsNotice(closing: BrowserTabsClosing | null): string {
+  if (!closing) return `Close all tabs: ${TABS_UNLISTED_NOTICE}`;
+  if (!closing.privateKept) return `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`;
+  return `Close all tabs: No other tabs are open to close. ${privateTabsKeptText(closing.privateKept)} Nothing was closed.`;
+}
 /**
  * A review item with the request binding the agent recorded. A camera capture that only needs
  * Camera open is marked, and names the message that asked for it when the agent bound one
@@ -676,6 +696,11 @@ type ExecutionResult = DeviceExecutionResult & {
    * the review it ran under, so it runs after the receipt attempt.
    */
   present?: () => void;
+  /**
+   * Told when `presentBrowser` cannot run (the request it ran under is no
+   * longer current), so a change the receipt reported can be corrected.
+   */
+  presentBrowserSkipped?: () => void;
 };
 type CommittedReceiptResult = { result: unknown } | Record<string, never>;
 
@@ -754,9 +779,7 @@ export class DeviceActionCoordinator<
        * Browser cannot say, or its tabs changed after the list was shown. The
        * agent never receives them.
        */
-      browserTabsClosing?: (
-        proposalId: string,
-      ) => readonly BrowserTabLine[] | null;
+      browserTabsClosing?: (proposalId: string) => BrowserTabsClosing | null;
       /**
        * The names of the phone contacts a contact change or deletion would be
        * offered for, looked up exactly as its executor will; null or a throw
@@ -1166,7 +1189,7 @@ export class DeviceActionCoordinator<
   private tabsClosing(
     proposal: DeviceProposal,
     list = true,
-  ): readonly BrowserTabLine[] | null | undefined {
+  ): BrowserTabsClosing | null | undefined {
     const op = proposal.operation;
     if (!isBrowserControl(op) || op.type !== "browser_tab_close" || !op.all)
       return undefined;
@@ -1249,11 +1272,19 @@ export class DeviceActionCoordinator<
     if (isFilesOperation(op)) return { ...base, ...describeFilesOperation(op) };
     if (isPhotosViewOperation(op))
       return { ...base, ...describePhotosViewOperation(op) };
-    if (isBrowserControl(op))
+    if (isBrowserControl(op)) {
+      const closing = this.tabsClosing(proposal) ?? undefined;
+      const card = describeBrowserControl(op, closing?.tabs);
       return {
         ...base,
-        ...describeBrowserControl(op, this.tabsClosing(proposal) ?? undefined),
+        ...card,
+        ...(closing?.privateKept
+          ? {
+              description: `${card.description}\n\n${privateTabsKeptText(closing.privateKept)}`,
+            }
+          : {}),
       };
+    }
     const notesDestination =
       (op.type === "notes_delete" || op.type === "notes_update") &&
       !context.sensitive &&
@@ -1403,12 +1434,12 @@ export class DeviceActionCoordinator<
       }
       // Closing every tab is offered only as a card listing what will close.
       const closing = this.tabsClosing(proposal);
-      if (closing?.length) this.listedTabCards.add(proposal.id);
-      if (closing !== undefined && !closing?.length) {
+      if (closing?.tabs.length) this.listedTabCards.add(proposal.id);
+      if (closing !== undefined && !closing?.tabs.length) {
         items.push({
           proposalId: proposal.id,
           proposal: null,
-          notice: `Close all tabs: ${closing ? NO_TABS_TO_CLOSE_NOTICE : TABS_UNLISTED_NOTICE}`,
+          notice: closeAllTabsNotice(closing),
         });
         continue;
       }
@@ -2320,13 +2351,22 @@ export class DeviceActionCoordinator<
       // Run it only after this exact action's receipt attempt, never as a retry.
       const presentBrowser = () => {
         if (result.status !== "succeeded") return;
+        const browser =
+          p.operation.type === "browser_navigate" || isBrowserControl(p.operation);
         try {
-          if (p.operation.type === "browser_navigate" || isBrowserControl(p.operation)) {
+          if (browser) {
             if (reviewed.currentRequest) assertCurrent();
             result.presentBrowser?.();
           } else if (isTelephonyAction(p.operation)) result.present?.();
         } catch {
-          /* A retired foreground must not replace a journaled outcome. */
+          /* A retired foreground must not replace a journaled outcome; what
+           * it would have changed is said instead. */
+          if (browser)
+            try {
+              result.presentBrowserSkipped?.();
+            } catch {
+              /* The journaled outcome stands. */
+            }
         }
       };
       let confirmed: DeviceProposal;

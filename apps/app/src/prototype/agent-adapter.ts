@@ -7,7 +7,7 @@ import {browserDocuments} from '../browser/documents';
 import {projectNoteForModel,type StickyNote} from '../../../../.eliza/client-features/plugins/plugin-notes/src/types.ts';
 import type {VoiceStartupStage} from '../runtime/diagnostics-export';
 import {cloudServiceName} from '../runtime/cloud-protocol';
-import {actionResultText,approvalExpiryText,emptyChatNotice,browserControlSummary,browserNavigationSummary,collapseSystemNotices,projectActionMessages,spokenActionReply,workflowReplyText} from '../runtime/action-message-presentation';
+import {actionResultText,approvalExpiryText,emptyChatNotice,browserControlSummary,browserNavigationSummary,runBrowserPresentation,collapseSystemNotices,projectActionMessages,spokenActionReply,workflowReplyText} from '../runtime/action-message-presentation';
 import {workflowChanges,workflowViewRefusal,type WorkflowChange} from '../runtime/automation-completion';
 import {CanonicalNotesUi} from './canonical-notes-ui';
 import {openExistingBrowserNotes,openExistingDeviceNotes,LegacyNotesAbsent,LegacyNotesDraftOnly,browserPreviousNotesAvailability,devicePreviousNotesAvailability} from './legacy-notes-access';
@@ -32,7 +32,7 @@ import {CONTACT_CALL_LOOKUP_LIMIT,contactCallOptions,contactWriteTargets,refuseT
 import {contactChoiceName} from '../ui/telephony/telephony-messages';
 import {normalizePhoneNumber} from '../runtime/aosp-telephony';
 import {askTelephonyReview} from './telephony-review';
-import type {BrowserTabChoice} from './browser-adapter';
+import type {BrowserPresentation,BrowserTabChoice} from './browser-adapter';
 import {isBrowserControl} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {displayNumber,numberKey} from './telephony-presenters';
 import {callCardText,proposalCanAct,resolveCallParty,setCallPartyResolver,type CallTarget,type CommsProposal,type CommsProposeResult} from '../runtime/comms-bar';
@@ -1455,15 +1455,19 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       // The tab the request was made from, when it was made in Browser: page history acts on that page only.
       const tab=expectedContext.view==='browser'?expectedContext.selectedObject:undefined,observed=tab?.kind==='browser-tab'&&tab.revision!==undefined?{id:tab.id,revision:tab.revision}:undefined;
       // Several tabs matching the request's words are listed in this action's own card; the agent never sees them.
-      const present=await approvedBrowserOpen<(()=>void)|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,proposalId:journalIdentity?.proposalId,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true, 'newTab' in operation && operation.newTab === true));
-      return { status: 'succeeded', summary: browserControl?browserControlSummary(operation):browserNavigationSummary(operation.url),presentBrowser:()=>{
-        const show=()=>{
-          if(!this.live||document.hidden||alphaClient.getState().pending||connectionController.getSnapshot().session!==browserSession||JSON.stringify(alphaClient.getState().context)!==JSON.stringify(expectedContext))return;
-          present?.();
-        };
+      const present=await approvedBrowserOpen<BrowserPresentation|undefined>(()=>browserControl?this.browserControl(operation,{signal,observed,proposalId:journalIdentity?.proposalId,choose:(choice:BrowserTabChoice,asking:AbortSignal)=>askTelephonyReview({kind:'tab',...choice},asking)}):this.browserNavigateApproved(operation.url, signal, true, 'newTab' in operation && operation.newTab === true));
+      // Runs once: shown, or skipped with the owner told what the receipt said that did not happen.
+      let presented=false;
+      const show=(ready:()=>boolean)=>{
+        if(presented)return;presented=true;
+        if(!browserControl){if(ready())present?.();return;}
+        runBrowserPresentation(operation,present,ready,text=>{if(this.live)this.agentSay(text,{type:'generic',icon:'info',title:text,sub:'',systemNotice:true,done:true});});
+      };
+      const ready=()=>this.live&&!document.hidden&&!alphaClient.getState().pending&&connectionController.getSnapshot().session===browserSession&&JSON.stringify(alphaClient.getState().context)===JSON.stringify(expectedContext);
+      return { status: 'succeeded', summary: browserControl?browserControlSummary(operation,present?.closed):browserNavigationSummary(operation.url),
         // A directly requested open runs inside the chat request that still carries its reply.
-        alphaClient.afterRequestSettles(show);
-      } };
+        presentBrowser:()=>alphaClient.afterRequestSettles(()=>show(ready)),
+        presentBrowserSkipped:()=>show(()=>false) };
     });
     context(this);
   };

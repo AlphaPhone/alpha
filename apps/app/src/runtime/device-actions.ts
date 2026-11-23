@@ -41,7 +41,7 @@ import {
   requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
 import {smsSimLabel} from '../ui/telephony/sms-card-facts';
-import type {BrowserTabLine} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
+import type {BrowserTabsClosing} from '../ui/device-actions/client-coordinator';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
 import {isReminderOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
@@ -114,11 +114,11 @@ let browserTabNeedsChoice: ((target:string)=>boolean)|undefined;
 export function setBrowserTabNeedsChoice(read: (target:string)=>boolean) {
   browserTabNeedsChoice=read;
 }
-/** The tabs a proposal's close-every-tab card lists: read from Browser when the card is first
- * drawn and bound to that proposal, the only tabs its executor will close (it refuses when
- * Browser's tabs changed since). null, or unset, no such card is offered. */
-let browserTabsClosing: ((proposalId:string)=>BrowserTabLine[]|null)|undefined;
-export function setBrowserTabsClosing(read: (proposalId:string)=>BrowserTabLine[]|null) {
+/** The tabs a proposal's close-every-tab card lists, and the private tabs it leaves open: read from
+ * Browser when the card is first drawn and bound to that proposal, the only tabs its executor will
+ * close (it refuses when Browser's tabs changed since). null, or unset, no such card is offered. */
+let browserTabsClosing: ((proposalId:string)=>BrowserTabsClosing|null)|undefined;
+export function setBrowserTabsClosing(read: (proposalId:string)=>BrowserTabsClosing|null) {
   browserTabsClosing=read;
 }
 /** The names of the phone contacts a contact change or deletion would be offered for, looked up
