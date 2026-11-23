@@ -1,5 +1,5 @@
 // spec/telephony/comms.md, "A proposal restored from the phone's own store is shown, never approved, until Alpha proposes it again"; spec/assistant/approvals.md, "A card restored from the phone's own store is shown but never executed"
-const safeText = (value: string) => value.isWellFormed() && !/[\p{Cc}‪-‮⁦-⁩]/u.test(value.replace(/\n/g, " "))
+const safeText = (value: string) => !/[\uD800-\uDFFF]/u.test(value) && !/[\p{Cc}‪-‮⁦-⁩]/u.test(value.replace(/\n/g, " "))
 
 /** The words of the open proposal's card as Alpha's reply showed them: its line, its title and its detail. */
 export const ProposalWords = Schema.Struct({

@@ -88,7 +88,7 @@ export const locationLayer = Layer.effect(MapsLocation, effect {
     if (checked.phase === "Prompting") {
       const asked = native.invoke(PLUGIN, "requestPermissions") catch effect () => { throw denied() }
       const answer = Schema.decodeUnknownEffect(Permission)(asked) catch () => ({ location: "denied" as const })
-      accuracy = answer.accuracy
+      accuracy = "accuracy" in answer ? answer.accuracy : undefined
       const answered = locator.send({ type: "permissionAnswered", owner, granted: answer.location === "granted" && answer.accuracy !== "none" }) catch effect () => {
         throw failure("cancelled", "Location request cancelled.")
       }
@@ -108,7 +108,7 @@ export const locationLayer = Layer.effect(MapsLocation, effect {
       Stream.map(native.listen(PLUGIN, "error"), (raw) => ({ kind: "error" as const, raw })),
     )
     const queue = try Queue.unbounded<{ kind: "fix" | "error"; raw: unknown } | { kind: "network"; raw: Position }>()
-    fork.scoped Stream.runForEach(events, (event) => Queue.offer(queue, event)) catch () => undefined
+    fork.scoped effect { Stream.runForEach(events, (event) => Queue.offer(queue, event)) catch () => undefined }
     try acquireRelease(
       effect {
         const raw = native.invoke(PLUGIN, "watchPosition", { accuracy: "high", minInterval: 1000, minDistance: 0 }) catch effect () => {

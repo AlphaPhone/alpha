@@ -2,7 +2,7 @@
 import { backgroundNavigation, type NavigationBridge, NavigationBridgeFailed } from "@elizaos/plugin-maps/client/device-navigation"
 import { type Guidance, type NavEffect, type NavStep, Machine as GuidanceMachine, readingUsable } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
-import { maySpeak, usableFix } from "../../gen/maps__vocabulary.ts"
+import { maySpeak, usableFix } from "../../gen/maps__vocabulary.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { MapsProvider } from "./cloud.vibe"
 import { MapsContent } from "./content.vibe"
@@ -70,10 +70,12 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
       return Schema.decodeUnknownEffect(NavigationAvailability)(raw) catch () => ({ background: false })
     },
     listen: (sessionId: string, stopped: (reason: string) => void) => effect {
-      const fiber = fork.detached Stream.runForEach(native.listen(SERVICE, "navigationStopped"), (raw) => effect {
-        const event = Schema.decodeUnknownEffect(NavigationStopped)(raw) catch () => undefined
-        if (event?.sessionId === sessionId) try sync(() => stopped(event.reason))
-      }) catch () => undefined
+      const fiber = fork.detached effect {
+        Stream.runForEach(native.listen(SERVICE, "navigationStopped"), (raw) => effect {
+          const event = Schema.decodeUnknownEffect(NavigationStopped)(raw) catch () => undefined
+          if (event?.sessionId === sessionId) try sync(() => stopped(event.reason))
+        }) catch () => undefined
+      }
       return () => fiber.interruptUnsafe()
     },
     start: (input) => map(call("startNavigation", input), () => undefined),
@@ -96,7 +98,7 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
     try content.update((c) => ({ ...c, message }))
   }
 
-  effect function apply(event: Parameters<typeof guidance.send>[0]) {
+  effect function apply(event: Parameters<typeof guidance.send>[0]): (Guidance | undefined)!! {
     const sent: NavStep | undefined = guidance.send(event) catch () => undefined
     if (sent === undefined) return undefined
     for (const out of sent.out) try perform(out)
@@ -118,7 +120,7 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
     if (message !== undefined) try tell(message)
   }
 
-  effect function perform(out: NavEffect) {
+  effect function perform(out: NavEffect): void!! {
     switch (out.tag) {
       case "StartWatch": {
         const session = out.session
@@ -213,7 +215,9 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
     if (s.fallback && s.visible) try tell("Screen-off guidance is unavailable. Keep Maps open for turn guidance.")
   })
 
-  fork.detached Stream.runForEach(location.states, (s) => service.permissionHold(s.phase === "Prompting" || s.phase === "WaitingFront", false)) catch () => undefined
+  fork.detached effect {
+    Stream.runForEach(location.states, (s) => service.permissionHold(s.phase === "Prompting" || s.phase === "WaitingFront", false)) catch () => undefined
+  }
 
   return {
     effect start() {

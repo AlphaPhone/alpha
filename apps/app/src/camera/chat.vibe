@@ -1,6 +1,6 @@
 // spec/camera/scan.md, "Only a complete, bounded scan request starts a scan, and only over the visible Camera"; spec/camera/media.md, "A frame question needs the ready, idle preview, and its frame is reviewed before it joins the draft"
-import { asksAboutFrame } from "../../gen/camera__media.ts"
-import { startsScan } from "../../gen/camera__scan.ts"
+import { asksAboutFrame } from "../../gen/camera__media.effect.vibe"
+import { startsScan } from "../../gen/camera__scan.effect.vibe"
 import { MediaReview } from "./mediaReview.vibe"
 import { Scanner } from "./scanner.vibe"
 import { frameQuestionRequested, scanRequested } from "./scanText.ts"

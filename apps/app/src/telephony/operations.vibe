@@ -5,7 +5,7 @@ import type { Result } from "../../gen/assistant__receipts.effect.vibe"
 import type { Settled } from "../../gen/telephony__actions.effect.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { Navigation } from "../shell/navigation.vibe"
-import { AlreadyRan, composeTargetOf, contactNumbersGrounded, contactNumbersOf, grounded, NotATelephonyOperation, telephonyOperationOf, TelephonyActions, type Present, type Refusal, type TelephonyOperation } from "./actions.vibe"
+import { AlreadyRan, composeTargetOf, contactNumbersGrounded, contactNumbersOf, grounded, NotATelephonyOperation, telephonyOperationOf, TelephonyActions, type Present, type Refusal, type TelephonyOperation, type TelephonyType } from "./actions.vibe"
 import { TelephonyBridges } from "./bridges.vibe"
 import { TelephonyCalls } from "./ports.vibe"
 
@@ -15,7 +15,7 @@ const CODES: Record<Settled, string> = {
   NotDone: "failed", Unconfirmed: "unknown", Refused: "refused", Busy: "busy", Occupied: "occupied", NoneSelected: "none-selected", Stale: "stale",
 }
 
-const TITLES: Record<string, string> = {
+const TITLES: Readonly<Record<TelephonyType, string>> = {
   phone_call: "Call", phone_dial: "Open the dialer", sms_send: "Send a text", mms_send: "Send pictures", sms_compose: "Text",
   sms_reply_selected: "Draft a reply", contact_create: "Add a contact", contact_update: "Change a contact", contact_delete: "Remove a contact",
   messages_read_selected: "Read this conversation", voicemail_read_selected: "Read this voicemail", voicemail_delete_selected: "Delete this voicemail",
@@ -112,8 +112,8 @@ export function sentenceOf(type: string, outcome: RunOutcome | undefined, result
 
 /** The card's title: a draft request says it drafts, and every other text says it sends. */
 export function titleOf(op: TelephonyOperation): string {
-  if (op.type === "sms_compose") return op.draft === true ? "Draft a text" : "Send a text"
-  return TITLES[op.type] ?? "Action"
+  if (op.type === "sms_compose") return "draft" in op && op.draft === true ? "Draft a text" : "Send a text"
+  return TITLES[op.type]
 }
 
 /** The direct-pass class of a telephony operation: only a bare keypad and a filtered Contacts list are views; every call, text, read and contact change is a reviewed comms act. */
@@ -141,13 +141,13 @@ export function advertisedOf(own: readonly string[], offered: readonly string[])
 /** Telephony's part of the device capability header, read when a turn is sent, for the shell's DeviceCapabilities. */
 export effect function telephonyCapabilities(offered: readonly string[]) {
   const actions = try TelephonyActions
-  return advertisedOf(try (actions.capabilities() catch () => [] as readonly string[]), offered)
+  return advertisedOf((actions.capabilities() catch () => [] as readonly string[]), offered)
 }
 
 /** What a telephony operation targets against the owner's words: a written number, a contact name, or nothing. */
 export function targetOf(op: TelephonyOperation | undefined, text: string): Target {
   if (op === undefined) return { tag: "NoTarget" }
-  if (op.type === "sms_send") return { tag: "NumberTarget", matches: (op.recipients as readonly string[]).every((n) => grounded(text, { kind: "number", number: n }, op.body)) }
+  if (op.type === "sms_send") return { tag: "NumberTarget", matches: op.recipients.every((n) => grounded(text, { kind: "number", number: n }, op.body)) }
   if (op.type === "phone_keypad" && typeof op.number === "string") return { tag: "NumberTarget", matches: grounded(text, { kind: "number", number: op.number }) }
   if ((op.type === "contact_create" || op.type === "contact_update") && contactNumbersOf(op).length > 0)
     return { tag: "NumberTarget", matches: contactNumbersGrounded(text, contactNumbersOf(op)) }
@@ -157,25 +157,25 @@ export function targetOf(op: TelephonyOperation | undefined, text: string): Targ
       ? { tag: "NumberTarget", matches: grounded(text, target, op.body) }
       : { tag: "ContactTarget", nameWritten: text.toLowerCase().includes(target.query.toLowerCase()) }
   }
-  if (op.target?.kind === "number") return { tag: "NumberTarget", matches: grounded(text, op.target) }
-  const query: unknown = op.target?.kind === "contact" ? op.target.query : op.query
-  if (typeof query === "string" && op.type !== "contact_show") return { tag: "ContactTarget", nameWritten: text.toLowerCase().includes(query.toLowerCase()) }
+  const target = "target" in op ? op.target : undefined
+  if (target?.kind === "number") return { tag: "NumberTarget", matches: grounded(text, target) }
+  const query = target?.kind === "contact" ? target.query : "query" in op ? op.query : undefined
+  if (query !== undefined && op.type !== "contact_show") return { tag: "ContactTarget", nameWritten: text.toLowerCase().includes(query.toLowerCase()) }
   return { tag: "NoTarget" }
 }
 
 /** The card's detail line: who or what the operation names, never more than the proposal itself carries. */
 export function detailOf(op: TelephonyOperation): string {
-  if (op.type === "sms_send") return `To ${(op.recipients as readonly string[]).join(", ")}: ${op.body}`
+  if (op.type === "sms_send") return `To ${op.recipients.join(", ")}: ${op.body}`
   if (op.type === "sms_compose") {
     const target = composeTargetOf(op)
     return `To ${target.kind === "number" ? target.number : target.query}: ${op.body}`
   }
   if (op.type === "sms_reply_selected") return op.body
   if (op.type === "contact_create") return op.contact.displayName
-  if (op.target?.kind === "number") return op.target.number
-  if (op.target?.kind === "contact") return op.target.query
-  if (typeof op.query === "string") return op.query
-  if (op.type === "phone_keypad" && typeof op.number === "string") return op.number
+  if ("target" in op) return op.target.kind === "number" ? op.target.number : op.target.query
+  if ("query" in op) return op.query
+  if (op.type === "phone_keypad" && op.number !== undefined) return op.number
   return ""
 }
 
@@ -209,12 +209,12 @@ export const operationPorts = effect {
 
   effect function showAfterReply(call: ExecutorCall, present: Present) {
     try calls.settled(call)
-    try (navigation.open(present.app, present.route) catch () => false)
+    navigation.open(present.app, present.route) catch () => false
   }
 
   effect function run(operation: unknown, call: ExecutorCall) {
     const facts = try calls.of(call)
-    const done = try (actions.run(operation, call.operationId, { text: facts.ownerText }) catch (failure) => failure)
+    const done = (actions.run(operation, call.operationId, { text: facts.ownerText }) catch (failure) => failure)
     if (done instanceof AlreadyRan) return undefined
     if (done instanceof NotATelephonyOperation) return { kind: "refused" as const, code: "unsupported" }
     remember(operation, { settled: done.settled, status: statusOf(done.result), refusal: done.refusal })

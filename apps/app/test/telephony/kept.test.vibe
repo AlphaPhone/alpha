@@ -13,7 +13,9 @@ import { PhoneInfoView } from "../../src/telephony/phone-info.vibe"
 import { messagesShareTarget } from "../../src/telephony/share.vibe"
 import { fakePhone, until } from "./fakes.vibe"
 
-const quiet = <A, E>(program: A!E) => program catch () => "Rejected" as const
+effect function quiet<A, E>(program: A!E) {
+  return program catch () => "Rejected" as const
+}
 
 /** A Cloud session that starts signed out and signs in when `signIn` runs. */
 function session() {

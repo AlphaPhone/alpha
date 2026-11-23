@@ -36,8 +36,9 @@ it.live("Back denies the newest confirmation, then closes the excerpt review, th
       try tabs.dispatch({ type: "toggleMenu" })
       const menuBack = try tabs.back()
       const shellBack = try tabs.back()
+      const got1 = try Ref.get(fake.drafts)
       try Effect.try(() => assert.deepStrictEqual(
-        { firstBack, newest, secondBack, oldest, noReview, readingBack, afterReading, noReading, menuBack, shellBack, drafts: (try Ref.get(fake.drafts)).length },
+        { firstBack, newest, secondBack, oldest, noReview, readingBack, afterReading, noReading, menuBack, shellBack, drafts: got1.length },
         { firstBack: true, newest: false, secondBack: true, oldest: false, noReview: false, readingBack: true, afterReading: Option.some("NotReading"), noReading: false, menuBack: true, shellBack: false, drafts: 0 },
       ))
     }

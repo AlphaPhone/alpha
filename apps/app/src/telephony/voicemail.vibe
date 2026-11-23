@@ -76,7 +76,7 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
   const undo = try DeletionUndo
   const front = try frontChanges()
   const audio = try Ref.make<{ ticket: number; wav: Uint8Array } | undefined>(undefined)
-  const tell = (event: VoicemailEvent) => voicemail.send(event) catch () => undefined
+  const tell = effect (event: VoicemailEvent) => voicemail.send(event) catch () => undefined
 
   effect function publish(listing: VoicemailListing) {
     const names = try displayNames(bridgeCall, "phone", listing.voicemails.filter((row) => !row.cachedName).map((row) => row.number))
@@ -84,16 +84,16 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
     const asked = try tell({ type: "listAsked" })
     if (asked === undefined) return
     const answered = try tell({ type: "listAnswered", ticket: asked.epoch, answer: listedAnswer(named) })
-    try (phone.send({ type: "carrierRead", ready: answered?.carrier === "CarrierReady" }) catch () => undefined)
+    phone.send({ type: "carrierRead", ready: answered?.carrier === "CarrierReady" }) catch () => undefined
   }
 
   effect function read(kind: "AutomaticRead" | "ExplicitRead") {
-    const listing = try (bridgeCall("refreshVoicemail", (c) => c.phone.refreshVoicemail(kind)) catch () => undefined)
+    const listing = (bridgeCall("refreshVoicemail", (c) => c.phone.refreshVoicemail(kind)) catch () => undefined)
     if (listing !== undefined) try publish(listing)
     else {
       const asked = try tell({ type: "listAsked" })
       if (asked !== undefined) try tell({ type: "listAnswered", ticket: asked.epoch, answer: { tag: "VoicemailUnreadable" } })
-      try (phone.send({ type: "carrierRead", ready: false }) catch () => undefined)
+      phone.send({ type: "carrierRead", ready: false }) catch () => undefined
     }
   }
 
@@ -103,7 +103,7 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
     if (asked === undefined || asked.opened.transcript !== "TranscriptRunning") return
     const parts: string[] = []
     for (const window of wavWindows(wav)) {
-      const text = try (recognizer.transcribe(base64Of(window)) catch () => "")
+      const text = (recognizer.transcribe(base64Of(window)) catch () => "")
       if ((try voicemail.get()).opened.ticket !== ticket) return
       if (text.trim() !== "") parts.push(text.trim())
     }
@@ -116,9 +116,9 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
     const { openId, ticket } = asked.opened
     const id = openId as VoicemailId
     const row = asked.rows.find((r) => r.id === openId)
-    const fetched = row?.hasAudio === true ? "ready" : try (bridgeCall("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id)) catch () => "failed")
-    const pcm = fetched === "ready" ? try (bridgeCall("voicemailPcm", (c) => c.phone.voicemailPcm(id)) catch () => undefined) : undefined
-    const wav = pcm === undefined ? undefined : try (Effect.try(() => bytesOf(pcm.data)) catch () => undefined)
+    const fetched = row?.hasAudio === true ? "ready" : (bridgeCall("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id)) catch () => "failed")
+    const pcm = fetched === "ready" ? (bridgeCall("voicemailPcm", (c) => c.phone.voicemailPcm(id)) catch () => undefined) : undefined
+    const wav = pcm === undefined ? undefined : (Effect.try(() => bytesOf(pcm.data)) catch () => undefined)
     if ((try voicemail.get()).opened.ticket !== ticket) return
     try Ref.set(audio, wav === undefined ? undefined : { ticket, wav })
     try tell({ type: "audioAnswered", ticket, ok: wav !== undefined })
@@ -135,8 +135,11 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
     effect visit() {
       try whileInFront(front, effect () => {
         if ((try tell({ type: "voicemailShown" })) === undefined) return
-        const stop = try (bridgeCall("observeVoicemail", (c) => c.phone.observeVoicemail((refreshed) => {
-          runFork(effect { try publish(try promise(() => refreshed)) } catch () => undefined)
+        const stop = (bridgeCall("observeVoicemail", (c) => c.phone.observeVoicemail((refreshed) => {
+          runFork(effect {
+            const listing = tryPromise(() => refreshed) catch () => undefined
+            if (listing !== undefined) publish(listing) catch () => undefined
+          })
         })) catch () => undefined)
         try ensuring(effect {
           try read("AutomaticRead")
@@ -146,7 +149,7 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
           try tell({ type: "readinessLost" })
           try Ref.set(audio, undefined)
           try tell({ type: "voicemailHidden" })
-          if (stop !== undefined) try (promise(() => stop()) catch () => undefined)
+          if (stop !== undefined) tryPromise(() => stop()) catch () => undefined
         })
       })
     },
@@ -163,7 +166,7 @@ export const voicemailViewLayer = Layer.effect(VoicemailView, effect {
       const before = try voicemail.get()
       const row = before.rows.find((r) => r.id === before.opened.openId)
       if ((try tell({ type: "played" })) === undefined || row === undefined || !row.fresh) return
-      const report = try (bridgeCall("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(row.id as VoicemailId)) catch () => undefined)
+      const report = (bridgeCall("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(row.id as VoicemailId)) catch () => undefined)
       if (report !== undefined) try publish(report.listing)
     },
     effect wav() {

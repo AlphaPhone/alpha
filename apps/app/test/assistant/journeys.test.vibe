@@ -371,6 +371,27 @@ it.effect("Let my agent know where I am when I allow it, indoors (spec/assistant
   }
 })
 
+it.effect("Let my agent know where I am when the warm-up's lookup failed (spec/assistant/context.md, \"The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again\")", () => effect {
+  const said = { asks: false, shares: true }
+  const lookups = { count: 0 }
+  provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), networkNative({ latitude: 48.8566, longitude: 2.3522, accuracy: 25000 }, lookups, 1), fakePreferences(said)) {
+    const location = try PhoneLocation
+    try location.warm()
+    const backingOff = try location.forTurn(true, true)
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+    const triedWhileBackingOff = lookups.count
+    try TestClock.adjust("121 seconds")
+    const due = try location.forTurn(true, true)
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+    const next = try location.forTurn(true, true)
+    for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+    try Effect.try(() => assert.deepStrictEqual(
+      { backingOff, triedWhileBackingOff, due, next: next?.accuracyMeters, lookups: lookups.count },
+      { backingOff: undefined, triedWhileBackingOff: 1, due: undefined, next: 25000, lookups: 2 },
+    ))
+  }
+})
+
 it.effect("Tell my agent what my screen shows, and nothing more (spec/assistant/context.md, \"A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn\")", () => effect {
   const seen: Seen = { calls: [] }
   provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Hi." }, proposals: [] }), fakeHost([], privateScreen), countingExecutors({ count: 0 })) {

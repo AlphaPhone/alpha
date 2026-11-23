@@ -1,5 +1,6 @@
 // spec/maps/plane.md, "A plane is rebuilt only when its element or basemap changes, and reports only for its own generation"; spec/maps/plane.md, "A failed tile never fails a plane whose style has loaded, and a cancelled tile fails nothing"; spec/maps/plane.md, "The camera goes to what the owner picked, on every map"; spec/maps/plane.md, "The compass shows only while the map is turned or tilted and guidance is not following, and puts north up"; spec/maps/plane.md, "Only the reply to the latest copyright request, for the view in place, is shown, and a failed one never fails the map"; spec/maps/plane.md, "Google content is drawn only on the Google raster, and other content on the world or open raster"; spec/maps/plane.md, "Story: See the map for what I am looking at"
-import maplibregl, { type GeoJSONSource, type Map as MapLibre, type StyleSpecification } from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { GeoJSONSource, Map as MapLibre, StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Compass } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -46,8 +47,22 @@ export type MapPlaneProps = {
 
 let protocols = 0;
 
-/** The padding that keeps what the camera shows above the open sheets and below the search bar. */
-const SHEETS = { top: 220, bottom: 280, left: 30, right: 30 };
+/**
+ * The padding that keeps what the camera shows between the search bar and the open sheets, measured from Maps as it is drawn now
+ * (the top controls and the credits row above the sheets), with fixed amounts where Maps draws neither. The two never take more than
+ * three quarters of the map's height, so a short landscape screen still has room for what the camera shows.
+ */
+function selectionPadding(container: HTMLElement): { top: number; bottom: number; left: number; right: number } {
+  const bounds = container.getBoundingClientRect();
+  const height = bounds.height || container.clientHeight;
+  const screen = container.closest("main");
+  const top = screen?.querySelector("[data-alpha-maps-top]")?.getBoundingClientRect();
+  const sheets = screen?.querySelector("[data-alpha-maps-controls]")?.getBoundingClientRect();
+  const above = top ? Math.max(0, top.bottom - bounds.top) + 60 : 100;
+  const below = sheets ? Math.max(0, bounds.bottom - sheets.top) + 16 : Math.min(430, height * 0.52 + 30);
+  const scale = above + below > height * 0.75 && above + below > 0 ? (height * 0.75) / (above + below) : 1;
+  return { top: Math.round(above * scale), bottom: Math.round(below * scale), left: 30, right: 30 };
+}
 
 function styleFor(basemap: Basemap, protocol: string, tileSize: number, minZoom: number, maxZoom: number, land: string): string | StyleSpecification {
   if (basemap === "WorldMap") return WORLD_STYLE;
@@ -105,12 +120,13 @@ function painter(map: MapLibre, onPin: (id: string) => void): { paint: (d: Plane
       map.easeTo({ center: [d.position.coordinate.longitude, d.position.coordinate.latitude], zoom: Math.max(map.getZoom(), 16.5), bearing: d.position.headingDegrees ?? map.getBearing(), duration: 500 });
     } else if (aim === "FitRoute" && d.route) {
       const bounds = d.route.reduce((b, c) => b.extend([c.longitude, c.latitude]), new maplibregl.LngLatBounds());
-      map.fitBounds(bounds, { padding: SHEETS, maxZoom: routeMaxZoom, duration: 350 });
+      map.fitBounds(bounds, { padding: selectionPadding(map.getContainer()), maxZoom: routeMaxZoom, duration: 350 });
     } else if (aim === "CenterOnPlace" && d.selection) {
-      map.easeTo({ center: [d.selection.longitude, d.selection.latitude], zoom: placeZoom, offset: [0, (SHEETS.top - SHEETS.bottom) / 2], duration: 0 });
+      const padding = selectionPadding(map.getContainer());
+      map.easeTo({ center: [d.selection.longitude, d.selection.latitude], zoom: placeZoom, offset: [0, (padding.top - padding.bottom) / 2], duration: 0 });
     } else if (aim === "FitResults") {
       const bounds = d.pins.reduce((b, p) => b.extend([p.coordinate.longitude, p.coordinate.latitude]), new maplibregl.LngLatBounds());
-      map.fitBounds(bounds, { padding: SHEETS, maxZoom: resultsMaxZoom, duration: 350 });
+      map.fitBounds(bounds, { padding: selectionPadding(map.getContainer()), maxZoom: resultsMaxZoom, duration: 350 });
     }
     keys = { route, pins, here: position, selection, follow: following };
   };
@@ -162,7 +178,8 @@ export function MapPlane(props: MapPlaneProps) {
     });
     instance.on("error", (e) => {
       const tileError = "tile" in e || "sourceId" in e;
-      const cancelled = e.error?.name === "AbortError";
+      const cause: unknown = e.error;
+      const cancelled = typeof cause === "object" && cause !== null && "name" in cause && cause.name === "AbortError";
       if (failsThePlane(styleLoaded, tileError, cancelled)) props.onState(generation, "PlaneFailed");
     });
     instance.on("movestart", (e) => { if ((e as { originalEvent?: unknown }).originalEvent) props.onInteraction(); });

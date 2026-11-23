@@ -6,6 +6,7 @@ import { PhotoLibrary } from "./library.vibe"
 import { photosText } from "./messages.vibe"
 import { CameraNotices } from "./notices.vibe"
 import { PhotosFailed, PhotoStore, type Reviewed } from "./photos.vibe"
+import { newId } from "../platform/ids.ts"
 
 /** A Photos request the phone refused, in Alpha's words; nothing was changed. */
 export error PhotosRefused { message: string }
@@ -51,7 +52,7 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
   const library = try PhotoLibrary
   const store = try PhotoStore
   const notices = try CameraNotices
-  const session = Array.from(globalThis.crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(36).padStart(2, "0")).join("").slice(0, 12)
+  const session = newId().replaceAll("-", "").slice(0, 12)
   const issued = new Map<string, { readonly id: string; readonly revision: string }>()
   let serial = 0
   let pending: { action: "trash" | "share" | "favorite" | "unfavorite"; items: Reviewed[] } | undefined
@@ -141,7 +142,7 @@ export const agentPhotos = Layer.effect(AgentPhotos, effect {
       }
     },
     effect page(hidden: boolean) {
-      try hostSend({ type: hidden ? "hide" : "show" })
+      try hostSend({ type: hidden ? "hideHost" : "show" })
       try reviewSend({ type: hidden ? "hidePage" : "showPage" })
       if (hidden) opened = undefined
     },

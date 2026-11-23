@@ -32,9 +32,9 @@ export const wifi = Layer.effect(Wifi, effect {
   const within = <A, E>(program: A!E!Native) => Effect.provideService(program, Native, native)
   return {
     scan: () => within(effect {
-      try (held.send({ type: "beginScan" }) catch () => undefined)
-      const found = try (call("ElizaWiFi", "listAvailableNetworks", WifiScan, { joinable: false, limit: 30 }) catch effect (error) => {
-        try (held.send({ type: "scanAnswered", scan: scanRefusal(error.reason), networks: [] }) catch () => undefined)
+      held.send({ type: "beginScan" }) catch () => undefined
+      const found = (call("ElizaWiFi", "listAvailableNetworks", WifiScan, { joinable: false, limit: 30 }) catch effect (error) => {
+        held.send({ type: "scanAnswered", scan: scanRefusal(error.reason), networks: [] }) catch () => undefined
         return undefined
       })
       if (found === undefined) return
@@ -42,25 +42,25 @@ export const wifi = Layer.effect(Wifi, effect {
         const security = n.security === undefined ? (n.secured ? "Wpa2" : "OpenNet") : PARSED[n.security]
         return { name: n.ssid, secured: n.secured, joinable: security !== "Enterprise" && security !== "Wep", strength: Math.round(n.rssi), security }
       })
-      try (held.send({ type: "scanAnswered", scan: "Found", networks }) catch () => undefined)
+      held.send({ type: "scanAnswered", scan: "Found", networks }) catch () => undefined
     }),
     join: (name: string, security: Security, passphrase: string) => within(effect {
       const characters = passphrase.length
       const printable = /^[\x20-\x7e]*$/.test(passphrase)
-      const asked = try (held.send({ type: "requestJoin", name: name.trim(), security, characters, printable }) catch () => undefined)
+      const asked = (held.send({ type: "requestJoin", name: name.trim(), security, characters, printable }) catch () => undefined)
       if (asked === undefined || asked.join !== "AwaitingAndroid") return
       const answer = try attempt(call("ElizaWiFi", "addNetworkWithApproval", WifiJoin, {
         ssid: name.trim(), security: WIRE[security], ...(characters > 0 ? { password: passphrase } : {}),
       }))
-      try (held.send({ type: "joinAnswered", answer: answer === undefined ? "NotConnected" : ANSWER[answer.status] }) catch () => undefined)
+      held.send({ type: "joinAnswered", answer: answer === undefined ? "NotConnected" : ANSWER[answer.status] }) catch () => undefined
     }),
     readConnectivity: () => within(effect {
       const read = try attempt(call("ElizaWiFi", "getConnectivity", WifiConnectivity))
-      try (held.send({ type: "connectivityRead", answered: read !== undefined, online: read?.online === true, validated: read?.validated === true, portal: read?.captivePortal === true }) catch () => undefined)
+      held.send({ type: "connectivityRead", answered: read !== undefined, online: read?.online === true, validated: read?.validated === true, portal: read?.captivePortal === true }) catch () => undefined
     }),
     openPanel: () => within(effect {
       const opened = try attempt(native.invoke("ElizaWiFi", "openInternetPanel"))
-      if (opened !== undefined) try (held.send({ type: "openPanel" }) catch () => undefined)
+      if (opened !== undefined) (held.send({ type: "openPanel" }) catch () => undefined)
     }),
   }
 })

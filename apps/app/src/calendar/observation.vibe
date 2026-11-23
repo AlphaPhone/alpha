@@ -13,7 +13,7 @@ export interface CalendarDayObservation {
 }
 
 /** The day Calendar shows now, or nothing unless a plain, ready day of the current owner is in front, uncovered and unchanged. */
-export effect function calendarDayObservation(): CalendarDayObservation | undefined {
+export effect function calendarDayObservation() {
   const front = try (try Foreground).get()
   const shown = try (try PresentationMachine).get()
   const agent = try (try AgentCalendar).view()

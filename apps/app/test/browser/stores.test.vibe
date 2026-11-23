@@ -5,7 +5,7 @@ import { CloudRequests } from "../../src/browser/cloudCustody.vibe"
 import { BrowserEgress } from "../../src/browser/egress.vibe"
 import { GoogleLink } from "../../src/browser/googleReturn.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
-import { callsTo, fakeHost, loadPage, sessionOf, settledTabs } from "./fakes.vibe"
+import { callsTo, emit, fakeHost, loadPage, sessionOf, settledTabs } from "./fakes.vibe"
 
 // spec/browser/bookmarks.md, "Story: Keep my bookmarks whole"
 it.live("a bookmark is written only after the list was read, keeps the page's name, and a refused write is reported and changes nothing", () => effect {
@@ -26,15 +26,41 @@ it.live("a bookmark is written only after the list was read, keeps the page's na
       try marks.set("https://full.test/", "Full", true)
       const now = try marks.get()
       const order = (try Ref.get(fake.calls)).map((c) => c.method).filter((m) => m === "bookmarks" || m === "setBookmark")
+      const got1 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
         firstIsARead: order[0],
         marks: now.marks,
-        refused: (try Ref.get(fake.toasts)).includes("Bookmark not saved. Alpha keeps up to 100 bookmarks; nothing else changed."),
+        refused: got1.includes("Bookmark not saved. Alpha keeps up to 100 bookmarks; nothing else changed."),
       }, {
         firstIsARead: "bookmarks",
         marks: [{ url: "https://example.test/news", title: "example.test" }, { url: "https://recipes.test/bread", title: "" }],
         refused: true,
       }))
+    }
+  })
+})
+
+// spec/browser/bookmarks.md, "Opening Browser, resuming the app, a visible return and a changed bookmark document each ask for one refresh"
+it.live("another tab's change to the bookmark document is read again, and another session's is not", () => effect {
+  const saved = try Ref.make<readonly string[]>([])
+  const fake = try fakeHost({ answers: { bookmarks: () => Effect.map(Ref.get(saved), (urls) => ({ urls })) } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const marks = try BrowserBookmarks
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      const before = (try callsTo(fake.calls, "bookmarks")).length
+      try Ref.set(saved, ["https://elsewhere.test/"])
+      try emit(fake.events, "bookmarksChanged", { session: "another-session" })
+      const ignored = (try callsTo(fake.calls, "bookmarks")).length
+      try emit(fake.events, "bookmarksChanged", { session })
+      const after = (try callsTo(fake.calls, "bookmarks")).length
+      const now = try marks.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { ignored: ignored - before, read: after - before, marks: now.marks.map((m) => m.url) },
+        { ignored: 0, read: 1, marks: ["https://elsewhere.test/"] },
+      ))
     }
   })
 })
@@ -48,10 +74,13 @@ it.live("an unreadable list is reported, nothing is written over it, and Recover
       try marks.refresh(false)
       try marks.set("https://example.test/", "Example", true)
       try marks.recover()
+      const got2 = try callsTo(fake.calls, "setBookmark")
+      const got3 = try Ref.get(fake.toasts)
+      const got4 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
-        writes: (try callsTo(fake.calls, "setBookmark")).length,
-        said: (try Ref.get(fake.toasts)).filter((t) => t === "Saved bookmarks couldn’t be read. They weren’t changed.").length > 0,
-        kept: (try Ref.get(fake.toasts)).at(-1),
+        writes: got2.length,
+        said: got3.filter((t) => t === "Saved bookmarks couldn’t be read. They weren’t changed.").length > 0,
+        kept: got4.at(-1),
       }, { writes: 0, said: true, kept: "Saved bookmarks were kept as they are. Nothing was replaced." }))
     }
   })
@@ -70,9 +99,10 @@ it.live("a rejected save tells the owner once and is not repeated before its wai
       const early = (try callsTo(fake.calls, "saveBrowsingState")).length
       try sleep("2100 millis")
       const later = (try callsTo(fake.calls, "saveBrowsingState")).length
+      const got5 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
         retried: later > early,
-        told: (try Ref.get(fake.toasts)).filter((t) => t === "Tabs and history couldn’t be saved. Alpha will try again shortly.").length,
+        told: got5.filter((t) => t === "Tabs and history couldn’t be saved. Alpha will try again shortly.").length,
       }, { retried: true, told: 1 }))
     }
   })
@@ -89,11 +119,12 @@ it.live("a second request for an occupied slot is refused and never sent, and a 
       try sleep("20 millis")
       const duplicate = requests.request("cloud:production", "GET", "/api/v1/status") catch (error) => error._tag
       try requests.cancel("cloud:production")
-      const cancelled = (join first) catch (error) => error._tag
+      const cancelled = Fiber.join(first) catch (error) => error._tag
       try Deferred.succeed(gate, undefined)
       const after = try requests.request("cloud:production", "GET", "/api/v1/status")
+      const got6 = try Ref.get(fake.cloudCalls)
       try Effect.try(() => assert.deepStrictEqual(
-        { duplicate, cancelled, after, sent: (try Ref.get(fake.cloudCalls)).length },
+        { duplicate, cancelled, after, sent: got6.length },
         { duplicate: "SlotBusy", cancelled: "RequestAborted", after: { ok: true }, sent: 2 },
       ))
     }
@@ -115,12 +146,13 @@ it.live("a callback wakes only the newest attempt of the same credential, and on
       try link.credentialChanged(8)
       try link.returned(again, 1)
       const switched = try timeout(Stream.runHead(link.changes), "1 second")
+      const got7 = try Ref.get(fake.cloudCalls)
       try Effect.try(() => assert.deepStrictEqual({
         stalePanel: Option.getOrUndefined(stale)?.panel,
         linkedPanel: Option.getOrUndefined(linked)?.panel,
         verified: Option.getOrUndefined(linked)?.verified,
         switchedPanel: Option.getOrUndefined(switched)?.panel,
-        reads: (try Ref.get(fake.cloudCalls)).filter((c) => c === "GET /api/v1/eliza/google/accounts?side=owner").length,
+        reads: got7.filter((c) => c === "GET /api/v1/eliza/google/accounts?side=owner").length,
       }, { stalePanel: true, linkedPanel: false, verified: true, switchedPanel: true, reads: 1 }))
     }
   })

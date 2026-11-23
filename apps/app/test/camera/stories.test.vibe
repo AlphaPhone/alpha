@@ -319,7 +319,8 @@ it.effect("a confirmed export freezes the pages, and Keep runs only for an unsav
     try scan.send({ type: "requestKeep" })
     try scan.send({ type: "resolveKeep", keepResult: "KeepSaved" })
     const kept = scan.send({ type: "requestKeep" }) catch () => "refused"
-    try Effect.try(() => assert.deepStrictEqual({ edit, picked, kept, status: (try scan.get()).keep.status }, { edit: "refused", picked: "refused", kept: "refused", status: "KeepSaved" }))
+    const status = (try scan.get()).keep.status
+    try Effect.try(() => assert.deepStrictEqual({ edit, picked, kept, status }, { edit: "refused", picked: "refused", kept: "refused", status: "KeepSaved" }))
   }
 })
 

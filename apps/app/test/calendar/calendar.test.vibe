@@ -82,8 +82,9 @@ describe("Calendar journeys (spec/calendar/agent.md, \"Story: See my agent's Cal
       try sleep("200 millis")
       try readCalendar(true, false)
       const after = try agent.view()
+      const stillHeld = (try held.get()).held.length
       try check(() => assert.deepStrictEqual(
-        { undone, second: second > first, sends, standupGone: !(after.feed?.events.some((event) => event.title === "Standup") ?? true), held: (try held.get()).held.length },
+        { undone, second: second > first, sends, standupGone: !(after.feed?.events.some((event) => event.title === "Standup") ?? true), held: stillHeld },
         { undone: true, second: true, sends: 1, standupGone: true, held: 0 },
       ))
 

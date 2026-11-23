@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { hostProfile } from "../scripts/android-host.ts";
 import { provisioningComponents, renderProvisioningOverlay, requestsAllFilesAccess, writeProvisioningOverlay } from "../scripts/aosp-provisioning-overlay.ts";
 import { assertImageLauncherManifest } from "../scripts/stage-aosp.ts";
 
@@ -106,7 +107,10 @@ test("the image grants the launcher its runtime permissions on first boot, revoc
   const { LAUNCHER_DEFAULT_PERMISSIONS, LAUNCHER_PRIVILEGED_PERMISSIONS } = await import("../scripts/stage-aosp.ts");
   const { renderOverlay } = await import("../vendor/eliza/packages/os/aosp/stage-launcher-overlay.ts");
   // The shared stager refuses a grant the APK does not declare; the launcher build merges these two manifests.
-  const declared = ["main", "launcher"].map(flavor => fs.readFileSync(`android/app/src/${flavor}/AndroidManifest.xml`, "utf8")).join("\n");
+  const profile = hostProfile();
+  const launcher = profile.flavors.find(flavor => flavor.name === "launcher");
+  assert.ok(launcher?.manifest);
+  const declared = [profile.manifest, launcher.manifest].map(source => fs.readFileSync(source.path, "utf8")).join("\n");
   for (const permission of LAUNCHER_DEFAULT_PERMISSIONS)
     assert.match(declared, new RegExp(`<uses-permission android:name="${permission.replaceAll(".", "\\.")}"(?![^>]*tools:node="remove")`), permission);
   // Every step of the startup access walkthrough that is an Android runtime permission is covered.

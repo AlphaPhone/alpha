@@ -42,12 +42,12 @@ export function previousMode(draft: PreviousDraft): Mode {
 }
 
 /** A previous draft as a shelved draft of this version: everything it held, its attachments checked again, revision one. */
-export effect function previousDraftOf(draft: PreviousDraft, toQ: string): Draft {
+export effect function previousDraftOf(draft: PreviousDraft, toQ: string): Draft!! {
   const forwardParts = (draft.forward?.parts ?? []).slice(0, 10).map((part) => ({ partId: part.partId, name: part.name, nameKey: part.name.toLowerCase(), mimeType: part.mimeType, bytes: part.size }))
   const files: OutgoingFile[] = []
   for (const attachment of draft.attachments ?? []) {
     if (files.length + forwardParts.length >= 10) break
-    const checked = try (tryPromise({ try: () => checkMailFile(attachment.name, attachment.mimeType, attachment.dataBase64), catch: () => "name-or-encoding" as const }) catch () => "name-or-encoding" as const)
+    const checked = (tryPromise({ try: () => checkMailFile(attachment.name, attachment.mimeType, attachment.dataBase64), catch: () => "name-or-encoding" as const }) catch () => "name-or-encoding" as const)
     if (!isRefusal(checked)) files.push(outgoing(checked.name, checked.mimeType, checked.bytes, checked.sha256, attachment.dataBase64))
   }
   const fields: DraftFields = {
@@ -64,21 +64,21 @@ export effect function previousDraftOf(draft: PreviousDraft, toQ: string): Draft
 }
 
 /** Bring the drafts the previous version kept for the bound account `owner` onto its shelf, then clear each previous slot whose drafts are all kept; the count of drafts kept. */
-export effect function keepPreviousDrafts(owner: string): number!! {
+export effect function keepPreviousDrafts(owner: string) {
   const machine = try DraftsMachine
   const google = try GoogleAccounts
   const native = try Native
   const store = try KeyValueStore.KeyValueStore
   const parts = ownerParts(owner)
   if (parts === undefined) return 0
-  const onDevice = try (native.available(SECURE_STORE) catch () => false)
+  const onDevice = (native.available(SECURE_STORE) catch () => false)
   const prefix = onDevice ? "" : BROWSER_PREFIX
 
-  effect function hash(text: string): string {
-    return try (tryPromise({ try: () => sha256Hex(text), catch: () => "" }) catch () => "")
+  effect function hash(text: string): string!! {
+    return (tryPromise({ try: () => sha256Hex(text), catch: () => "" }) catch () => "")
   }
 
-  effect function read(slot: string): string | undefined {
+  effect function read(slot: string) {
     if (onDevice) {
       try adoptLegacySlot(slot, slot)
       const answer = try native.invoke(SECURE_STORE, "get", { key: slot })
@@ -96,7 +96,7 @@ export effect function keepPreviousDrafts(owner: string): number!! {
     if ((try store.get(slot)) === raw) try store.remove(slot)
   }
 
-  effect function slotsOf(previous: string): PreviousSlotDrafts[] {
+  effect function slotsOf(previous: string): PreviousSlotDrafts[]!! {
     const ownerHash = try hash(previous)
     if (ownerHash === "") return []
     const found: PreviousSlotDrafts[] = []
@@ -105,28 +105,28 @@ export effect function keepPreviousDrafts(owner: string): number!! {
       const bindingHash = try hash(binding)
       if (bindingHash === "") continue
       const slot = `${prefix}inbox-drafts:v1:unsaved:${bindingHash}`
-      const raw = try (read(slot) catch () => undefined)
+      const raw = (read(slot) catch () => undefined)
       if (raw === undefined) continue
-      const envelope = try (decodePreviousRecoveryEnvelope(raw) catch () => undefined)
+      const envelope = (decodePreviousRecoveryEnvelope(raw) catch () => undefined)
       if (envelope === undefined || envelope.version !== 1 || envelope.binding !== binding) continue
       if (envelope.text === "") {
         found.push({ slot, raw, drafts: [] })
         continue
       }
-      const copy = try (decodePreviousRecovery(envelope.text) catch () => undefined)
+      const copy = (decodePreviousRecovery(envelope.text) catch () => undefined)
       if (copy === undefined || copy.version !== 1 || copy.owner !== previous || copy.draft.owner !== previous || copy.draft.version !== 1) continue
       found.push({ slot, raw, drafts: [{ draft: copy.draft, toQ: copy.toQ, base: copy.baseRevision }] })
     }
     const savedSlot = onDevice ? `inbox-drafts:v1:${previous}` : `${BROWSER_PREFIX}inbox-saved-drafts:v1:${ownerHash}`
-    const savedRaw = try (read(savedSlot) catch () => undefined)
+    const savedRaw = (read(savedSlot) catch () => undefined)
     if (savedRaw !== undefined) {
-      const saved = try (decodePreviousDraft(savedRaw) catch () => undefined)
+      const saved = (decodePreviousDraft(savedRaw) catch () => undefined)
       if (saved !== undefined && saved.version === 1 && saved.owner === previous) found.push({ slot: savedSlot, raw: savedRaw, drafts: [{ draft: saved, toQ: "" }] })
     }
     const shelfSlot = `${prefix}inbox-drafts:v1:shelf:${ownerHash}`
-    const shelfRaw = try (read(shelfSlot) catch () => undefined)
+    const shelfRaw = (read(shelfSlot) catch () => undefined)
     if (shelfRaw !== undefined) {
-      const shelf = try (decodePreviousShelf(shelfRaw) catch () => undefined)
+      const shelf = (decodePreviousShelf(shelfRaw) catch () => undefined)
       if (shelf !== undefined && shelf.version === 1 && shelf.owner === previous && shelf.items.every((row) => row.draft.version === 1 && row.draft.owner === previous)) {
         found.push({ slot: shelfSlot, raw: shelfRaw, drafts: shelf.items.map((row) => ({ draft: row.draft, toQ: row.toQ })) })
       }
@@ -134,7 +134,7 @@ export effect function keepPreviousDrafts(owner: string): number!! {
     return found
   }
 
-  const rows = try (google.list() catch () => [])
+  const rows = (google.list() catch () => [])
   const grants = [parts.grant, ...rows.filter((row) => mailAccountOf(row).id === parts.grant).flatMap((row) => [row.connectionId, row.grantId ?? ""])]
   let kept = 0
   for (const previous of previousOwners(owner, grants)) {
@@ -156,7 +156,7 @@ export effect function keepPreviousDrafts(owner: string): number!! {
       const a = accountOf(owner, s)
       if (!meaningful(draft) || previousKept(a, draft.id)) continue
       const shelfBytes = jsonBytes([...a.shelf, draft])
-      const done = try (machine.send({ type: "keepPrevious", owner, draft, shelfBytes }) catch () => undefined)
+      const done = (machine.send({ type: "keepPrevious", owner, draft, shelfBytes }) catch () => undefined)
       if (done !== undefined) kept += 1
     }
     const after = try machine.get()
@@ -167,7 +167,7 @@ export effect function keepPreviousDrafts(owner: string): number!! {
         const draft = converted.get(row.draft.id)
         return draft === undefined || !meaningful(draft) || previousKept(account, draft.id)
       }).length
-      if (previousSlotsClear(settled, slot.drafts.length)) try (clear(slot.slot, slot.raw) catch () => undefined)
+      if (previousSlotsClear(settled, slot.drafts.length)) (clear(slot.slot, slot.raw) catch () => undefined)
     }
   }
   return kept

@@ -32,7 +32,7 @@ export const layer = Layer.effect(MailSuggestions, effect {
     return machine.send(event) catch () => undefined
   }
 
-  effect function destination(): SuggestionDestination {
+  effect function destination(): SuggestionDestination!! {
     const a = try composer.mine()
     const r = try reader.get()
     if (hasDraft(a.open)) return "open-draft"
@@ -40,7 +40,7 @@ export const layer = Layer.effect(MailSuggestions, effect {
     return r.phase === "BodyShown" ? "new-reply" : "new-email"
   }
 
-  effect function target(text: string): SuggestionTarget {
+  effect function target(text: string): SuggestionTarget!! {
     const a = try composer.mine()
     const where = try destination()
     const r = try reader.get()

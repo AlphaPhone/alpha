@@ -110,17 +110,17 @@ const PAGE_ERRORS: ReadonlyMap<string, string> = new Map([
 
 const text = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 
-/** Alpha's sentence for a refused Browser call; a sentence the host did not word reads as `fallback`. */
+/** Alpha's sentence for a refused Browser call; a sentence the host did not word reads as `fallback`. @throws {never} */
 export function refusalText(message: unknown, fallback = "Browser couldn’t do that. Try again."): string {
   return REFUSALS.get(text(message)) ?? fallback;
 }
 
-/** Alpha's sentence for a tab-host notice; an unknown notice reads as a blocked page action. */
+/** Alpha's sentence for a tab-host notice; an unknown notice reads as a blocked page action. @throws {never} */
 export function noticeText(message: unknown): string {
   return NOTICES.get(text(message)) ?? "Browser blocked something on this page.";
 }
 
-/** Alpha's sentence for a page the tab host could not show. */
+/** Alpha's sentence for a page the tab host could not show. @throws {never} */
 export function pageErrorText(message: unknown): string {
   return PAGE_ERRORS.get(text(message)) ?? "The page didn’t load. Reload to try again.";
 }

@@ -22,7 +22,6 @@
  */
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {otaMain} from './upstream-os.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 export const ALPHA_OTA_DEFAULTS = Object.freeze({
@@ -44,6 +43,7 @@ export function withAlphaDefaults(argv: readonly string[], defaults = ALPHA_OTA_
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
+    const {otaMain} = await import('./upstream-os.ts');
     const result = await otaMain(withAlphaDefaults(process.argv.slice(2))) as {problems?: readonly unknown[]; passed?: boolean};
     console.log(JSON.stringify(result, null, 2));
     if (result?.problems?.length || result?.passed === false) process.exitCode = 1;

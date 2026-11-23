@@ -45,14 +45,14 @@ const known = (value: boolean | null): Known => value === null ? "NotKnown" : va
 
 /** The calls of a reading, or undefined for one the bar cannot trust. */
 export effect function readCalls(raw: unknown) {
-  const reading = try (Schema.decodeUnknownEffect(OngoingCalls, exact)(raw) catch () => undefined)
+  const reading = (Schema.decodeUnknownEffect(OngoingCalls, exact)(raw) catch () => undefined)
   if (reading === undefined) return undefined
   return reading.calls.map((row): LiveCall => ({ id: row.id, phase: PHASES[row.state] ?? "Dialing", connectedAt: row.connectedAt ?? 0 }))
 }
 
 /** Telecom's call-state reading, or undefined; a payload claiming a live emergency is never lifted by its other fields. */
 export effect function readCallState(raw: unknown) {
-  const row = try (Schema.decodeUnknownEffect(CallStateReading, exact)(raw) catch () => undefined)
+  const row = (Schema.decodeUnknownEffect(CallStateReading, exact)(raw) catch () => undefined)
   if (row === undefined) return undefined
   const reading: CallReading = { inCall: known(row.inCall), emergency: known(row.emergency) }
   return row.emergencyLive && !emergencyLive(reading) ? { inCall: "KnownYes", emergency: "NotKnown" } satisfies CallReading : reading
@@ -65,7 +65,7 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
   const voice = try VoiceConversation
   const microphone = try Microphone
   const foreground = try Foreground
-  const tell = (event: CallBarEvent) => bar.send(event) catch () => undefined
+  const tell = effect (event: CallBarEvent) => bar.send(event) catch () => undefined
   const ongoing = try native.available(ONGOING_CALL_PLUGIN)
   const callState = try native.available(CALL_STATE_PLUGIN)
 
@@ -76,7 +76,7 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
   }
 
   effect function readState() {
-    const raw = try (native.invoke(CALL_STATE_PLUGIN, "callState") catch () => undefined)
+    const raw = (native.invoke(CALL_STATE_PLUGIN, "callState") catch () => undefined)
     const reading = try readCallState(raw)
     if (reading !== undefined) try tell({ type: "callStateReported", reading })
     return reading
@@ -86,7 +86,7 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
     if (ongoing) {
       const started = try tell({ type: "refreshStarted" })
       const generation = started === undefined ? (try bar.get()).generation : started.generation
-      const raw = try (native.invoke(ONGOING_CALL_PLUGIN, "ongoingCall") catch () => undefined)
+      const raw = (native.invoke(ONGOING_CALL_PLUGIN, "ongoingCall") catch () => undefined)
       if (raw !== undefined) try applyCalls(raw, generation)
     }
     if (callState) try readState()
@@ -130,7 +130,7 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
   effect function endCall(callId: string) {
     const asked = try tell({ type: "endAsked", callId })
     if (asked === undefined) return
-    const done = try (native.invoke(ONGOING_CALL_PLUGIN, "endCall", { id: callId }) catch () => false)
+    const done = (native.invoke(ONGOING_CALL_PLUGIN, "endCall", { id: callId }) catch () => false)
     if (done === false) try tell({ type: "endRefused", callId })
     try refresh()
   }
@@ -147,11 +147,13 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
       try tell({ type: "tick", at: try Clock.currentTimeMillis })
       try refresh()
       try.all [
-        ongoing ? (follow(ONGOING_CALL_PLUGIN, "ongoingCall", (raw) => applyCalls(raw)) catch () => undefined) : Effect.void,
-        callState ? (follow(CALL_STATE_PLUGIN, "callState", effect (raw) => {
-          const reading = try readCallState(raw)
-          if (reading !== undefined) try tell({ type: "callStateReported", reading })
-        }) catch () => undefined) : Effect.void,
+        ongoing ? effect { follow(ONGOING_CALL_PLUGIN, "ongoingCall", (raw) => applyCalls(raw)) catch () => undefined } : Effect.void,
+        callState ? effect {
+          follow(CALL_STATE_PLUGIN, "callState", effect (raw) => {
+            const reading = try readCallState(raw)
+            if (reading !== undefined) try tell({ type: "callStateReported", reading })
+          }) catch () => undefined
+        } : Effect.void,
         clock(),
         poll(),
         voiceFollow(),
@@ -163,7 +165,7 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
       try tell({ type: "eligibilityChanged", eligible: on })
     },
     effect returnToCall(callId: string) {
-      try (native.invoke(ONGOING_CALL_PLUGIN, "showCall", { id: callId }) catch () => undefined)
+      native.invoke(ONGOING_CALL_PLUGIN, "showCall", { id: callId }) catch () => undefined
     },
     end: endCall,
     effect endShown() {

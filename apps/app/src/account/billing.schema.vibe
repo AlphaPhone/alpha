@@ -41,5 +41,5 @@ export schema AuthorityStatus {
 /** One answer of the native billing authority: Cloud's status and JSON body. */
 export schema AuthorityAnswer {
   status: number
-  body: unknown
+  body: Schema.Unknown
 }

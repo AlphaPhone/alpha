@@ -44,15 +44,25 @@ export class WebTabHost {
   private readonly tabs = new Map<string, FrameTab>();
   private readonly listeners = new Map<string, Set<Listener>>();
 
+  /** A host for one session; it opens no frame until asked. @throws {never} */
   constructor(private readonly session: string) {}
 
-  /** Listen to one of the host's events; returns how to stop. */
+  /** Listen to one of the host's events; returns how to stop. `bookmarksChanged` follows another tab's change to the bookmark document. */
   subscribe(name: string, listener: Listener): () => void {
     const set = this.listeners.get(name) ?? new Set<Listener>();
     set.add(listener);
     this.listeners.set(name, set);
-    return () => set.delete(listener);
+    if (name === "bookmarksChanged" && set.size === 1) globalThis.addEventListener?.("storage", this.storageChanged);
+    return () => {
+      set.delete(listener);
+      if (name === "bookmarksChanged" && set.size === 0) globalThis.removeEventListener?.("storage", this.storageChanged);
+    };
   }
+
+  /** Another tab of this browser wrote the bookmark document, or cleared this origin's storage. */
+  private readonly storageChanged = (event: StorageEvent) => {
+    if (event.key === MARKS_KEY || event.key === null) this.emit("bookmarksChanged", { session: this.session });
+  };
 
   /** One call of the tab-host contract. */
   async call(method: string, args: Record<string, unknown>): Promise<unknown> {

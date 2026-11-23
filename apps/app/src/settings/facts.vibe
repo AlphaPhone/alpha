@@ -123,16 +123,17 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
   const within = <A, E>(program: A!E!(Native | Build | StorageUsage)) => Effect.provideService(Effect.provideService(Effect.provideService(program, Native, native), Build, build), StorageUsage, storage)
 
   effect function refresh() {
-    const begun = try facts.send({ type: "beginRead" })
+    const begun = facts.send({ type: "beginRead" }) catch () => undefined
+    if (begun === undefined) return
     const read = try readDevice()
-    try (facts.send({ type: "settleRead", token: begun.generation, read }) catch () => undefined)
+    facts.send({ type: "settleRead", token: begun.generation, read }) catch () => undefined
   }
 
   effect function readIfBegun(before: number) {
     const now = try facts.get()
     if (now.generation === before) return
     const read = try readDevice()
-    try (facts.send({ type: "settleRead", token: now.generation, read }) catch () => undefined)
+    facts.send({ type: "settleRead", token: now.generation, read }) catch () => undefined
   }
 
   return {
@@ -140,38 +141,38 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
     refresh: () => within(refresh()),
     resume: () => within(effect {
       const before = (try facts.get()).generation
-      try (facts.send({ type: "resume" }) catch () => undefined)
+      facts.send({ type: "resume" }) catch () => undefined
       try readIfBegun(before)
     }),
     show: () => within(effect {
       const before = (try facts.get()).generation
-      try (facts.send({ type: "show" }) catch () => undefined)
+      facts.send({ type: "show" }) catch () => undefined
       try readIfBegun(before)
     }),
-    hide: () => effect { try (facts.send({ type: "hideFacts" }) catch () => undefined) },
+    hide: () => effect { (facts.send({ type: "hideFacts" }) catch () => undefined) },
     requestScale: (percent: number) => within(effect {
-      const issued = try (facts.send({ type: "requestScale", percent }) catch () => undefined)
+      const issued = (facts.send({ type: "requestScale", percent }) catch () => undefined)
       if (issued === undefined) return
       const token = issued.scaleIssued
       const answer = try attempt(call("AlphaDevice", "setTextScale", TextScale, { percent }))
       if (answer === undefined) {
-        const failed = try (facts.send({ type: "scaleFailedNewest" }) catch () => undefined)
+        const failed = (facts.send({ type: "scaleFailedNewest" }) catch () => undefined)
         if (failed !== undefined) try refresh()
         return
       }
-      try (facts.send({ type: "scaleApplied", token, percent: answer.textScalePercent }) catch () => undefined)
+      facts.send({ type: "scaleApplied", token, percent: answer.textScalePercent }) catch () => undefined
     }),
     askHome: () => within(effect {
-      const asked = try (facts.send({ type: "askHome" }) catch () => undefined)
+      const asked = (facts.send({ type: "askHome" }) catch () => undefined)
       if (asked === undefined) return
       const reply = try attempt(call("ElizaSystem", "requestRole", RoleReply, { role: "home" }))
-      const answered = try (facts.send({ type: "homeAnswered", refused: reply === undefined }) catch () => undefined)
+      const answered = (facts.send({ type: "homeAnswered", refused: reply === undefined }) catch () => undefined)
       if (answered === undefined) return
       const read = try readDevice()
-      try (facts.send({ type: "settleRead", token: answered.generation, read }) catch () => undefined)
+      facts.send({ type: "settleRead", token: answered.generation, read }) catch () => undefined
     }),
     openPage: (page: SettingsPage) => within(effect {
-      const begun = try (facts.send({ type: "beginHandoff", page }) catch () => undefined)
+      const begun = (facts.send({ type: "beginHandoff", page }) catch () => undefined)
       if (begun === undefined) return
       const opened = try (effect {
         if (page === "PageHome") return try attempt(call("AlphaDevice", "openSettings", PageOpened, { page: "system" }))
@@ -180,13 +181,13 @@ export const deviceFacts = Layer.effect(DeviceFacts, effect {
         if (page === "PagePhotoAccess") return (try attempt(call("AlphaPhotoLibrary", "requestAccess", PhotoAccess))) === undefined ? undefined : { specific: true }
         return try attempt(call("ElizaSystem", "openSettingsPage", PageOpened, { page: PAGE_NAMES[page] ?? "system" }))
       })
-      try (facts.send({ type: "handoffAnswered", opened: opened !== undefined, specific: opened?.specific !== false }) catch () => undefined)
+      facts.send({ type: "handoffAnswered", opened: opened !== undefined, specific: opened?.specific !== false }) catch () => undefined
       if (opened !== undefined && REREAD.includes(page)) try refresh()
     }),
     openShade: () => within(effect {
       const reply = try attempt(call("ElizaSystem", "openNotificationShade", ShadeReply))
       const answer: ShadeAnswer = reply === undefined ? "ShadeUnsupported" : SHADE[reply.status]
-      try (facts.send({ type: "shadeAnswered", answer }) catch () => undefined)
+      facts.send({ type: "shadeAnswered", answer }) catch () => undefined
       return answer
     }),
   }

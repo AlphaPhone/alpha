@@ -9,7 +9,10 @@ export function bytesOf(base64: string): Uint8Array {
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 }
 
-/** The base64 of some bytes. */
+/**
+ * The base64 of some bytes: every char code is a byte, so `btoa` takes them all.
+ * @throws {never}
+ */
 export function base64Of(bytes: Uint8Array): string {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));

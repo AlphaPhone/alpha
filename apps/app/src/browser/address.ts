@@ -18,7 +18,7 @@ const REASONS: Readonly<Record<string, RefusalReason>> = {
   "unsupported-protocol": "RefusedProtocol",
 };
 
-/** The facts `classifyAddress` reads from what the owner typed, with the href or query each outcome opens. */
+/** The facts `classifyAddress` reads from what the owner typed, with the href or query each outcome opens. @throws {never} */
 export function typedAddress(raw: string): { facts: AddressFacts; href: string; query: string } {
   const typed = raw.trim();
   const at = typed.normalize("NFKC");
@@ -40,14 +40,14 @@ export function typedAddress(raw: string): { facts: AddressFacts; href: string; 
   return { facts, href, query: typed };
 }
 
-/** The web search this phone opens for words typed in the address bar and for a reviewed chat search. */
+/** The web search this phone opens for words typed in the address bar and for a reviewed chat search. @throws {never} */
 export function searchAddress(query: string): string {
   const url = new URL("https://www.google.com/search");
   url.searchParams.set("q", query);
   return url.href;
 }
 
-/** The address an outcome loads: the parsed address, the local development host over HTTPS, or a search. */
+/** The address an outcome loads: the parsed address, the local development host over HTTPS, or a search. @throws {never} */
 export function addressFor(outcome: AddressOutcome, typed: { href: string; query: string }): string {
   switch (outcome) {
     case "OpenAddress":
@@ -63,12 +63,12 @@ export function addressFor(outcome: AddressOutcome, typed: { href: string; query
   }
 }
 
-/** Whether a host is this device's own development host, which keeps a typed `http:` address. */
+/** Whether a host is this device's own development host, which keeps a typed `http:` address. @throws {never} */
 export function loopbackHost(host: string): boolean {
   return LOOPBACK.test(host) || /\.localhost$/i.test(host);
 }
 
-/** Android refuses cleartext pages, so a typed `http://` address is tried over HTTPS, except a loopback host or an explicit port. */
+/** Android refuses cleartext pages, so a typed `http://` address is tried over HTTPS, except a loopback host or an explicit port. @throws {never} */
 export function secureTypedAddress(raw: string, onDevice: boolean): string {
   if (!onDevice) return raw;
   const typed = /^\s*http:\/\/([^/?#\s@]+)(?=[/?#]|\s*$)/i.exec(raw);
@@ -76,7 +76,7 @@ export function secureTypedAddress(raw: string, onDevice: boolean): string {
   return raw.replace(/^(\s*)http:/i, "$1https:");
 }
 
-/** A link tapped outside Browser as the address it opens, or undefined when it is not a web address with a host and no credentials; a link is never searched. */
+/** A link tapped outside Browser as the address it opens, or undefined when it is not a web address with a host and no credentials; a link is never searched. @throws {never} */
 export function linkAddress(raw: string, onDevice: boolean): string | undefined {
   const typed = raw.trim();
   if (typed === "" || typed.length > MAX_TYPED) return undefined;
@@ -85,24 +85,24 @@ export function linkAddress(raw: string, onDevice: boolean): string | undefined 
   return url.href;
 }
 
-/** A page's name as one line of plain text, empty when it only repeats the address. */
+/** A page's name as one line of plain text, empty when it only repeats the address. @throws {never} */
 export function cleanTitle(title: unknown, url: string): string {
   const text = String(title ?? "").replace(CONTROL, " ").trim().slice(0, TITLE_MAX);
   return text && text !== url ? text : "";
 }
 
-/** Whether a failed address is plain HTTP on a host other than the device's own, which Android refuses. */
+/** Whether a failed address is plain HTTP on a host other than the device's own, which Android refuses. @throws {never} */
 export function insecureHttp(url: string): boolean {
   const parsed = URL.parse(url);
   return parsed !== null && parsed.protocol === "http:" && !loopbackHost(parsed.hostname);
 }
 
-/** The page fields the spec reads from a native report. */
+/** The page fields the spec reads from a native report. @throws {never} */
 export function pageFacts(url: string): Pick<TabPage, "web" | "secure"> {
   return { web: isWebAddress(url), secure: isSecureWebAddress(url) };
 }
 
-/** The open tabs a chat request names by a few words of a title or host; exact names win over tabs that merely contain them. */
+/** The open tabs a chat request names by a few words of a title or host; exact names win over tabs that merely contain them. @throws {never} */
 export function matchingTabs<T extends { readonly id: string; readonly profile: string }>(
   tabs: readonly T[],
   target: string,
@@ -121,12 +121,12 @@ export function matchingTabs<T extends { readonly id: string; readonly profile: 
   return exact.length ? exact : tabs.filter((tab) => names(tab).some((name) => name.includes(wanted)));
 }
 
-/** A new random tab identity, valid for the native host. */
+/** A new random tab identity, valid for the native host. @throws {never} */
 export function newTabId(): string {
   return `b${newId().replace(/-/g, "")}`;
 }
 
-/** The current time in milliseconds, for visit times and the writer's clock. */
+/** The current time in milliseconds, for visit times and the writer's clock. @throws {never} */
 export function now(): number {
   return Date.now();
 }

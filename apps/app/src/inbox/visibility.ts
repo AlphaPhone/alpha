@@ -2,7 +2,7 @@
 
 export { pageVisible } from "../platform/build-flags.ts";
 
-/** Whether the WebView reports a network connection. */
+/** Whether the WebView reports a network connection. @throws {never} */
 export function pageOnline(): boolean {
   return typeof navigator === "undefined" || navigator.onLine !== false;
 }

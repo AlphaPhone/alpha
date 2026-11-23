@@ -45,13 +45,15 @@ it.live("closing every tab closes exactly the tabs its card listed, and nothing 
       const after = try tabs.get()
       const again = try promise(() => ports.execute(all, call("second")))
       const receipt = ports.summarize(all, "Applied", "second")
+      const got1 = try callsTo(fake.calls, "close")
+      const got2 = try Ref.get(fake.opened)
       try Effect.try(() => assert.deepStrictEqual({
         first, unlisted, retitled, withdrawn, refused, untouched, receipt,
         card: typeof card === "object" ? [card.lines, card.unnamed] : card,
         listed, applied, shownBeforeReceipt,
-        closed: (try callsTo(fake.calls, "close")).map((c) => c.args.id).sort(),
+        closed: got1.map((c) => c.args.id).sort(),
         left: [after.tabs.length, [news, docs, shop].includes(after.cur)],
-        shown: (try Ref.get(fake.opened)).includes("browser"),
+        shown: got2.includes("browser"),
         again,
       }, {
         first: { tabs: [{ title: "news.example", host: "news.example" }, { title: "docs.example.org", host: "docs.example.org" }], kept: 0 },

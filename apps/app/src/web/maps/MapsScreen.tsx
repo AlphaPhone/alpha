@@ -74,7 +74,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
 
   return (
     <main ref={opened} aria-label="Maps" className="relative flex size-full flex-col bg-background">
-      <div className="pointer-events-none relative z-10 flex flex-col gap-2 p-3 *:pointer-events-auto">
+      <div data-alpha-maps-top className="pointer-events-none relative z-10 flex flex-col gap-2 p-3 *:pointer-events-auto">
         {guiding && guidance && c.guidance ? (
           <NavigationView guidance={guidance} content={c.guidance} voiceOn={c.voiceOn} voiceAllowed={maySpeak(c.guidance.kind)} now={Date.now()}
             onEnd={() => act((s) => s.navigation.end())} onRecenter={() => act((s) => s.navigation.recenter())} onVoice={() => act((s) => s.navigation.toggleVoice())} />

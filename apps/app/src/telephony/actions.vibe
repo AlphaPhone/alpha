@@ -1,5 +1,5 @@
 // spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A name is looked up on the phone and the owner picks the exact number, even for one match"; spec/telephony/actions.md, "The owner's Not now, leaving the app or a changed context ends a run that has not dispatched"; spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"
-import { operationOf, readLatestSender, type DeviceOperationType } from "@elizaos/agent/operations"
+import { operationOf, readLatestSender, type DeviceOperation, type DeviceOperationType } from "@elizaos/agent/operations"
 import { contactWriteAdvertised, type ContactDetail, type ContactDraft, type ContactId, type ContactVersion } from "@elizaos/os/bridges/contacts"
 import { operationIdOf } from "@elizaos/os/bridges/definitions/messages"
 import { normalizePhoneNumber } from "@elizaos/os/bridges/definitions/phone"
@@ -9,7 +9,7 @@ import {
 import { Machine as CallBarMachine } from "../../gen/telephony__callBar.effect.vibe"
 import { sameLine, withoutBody, writtenNumbers } from "../assistant/grounding.vibe"
 import { OwnerRequest } from "./actions.schema.vibe"
-import { callerOf, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { callerOf, TelephonyBridges, TelephonyRefused, TelephonyUnavailable } from "./bridges.vibe"
 import { CallWatch } from "./call-bar.vibe"
 import { ContactsView } from "./contacts.vibe"
 import { DraftSends } from "./drafts.vibe"
@@ -83,27 +83,34 @@ export function sendRecordOf(status: string | undefined): SendRecord {
   return "RecordUnknown"
 }
 
-const KINDS: Record<string, ActionKind> = {
+const KINDS = {
   phone_dial: "DialNumber", phone_call: "PlaceCall", sms_send: "SendText", mms_send: "SendPictures", sms_compose: "ComposeText",
   sms_reply_selected: "ReplyToSelected", contact_create: "ContactAdd", contact_update: "ContactChange", contact_delete: "ContactRemove",
   messages_read_selected: "ReadThread", voicemail_read_selected: "ReadVoicemail", voicemail_delete_selected: "RemoveVoicemail",
   sms_latest_sender: "LatestSender", phone_keypad: "KeypadOpen", contact_show: "ContactsShow", contact_read_selected: "ReadContact",
+} as const satisfies Partial<Record<DeviceOperationType, ActionKind>>
+
+/** The wire types this device runs as telephony. */
+export type TelephonyType = keyof typeof KINDS
+
+function isTelephonyType(type: string): type is TelephonyType {
+  return Object.hasOwn(KINDS, type)
 }
 
 /** A telephony operation as the wire carries it, after its decoder admitted it. */
-export type TelephonyOperation = { readonly type: string } & Record<string, any>
-type Wire = TelephonyOperation
+export type TelephonyOperation = Extract<DeviceOperation, { readonly type: TelephonyType }>
+/** The telephony operation of `type`. */
+export type TelephonyOperationOf<T extends TelephonyType> = Extract<TelephonyOperation, { readonly type: T }>
 
 /** A wire operation by the agent's own decoder for its type (`operationOf`); undefined for any other. The keypad, filtered Contacts and open-contact read are the agent's own telephony operations at this pin. */
 export function telephonyOperationOf(input: unknown): TelephonyOperation | undefined {
   const type = typeof input === "object" && input !== null && "type" in input ? String(input.type) : ""
-  if (KINDS[type] === undefined) return undefined
-  return operationOf(input, type as DeviceOperationType) as TelephonyOperation | undefined
+  return isTelephonyType(type) ? operationOf(input, type) : undefined
 }
 
 /** Whom a text names: the v2 `target`, or the v1 contact `query`. */
-export function composeTargetOf(op: TelephonyOperation): { kind: "number"; number: string } | { kind: "contact"; query: string } {
-  return op.target ?? { kind: "contact", query: op.query }
+export function composeTargetOf(op: TelephonyOperationOf<"sms_compose">): { kind: "number"; number: string } | { kind: "contact"; query: string } {
+  return "target" in op ? op.target : { kind: "contact", query: op.query }
 }
 
 /** Whether every number a contact change saves is one the owner wrote, where the owner wrote any number at all (upstream `contactValueVerdict`). */
@@ -174,7 +181,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
   const voicemail = try VoicemailView
   const foreground = try Foreground
   const navigation = try Navigation
-  const tell = (event: ActionsEvent, by: "Owner" | "Alpha" | "Device") => actions.send(event, by) catch () => undefined
+  const tell = effect (event: ActionsEvent, by: "Owner" | "Alpha" | "Device") => actions.send(event, by) catch () => undefined
   const review = try Ref.make<ReviewDetails>({})
 
   effect function settle(runId: string, result: unknown, status: string, present?: Present) {
@@ -254,19 +261,19 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     const out: ContactDetail[] = []
     for (const row of page.contacts.slice(0, LOOKUP_LIMIT)) {
       if ("incomplete" in row) continue
-      const detail = try (bridgeCall("get", (c) => c.contacts.get(row.id, "ExplicitRead")) catch () => undefined)
+      const detail = (bridgeCall("get", (c) => c.contacts.get(row.id, "ExplicitRead")) catch () => undefined)
       if (detail !== undefined) out.push(detail)
     }
     return out
   }
 
-  effect function callOrDial(runId: string, op: Wire, dialOnly: boolean) {
+  effect function callOrDial(runId: string, op: TelephonyOperationOf<"phone_dial" | "phone_call">, dialOnly: boolean) {
     const contact = op.target.kind === "contact"
     let number: string | undefined = contact ? undefined : op.target.number
     const kind = dialOnly ? "phone-dial" : "phone-call"
     const failed = (status: string) => dialOnly ? { kind, status, handler: null, contact } : { kind, status, contact }
     if (contact) {
-      const found = try (numbersOf(op.target.query) catch () => undefined)
+      const found = (numbersOf(op.target.query) catch () => undefined)
       if (found === undefined) return try finishEarly(runId, failed("unavailable"), "Unavailable")
       if (found.length === 0) return try finishEarly(runId, dialOnly ? failed("unavailable") : failed("not-found"), "NothingFound")
       number = try choose(runId, found)
@@ -274,7 +281,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     } else if ((try tell({ type: "numberReady", runId, number: number! }, "Device")) === undefined) return try cancelled(runId, failed("cancelled"))
     if (!(try guard(runId))) return { result: failed("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
     if (dialOnly) {
-      const report = try (bridgeCall("dial", (c) => c.phone.dial(number!)) catch () => undefined)
+      const report = (bridgeCall("dial", (c) => c.phone.dial(number!)) catch () => undefined)
       if (report === undefined) return try finish(runId, failed("failed"), "failed")
       const status = DIAL[report.dialStatus] ?? "failed"
       return try finish(runId, { kind, status, handler: status === "handed-off" ? report.handler : null, contact }, status)
@@ -307,16 +314,16 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     return try finishEarly(runId, result("unavailable"), placed === "occupied" ? "Occupied" : "Unavailable")
   }
 
-  effect function compose(runId: string, op: Wire, operationId: string) {
+  effect function compose(runId: string, op: TelephonyOperationOf<"sms_compose">, operationId: string) {
     const result = (status: string) => ({ kind: "sms-compose", status })
-    const draftOnly = op.draft === true
+    const draftOnly = "target" in op && op.draft === true
     const target = composeTargetOf(op)
     try Ref.set(review, { body: op.body })
     const open = try messages.selected()
     const openTo = (number: string) => open !== null && open.addresses.length === 1 && sameLine(open.addresses[0]!, number)
     let number: string
     if (target.kind === "contact") {
-      const found = try (numbersOf(target.query) catch () => undefined)
+      const found = (numbersOf(target.query) catch () => undefined)
       if (found === undefined) return try finishEarly(runId, result("unavailable"), "Unavailable")
       if (found.length === 0) return try finishEarly(runId, result("not-found"), "NothingFound")
       const only = found.length === 1 ? found[0]! : undefined
@@ -331,7 +338,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       number = normalizePhoneNumber(target.number) ?? target.number
       if ((try tell({ type: "numberReady", runId, number }, "Device")) === undefined) return try cancelled(runId, result("cancelled"))
     }
-    if (typeof op.replyThreadId === "string") return try drafted(runId, op.replyThreadId, [number], op.body, `thread:${op.replyThreadId}`)
+    if ("target" in op && typeof op.replyThreadId === "string") return try drafted(runId, op.replyThreadId, [number], op.body, `thread:${op.replyThreadId}`)
     if (open !== null && openTo(number)) {
       if (draftOnly) return try drafted(runId, open.threadId, open.addresses, op.body, `thread:${open.threadId}`)
       const placed = try drafts.placeAlphaDraft(open.threadId, open.addresses, op.body)
@@ -339,35 +346,36 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
     }
     if (draftOnly) return try drafted(runId, "new", [number], op.body, `compose:${number}`)
     if (!(try guard(runId))) return { result: result("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
-    const sent = try (sendText(runId, [number], op.body, operationId) catch (failure) => failure)
-    if (sent === undefined) return try finish(runId, result("unavailable"), "unavailable")
+    const sent = (sendText(runId, [number], op.body, operationId) catch (failure) => failure)
+    if (sent === undefined || sent instanceof TelephonyUnavailable) return try finish(runId, result("unavailable"), "unavailable")
     if (sent instanceof TelephonyRefused) return sent.code === undefined ? try lost(runId, result("unknown")) : try finish(runId, result("unavailable"), "unavailable")
     const status = sent.status === "denied" ? "unavailable" : sent.status
     return try finish(runId, result(status), status)
   }
 
-  effect function contactWrite(runId: string, op: Wire) {
+  effect function contactWrite(runId: string, op: TelephonyOperationOf<"contact_create" | "contact_update" | "contact_delete">) {
     const result = (status: string) => ({ kind: "contact-write", status })
-    const writable = try (bridgeCall("status", (c) => c.contacts.status()) catch () => undefined)
+    const writable = (bridgeCall("status", (c) => c.contacts.status()) catch () => undefined)
     if (writable === undefined || !contactWriteAdvertised("WritingInstall", writable)) return try finishEarly(runId, result("unavailable"), "Unavailable")
     let write: () => Promise<{ status: string }>
     if (op.type === "contact_create") {
       const draft: ContactDraft = {
         displayName: op.contact.displayName,
-        phoneNumbers: op.contact.phoneNumbers.map((number: string) => ({ number, type: "mobile" as const })),
-        emailAddresses: op.contact.emailAddresses.map((address: string) => ({ address, type: "home" as const })),
+        phoneNumbers: op.contact.phoneNumbers.map((number) => ({ number, type: "mobile" as const })),
+        emailAddresses: op.contact.emailAddresses.map((address) => ({ address, type: "home" as const })),
       }
       const twins: Candidate[] = []
       for (const query of [op.contact.displayName, ...op.contact.phoneNumbers]) {
-        for (const found of try (numbersOf(query) catch () => [] as Candidate[])) if (!twins.some((t) => t.candidateId === found.candidateId)) twins.push(found)
+        for (const found of (numbersOf(query) catch () => [] as Candidate[])) if (!twins.some((t) => t.candidateId === found.candidateId)) twins.push(found)
       }
-      const twin = twins.find((t) => op.contact.phoneNumbers.some((n: string) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
+      const twin = twins.find((t) => op.contact.phoneNumbers.some((n) => sameLine(n, t.number)) || t.title.toLowerCase() === op.contact.displayName.toLowerCase())
       const shown = try choose(runId, twin === undefined ? [] : [{ candidateId: "add-anyway", title: twin.title, number: twin.number }])
       if (twin !== undefined && shown === undefined) return try cancelled(runId, result("cancelled"))
-      const clients = try bridges.clients()
+      const clients = bridges.clients() catch () => undefined
+      if (clients === undefined) return try finishEarly(runId, result("unavailable"), "Unavailable")
       write = () => clients.contacts.createContact(draft)
     } else {
-      const found = try (contactsMatching(op.query) catch () => undefined)
+      const found = (contactsMatching(op.query) catch () => undefined)
       if (found === undefined) return try finishEarly(runId, result("unavailable"), "Unavailable")
       const options: { candidate: Candidate; before: ContactDetail; after?: ContactDraft }[] = []
       for (const before of found) {
@@ -387,11 +395,12 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       const chosen = options.find((o) => o.candidate.candidateId === chosenNumber)
       if (chosen === undefined) return try cancelled(runId, result("cancelled"))
       const reviewed = { id: chosen.before.id as ContactId, version: chosen.before.version as ContactVersion }
-      const clients = try bridges.clients()
+      const clients = bridges.clients() catch () => undefined
+      if (clients === undefined) return try finishEarly(runId, result("unavailable"), "Unavailable")
       write = chosen.after === undefined ? () => clients.contacts.remove(reviewed) : () => clients.contacts.updateContact(reviewed, chosen.after!)
     }
     if (!(try guard(runId))) return { result: result("unavailable"), settled: "Refused", refusal: "emergency" } satisfies ActionExecution
-    const written = try (tryPromise({ try: write, catch: (cause) => cause }) catch (cause) => ({ status: typeof cause === "object" && cause !== null && "code" in cause ? "failed" : "unknown" }))
+    const written = (tryPromise({ try: write, catch: (cause) => cause }) catch (cause) => ({ status: typeof cause === "object" && cause !== null && "code" in cause ? "failed" : "unknown" }))
     const status = written.status === "not-found" && op.type === "contact_create" ? "failed" : contactStatusOf(written.status)
     try contacts.alphaWrote(status === "unknown")
     return status === "unknown" ? try lost(runId, result("unknown")) : try finish(runId, result(status), status)
@@ -402,18 +411,19 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       if (!bridges.offered) return []
       const base = ["phone.dial.v1", "phone.call.v1", "sms.send.v1", "sms.compose.v1", "sms.reply-selected.v1", "messages.read.v1",
         "voicemail.read.v1", "voicemail.delete.v1", "sms.latest-sender.v1", "sms.latest-sender.v2", "views.telephony.v1", "phone.keypad.v1", "contacts.show.v1", "contacts.read.v1"]
-      const status = try (bridgeCall("status", (c) => c.contacts.status()) catch () => undefined)
+      const status = (bridgeCall("status", (c) => c.contacts.status()) catch () => undefined)
       return status !== undefined && contactWriteAdvertised("WritingInstall", status) ? [...base, "contacts.write.v1"] : base
     },
     effect run(operation: unknown, operationId: string, request: unknown) {
       const op = try decodeOperation(operation)
-      const owner = try (Schema.decodeUnknownEffect(OwnerRequest)(request) catch () => ({ text: "" }))
-      const kind = KINDS[op.type]!
-      const form: TargetForm = op.target?.kind === "number" || op.type === "sms_send" ? "WrittenNumber"
-        : op.target?.kind === "contact" || op.query !== undefined && op.type !== "contact_show" ? "ContactLookup"
+      const owner = (Schema.decodeUnknownEffect(OwnerRequest)(request) catch () => ({ text: "" }))
+      const kind = KINDS[op.type]
+      const target = "target" in op ? op.target : undefined
+      const form: TargetForm = target?.kind === "number" || op.type === "sms_send" ? "WrittenNumber"
+        : target?.kind === "contact" || "query" in op && op.type !== "contact_show" ? "ContactLookup"
         : op.type === "contact_create" ? "ContactLookup" : "NoTarget"
-      const isGrounded = op.type === "sms_send" ? op.recipients.every((n: string) => grounded(owner.text, { kind: "number", number: n }, op.body))
-        : op.target !== undefined ? grounded(owner.text, op.target, typeof op.body === "string" ? op.body : undefined) : true
+      const isGrounded = op.type === "sms_send" ? op.recipients.every((n) => grounded(owner.text, { kind: "number", number: n }, op.body))
+        : target !== undefined ? grounded(owner.text, target, "body" in op ? op.body : undefined) : true
       try Ref.set(review, {})
       const started = try tell({ type: "actionStarted", runId: operationId, kind, form, grounded: isGrounded }, "Device")
       if (started === undefined) throw new AlreadyRan({ operationId })
@@ -431,8 +441,9 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
         case "sms_send": {
           if ((try tell({ type: "numberReady", runId: operationId, number: op.recipients[0] }, "Device")) === undefined) return try cancelled(operationId, undefined)
           if (!(try guard(operationId))) return { result: undefined, settled: "Refused", refusal: "emergency" } satisfies ActionExecution
-          const sent = try (sendText(operationId, op.recipients, op.body, operationId, op.subscriptionId) catch (failure) => failure)
-          if (sent === undefined || sent instanceof TelephonyRefused) return sent instanceof TelephonyRefused && sent.code === undefined ? try lost(operationId, undefined) : try finish(operationId, undefined, "unavailable")
+          const sent = (sendText(operationId, op.recipients, op.body, operationId, op.subscriptionId) catch (failure) => failure)
+          if (sent === undefined || sent instanceof TelephonyUnavailable || sent instanceof TelephonyRefused)
+            return sent instanceof TelephonyRefused && sent.code === undefined ? try lost(operationId, undefined) : try finish(operationId, undefined, "unavailable")
           return try finish(operationId, sent, sent.status)
         }
         case "mms_send": return try settle(operationId, undefined, "unavailable")
@@ -483,7 +494,7 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
       const kind = op === undefined ? undefined : KINDS[op.type]
       const id = operationIdOf(operationId)
       if (op === undefined || kind === undefined || id === null || readBackOf(kind, "RecordTaken") === "StaysUnconfirmed") return undefined
-      const history = try (bridgeCall("smsSendHistory", (c) => c.messages.smsSendHistory()) catch () => undefined)
+      const history = (bridgeCall("smsSendHistory", (c) => c.messages.smsSendHistory()) catch () => undefined)
       if (history === undefined) return undefined
       const entry = history.find((record) => record.operationId === id)
       const answer = readBackOf(kind, sendRecordOf(entry?.status))

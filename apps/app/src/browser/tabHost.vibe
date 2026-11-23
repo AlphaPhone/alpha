@@ -10,8 +10,8 @@ export const PLUGIN = "AlphaBrowser"
 /** A tab-host call that failed; `unavailable` when this build or device has no tab host. */
 export error BrowserCallFailed { method: string; message: string; unavailable: boolean }
 
-/** The events the tab host sends. */
-export type HostEvent = "stateChanged" | "tabOpened" | "tabClosed" | "notice" | "findResult" | "fullscreen" | "showDownloads"
+/** The events the tab host sends; only the browser build's host sends `bookmarksChanged`, when another tab of the browser changed the bookmark document. */
+export type HostEvent = "stateChanged" | "tabOpened" | "tabClosed" | "notice" | "findResult" | "fullscreen" | "showDownloads" | "bookmarksChanged"
 
 /** The tab host of this document: the native `AlphaBrowser` plugin, or the browser build's frame surface. */
 export service TabHost {
@@ -49,7 +49,7 @@ export const tabHostLayer = Layer.effect(TabHost, effect {
   return {
     session,
     onDevice: true,
-    call: (method: string, args: Record<string, unknown> = {}) =>
+    call: effect (method: string, args: Record<string, unknown> = {}) =>
       native.invoke(PLUGIN, method, { ...args, session }) catch effect (error) => match (error) {
         when NativeUnavailable: throw new BrowserCallFailed({ method, message: "Unavailable", unavailable: true });
         when NativeFailed: throw new BrowserCallFailed({ method, message: error.message, unavailable: false });

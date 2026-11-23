@@ -34,7 +34,7 @@ export const cloudRequestsLayer = Layer.provide(Layer.effect(CloudRequests, effe
       const outcome = try onExit(
         race(Effect.map(cloud.json(method, path, body), (data) => ({ data })), Effect.map(Deferred.await(stop), () => undefined)),
         (exit) => effect {
-          if (Exit.isInterrupted(exit)) custody.send({ type: "closeRequest", generation }) catch () => undefined
+          if (Exit.hasInterrupts(exit)) custody.send({ type: "closeRequest", generation }) catch () => undefined
           custody.send({ type: "finishRequest", generation }) catch () => undefined
           try Ref.update(running, (all) => {
             const next = new Map(all)

@@ -59,7 +59,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     return ownerKey(state.owner, slotName(target))
   }
 
-  effect function readSlot(target: string): DraftSlotRecord | undefined | "error" {
+  effect function readSlot(target: string): (DraftSlotRecord | undefined | "error")!! {
     return effect {
       const raw = try store.get(try key(target))
       if (raw === undefined) return undefined
@@ -74,7 +74,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     return slot === undefined ? { copy: "", copyRevision: "" } : { copy: JSON.stringify(slot.fields), copyRevision: slot.eventRevision }
   }
 
-  effect function writeSlot(fields: DraftFieldsRecord, revision: string): "saved" | "conflict" | "error" {
+  effect function writeSlot(fields: DraftFieldsRecord, revision: string): ("saved" | "conflict" | "error")!! {
     const state = try machine.get()
     const current = try readSlot(state.target)
     if (current === "error") return "error"
@@ -89,7 +89,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     } catch () => "error" as const
   }
 
-  effect function clearSlot(expected: string): SlotOutcome {
+  effect function clearSlot(expected: string): SlotOutcome!! {
     const state = try machine.get()
     const current = try readSlot(state.target)
     if (current === "error") return "SlotError"
@@ -183,7 +183,7 @@ export const draftsLayer = Layer.effect(CalendarDrafts, effect {
     effect handoff(origin: DraftOrigin, fields: DraftFieldsRecord) {
       const current = try readSlot("")
       const text = JSON.stringify(fields)
-      const after = try send({ type: "admitHandoff", origin, slotEmpty: current === undefined, fields: text })
+      const after = try send({ type: "admitHandoff", origin, slotEmpty: current === undefined, edits: text })
       if (after?.notice === "HandoffAdmitted") {
         try Ref.set(sequence, 0)
         const result = try writeSlot(fields, "")
