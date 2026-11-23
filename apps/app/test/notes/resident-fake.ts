@@ -132,8 +132,11 @@ export class DeviceFake {
   opened: string[] = [];
   exported: { title: string; text: string }[] = [];
   released: string[][] = [];
+  /** The earlier Alpha's connection store, when this phone still has one: what its `notes-records:v1:device` slot holds. */
+  connection: { records?: string } | undefined;
 
   available(plugin: string): boolean {
+    if (plugin === "AlphaConnection") return this.connection !== undefined;
     return plugin === "AlphaNoteAudio" ? this.host : ["AlphaVoiceCloud", "ElizaSecureStore", "DailyApps", "AlphaMailAttachments", "AlphaNoteDocuments"].includes(plugin);
   }
 
@@ -148,6 +151,9 @@ export class DeviceFake {
       if (args.value === null) this.slots.delete(key);
       else this.slots.set(key, String(args.value));
       return { ok: true, outcome: args.value === null ? "Removed" : "Written" };
+    }
+    if (plugin === "AlphaConnection" && method === "secureRead" && this.connection !== undefined) {
+      return { value: args.slot === "notes-records:v1:device" ? this.connection.records ?? null : null };
     }
     if (plugin === "AlphaVoiceCloud") return this.voice(method, args);
     if (plugin === "AlphaNoteAudio") return this.audio(method, args);

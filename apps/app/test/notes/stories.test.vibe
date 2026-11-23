@@ -682,10 +682,17 @@ describe("Notes stories", () => {
       const state = try attachment.get()
       // spec/notes/attachment.md, "A document's grant is released only when neither a saved note nor Trash still refers to it"
       const released = try sources.releaseUnused()
+      const asked = device.released.length
+      device.connection = { records: JSON.stringify({ version: 1, notes: [{ id: "old", kind: "text", title: "Before" }] }) }
+      try sources.releaseUnused()
+      const heldForEarlier = device.released.length - asked
+      device.connection = {}
+      try sources.releaseUnused()
+      const afterEmpty = device.released.length - asked
       try check(() => assert.deepStrictEqual(
         { wrong, right, opened: device.opened, mismatches: state.mismatches, released, keep: device.released.at(-1),
-          trashKeeps: releasesSource(true, false, true, 259200001), unread: releasesSource(false, false, false, 259200001) },
-        { wrong: "mismatch", right: "opened", opened: ["b".repeat(64)], mismatches: 1, released: 0, keep: [], trashKeeps: false, unread: false },
+          trashKeeps: releasesSource(true, false, true, 259200001), unread: releasesSource(false, false, false, 259200001), heldForEarlier, afterEmpty },
+        { wrong: "mismatch", right: "opened", opened: ["b".repeat(64)], mismatches: 1, released: 0, keep: [], trashKeeps: false, unread: false, heldForEarlier: 0, afterEmpty: 1 },
       ))
     }
   })

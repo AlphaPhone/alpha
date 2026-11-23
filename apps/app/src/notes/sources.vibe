@@ -5,6 +5,7 @@ import { type Event as DialogEvent, Machine as SourceDialogMachine, machine as s
 import { Native } from "../platform/native.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { type NoteRow, rowOf } from "./list.vibe"
+import { earlierNotesKept } from "./slots.vibe"
 import { NotesHandoff } from "./origins.vibe"
 
 /** What a source action did. */
@@ -137,7 +138,9 @@ const make = effect {
     effect releaseUnused() {
       if (!(try native.available("AlphaMailAttachments"))) return 0
       const snapshot = (try collection.current())?.snapshot
-      if (snapshot === undefined || !releasesSource(snapshot.trash !== undefined, false, false, releaseAfterMs + 1)) return 0
+      // spec/notes/attachment.md: the earlier device collection's notes may name a document too, so nothing is released while it may hold any.
+      const earlier = try Effect.provideService(earlierNotesKept(), Native, native)
+      if (snapshot === undefined || !releasesSource(snapshot.trash !== undefined && !earlier, false, false, releaseAfterMs + 1)) return 0
       const answer = (native.invoke("AlphaMailAttachments", "releaseSourceReferences", { keep: sourceReferences(snapshot), olderThanMs: releaseAfterMs }) catch () => undefined)
       return typeof answer === "object" && answer !== null && "released" in answer && typeof answer.released === "number" ? answer.released : 0
     },

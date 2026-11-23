@@ -1,7 +1,8 @@
 // spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"; spec/notes/folders.md, "A folder is created once per name, up to a hundred folders"; spec/notes/origins.md, "A link is stored only for a record that was saved, and retired with a durable deletion receipt"; spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { adoptLegacySlot } from "../platform/legacy-slots.vibe"
-import { Native } from "../platform/native.vibe"
+import { Native, NativeUnavailable } from "../platform/native.vibe"
+import { LegacySlotRead } from "../platform/native.schema.vibe"
 import { decodeSecureExchange, decodeSecureRead } from "./notes.schema.vibe"
 
 /** The slot could not be read or written; nothing was changed. */
@@ -16,6 +17,22 @@ export const slots = {
   origins: "note-origins:v1:device",
   legacyTrash: "notes-trash:v1:device",
 } as const
+
+/** The earlier Alpha's own device collection of notes, which this version neither reads nor moves (docs/vibestack-open-items.md, "Upgrade requirement"). */
+export const earlierRecordsSlot = "notes-records:v1:device"
+
+/**
+ * Whether the earlier Alpha's device collection may still hold notes: false only where the phone has no earlier store, or reads its
+ * slot as empty. A slot that cannot be read counts as kept. Nothing is moved or written.
+ */
+export effect function earlierNotesKept(): boolean!!(Native) {
+  const native = try Native
+  if (!(try native.available("AlphaConnection"))) return false
+  const raw = native.invoke("AlphaConnection", "secureRead", { slot: earlierRecordsSlot }) catch (error) => error
+  if (raw instanceof NativeUnavailable) return false
+  const read = Schema.decodeUnknownEffect(LegacySlotRead)(raw) catch () => undefined
+  return read === undefined || (typeof read.value === "string" && read.value !== "")
+}
 
 /** The earlier Alpha's encrypted connection slot each Notes slot moves from; its kept draft was a change set over the old device collection, which no slot of this version reads. */
 export const legacySlots: Readonly<Record<string, string>> = {
