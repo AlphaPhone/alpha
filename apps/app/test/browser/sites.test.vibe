@@ -19,8 +19,9 @@ it.live("each tab's WebView is built in its own profile, and a pop-up of a priva
       try loadPage(tabs, fake.events, session, "https://private.test/", "1", 1)
       try emit(fake.events, "tabOpened", { session, id: "bpopup", opener: "bpriv", private: false })
       const now = try tabs.get()
+      const got1 = try callsTo(fake.calls, "create")
       try Effect.try(() => assert.deepStrictEqual({
-        built: (try callsTo(fake.calls, "create")).map((c) => c.args.private),
+        built: got1.map((c) => c.args.private),
         popup: now.tabs.find((t) => t.id === "bpopup")?.profile,
         selected: now.cur,
       }, { built: [false, true], popup: "Private", selected: "bpopup" }))
@@ -39,7 +40,8 @@ it.live("the host's refusals for a site's device request reach the owner in Alph
       try emit(fake.events, "notice", { session, id: started.cur, message: "Blocked a camera or microphone request from an embedded site." })
       try emit(fake.events, "notice", { session, id: started.cur, message: "Android has not allowed Alpha Phone to use your location. You can allow it in Android Settings." })
       try emit(fake.events, "notice", { session, id: started.cur, message: "Something the host never words" })
-      try Effect.try(() => assert.deepStrictEqual(try Ref.get(fake.toasts), [
+      const got2 = try Ref.get(fake.toasts)
+      try Effect.try(() => assert.deepStrictEqual(got2, [
         "Blocked a camera or microphone request from a site inside this page.",
         "Android hasn’t allowed Alpha to use your location. You can allow it in Android Settings.",
         "Browser blocked something on this page.",
@@ -65,9 +67,11 @@ it.live("Clear site data clears only the shown site after the owner confirms it,
         else try reviews.dismiss("browser-clear-site")
         try join clearing
       }
+      const got3 = try callsTo(fake.calls, "clearSiteData")
+      const got4 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
-        cleared: (try callsTo(fake.calls, "clearSiteData")).map((c) => [c.args.id, c.args.url]),
-        said: try Ref.get(fake.toasts),
+        cleared: got3.map((c) => [c.args.id, c.args.url]),
+        said: got4,
       }, {
         cleared: [[id, "https://example.test/account"]],
         said: ["Load a website before clearing its data.", "Cleared example.test"],
@@ -94,10 +98,12 @@ it.live("filling is known only from the host's answer, the menu's Passwords open
       }
     })
   }
+  const got5 = try Ref.get(able.opened)
+  const got6 = try Ref.get(able.toasts)
   try Effect.try(() => assert.deepStrictEqual({
     statuses,
-    opened: try Ref.get(able.opened),
-    blocked: (try Ref.get(able.toasts)).includes("Blocked a sign-in request from a different site."),
+    opened: got5,
+    blocked: got6.includes("Blocked a sign-in request from a different site."),
   }, { statuses: ["FillAvailable", "FillUnknown"], opened: ["passwords"], blocked: true }))
 })
 
@@ -113,12 +119,14 @@ it.live("an approved HTTPS open runs once through the Browser family's executor,
       const valid = [open, { type: "browser_navigate", url: "http://example.test/" }, { type: "browser_navigate", url: "https://ann:pw@example.test/" }].map((op) => ports.validate(op) !== undefined)
       const executed = try promise(() => ports.execute(open, {} as never))
       try sleep("50 millis")
+      const got7 = try callsTo(fake.calls, "navigate")
+      const got8 = try promise(() => ports.readBack(open, {} as never))
       try Effect.try(() => assert.deepStrictEqual({
         valid,
         executed,
         described: ports.describe(open),
-        navigated: (try callsTo(fake.calls, "navigate")).map((c) => [c.args.id, c.args.url]),
-        readBack: try promise(() => ports.readBack(open, {} as never)),
+        navigated: got7.map((c) => [c.args.id, c.args.url]),
+        readBack: got8,
       }, {
         valid: [true, false, false],
         executed: { kind: "applied" },

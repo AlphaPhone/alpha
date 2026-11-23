@@ -18,6 +18,12 @@ export schema WireReviewedFile {
   partId?: string
 }
 
+/** The source message a reviewed forward binds its original parts to. */
+export schema WireForwardSource {
+  messageId: string
+  historyId: string
+}
+
 /** The review managed Gmail answers a prepared operation with. */
 export schema WireReview {
   kind: string
@@ -36,12 +42,6 @@ export schema WireReview {
   attachments?: WireReviewedFile[]
   forwardedAttachments?: WireReviewedFile[]
   forwardSource?: WireForwardSource
-}
-
-/** The source message a reviewed forward binds its original parts to. */
-export schema WireForwardSource {
-  messageId: string
-  historyId: string
 }
 
 /** `AlphaGmail.status()`: the native watch's own report. */

@@ -35,8 +35,9 @@ it.live("a message sent on the page Browser shows carries that page, bound to th
       const id = try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story?id=1#top", "4", 1)
       const observation = try observing(agent)
       const sent = try context.forTurn(observation, true)
+      const got1 = try callsTo(fake.calls, "pageContext")
       try Effect.try(() => assert.deepStrictEqual({
-        asked: (try callsTo(fake.calls, "pageContext")).map((c) => [c.args.id, c.args.url, c.args.navigation]),
+        asked: got1.map((c) => [c.args.id, c.args.url, c.args.navigation]),
         sent: sent === undefined ? undefined : { ...sent, capturedAt: typeof sent.capturedAt === "number" },
         frozen: sent !== undefined && Object.isFrozen(sent),
       }, {
@@ -86,9 +87,10 @@ it.live("nothing is read with the setting off, for a peer that does not take it,
       try tabs.dispatch({ type: "openTab", id: "bplain", profile: "Normal" })
       try loadPage(tabs, fake.events, session, "http://plain.example/", "1", 1)
       results.push(try context.forTurn(try observing(agent), true))
+      const got2 = try callsTo(fake.calls, "pageContext")
       try Effect.try(() => assert.deepStrictEqual({
         results: results.map((r) => r === undefined),
-        reads: (try callsTo(fake.calls, "pageContext")).length,
+        reads: got2.length,
       }, { results: results.map(() => true), reads: 0 }))
     }
   })
@@ -190,9 +192,10 @@ it.live("a slow read never holds the message past its wait, and a page that chan
       try SubscriptionRef.set(sharing, true)
       mode = "moved"
       const moved = try context.forTurn(observation, true)
+      const got3 = try context.carried("https://news.example/second")
       try Effect.try(() => assert.deepStrictEqual({
         slow, withinWait: waited < 2000, stage: afterSlow._tag === "Some" ? afterSlow.value.stage : "none", turnedOff, moved,
-        carriedAfterDrop: try context.carried("https://news.example/second"),
+        carriedAfterDrop: got3,
       }, { slow: undefined, withinWait: true, stage: "Withdrawn", turnedOff: undefined, moved: undefined, carriedAfterDrop: false }))
     }
   })
@@ -219,10 +222,11 @@ it.live("an exact link of the page the message carried gets a card, never opens 
       const navigatedBefore = (try callsTo(fake.calls, "navigate")).map((c) => c.args.url)
       const reviewedPorts = try Effect.provideService(operationPorts, BrowserCallFacts, { of: () => succeed({ reviewed: true, ownerText: words }) })
       const reviewed = try promise(() => reviewedPorts.execute(link, call("reviewed")))
+      const got4 = try callsTo(fake.calls, "navigate")
       try Effect.try(() => assert.deepStrictEqual({
         before, targets, unreviewed, reviewed,
         openedUnreviewed: navigatedBefore.includes("https://news.example/second"),
-        openedReviewed: (try callsTo(fake.calls, "navigate")).map((c) => c.args.url).includes("https://news.example/second"),
+        openedReviewed: got4.map((c) => c.args.url).includes("https://news.example/second"),
       }, {
         before: "NoTarget",
         targets: ["ContactTarget", "NoTarget"],
@@ -253,11 +257,13 @@ it.live("an approved open loads its tab at once and brings Browser forward only 
       const shownAfter = (try Ref.get(fake.opened)).filter((app) => app === "browser").length
       ports.present(open, call("open"))
       try sleep("30 millis")
+      const got5 = try callsTo(fake.calls, "navigate")
+      const got6 = try Ref.get(fake.opened)
       try Effect.try(() => assert.deepStrictEqual({
         applied,
-        loaded: (try callsTo(fake.calls, "navigate")).map((c) => c.args.url),
+        loaded: got5.map((c) => c.args.url),
         shownBefore,
-        shownOnce: [shownAfter, (try Ref.get(fake.opened)).filter((app) => app === "browser").length],
+        shownOnce: [shownAfter, got6.filter((app) => app === "browser").length],
       }, { applied: { kind: "applied" }, loaded: ["https://example.test/"], shownBefore: 0, shownOnce: [1, 1] }))
     }
   })
@@ -271,10 +277,13 @@ it.live("a page-text request from the agent is refused with where the page comes
       const tabs = try BrowserTabs
       const agent = try BrowserAgent
       try settledTabs(tabs)
+      const got7 = try agent.interact("get-text", {}, undefined)
+      const got8 = try agent.interact("click", {}, undefined)
+      const got9 = try callsTo(fake.calls, "pageContext")
       try Effect.try(() => assert.deepStrictEqual({
-        text: try agent.interact("get-text", {}, undefined),
-        click: try agent.interact("click", {}, undefined),
-        reads: (try callsTo(fake.calls, "pageContext")).length,
+        text: got7,
+        click: got8,
+        reads: got9.length,
       }, {
         text: { ok: false, code: "UNSUPPORTED", message: NO_PAGE_READ },
         click: { ok: false, code: "UNSUPPORTED", message: NO_VIEW_COMMAND },

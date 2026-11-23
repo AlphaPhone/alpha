@@ -54,7 +54,8 @@ effect function read(cloud: Cloud.Shape, path: string) {
   return try mapError(cloud.json("GET", path), refusal)
 }
 
-function signedOf(status: "active" | "past_due" | "none"): SignedPlan {
+/** A cancelled (unpaid) plan admits no plan of its own, as no plan does. */
+function signedOf(status: "active" | "past_due" | "canceled" | "none"): SignedPlan {
   return status === "active" ? "SignedActive" : status === "past_due" ? "SignedPastDue" : "SignedNone"
 }
 

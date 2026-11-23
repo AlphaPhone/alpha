@@ -67,7 +67,7 @@ export const linkLayer = Layer.effect(CalendarLink, effect {
   const running = try Ref.make(false)
   const pause = try Ref.make<PauseReport | undefined>(undefined)
 
-  effect function snapshot(): CalendarLinkView {
+  effect function snapshot(): CalendarLinkView!! {
     const rows = try google.list()
     const g = try google.current()
     return {
@@ -92,17 +92,17 @@ export const linkLayer = Layer.effect(CalendarLink, effect {
       busy: view.state.read.id !== 0 || view.state.write.id !== 0 })
   }
 
-  effect function control(): LinkedCalendarControlView | undefined {
+  effect function control(): (LinkedCalendarControlView | undefined)!! {
     const answer = tryPromise({ try: () => linked.getLinkedCalendarControl(), catch: () => undefined }) catch () => undefined
     return answer
   }
 
-  effect function candidates(): ReadonlyArray<LinkedCalendarCandidate> | undefined {
+  effect function candidates(): (ReadonlyArray<LinkedCalendarCandidate> | undefined)!! {
     const answer = tryPromise({ try: () => linked.getLinkedCalendarDestinations(), catch: () => undefined }) catch () => undefined
     return answer?.candidates
   }
 
-  effect function write(operation: "select" | "resume" | "pause", owner: string, revision: number, target: LinkedCalendarDestination | null): LinkedCalendarControlView | undefined {
+  effect function write(operation: "select" | "resume" | "pause", owner: string, revision: number, target: LinkedCalendarDestination | null): (LinkedCalendarControlView | undefined)!! {
     return effect {
       const idempotencyKey = try controlOperationKey(owner, operation, revision, target)
       const request = operation === "select" ? { operation, destination: target, expectedRevision: revision, idempotencyKey } : { operation, expectedRevision: revision, idempotencyKey }
@@ -110,7 +110,7 @@ export const linkLayer = Layer.effect(CalendarLink, effect {
     } catch () => undefined
   }
 
-  effect function linksReply(target: LinkedCalendarDestination | null): LinksReply {
+  effect function linksReply(target: LinkedCalendarDestination | null): LinksReply!! {
     const answer = tryPromise({ try: () => linked.listLinkedCalendarEvents(), catch: () => undefined }) catch () => undefined
     if (answer === undefined) return "LinksFailed"
     const count = answer.links.filter((entry) => (entry.state === "conflicted" || entry.state === "quarantined") && target !== null && entry.destination !== null && same(entry.destination, target)).length

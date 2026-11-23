@@ -110,16 +110,18 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
 
   effect function askCloseNow() {
     const after = try send({ type: "askClose" })
-    if (after?.status === "EditClosed" && session !== undefined) {
-      store.cancelEdit(session.sessionId) catch () => undefined
+    const open = session
+    if (after?.status === "EditClosed" && open !== undefined) {
+      store.cancelEdit(open.sessionId) catch () => undefined
       session = undefined
     }
   }
 
   effect function videoEventNow(event: VideoEvent) {
     const after = video.send(event) catch () => undefined
-    if (after?.closed === true && videoSession !== undefined && (event.type === "closeEditor" || event.type === "hide")) {
-      if (!after.busy) store.cancelVideoEdit(videoSession.sessionId) catch () => undefined
+    const open = videoSession
+    if (after?.closed === true && open !== undefined && (event.type === "closeEditor" || event.type === "hideEditor")) {
+      if (!after.busy) store.cancelVideoEdit(open.sessionId) catch () => undefined
       if (!after.busy) videoSession = undefined
     }
   }
@@ -143,23 +145,25 @@ export const mediaEditor = Layer.effect(MediaEditor, effect {
     cancelCrop: () => effect { try send({ type: "cancelCrop" }) },
     effect save(mode: SaveMode) {
       const after = try send({ type: "save", mode })
-      if (after === undefined || session === undefined) return
+      const open = session
+      if (after === undefined || open === undefined) return
       if (after.status === "EditUnchanged") return try say("No changes to save")
-      const admitted = intents.send({ type: "admit", caller: EDITOR, token: session.operationId }) catch () => undefined
-      if (admitted === undefined || admitted.slot.token !== session.operationId) {
+      const admitted = intents.send({ type: "admit", caller: EDITOR, token: open.operationId }) catch () => undefined
+      if (admitted === undefined || admitted.slot.token !== open.operationId) {
         try send({ type: "saveSettled", answer: "SaveUnconfirmed" })
         return try say("Checking…")
       }
       const receipt = store.saveEdit({ ...(try request(after)), ...(mode === "ReplaceMode" ? { replace: true } : {}) }) catch () => undefined
       if (receipt === undefined) return try settle("unknown", undefined, undefined)
-      if (receipt.operationId !== session.operationId) return try settle("unknown", undefined, undefined)
+      if (receipt.operationId !== open.operationId) return try settle("unknown", undefined, undefined)
       try settle(receipt.status, receipt.replaced, receipt.id)
     },
     askClose: askCloseNow,
     keepEditing: () => effect { try send({ type: "keepEditing" }) },
     effect confirmClose() {
       try send({ type: "confirmClose" })
-      if (session !== undefined) store.cancelEdit(session.sessionId) catch () => undefined
+      const open = session
+      if (open !== undefined) store.cancelEdit(open.sessionId) catch () => undefined
       session = undefined
     },
     effect recover() {

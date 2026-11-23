@@ -25,7 +25,7 @@ function scheme(): MediaQueryList | undefined {
   return typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : undefined;
 }
 
-/** Whether the system scheme is dark now; an unreadable scheme is light. */
+/** Whether the system scheme is dark now; an unreadable scheme is light. @throws {never} */
 export function systemDark(): boolean {
   return scheme()?.matches === true;
 }
@@ -61,7 +61,7 @@ export function savedElsewhere(key: string): Stream.Stream<void> {
   );
 }
 
-/** The `theme` query of the page, the preview a build with test mocks starts on. */
+/** The `theme` query of the page, the preview a build with test mocks starts on. @throws {never} */
 export function themeQuery(): "light" | "dark" | undefined {
   const value = typeof location === "object" ? new URLSearchParams(location.search).get("theme") : null;
   return value === "light" || value === "dark" ? value : undefined;

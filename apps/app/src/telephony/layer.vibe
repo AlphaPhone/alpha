@@ -50,7 +50,7 @@ export const draftsKept = Layer.effect(DraftsMachine, effect {
   const interrupted = effect {
     for (const slot of (try inner.get()).slots) {
       if (slot.outcome !== "Sending" || slot.operation.tag !== "BoundOperation") continue
-      try (inner.send({ type: "sendAnswered", thread: slot.thread, operationId: slot.operation.operationId, receipt: "ReceiptLost" }, "Device") catch () => undefined)
+      inner.send({ type: "sendAnswered", thread: slot.thread, operationId: slot.operation.operationId, receipt: "ReceiptLost" }, "Device") catch () => undefined
     }
     return try inner.get()
   }
@@ -67,7 +67,7 @@ export const commsKept = Layer.effect(CommsMachine, effect {
   const kept = try ownerKept("comms", commsInitial, decodeComms)
   const inner = try commsOver(kept.load, kept.keep)
   const restore = effect {
-    try (inner.send({ type: "restored" }, "Device") catch () => undefined)
+    inner.send({ type: "restored" }, "Device") catch () => undefined
     return try inner.get()
   }
   try restore
@@ -78,7 +78,7 @@ export const commsKept = Layer.effect(CommsMachine, effect {
 /** One untrusted event and sender through the owner's stored drafts, as the conformance driver reaches them: false where it is refused, the state unchanged. */
 export effect function draftsDispatch(event: unknown, by: unknown) {
   const drafts = try DraftsMachine
-  return try (effect {
+  return (effect {
     try drafts.receive(event, try draftsSender(by))
     return true
   } catch () => false)
@@ -92,7 +92,7 @@ export effect function draftsNow() {
 /** One untrusted event and sender through the owner's stored comms stage, as the conformance driver reaches it: false where it is refused. */
 export effect function commsDispatch(event: unknown, by: unknown) {
   const comms = try CommsMachine
-  return try (effect {
+  return (effect {
     try comms.receive(event, try commsSender(by))
     return true
   } catch () => false)

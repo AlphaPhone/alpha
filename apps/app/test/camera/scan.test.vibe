@@ -34,8 +34,9 @@ it.live("a scanned frame is kept only by Keep, under one identity until a defini
     try scanner.keepPhoto()
     try scanner.keepPhoto()
     const kept = device.calls.filter((call) => call.method === "AlphaPhotos.keepCapture").map((call) => (call.args as { operationId: string }).operationId)
+    const keep = (try scan.get()).keep.status
     try Effect.try(() => assert.deepStrictEqual(
-      { hidden, shown, saved, sameAfterUnknown: kept[0] === kept[1], freshAfterFailure: kept[1] !== kept[2], keep: (try scan.get()).keep.status, calls: kept.length },
+      { hidden, shown, saved, sameAfterUnknown: kept[0] === kept[1], freshAfterFailure: kept[1] !== kept[2], keep, calls: kept.length },
       { hidden: false, shown: true, saved: [false], sameAfterUnknown: true, freshAfterFailure: true, keep: "KeepSaved", calls: 3 },
     ))
   }

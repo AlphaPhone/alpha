@@ -62,20 +62,20 @@ export const phoneInfoViewLayer = Layer.effect(PhoneInfoView, effect {
   const native = try Native
   const facts = try FactsMachine
   const front = try frontChanges()
-  const tell = (event: FactsEvent) => facts.send(event) catch () => undefined
+  const tell = effect (event: FactsEvent) => facts.send(event) catch () => undefined
 
   effect function readNow(asking: boolean) {
     const status: TelephonyStatus = asking
       ? try bridgeCall("requestAccess", (c) => c.phone.requestAccess("phoneState"))
       : try bridgeCall("status", (c) => c.phone.status())
     const info: PhoneInfo = try bridgeCall("phoneInfo", (c) => c.phone.phoneInfo())
-    const listing = try (bridgeCall("voicemail", (c) => c.phone.voicemail()) catch () => undefined)
+    const listing = (bridgeCall("voicemail", (c) => c.phone.voicemail()) catch () => undefined)
     return { status, info, listing }
   }
 
   effect function read() {
     const { epoch, asking } = try facts.get()
-    const answer = try (readNow(asking) catch () => undefined)
+    const answer = (readNow(asking) catch () => undefined)
     if (answer === undefined) {
       try tell({ type: "infoFailed", ticket: epoch })
       return
@@ -104,7 +104,7 @@ export const phoneInfoViewLayer = Layer.effect(PhoneInfoView, effect {
       if ((try tell({ type: "infoAsked", request: true })) !== undefined) try read()
     },
     effect openStatus(page: StatusPage) {
-      const opened = try (native.invoke(SYSTEM_PLUGIN, "openSettingsPage", { page }) catch () => undefined)
+      const opened = (native.invoke(SYSTEM_PLUGIN, "openSettingsPage", { page }) catch () => undefined)
       if (typeof opened !== "object" || opened === null) return false
       const reply = opened as { status?: unknown; page?: unknown }
       return reply.status === "opened" && reply.page === page

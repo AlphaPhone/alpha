@@ -44,8 +44,9 @@ it.live("page through the permitted library newest first, select, and move to tr
     const selected = (try browse.get()).selection
     try photos.trash()
     const after = try browse.get()
+    const order = (try catalog.get()).main.rows.map((row) => row.id)
     try Effect.try(() => assert.deepStrictEqual(
-      { order: (try catalog.get()).main.rows.map((row) => row.id), selected: [...selected].sort(), undo: [...after.undo].sort(), selecting: after.selecting },
+      { order, selected: [...selected].sort(), undo: [...after.undo].sort(), selecting: after.selecting },
       { order: ["m:1", "m:2", "m:3"], selected: ["m:1", "m:2", "m:3"], undo: ["m:1", "m:2", "m:3"], selecting: false },
     ))
   }

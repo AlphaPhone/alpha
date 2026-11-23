@@ -9,6 +9,7 @@ import { senderImageFacts } from "../../src/inbox/text.ts"
 import { emailShareTarget } from "../../src/inbox/shareTarget.vibe"
 import { InboxAccounts, Mailbox, MailComposer, MailOperations, MailSelection, MailNoticesShell, MailSuggestions, Reader, SavedMail, inboxBack } from "../../src/inbox/layer.vibe"
 import { base64, calls, grantA, grantB, inboxApp, mailCloud, readMessage, settle, zeroDigest } from "./support.vibe"
+import { losingAnswer } from "./lost.ts"
 
 const row1 = { id: "m1", threadId: "t-m1", sender: "Bo <bo@example.com>", senderAddress: "bo@example.com", subject: "Subject m1", snippet: "About m1", receivedAt: "2026-11-21T09:30:00Z", unread: true, starred: false, attached: false }
 
@@ -16,12 +17,11 @@ const row1 = { id: "m1", threadId: "t-m1", sender: "Bo <bo@example.com>", sender
 function sendRoutes(log: ReturnType<typeof calls>, lose: boolean) {
   let state = "prepared"
   return {
-    "POST /api/v1/eliza/google/gmail/inbox-v1/operations/r-send/dispatch": () => {
+    "POST /api/v1/eliza/google/gmail/inbox-v1/operations/r-send/dispatch": losingAnswer(() => {
       log.cloud.push("dispatch")
       state = "succeeded"
-      if (lose) throw new Error("connection reset")
       return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: zeroDigest, state, providerResult: { messageId: "sent-1" }, rejectionCode: null } }
-    },
+    }, () => lose),
     "GET /api/v1/eliza/google/gmail/inbox-v1/operations/r-send": () => {
       log.cloud.push("receipt")
       return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: zeroDigest, state, providerResult: state === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null } }
@@ -114,7 +114,7 @@ it.live("See on Home that mail is waiting: only the unread count reaches the ove
   provide inboxApp(log, mailCloud(log)) {
     const mailbox = try Mailbox
     try settle(mailbox.changes, (m) => m.phase === "ListReady" && m.rows.length === 2)
-    try settle(Stream.repeatEffect(sync(() => log.attention.length)), (n) => n > 0)
+    try settle(Stream.fromEffectRepeat(sync(() => log.attention.length)), (n) => n > 0)
     try Effect.try(() => assert.deepStrictEqual(log.attention.at(-1), { unread: 1, more: false, connected: true }))
   }
 })
@@ -293,7 +293,8 @@ it.live("Send from another of my accounts: a new email moves and the selection f
     const moved = try composer.transfer(grantB)
     try settle(composer.changes, (d) => d.owner.includes(grantB))
     const onB = (try composer.mine()).open
-    try Effect.try(() => assert.deepStrictEqual({ moved, selected: (try accounts.get()).selected, subject: onB.fields.subject }, { moved: undefined, selected: grantB, subject: "Plan" }))
+    const selected = (try accounts.get()).selected
+    try Effect.try(() => assert.deepStrictEqual({ moved, selected, subject: onB.fields.subject }, { moved: undefined, selected: grantB, subject: "Plan" }))
   }
 })
 
@@ -402,8 +403,10 @@ it.live("Clean up after a send and say Sent once: a recheck of the same receipt 
     const sent = try operations.sendDraft(draft, "r-send")
     const recheck = try operations.refresh()
     const tapAgain = try operations.sendDraft(draft, "r-send")
+    const announced = (try operations.get()).announced
+    const cleared = (try composer.mine()).open.id === ""
     try Effect.try(() => assert.deepStrictEqual(
-      { sent, recheck, tapAgain, announced: (try operations.get()).announced, cleared: (try composer.mine()).open.id === "", dispatches: log.cloud.filter((c) => c === "dispatch").length },
+      { sent, recheck, tapAgain, announced, cleared, dispatches: log.cloud.filter((c) => c === "dispatch").length },
       { sent: "Sent", recheck: "SentBefore", tapAgain: "SentBefore", announced: ["r-send"], cleared: true, dispatches: 1 }))
   }
 })
@@ -420,8 +423,10 @@ it.live("An email edited while Gmail reviewed it is not sent: its review is disc
     const draft = try writeFriday()
     const edited = composerRef({ ...draft, fields: { ...draft.fields, body: "Noon works. Bring the plans." } })
     const outcome = try operations.sendDraft(draft, "r-send", succeed(edited))
+    const held = (try operations.current()) === undefined
+    const notice = (try operations.get()).notice
     try Effect.try(() => assert.deepStrictEqual(
-      { outcome, held: (try operations.current()) === undefined, notice: (try operations.get()).notice, dispatches: log.cloud.filter((c) => c === "dispatch").length },
+      { outcome, held, notice, dispatches: log.cloud.filter((c) => c === "dispatch").length },
       { outcome: "Discarded", held: true, notice: "ReviewDiscarded", dispatches: 0 }))
   }
 })
@@ -459,7 +464,8 @@ it.live("Put an agent's suggestion into my email once, where the review said it 
     const id = (try suggestions.get()).review.id
     const first = try suggestions.confirm(id, "Sounds good, see you at noon.", true)
     const second = try suggestions.confirm(id, "Sounds good, see you at noon.", true)
-    try Effect.try(() => assert.deepStrictEqual({ where, first, second, body: (try composer.mine()).open.fields.body }, { where: "new-email", first: true, second: false, body: "Sounds good, see you at noon." }))
+    const body = (try composer.mine()).open.fields.body
+    try Effect.try(() => assert.deepStrictEqual({ where, first, second, body }, { where: "new-email", first: true, second: false, body: "Sounds good, see you at noon." }))
   }
 })
 

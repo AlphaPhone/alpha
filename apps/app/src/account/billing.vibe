@@ -300,9 +300,9 @@ export const billingService = Layer.effect(Membership, effect {
     effect sendCode() { try send({ type: "sendAuthorityCode" }) },
     effect verifyCode(code: string) {
       const user = Effect.flatMap(cloud.json("GET", "/api/v1/user"), Schema.decodeUnknownEffect(UserAnswer)) catch () => undefined
-      const status = user === undefined ? undefined : (Schema.decodeUnknownEffect(AuthorityStatus)(try native.invoke(authorityPlugin, "verify", {
+      const status = user === undefined ? undefined : (Effect.flatMap(native.invoke(authorityPlugin, "verify", {
         code: code.replace(/\s/g, ""), userId: user.data.id, organizationId: user.data.organization_id
-      })) catch () => undefined)
+      }), Schema.decodeUnknownEffect(AuthorityStatus)) catch () => undefined)
       try send({ type: "authorityVerified", ok: status?.status === "authorized" })
     },
     effect confirmChange() { try send({ type: "confirmChange" }) },

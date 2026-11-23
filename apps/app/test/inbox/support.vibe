@@ -114,9 +114,9 @@ export function neighbors(log: Calls, options: { readonly mailImages?: boolean; 
   )
 }
 
-/** The Inbox over the fake platform and neighbors. */
+/** The Inbox over the fake platform and neighbors, which stay reachable to a story that drives a neighbor port itself. */
 export function inboxApp(log: Calls, cloud: ReturnType<typeof mailCloud>, native = fakeNative({}), options: Parameters<typeof neighbors>[1] = {}) {
-  return Layer.provide(inbox, Layer.mergeAll(cloud, native, fakeResident({}), buildInfo(), memoryStore, neighbors(log, options)))
+  return Layer.provideMerge(inbox, Layer.mergeAll(cloud, native, fakeResident({}), buildInfo(), memoryStore, neighbors(log, options)))
 }
 
 /** Waits until a stream shows a value `ok` accepts. */

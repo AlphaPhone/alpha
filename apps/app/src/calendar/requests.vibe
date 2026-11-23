@@ -92,7 +92,7 @@ export const requestsLayer = Layer.effect(AgentRequests, effect {
   }
 
   return {
-    sheets: sheets.changes,
+    sheets: SubscriptionRef.changes(sheets),
     actions: machine.changes,
     effect scene(view: ScreenView, sensitive: boolean, selected: string, permission: boolean) {
       try send({ type: "scene", view, sensitive, selected, permission })
@@ -126,7 +126,7 @@ export const requestsLayer = Layer.effect(AgentRequests, effect {
     },
     effect namedRead(operation: unknown, operationId: string, context: NamedCalendarReadContext, current: () => NamedCalendarReadContext, journalIdentity?: AgentRun["journalIdentity"]) {
       const outcome: NamedReadOutcome = shareOffered(context.view === "calendar", context.sensitive === true, context.selectedObject !== undefined)
-        ? try executeNamedCalendarRead({
+        ? executeNamedCalendarRead({
             executeAgent: (input) => effect {
               return try mapError(native.invoke(PLUGIN, "executeAgent", input), (cause) => new NamedReadUnavailable({ reason: cause._tag })) as { status: string; result?: unknown; feedComplete?: boolean }
             },

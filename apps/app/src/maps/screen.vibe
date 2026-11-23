@@ -1,7 +1,7 @@
 // spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "The quiet fix on open shows and centres the phone's position only while nothing is chosen, listed or being located, and its failure says nothing"; spec/maps/screen.md, "A place outside every region the provider covers keeps its coordinates and says so"; spec/maps/savedPlaces.md, "A saved provider place is used only with the open-data provider that served it"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/screen.md, "Story: Keep my place while I step away"; spec/maps/screen.md, "A handed-over query is applied once, and any newer action discards it before it applies"; spec/maps/location.md, "A start is admitted one at a time and retires the session before it"
 import { type Actor, type Event, type OriginKind, type Phase, type Screen, Machine as ScreenMachine, debounceMs, resumable } from "../../gen/maps__screen.effect.vibe"
-import { centersOnQuietFix, outsideCoverage } from "../../gen/maps__screen.ts"
-import { type SavedItem, savedLocal } from "../../gen/maps__savedPlaces.ts"
+import { centersOnQuietFix, outsideCoverage } from "../../gen/maps__screen.effect.vibe"
+import { type SavedItem, savedLocal } from "../../gen/maps__savedPlaces.effect.vibe"
 import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
 import { offers, restricted, type Travel } from "../../gen/maps__vocabulary.effect.vibe"
 import { MapsProvider } from "./cloud.vibe"
@@ -138,7 +138,7 @@ export const screenLayer = Layer.effect(MapsScreen, effect {
     if (!after.locating && before.locating) try cancel("locate")
   }
 
-  effect function debounced() {
+  effect function debounced(): void!! {
     try sleep(debounceMs)
     const s = try screen.get()
     try send({ type: "debounce", len: s.query.trim().length }, "Flow")

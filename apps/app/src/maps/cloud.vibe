@@ -115,7 +115,8 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
   effect function admitted() {
     const now = try Clock.currentTimeMillis
     const before = try connection.get()
-    const s = now > before.now ? (try connection.send({ type: "tick", now })).state : before
+    const ticked = now > before.now ? (connection.send({ type: "tick", now }) catch () => undefined) : undefined
+    const s = ticked?.state ?? before
     if (s.phase !== "Installed") {
       if (s.account === 0) throw failure("unauthorized", "Sign in to Cloud to use Maps.")
       throw failure("unconfigured", "Connect a Maps provider to search places and plan routes.")

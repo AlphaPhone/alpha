@@ -25,7 +25,7 @@ function sourceOf(row: CalendarRow): EventSource {
   return row.source === "device" ? "DeviceSource" : "AgentSource"
 }
 
-effect function agentEvent(row: CalendarRow): EventRecord | undefined {
+effect function agentEvent(row: CalendarRow) {
   const view = try (try AgentCalendar).view()
   return view.feed?.events.find((event) => `agent:${agentEventKey(event)}` === row.id)
 }
@@ -33,7 +33,7 @@ effect function agentEvent(row: CalendarRow): EventRecord | undefined {
 /** The id a note's back-link names an agent event by: a digest of its exact key, short enough for the origin index. */
 export effect function noteRecordId(rowId: string) {
   if (!rowId.startsWith("agent:")) return ""
-  const digest = try tryPromise({ try: () => sha256Hex(rowId.slice("agent:".length)), catch: () => "" }) catch () => ""
+  const digest = tryPromise({ try: () => sha256Hex(rowId.slice("agent:".length)), catch: () => "" }) catch () => ""
   return digest === "" ? "" : `agent-event:${digest}`
 }
 
@@ -141,8 +141,27 @@ export effect function openEventLink(url: string) {
 /** What a deletion came to, for its notice. */
 export type DeleteResult = "held" | "queued" | "deleted" | "changed" | "external" | "unconfirmed" | "refused" | "not-staged"
 
-/** Delete or decline the open row with the scope chosen; an agent Calendar deletion waits out the Undo window, hidden. */
+/** What the owner is told when a deletion did not go through or was not confirmed; "" when the result speaks for itself. */
+export function deleteProblem(result: DeleteResult): string {
+  switch (result) {
+    case "changed": return "Event changed. Check it before deleting. Not deleted."
+    case "external": return "This event can only be deleted in Android Calendar. Not deleted."
+    case "unconfirmed": return "Not confirmed. Check Calendar before deleting again."
+    case "refused": return "Not deleted"
+    case "not-staged": return "Calendar is still updating. Not deleted. Try again in a moment."
+    case "held": case "queued": case "deleted": return ""
+  }
+}
+
+/** Delete or decline the open row with the scope chosen; an agent Calendar deletion waits out the Undo window, hidden. Says why when it did not go through. */
 export effect function deleteRow(row: CalendarRow, scope: CalendarWriteScope | "event", mode: "organizer_cancel" | "decline_invitation" | "remove_private_copy") {
+  const result = try stageDeletion(row, scope, mode)
+  const problem = deleteProblem(result)
+  if (problem !== "") try (try Notices).show(problem)
+  return result
+}
+
+effect function stageDeletion(row: CalendarRow, scope: CalendarWriteScope | "event", mode: "organizer_cancel" | "decline_invitation" | "remove_private_copy") {
   const presentation = try PresentationMachine
   if (row.source === "device") {
     const [, id, begin] = row.id.split(":")
@@ -158,6 +177,7 @@ export effect function deleteRow(row: CalendarRow, scope: CalendarWriteScope | "
   }
   const agent = try AgentCalendar
   const key = agentEventKey(event)
+  const confirmed = (try agent.view()).savedAt === undefined ? event : undefined
   const operation = `delete-${civilDay(Date.parse(event.startAt), "UTC")}-${row.revision.replace(/[^-a-zA-Z0-9_]/g, "").slice(0, 60)}`
   const recordId = try noteRecordId(row.id)
   const origins = try NotesOrigins
@@ -169,7 +189,7 @@ export effect function deleteRow(row: CalendarRow, scope: CalendarWriteScope | "
       try sleep("250 millis")
       waited += 1
     }
-    const outcome = try agent.remove({ eventKey: key, admitted: true, request: {
+    const outcome = try agent.remove({ eventKey: key, admitted: true, ...(confirmed === undefined ? {} : { confirmed }), request: {
       calendarId: event.calendarId, grantId: event.grantId, side: event.side, expectedProviderVersion: row.revision, idempotencyKey: operation,
       cancellationMode: mode, ...(scope !== "event" ? { recurrenceScope: scope } : {}),
     } })
@@ -188,7 +208,7 @@ function wallOf(instant: number, zone: string): string {
 }
 
 /** The fields a new form opens with: today at the next full hour, another day at ten, one hour long, in the device zone. */
-export effect function newFields(day: number, creationId: string): DraftFieldsRecord {
+export effect function newFields(day: number, creationId: string): DraftFieldsRecord!! {
   const now = try Clock.currentTimeMillis
   const zone = deviceZone()
   const hour = Number((calendarWall(now, zone) ?? "T00").slice(11, 13))
@@ -415,7 +435,8 @@ export effect function openRoute(route: string) {
   }
   const match = /^event\/([^?]+)\?day=(-?\d+)$/.exec(route)
   if (!match) return
-  const rowId = decodeURIComponent(match[1]!)
+  const rowId = Effect.try(() => decodeURIComponent(match[1]!)) catch () => undefined
+  if (rowId === undefined) return
   const day = Number(match[2])
   const presentation = try PresentationMachine
   presentation.send({ type: "chooseDay", day }) catch () => undefined

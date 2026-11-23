@@ -13,7 +13,7 @@ schema TurnReceipt {
 
 /** One action result's receipts, before each is read. */
 schema TurnActionResult {
-  effectReceipts?: ReadonlyArray<unknown>
+  effectReceipts?: readonly Schema.Unknown[]
 }
 
 /** The code upstream gives a turn interrupted after an effect was committed. */

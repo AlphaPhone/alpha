@@ -27,7 +27,8 @@ it.live("a normal HTTPS page goes to another browser at once, a private one only
         else try reviews.dismiss("external-browser")
         try join leaving
       }
-      try Effect.try(() => assert.deepStrictEqual((try callsTo(fake.calls, "openExternalBrowser")).map((c) => [c.args.id, c.args.url, c.args.navigation, c.args.privateConfirmed]), [
+      const got1 = try callsTo(fake.calls, "openExternalBrowser")
+      try Effect.try(() => assert.deepStrictEqual(got1.map((c) => [c.args.id, c.args.url, c.args.navigation, c.args.privateConfirmed]), [
         [normal, "https://example.test/", "1", false],
         ["bpriv", "https://private.test/", "4", true],
       ]))
@@ -46,8 +47,10 @@ it.live("the host's notices about app links reach the owner in Alpha's words, an
       try emit(fake.events, "notice", { session, id: started.cur, message: "Blocked a link to another app that opened without a tap." })
       try emit(fake.events, "notice", { session, id: started.cur, message: "This link type is not supported." })
       try emit(fake.events, "notice", { session: "another-session", id: started.cur, message: "No app on this device can open this link." })
+      const got2 = try Ref.get(fake.toasts)
+      const got3 = try Ref.get(fake.opened)
       try Effect.try(() => assert.deepStrictEqual(
-        { said: try Ref.get(fake.toasts), opened: try Ref.get(fake.opened) },
+        { said: got2, opened: got3 },
         { said: ["Blocked a link to another app that opened without a tap.", "Browser can’t open this kind of link."], opened: [] },
       ))
     }
@@ -68,8 +71,10 @@ it.live("Share by email drafts the shown page's name and address, says why when 
         try egress.shareByEmail()
         try emit(fake.events, "stateChanged", { session, id, sequence: 2, navigation: "2", url: "https://example.test/next", loading: true })
         try egress.shareByEmail()
+        const got4 = try Ref.get(fake.mails)
+        const got5 = try Ref.get(fake.toasts)
         try Effect.try(() => assert.deepStrictEqual(
-          { mails: try Ref.get(fake.mails), refused: (try Ref.get(fake.toasts)).includes("Email isn’t available on this phone.") },
+          { mails: got4, refused: got5.includes("Email isn’t available on this phone.") },
           { mails: [{ subject: "example.test", body: "https://example.test/article" }], refused: !mail },
         ))
       }
@@ -88,8 +93,10 @@ it.live("Share hands Android the page that was shown when the menu closed", () =
       const id = try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://example.test/article", "5", 1)
       try tabs.dispatch({ type: "openShare" })
       try egress.share()
+      const got6 = try callsTo(fake.calls, "share")
+      const got7 = try tabs.get()
       try Effect.try(() => assert.deepStrictEqual(
-        { shared: (try callsTo(fake.calls, "share")).map((c) => [c.args.id, c.args.url, c.args.navigation]), shareOpen: (try tabs.get()).layers.share },
+        { shared: got6.map((c) => [c.args.id, c.args.url, c.args.navigation]), shareOpen: got7.layers.share },
         { shared: [[id, "https://example.test/article", "5"]], shareOpen: false },
       ))
     }
@@ -108,8 +115,11 @@ it.live("the menu's Downloads opens the host's list, and Show in Files opens Fil
       try tabs.openDownloads()
       try emit(fake.events, "showDownloads", { session: "another-session" })
       try emit(fake.events, "showDownloads", { session })
+      const got8 = try callsTo(fake.calls, "downloads")
+      const got9 = try tabs.get()
+      const got10 = try Ref.get(fake.opened)
       try Effect.try(() => assert.deepStrictEqual(
-        { listed: (try callsTo(fake.calls, "downloads")).length, menu: (try tabs.get()).layers.menu, opened: try Ref.get(fake.opened) },
+        { listed: got8.length, menu: got9.layers.menu, opened: got10 },
         { listed: 1, menu: false, opened: ["files:downloads"] },
       ))
     }

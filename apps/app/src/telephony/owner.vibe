@@ -10,7 +10,7 @@ export interface OwnerKept<S> {
   load(): S!unknown
   keep(next: S): void!!
   /** The state as shown: read again by `reload` after each of `changes`, and by `rebind` each time the signed-in owner's namespace becomes another than the one last shown; it follows for the layer's life. */
-  follow(changes: Stream.Stream<unknown>, reload: () => S!unknown, rebind: () => S!unknown): Stream.Stream<S>!!
+  follow(changes: Stream.Stream<unknown>, reload: () => S!unknown, rebind: () => S!unknown): Stream.Stream<S>!never!Scope.Scope
 }
 
 /**
@@ -31,15 +31,17 @@ export effect function ownerKept<S>(name: string, start: S, decode: (input: unkn
 
   effect function parsed(raw: string | undefined) {
     if (raw === undefined) return undefined
-    return try (decode(try Effect.try(() => JSON.parse(raw) as unknown)) catch () => undefined)
+    const json = Effect.try(() => JSON.parse(raw) as unknown) catch () => undefined
+    if (json === undefined) return undefined
+    return decode(json) catch () => undefined
   }
 
   effect function moveCompanions(state: S) {
     const moved: string[] = []
     for (const companion of companions(state)) {
-      const bytes = try (store.getUint8Array(ownerKey("device", companion)) catch () => undefined)
+      const bytes = (store.getUint8Array(ownerKey("device", companion)) catch () => undefined)
       if (bytes === undefined) continue
-      const placed = try (effect { try store.set(try session.ownerKey(companion), bytes); return true } catch () => false)
+      const placed = (effect { try store.set(try session.ownerKey(companion), bytes); return true } catch () => false)
       if (placed) moved.push(companion)
     }
     return moved
@@ -47,27 +49,27 @@ export effect function ownerKept<S>(name: string, start: S, decode: (input: unkn
 
   effect function adopt(key: string, mine: string | undefined) {
     if (key === deviceKey) return mine
-    const left = try (store.get(deviceKey) catch () => undefined)
+    const left = (store.get(deviceKey) catch () => undefined)
     if (left === undefined) return mine
     const state = try parsed(left)
     const device: Kept = state === undefined ? "KeptDamaged" : "KeptState"
     if (state === undefined || !adoptsDeviceSlot(device, mine === undefined ? "NothingKept" : "KeptState")) return mine
     const moved = try moveCompanions(state)
-    const placed = try (effect { try store.set(key, left); return true } catch () => false)
+    const placed = (effect { try store.set(key, left); return true } catch () => false)
     if (!placed) return mine
-    try (store.remove(deviceKey) catch () => undefined)
-    for (const companion of moved) try (store.remove(ownerKey("device", companion)) catch () => undefined)
+    store.remove(deviceKey) catch () => undefined
+    for (const companion of moved) store.remove(ownerKey("device", companion)) catch () => undefined
     return left
   }
 
-  effect function damaged(key: string): S {
+  effect function damaged(key: string) {
     const held = Option.isSome(storage) && (try storage.value.hold(key))
-    const cleared = held && (try (effect { try store.remove(key); return true } catch () => false))
+    const cleared = held && ((effect { try store.remove(key); return true } catch () => false))
     if (!cleared) try Ref.update(inMemory, (states) => new Map(states).set(key, start))
     return start
   }
 
-  effect function load(): S {
+  effect function load() {
     const key = try session.ownerKey(slot)
     const running = (try Ref.get(inMemory)).get(key)
     if (running !== undefined) return running
@@ -88,9 +90,9 @@ export effect function ownerKept<S>(name: string, start: S, decode: (input: unkn
 
   effect function follow(changes: Stream.Stream<unknown>, reload: () => S!unknown, rebind: () => S!unknown) {
     const shownUnder = try Ref.make(try session.ownerKey(slot))
-    const shown = try SubscriptionRef.make(try (reload() catch () => start))
+    const shown = try SubscriptionRef.make((reload() catch () => start))
     effect function show(read: () => S!unknown) {
-      const next = try (effect { return { state: try read() } } catch () => undefined)
+      const next = (effect { return { state: try read() } } catch () => undefined)
       if (next !== undefined) try SubscriptionRef.set(shown, next.state)
     }
     effect function owner() {

@@ -1,6 +1,6 @@
 // spec/maps/connection.md, "Story: Back off when Maps asks me to wait"; spec/maps/connection.md, "A request may start only on the installed provider, for its account and generation, outside a pause"; spec/maps/connection.md, "A wait Cloud names is shown and kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute"
 import { MapsFailure, type MapsFailureCode } from "@elizaos/plugin-maps/client/contracts"
-import { pauseSeconds, resetNamed, waitNamed } from "../../gen/maps__connection.ts"
+import { pauseSeconds, resetNamed, waitNamed } from "../../gen/maps__connection.effect.vibe"
 import { limitOfRefusal } from "../account/limits.vibe"
 import type { CloudSignedOut, CloudUnavailable } from "../platform/cloud.vibe"
 

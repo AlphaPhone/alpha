@@ -100,7 +100,7 @@ export class CalendarAgentFake {
     return { provider: "eliza", side: "owner", grantId: "eliza-calendar", connectorAccountId: "", calendarId: "primary" };
   }
 
-  /** Add an event today at `hour` UTC. */
+  /** Add an event today at `hour` UTC. @throws {never} */
   add(id: string, title: string, day: number, hour: number) {
     const start = Math.floor(Date.now() / DAY) * DAY + day * DAY + hour * 3_600_000;
     this.events.push({ id, title, startAt: new Date(start).toISOString(), endAt: new Date(start + 3_600_000).toISOString(), etag: "etag-1", status: "confirmed" });

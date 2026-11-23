@@ -34,7 +34,7 @@ function utf8(bytes: Uint8Array): string | null {
   }
 }
 
-function decode(dataBase64: string): Uint8Array | null {
+function decode(dataBase64: string): Uint8Array<ArrayBuffer> | null {
   try {
     const binary = atob(dataBase64);
     if (btoa(binary) !== dataBase64) return null;
@@ -44,7 +44,7 @@ function decode(dataBase64: string): Uint8Array | null {
   }
 }
 
-async function digest(bytes: Uint8Array): Promise<string> {
+async function digest(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   const hash = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -78,7 +78,7 @@ export async function checkOpaqueFile(name: string, mimeType: string, dataBase64
   return { name, mimeType: type, bytes: bytes.length, sha256: await digest(bytes) };
 }
 
-/** Whether a value is a refusal rather than a checked file. */
+/** Whether a value is a refusal rather than a checked file. @throws {never} */
 export function isRefusal(value: CheckedFile | FileRefusal): value is FileRefusal {
   return typeof value === "string";
 }

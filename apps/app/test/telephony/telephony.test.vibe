@@ -55,7 +55,7 @@ it.live("Send only what I reviewed, once (spec/telephony/drafts.md, \"Story: Sen
     // spec/telephony/drafts.md, "Alpha's draft goes only into an unoccupied slot addressed to exactly the same people, and keeps one Undo"
     const elsewhere = try sends.placeAlphaDraft(thread, ["4155550111"], "Hi")
     const placed = try sends.placeAlphaDraft(thread, ["4155550100"], "Running late")
-    const alphaSend = try (drafts.send({ type: "sendStarted", thread, operationId: "op1", kind: "SmsSend", sim: 7 }, "Alpha") catch () => "Rejected")
+    const alphaSend = (drafts.send({ type: "sendStarted", thread, operationId: "op1", kind: "SmsSend", sim: 7 }, "Alpha") catch () => "Rejected")
     const drafted = slotOf((try drafts.get()).slots, thread)
     // spec/telephony/drafts.md, "An accepted send clears the slot, a definite refusal releases its operation, and an unknown outcome keeps it"
     try sends.send(thread)
@@ -107,7 +107,7 @@ it.live("Call only the person I approved (spec/telephony/actions.md, \"Story: Ca
     const actions = try TelephonyActions
     // spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"
     const ungrounded = try actions.run({ type: "phone_call", target: { kind: "number", number: "4155550199" } }, "op-1", { text: "call 415-555-0100" })
-    const repeated = try (actions.run({ type: "phone_call", target: { kind: "number", number: "4155550100" } }, "op-1", { text: "call 415-555-0100" }) catch (e) => e._tag)
+    const repeated = (actions.run({ type: "phone_call", target: { kind: "number", number: "4155550100" } }, "op-1", { text: "call 415-555-0100" }) catch (e) => e._tag)
     // spec/telephony/actions.md, "An effect dispatches only after a fresh call-state reading allows it"
     try sync(() => { fake.world.callState = { inCall: true, emergency: null, emergencyLive: true, watching: true } })
     const emergency = try actions.run({ type: "phone_call", target: { kind: "number", number: "4155550100" } }, "op-2", { text: "call 415-555-0100" })
@@ -192,8 +192,8 @@ it("The call bar stays off Android's assistant surface only (spec/telephony/call
 it("Calls, texts, reads and contact changes are reviewed comms acts, and only reads may not stay unresolved (spec/assistant/receipts.md, \"An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved\")", () => {
   assert.deepStrictEqual(
     {
-      classes: [classOf({ type: "contact_show", query: "maya" }), classOf({ type: "phone_keypad" }), classOf({ type: "phone_call" }), classOf({ type: "messages_read_selected" })],
-      handoffs: [handoffOf({ type: "sms_send" }), handoffOf({ type: "phone_dial" }), handoffOf({ type: "contact_update" }), handoffOf({ type: "messages_read_selected" }), handoffOf({ type: "sms_latest_sender" })],
+      classes: [classOf({ type: "contact_show", query: "maya" }), classOf({ type: "phone_keypad" }), classOf({ type: "phone_call", target: { kind: "number", number: "4155550100" } }), classOf({ type: "messages_read_selected" })],
+      handoffs: [handoffOf({ type: "sms_send", recipients: ["4155550100"], body: "hi", subscriptionId: 1 }), handoffOf({ type: "phone_dial", target: { kind: "number", number: "4155550100" } }), handoffOf({ type: "contact_update", query: "maya", set: { displayName: "Maya" } }), handoffOf({ type: "messages_read_selected" }), handoffOf({ type: "sms_latest_sender" })],
       advertised: advertisedOf(["sms.send.v1", "sms.latest-sender.v2", "phone.call.v1"], ["sms.send.v1", "sms.latest-sender.v2", "calendar.create.v1"]),
     },
     {

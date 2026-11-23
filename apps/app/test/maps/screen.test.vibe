@@ -185,8 +185,9 @@ it.live("The copyright shown is the latest reply for the view, and a failed one 
     try Ref.set(h.refuseNext, 1)
     try plane.settled(pier, 14, 400, 800)
     const failed = try until(machine.changes, (s) => s.copyrightFailed)
+    const got1 = try (try MapsContent).get()
     try Effect.try(() => assert.deepStrictEqual(
-      { shown: [shown.shownView, shown.view], copyright: (try (try MapsContent).get()).copyright, failed: [failed.state, failed.copyrightShown] },
+      { shown: [shown.shownView, shown.view], copyright: got1.copyright, failed: [failed.state, failed.copyrightShown] },
       { shown: [1, 1], copyright: "© data", failed: ["PlaneReady", false] },
     ))
   }
@@ -205,8 +206,9 @@ it.live("A named wait is shown and kept (spec/maps/connection.md, \"A wait Cloud
     try screen.submitSearch()
     try until((try ScreenMachine).changes, (s) => s.search === "Failed")
     const paused = try connection.get()
+    const got2 = try (try MapsContent).get()
     try Effect.try(() => assert.deepStrictEqual(
-      { said: (try (try MapsContent).get()).message, pause: paused.pausedUntil - paused.now },
+      { said: got2.message, pause: paused.pausedUntil - paused.now },
       { said: "Maps request limit reached. Try again in 5 minutes.", pause: 300000 },
     ))
   }

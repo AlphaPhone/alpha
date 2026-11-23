@@ -8,7 +8,7 @@ import {
   Machine as DraftsMachine, maxPictures, occupied, slotOf, type Event as DraftsEvent, type Operation, type Receipt, type SendKind, type Slot,
 } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as MessagesMachine, type OutgoingState } from "../../gen/telephony__messages.effect.vibe"
-import { callerOf, refusalTag, TelephonyBridges, TelephonyRefused } from "./bridges.vibe"
+import { callerOf, refusalTag, TelephonyBridges, TelephonyRefused, TelephonyUnavailable } from "./bridges.vibe"
 import { newId as newOperationId } from "../platform/ids.ts"
 import { CloudSession } from "../account/layer.vibe"
 
@@ -58,7 +58,8 @@ const PROGRESS: Record<string, OutgoingState> = { submitted: "Handed", sent: "Co
 const REFUSED_BEFORE_SENDING: readonly string[] = ["SmsSendNotAttempted", "InvalidMessageRequest", "SmsSendRefused", "SmsReviewPending", "SmsJournalRefused"]
 
 /** A failed send call: refused before anything was sent, or a lost answer the radio may have acted on. */
-export function receiptOfFailure(failure: TelephonyRefused): Receipt {
+export function receiptOfFailure(failure: TelephonyRefused | TelephonyUnavailable): Receipt {
+  if (failure instanceof TelephonyUnavailable) return "ReceiptRefused"
   return REFUSED_BEFORE_SENDING.includes(refusalTag(failure)) || failure.code !== undefined ? "ReceiptRefused" : "ReceiptLost"
 }
 
@@ -75,13 +76,13 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
   const store = try KeyValueStore.KeyValueStore
   const session = try CloudSession
   const keyOf = (thread: string, name: string) => session.ownerKey(pictureSlot(thread, name))
-  const tell = (event: DraftsEvent, by: "Owner" | "Alpha" | "Device") => drafts.send(event, by) catch () => undefined
-  const note = (event: Parameters<typeof messages.send>[0]) => messages.send(event) catch () => undefined
+  const tell = effect (event: DraftsEvent, by: "Owner" | "Alpha" | "Device") => drafts.send(event, by) catch () => undefined
+  const note = effect (event: Parameters<typeof messages.send>[0]) => messages.send(event) catch () => undefined
 
   effect function pictureBytes(thread: string, slot: Slot) {
     const out: { contentType: string; name: string; bytes: Uint8Array }[] = []
     for (const picture of slot.pictures) {
-      const bytes = try (store.getUint8Array(try keyOf(thread, picture.pictureName)) catch () => undefined)
+      const bytes = (store.getUint8Array(try keyOf(thread, picture.pictureName)) catch () => undefined)
       if (bytes === undefined) return undefined
       out.push({ contentType: picture.contentType, name: picture.pictureName, bytes })
     }
@@ -109,13 +110,13 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
     const bound = try boundReview(thread, slot, operation)
     if (id === null || bound === undefined) return
     const result = bound.kind === "sms"
-      ? try (bridgeCall("smsSendResult", (c) => c.messages.smsSendResult(bound.review, id)) catch () => undefined)
-      : try (bridgeCall("mmsSendResult", (c) => c.messages.mmsSendResult(bound.review, id)) catch () => undefined)
+      ? (bridgeCall("smsSendResult", (c) => c.messages.smsSendResult(bound.review, id)) catch () => undefined)
+      : (bridgeCall("mmsSendResult", (c) => c.messages.mmsSendResult(bound.review, id)) catch () => undefined)
     if (result !== undefined) try settle(thread, operation.operationId, result.status, result.createdAt)
   }
 
   effect function status() {
-    return try (bridgeCall("status", (c) => c.messages.status()) catch () => undefined)
+    return (bridgeCall("status", (c) => c.messages.status()) catch () => undefined)
   }
 
   effect function reviewed(slot: Slot, current: TelephonyStatus, thread: string) {
@@ -151,9 +152,9 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
       if (checked.sms !== undefined && checked.sms.recipients.length === 1)
         try note({ type: "outgoingStarted", operationId, toThread: thread, body: checked.sms.body, at })
       const sent = checked.sms !== undefined
-        ? try (bridgeCall("sendSms", (c) => c.composer.sendSms(checked.sms, id)) catch (failure) => failure)
-        : try (bridgeCall("sendMms", (c) => c.composer.sendMms(checked.mms!, id)) catch (failure) => failure)
-      if (sent instanceof TelephonyRefused) {
+        ? (bridgeCall("sendSms", (c) => c.composer.sendSms(checked.sms, id)) catch (failure) => failure)
+        : (bridgeCall("sendMms", (c) => c.composer.sendMms(checked.mms!, id)) catch (failure) => failure)
+      if (sent instanceof TelephonyRefused || sent instanceof TelephonyUnavailable) {
         try tell({ type: "sendAnswered", thread, operationId, receipt: receiptOfFailure(sent) }, "Device")
         try note({ type: "outgoingSettled", operationId })
         return undefined
@@ -161,7 +162,7 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
       let result = sent
       for (let read = 0; checked.sms !== undefined && result.status === "submitted" && read < SMS_SETTLE.reads; read++) {
         try sleep(SMS_SETTLE.every)
-        const again = try (bridgeCall("smsSendResult", (c) => c.messages.smsSendResult(checked.sms, id)) catch () => undefined)
+        const again = (bridgeCall("smsSendResult", (c) => c.messages.smsSendResult(checked.sms, id)) catch () => undefined)
         if (again === undefined) break
         result = again
       }
@@ -184,7 +185,7 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
       if (current === undefined) return undefined
       const checked = reviewSms({ recipients: slot.recipients, body: slot.text }, current, "handoff")
       if ("problem" in checked) return undefined
-      return try (bridgeCall("composeSms", (c) => c.messages.composeSms(checked.review)) catch () => undefined)
+      return (bridgeCall("composeSms", (c) => c.messages.composeSms(checked.review)) catch () => undefined)
     },
     effect addRecipient(number: string) {
       const slot = slotOf((try drafts.get()).slots, "new")
@@ -206,7 +207,7 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
       if (slot.pictures.reduce((total, p) => total + p.bytes, 0) + bytes.length > MMS_MAX_TOTAL_BYTES) return "too-large"
       const used = slot.pictures.map((p) => Number(p.pictureName.split(".")[0]?.slice(8) ?? 0))
       const pictureName = `picture-${Math.max(0, ...used) + 1}.${extension}`
-      try (store.set(try keyOf(thread, pictureName), bytes) catch () => undefined)
+      store.set(try keyOf(thread, pictureName), bytes) catch () => undefined
       const added = try tell({ type: "pictureAdded", thread, picture: { pictureName, contentType, bytes: bytes.length } }, "Owner")
       return added === undefined ? "too-many" : "added"
     },
@@ -218,7 +219,7 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
     },
     effect removePicture(thread: string, pictureName: string) {
       if ((try tell({ type: "pictureRemoved", thread, pictureName }, "Owner")) !== undefined)
-        try (store.remove(try keyOf(thread, pictureName)) catch () => undefined)
+        store.remove(try keyOf(thread, pictureName)) catch () => undefined
     },
   }
 })

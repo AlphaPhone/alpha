@@ -29,11 +29,15 @@ export effect function check(run: () => void) {
 /** Every toast and persistent notice the Notes layer raised in a test, in order. */
 export const told: string[] = []
 
+/** Notices methods the Notes layer never calls and that not every shell version has (the shell-clock-platform branch adds `dismissShown`); spread in, so the fake fits either. */
+const quietNotices = { dismissShown: () => Effect.void }
+
 /** The shell's notices, recorded in `told`. */
 const noticesFake = Layer.succeed(Notices, {
   show: (message: string) => sync(() => { told.push(message) }),
   persist: (message: string) => sync(() => { told.push(message) }),
   dismiss: () => Effect.void, hold: () => Effect.void, release: () => Effect.void, takeAction: () => Effect.void, send: () => succeed(false),
+  ...quietNotices,
 })
 
 /** The platform, account, voice and shell services the Notes layer needs, over the in-memory resident and device. */

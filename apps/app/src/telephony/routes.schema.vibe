@@ -1,5 +1,5 @@
 // spec/telephony/phone.md, "A number handed to Phone fills the keypad once it is idle, and never dials"; spec/telephony/phoneInfo.md, "The page reads only while it is in front, and leaving forgets what it read"; spec/telephony/messages.md, "Only a complete listed conversation opens, with the full identity it was listed with"; spec/telephony/contacts.md, "Alpha's filter is the provider's own query on this phone, closes an open contact and shows a clearable chip"
-const safeText = (value: string) => value.isWellFormed() && !/[\p{Cc}‪-‮⁦-⁩]/u.test(value)
+const safeText = (value: string) => !/[\uD800-\uDFFF]/u.test(value) && !/[\p{Cc}‪-‮⁦-⁩]/u.test(value)
 
 /** A Phone route: the keypad with a number as a contact or voicemail shows it (digits, `*`, `#`, `+` and separators), Recents, Voicemail, or Settings → Phone's details. */
 export const PhoneRoute = Schema.String.check(Schema.isPattern(/^(keypad:[0-9*#+().\- ]{0,60}|recents|voicemail|info)$/))

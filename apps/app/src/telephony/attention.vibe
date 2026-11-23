@@ -20,15 +20,15 @@ export const homeAttentionLayer = Layer.effect(HomeAttention, effect {
   const bridgeCall = callerOf(try TelephonyBridges)
   const attention = try AttentionMachine
   const front = try frontChanges()
-  const tell = (event: AttentionEvent) => attention.send(event) catch () => undefined
+  const tell = effect (event: AttentionEvent) => attention.send(event) catch () => undefined
 
   effect function sources() {
-    const status = try (bridgeCall("status", (c) => c.messages.status()) catch () => undefined)
+    const status = (bridgeCall("status", (c) => c.messages.status()) catch () => undefined)
     const threads = status?.permissions.sms === "granted"
-      ? try (bridgeCall("listThreads", (c) => c.messages.listThreads(20)) catch () => undefined) : undefined
+      ? (bridgeCall("listThreads", (c) => c.messages.listThreads(20)) catch () => undefined) : undefined
     const calls = status?.permissions.callLog === "granted"
-      ? try (bridgeCall("recentCalls", (c) => c.phone.recentCalls({ limit: 50 })) catch () => undefined) : undefined
-    const voicemail = try (bridgeCall("voicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined)
+      ? (bridgeCall("recentCalls", (c) => c.phone.recentCalls({ limit: 50 })) catch () => undefined) : undefined
+    const voicemail = (bridgeCall("voicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined)
     const unreadRows: UnreadThread[] = (threads ?? []).flatMap((t) => isIncompleteSmsRow(t) || !t.unread ? [] : [{ threadId: t.id, title: t.addresses.join(", "), snippet: t.snippet, date: t.date }])
     const missedRows: NewMissed[] = (calls?.calls ?? []).filter((c) => c.isNew && c.type === "missed").map((c) => ({ callerKey: c.number, title: c.cachedName ?? c.number, date: c.date }))
     const voicemailOk = voicemail !== undefined && voicemail.carrier === "CarrierReady"

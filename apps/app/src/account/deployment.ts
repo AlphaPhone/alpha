@@ -33,7 +33,7 @@ export function authorityOf(of: Deployment, environment: Environment): CloudAuth
   return { ...cloud, agents: new URL(cloud.services).host };
 }
 
-/** The registered App Link a Stripe page returns to. */
+/** The registered App Link a Stripe page returns to. @throws {never} */
 export function billingReturnUrl(authority: CloudAuthority): string {
   return `${authority.web}${billingReturnPath}`;
 }
@@ -51,7 +51,7 @@ const googleScopes = new Set([
   "https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/calendar.readonly", "https://www.googleapis.com/auth/calendar.events",
 ]);
 
-/** What spec/account/google.md checks of a consent URL Cloud answered. */
+/** What spec/account/google.md checks of a consent URL Cloud answered. @throws {never} */
 export function consentPageOf(value: string, authority: CloudAuthority): ConsentPage {
   if (!URL.canParse(value)) return { googleOrigin: false, callbackListed: false, scopesListed: false, carriesCredentials: true };
   const url = new URL(value);
@@ -67,7 +67,7 @@ export function consentPageOf(value: string, authority: CloudAuthority): Consent
   };
 }
 
-/** The workspace return App Link for Google consent started from Alpha. */
+/** The workspace return App Link for Google consent started from Alpha. @throws {never} */
 export function googleWorkspaceCallback(authority: CloudAuthority): string {
   return `${authority.web}${connectReturnPath}`;
 }

@@ -273,7 +273,8 @@ export const layer = Layer.effect(Gmail, effect {
       const prepared = client.gmailPrepareOperation(grant, requestId, wireProposal(kind, proposal)) catch effect (error) => { throw failureOf(error, "operation") }
       const review = Schema.decodeUnknownEffect(WireReview)(prepared.review) catch effect () => { throw new GmailFailed({ kind: "Unavailable", status: 0, code: "invalid-response" }) }
       const r = try receipt(prepared.receipt)
-      const digest = try sha256Hex(canonicalJson(prepared.review))
+      const canonical = try Effect.try({ try: () => canonicalJson(prepared.review), catch: () => new GmailFailed({ kind: "Unavailable", status: 0, code: "invalid-response" }) })
+      const digest = try sha256Hex(canonical)
       const exact = r.receiptKind === kind && digest === r.digest && reviewMatches(kind, proposal, review)
       return { receipt: r, review: reviewOf(review), exact } satisfies PreparedOperation
     },

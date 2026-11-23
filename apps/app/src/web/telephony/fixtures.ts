@@ -118,12 +118,12 @@ export const contactOpen: Contacts = {
   shown: true, epoch: 3, loading: false, explicitRead: false, readable: true, writable: true, failed: false,
   rows: [{ id: "7", title: "Maya Chen", phones: ["4155550100"], emails: ["maya@example.com"], complete: true, lookup: "k7", revision: "r1" }],
   rowsQuery: "", query: "", searching: false, more: false, limit: 50, openId: "7", detail: contactDetail, detailTicket: 2, editor: { tag: "EditorClosed" },
-  confirming: false, gate: "WriteIdle", writeKind: "NoWrite", lastWrite: { tag: "NothingWritten" }, chip: "", notice: { tag: "NoContactsNotice" },
+  confirming: false, gate: "WriteIdle", writeKind: "NoWrite", lastWrite: { tag: "NothingWritten" }, chip: "", notice: "NoContactsNotice",
 };
 /** The open contact's removal waiting for confirmation. */
 export const contactConfirming: Contacts = { ...contactOpen, confirming: true };
 /** A lost write answer: every write held until an explicit read. */
-export const contactUnsettled: Contacts = { ...contactOpen, gate: "WriteUnsettled", notice: { tag: "OutcomeUnknown" } };
+export const contactUnsettled: Contacts = { ...contactOpen, gate: "WriteUnsettled", notice: "OutcomeUnknown" };
 /** The in-app editor open on the contact read whole. */
 export const editing: Extract<Editor, { tag: "EditorOpen" }> = { tag: "EditorOpen", mode: "Editing", editId: "7", editVersion: "a".repeat(64), dirty: false, stale: false, notesEditable: true };
 /** The editor after the contact changed on the phone since it opened. */

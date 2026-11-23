@@ -35,12 +35,12 @@ export service Preferences {
 /** Take the previous Alpha's saved choices once, when this version keeps none: whether the preferences are readable after. */
 effect function adoptPreviousChoices() {
   const store = try KeyValueStore.KeyValueStore
-  const raw = try (tryPromise(() => previousDeviceChoices()) catch () => null)
+  const raw = (tryPromise(() => previousDeviceChoices()) catch () => null)
   if (raw === undefined) return true
   if (raw === null) return false
-  const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => null)
+  const value = (Effect.try(() => JSON.parse(raw) as unknown) catch () => null)
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false
-  const previous = try (Schema.decodeUnknownEffect(PreviousDeviceChoices)(value) catch () => undefined)
+  const previous = (Schema.decodeUnknownEffect(PreviousDeviceChoices)(value) catch () => undefined)
   if (previous === undefined) return false
   const adopted = adoptPrevious({
     askBeforeActions: previous.askBeforeAgentActions ?? initial.askBeforeActions,
@@ -50,20 +50,20 @@ effect function adoptPreviousChoices() {
     calendarEdits: previous.agentCalendarEdits ?? initial.calendarEdits,
     mailImages: previous.autoLoadMailImages ?? initial.mailImages,
   })
-  return try (Effect.as(store.set(PREFERENCES_KEY, JSON.stringify(adopted)), true) catch () => false)
+  return (Effect.as(store.set(PREFERENCES_KEY, JSON.stringify(adopted)), true) catch () => false)
 }
 
 effect function readable() {
   const store = try KeyValueStore.KeyValueStore
-  const raw = try (store.get(PREFERENCES_KEY) catch () => null)
+  const raw = (store.get(PREFERENCES_KEY) catch () => null)
   if (raw === undefined) return try adoptPreviousChoices()
   if (raw === null) return false
-  const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => null)
+  const value = (Effect.try(() => JSON.parse(raw) as unknown) catch () => null)
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false
   const filled = { ...initial, ...value }
-  if ((try (decodeState(filled) catch () => undefined)) === undefined) return false
+  if (((decodeState(filled) catch () => undefined)) === undefined) return false
   if (Object.keys(initial).every((key) => Object.hasOwn(value, key))) return true
-  return try (Effect.as(store.set(PREFERENCES_KEY, JSON.stringify(filled)), true) catch () => false)
+  return (Effect.as(store.set(PREFERENCES_KEY, JSON.stringify(filled)), true) catch () => false)
 }
 
 /** The preferences Machine kept under the owner's key, or in memory while the key cannot be read. */
@@ -75,7 +75,7 @@ export const preferences = Layer.unwrap(effect {
     const held = try Machine
     const store = try KeyValueStore.KeyValueStore
     const mocks = (try Build).info.testMocks
-    const persist = effect () => { try (store.set(PREFERENCES_KEY, JSON.stringify(try held.get())) catch () => undefined) }
+    const persist = effect () => { (store.set(PREFERENCES_KEY, JSON.stringify(try held.get())) catch () => undefined) }
     const read = effect () => ({ value: try held.get(), readable: lock.open })
     return {
       current: read,
@@ -89,13 +89,13 @@ export const preferences = Layer.unwrap(effect {
       sensorAllowed: effect (microphone: boolean) => { const { value, readable } = try read(); return sensorAllowed(value, readable, mocks, microphone) },
       effect set(preference: Preference, on: boolean) {
         if (!lock.open) throw new PreferencesUnreadable()
-        try (held.send({ type: "setPreference", preference, on }) catch () => undefined)
+        held.send({ type: "setPreference", preference, on }) catch () => undefined
         if (!ok) try persist()
       },
       effect reset() {
-        try (store.remove(PREFERENCES_KEY) catch () => undefined)
+        store.remove(PREFERENCES_KEY) catch () => undefined
         lock.open = true
-        try (held.send({ type: "resetPreferences" }) catch () => undefined)
+        held.send({ type: "resetPreferences" }) catch () => undefined
         if (!ok) try persist()
       },
     }

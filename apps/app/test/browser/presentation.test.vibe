@@ -23,7 +23,8 @@ it.live("the page is placed under the toolbar only when nothing covers it, sent 
       try presenter.offer({ ...shown, shade: true }, placed)
       try presenter.offer({ ...shown, underlay: false, underAssistant: true }, placed)
       try presenter.offer({ ...shown, underAssistant: true }, placed)
-      try Effect.try(() => assert.deepStrictEqual((try callsTo(fake.calls, "present")).map((c) => ({ ...c.args, session: undefined })), [
+      const got1 = try callsTo(fake.calls, "present")
+      try Effect.try(() => assert.deepStrictEqual(got1.map((c): Record<string, unknown> => ({ ...c.args, session: undefined })), [
         { session: undefined, id: "b1", x: 0, y: 56, width: 360, height: 544, layer: "below-host", hostRects: [toolbar] },
         { session: undefined, id: null },
         { session: undefined, id: null },
@@ -42,8 +43,10 @@ it.live("a failed presentation is retried on the next frame and reported once, a
       try presenter.offer(shown, placed)
       try presenter.offer(shown, placed)
       try presenter.withdraw()
+      const got2 = try callsTo(fake.calls, "present")
+      const got3 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual(
-        { sent: (try callsTo(fake.calls, "present")).length, said: (try Ref.get(fake.toasts)).filter((t) => t === "Browser couldn’t do that. Try again.").length },
+        { sent: got2.length, said: got3.filter((t) => t === "Browser couldn’t do that. Try again.").length },
         { sent: 3, said: 1 },
       ))
     }
@@ -61,7 +64,8 @@ it.live("a host control that appears blocks page input over the whole page until
       try presenter.offer(shown, placed)
       try presenter.appVisibility(true)
       try presenter.offer({ ...shown, inBrowser: false }, placed)
-      try Effect.try(() => assert.deepStrictEqual((try callsTo(fake.calls, "present")).map((c) => c.args.hostRects), [[toolbar], whole, [toolbar]]))
+      const got4 = try callsTo(fake.calls, "present")
+      try Effect.try(() => assert.deepStrictEqual(got4.map((c) => c.args.hostRects), [[toolbar], whole, [toolbar]]))
     }
   })
 })

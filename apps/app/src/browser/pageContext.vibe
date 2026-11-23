@@ -63,7 +63,7 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
   const preferences = try Preferences
   const links = try Ref.make<readonly string[]>([])
   const cache = host.onDevice ? new BrowserPageCache() : undefined
-  const step = (event: Event) => reads.send(event) catch () => undefined
+  const step = effect (event: Event) => reads.send(event) catch () => undefined
 
   effect function read(tab: string, url: string, navigation: string) {
     if (host.onDevice) {
@@ -89,10 +89,11 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     const answer = try read(target.hostTab, target.url, target.navigation)
     if (answer === undefined || !(try still(target)) || !(try preferences.sharesBrowserPage())) return undefined
     const capturedAt = try Clock.currentTimeMillis
-    return boundPage(answer, { ...target, capturedAt })
+    const base = { ...target, capturedAt }
+    return (Effect.try(() => boundPage(answer, base)) catch () => undefined)
   }
 
-  const fetch = (target: CaptureTarget) => (signal: AbortSignal) => runPromise(Effect.timeout(capture(target), waitMs), { signal })
+  const nativeCapture = (target: CaptureTarget) => (signal: AbortSignal) => runPromise(Effect.timeout(capture(target), waitMs), { signal })
 
   if (cache !== undefined) {
     try addFinalizer(() => sync(() => { cache.select(undefined) }))
@@ -113,7 +114,7 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
         wasOpen = open
         const changed = cache.select(target?.key)
         if (target === undefined) continue
-        const refresh = fetch(target)
+        const refresh = nativeCapture(target)
         if (changed) cache.schedule(target.key, settleMs, refresh)
         if (opened) {
           const now = try Clock.currentTimeMillis
@@ -151,7 +152,7 @@ export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, e
     if (begun?.stage !== "Reading" || target === undefined) return undefined
     const kept = cache?.cached(target.key, try Clock.currentTimeMillis, captureMaxAgeMs)
     if (cache !== undefined) cache.select(target.key)
-    const pageRead = cache === undefined ? capture(target) : promise(() => cache.refresh(target.key, fetch(target)))
+    const pageRead = cache === undefined ? capture(target) : promise(() => cache.refresh(target.key, nativeCapture(target)))
     const answer = timeout(pageRead, captureWait(kept !== undefined)) catch () => "late" as const
     if (answer === "late" && kept === undefined) {
       try step({ type: "timedOut", turn })

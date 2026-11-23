@@ -117,6 +117,20 @@ pure def alwaysSearchHasText(s: Screen): bool = s.search != NotAsked implies s.s
 pure def alwaysTypingHoldsNoLocate(s: Screen): bool = s.pending == QueryPending implies not(s.locating)
 ```
 
+### Recent searches list what the owner searched, newest first, and are kept only in memory
+
+A search the owner sent is remembered, newest first, five at most; searching the same words again,
+in any case, moves them to the top instead of repeating them. Coordinates, which drop a pin, and
+text over 300 characters are never remembered. The list lives only in memory: a restart, a change of
+Maps provider and the owner's Clear forget it.
+
+```quint
+pure val maxRecent = 5
+pure def recentRemembered(len: int, coordinates: bool): bool = searchable(len) and not(coordinates)
+pure def lawCoordinatesAreNeverRemembered(len: int): bool = not(recentRemembered(len, true))
+pure def lawOnlyASearchableTextIsRemembered(len: int): bool = recentRemembered(len, false) iff searchable(len)
+```
+
 ### A typed starting point or query is sent when the owner pauses, and only while the screen is in front
 
 ```quint

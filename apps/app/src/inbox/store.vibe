@@ -69,7 +69,7 @@ export const mailHeld = Layer.effect(DeviceStorage, effect {
     effect admitStartup() { if (Option.isSome(platform)) try platform.value.admitStartup() },
     effect bindOwner(owner: string) { if (Option.isSome(platform)) try platform.value.bindOwner(owner) },
     effect signedOut() { if (Option.isSome(platform)) try platform.value.signedOut() },
-    effect hold(key: string): boolean {
+    effect hold(key: string): boolean!! {
       const copy = heldKeyOf(key)
       const earlier = store.get(copy) catch () => null
       const value = store.get(key) catch () => null
@@ -80,7 +80,7 @@ export const mailHeld = Layer.effect(DeviceStorage, effect {
       }
       return Option.isSome(platform) ? try platform.value.hold(key) : true
     },
-    effect held(key: string): string | undefined {
+    effect held(key: string): (string | undefined)!! {
       const kept = store.get(heldKeyOf(key)) catch () => undefined
       return kept
     },

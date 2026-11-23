@@ -112,33 +112,33 @@ export const diagnostics = Layer.effect(Diagnostics, effect {
     const mine = asks.newest
     const started = try Clock.currentTimeMillis
     if ((try resident.status()) !== "running") return
-    const answer = try (timeout(resident.json("GET", "/api/status"), STATUS_LIMIT) catch () => undefined)
+    const answer = (timeout(resident.json("GET", "/api/status"), STATUS_LIMIT) catch () => undefined)
     const elapsed = (try Clock.currentTimeMillis) - started
     if (answer === undefined || !mayRecordInference(mine, asks.newest, elapsed)) return
     const status = Option.getOrUndefined(Schema.decodeUnknownOption(ResidentDiagnostics)(answer.data))
     if (status?.cloudInferenceFailure === undefined || status.cloudInferenceFailure === null) return
     try journal.recordInference(status.cloudInferenceFailure)
     const read = try attempt(entries())
-    if (read !== undefined && mine === asks.newest) try (held.send({ type: "logPublished", problems: read.problems }) catch () => undefined)
+    if (read !== undefined && mine === asks.newest) (held.send({ type: "logPublished", problems: read.problems }) catch () => undefined)
   }
 
   return {
     readLog: (explicit: boolean) => within(effect {
       const under = (try held.get()).version
       const read = try attempt(entries())
-      try (held.send({ type: "logRead", under, ok: read !== undefined, problems: read?.problems ?? [] }) catch () => undefined)
+      held.send({ type: "logRead", under, ok: read !== undefined, problems: read?.problems ?? [] }) catch () => undefined
       if (explicit) try askAgent()
     }),
     clearLog: () => within(effect {
-      const begun = try (held.send({ type: "confirmClearLog" }) catch () => undefined)
+      const begun = (held.send({ type: "confirmClearLog" }) catch () => undefined)
       if (begun === undefined) return
       const done = try attempt(journal.clear())
-      try (held.send({ type: "cleared", ok: done !== undefined }) catch () => undefined)
+      held.send({ type: "cleared", ok: done !== undefined }) catch () => undefined
       const read = try attempt(entries())
-      if (read !== undefined) try (held.send({ type: "logPublished", problems: read.problems }) catch () => undefined)
+      if (read !== undefined) (held.send({ type: "logPublished", problems: read.problems }) catch () => undefined)
     }),
     exportReport: (read: DeviceRead) => within(effect {
-      const begun = try (held.send({ type: "beginExport" }) catch () => undefined)
+      const begun = (held.send({ type: "beginExport" }) catch () => undefined)
       if (begun === undefined) return
       const isNative = build.variant !== "browser"
       const facts = isNative ? try attempt(call("AlphaDevice", "diagnosticsFacts", DiagnosticsFacts)) : undefined
@@ -153,17 +153,17 @@ export const diagnostics = Layer.effect(Diagnostics, effect {
         const saved = try attempt(Effect.try(() => saveFile(`alpha-diagnostics-${report.generatedAt.replace(/[:.]/g, "-")}.json`, text)))
         if (saved !== undefined) answer = "Saved"
       }
-      try (held.send({ type: "exportAnswered", answer }) catch () => undefined)
+      held.send({ type: "exportAnswered", answer }) catch () => undefined
     }),
     effect loadLicences() {
-      const begun = try (held.send({ type: "loadLicences" }) catch () => undefined)
+      const begun = (held.send({ type: "loadLicences" }) catch () => undefined)
       if (begun === undefined) return
       const value = try attempt(tryPromise(() => shippedNotices()))
-      try (held.send({ type: "licencesAnswered", notices: noticesOf(value) }) catch () => undefined)
+      held.send({ type: "licencesAnswered", notices: noticesOf(value) }) catch () => undefined
     },
     effect back() {
       if (!(try held.get()).confirmClear) return false
-      const cancelled = try (held.send({ type: "cancelClear" }) catch () => undefined)
+      const cancelled = (held.send({ type: "cancelClear" }) catch () => undefined)
       return cancelled !== undefined
     },
   }

@@ -139,9 +139,10 @@ export const enrollmentService = Layer.effect(DeviceEnrollment, effect {
 
   effect function probe() {
     const asked = effect {
-      const answers = try all(PRESENTATION_PLUGINS.map((plugin) => Effect.flatMap(native.invoke(plugin, "workflowPresentationCapabilities", {}), Schema.decodeUnknownEffect(PresentationAnswer))), { concurrency: "unbounded" })
+      const answers = all(PRESENTATION_PLUGINS.map((plugin) => Effect.flatMap(native.invoke(plugin, "workflowPresentationCapabilities", {}), Schema.decodeUnknownEffect(PresentationAnswer))), { concurrency: "unbounded" }) catch () => undefined
+      if (answers === undefined) return "older" as const
       return answers.every((answer) => answer.protocol === 2) ? "ready" as const : "older" as const
-    } catch () => "older" as const
+    }
     return timeout(asked, PRESENTATION_TIMEOUT) catch () => "stalled" as const
   }
 
@@ -298,7 +299,7 @@ export const enrollmentService = Layer.effect(DeviceEnrollment, effect {
     if (enabled(try machine.get(), { type: "disconnect" })) try send({ type: "disconnect" })
   }
 
-  effect function follow() {
+  effect function follow(): void!! {
     let last = ""
     for try (const r of control.changes) {
       if (r.phase !== "Connected") {

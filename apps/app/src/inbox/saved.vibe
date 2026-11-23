@@ -82,7 +82,9 @@ export const layer = Layer.effect(SavedMail, effect {
   const linkMemory = new Map<string, MailBody["links"]>()
 
   const store: SavedMailboxStore = {
-    read: (name: string) => kv.get(name) catch effect (cause) => { throw new MailStoreFailed({ cause }) },
+    effect read(name: string) {
+      return kv.get(name) catch effect (cause) => { throw new MailStoreFailed({ cause }) }
+    },
     effect compareExchange(name: string, expected: string | undefined, next: string | undefined) {
       const actual = kv.get(name) catch effect (cause) => { throw new MailStoreFailed({ cause }) }
       if (actual !== expected) return "conflict" as const

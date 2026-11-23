@@ -33,12 +33,12 @@ const DIALED: Record<string, HandoffAnswer> = { DialHandedOff: "HandoffOpened", 
 
 /** The owner's tap places the call through Telecom; without the dialer role or the call grant the number opens in the system dial screen. */
 export effect function placeOwnerCall(number: string) {
-  const placed = try (bridgeCall("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => failure)
+  const placed = (bridgeCall("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => failure)
   const answer: PlaceAnswer = placed instanceof TelephonyRefused
     ? (placed.code === undefined ? "PlaceLost" : "TelecomUnavailable")
     : "placeStatus" in placed ? PLACED[placed.placeStatus] ?? "TelecomFailed" : "TelecomUnavailable"
   if (answer !== "RoleRequired" && answer !== "GrantRequired") return callOutcome(answer, "NoHandoff")
-  const dialed = try (bridgeCall("dial", (c) => c.phone.dial(number)) catch () => undefined)
+  const dialed = (bridgeCall("dial", (c) => c.phone.dial(number)) catch () => undefined)
   return callOutcome(answer, dialed === undefined || !("dialStatus" in dialed) ? "HandoffFailed" : DIALED[dialed.dialStatus] ?? "HandoffFailed")
 }
 
@@ -69,7 +69,7 @@ export const phoneViewLayer = Layer.effect(PhoneView, effect {
   const bridgeCall = callerOf(bridges)
   const phone = try PhoneMachine
   const front = try frontChanges()
-  const tell = (event: PhoneEvent) => phone.send(event) catch () => undefined
+  const tell = effect (event: PhoneEvent) => phone.send(event) catch () => undefined
 
   effect function readRecents(request: boolean) {
     let status = try bridgeCall("status", (c) => c.phone.status())
@@ -83,7 +83,7 @@ export const phoneViewLayer = Layer.effect(PhoneView, effect {
 
   effect function read() {
     const { epoch, askAccess } = try phone.get()
-    const answer: RecentsAnswer = try (readRecents(askAccess) catch (failure) => refusedRecents(failure))
+    const answer: RecentsAnswer = (readRecents(askAccess) catch (failure) => refusedRecents(failure))
     try tell({ type: "recentsAnswered", ticket: epoch, answer, at: try Clock.currentTimeMillis })
   }
 

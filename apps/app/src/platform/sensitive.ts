@@ -6,7 +6,7 @@ const SENSITIVE =
 const words = (value: string) => value.replace(/([a-z\d])([A-Z])/g, "$1 $2").replace(/([A-Z])([A-Z][a-z])/g, "$1 $2");
 const normalize = (value: string) => value.normalize("NFKC").replace(/[​-‍﻿]/g, "");
 
-/** Credential prose or an unlabelled six-to-eight digit code. */
+/** Credential prose or an unlabelled six-to-eight digit code. @throws {never} */
 export function sensitiveText(text: string): boolean {
   const value = normalize(text);
   return SENSITIVE.test(value) || SENSITIVE.test(words(value)) || /(?:^|\D)\d{6,8}(?:\D|$)/.test(value);
