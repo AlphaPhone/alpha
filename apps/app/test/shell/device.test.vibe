@@ -4,7 +4,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Machine as NavigationMachine } from "../../gen/shell__navigation.effect.vibe"
 import { Machine as PermissionsMachine } from "../../gen/shell__permissions.effect.vibe"
-import { backOf, grantOf, noticeAfter } from "../../gen/shell__permissions.ts"
+import { backOf, grantOf, noticeAfter } from "../../gen/shell__permissions.effect.vibe"
 import { CrashJournal } from "../../src/platform/crash-journal.vibe"
 import { DeviceStorage } from "../../src/platform/device-storage.vibe"
 import { buildInfo, fakeNative, fakeResident } from "../../src/platform/layers.vibe"
@@ -124,7 +124,8 @@ describe("The keyguard and the assistant surface (spec/assistant/index.md, \"The
         const surface = (try (try Foreground).get()).assistantSurface
         try navigation.back()
         try TestClock.adjust("1 millis")
-        try Effect.try(() => assert.deepStrictEqual([host, surface, (try machine.get()).ended, closedAssistant], ["AssistantSurface", true, true, 1]))
+        const now0 = try machine.get()
+        try Effect.try(() => assert.deepStrictEqual([host, surface, now0.ended, closedAssistant], ["AssistantSurface", true, true, 1]))
       }
     }
   })

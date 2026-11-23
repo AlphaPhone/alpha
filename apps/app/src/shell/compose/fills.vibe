@@ -16,6 +16,7 @@ import { mapsRelayPort } from "../../maps/agent.vibe"
 import type { ResidentHeaders } from "../../platform/resident.vibe"
 import { MapsHandoff } from "../../maps/handoff.vibe"
 import { CallWatch } from "../../telephony/call-bar.vibe"
+import { TelephonyBridges } from "../../telephony/bridges.vibe"
 import { messagesShareTarget } from "../../telephony/share.vibe"
 import { replyChanges } from "../../workflows/layer.vibe"
 import { WorkflowClockPort } from "../../workflows/ports.vibe"
@@ -77,12 +78,13 @@ export const fillsLive = Layer.effectDiscard(effect {
 
   const email = try emailShareTarget
   const messages = try messagesShareTarget
+  const bridges = try TelephonyBridges
   const ask = try askAlphaTarget()
   const share: FileShareTargets.Shape = {
     emailAccount: () => email.emailAccount(),
     email: (...args: Parameters<FileShareTargets.Shape["email"]>) => email.email(...args),
     get messages() { return messages.messages },
-    message: (...args: Parameters<FileShareTargets.Shape["message"]>) => messages.message(...args),
+    message: (...args: Parameters<FileShareTargets.Shape["message"]>) => Effect.provideService(messages.message(...args), TelephonyBridges, bridges),
     get ask() { return ask.ask },
     attachToChat: (...args: Parameters<FileShareTargets.Shape["attachToChat"]>) => ask.attachToChat(...args),
   }

@@ -28,7 +28,7 @@ describe("Notifications (spec/clock/notifications.md, \"Story: Act on exactly th
       "AlphaNotifications.dismiss": () => ({}),
       "AlphaNotifications.clear": (args) => ({ outcomes: (args as { items: unknown[] }).items.map(() => ({ status: "requested" })) }),
     })
-    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(phone.layer, fakeAssistant().layer)) {
       const notifications = try Notifications
       const shade = try ShadeMachine
       try notifications.open()
@@ -61,11 +61,11 @@ describe("Asking about a notice (spec/clock/notifications.md, \"Story: Ask Alpha
     const older = fakePhone({ "AlphaNotifications.list": () => ({ items, scope: "device" }) })
     let consumed: boolean[] = []
     let unsupported: boolean[] = []
-    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(phone.layer, fakeAssistant().layer)) {
       const notifications = try Notifications
       consumed = [try notifications.consume("reminder-1"), try notifications.consume("reminder-1"), try notifications.consume("missing")]
     }
-    provide Layer.provideMerge(notificationsLayer, machines), older.layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(older.layer, fakeAssistant().layer)) {
       const notifications = try Notifications
       unsupported = [try notifications.consume("reminder-1"), try notifications.consume("reminder-1")]
     }
@@ -87,7 +87,7 @@ describe("Notification taps (spec/clock/canonicalTaps.md, \"Story: Open the view
       },
     })
     const navigator = fakeNavigation()
-    provide Layer.provideMerge(canonicalTapsLayer, machines), phone.layer, navigator.layer, fakeAssistant().layer, session("org:owner-1") {
+    provide Layer.provideMerge(Layer.provideMerge(canonicalTapsLayer, machines), Layer.mergeAll(phone.layer, navigator.layer, fakeAssistant().layer, session("org:owner-1"))) {
       const taps = try CanonicalTaps
       try taps.wake()
       try taps.wake()
@@ -106,7 +106,7 @@ describe("Notification taps (spec/clock/canonicalTaps.md, \"Story: Open the view
       "AlphaNotifications.acknowledgeCanonical": () => ({ ok: true }),
     })
     const navigator = fakeNavigation()
-    provide Layer.provideMerge(canonicalTapsLayer, machines), phone.layer, navigator.layer, fakeAssistant(false, true).layer, session("org:owner-1") {
+    provide Layer.provideMerge(Layer.provideMerge(canonicalTapsLayer, machines), Layer.mergeAll(phone.layer, navigator.layer, fakeAssistant(false, true).layer, session("org:owner-1"))) {
       const taps = try CanonicalTaps
       try taps.wake()
       try Effect.try(() => assert.deepStrictEqual(
@@ -126,7 +126,7 @@ describe("Notification taps (spec/clock/canonicalTaps.md, \"Story: Open the view
     })
     const runs = fakeRuns()
     const navigation = fakeNavigation()
-    provide Layer.provideMerge(workflowNoticesLayer, machines), phone.layer, runs.layer, navigation.layer, fakeAssistant().layer, session("org:owner-1") {
+    provide Layer.provideMerge(Layer.provideMerge(workflowNoticesLayer, machines), Layer.mergeAll(phone.layer, runs.layer, navigation.layer, fakeAssistant().layer, session("org:owner-1"))) {
       const notices = try WorkflowNotices
       try notices.check()
       consumeOk = true
@@ -150,7 +150,7 @@ describe("Deletion Undo (spec/clock/deletions.md, \"Story: Undo a reviewed delet
         return { phase: "undone" }
       },
     })
-    provide Layer.provideMerge(deletionsLayer, machines), phone.layer, origins.layer, session("org:owner-1") {
+    provide Layer.provideMerge(Layer.provideMerge(deletionsLayer, machines), Layer.mergeAll(phone.layer, origins.layer, session("org:owner-1"))) {
       const deletions = try Deletions
       const notice = try DeletionsMachine
       try deletions.refresh()
@@ -178,7 +178,7 @@ describe("Notification mirror (spec/clock/mirror.md, \"Story: Choose which apps 
       "AlphaNotifications.clearNotificationHistory": () => ({}),
       "AlphaNotifications.notificationHistory": () => ({ items: history }),
     })
-    provide Layer.provideMerge(mirrorLayer, machines), phone.layer {
+    provide Layer.provideMerge(Layer.provideMerge(mirrorLayer, machines), phone.layer) {
       const mirror = try Mirror
       const shown = try MirrorMachine
       try mirror.refresh()
@@ -205,7 +205,7 @@ describe("Notification mirror (spec/clock/mirror.md, \"Story: Choose which apps 
       "AlphaNotifications.crossAppStatus": () => refuse("unavailable"),
       "AlphaNotifications.status": () => ({ appEnabled: true, permissionGranted: true, channels: [{ id: "reminders", blocked: false, groupBlocked: true }] }),
     })
-    provide Layer.provideMerge(mirrorLayer, machines), phone.layer {
+    provide Layer.provideMerge(Layer.provideMerge(mirrorLayer, machines), phone.layer) {
       const mirror = try Mirror
       const shown = try MirrorMachine
       try mirror.refresh()
@@ -221,7 +221,7 @@ describe("Notice leases (spec/clock/notices.md, \"Story: Stay where I am when I 
       "AlphaNotifications.list": () => ({ items: [row("reminder-1", "v1")], scope: "device" }),
       "AlphaNotifications.open": () => ({}),
     })
-    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(phone.layer, fakeAssistant().layer)) {
       const notifications = try Notifications
       const notices = try NoticesMachine
       try notifications.open()
@@ -239,7 +239,7 @@ describe("Retained data (spec/clock/notices.md, \"Story: Be told my data was kep
   it.effect("say plainly that unreadable data was kept, one notice at a time, with no recovery outside test mocks (spec/clock/notices.md, \"Story: Be told my data was kept\")", () => effect {
     keepUnreadable("Timers", "device/clock/timers")
     keepUnreadable("Alarms", "device/clock/alarms")
-    provide Layer.provideMerge(recoveryLayer, machines), memoryStore, build("launcher") {
+    provide Layer.provideMerge(Layer.provideMerge(recoveryLayer, machines), Layer.mergeAll(memoryStore, build("launcher"))) {
       const recovery = try ClockRecovery
       const notices = try NoticesMachine
       try recovery.announce()
@@ -260,7 +260,7 @@ describe("Retained data (spec/clock/notices.md, \"Story: Be told my data was kep
 describe("Developer recovery (spec/clock/notices.md, \"Story: Recover unreadable data while developing\")", () => {
   it.effect("download the kept bytes and reset that one store only after a confirmation (spec/clock/notices.md, \"Story: Recover unreadable data while developing\")", () => effect {
     keepUnreadable("Stopwatch", "device/clock/stopwatch")
-    provide Layer.provideMerge(recoveryLayer, machines), memoryStore, build("browser", true) {
+    provide Layer.provideMerge(Layer.provideMerge(recoveryLayer, machines), Layer.mergeAll(memoryStore, build("browser", true))) {
       const store = try KeyValueStore.KeyValueStore
       const recovery = try ClockRecovery
       const notices = try NoticesMachine

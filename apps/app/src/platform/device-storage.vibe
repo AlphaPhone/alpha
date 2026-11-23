@@ -60,7 +60,7 @@ export const deviceStorageLive = Layer.effect(DeviceStorage, effect {
     effect signedOut() {
       device.send({ type: "signedOut" }) catch () => undefined
     },
-    effect hold(key: string): boolean {
+    effect hold(key: string): boolean!! {
       const copy = heldKeyOf(key)
       const earlier = store.get(copy) catch () => null
       const value = store.get(key) catch () => null
@@ -72,7 +72,7 @@ export const deviceStorageLive = Layer.effect(DeviceStorage, effect {
       device.send({ type: "corruptFound", key }) catch () => undefined
       return true
     },
-    effect held(key: string): string | undefined {
+    effect held(key: string): (string | undefined)!! {
       const kept = store.get(heldKeyOf(key)) catch () => undefined
       return kept
     },

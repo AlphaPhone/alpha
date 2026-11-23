@@ -3,7 +3,7 @@ import { Native } from "../platform/native.vibe"
 import { assistantPeer, navigationPeer } from "./peers.vibe"
 import { Machine as TapsMachine } from "../../gen/clock__reminderTaps.effect.vibe"
 import { ReminderListing, ReminderTap, ReminderTarget, SurfaceInfo } from "./native.schema.vibe"
-import { DAILY, call, command } from "./plugins.vibe"
+import { DAILY, nativeCalls } from "./plugins.vibe"
 import { Reminders } from "./reminders.vibe"
 import { pageVisible } from "./page.ts"
 
@@ -39,11 +39,12 @@ export service ReminderTaps {
 
 /** Reminder taps over the store's tap custody, opening Reminders through the shell's navigator. */
 export const reminderTapsLayer = Layer.effect(ReminderTaps, effect {
+  const { call, command } = try nativeCalls()
   const taps = try TapsMachine
   const navigator = try navigationPeer()
   const composer = try assistantPeer()
   const asking = try Ref.make<(ReminderQuestion & { readonly token: string; readonly target: Target }) | undefined>(undefined)
-  const step = (event: Parameters<typeof taps.send>[0]) => taps.send(event) catch () => undefined
+  const step = effect (event: Parameters<typeof taps.send>[0]) => taps.send(event) catch () => undefined
 
   effect function pending() {
     return call(DAILY, "pendingReminderTap", ReminderTap) catch () => undefined
@@ -52,20 +53,20 @@ export const reminderTapsLayer = Layer.effect(ReminderTaps, effect {
   effect function run() {
     while ((try taps.get()).stage === "TapReading") {
       const tap = try pending()
-      const read = step({ type: "pendingRead", token: tap?.token ?? "", retained: tap?.retained === true && tap.target !== undefined, question: tap?.question === true })
+      const read = try step({ type: "pendingRead", token: tap?.token ?? "", retained: tap?.retained === true && tap.target !== undefined, question: tap?.question === true })
       if (read?.stage !== "TapListing" || tap?.target === undefined) continue
       const listed = call(DAILY, "listReminders", ReminderListing) catch () => undefined
       const row = listed?.reminders.find((r) => sameTarget(r.target, tap.target))
-      if (step({ type: "targetListed", found: row !== undefined })?.stage !== "TapConfirming" || row === undefined) continue
+      if ((try step({ type: "targetListed", found: row !== undefined }))?.stage !== "TapConfirming" || row === undefined) continue
       const again = try pending()
-      const confirmed = step({ type: "confirmed", token: again?.token ?? "", retained: again?.retained === true && sameTarget(again.target, tap.target) })
+      const confirmed = try step({ type: "confirmed", token: again?.token ?? "", retained: again?.retained === true && sameTarget(again.target, tap.target) })
       if (confirmed?.stage !== "TapOpened") continue
       try navigator.open("reminders", row.id)
       const at = try navigator.shown()
-      const shown = step({ type: "detailShown", visible: at.app === "reminders" && at.route === row.id })
+      const shown = try step({ type: "detailShown", visible: at.app === "reminders" && at.route === row.id })
       if (shown?.stage === "TapConsuming") {
         const ok = (command(DAILY, "consumeReminderTap", { token: confirmed.captured }) catch () => false) !== false
-        step({ type: "consumeSettled", ok })
+        try step({ type: "consumeSettled", ok })
       } else if (shown?.stage === "TapQuestion") {
         try Ref.set(asking, { id: row.id, title: row.title, text: row.body, token: confirmed.captured, target: row.target })
         return
@@ -78,11 +79,11 @@ export const reminderTapsLayer = Layer.effect(ReminderTaps, effect {
       const info = call(DAILY, "surfaceInfo", SurfaceInfo) catch () => undefined
       if (info?.reminderTapVersion !== 1) return
       const before = try taps.get()
-      step({ type: "check", explicit })
+      try step({ type: "check", explicit })
       if (before.stage === "TapIdle") try run()
     },
-    interact: () => step({ type: "interact" }),
-    setBlocked: (blocked: boolean) => step({ type: "setBlocked", blocked }),
+    interact: () => asVoid(step({ type: "interact" })),
+    setBlocked: (blocked: boolean) => asVoid(step({ type: "setBlocked", blocked })),
     effect question() {
       const open = try Ref.get(asking)
       return open === undefined ? undefined : { id: open.id, title: open.title, text: open.text }
@@ -94,10 +95,10 @@ export const reminderTapsLayer = Layer.effect(ReminderTaps, effect {
       const listed = call(DAILY, "listReminders", ReminderListing) catch () => undefined
       const unchanged = again?.token === open.token && again.question === true && sameTarget(again.target, open.target) &&
         listed?.reminders.some((r) => sameTarget(r.target, open.target) && r.title === open.title && r.body === open.text) === true
-      const closed = step({ type: "questionClosed", compose: draft !== undefined && draft.trim() !== "", unchanged })
+      const closed = try step({ type: "questionClosed", compose: draft !== undefined && draft.trim() !== "", unchanged })
       if (closed?.stage === "TapConsuming") {
         const ok = (command(DAILY, "consumeReminderTap", { token: open.token }) catch () => false) !== false
-        step({ type: "consumeSettled", ok })
+        try step({ type: "consumeSettled", ok })
         if (ok && draft !== undefined) try composer.draft(draft.trim())
       } else {
         command(DAILY, "releaseReminderQuestion", { token: open.token }) catch () => undefined
@@ -108,7 +109,7 @@ export const reminderTapsLayer = Layer.effect(ReminderTaps, effect {
       const tap = try pending()
       if (tap?.token === undefined) return
       const dismissed = (command(DAILY, "dismissReminderTap", { token: tap.token }) catch () => false) !== false
-      if (dismissed) step({ type: "dismissBanner" })
+      if (dismissed) try step({ type: "dismissBanner" })
     },
   }
 })

@@ -7,7 +7,7 @@ import { Native } from "../platform/native.vibe"
 import { BuildFacts } from "./native.schema.vibe"
 import { Navigation } from "./navigation.vibe"
 import { Notices } from "./notices.vibe"
-import { appRendered, errorClass, pageEvents, reloadPage, takeOverFromDialogs } from "./page.ts"
+import { appRendered, errorClass, failureOf, pageEvents, reloadPage, takeOverFromDialogs } from "./page.ts"
 
 /** Recovery from a failed render, for the shell's error boundaries. */
 export service Recovery {
@@ -54,8 +54,8 @@ export const recoveryLive = Layer.effect(Recovery, effect {
     try takeOver()
   }
 
-  fork.scoped (effect { for try (const event of pageEvents("error")) try uncaught(event instanceof ErrorEvent ? event.error : event) })
-  fork.scoped (effect { for try (const event of pageEvents("unhandledrejection")) try uncaught(event instanceof PromiseRejectionEvent ? event.reason : event) })
+  fork.scoped (effect { for try (const event of pageEvents("error")) try uncaught(failureOf(event)) })
+  fork.scoped (effect { for try (const event of pageEvents("unhandledrejection")) try uncaught(failureOf(event)) })
   if (build.info.variant !== "browser" && (try native.available("DeviceApps"))) {
     const facts = effect { return try Schema.decodeUnknownEffect(BuildFacts)(try native.invoke("ElizaSystem", "getBuildInfo")) } catch () => ({ launcher: false })
     try sendTo({ type: "escapeAvailable", available: facts.launcher })

@@ -22,19 +22,29 @@ export error MalformedReply { plugin: string; method: string }
 export type PluginFailure = NativeUnavailable | NativeFailed | MalformedReply
 
 /** One call of `method` on `plugin`, its reply decoded by `shape`. */
-export effect function call<A>(plugin: string, method: string, shape: Schema.ConstraintDecoder<A>, args?: unknown): A!PluginFailure {
+export effect function call<A>(plugin: string, method: string, shape: Schema.ConstraintDecoder<A>, args?: unknown): A!PluginFailure!Native {
   const native = try Native
   const raw = try native.invoke(plugin, method, args)
   return try mapError(Schema.decodeUnknownEffect(shape)(raw), () => new MalformedReply({ plugin, method }))
 }
 
 /** One call whose reply carries nothing Clock reads. */
-export effect function command(plugin: string, method: string, args?: unknown): void!(NativeUnavailable | NativeFailed) {
+export effect function command(plugin: string, method: string, args?: unknown): void!(NativeUnavailable | NativeFailed)!Native {
   const native = try Native
   try native.invoke(plugin, method, args)
 }
 
 /** Whether `plugin` is registered on this device. */
-export effect function present(plugin: string): boolean {
+export effect function present(plugin: string): boolean!!Native {
   return try (try Native).available(plugin)
+}
+
+/** `call`, `command` and `present` over the Native a layer was built with, so its services need nothing when called. */
+export effect function nativeCalls() {
+  const native = try Native
+  return {
+    call: <A>(plugin: string, method: string, shape: Schema.ConstraintDecoder<A>, args?: unknown) => Effect.provideService(call(plugin, method, shape, args), Native, native),
+    command: (plugin: string, method: string, args?: unknown) => Effect.provideService(command(plugin, method, args), Native, native),
+    present: (plugin: string) => Effect.provideService(present(plugin), Native, native),
+  }
 }

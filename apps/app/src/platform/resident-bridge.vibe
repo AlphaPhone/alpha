@@ -121,6 +121,9 @@ const contentTypeOf = (headers: Readonly<Record<string, string>>) =>
 
 type Heard = AgentStreamData | AgentStreamEnd | { readonly id: string; readonly kind: "rejected" | "changed" }
 
+/** One frame as `@elizaos/agent/client` reads it, keeping its literal kind. */
+const frame = (value: RuntimeStreamFrame): RuntimeStreamFrame => value
+
 /** One streamed reply through the agent service, carrying the admitted device `headers`, as the frames `@elizaos/agent/client` reads: the listeners first, then the request, then what the service posts under its id. */
 export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body: unknown, headers: ResidentHeaders = {}) {
   const relay = try Effect.provide(effect { return try Relay }, relayMachine())
@@ -143,7 +146,7 @@ export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body:
   if (listening === undefined) {
     try hear({ type: "abort", timedOut: false })
     try hear({ type: "finish" })
-    yield { kind: "error" }
+    yield frame({ kind: "error" })
     return
   }
   try hear({ type: "requestStream" })
@@ -165,31 +168,31 @@ export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body:
     ended = true
     if (next === undefined) {
       try hear({ type: "abort", timedOut: true })
-      yield { kind: "error" }
+      yield frame({ kind: "error" })
     } else if (next.kind === "head") {
       const after = try hear({ type: "response", httpStatus: next.status, eventStream: contentTypeOf(next.headers).startsWith("text/event-stream") })
       if (after.outcome === "Open") {
-        yield { kind: "head", status: next.status, headers: next.headers }
+        yield frame({ kind: "head", status: next.status, headers: next.headers })
         ended = false
       } else {
         refusal = refusalOfFailure[after.failure]
-        if (refusal === undefined) yield { kind: "error" }
+        if (refusal === undefined) yield frame({ kind: "error" })
       }
     } else if (next.kind === "chunk") {
       const bytes = bytesOfBase64(next.dataBase64)
       const after = try hear({ type: "chunk", byteCount: bytes === undefined ? -1 : bytes.length })
       if (after.outcome === "Open" && bytes !== undefined) {
-        yield { kind: "chunk", data: bytes }
+        yield frame({ kind: "chunk", data: bytes })
         ended = false
       } else {
-        yield { kind: "error" }
+        yield frame({ kind: "error" })
       }
     } else if (next.kind === "end" || next.kind === "error") {
       const after = try hear({ type: "complete", withError: next.kind === "error" })
-      yield after.outcome === "Completed" ? { kind: "end" } : { kind: "error" }
+      yield frame(after.outcome === "Completed" ? { kind: "end" } : { kind: "error" })
     } else if (next.kind === "aborted" || next.kind === "changed") {
       try hear({ type: "abort", timedOut: false })
-      yield { kind: next.kind === "aborted" ? "aborted" : "error" }
+      yield frame({ kind: next.kind === "aborted" ? "aborted" : "error" })
     } else {
       const before = try relay.get()
       const after = next.kind === "failed" && next.code === "Busy" && !before.responded
@@ -198,13 +201,13 @@ export effect function* relayFrames(agent: ElizaAgentPlugin, path: string, body:
           ? try hear({ type: "requestRejected" })
           : try hear({ type: "abort", timedOut: false })
       refusal = refusalOfFailure[after.failure]
-      if (refusal === undefined) yield { kind: "error" }
+      if (refusal === undefined) yield frame({ kind: "error" })
     }
   }
   if (refusal !== undefined) {
-    yield { kind: "head", status: refusal.status, headers: { "content-type": "application/json" } }
-    yield { kind: "chunk", data: jsonBytes({ error: refusal.error, code: refusal.code }) }
-    yield { kind: "end" }
+    yield frame({ kind: "head", status: refusal.status, headers: { "content-type": "application/json" } })
+    yield frame({ kind: "chunk", data: jsonBytes({ error: refusal.error, code: refusal.code }) })
+    yield frame({ kind: "end" })
   }
   try hear({ type: "finish" })
 }

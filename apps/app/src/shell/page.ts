@@ -321,3 +321,13 @@ export function errorClass(error: unknown): string {
   if (error instanceof Error) return /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(error.name) ? error.name : "Error";
   return error === null ? "null" : typeof error;
 }
+
+/**
+ * What a page `error` or `unhandledrejection` event says went wrong: the error or rejection reason it carries, else the event.
+ * @throws {never}
+ */
+export function failureOf(event: unknown): unknown {
+  if (typeof ErrorEvent !== "undefined" && event instanceof ErrorEvent) return event.error;
+  if (typeof PromiseRejectionEvent !== "undefined" && event instanceof PromiseRejectionEvent) return event.reason;
+  return event;
+}

@@ -17,7 +17,7 @@ describe("Clock handoff (spec/clock/handoff.md, \"Story: Ask Clock for an alarm 
       "DailyApps.surfaceInfo": () => ({ clockRepeatDaysVersion: 1 }),
       "DailyApps.clockHandoff": (args) => ({ action: (args as { action: string }).action, status: "opened", message: "Clock request sent. Check the Clock app; Alpha cannot confirm an alarm was changed." }),
     })
-    provide Layer.provideMerge(handoffLayer, machines), phone.layer, build("launcher") {
+    provide Layer.provideMerge(Layer.provideMerge(handoffLayer, machines), Layer.mergeAll(phone.layer, build("launcher"))) {
       const handoff = try ClockHandoff
       const draft = try HandoffMachine
       const history = try HistoryMachine
@@ -44,7 +44,7 @@ describe("Clock handoff (spec/clock/handoff.md, \"Story: Ask Clock for an alarm 
   // spec/clock/handoff.md, "A repeating alarm is reviewed only when the phone's Clock handoff carries repeat days"
   it.effect("refuse a repeat the phone's Clock cannot take, and simulate only with test mocks (spec/clock/handoff.md, \"Story: Try the Clock screen without opening Clock\")", () => effect {
     const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({}), "DailyApps.clockHandoff": () => ({ action: "show", status: "opened" }) })
-    provide Layer.provideMerge(handoffLayer, machines), phone.layer, build("launcher", true) {
+    provide Layer.provideMerge(Layer.provideMerge(handoffLayer, machines), Layer.mergeAll(phone.layer, build("launcher", true))) {
       const handoff = try ClockHandoff
       const draft = try HandoffMachine
       try handoff.restore()
@@ -72,7 +72,7 @@ describe("Agent Clock review (spec/clock/agentReview.md, \"Story: Let the agent 
       "AlphaActionJournal.confirmClock": () => ({ result: { action: "set", status: "opened" } }),
       "AlphaActionJournal.cancelClock": () => ({}),
     })
-    provide agentReviewLayer, phone.layer {
+    provide Layer.provideMerge(agentReviewLayer, phone.layer) {
       const review = try ClockReview
       const identity = { scope: "agent", proposalId: "p1", operationId: "op_1" }
       const status = try review.review(identity, { action: "set", hour: 7, minute: 0, timeZone: "Europe/Paris" })
@@ -93,7 +93,7 @@ describe("Agent Clock operations (spec/clock/agentReview.md, \"Story: Let the ag
       "AlphaActionJournal.confirmClock": () => ({ result: { action: "show", status: "opened" } }),
       "AlphaActionJournal.cancelClock": () => ({}),
     })
-    provide agentReviewLayer, phone.layer, fakeHost(), fakeReminders().layer {
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders().layer)) {
       const ports = try operationPorts
       const operation = { type: "clock_handoff", action: "show" }
       const at = { proposalId: "p1", operationId: "op_1", attemptId: 1 }
@@ -113,7 +113,7 @@ describe("Agent Clock operations (spec/clock/agentReview.md, \"Story: Let the ag
       "DailyApps.selectedReminder": () => ({ ...target, revision: "c".repeat(64) }),
       "DailyApps.operateReminder": () => ({ status: "succeeded" }),
     })
-    provide agentReviewLayer, phone.layer, fakeHost(), fakeReminders().layer {
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders().layer)) {
       const ports = try operationPorts
       const answer = try promise(() => ports.execute({ type: "reminder_complete", target }, { proposalId: "p2", operationId: "op_2", attemptId: 1 }))
       try Effect.try(() => assert.deepStrictEqual(
@@ -131,7 +131,7 @@ describe("What Clock answered (spec/clock/vocabulary.md, \"Story: Hear only what
       "DailyApps.surfaceInfo": () => ({}),
       "DailyApps.clockHandoff": () => ({ action: answer, status: "opened" }),
     })
-    provide Layer.provideMerge(Layer.provideMerge(workflowClockPort, handoffLayer), machines), phone.layer, build("launcher") {
+    provide Layer.provideMerge(Layer.provideMerge(Layer.provideMerge(workflowClockPort, handoffLayer), machines), Layer.mergeAll(phone.layer, build("launcher"))) {
       const port = try WorkflowClockPort
       const draft = try HandoffMachine
       try port.prepare({ hour: 7, minute: 30, label: "Gym", days: [] })
@@ -151,7 +151,7 @@ describe("What Clock answered (spec/clock/vocabulary.md, \"Story: Hear only what
 describe("Clock handoff history (spec/clock/handoffHistory.md, \"Story: Know what became of my last Clock request after a restart\")", () => {
   it.effect("keep a lost answer as unknown and never send it again without a new review (spec/clock/handoffHistory.md, \"Story: Know what became of my last Clock request after a restart\")", () => effect {
     const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({}), "DailyApps.clockHandoff": () => refuse("The activity was stopped") })
-    provide Layer.provideMerge(handoffLayer, machines), phone.layer, build("aosp") {
+    provide Layer.provideMerge(Layer.provideMerge(handoffLayer, machines), Layer.mergeAll(phone.layer, build("aosp"))) {
       const handoff = try ClockHandoff
       const history = try HistoryMachine
       try handoff.prepare()
@@ -185,7 +185,7 @@ describe("Reminder reads (spec/clock/reminderReads.md, \"Story: Let a workflow r
         { ...row("todo", "todo", "2026-11-22T00:00:00Z"), undated: true },
       ] }),
     })
-    provide agentReviewLayer, phone.layer, fakeHost(), fakeReminders().layer {
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders().layer)) {
       const ports = try operationPorts
       const read = { type: "read_selected_reminders", window: "open_and_completed_today", day: "2026-11-22", timeZone: "UTC", maximumItems: 5 }
       const call = { proposalId: "p3", operationId: "op_3", attemptId: 1 }

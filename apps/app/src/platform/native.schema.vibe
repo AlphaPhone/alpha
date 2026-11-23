@@ -90,7 +90,7 @@ export schema RecoveryReview { readonly kind: "reviewable" | "unavailable"; read
 export schema RecoveryArchive { readonly kind: "archived" | "unavailable"; readonly archivedCount?: Schema.Int }
 
 /** `AlphaActionJournal.get` without a scope: the device-execution entry for one proposal, null when the journal holds none. */
-export schema DeviceJournalRead { readonly entry: unknown }
+export schema DeviceJournalRead { readonly entry: Schema.Unknown }
 
 /** `AlphaActionJournal.edit`: whether the compare-and-set at the expected revision replaced the entry. */
 export schema DeviceJournalEdit { readonly kept: boolean }

@@ -34,7 +34,7 @@ export function DeletionUndo({ notices, onUndo, onDismiss, onRefresh }: Deletion
             {canUndo(notices, row.key) && <Button size="sm" variant="secondary" onClick={() => onUndo(row.key)}><Undo2 aria-hidden className="size-4" />Undo</Button>}
             {notice === "NoticeUncertain" && (
               <>
-                <Button size="icon" variant="ghost" aria-label="Refresh receipt" onClick={onRefresh}><RefreshCw aria-hidden className="size-4" /></Button>
+                <Button size="icon" variant="ghost" aria-label="Check the deletion again" onClick={onRefresh}><RefreshCw aria-hidden className="size-4" /></Button>
                 <Button size="icon" variant="ghost" aria-label="Dismiss outcome" disabled={!canDismissOutcome(notices, row.key)} onClick={() => onDismiss(row.key)}><X aria-hidden className="size-4" /></Button>
               </>
             )}

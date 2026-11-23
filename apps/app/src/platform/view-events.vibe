@@ -44,7 +44,7 @@ export function subscription(agent: ElizaAgentPlugin, control: ResidentControl.S
       const after = feed.send({ type: "subscribeResult", success: admitted !== undefined, matching: admitted?.id === id }) catch () => undefined
       if (after?.phase !== "Ready") Queue.offerUnsafe(queue, { kind: "end" })
     })
-    effect function admitted(value: unknown): unknown | undefined {
+    effect function admitted(value: unknown) {
       if (topic === "view") {
         const frame = Schema.decodeUnknownEffect(ViewInteract)(value) catch () => undefined
         const kind: FrameKind = frame === undefined ? "OtherFrame" : "Interact"

@@ -3,7 +3,7 @@ import { CloudSession, ownerOf } from "../account/layer.vibe"
 import { Machine as ReviewMachine, machine as reviewMachine } from "../../gen/clock__agentReview.effect.vibe"
 import type { HandoffStatus } from "../../gen/clock__vocabulary.ts"
 import { AgentClockOperation, ClockReviewAnswer } from "./native.schema.vibe"
-import { ACTION_JOURNAL, call, command } from "./plugins.vibe"
+import { ACTION_JOURNAL, nativeCalls } from "./plugins.vibe"
 
 const STATUS: Readonly<Record<string, HandoffStatus>> = {
   opened: "ClockOpened",
@@ -37,6 +37,7 @@ const OPERATION_ID = /^[A-Za-z0-9_-]{1,128}$/
 
 /** Reviews over `AlphaActionJournal`, one machine per review. */
 export const agentReviewLayer = Layer.effect(ClockReview, effect {
+  const { call, command } = try nativeCalls()
   const active = try Ref.make<ReadonlyArray<{ readonly retire: void!! }>>([])
 
   effect function reviewOnce(identity: ClockReviewIdentity, operation: unknown) {

@@ -6,7 +6,7 @@ import { WorkflowsPlace } from "../workflows/place.vibe"
 import { ownerPeer, questionPeer, runsPeer } from "./peers.vibe"
 import { Machine as WorkflowNoticesMachine, type NoticeTapSource } from "../../gen/clock__workflowNotices.effect.vibe"
 import { WorkflowTapRecord } from "./native.schema.vibe"
-import { HOSTED_RESULTS, WORKFLOW_NOTICES, call, command } from "./plugins.vibe"
+import { HOSTED_RESULTS, WORKFLOW_NOTICES, nativeCalls } from "./plugins.vibe"
 import { pageVisible } from "./page.ts"
 
 type Tap = typeof WorkflowTapRecord.Type
@@ -61,12 +61,13 @@ export service WorkflowNotices {
 
 /** Workflow notices over `ElizaNotifications` and `AlphaHostedResults`, opening runs through the workflows area and asking through the assistant's question review. */
 export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
+  const { call, command } = try nativeCalls()
   const notices = try WorkflowNoticesMachine
   const runs = try runsPeer()
   const session = try ownerPeer()
   const review = try questionPeer()
   const asking = try Ref.make<Asking | undefined>(undefined)
-  const step = (event: Parameters<typeof notices.send>[0]) => notices.send(event) catch () => undefined
+  const step = effect (event: Parameters<typeof notices.send>[0]) => notices.send(event) catch () => undefined
 
   effect function consumeTap(source: NoticeTapSource, token: string, extra: { readonly unavailable?: true; readonly discard?: true; readonly noticeRevision?: string } = {}) {
     const done = source === "WorkflowTap"
@@ -81,7 +82,7 @@ export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
 
   effect function ask(source: NoticeTapSource, token: string, ownerId: string, notice: Notice | undefined) {
     if (notice === undefined || !pageVisible()) {
-      step({ type: "questionAnswered", ending: notice === undefined ? "ComposeQuestion" : "InterruptQuestion", unchanged: false })
+      try step({ type: "questionAnswered", ending: notice === undefined ? "ComposeQuestion" : "InterruptQuestion", unchanged: false })
       try release(source, token)
       return
     }
@@ -97,34 +98,34 @@ export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
   }
 
   effect function checkOne(source: NoticeTapSource) {
-    step({ type: "tapAnnounced" })
-    if (step({ type: "beginCheck", source })?.stage !== "WReadingTap") return
+    try step({ type: "tapAnnounced" })
+    if ((try step({ type: "beginCheck", source }))?.stage !== "WReadingTap") return
     const tap: Tap | undefined = call(READ[source].plugin, READ[source].pending, WorkflowTapRecord) catch () => undefined
     const owner = try session.owner()
     const sameAccount = owner !== undefined && tap?.ownerId === owner.ownerId && tap.retained !== false
-    const resolved = step({ type: "tapResolved", token: tap?.token ?? "", sameAccount, runId: tap?.runId ?? "", question: tap?.question === true })
+    const resolved = try step({ type: "tapResolved", token: tap?.token ?? "", sameAccount, runId: tap?.runId ?? "", question: tap?.question === true })
     if (resolved === undefined) return
     if (resolved.stage === "WQuestionTap") return try ask(source, resolved.token, owner?.ownerId ?? "", tap?.notice)
     if (resolved.stage === "WOpeningRun") {
       const opened = try runs.open(resolved.runId)
-      step({ type: "runOpened", ok: opened })
+      try step({ type: "runOpened", ok: opened })
     }
     const consuming = try notices.get()
-    if (consuming.stage === "WConsumingTap") step({ type: "tapConsumed", ok: try consumeTap(source, consuming.token, consuming.report === "RunUnavailable" ? { unavailable: true } : {}) })
+    if (consuming.stage === "WConsumingTap") try step({ type: "tapConsumed", ok: try consumeTap(source, consuming.token, consuming.report === "RunUnavailable" ? { unavailable: true } : {}) })
   }
 
   effect function cancel() {
     const open = try Ref.getAndSet(asking, undefined)
     if (open === undefined) return
-    const cancelled = step({ type: "questionAnswered", ending: "CancelQuestion", unchanged: false })
-    if (cancelled?.stage === "WConsumingTap") step({ type: "tapConsumed", ok: try consumeTap(open.source, open.token, { discard: true }) })
+    const cancelled = try step({ type: "questionAnswered", ending: "CancelQuestion", unchanged: false })
+    if (cancelled?.stage === "WConsumingTap") try step({ type: "tapConsumed", ok: try consumeTap(open.source, open.token, { discard: true }) })
     else try release(open.source, open.token)
   }
 
   effect function interrupt() {
     const open = try Ref.getAndSet(asking, undefined)
     if (open === undefined) return
-    step({ type: "questionAnswered", ending: "InterruptQuestion", unchanged: false })
+    try step({ type: "questionAnswered", ending: "InterruptQuestion", unchanged: false })
     try release(open.source, open.token)
     const shown = try review.shown()
     if (shown?.about?.id === open.id) try review.dismiss(shown.id)
@@ -140,7 +141,7 @@ export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
         if ((try notices.get()).generation === before) return
       }
     },
-    viewMoved: () => step({ type: "viewMoved" }),
+    viewMoved: () => asVoid(step({ type: "viewMoved" })),
     effect current(id: string) {
       const open = try Ref.get(asking)
       if (open === undefined || open.id !== id) return undefined
@@ -150,7 +151,7 @@ export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
         owner !== undefined && owner.ownerId === open.ownerId && again.ownerId === open.ownerId
       if (!unchanged) {
         try Ref.set(asking, undefined)
-        step({ type: "questionAnswered", ending: "ComposeQuestion", unchanged: false })
+        try step({ type: "questionAnswered", ending: "ComposeQuestion", unchanged: false })
         try release(open.source, open.token)
         return undefined
       }
@@ -160,13 +161,13 @@ export const workflowNoticesLayer = Layer.effect(WorkflowNotices, effect {
       const open = try Ref.get(asking)
       if (open === undefined || open.id !== id) return false
       try Ref.set(asking, undefined)
-      const answered = step({ type: "questionAnswered", ending: "ComposeQuestion", unchanged: true })
+      const answered = try step({ type: "questionAnswered", ending: "ComposeQuestion", unchanged: true })
       if (answered?.stage !== "WConsumingTap") {
         try release(open.source, open.token)
         return false
       }
       const ok = try consumeTap(open.source, open.token, open.notice.revision === undefined ? {} : { noticeRevision: open.notice.revision })
-      step({ type: "tapConsumed", ok })
+      try step({ type: "tapConsumed", ok })
       return ok
     },
     effect reviewShown(id: string | undefined) {

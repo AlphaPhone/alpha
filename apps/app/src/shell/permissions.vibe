@@ -144,8 +144,8 @@ export const permissionsLive = Layer.effect(Permissions, effect {
   const plain = (access: Access): Reading => ({ access, grant: NO_GRANT })
 
   function bridgeFor(key: Perm): Bridge {
-    const privacy = () => native.invoke("AlphaDevice", "openSettings", { page: "privacy" }) catch () => undefined
-    const quietly = (plugin: string, method: string, args?: unknown) => native.invoke(plugin, method, args) catch () => undefined
+    const privacy = effect () => { native.invoke("AlphaDevice", "openSettings", { page: "privacy" }) catch () => undefined }
+    const quietly = effect (plugin: string, method: string, args?: unknown) => { native.invoke(plugin, method, args) catch () => undefined }
     if (!onDevice) {
       const name = BROWSER_NAMES[key]
       return {
@@ -251,8 +251,7 @@ export const permissionsLive = Layer.effect(Permissions, effect {
     }
   }
 
-  const raw = store.get(PROGRESS_KEY) catch () => undefined
-  const text = Option.isOption(raw) ? Option.getOrUndefined(raw) : raw
+  const text = store.get(PROGRESS_KEY) catch () => undefined
   const kept = try decodeStored(text, Schema.decodeUnknownEffect(SavedProgress))
   const earlier = kept !== undefined || typeof text === "string" ? undefined : legacyProgress(
     try decodeStored(storedValue(LEGACY_PROGRESS_KEY), Schema.decodeUnknownEffect(LegacyWalkthroughProgress)),

@@ -26,7 +26,7 @@ describe("Reminder cards (spec/clock/agentReview.md)", () => {
       "Does not repeat.",
     ]))
     try Effect.try(() => assert.match(applied, /10:52:17\.581 PM PDT/))
-    try Effect.try(() => assert.doesNotMatch(card.detail, /:\d\d:\d\d|\.\d{3}/))
+    try Effect.try(() => assert.notMatch(card.detail, /:\d\d:\d\d|\.\d{3}/))
   })
 
   it.effect("a body that only repeats the title is dropped, and an update that keeps the timing says so", () => effect {

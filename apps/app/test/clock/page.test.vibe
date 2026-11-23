@@ -26,7 +26,7 @@ describe("Reminder page (spec/clock/reminderPage.md, \"Story: Step back out of w
       "DailyApps.surfaceInfo": () => ({ reminderTimingVersion: 2, reminderTodoVersion: 1 }),
       "DailyApps.listReminders": () => ({ reminders: [listed] }),
     })
-    provide Layer.provideMerge(page, machines), phone.layer, fakeNavigation().layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(page, machines), Layer.mergeAll(phone.layer, fakeNavigation().layer, fakeAssistant().layer)) {
       const pages = try RemindersPage
       const reminders = try Reminders
       const machine = try PageMachine
@@ -61,7 +61,7 @@ describe("Reminder page (spec/clock/reminderPage.md, \"Story: Step back out of w
       "DailyApps.surfaceInfo": () => ({ reminderTimingVersion: 2 }),
       "DailyApps.listReminders": () => ({ reminders: [] }),
     })
-    provide Layer.provideMerge(page, machines), phone.layer, fakeNavigation().layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(page, machines), Layer.mergeAll(phone.layer, fakeNavigation().layer, fakeAssistant().layer)) {
       const pages = try RemindersPage
       try (try Reminders).enter()
       try pages.show("gone")
@@ -74,7 +74,7 @@ describe("Reminder page (spec/clock/reminderPage.md, \"Story: Step back out of w
 describe("Clock Back (spec/clock/handoff.md, \"Story: Ask Clock for an alarm after I review it\")", () => {
   it.effect("retire an open Clock review on Back, and leave Back to the shell with none open (spec/clock/handoff.md, \"Preparing shows the exact request with the phone's time zone; leaving, Back or hiding retires it\")", () => effect {
     const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({}) })
-    provide Layer.provideMerge(handoffLayer, machines), phone.layer, build("launcher") {
+    provide Layer.provideMerge(Layer.provideMerge(handoffLayer, machines), Layer.mergeAll(phone.layer, build("launcher"))) {
       const handoff = try ClockHandoff
       const draft = try HandoffMachine
       try handoff.prepare()
@@ -101,7 +101,7 @@ describe("Workflow notice questions (spec/clock/workflowNotices.md, \"Story: Ret
     })
     const assistant = fakeAssistant()
     const runs = fakeRuns()
-    provide Layer.provideMerge(workflowNoticesLayer, machines), phone.layer, runs.layer, fakeNavigation().layer, assistant.layer, session("org:owner-1") {
+    provide Layer.provideMerge(Layer.provideMerge(workflowNoticesLayer, machines), Layer.mergeAll(phone.layer, runs.layer, fakeNavigation().layer, assistant.layer, session("org:owner-1"))) {
       const notices = try WorkflowNotices
       const machine = try WorkflowNoticesMachine
       try notices.check()
@@ -124,10 +124,11 @@ describe("Workflow notice questions (spec/clock/workflowNotices.md, \"Story: Ret
       const consumed = try notices.consume("workflow-tap:w2")
       const again = try notices.consume("workflow-tap:w2")
       const last = phone.calls.filter((c) => c.method === "consumeWorkflowTap").at(-1)?.args
+      const finalState = try machine.get()
       try Effect.try(() => assert.deepStrictEqual(
         {
           first: first === undefined ? undefined : { name: first.name, text: first.text, notice: first.notice }, cancelled, stale, changed, kept,
-          other, fresh, consumed, again, last, reviews: assistant.reviews.length, opened: runs.opened, state: [(try machine.get()).discards, (try machine.get()).composed],
+          other, fresh, consumed, again, last, reviews: assistant.reviews.length, opened: runs.opened, state: [finalState.discards, finalState.composed],
         },
         {
           first: { name: "Alpha Phone notification", text: "Approve the weekly digest\nStep 2 waits for you", notice: { id: "workflow-tap:w1", revision: "n1" } },
@@ -153,11 +154,11 @@ describe("Named reminder changes (spec/clock/reminderPage.md, \"Story: Let the a
     const call = { proposalId: "p9", operationId: "op_9", attemptId: 1 }
     let unchosen: unknown = undefined
     let chosen: { kind: string; result?: { basis?: string; operation?: { type: string } } } = { kind: "" }
-    provide agentReviewLayer, phone.layer, fakeHost(), fakeReminders().layer {
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders().layer)) {
       const ports = try operationPorts
       unchosen = try promise(() => ports.execute(named, call))
     }
-    provide agentReviewLayer, phone.layer, fakeHost(), fakeReminders({ id: "r1", name: "Call the dentist" }).layer {
+    provide Layer.provideMerge(agentReviewLayer, Layer.mergeAll(phone.layer, fakeHost(), fakeReminders({ id: "r1", name: "Call the dentist" }).layer)) {
       const ports = try operationPorts
       chosen = (try promise(() => ports.execute(named, call))) as typeof chosen
     }

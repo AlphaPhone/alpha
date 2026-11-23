@@ -182,14 +182,14 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
 
     effect function viaAgent(method: Verb, path: string, body: unknown, headers: ResidentHeaders, remainingMs: number): Attempt!(ResidentUnavailable | ResidentRefused) {
       const id = newId()
-      const answer = try onInterrupt(
-        timeout(agentRequest(agent, method, path, body, id, headers), remainingMs) catch effect (error) => {
+      const sent = effect {
+        return timeout(agentRequest(agent, method, path, body, id, headers), remainingMs) catch effect (error) => {
           if (error._tag === "AgentCallFailed") throw new ResidentUnavailable({ state: "stopped", reason: error.code ?? error.message })
           const outcome = try withdraw(agent, id)
           throw new ResidentUnavailable({ state: "stopped", reason: outcome })
-        },
-        () => Effect.ignore(withdraw(agent, id)),
-      )
+        }
+      }
+      const answer = try onInterrupt(sent, () => Effect.ignore(withdraw(agent, id)))
       if (answerOf(answer.status) === "Replied") return { kind: "answer", answer: { status: answer.status, data: answer.data } }
       const said = Schema.decodeUnknownEffect(ResidentRefusal)(answer.data) catch () => undefined
       const refusal = refusalOf(answer.status, said)
@@ -317,7 +317,7 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
     }
     const control: ResidentControl.Shape = {
       changes: conn.changes,
-      effect session(): ResidentSession | undefined {
+      effect session(): (ResidentSession | undefined)!! {
         const now = try conn.get()
         if (now.phase !== "Connected") return undefined
         return { owner: now.owner, agent: now.agent, generation: now.generation, epoch: try Ref.get(verifiedEpoch) }
@@ -340,7 +340,7 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       },
     }
     const recovery: ResidentRecovery.Shape = {
-      effect review(): HeldRecovery {
+      effect review(): HeldRecovery!! {
         const said = tryPromise(() => agent.reviewRecovery()) catch () => undefined
         const held = Schema.decodeUnknownEffect(RecoveryReview)(said) catch () => undefined
         const token = held?.reviewToken

@@ -30,7 +30,7 @@ describe("Reminder taps (spec/clock/reminderTaps.md, \"Story: Open the reminder 
   it.effect("open exactly the tapped reminder and consume its token once, after its detail shows (spec/clock/reminderTaps.md, \"Story: Open the reminder I tapped\")", () => effect {
     const store = tapStore(false)
     const navigator = fakeNavigation()
-    provide Layer.provideMerge(reminderTapsLayer, machines), store.phone.layer, navigator.layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(reminderTapsLayer, machines), Layer.mergeAll(store.phone.layer, navigator.layer, fakeAssistant().layer)) {
       const taps = try ReminderTaps
       const machine = try TapsMachine
       try taps.check(true)
@@ -46,7 +46,7 @@ describe("Reminder taps (spec/clock/reminderTaps.md, \"Story: Open the reminder 
   it.effect("hold the tap while the page is hidden, and keep the link (spec/clock/reminderTaps.md, \"Story: Open the reminder I tapped\")", () => effect {
     const store = tapStore(false)
     const navigator = fakeNavigation()
-    provide Layer.provideMerge(reminderTapsLayer, machines), store.phone.layer, navigator.layer, fakeAssistant().layer {
+    provide Layer.provideMerge(Layer.provideMerge(reminderTapsLayer, machines), Layer.mergeAll(store.phone.layer, navigator.layer, fakeAssistant().layer)) {
       const taps = try ReminderTaps
       try taps.setBlocked(true)
       try taps.check(true)
@@ -62,7 +62,7 @@ describe("Reminder questions (spec/clock/reminderTaps.md, \"Story: Ask about a r
   it.effect("release the tap when the review closes, and consume it before the reviewed question is drafted (spec/clock/reminderTaps.md, \"Story: Ask about a reminder I tapped\")", () => effect {
     const store = tapStore(true)
     const assistant = fakeAssistant()
-    provide Layer.provideMerge(reminderTapsLayer, machines), store.phone.layer, fakeNavigation().layer, assistant.layer {
+    provide Layer.provideMerge(Layer.provideMerge(reminderTapsLayer, machines), Layer.mergeAll(store.phone.layer, fakeNavigation().layer, assistant.layer)) {
       const taps = try ReminderTaps
       try taps.check(true)
       const asked = try taps.question()
@@ -86,7 +86,7 @@ describe("Notification questions (spec/clock/notifications.md, \"Story: Ask Alph
     let items = [own, mail]
     const assistant = fakeAssistant(false, false, (id) => items.find((item) => item.id === id && item.source === "own"))
     const phone = fakePhone({ "AlphaNotifications.list": () => ({ items, scope: "device" }) })
-    provide Layer.provideMerge(notificationsLayer, machines), phone.layer, assistant.layer {
+    provide Layer.provideMerge(Layer.provideMerge(notificationsLayer, machines), Layer.mergeAll(phone.layer, assistant.layer)) {
       const notifications = try Notifications
       const shade = try ShadeMachine
       try notifications.open()

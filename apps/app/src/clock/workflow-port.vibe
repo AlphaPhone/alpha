@@ -1,7 +1,7 @@
 // spec/workflows/clockDraft.md, "Story: Set an alarm a workflow suggests, from Workflows"; spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"; spec/clock/handoff.md, "Any change to the draft retires its review"
 import { WorkflowClockPort, type AlarmRequest } from "../workflows/ports.vibe"
 import { Machine as HandoffMachine, type Event as HandoffEvent } from "../../gen/clock__handoff.effect.vibe"
-import { answeredWith } from "../../gen/clock__handoff.ts"
+import { answeredWith } from "../../gen/clock__handoff.effect.vibe"
 import { ClockHandoff } from "./handoff.vibe"
 
 const WEEK = [1, 2, 3, 4, 5, 6, 7] as const
@@ -18,18 +18,18 @@ function holds(draft: { readonly handoffAction: string; readonly hour: number; r
 export const workflowClockPort = Layer.effect(WorkflowClockPort, effect {
   const handoff = try ClockHandoff
   const draft = try HandoffMachine
-  const step = (event: HandoffEvent) => draft.send(event) catch () => undefined
+  const step = effect (event: HandoffEvent) => draft.send(event) catch () => undefined
 
   return {
     effect prepare(request: AlarmRequest) {
       const before = try draft.get()
       if (before.phase === "Saving" || before.phase === "Opening") return false
-      if (before.handoffAction !== "SetAlarm") step({ type: "chooseAction", handoffAction: "SetAlarm" })
-      step({ type: "setTime", hour: request.hour, minute: request.minute })
-      if ((try draft.get()).label !== request.label) step({ type: "setLabel", label: request.label })
+      if (before.handoffAction !== "SetAlarm") try step({ type: "chooseAction", handoffAction: "SetAlarm" })
+      try step({ type: "setTime", hour: request.hour, minute: request.minute })
+      if ((try draft.get()).label !== request.label) try step({ type: "setLabel", label: request.label })
       const wanted = new Set(request.days)
       for (const day of WEEK) {
-        if ((try draft.get()).days.includes(day) !== wanted.has(day)) step({ type: "toggleDay", day })
+        if ((try draft.get()).days.includes(day) !== wanted.has(day)) try step({ type: "toggleDay", day })
       }
       if (!holds(try draft.get(), request)) return false
       return try handoff.prepare()

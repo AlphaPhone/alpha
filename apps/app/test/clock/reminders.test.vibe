@@ -63,7 +63,7 @@ describe("Reminders (spec/clock/reminders.md, \"Story: Change a reminder exactly
   it.effect("create a reminder, complete it through a lost answer once, and delete it through the review (spec/clock/reminders.md, \"Story: Change a reminder exactly once\")", () => effect {
     const store = reminderStore()
     const navigator = fakeNavigation()
-    provide Layer.provideMerge(remindersLayer, machines), store.phone.layer, navigator.layer {
+    provide Layer.provideMerge(Layer.provideMerge(remindersLayer, machines), Layer.mergeAll(store.phone.layer, navigator.layer)) {
       const reminders = try Reminders
       const screen = try RemindersMachine
       const journal = try JournalMachine
@@ -96,7 +96,7 @@ describe("Reminders (spec/clock/reminders.md, \"Story: Change a reminder exactly
       "DailyApps.surfaceInfo": () => ({ reminderTimingVersion: 2 }),
       "DailyApps.listReminders": () => readable ? { reminders: [] } : refuse("Reminder store unavailable"),
     })
-    provide Layer.provideMerge(remindersLayer, machines), phone.layer, fakeNavigation().layer {
+    provide Layer.provideMerge(Layer.provideMerge(remindersLayer, machines), Layer.mergeAll(phone.layer, fakeNavigation().layer)) {
       const reminders = try Reminders
       const screen = try RemindersMachine
       try reminders.refresh()
@@ -116,7 +116,7 @@ describe("Reminders (spec/clock/reminders.md, \"Story: Change a reminder exactly
 describe("Reminder journal (spec/clock/reminderJournal.md, \"Story: Never create or change a reminder twice\")", () => {
   it.effect("settle a creation whose answer was lost by reading what the phone saved, never by sending it again (spec/clock/reminderJournal.md, \"Story: Never create or change a reminder twice\")", () => effect {
     const store = reminderStore(true)
-    provide Layer.provideMerge(remindersLayer, machines), store.phone.layer, fakeNavigation().layer {
+    provide Layer.provideMerge(Layer.provideMerge(remindersLayer, machines), Layer.mergeAll(store.phone.layer, fakeNavigation().layer)) {
       const reminders = try Reminders
       const screen = try RemindersMachine
       const journal = try JournalMachine
@@ -136,7 +136,7 @@ describe("Reminder journal (spec/clock/reminderJournal.md, \"Story: Never create
 describe("Reminder drafts (spec/clock/reminderDrafts.md, \"Story: Find my unsaved reminder where I left it\")", () => {
   it.effect("keep an unsaved reminder under its creation id, save it under that id, and discard only after asking (spec/clock/reminderDrafts.md, \"Story: Find my unsaved reminder where I left it\")", () => effect {
     const store = reminderStore()
-    provide Layer.provideMerge(Layer.mergeAll(remindersLayer, draftsLayer), machines), store.phone.layer, fakeNavigation().layer {
+    provide Layer.provideMerge(Layer.provideMerge(Layer.mergeAll(remindersLayer, draftsLayer), machines), Layer.mergeAll(store.phone.layer, fakeNavigation().layer)) {
       const reminders = try Reminders
       const drafts = try ReminderDrafts
       const kept = try DraftsMachine

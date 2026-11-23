@@ -50,7 +50,7 @@ export service ReminderDrafts {
 export const draftsLayer = Layer.effect(ReminderDrafts, effect {
   const drafts = try DraftsMachine
   const screen = try RemindersMachine
-  const step = (event: Parameters<typeof drafts.send>[0]) => drafts.send(event) catch () => undefined
+  const step = effect (event: Parameters<typeof drafts.send>[0]) => drafts.send(event) catch () => undefined
 
   effect function kept(form: DraftForm) {
     const slot: Kept = form === "new" ? (try drafts.get()).creation : (try drafts.get()).edit
@@ -66,20 +66,20 @@ export const draftsLayer = Layer.effect(ReminderDrafts, effect {
     kept,
     effect resume(form: DraftForm) {
       const found = try kept(form)
-      if (found !== undefined) step({ type: "resume", slot: SLOT[form] })
+      if (found !== undefined) try step({ type: "resume", slot: SLOT[form] })
       return found
     },
     effect keep(form: DraftForm, id: string, revision: string, draft: ReminderDraft) {
       const fields = JSON.stringify(keptFormOf(draft, try Clock.currentTimeMillis))
       const held = (try drafts.get()).creation
       const under = form === "new" && id === "" ? (held.tag === "Held" ? held.id : freshId()) : id
-      step({ type: "keep", slot: SLOT[form], id: under, revision, edits: fields })
+      try step({ type: "keep", slot: SLOT[form], id: under, revision, edits: fields })
     },
     effect settle(form: DraftForm, id: string, version: number) {
-      if (CONFIRMED.has(outcomeTag((try screen.get()).outcome))) step({ type: "saved", slot: SLOT[form], id, version })
+      if (CONFIRMED.has(outcomeTag((try screen.get()).outcome))) try step({ type: "saved", slot: SLOT[form], id, version })
     },
-    askDiscard: (form: DraftForm) => step({ type: "askDiscard", slot: SLOT[form] }),
-    cancelDiscard: () => step({ type: "cancelDiscard" }),
-    confirmDiscard: () => step({ type: "confirmDiscard" }),
+    askDiscard: (form: DraftForm) => asVoid(step({ type: "askDiscard", slot: SLOT[form] })),
+    cancelDiscard: () => asVoid(step({ type: "cancelDiscard" })),
+    confirmDiscard: () => asVoid(step({ type: "confirmDiscard" })),
   }
 })

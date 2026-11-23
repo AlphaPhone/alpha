@@ -63,7 +63,7 @@ export function AgentActivity({ onBack }: AgentActivityProps) {
   const settle = (item: HistoryItem, outcome: HistoryOutcome) =>
     perform(Effect.flatMap(Effect.service(DeviceReview), (review) => review.settleHistory(item.proposalId, outcome))).finally(again);
   const decide = (card: ProposalCard, approve: boolean) =>
-    perform(Effect.flatMap(Effect.service(DeviceReview), (review) => approve ? review.approve(card) : review.decline(card))).finally(again);
+    perform(Effect.flatMap(Effect.service(DeviceReview), (review) => approve ? Effect.asVoid(review.approve(card)) : Effect.asVoid(review.decline(card)))).finally(again);
   return (
     <section aria-label="Agent activity" className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-2 px-3 py-2">

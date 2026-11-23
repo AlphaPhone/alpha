@@ -4,5 +4,5 @@ import { DeviceStorage } from "../../platform/device-storage.vibe"
 /** Admits startup before any area reads what it stored, first finishing a reset an earlier process left pending; a refusal leaves startup unadmitted. */
 export const startupLive = Layer.effectDiscard(effect {
   const storage = try DeviceStorage
-  try (storage.admitStartup() catch () => undefined)
+  storage.admitStartup() catch () => undefined
 })
