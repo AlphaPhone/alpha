@@ -93,7 +93,8 @@ export const linkLayer = Layer.effect(CalendarLink, effect {
   }
 
   effect function control(): LinkedCalendarControlView | undefined {
-    return try tryPromise({ try: () => linked.getLinkedCalendarControl(), catch: () => undefined }) catch () => undefined
+    const answer = tryPromise({ try: () => linked.getLinkedCalendarControl(), catch: () => undefined }) catch () => undefined
+    return answer
   }
 
   effect function candidates(): ReadonlyArray<LinkedCalendarCandidate> | undefined {
