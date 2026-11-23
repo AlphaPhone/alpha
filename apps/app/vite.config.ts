@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
 import { defineConfig, type Plugin } from "vite";
+import cloudDeployment from "../../cloud/deployment.json" with { type: "json" };
 import { localOcrAssets } from "../../scripts/local-ocr-assets.ts";
 
 const mocks = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1";
@@ -46,13 +47,20 @@ function contentSecurity(): Plugin {
   };
 }
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   root: "src/web",
   publicDir: "../../public",
   envPrefix: "VITE_",
-  define: { __ALPHA_TEST_MOCKS__: JSON.stringify(mocks) },
+  define: {
+    __ALPHA_TEST_MOCKS__: JSON.stringify(mocks),
+    __ALPHA_PRODUCTION_DEPLOYMENT__: JSON.stringify(command === "build" && !mocks),
+    __ALPHA_CLOUD_DEPLOYMENT__: JSON.stringify({
+      shipped: { production: cloudDeployment.shipped.production },
+      alphaCloudHosts: { production: cloudDeployment.alphaCloudHosts.production },
+    }),
+  },
   resolve: { conditions: ["eliza-source"] },
   // Scan OCR (src/camera/scanWork.ts) loads its worker, cores and English data from /ocr/, never a CDN.
   plugins: [contentSecurity(), vibelang(), react(), tailwindcss(), localOcrAssets(new URL("./package.json", import.meta.url))],
   build: { outDir: "../../../../web-dist", emptyOutDir: true, target: "es2023" },
-});
+}));
