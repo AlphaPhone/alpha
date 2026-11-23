@@ -497,8 +497,8 @@
   {
    "legacy": "test/batch-voice-progress-ack.test.mjs",
    "area": "voice",
-   "spec": "apps/app/spec/voice/index.md",
-   "status": "mapped"
+   "spec": "apps/app/spec/voice/acknowledgement.md",
+   "status": "removed"
   },
   {
    "legacy": "test/browser-approved-open.test.mjs",

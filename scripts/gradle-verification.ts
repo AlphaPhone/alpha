@@ -160,19 +160,32 @@ export function referencePath({root, path: relative}: HostReference) {
   throw new Error(`${HOST_DESCRIPTOR} names unknown root ${root}`);
 }
 
+/** The pinned upstream os Android modules the host builds by name (android/consumer-host.json osModules). */
+export const OS_MODULES = 'vendor/eliza/packages/os/android';
+
+/** A module script and every script it applies by a literal relative path (local-inference applies consumer.gradle). */
+function withApplied(root: string, script: string): string[] {
+  const file = path.join(root, script);
+  if (!fs.existsSync(file)) return [script];
+  const applied = [...fs.readFileSync(file, 'utf8').matchAll(/apply from:\s*['"]([^'"$]+\.gradle)['"]/g)].map(match => path.posix.join(path.posix.dirname(script), match[1]));
+  return [script, ...applied];
+}
+
 /**
  * Every Gradle script that can declare a repository for the android/ build: the upstream host
- * templates the generated root, settings and app scripts come from, Alpha's product script and
- * the build.gradle of each module android/consumer-host.json includes (the fixtures, the speech
- * and listener modules, Capacitor from node_modules and the plugins from the pinned upstream checkout).
- * Staged modules are exact copies of these pinned upstream inputs.
+ * templates the generated root, settings and app scripts come from, Alpha's product script, the
+ * build.gradle of each module android/consumer-host.json includes (the fixtures, the speech and
+ * listener modules, Capacitor from node_modules) and of each pinned upstream os module it builds,
+ * with the scripts those apply.
  */
 export function buildScripts(root: string) {
   const {profile} = readHostDescriptor(root);
   const modules = profile.modules.map(module => path.posix.join(referencePath(module.source), 'build.gradle'));
-  if (new Set(modules).size !== modules.length) throw new Error(`${HOST_DESCRIPTOR} includes one module directory twice`);
+  const osModules = ((profile as {osModules?: {module: string}[]}).osModules ?? []).flatMap(({module}) => withApplied(root, `${OS_MODULES}/${module}/build.gradle`));
+  const all = [...modules, ...osModules];
+  if (new Set(all).size !== all.length) throw new Error(`${HOST_DESCRIPTOR} includes one module directory twice`);
   return [`${HOST_TEMPLATES}/settings.gradle`, `${HOST_TEMPLATES}/build.gradle`, `${HOST_TEMPLATES}/app.gradle`,
-    ...(profile.appScripts ?? []).map(referencePath), ...modules.sort()];
+    ...(profile.appScripts ?? []).map(referencePath), ...all.sort()];
 }
 
 export function checkVerification(root: string) {

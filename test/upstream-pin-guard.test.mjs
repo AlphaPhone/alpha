@@ -112,10 +112,8 @@ test('the preflight entry point exits 2 for an older pin', t => {
   fs.copyFileSync(path.join(ROOT,'app.config.json'),path.join(f.root,'app.config.json'));
   fs.mkdirSync(path.join(f.root,'android'),{recursive:true});
   fs.copyFileSync(path.join(ROOT,'android/consumer-host.json'),path.join(f.root,'android/consumer-host.json'));
-  for (const file of ['android-identity.ts', 'android-build-preflight.ts', 'voice-host.ts', 'stage-embedding-host.ts', 'build-embedding-host.ts', 'native-build-inputs.ts', 'android-stage-voice-models.ts', 'mobile-uuid-adapter.ts', 'android-abis.ts', 'embedding-native-contract.ts', 'paradee-runtime.ts', 'toolchain.ts', 'copy-file-clone.ts', 'core-state-patch.ts', 'build-policy-source.ts', 'upstream-pin.ts', 'sha256.ts']) {
-    fs.mkdirSync(path.join(f.root, 'scripts'), {recursive: true});
-    fs.copyFileSync(path.join(ROOT, 'scripts', file), path.join(f.root, 'scripts', file));
-  }
+  // The preflight and every script it imports, as the checkout has them.
+  fs.cpSync(path.join(ROOT, 'scripts'), path.join(f.root, 'scripts'), {recursive: true, filter: source => !source.includes(`${path.sep}fixtures${path.sep}`)});
   fs.mkdirSync(path.join(f.root, 'android/voice-host'), {recursive: true});
   fs.copyFileSync(path.join(ROOT, 'android/voice-host/qualified-voice-host.json'), path.join(f.root, 'android/voice-host/qualified-voice-host.json'));
   const run = () => spawnSync(process.execPath, ['scripts/android-build-preflight.ts'], {cwd: f.root, encoding: 'utf8'});

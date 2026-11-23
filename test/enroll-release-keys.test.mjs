@@ -81,16 +81,15 @@ function run(argv, rootDir) {
   return { code, out: out.join("\n"), err: err.join("\n") };
 }
 
-test("Alpha's key list is the upstream image signing keys plus one application key, and the pinned ceremony tool accepts it", async () => {
-  const upstream = JSON.parse(fs.readFileSync(path.join(root, "vendor/eliza/packages/os/android/signing/key-manifest.json"), "utf8"));
+// Upstream no longer ships its image key manifest; Alpha's ceremony tool is its copy in scripts/os-ported.
+const GENERATOR = "scripts/os-ported/os/generate-release-keys.ts";
+test("Alpha's key list is the image signing keys plus one application key, and the ceremony tool accepts it", async () => {
   const names = manifest.keys.map(key => key.name);
   assert.deepEqual(names, ["releasekey", "platform", "shared", "media", "networkstack", "sdk_sandbox", "bluetooth", "nfc", "apex", "apex_payload", "avb", APPLICATION_KEY]);
-  for (const key of manifest.keys.filter(row => row.name !== APPLICATION_KEY))
-    assert.deepEqual(key, upstream.keys.find(row => row.name === key.name), `${key.name} must match the pinned upstream entry`);
   // Every digest enrollment writes comes from a listed key, and every image certificate the signing job pins is covered.
   for (const row of ENROLLMENT) assert.ok(names.includes(row.key), `${row.field.join(".")} reads ${row.key}`);
   assert.deepEqual(IMAGE_CERTIFICATES, Object.keys(JSON.parse(fs.readFileSync(path.join(root, PRODUCT), "utf8")).signer.releaseCertificates));
-  const { loadKeyManifest } = await import("../vendor/eliza/packages/os/scripts/android/generate-release-keys.ts");
+  const { loadKeyManifest } = await import(`../${GENERATOR}`);
   assert.equal(loadKeyManifest(path.join(root, KEY_MANIFEST)).keys.length, names.length);
 });
 
@@ -98,7 +97,7 @@ test("a test-key ceremony from the pinned generator is refused, also when its te
   const dir = scratch(t, "alpha-enroll-testkeys-");
   const pass = path.join(dir, "pass");
   fs.writeFileSync(pass, "test-passphrase-0123456789abcdef\n", { mode: 0o600 });
-  execFileSync(process.execPath, [path.join(root, "vendor/eliza/packages/os/scripts/android/generate-release-keys.ts"), "--test-keys",
+  execFileSync(process.execPath, [path.join(root, GENERATOR), "--test-keys",
     "--manifest", path.join(root, KEY_MANIFEST), "--output", path.join(dir, "keys"), "--passphrase-file", pass], { stdio: "ignore" });
   const file = path.join(dir, "keys/fingerprints.json");
   const fixture = recordsFixture(t);

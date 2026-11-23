@@ -25,11 +25,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// This copy lives at scripts/os-ported/os in Alpha's checkout, which holds the eliza checkout under vendor/eliza.
 const elizaRepositoryRoot = fileURLToPath(
-  new URL("../../../..", import.meta.url),
+  new URL("../../../", import.meta.url),
 );
+// Upstream no longer ships a key manifest; Alpha's ceremony list is the default.
 export const defaultKeyManifest = fileURLToPath(
-  new URL("../../android/signing/key-manifest.json", import.meta.url),
+  new URL("../../../android/signing/alpha-key-manifest.json", import.meta.url),
 );
 
 export type KeyKind = "x509-pk8" | "avb-rsa" | "ed25519";

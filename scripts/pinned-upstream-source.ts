@@ -6,14 +6,19 @@ import { pinnedCommit } from "./upstream-pin.ts";
 export const GENERATED_UPSTREAM_DIRECTORIES = [
 	"system", "camera", "location", "network-policy", "calendar", "reminders", "agent-service", "runtime-files", "sign-in", "secure-store",
 	"browser-surface", "contacts", "action-journal", "notifications", "messages", "phone", "passwords", "media", "filesystem",
-].map((name) => `packages/os/android/${name}/build`);
+].map((name) => `packages/os/android/${name}/build`).concat(
+	// The upstream root's own build and spec tools (pnpm build:upstream): vibestack's dist, its VibeLang and spec caches.
+	[".cache", ".vibe", "dist", ".spec-cache", "vibestack/studio/.spec-cache", "vibestack/studio/.vibe"],
+);
+/** The upstream root's turbo logs from pnpm build:upstream. */
+export const GENERATED_UPSTREAM_FILES = [".turbo/turbo-build.log", ".turbo/turbo-gen.log"];
 
 /** Authenticate vendor bytes at the pinned commit before resolving or compiling consumer source. */
 export async function verifyPinnedUpstream(root: string) {
 	const commit = pinnedCommit(root);
 	const directory = path.join(root, "vendor/eliza");
 	const { verifyCommittedWorkspace } = await import("./upstream-os.ts");
-	await verifyCommittedWorkspace(directory, commit, { generatedDirectories: GENERATED_UPSTREAM_DIRECTORIES });
+	await verifyCommittedWorkspace(directory, commit, { generatedDirectories: GENERATED_UPSTREAM_DIRECTORIES, generatedFiles: GENERATED_UPSTREAM_FILES });
 	return { directory, commit };
 }
 

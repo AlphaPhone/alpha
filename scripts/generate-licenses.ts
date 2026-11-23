@@ -3,7 +3,7 @@ import {VOICE_HOST_MANIFEST, voiceHostProblems, type readVoiceHost} from './voic
 import {readNativeBuildReceipt, verifyNativeBuildFiles} from './native-build-inputs.ts';
 import {HOST_DESCRIPTOR, generateAlphaAndroidHost, readHostDescriptor} from './android-host.ts';
 import {HOST_TEMPLATES, referencePath} from './gradle-verification.ts';
-import {LOCKFILE, readPnpmLock as readLock, type PackageLock} from './pnpm-lock.ts';
+import {LOCKFILE, SHIPPING_IMPORTER, readPnpmLock as readLock, type PackageLock} from './pnpm-lock.ts';
 import {readUpstreamPin} from './upstream-pin.ts';
 export type {PackageLock};
 // Generates the third-party notices shipped in the web bundle and in every APK payload.
@@ -455,8 +455,14 @@ function lucideIconEntries(root: string, errors: string[]): NoticeDraft[] {
   return [{name: record.package, version: record.version, license: 'ISC AND MIT', source: record.repository, text: normalizeText(licence.toString('utf8'))}];
 }
 
+/** A package the renderer ships, as installed for the shipping importer (apps/app) by pnpm. */
+export function shippedPackageDir(root: string, name: string) {
+  const app = `${SHIPPING_IMPORTER}/node_modules/${name}`;
+  return exists(root, `${app}/package.json`) ? app : `node_modules/${name}`;
+}
+
 function pdfjsEntries(root: string, errors: string[]): NoticeDraft[] {
-  const dir = 'node_modules/pdfjs-dist';
+  const dir = shippedPackageDir(root, 'pdfjs-dist');
   if (!exists(root, `${dir}/package.json`)) return [];
   const version = readJson(root, `${dir}/package.json`).version;
   return PDFJS_COMPONENTS.map(component => {
@@ -469,7 +475,7 @@ function pdfjsEntries(root: string, errors: string[]): NoticeDraft[] {
 }
 
 function ocrDataEntries(root: string): NoticeDraft[] {
-  const eng = readJson(root, 'node_modules/@tesseract.js-data/eng/package.json');
+  const eng = readJson(root, `${shippedPackageDir(root, '@tesseract.js-data/eng')}/package.json`);
   return [{name: 'Tesseract English trained data (tessdata 4.0.0_best_int)', version: `bundled with @tesseract.js-data/eng ${eng.version}`, license: 'Apache-2.0',
     source: 'https://github.com/naptha/tessdata', text: normalizeText(read(root, 'licenses/tessdata-APACHE-2.0.txt'))}];
 }
@@ -488,7 +494,7 @@ function tesseractCoreEntries(root: string, errors: string[]): NoticeDraft[] {
     cores: Record<string, string>;
     components: {name: string; version: string; license: string; source: string; preface?: string; files: {path: string; sha256: string}[]}[];
   } = readJson(root, TESSERACT_CORE_SOURCES);
-  const dir = `node_modules/${pinned.package}`;
+  const dir = shippedPackageDir(root, pinned.package);
   if (!exists(root, `${dir}/package.json`)) { errors.push(`${pinned.package}: not installed; run pnpm install --frozen-lockfile`); return []; }
   const installed = readJson(root, `${dir}/package.json`).version;
   if (installed !== pinned.version)
@@ -568,10 +574,10 @@ function fontEntries(root: string, templates: Templates, errors: string[]) {
       ...(record && heldOutside && license === COMMERCIAL_FONT ? {_flags: ['proprietary-licence-held-outside-repo'], _reason: `${record.holder}: ${record.basis}.`} : {})});
   }
   for (const item of licensed) if (!usedRecords.has(item)) errors.push(`${FONT_LICENSES}: stale entry ${item.name}; no shipped font matches its name and sha256 list`);
-  const pkg = readJson(root, 'package.json');
+  const pkg = readJson(root, `${SHIPPING_IMPORTER}/package.json`);
   const fontsource = Object.keys({...pkg.dependencies, ...pkg.devDependencies}).filter(name => name.startsWith('@fontsource/')).sort();
   for (const name of fontsource) {
-    const dir = `node_modules/${name}`;
+    const dir = shippedPackageDir(root, name);
     if (!exists(root, `${dir}/package.json`)) { errors.push(`${name}: not installed; run pnpm install --frozen-lockfile`); continue; }
     const manifest = readManifest(path.join(root, dir), name, errors);
     if (!manifest) continue;
@@ -772,6 +778,30 @@ function voiceHostEntries(root: string, templates: Templates, errors: string[]):
 
 export const AGENT_ASSETS = 'android/app/src/main/assets/agent';
 
+/** The installed directory of name@version: a workspace package of the pinned upstream, or pnpm's store entry. */
+export function installedPackageDirectory(root: string, sourceDir: string, name: string, version: string): string | undefined {
+  const matches = (dir: string) => {
+    try { const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); return manifest.name === name && manifest.version === version; }
+    catch { return false; }
+  };
+  for (const workspace of ['packages', 'vibestack']) {
+    const base = path.join(sourceDir, workspace);
+    if (!fs.existsSync(base)) continue;
+    for (const child of fs.readdirSync(base)) if (matches(path.join(base, child))) return path.join(base, child);
+  }
+  for (const store of [path.join(root, 'node_modules/.pnpm'), path.join(sourceDir, 'node_modules/.pnpm')]) {
+    const prefix = `${name.replace('/', '+')}@${version}`;
+    if (!fs.existsSync(store)) continue;
+    for (const entry of fs.readdirSync(store)) {
+      if (entry !== prefix && !entry.startsWith(prefix + '_')) continue;
+      const dir = path.join(store, entry, 'node_modules', name);
+      if (matches(dir)) return dir;
+    }
+  }
+  return undefined;
+}
+
+
 /** True when a resident runtime is staged into the APK assets (runtimePackaging PACKAGED). */
 export function packagedRuntimePresent(root = ROOT, agentDir = path.join(root, AGENT_ASSETS)) {
   return fs.existsSync(path.join(agentDir, 'agent.mjs')) && fs.existsSync(path.join(agentDir, 'inventory.json'));
@@ -826,28 +856,26 @@ export function runtimeEntries(root: string, templates: Templates, errors: strin
     if (existing) existing._bundles = [...new Set([...existing._bundles, ...entry._bundles])];
     else byId.set(key, entry);
   };
+  // Upstream's bundle manifest (@elizaos/agent/bundle) names every package that emitted bytes by name and
+  // version; each is read from its installed directory in this workspace.
   try {
-    const manifest = JSON.parse(fs.readFileSync(path.join(agentDir, 'bundle-manifest.json'), 'utf8')) as {packages?: {directory: string}[]};
-    for (const {directory} of manifest.packages ?? [])
-      add(runtimePackageEntry(path.join(sourceDir, directory), 'agent bundle', templates, errors));
+    const manifest = JSON.parse(fs.readFileSync(path.join(agentDir, 'manifest.json'), 'utf8')) as {packages?: {name: string; version: string}[]};
+    if (!Array.isArray(manifest.packages) || !manifest.packages.length) errors.push(`${agentDir}/manifest.json lists no bundled package`);
+    for (const {name, version} of manifest.packages ?? []) {
+      const directory = installedPackageDirectory(root, sourceDir, name, version);
+      if (!directory) { errors.push(`agent bundle: ${name}@${version} is not installed in this workspace; run pnpm install`); continue; }
+      add(runtimePackageEntry(directory, 'agent bundle', templates, errors));
+    }
   } catch (error) { errors.push(errorMessage(error)); }
+  // The workflow worker artifact (@elizaos/plugin-workflow/worker) records its npm dependencies by name and version
+  // in dependencies.json; it ships only the modules the worker reaches, so notices come from the installed package.
   const workerDir = path.join(agentDir, 'workflow-worker');
   if (fs.existsSync(path.join(workerDir, 'dependencies.json'))) {
-    const dependencies: {name: string; version: string; notices?: string[]; license?: unknown; sourcePath?: string}[] =
-      JSON.parse(fs.readFileSync(path.join(workerDir, 'dependencies.json'), 'utf8'));
-    for (const dep of dependencies) {
-      const notices = (dep.notices ?? []).map(file => path.join(workerDir, file));
-      const missing = notices.filter(file => !fs.existsSync(file));
-      if (missing.length) errors.push(`workflow-worker ${dep.name}@${dep.version}: missing notice ${missing.map(file => path.relative(workerDir, file)).join(', ')}`);
-      let license = typeof dep.license === 'string' ? dep.license : '';
-      const shippedDir = path.join(workerDir, dep.sourcePath ?? '');
-      let manifest: Partial<PackageMetadata> = {};
-      if (dep.sourcePath && fs.existsSync(path.join(shippedDir, 'package.json'))) manifest = readManifest(shippedDir, `workflow-worker ${dep.name}@${dep.version}`, errors) ?? {};
-      if (!license) license = manifestLicense(manifest);
-      const text = notices.filter(file => fs.existsSync(file)).map(file => normalizeText(fs.readFileSync(file, 'utf8'))).join('\n\n');
-      // No recorded notice file: the canonical terms of the declared licence are used and the entry is flagged.
-      const notice = packageNotice({declared: license, text, dir: dep.sourcePath ? shippedDir : '', manifest, templates, shippedBy: 'workflow-worker artifact'});
-      add({name: dep.name, version: dep.version, source: `https://www.npmjs.com/package/${dep.name}/v/${dep.version}`, ...notice, _bundles: ['workflow worker']});
+    const dependencies: Record<string, string> = JSON.parse(fs.readFileSync(path.join(workerDir, 'dependencies.json'), 'utf8'));
+    for (const [name, version] of Object.entries(dependencies)) {
+      const directory = installedPackageDirectory(root, sourceDir, name, version);
+      if (!directory) { errors.push(`workflow-worker ${name}@${version} is not installed in this workspace; run pnpm install`); continue; }
+      add(runtimePackageEntry(directory, 'workflow worker', templates, errors));
     }
   } else errors.push(`${workerDir}/dependencies.json is missing from the staged runtime`);
   // The compiled native Google host is a third bundled surface. Its input map is

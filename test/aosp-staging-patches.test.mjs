@@ -52,7 +52,7 @@ test('host build patch admission is explicit and pinned to the source lock', () 
   assert.throws(() => stagingBuildPatches(['soong-app-native']), /Duplicate/);
   assert.throws(() => stagingBuildPatches(['arbitrary']), /Unknown AOSP build patch/);
   const [, {name,manifest}] = stagingBuildPatches(['soong-memory']);
-  const lock = fs.readFileSync('vendor/eliza/packages/os/android/sources/pixel10a-stallion.json');
+  const lock = fs.readFileSync('vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json');
   assert.equal(name, 'soong-memory');
   assert.equal(manifest.baselineLockSha256, createHash('sha256').update(lock).digest('hex'));
   assert.equal(manifest.revision, JSON.parse(lock).projects.find(row => row.path === 'build/soong').commit);
@@ -63,7 +63,7 @@ test('host build patch admission is explicit and pinned to the source lock', () 
 test('Soong app-native installation patch is independently pinned and has no guard bypass', () => {
   const [{name, manifest}] = stagingBuildPatches([]);
   assert.equal(name, 'soong-app-native');
-  const lock = fs.readFileSync('vendor/eliza/packages/os/android/sources/pixel10a-stallion.json');
+  const lock = fs.readFileSync('vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json');
   assert.equal(manifest.baselineLockSha256, createHash('sha256').update(lock).digest('hex'));
   assert.equal(manifest.revision, JSON.parse(lock).projects.find(row => row.path === 'build/soong').commit);
   assert.deepEqual(manifest.files.map(row => row.path), ['etc/prebuilt_etc.go', 'etc/prebuilt_etc_test.go']);
@@ -71,7 +71,7 @@ test('Soong app-native installation patch is independently pinned and has no gua
 
 test('the protected Power source bundle is pinned and shares identity only on the image child route', () => {
   assert.throws(() => stagingSystemuiPatches(['alpha-protected-power', 'assist']), /same SystemUI source/);
-  const lock = fs.readFileSync('vendor/eliza/packages/os/android/sources/pixel10a-stallion.json');
+  const lock = fs.readFileSync('vendor/eliza/packages/os/aosp/sources/pixel10a-stallion.json');
   const [{name, manifest, manifestSha256}] = stagingSystemuiPatches(['alpha-protected-power']);
   const bundle = 'android/aosp/branding/power-voice';
   assert.equal(name, 'alpha-protected-power');

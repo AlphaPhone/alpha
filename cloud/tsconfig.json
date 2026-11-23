@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "target": "es2023",
+    "jsx": "react-jsx",
     "module": "nodenext",
     "lib": ["es2024", "dom", "dom.iterable"],
     "jsx": "react-jsx",

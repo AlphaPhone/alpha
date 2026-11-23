@@ -8,9 +8,10 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The pinned os package, whose aosp/sense/systemui holds the SystemUI bundles.
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../..",
+  "../../../vendor/eliza/packages/os",
 );
 // ops: microphone indicator op lists; chip: Listening chip and indicator lease;
 // assist: SystemUI shares its identity with the assistant it launches, so a
@@ -20,7 +21,7 @@ const bundleDirectory = (bundle) => {
     throw Error("Unknown SystemUI bundle");
   return path.join(
     root,
-    "android/sense/systemui",
+    "aosp/sense/systemui",
     bundle === "ops" ? "" : bundle,
   );
 };
@@ -47,7 +48,7 @@ export function verifyListenerSystemui(
   if (sha(patch) !== manifest.patchSha256)
     throw Error("SystemUI patch hash mismatch");
   if (
-    sha(regular(path.join(root, "android/sources/pixel10a-stallion.json"))) !==
+    sha(regular(path.join(root, "aosp/sources/pixel10a-stallion.json"))) !==
     manifest.baselineLockSha256
   )
     throw Error("Baseline source lock changed; re-review SystemUI patch");
@@ -144,7 +145,7 @@ export function senseSystemuiPatch(bundle = "chip") {
   )
     throw Error("SystemUI patch hash mismatch");
   if (
-    sha(regular(path.join(root, "android/sources/pixel10a-stallion.json"))) !==
+    sha(regular(path.join(root, "aosp/sources/pixel10a-stallion.json"))) !==
     manifest.baselineLockSha256
   )
     throw Error("SystemUI baseline source lock changed");

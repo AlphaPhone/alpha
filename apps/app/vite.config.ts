@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import vibelang from "vibelang-vite";
 import { defineConfig, type Plugin } from "vite";
+import { localOcrAssets } from "../../scripts/local-ocr-assets.ts";
 
 const mocks = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === "1";
 
@@ -51,6 +52,7 @@ export default defineConfig({
   envPrefix: "VITE_",
   define: { __ALPHA_TEST_MOCKS__: JSON.stringify(mocks) },
   resolve: { conditions: ["eliza-source"] },
-  plugins: [contentSecurity(), vibelang(), react(), tailwindcss()],
+  // Scan OCR (src/camera/scanWork.ts) loads its worker, cores and English data from /ocr/, never a CDN.
+  plugins: [contentSecurity(), vibelang(), react(), tailwindcss(), localOcrAssets(new URL("./package.json", import.meta.url))],
   build: { outDir: "../../../../web-dist", emptyOutDir: true, target: "es2023" },
 });
