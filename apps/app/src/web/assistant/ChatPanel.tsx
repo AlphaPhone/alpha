@@ -41,6 +41,8 @@ export type ChatPanelProps = {
   open: (app: string, route?: string) => void;
   /** Ask the voice area to start a conversation. */
   onTalk: () => void;
+  /** Monotonic counter requesting immediate focus on the composer textarea. */
+  focusSeq?: number;
 };
 
 const notices = {
@@ -52,7 +54,7 @@ const notices = {
  * The assistant's conversation: transcript, cards and composer, with the chat actions menu and search.
  * @model spec/assistant/send.md
  */
-export function ChatPanel({ open, onTalk }: ChatPanelProps) {
+export function ChatPanel({ open, onTalk, focusSeq }: ChatPanelProps) {
   const voice = useVoiceTalk(onTalk);
   const transcript = useServiceStream("assistant/transcript", transcriptStream, emptyTranscript);
   const target = useServiceStream("assistant/target", targetStream, undefined);
@@ -139,6 +141,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
         )}
       {voice.view}
       <ComposerBar
+        focusSeq={focusSeq}
         text={text} files={files} typing={sends.typing} canSend={sendable} unsettled={draftUnsettled(drafts)}
         notice={notices[drafts.notice]} target={target}
         disclosure={disclosed(inference.where) ? copy.hostedDisclosure(inference.provider) : undefined}

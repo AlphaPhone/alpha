@@ -126,6 +126,7 @@ public final class TabInputRouter extends View {
       TabFrame page = pageAt(event.getX(), event.getY());
       if (page == null) {
         hostDownTime = event.getDownTime();
+        focusHost();
         return false;
       }
       touchTarget = page;
@@ -192,6 +193,15 @@ public final class TabInputRouter extends View {
       }
       default:
         return true;
+    }
+  }
+
+  /** Moves Android View focus from any focused below-host page back to Alpha's WebView. */
+  private void focusHost() {
+    View host = hostBelow();
+    if (host != null && !host.hasFocus()) host.requestFocus();
+    for (TabFrame page : pages.get()) {
+      if (page.hasFocus()) page.clearFocus();
     }
   }
 

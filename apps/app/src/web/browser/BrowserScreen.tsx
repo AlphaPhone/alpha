@@ -84,7 +84,7 @@ export function BrowserScreen({ route, onClose }: BrowserScreenProps) {
     run(({ presenter, tabs }) => tab.restoreUrl !== "" && !covered(session) ? tabs.dispatch({ type: "showRestored" }) : presenter.offer(facts, placementOf(session.cur, viewport)));
   }, () => run(({ presenter }) => presenter.chromeChanged()));
   return (
-    <section ref={arrived} aria-label="Browser" data-page-shareable={shareable ? "true" : "false"} className="relative flex h-full flex-col bg-transparent">
+    <section ref={arrived} aria-label="Browser" data-page-shareable={shareable ? "true" : "false"} className="relative flex h-full flex-col bg-transparent" style={{ paddingBottom: "var(--alpha-dock-rest, 0px)" }}>
       <div {...{ [HOST_CHROME]: "" }} className="flex items-center bg-background">
         <Button variant="ghost" size="icon" aria-label="Home" onClick={onClose}><ChevronDown aria-hidden /></Button>
         {finding && <div className="flex-1"><FindBar session={session} onQuery={(q) => run(({ tabs }) => tabs.typeFind(q))} onMove={(forward) => run(({ tabs }) => tabs.dispatch({ type: "moveFind", forward }))} onClose={() => run(({ tabs }) => tabs.dispatch({ type: "closeFind" }))} /></div>}
