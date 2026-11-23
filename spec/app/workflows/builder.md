@@ -509,6 +509,8 @@ pure def sometimesASaveIsLetGo(b: Builder): bool = b.save.attempt.outcome == A::
 
 ### A restart closes the builder and keeps the draft and its save
 
+Closing the builder stops waiting for the phone's list.
+
 ```quint
 pure def restart(b: Builder): Builder = {
   ...b, open: false, offer: { ...b.offer, status: R::Idle }, choices: { ...b.choices, status: R::Idle }, discarding: false, review: V::dismiss(b.review),
@@ -517,7 +519,8 @@ pure def restart(b: Builder): Builder = {
 
 pure def canCloseBuilder(b: Builder): bool = b.open
 
-pure def closeBuilder(b: Builder): Builder = { ...b, open: false, discarding: false, review: V::dismiss(b.review) }
+pure def closeBuilder(b: Builder): Builder =
+  { ...b, open: false, choices: { ...b.choices, status: R::Idle }, discarding: false, review: V::dismiss(b.review) }
 ```
 
 ### When another owner signs in, the builder shows that owner's own slot, and a save of the previous owner is let go
@@ -528,7 +531,8 @@ The previous owner's draft stays in their slot on the phone.
 pure def canOwnerChanged(b: Builder, owner: int): bool = owner != b.owner and owner >= 0
 
 pure def ownerChanged(b: Builder, owner: int): Builder =
-  { ...initial, owner: owner, write: b.write, save: Q::abandon(b.save), saved: b.saved }
+  { ...initial, owner: owner, write: b.write, save: Q::abandon(b.save), saved: b.saved,
+    offer: { ...b.offer, status: R::Idle }, choices: { ...b.choices, status: R::Idle } }
 ```
 
 ### A kept save is let go only when the agent answered, its record was read, the owner let it go, or its owner signed out

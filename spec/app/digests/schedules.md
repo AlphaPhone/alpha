@@ -69,26 +69,9 @@ pure val minuteValues = Set(0, 60)
 pure val zoneValues = Set(0, 1)
 pure val sourceValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
-pure val weight_schedulesRead = 12
-pure val weight_openEditor = 3
-pure val weight_pickTemplate = 5
-pure val weight_pickSource = 6
-pure val weight_reviewChange = 6
-pure val weight_confirmChange = 6
-pure val weight_sendChange = 6
-pure val weight_changeAnswered = 10
-pure val weight_changeUnanswered = 3
-pure val weight_checkChange = 3
-pure val weight_changeChecked = 6
-pure val weight_retry = 4
-pure val weight_reviewRunNow = 6
-pure val weight_confirmRunNow = 6
-pure val weight_sendRunNow = 6
-pure val weight_runNowAnswered = 10
-pure val weight_runNowUnanswered = 4
-pure val weight_checkRunNow = 3
-pure val weight_runNowChecked = 6
-pure val weight_letGoRunNow = 4
+pure val weight_schedulesRead = 4
+pure val weight_changeAnswered = 2
+pure val weight_runNowAnswered = 2
 ```
 
 ### The panel opens and closes, and opening it reads the schedules for the owner signed in

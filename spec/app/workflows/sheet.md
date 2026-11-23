@@ -57,6 +57,8 @@ pure val statusValues = Set(U::Running, U::Done, U::Interrupted, U::NoRun)
 
 ### The history is read for the owner signed in, one page of at most 20 runs at a time, from the start or after the runs shown
 
+A next page that could not be read can be asked for again.
+
 ```quint
 pure def canReadHistory(s: Sheet, removed: bool): bool = s.owner >= 1 and s.history.status != R::Loading
 
@@ -65,11 +67,12 @@ pure def readHistory(s: Sheet, removed: bool): Moved =
   { state: { ...s, history: asked, shown: 0, more: false, removed: removed },
     out: List(ReadRuns({ ticket: asked.ticket, owner: s.owner, after: 0 })) }
 
-pure def canReadMore(s: Sheet): bool = s.more and s.history.status == R::Loaded
+pure def canReadMore(s: Sheet): bool =
+  s.shown >= maxPage and ((s.more and s.history.status == R::Loaded) or s.history.status == R::Failed)
 
 pure def readMore(s: Sheet): Moved =
   val asked = R::ask(s.history)
-  { state: { ...s, history: asked }, out: List(ReadRuns({ ticket: asked.ticket, owner: s.owner, after: s.shown })) }
+  { state: { ...s, history: asked, more: false }, out: List(ReadRuns({ ticket: asked.ticket, owner: s.owner, after: s.shown })) }
 
 pure def canRunsRead(s: Sheet, ticket: int, count: int): bool = R::canAnswer(s.history, ticket) and 0 <= count and count <= maxPage
 

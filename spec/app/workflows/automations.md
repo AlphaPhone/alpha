@@ -75,23 +75,9 @@ pure val charsValues = Set(0, 12, 2001)
 pure val minutesValues = Set(0, 15, 1441)
 pure val workflowValues = Set(0, 1)
 pure val ownerValues = Set(0, 1, 2)
-pure val weight_automationsRead = 12
-pure val weight_act = 3
-pure val weight_reviewChange = 6
-pure val weight_confirmChange = 6
-pure val weight_sendChange = 6
-pure val weight_changeAnswered = 10
-pure val weight_changeUnanswered = 4
-pure val weight_checkChange = 3
-pure val weight_changeChecked = 6
-pure val weight_letGo = 4
-pure val weight_openEditor = 3
-pure val weight_editRow = 10
-pure val weight_setText = 4
-pure val weight_setTarget = 4
-pure val weight_pickPreset = 4
-pure val weight_toggleDay = 6
-pure val weight_reviewCreate = 6
+pure val weight_automationsRead = 4
+pure val weight_changeAnswered = 2
+pure val weight_editRow = 3
 ```
 
 ### The list is read for the owner signed in, once at a time, and only its newest answer is taken
