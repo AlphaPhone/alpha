@@ -412,6 +412,6 @@ export function assistantWith<P>(ports: Layer.Layer<P>, resident: Layer.Layer<Re
 }
 
 /** The assistant over the fakes, with its stores in memory and the shell's navigation on Home. */
-export function assistantOver(resident: Layer.Layer<Resident>, host: Layer.Layer<AssistantHost | AssistantEmail>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false }), control: Layer.Layer<ResidentControl | ResidentRecovery> = fakeResidentControl(), latency: Layer.Layer<Latency> = fakeLatency()) {
+export function assistantOver(resident: Layer.Layer<Resident>, host: Layer.Layer<AssistantHost>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false }), control: Layer.Layer<ResidentControl | ResidentRecovery> = fakeResidentControl(), latency: Layer.Layer<Latency> = fakeLatency()) {
   return Layer.provideMerge(layer, Layer.mergeAll(fakeFeeds(), fakeComms(), resident, control, host, executors, native, memoryStore, preferences, fakeNavigation(), latency))
 }
