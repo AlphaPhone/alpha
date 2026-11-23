@@ -34,7 +34,6 @@ const outcomeLabels = { happened: "Happened", didnt: "Didn’t happen", unresolv
 
 /**
  * Agent activity: a new conversation, saved conversations, the actions waiting for me, the phone actions whose outcome I settle, and the agent's restart.
- * @model spec/assistant/receipts.md
  */
 export function AgentActivity({ onBack }: AgentActivityProps) {
   const [round, setRound] = useState(0);
