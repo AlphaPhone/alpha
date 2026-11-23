@@ -147,6 +147,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - These tests still target removed code:
   - owner-route-parity (including its JVM half), `test/android-host.test.mjs` and verify-apks import the removed `product/owner-route-table.ts` or the legacy generator;
   - `specs/quint/refinement/native/credential-coordinator*.mjs`;
+  - `test/android-build-fast.test.mjs` imports `vendor/eliza/packages/app/scripts/mobile/android/build-consumer.mjs`, which vibestack removed, so the whole file fails to load;
   - `scripts/test-cloud-delegation-return.ts`, `test/quint-conformance.test.mjs` and `specs/quint/refinement/application/portable.mjs` validate the old static delegation page, not the forwarder.
 
 ## Upstream (eliza)
