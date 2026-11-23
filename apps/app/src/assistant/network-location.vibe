@@ -17,9 +17,9 @@ const plugin = "AlphaNetworkLocation"
 /** The phone's Wi-Fi and cell position for when GPS has no fix; looked up only when a caller needs a position now, shared while in flight, and cached. Maps reads the same answers. */
 export service NetworkLocation {
   /** The last answer while it may still stand for the phone's position; never a lookup. */
-  cached(): NetworkPosition | undefined!!
+  cached(): (NetworkPosition | undefined)!!
   /** A position now: the cached one while it is recent, else one shared lookup; a failure backs off. */
-  locate(): NetworkPosition | undefined!!
+  locate(): (NetworkPosition | undefined)!!
   /** Forget every answer and retire a lookup in flight. */
   clear(): void!!
 }
