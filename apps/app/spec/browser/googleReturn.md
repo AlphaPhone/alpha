@@ -36,8 +36,7 @@ pure val initial: GoogleReturn = {
 pure def matches(pending: PendingRecord): bool = pending == RecordMatching or pending == RecordExpired
 pure def ended(result: ReturnOutcome, g: GoogleReturn): GoogleReturn = { ...g, live: false, outcome: result }
 pure def closedBrowser(fence: bool, g: GoogleReturn): GoogleReturn = { ...ended(BrowserClosed, g), fence: true }
-pure def canOpenInHostTask(g: GoogleReturn): bool =
-  g.live and not(g.hostTask or g.paused or g.hint or g.claimed or g.received) and g.work.length() == 0 and g.grace.length() == 0
+pure def canOpenInHostTask(g: GoogleReturn): bool = g == initial
 pure def openInHostTask(g: GoogleReturn): GoogleReturn = { ...g, hostTask: true }
 pure def canPause(g: GoogleReturn): bool = g.live and not(g.paused)
 pure def pause(g: GoogleReturn): GoogleReturn = { ...g, paused: g.hostTask }
