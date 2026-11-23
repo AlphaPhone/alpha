@@ -119,9 +119,12 @@ pure val queryValues = Set("", "beach")
 pure val personValues = Set(0, 4)
 pure val nameValues = Set("", "Trip")
 pure val lettersValues = Set(0, 4, 81)
-pure val weight_listed = 3
-pure val weight_chooseAlbum = 3
-pure val weight_addTo = 3
+pure val weight_listed = 4
+pure val weight_showTab = 3
+pure val weight_startSelect = 2
+pure val weight_toggle = 2
+pure val weight_chooseAlbum = 4
+pure val weight_addTo = 4
 ```
 
 ## Story: Give Photos access
