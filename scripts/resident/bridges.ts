@@ -10,6 +10,7 @@ import type {AgentCli, ResidentHost} from '@elizaos/agent/cli';
 import {MapsFailure} from '@elizaos/plugin-maps/client/contracts';
 import type {AgentSavedPlaceStore, StoredSaves} from '@elizaos/plugin-maps';
 import {WORKFLOW_DEVICE_SERVICE, WORKFLOW_NATIVE_DIGEST_SERVICE} from '@elizaos/plugin-workflow';
+import {workflowCalendarRevisionInput, workflowSha} from '@elizaos/plugin-workflow/client';
 
 type ServiceClass = ReturnType<NonNullable<AgentCli['runtimeServices']>>[number];
 type Runtime = Parameters<ServiceClass['start']>[0];
@@ -140,6 +141,26 @@ function operationType(operation: unknown): string {
 }
 
 /**
+ * A native Calendar range read with each row's revision added, as the agent's read result requires: the bridge reads the rows
+ * and the revision is the workflow hash of each row's own fields (`workflowCalendarRevisionInput`). Anything else is returned as it is.
+ * @throws {never}
+ */
+export async function withCalendarRevisions(answer: unknown): Promise<unknown> {
+	if (typeof answer !== 'object' || answer === null) return answer;
+	const read = answer as {kind?: unknown; events?: unknown};
+	if (read.kind !== 'calendar' || !Array.isArray(read.events)) return answer;
+	const events = await Promise.all(read.events.map(async (row: unknown) => {
+		if (typeof row !== 'object' || row === null) return row;
+		const fields = row as {id: string; calendarId: string; title: string; start: string; end: string; allDay: boolean};
+		const revision = await Effect.runPromise(workflowSha(workflowCalendarRevisionInput({
+			id: fields.id, calendarId: fields.calendarId, title: fields.title, start: fields.start, end: fields.end, allDay: fields.allDay,
+		})));
+		return {id: fields.id, calendarId: fields.calendarId, revision, title: fields.title, start: fields.start, end: fields.end, allDay: fields.allDay};
+	}));
+	return {...read, events};
+}
+
+/**
  * The workflow device bridge: the enrolled phone as the agent's own device requests know it, an exact reviewed Calendar
  * range read by the app process over its bridge, and every other step offered to the phone for review (`offer`), which
  * answers with the result it applied.
@@ -152,7 +173,7 @@ export function workflowDevice(offer: WorkflowDeviceOffer, ask = askBridge): {
 	return {
 		enrollment: () => offer.enrollment(),
 		perform: (binding, target, operation, signal) => NATIVE_DEVICE_OPERATIONS.has(operationType(operation))
-			? ask({op: 'perform', binding, target, operation})
+			? ask({op: 'perform', binding, target, operation}).then(withCalendarRevisions)
 			: offer.perform(binding, target, operation, signal),
 	};
 }

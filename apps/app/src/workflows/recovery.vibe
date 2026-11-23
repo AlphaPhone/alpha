@@ -16,12 +16,12 @@ export type RequestBackup = Readonly<Record<string, string | null>>
 /** Back up or reset saved workflow requests from the one open, visible review. */
 export service RequestRecovery {
   /** Open a review: retires the previous one and reads what is saved. */
-  open(): RequestBackup | undefined!!
+  open(): (RequestBackup | undefined)!!
   /** The page left, hid or changed session: every review is blocked until `allow`. */
   block(): void!!
   allow(): void!!
   /** The open review's backup, or undefined when that review is no longer the open one. */
-  capture(review: number): RequestBackup | undefined!!
+  capture(review: number): (RequestBackup | undefined)!!
   /** Remove every saved request after the owner confirmed it in the open review. */
   reset(review: number): boolean!!
   /** The open review's number. */

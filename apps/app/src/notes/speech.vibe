@@ -1,4 +1,4 @@
-// spec/notes/recorder.md, "Segments are transcribed in order while the recording goes on, and never past the audio"; spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
+// spec/notes/audio.md, "A transcript is read in 25-second windows, each checked against the exact recording first"
 import type { RecordingTranscriber } from "../voice/transcription.vibe"
 
 /** The window of a saved voice note's recording a transcript request reads. */
@@ -18,7 +18,7 @@ export function refusalCode(error: unknown): string | undefined {
 }
 
 /** Transcribe a live segment or a saved window through voice's recording transcriber; a saved window heard on the phone is refused, since the phone's own path reads no saved window. */
-export effect function transcribeKept(transcriber: RecordingTranscriber.Shape, recordingId: string, saved?: SavedWindow): string | SpeechRefused!! {
+export effect function transcribeKept(transcriber: RecordingTranscriber.Shape, recordingId: string, saved?: SavedWindow): (string | SpeechRefused)!! {
   const details = saved === undefined ? {} : { savedNoteId: saved.savedNoteId, savedDurationMs: saved.savedDurationMs, offsetMs: saved.offsetMs }
   const heard = try (transcriber.transcribe(recordingId, details) catch (error): SpeechRefused => ({ code: refusalCode(error.cause) ?? refusalCode(error) }))
   if ("code" in heard) return heard

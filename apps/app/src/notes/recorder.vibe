@@ -1,4 +1,4 @@
-// spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"; spec/notes/recorder.md, "Segments are transcribed in order while the recording goes on, and never past the audio"; spec/notes/recorder.md, "Pause, resume and stop act only on the owner's open recording"; spec/notes/recorder.md, "Done claims the save once, and the recording closes only after its note is confirmed"; spec/notes/recorder.md, "Discard asks once for a recording of a second or more, and never while its save is claimed"; spec/notes/recorder.md, "Another owner or leaving Notes detaches the view and keeps the recording"; spec/notes/recordingJournal.md, "A stopped recording is claimed once and committed only to its canonical note"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
+// spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/recorder.md, "A recording starts only for the current owner, after any playback has confirmed it stopped"; spec/notes/recorder.md, "A recording is audio only, and shows only text its journal already holds, never past the audio"; spec/notes/recorder.md, "Pause, resume and stop act only on the owner's open recording"; spec/notes/recorder.md, "Done claims the save once, and the recording closes only after its note is confirmed"; spec/notes/recorder.md, "Discard asks once for a recording of a second or more, and never while its save is claimed"; spec/notes/recorder.md, "Another owner or leaving Notes detaches the view and keeps the recording"; spec/notes/recordingJournal.md, "A stopped recording is claimed once and committed only to its canonical note"; spec/notes/audio.md, "Playback starts only for the open note's own live recording, and stops before any change to it"
 import type { NoteFormat, NoteJson, StickyNote } from "@elizaos/plugin-notes/types"
 import { playbackAllowed } from "../../gen/notes__audio.effect.vibe"
 import {
@@ -6,13 +6,11 @@ import {
 } from "../../gen/notes__recorder.effect.vibe"
 import { type Event as JournalEvent, Machine as JournalMachine, machine as journalMachine } from "../../gen/notes__recordingJournal.effect.vibe"
 import { Native } from "../platform/native.vibe"
-import { RecordingTranscriber } from "../voice/transcription.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { NotesEditor } from "./editor.vibe"
 import { contentOf, nextDefaultTitle, type NoteRow, voiceAudio } from "./list.vibe"
 import { decodeAudioDescription, decodeClaim, decodePlayback, decodeRecordingStatus, decodeSavedAudio, type RecordingStatus } from "./notes.schema.vibe"
 import { sha256Hex } from "./platform.ts"
-import { transcribeKept } from "./speech.vibe"
 
 const voicePlugin = "AlphaVoiceCloud"
 const audioPlugin = "AlphaNoteAudio"
@@ -79,7 +77,6 @@ const idle: RecorderDisplay = { durationMs: 0, levels: [], transcript: "", posit
 
 const make = effect {
   const native = try Native
-  const transcriber = try RecordingTranscriber
   const collection = try NotesCollection
   const editor = try NotesEditor
   const machine = try RecorderMachine
@@ -90,7 +87,7 @@ const make = effect {
   const digest = try Ref.make<string | undefined>(undefined)
   const folder = try Ref.make<string | null>(null)
 
-  effect function send(event: RecorderEvent): Recorder | undefined!! {
+  effect function send(event: RecorderEvent): (Recorder | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
   effect function record(event: JournalEvent): void!! {
@@ -108,7 +105,7 @@ const make = effect {
     return try native.invoke(voicePlugin, method, args)
   }
 
-  effect function ownerDigest(): string | undefined!! {
+  effect function ownerDigest(): (string | undefined)!! {
     const owner = (try collection.current())?.owner
     if (owner === undefined) return undefined
     const value = try (tryPromise(() => sha256Hex(owner)) catch () => "")
@@ -128,31 +125,6 @@ const make = effect {
       if (text.trim() !== "") parts.push(text.trim())
     }
     return parts.join(" ")
-  }
-
-  effect function pump(status: RecordingStatus): void!! {
-    const recordingId = status.recordingId
-    if (recordingId === undefined) return
-    for (const segment of status.segments ?? []) {
-      const state = try machine.get()
-      if (state.transcriptionFailed || state.savePending) return
-      if ((try Ref.get(texts)).has(segment.segmentId)) continue
-      const answer = try transcribeKept(transcriber, segment.segmentId)
-      if (typeof answer !== "string") {
-        const code = answer.code
-        if (code === "no-speech") {
-          try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, ""]]))
-        } else {
-          try send({ type: "transcriptionStopped", failure: code === "sign-in" ? "FailedSignIn" : code === "unavailable" ? "FailedNoRoute" : "FailedRoute" })
-          return
-        }
-      } else {
-        try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, answer]]))
-        try (voice("setNoteSegmentText", { recordingId, segmentId: segment.segmentId, text: answer }) catch () => undefined)
-        try record({ type: "textJournaled" })
-      }
-      try send({ type: "segmentTranscribed" })
-    }
   }
 
   effect function learn(status: RecordingStatus): void!! {
@@ -184,10 +156,9 @@ const make = effect {
     }))
     const words = try transcript(segments)
     try SubscriptionRef.update(display, (shown) => ({ ...shown, transcript: words }))
-    if (status.state === "recording" || status.state === "stopped") try pump(status)
   }
 
-  effect function status(): RecordingStatus | undefined!! {
+  effect function status(): (RecordingStatus | undefined)!! {
     return try (effect { return try decodeRecordingStatus(try voice("noteRecordingStatus")) } catch () => undefined)
   }
 
@@ -235,7 +206,7 @@ const make = effect {
     return "started"
   }
 
-  effect function recordingId(): string | undefined!! {
+  effect function recordingId(): (string | undefined)!! {
     return (try SubscriptionRef.get(display)).recordingId
   }
 

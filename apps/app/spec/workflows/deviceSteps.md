@@ -90,17 +90,26 @@ pure def sometimesAnchorMoved(x: Steps): bool = x.status == AnchorMoved
 
 ### The agent admits the exact issue it proposed, and the phone acts at most once, journaling the outcome
 
-An action taken in front and open is applied; one interrupted is unknown.
+The agent performs an approved step inside the decision request: it offers the step to the phone and
+answers only once the phone settled it, or the offer lapsed. So the phone runs the step's own
+workflow-bound proposal while its decision is in flight, and journals what that run reported, never
+what the approval status says. A step the phone performed and confirmed, in front and open, is
+applied; one it ran without confirming, or one interrupted, is unknown; one it never ran, or ran and
+refused, did nothing. A Calendar range the agent reads through the phone's own bridge has no proposal
+to run, so the phone cannot confirm it and journals it unknown.
 
 ```quint
+type Performed = PhoneApplied | PhoneUnknown | PhoneNothing
+pure val performedValues = Set(PhoneApplied, PhoneUnknown, PhoneNothing)
 pure def canAdmit(x: Steps): bool = x.inflight == Admitting
 pure def admit(x: Steps): Steps =
   if (x.tappedIssue == x.issued and x.proposal == StepPending and not(x.expired) and not(x.closed))
     { ...x, inflight: Executing, proposal: StepExecuting, admittedIssue: x.issued, admittedDigest: x.digest }
   else cleared(StepNotStarted, x)
-pure def canExecute(x: Steps): bool = x.inflight == Executing
-pure def execute(x: Steps): Steps =
-  if (x.foreground and x.open) { ...x, inflight: SendingReceipt, journal: JournalApplied, effects: x.effects + 1 }
+pure def canExecute(x: Steps, performed: Performed): bool = x.inflight == Executing
+pure def execute(x: Steps, performed: Performed): Steps =
+  if (performed == PhoneNothing) { ...cleared(StepNotStarted, x), proposal: StepDone }
+  else if (performed == PhoneApplied and x.foreground and x.open) { ...x, inflight: SendingReceipt, journal: JournalApplied, effects: x.effects + 1 }
   else { ...x, inflight: SendingReceipt, journal: JournalUnknown }
 pure def alwaysAtMostOneEffect(x: Steps): bool = x.effects + x.denials <= 1
 pure def alwaysAnEffectWasAdmittedAsReviewed(x: Steps): bool =
@@ -127,6 +136,7 @@ pure def alwaysTheStatusIsTruthful(x: Steps): bool =
   (x.status == StepApplied implies (x.effects == 1 and x.receipt == JournalApplied)) and (x.status == StepDeniedStatus implies x.denials == 1) and
   (x.status == StepUnsynced implies x.journal != NoJournal)
 pure def sometimesApplied(x: Steps): bool = x.status == StepApplied
+pure def sometimesNotStarted(x: Steps): bool = x.status == StepNotStarted
 pure def sometimesDenied(x: Steps): bool = x.status == StepDeniedStatus
 ```
 
@@ -179,7 +189,7 @@ pure def lawUnadmittedSpeechIsRefused(started: bool, finished: bool): bool = spo
 ### A notification step is posted on Android, bound to its run, step and operation; elsewhere it is a notice in Alpha
 
 On a phone whose `AlphaNotifications` offers `postWorkflow`, the reviewed title and body are posted
-there with the run's route and a binding of the owner, agent, session, enrollment, proposal and
+there with the run's route and a binding of the owner, agent, session, enrollment, proposal (its id and listed digest) and
 operation, so a tap reopens that run. Android's `succeeded` is applied, `failed` posted nothing, and
 any other answer is unconfirmed. Without that call, or without a reviewed run to bind it to, the
 step posts a notice in Alpha that the owner dismisses.

@@ -6,7 +6,8 @@ import { operationPorts as cameraOperations } from "../../camera/operations.vibe
 import { operationPorts as clockOperations } from "../../clock/operations.vibe"
 import { operationPorts as filesOperations } from "../../files/operations.vibe"
 import { operationPorts as mapsOperations } from "../../maps/operations.vibe"
-import { operationPorts as notesOperations } from "../../notes/operations.vibe"
+import { DeviceReview } from "../../assistant/review.vibe"
+import { NotesCalls, operationPorts as notesOperations } from "../../notes/operations.vibe"
 import { operationPorts as telephonyOperations } from "../../telephony/operations.vibe"
 import { TelephonyCalls } from "../../telephony/ports.vibe"
 import { operationPorts as workflowsOperations } from "../../workflows/operations.vibe"
@@ -19,11 +20,18 @@ export effect function telephonyFamily() {
   return try Effect.provideService(telephonyOperations, TelephonyCalls, calls)
 }
 
+/** Notes' family over the assistant's per-call facts: a workflow's note is saved only for a call run from its own run's step review. */
+export effect function notesFamily() {
+  const review = try DeviceReview
+  const calls: NotesCalls.Shape = { workflow: (call) => map(review.callFacts(call), (facts) => facts.workflow) }
+  return try Effect.provideService(notesOperations, NotesCalls, calls)
+}
+
 /** Every area's agent device operations, registered in this order once the last of those areas is built; an operation goes to the first family that validates it. */
 export const executorsLive = Layer.effectDiscard(effect {
   try registerFamily(shellOperations)
   try registerFamily(filesOperations)
-  try registerFamily(notesOperations)
+  try registerFamily(notesFamily())
   try registerFamily(calendarOperations)
   try registerFamily(telephonyFamily())
   try registerFamily(browserOperations)

@@ -10,13 +10,13 @@ const day = (iso: string) => Date.parse(iso)
 
 describe("phone steps (spec/workflows/deviceSteps.md)", () => {
   // spec/workflows/deviceSteps.md, "A notification step is posted on Android, bound to its run, step and operation; elsewhere it is a notice in Alpha"
-  it.effect("a notification's binding names the owner scope, agent session, enrollment, proposal and operation, and its card says what it posts (spec/workflows/deviceSteps.md, \"A notification step is posted on Android, bound to its run, step and operation; elsewhere it is a notice in Alpha\")", () => effect {
-    const text = workflowNoticeBindingText(route, identity, { proposalId: "proposal-1", operationId: "op-1", attemptId: 1 })
+  it.effect("a notification's binding names the owner scope, agent session, enrollment, proposal with its digest and operation, and its card says what it posts (spec/workflows/deviceSteps.md, \"A notification step is posted on Android, bound to its run, step and operation; elsewhere it is a notice in Alpha\")", () => effect {
+    const text = workflowNoticeBindingText(route, identity, { proposalId: "proposal-1", operationId: "op-1", attemptId: 1 }, "d".repeat(64))
     const notice = { type: "post_notification", title: "Groceries", body: "Milk and eggs" } as const
     try Effect.try(() => assert.deepStrictEqual(
       { text, card: describeOwned(notice), applied: summarizeOwned(notice, "Applied"), failed: summarizeOwned(notice, "Failed") },
       {
-        text: JSON.stringify([route.scope, "owner:agent-1", "agent-1", "session-1", route.origin, "install-1", "enroll-1", "proposal-1", "op-1"]),
+        text: JSON.stringify([route.scope, "owner:agent-1", "agent-1", "session-1", route.origin, "install-1", "enroll-1", "proposal-1", "d".repeat(64), "op-1"]),
         card: { title: "Post a notification", detail: "Groceries\nMilk and eggs" },
         applied: "Posted the reviewed notification.", failed: "No notification was posted.",
       },

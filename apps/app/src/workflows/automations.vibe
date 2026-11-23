@@ -60,9 +60,9 @@ export service Automations {
   /** Save a new prompt, or the prompt `id`. */
   savePrompt(input: PromptInput, id?: string): Report!!
   /** The prompt's run history, newest first. */
-  promptRuns(id: string): ReadonlyArray<PromptRunLine>!AgentRefused | AgentUnavailable | Unrecognized | NotSent
+  promptRuns(id: string): ReadonlyArray<PromptRunLine>!(AgentRefused | AgentUnavailable | Unrecognized | NotSent)
   /** The prompt `id` as the agent keeps it, to change; undefined when its trigger is not one Alpha changes. */
-  prompt(id: string): PromptInput | undefined!AgentRefused | AgentUnavailable | Unrecognized | NotSent
+  prompt(id: string): (PromptInput | undefined)!(AgentRefused | AgentUnavailable | Unrecognized | NotSent)
   /** Release the held change `id` the owner reviewed, after they confirmed it may still apply. */
   allowAnother(id: number): void!!
 }
