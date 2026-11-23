@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { CalendarDays } from "lucide-react";
 import { ApprovalReviews } from "../../calendar/approvals.vibe";
 import { AgentRequests } from "../../calendar/requests.vibe";
-import { calendarScreenBack, calendarSurfacesBack } from "../../calendar/screen.vibe";
+import { calendarScreenBack } from "../../calendar/screen.vibe";
 import type { AppScreen, AppSurface } from "../app-screen.ts";
 import { CalendarScreen } from "./CalendarScreen.tsx";
 import { ask } from "../shell/services.ts";
@@ -19,9 +19,6 @@ export const screens: AppScreen[] = [
     back: () => ask(calendarScreenBack(), false),
   },
 ];
-
-/** Back for Calendar's overlay surfaces over any screen: true when it closed the availability or approval review, false when neither is open and Back is the shell's. */
-export const surfacesBack = (): Promise<boolean> => ask(calendarSurfacesBack(), false);
 
 /** Calendar's always-mounted surfaces: the Undo notice of a held deletion, the approval review and the availability review. */
 export const surfaces: AppSurface[] = [

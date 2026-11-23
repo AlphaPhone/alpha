@@ -6,7 +6,7 @@ import {
 } from "../../gen/calendar__agent.effect.vibe"
 import { sourceKeyId, utcInstant } from "@elizaos/plugin-calendar"
 import { namedReadWindow } from "@elizaos/plugin-calendar/client"
-import { Resident, ResidentRefused } from "../platform/resident.vibe"
+import { Resident, ResidentRefused, ResidentUnavailable } from "../platform/resident.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 import { type CalendarRecord as CalendarSummary, type EventRecord, type FeedRecord, decodeCalendars, decodeFeed, decodeNext } from "./feed.schema.vibe"
 import type { CalendarChangeReply, CalendarCreateRequest, CalendarDeleteRequest, CalendarUpdateRequest } from "@elizaos/plugin-calendar/client"
@@ -69,9 +69,9 @@ export service AgentCalendar {
   /** Whether an event left for Maps is still the version left, for the same binding; with `sourceRevision`, also from the same calendar selection. */
   verifyReturn(eventKey: string, revision: string, begin: number, sourceRevision?: string): EventReturn!!
   /** The key of the event a confirmed create with this idempotency key read back, for the note it came from. */
-  createdEvent(idempotencyKey: string): string | undefined!!
+  createdEvent(idempotencyKey: string): (string | undefined)!!
   /** One complete read of one calendar at an instant, for a review of an event outside the loaded window. */
-  readSourceAt(sourceKey: string, at: number): { readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined!!
+  readSourceAt(sourceKey: string, at: number): ({ readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined)!!
   /** Drop an ended next event. */
   upcomingEnded(): void!!
 }
@@ -232,19 +232,23 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
 
   const api = residentClients(resident).calendar
 
-  type Sent = CalendarChangeReply | "transport" | "refused"
+  type Sent = CalendarChangeReply | "transport" | "refused" | "unknown"
 
   function providerReply(reply: Sent, agentId: string): ProviderReply {
     if (reply === "transport") return "ProviderTransport"
     if (reply === "refused") return "ProviderRefused"
+    if (reply === "unknown") return "ProviderUnknown"
     if ("approvalRequestId" in reply) return "ProviderQueued"
     if ("event" in reply && reply.event !== null && agentId !== "" && reply.event.agentId !== agentId) return "ProviderForeign"
     return "ProviderApplied"
   }
 
+  /** A refusal named by the agent is refused; an agent that was not running or asked to slow down took nothing; any other lost answer may have been applied and is unknown. */
   effect function sent(call: () => Promise<CalendarChangeReply>): Sent {
     return try tryPromise({ try: call, catch: (error) => error }) catch (error) =>
-      (error instanceof ResidentRefused && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429 ? "refused" : "transport") as Sent
+      (error instanceof ResidentUnavailable ? "transport"
+        : error instanceof ResidentRefused ? (error.status === 429 ? "transport" : error.status >= 400 && error.status < 500 && error.status !== 408 ? "refused" : "unknown")
+        : "unknown") as Sent
   }
 
   effect function settleWrite(id: number) {

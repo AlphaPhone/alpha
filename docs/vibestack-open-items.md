@@ -28,7 +28,11 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - the origin-local meeting preview;
   - foreground alert catch-up (legacy `calendar-alerts.ts`), which would belong to Clock.
 
-  The Calendar "Not connected" Settings button still opens account > google; confirm that target.
+  The Calendar "Not connected" Settings button opens account > google, now with the Google panel's Calendar intent (the same as the Calendars sheet's Connect); confirm that target.
+- **OWNER:** Reminders are no longer Calendar rows: legacy listed saved reminders in Calendar and its form could make one, and Home's next line took whichever came first (`nextLead` in `spec/calendar/home.md` has no caller). Clock owns reminders now. Show them in Calendar again through a port Clock fills, or drop `nextLead`?
+- **OWNER:** Saved mail moved from the encrypted `connected-read-cache:v1:<sha256>` slot to the WebView's KeyValueStore (localStorage), up to 8 lists and 16 bodies at rest unencrypted, and the legacy slot is never read or cleared. Move saved mail to the mail store's secure slots (`keys.savedMail` is unused), or accept it?
+- **OWNER:** Inbox keeps all accounts' drafts in one 8 MiB secure slot and all operations in another, and an operation record stores its attachments twice (`proposal.mail.files` and `composer.content`), so a send with more than about 2.9 MiB of attachments cannot be journaled although `proposalLimit` (7.5 MiB) admits it. Key the slots per account, drop file bytes from `ComposerRef.content` (bind a digest), or raise the native limit?
+- **OWNER:** The agent's Gmail body reads and mailbox changes (legacy gmail-agent-read-host: 32,000-character body reads, agent archive, Trash and read state) have no counterpart: `android/agent/policy.json` admits only `INBOX_READ` and `INBOX_COMPOSE_EMAIL`, and upstream has no change action. Keep them retired?
 - **OWNER:** Legacy slots not carried over:
   - old inbox operation records (`inbox-operation:v1:<sha256>`), possibly including a send in flight during the update: move to `device:<key>` in MailOperations, or drop?
   - the legacy Notes draft `notes-draft:v1:device` is deliberately not adopted, because `notes-canonical-draft:v1:device` cannot read its change set; accept losing it?
@@ -56,12 +60,15 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - Browser has no always-mounted sheet; the "Browser shade sheet" was read as the browser build's notification shade in clock-notices. If another Browser sheet was meant, it needs its own surface and Back.
 - `src/shell/assistantHost.vibe` keeps local copies of `learnPeer`/`comparePeer`/`statusRead`, because upstream `./client` does not re-export them.
 - Hardware Back does not close an open Inbox search field that has no submitted query, because that state is UI-local in InboxScreen (Inbox). The on-screen Back does close it.
+- Preparing an app update does not write Inbox's waiting edit: `keepDrafts` in `src/shell/activity.vibe` only blurs the focused field. The shell needs a keeper port that Inbox fills with `MailComposer.flush` (answering false on a refusal), and the update must refuse while an Inbox review, selection or attachment is open (`spec/inbox/drafts.md`, `spec/settings/updates.md`).
 - `index.html` carries no CSP for the delegation-return landing route.
 
 ## Assistant
 
 - `spokenCue`'s `replyReady()` does nothing when no cue was said, so a later `say()` would still play after the reply (`src/assistant/cue.vibe`). Voice guards against it with its own machine.
 - `metadata.clientDevice.calendarAgendaSource` is not sent, because Calendar exports no agenda source for the shown day.
+- A Calendar approval request the agent queued can never be reviewed on the phone: `src/assistant/reply-lines.vibe` admits only `maps-share` and `checkin-*` choice blocks, so `[CHOICE:approval-<id>]` shows as text. Classify it through Calendar's `calendarReviewText` into a transcript row, render it in `src/web/assistant/Transcript.tsx` with its status and a Review button that calls `ApprovalReviews.open(id)`, and call `ApprovalReviews.retire()` on a conversation change (a hidden page now retires it). The rule belongs in `spec/assistant/reply.md`.
+- "Needs your approval · reply cut off" and "Done · reply cut off" are unreachable: `src/assistant/composer.vibe` calls `cutOffLabel(…, 0, false)`. Count the reply's applied, not rolled-back effect receipts and its `calendar.approval_request` receipts without a `calendar.event` artifact from `reply.actionResults`, and pass the reply's `TURN_INTERRUPTED_AFTER_EFFECT` code. `replyCutOffNeedsApproval` in `spec/calendar/approvals.md` duplicates `spec/assistant/receipts.md` and has no caller.
 - `workflowStepDecisions` and the workflows layer each build their own WorkflowApi/WorkflowVersions. Composition may want to share one.
 
 ## Areas consuming assistant changes
@@ -71,7 +78,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **Workflows:** `src/workflows/notices.vibe` should call `DeviceReview.workflowStep(runId, stepId)` in its Executing phase, so an admitted phone step actually runs. `WorkflowCalendar` (`src/workflows/calendarRanges.vibe`) has no screen consumer; the simulator still uses the pure range helpers. The `post_notification` bindingHash omits the proposal digest, because `ExecutorCall` carries none.
 - **Notes:** `create_note` still treats "Workflows in front" as a workflow run. Notes sits before the assistant in the runtime order, so it needs a port, filled by the shell from `DeviceReview.callFacts(call).workflow`. `NotesListFilter.negotiate` and `filesCapabilities` can read the advertised names once the shell fills `AdvertisedCapabilities`.
 - **Maps:** `src/maps/failure.vibe` could use account's `limitOfRefusal` instead of reading `resetAt` itself.
-- **Calendar:** `surfacesBack()` in `src/web/calendar/index.tsx` is no longer used and can be dropped. A device-calendar event saved from a note is not back-linked, because Calendar's new-event form always writes to the agent calendar. `linkedProviderEvents` mapped-copy suppression is not wired (legacy did not use it either).
+- **Calendar:** a device-calendar event saved from a note is not back-linked. The new-event form can now save to a phone calendar, but `linkSavedNote` links only an agent event a readback confirmed (`AgentCalendar.createdEvent`), so a phone event from a note says "Saved · note not linked". The device create's confirmed id needs to reach Notes' origins.
 
 ## Voice
 
@@ -140,7 +147,8 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - `./client` does not re-export `learnPeer`/`comparePeer`/`statusRead`.
 - **agent:** a workflow device-offer helper is missing, so `read_selected_notes`/`create_note` can answer DEVICE_STEP_UNSUPPORTED.
 - **agent/voice:** `VoiceReplyAction` has no failure flag, so the "email action failed" line is unreachable.
-- **cloud:** `@elizaos/cloud` has no `CloudServices.client.googleCalendarSync(request, { signal })` (assumed signature, used by `src/calendar/deviceSync.vibe`), and the device route table lacks `creditsCheckout`.
+- **cloud:** the device route table lacks `creditsCheckout`.
+- **plugin-inbox:** a read message carries no Reply-To (`GmailReadResult`/`wire.schema.vibe` have no `replyTo`), so `src/inbox/gmail.vibe` sets `replyTo: ""` and a reply always goes to the sender, never to a list's or ticket system's Reply-To.
 - **plugin-inbox:** `inboxComposeActionName` is exported only from the package root, so voice keeps a local copy.
 
 ## Unverified in the code-only phase
@@ -151,7 +159,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - voice: `voice__acknowledgement` (CueTurn, acknowledged, audible, replyReady, ended, cancel, replyMayStart), cross-module `R::cueReplyBoundMs`, `R::ackLimit`, `R::Cue`, plus the extended `voice__latency`;
   - account: `account__enrollment`, `paymentPageOpens`, `authorizePageOpens`;
   - browser: `browser__pageContext`;
-  - calendar: `calendar__deviceSync`;
+  - calendar: `calendar__googleLink` (GoogleRow, PauseReport, googleRow, grantOf, pauseNeeded, pauseReport, accessContinuation), `calendar__home` homeReads, `calendar__presentation` replyRereads, `calendar__editor` agentRepeatSendable and newEventTarget;
   - camera: `camera__agentCapture` `panelLimitMs`;
   - clock: `clock__agentReview`, `clock__notifications` ConsumeAnswer and consumeAccepted;
   - inbox: keepPrevious, inboxAdvertised, `decodeState`/`machine` of `inbox__drafts` and `inbox__operations`;
@@ -169,7 +177,6 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - `let` rebinding of a `catch` expression;
   - a getter inside `satisfies Pick<…>`;
   - the `Stream.filter` refinement, `Stream.mapEffect`/`Stream.concat` and `Ref.Ref` in the resident stream relay;
-  - `createCalendarSyncHost`'s effect members called from VibeLang;
   - whether `Stream.drop` over `WorkflowsPlace.moves` and `Foreground.changes`/`AssistantDraft.review` emit their current value first;
   - `Machine.send` returning Cue for a spec with no out.
 - **Build and tooling:**
@@ -189,7 +196,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 ## After merging develop through #1449 (#1422 retirement)
 
 - Android code that #1422 itself kept: `PairedAgentCredential`, `PairedSpeechContract`, `HostedTransport`, the paired branch in `AlphaVoiceCloudPlugin`, `ConnectionRoutes.retiredPairing`, `CalendarSyncBridge` and Android `AlphaCalendar.sync`. **OWNER:** retire these too, now that client Calendar linked sync is gone from the app?
-- `owner-routes.json` still lists `/api/lifeops/calendar/sync-control` and `/links`.
+- Calendar's Google link (`src/calendar/link.vibe`) uses `/api/lifeops/calendar/sync-control`, `/sync-control/destinations` and `/links` again; `owner-routes.json` and `android/agent/host.json` admit all three; whether the resident at the pin serves `/sync-control/destinations` on the phone is not checked.
 - Some androidTest files still call `AlphaConnection.secureWrite`/`secureRemove`, which the branch removed.
 - `docs/simplification-audit/**` (4,666 files) came in with #1422 and describes the legacy renderer.
 

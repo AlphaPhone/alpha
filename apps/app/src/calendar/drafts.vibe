@@ -18,7 +18,7 @@ export service CalendarDrafts {
   /** The fields typed: retained when they fit and nothing is offered or saving. */
   edit(fields: DraftFieldsRecord): void!!
   /** The fields Restore puts into the form. */
-  restore(): DraftFieldsRecord | undefined!!
+  restore(): (DraftFieldsRecord | undefined)!!
   openReview(kind: DraftReview): void!!
   answerReview(confirmed: boolean): void!!
   retry(): void!!
@@ -30,9 +30,9 @@ export service CalendarDrafts {
   /** A note or scan asks for a draft; HandoffAdmitted when the new event form now holds it. */
   handoff(origin: DraftOrigin, fields: DraftFieldsRecord): HandoffNotice!!
   /** What the owner's slot for a target holds now, if anything. */
-  retained(target: string): DraftFieldsRecord | undefined!!
+  retained(target: string): (DraftFieldsRecord | undefined)!!
   openRecovery(): void!!
-  captureRecovery(): string | undefined!!
+  captureRecovery(): (string | undefined)!!
   /** Ask to reset the captured snapshot; nothing is reset until the owner confirms. */
   requestReset(): void!!
   /** Reset only the snapshot captured, and only while nothing wrote the slot since. */
