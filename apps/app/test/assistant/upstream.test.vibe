@@ -10,7 +10,8 @@ import {
   assistantOver, browserScreen, countingExecutors, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
   wireProposal, type Seen,
 } from "./fakes.vibe"
-import type { PageObservation } from "../../src/assistant/ports.vibe"
+import { MapsViews, type PageObservation } from "../../src/assistant/ports.vibe"
+import { AgentViews } from "../../src/assistant/views.vibe"
 
 const page = {
   tabId: "t1", revision: "r1", url: "https://news.example.com/today#top", title: "Today\nin brief", capturedAt: 1,
@@ -167,6 +168,23 @@ it.effect(`A turn tells the agent direct requests are allowed only with review-f
     direct: { delivery: "completed-action", sameRenderer: true, direct: "direct-request-v1" },
     asking: { delivery: "completed-action", sameRenderer: true, direct: undefined },
   }))
+})
+
+it.effect("Distinct Maps handoffs still open after the recent effect list fills (spec/assistant/views.md, \"Maps' view is delivered by Maps, at most once per effect\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const keys: number[] = []
+  const maps = Layer.succeed(MapsViews, {
+    shown: () => succeed(undefined),
+    deliver: (_request, effectKey) => sync(() => { keys.push(effectKey) }),
+  })
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Okay." }, proposals: [] }), Layer.merge(fakeHost([]), maps), countingExecutors({ count: 0 })) {
+    const views = try AgentViews
+    for (const index of [...Array.from({ length: 66 }, (_, index) => index), 65]) {
+      const navigationBinding = { requestId: `maps-${index}`, clientId: views.clientId, viewId: "maps", viewType: "gui", installationId: "i1" }
+      try views.deliver([{ action: "VIEWS", data: { viewId: "maps", navigationPrepared: true, navigationBinding } }], "home")
+    }
+  }
+  try Effect.try(() => assert.deepStrictEqual([keys.length, new Set(keys.slice(0, 66)).size, keys[66]], [67, 66, keys[65]]))
 })
 
 it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {

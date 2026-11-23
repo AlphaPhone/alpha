@@ -83,6 +83,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
   const clientId = newId()
   const running = new Set<string>()
   const effects = new Map<string, number>()
+  let effectSerial = 0
   let requests = 0
   let following = false
 
@@ -114,7 +115,7 @@ export const viewsLayer = Layer.effect(AgentViews, effect {
   effect function effectKeyOf(requestId: string) {
     const known = effects.get(requestId)
     if (known !== undefined) return known
-    const next = effects.size + 1
+    const next = ++effectSerial
     effects.set(requestId, next)
     if (effects.size > 64) effects.delete(effects.keys().next().value ?? "")
     return next
