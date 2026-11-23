@@ -17,7 +17,7 @@ const inputs = {ids: resources.staging, sibling: resources.production, apiHost, 
 const origin = {host: 'db.example.invalid', port: 5432, database: 'alpha-fixture', user: 'fixture-user', scheme: 'postgresql'};
 const zone = {id: zoneId, name: inputs.ids.zone, account: {id: accountId}};
 const kv = {id: kvId, title: `${inputs.ids.workerName}-cache`, supports_url_encoding: true};
-const hyperdrive = {id: hyperId, name: `${inputs.ids.workerName}-db`, origin};
+const hyperdrive = {id: hyperId, name: `${inputs.ids.workerName}-db`, origin, caching: {disabled: true}};
 const bucket = {name: inputs.ids.r2Bucket, creation_date: '2026-01-01T00:00:00Z', location: 'ENAM', storage_class: 'Standard'};
 const dnsRow = name => ({id: name === apiHost ? id('e') : id('f'), name, type: 'AAAA', content: '100::', proxied: true});
 const domain = (hostname, service) => ({id: hostname === apiHost ? id('7') : id('8'), hostname, service, environment: 'production', zone_id: zoneId});
@@ -61,7 +61,7 @@ function cloudflareFixture({existing = false} = {}) {
         return onWrite.get('kv')?.(create, error) ?? create();
       }
       if (path.endsWith('/hyperdrive/configs')) {
-        assert.deepEqual(body, {name: hyperdrive.name, origin: {...origin, password: 'fixture@password'}});
+        assert.deepEqual(body, {name: hyperdrive.name, origin: {...origin, password: 'fixture@password'}, caching: {disabled: true}});
         const create = () => { state.hyper.push(hyperdrive); return ok(hyperdrive); };
         return onWrite.get('hyper')?.(create, error) ?? create();
       }
@@ -153,6 +153,7 @@ test('wrong authority, config collisions and missing preflight state fail before
     // one that collides is refused at its create receipt (the next test covers receipts).
     [() => {}, {sibling: {...inputs.sibling, hyperdriveId: hyperId}}, /Conflicting Hyperdrive identity/, 'existing only'],
     [fixture => { fixture.state.hyper = [{...hyperdrive, origin: {...origin, database: 'wrong'}}]; }, {}, /Hyperdrive origin/],
+    [fixture => { fixture.state.hyper = [{...hyperdrive, caching: {disabled: false}}]; }, {}, /Hyperdrive query caching must be disabled/],
     [fixture => { fixture.state.bucket = fixture.error(401, 10000); }, {}, /R2 lookup failed \(HTTP 401\)/],
     [fixture => { fixture.state.dns.push(dnsRow(apiHost)); }, {}, /Conflicting DNS record/],
     [fixture => { fixture.state.dns.push({...dnsRow(webHost), type: 'CNAME', content: 'other.pages.dev'}); }, {}, /Conflicting DNS record/],

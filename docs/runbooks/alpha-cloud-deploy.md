@@ -148,7 +148,8 @@ pnpm cloud:worker provision --environment staging --env-file ~/.config/alpha-clo
 
 This verifies the zone, then creates (or finds by name, if a previous run stopped partway) the KV
 namespace, the Hyperdrive configuration for `DATABASE_URL`, the R2 bucket, and the proxied DNS record
-for `blob-staging.`. It confirms each one by reading it back. The API and web hostnames must be
+for `blob-staging.`. It confirms each resource by reading it back. Hyperdrive query caching is
+disabled so account and billing reads see committed changes. The API and web hostnames must be
 available or already attached to the expected Workers. Cloudflare manages their DNS on deploy.
 `--write` records the account and resource IDs in `cloud/resources.json`. **Commit that file** (IDs only, no
 secrets) and open a PR, or send it to the owner. If it reports a conflict (a resource with that

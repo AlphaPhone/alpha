@@ -150,6 +150,7 @@ export async function reconcileCloudResources({ids, sibling, apiHost, webHost, d
   const readKv = async () => namedResource(await list(api, `${kvPath}?order=title&direction=asc`, 'KV lookup'), 'title', kvName, kvId, sibling.kvNamespaceId, 'KV namespace');
   const readHyper = async () => {
     const entry = namedResource(await list(api, hyperPath, 'Hyperdrive lookup'), 'name', hyperName, hyperdriveId, sibling.hyperdriveId, 'Hyperdrive');
+    if (entry && record(entry.caching).disabled !== true) throw new Error('Hyperdrive query caching must be disabled for Alpha Cloud accounts');
     if (entry && origin) {
       const observed = record(entry.origin);
       if (!['postgres', 'postgresql'].some(scheme => observed.scheme === scheme) || observed.host !== origin.host ||
@@ -216,7 +217,7 @@ export async function reconcileCloudResources({ids, sibling, apiHost, webHost, d
     return {...ids, accountId: account};
   }
   const finalKv = kv ?? await createAndRead(() => api(kvPath, 'KV create', {title: kvName}), readKv, 'KV namespace', 'id', 10014);
-  const finalHyper = hyper ?? await createAndRead(() => api(hyperPath, 'Hyperdrive create', {name: hyperName, origin}), readHyper, 'Hyperdrive', 'id');
+  const finalHyper = hyper ?? await createAndRead(() => api(hyperPath, 'Hyperdrive create', {name: hyperName, origin, caching: {disabled: true}}), readHyper, 'Hyperdrive', 'id');
   if (!bucket) await createAndRead(() => api(bucketsPath, 'R2 create', {name: ids.r2Bucket}), readBucket, 'R2 bucket', 'name');
   if (!blobDns) await createAndRead(() => api(dnsPath, 'DNS create', {type: 'AAAA', name: ids.blobHost, content: '100::', proxied: true,
     comment: routeComment}), readBlobDns, 'DNS record', 'id');
