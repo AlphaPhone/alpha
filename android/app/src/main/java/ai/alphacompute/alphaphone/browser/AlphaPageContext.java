@@ -175,13 +175,17 @@ public final class AlphaPageContext {
      return true;
     };
     walk(root);
-    // One line per block, whitespace collapsed, repeated blank lines and exact repeats dropped.
-    const lines=[];let offset=0,anchorLine;
+    // One line per block, whitespace collapsed, repeated blank lines and exact repeats dropped. A short
+    // label ("Kingdom:") joins the value after it, and runs of one-to-three-character cells join.
+    const lines=[];let offset=0,anchorLine,short=false;
     for(const raw of clean(out).split('\\n')){
      if(anchor!==undefined&&anchorLine===undefined&&offset>=anchor)anchorLine=lines.length;
      offset+=raw.length+1;
      const text=raw.replace(/\\s+/g,' ').replace(/^(#+|-) $/,'').trim();
-     if(text&&text!==lines[lines.length-1])lines.push(text);
+     if(!text||text===lines[lines.length-1])continue;
+     const last=lines[lines.length-1];
+     if(last!==undefined&&!/^(#|- )/.test(text)&&((short&&text.length<=3)||(last.length<=40&&last.endsWith(':')&&last[0]!=='#'&&text.length<=120))){lines[lines.length-1]=last+' '+text;short=short&&text.length<=3;continue;}
+     short=text.length<=3;lines.push(text);
     }
     let text=redact(lines.join('\\n'));
     if(secret.test(text))return {withheld:'sensitive-page'};

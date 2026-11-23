@@ -26,6 +26,11 @@ test('main content keeps its headings, paragraphs and list items as lines',async
  expect(result).toEqual({text:'# Octopus arms\nEach arm tastes what it touches.\n- Eight arms\n- Three hearts\nLifespan 1 to 2 years',truncated:false});
 });
 
+test('a short label joins its value, and runs of tiny cells share one line',async({page})=>{
+ const result=await read(page,'<main><div><div>Kingdom:</div><div>Animalia</div></div><div><div>Phylum:</div><div>Mollusca</div></div><div>Ingredients:</div><ul><li>Two eggs</li></ul><div>O</div><div>S</div><div>D</div><p>After</p></main>');
+ expect(result.text).toBe('Kingdom: Animalia\nPhylum: Mollusca\nIngredients:\n- Two eggs\nO S D\nAfter');
+});
+
 test('a visible password, one-time-code or card field withholds the page',async({page})=>{
  for(const field of ['<input type="password">','<input autocomplete="one-time-code">','<input name="otp">','<input autocomplete="cc-number">','<input aria-label="Verification code">']){
   expect(await read(page,`<main><p>Welcome back</p>${field}</main>`),field).toEqual({withheld:'sensitive-page'});
