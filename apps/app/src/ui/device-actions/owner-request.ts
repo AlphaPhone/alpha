@@ -48,7 +48,7 @@ export function namedNoteOpenRequest(text: string): string | undefined {
   const reference = target.replace(/^(?:a|an|the|my) /i, "").replace(/ (?:note|one)$/i, "");
   const generic = /^(?:a|an|the|my|this|that|it|new|(?:new )?(?:empty|blank)|any|another|some|first|last|latest|newest|oldest|(?:most |least )?recent|previous|note|one)$/i;
   const relativeAction = /^(?:(?:i|you|we) )?(?:just|last|(?:most )?recently) (?:made|wrote|created|saved|edited|updated|opened)$/i;
-  if (!named && !quotedTitle && (generic.test(reference) || relativeAction.test(reference))) return;
+  if (!named && !quotedTitle && (generic.test(reference) || relativeAction.test(reference) || /^(?:about|on|with|concerning)\s+/i.test(reference))) return;
   const title = unquote(target).trim();
   if (title && !/[\r\n]/.test(title)) return title;
 }

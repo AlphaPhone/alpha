@@ -814,15 +814,17 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   async function deliverChatNavigation(shell:Shell,navigation:ReturnType<typeof connectionController.captureViewNavigation>,results:readonly unknown[]|undefined,current?:()=>void,continuation?:import('../runtime/alpha-client').VoiceNavigationContinuation){
     if(!navigation||!results?.length)return false;
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
-    const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
+    const delivered=await navigation.client.deliver(results,attempt,async(view,check,noteId)=>{
+      const target=noteId?await resolveNote(shell,{id:noteId},check):undefined;
+      if(target&&'message' in target)return false;
       const commit=(chat?:string,onCommitted?:(value:ContextEnvelope)=>void)=>{
         check();
-        return commitNavigation(shell,view,()=>openInternalView(shell,view,chat),onCommitted);
+        return target?openNamedNote(shell,target,chat,onCommitted):commitNavigation(shell,view,()=>openInternalView(shell,view,chat),onCommitted);
       };
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.
       const chat=shell.S().chat;
-      return continuation?continuation.apply(view,check,commit):commit(chat==='sheet'||chat==='full'?chat:undefined);
+      return continuation?continuation.apply(view,check,commit,target?{kind:'canonical-note',id:target.id}:undefined):commit(chat==='sheet'||chat==='full'?chat:undefined);
     });
     if(delivered.status==='unavailable'&&shell.live){
       // A page inside an app this phone has: say where it is. Nothing was opened or acknowledged.

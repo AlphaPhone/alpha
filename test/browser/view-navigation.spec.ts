@@ -97,6 +97,7 @@ test("claimed Notes navigation displays the view and reports only IDs and a conf
 		"PRIVATE_PERSONAL_CONTENT",
 	);
 	expect(Object.keys(state.metadata).sort()).toEqual([
+		"notesEditorNavigation",
 		"uiView",
 		"viewClientId",
 		"viewDelivery",

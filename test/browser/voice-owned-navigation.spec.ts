@@ -500,6 +500,29 @@ test('a spoken exact note title opens its editor from Home and keeps Talk listen
  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
 });
 
+for(const prompt of ['Open the note about taking the ferry to the island.', 'Open my most recent note.']){
+ test(`Talk opens the saved note resolved by the planner for: ${prompt}`,async({page})=>{
+  await setup(page,'sheet',false,true);
+  await page.evaluate(prompt=>{
+   const f=(window as any).ownedVoiceNavigation;
+   const at='2026-11-21T12:00:00Z';
+   f.notes=[
+    {id:'other-note',title:'Supplies for the island',body:'\nTalk to Lee.',color:'yellow',createdAt:at,updatedAt:at},
+    {id:'actual-note',title:'Saturday plans',body:'\nTake the ferry from pier four.',color:'yellow',createdAt:at,updatedAt:at},
+   ];
+   f.prompt=prompt;f.navigateToNote='actual-note';f.releaseNotesRead();
+  },prompt);
+  await utterance(page,'notes');
+  const editor=page.locator('[data-alpha-subview="notes-editor"]');
+  await expect(editor.getByRole('textbox',{name:'Title',exact:true})).toHaveValue('Saturday plans');
+  await expect(voice(page)).toHaveAttribute('data-voice-state','speaking');
+  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.inputs.length)).toBe(1);
+  expect(await page.evaluate(()=>(window as any).ownedVoiceNavigation.acks)).toBe(1);
+  await page.evaluate(()=>(window as any).ownedVoiceNavigation.finishPlayback());
+  await expect(voice(page)).toHaveAttribute('data-voice-state','listening');
+ });
+}
+
 for(const mode of ['polite title','casual title','follow-up','one request','existing identical note'] as const)test(`Talk opens the actual saved note for a ${mode}`,async({page},info)=>{
  await setup(page,'sheet',false,true);
  await page.evaluate(mode=>{
