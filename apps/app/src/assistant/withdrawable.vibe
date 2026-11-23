@@ -15,7 +15,9 @@ export const withdrawableLayer = Layer.effect(WithdrawableRequests, effect {
   const resident = try Resident
   const advertised = try AdvertisedCapabilities
   const bridge = try BridgeMachine
-  const quiet = (event: BridgeEvent) => map(bridge.send(event), () => true) catch () => false
+  effect function quiet(event: BridgeEvent) {
+    return map(bridge.send(event), () => true) catch () => false
+  }
   return {
     ask: (method: "GET" | "POST" | "PUT" | "DELETE", path: string, body?: unknown) => effect {
       try quiet({ type: "request" })
