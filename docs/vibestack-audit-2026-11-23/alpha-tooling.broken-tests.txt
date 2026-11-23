@@ -1,0 +1,974 @@
+# Files in alpha-vs (migration 3d7ca972) that reference files which exist on alpha develop dd63c6bc but not in the port.
+# IMPORT = a relative import/dynamic import/require, followed transitively through test/, specs/, scripts/ helpers, resolves to a removed file (the file cannot load).
+# PATH   = no broken import, but a quoted repository path (read as source text or spawned) names a removed file.
+# Lower bound: root-level files (bun.lock, vite.config.ts, lemmascript.json), vendor/eliza paths and selectors of the removed UI are not counted.
+# kind	file	missing targets (first four)
+PATH	test/abort-signal-compat.test.mjs	apps/app/src/runtime/abort-signal.ts
+IMPORT	test/action-completion-one-sentence.test.mjs	apps/app/src/runtime/device-record-presentation.ts apps/app/src/ui/calendar/calendar-approval-messages.ts apps/app/src/ui/calendar/named-read-messages.ts apps/app/src/ui/notes/notes-action-messages.ts …+1
+PATH	test/action-message-presentation.test.mjs	apps/app/src/runtime/device-actions.ts
+PATH	test/agent-action-preferences.test.mjs	apps/app/src/runtime/device-actions.ts
+IMPORT	test/agent-copy-mappings.test.mjs	apps/app/src/runtime/action-message-presentation.ts apps/app/src/runtime/clock-contract.ts apps/app/src/ui/clock/clock-handoff-presentation.ts apps/app/src/ui/device-actions/device-action-messages.ts …+5
+IMPORT	test/agent-email-draft.test.mjs	apps/app/src/ui/mailbox/agent-email-draft.ts
+IMPORT	test/agent-embedding-overrides.test.mjs	scripts/agent-embeddings.ts
+IMPORT	test/agent-executor-not-started.test.mjs	apps/app/src/runtime/device-actions.ts
+IMPORT	test/agent-identity.test.mjs	apps/app/src/product/alpha-product-registration.ts scripts/agent-embeddings.ts scripts/agent-identity.ts
+PATH	test/agent-model-selection.test.mjs	scripts/start-local-remote.ts
+IMPORT	test/always-on-listener.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/android-build-path.test.mjs	scripts/core-state-patch.ts scripts/local-agent-source.ts scripts/prepared-workflow-worker.ts scripts/runtime-profile.ts
+IMPORT	test/android-dependency-fingerprint.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/android-host.test.mjs	android/upstream-native-sources.json scripts/cloud-deployment.ts scripts/prepare-patched-native.ts scripts/stage-local-agent-sources.ts
+IMPORT	test/android-identity.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/android-instrumentation-runner.test.mjs	scripts/test-native-permissions.ts
+IMPORT	test/aosp-capabilities.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/aosp-image-capability.test.mjs	apps/app/src/runtime/aosp-image.ts
+IMPORT	test/aosp-sms.test.mjs	apps/app/src/runtime/aosp-image.ts apps/app/src/runtime/aosp-telephony.ts apps/app/src/runtime/phone-context.ts scripts/prepare-patched-native.ts
+IMPORT	test/aosp-telephony-setup.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/aosp-telephony.test.mjs	apps/app/src/runtime/aosp-telephony.ts
+IMPORT	test/app-record-completion-calendar.test.mjs	apps/app/src/runtime/app-record-completion.ts
+IMPORT	test/app-record-completion.test.mjs	apps/app/src/runtime/app-record-completion.ts
+IMPORT	test/app-update-startup.test.mjs	apps/app/src/ui/state/app-update-gate.ts
+PATH	test/automation-completion.test.mjs	apps/app/src/runtime/automation-completion.ts
+PATH	test/automations-transport.test.mjs	apps/app/src/runtime/local-agent.ts scripts/local-agent-dev-bridge.ts
+IMPORT	test/automations-unified.test.mjs	apps/app/src/prototype/home-cards.ts
+IMPORT	test/batch-progress-stream.test.mjs	scripts/test-batch-progress-stream.ts
+IMPORT	test/browser-approved-open.test.mjs	scripts/quint-lib.ts
+PATH	test/browser-camera-storage.test.mjs	apps/app/src/prototype/browser-camera.ts
+IMPORT	test/browser-chat-controls.test.mjs	apps/app/src/runtime/phone-context.ts scripts/quint-lib.ts
+IMPORT	test/browser-cloud-dev-bridge.test.mjs	apps/app/src/browser/cloud-connection.ts apps/app/src/runtime/cloud-deployment.generated.ts apps/app/src/runtime/cloud-protocol.ts apps/app/src/runtime/subscription-entitlement.ts …+7
+PATH	test/browser-deletion-recovery.test.mjs	apps/app/src/browser/deletion-recovery.ts
+IMPORT	test/browser-errors.test.mjs	apps/app/src/browser/browser-errors.ts
+IMPORT	test/browser-host-source-closure.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/browser-local-transcription.test.mjs	apps/app/src/browser/local-transcription.ts
+IMPORT	test/browser-native-copy.test.mjs	apps/app/src/ui/browser/browser-messages.ts scripts/prepare-patched-native.ts
+PATH	test/browser-new-tab-negotiation.test.mjs	apps/app/src/ui/device-actions/client-coordinator.ts
+IMPORT	test/browser-note-pending-audio.test.mjs	apps/app/src/browser/note-recording-journal.ts apps/app/src/prototype/note-recorder.ts
+IMPORT	test/browser-page-context-native.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/browser-page-context.test.mjs	apps/app/src/runtime/browser-page-context.ts apps/app/src/runtime/client-observation-support.ts
+PATH	test/browser-provider-transport.test.mjs	apps/app/src/runtime/browser-cloud-resident.ts
+IMPORT	test/browser-reading-navigation.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/browser-request-refusal.test.mjs	apps/app/src/runtime/device-actions.ts
+IMPORT	test/browser-site-permissions.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/browser-streamed-speech.test.mjs	apps/app/src/browser/voice.ts
+IMPORT	test/browser-toolbar.test.mjs	scripts/quint-lib.ts
+PATH	test/browser-voice-cancellation.test.mjs	apps/app/src/browser/speech-errors.ts apps/app/src/browser/voice.ts
+PATH	test/browser/accessibility-lifecycle.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+PATH	test/browser/accessibility-resilience.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+PATH	test/browser/accessibility-sweep.production.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+PATH	test/browser/accessibility-sweep.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/agent-email-card.production.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/agent-keypad-direct.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/agent-sms-card-approve.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/aosp-telephony-views.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/browser-agent-history-voice-reply.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+PATH	test/browser/browser-chat-overlay.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/browser-cloud-dev.spec.ts	apps/app/src/runtime/cloud-deployment.generated scripts/browser-cloud-dev-bridge scripts/local-agent-dev-bridge
+IMPORT	test/browser/browser-list-focus.spec.ts	scripts/quint-lib.ts
+IMPORT	test/browser/browser-speech.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/canonical-icons.spec.ts	apps/app/src/product/alpha-product-registration.ts
+PATH	test/browser/canonical-notes-design.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+PATH	test/browser/canonical-notes-retry.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+PATH	test/browser/chat-header-controls.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/cloud-tts-streaming.spec.ts	scripts/local-agent-dev-bridge
+IMPORT	test/browser/comms-contacts.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/comms-dictation.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/comms-header-search.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/comms-image-guards.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/comms-messages.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/comms-phone.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/dev-calendar-assistant.spec.ts	apps/app/src/runtime/device-record-presentation.ts
+IMPORT	test/browser/dev-calendar-recurring-assistant.spec.ts	apps/app/src/runtime/device-record-presentation.ts
+IMPORT	test/browser/dev-connected-voice.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/dev-hosted-journey.spec.ts	scripts/local-agent-dev-storage
+IMPORT	test/browser/dev-local-resident-recovery.spec.ts	scripts/local-agent-dev-storage
+PATH	test/browser/dev-maps-voice.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/dev-reload.spec.ts	scripts/browser-full-reload
+IMPORT	test/browser/document-summary-note.production.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+PATH	test/browser/drawer-full-height.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+PATH	test/browser/home-compact-scroll.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/inbox-folders-drafts.spec.ts	apps/app/src/runtime/cloud-protocol
+IMPORT	test/browser/journey-b-voice-note-actions.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/journey-f-hosted-result.spec.ts	scripts/local-agent-dev-storage
+IMPORT	test/browser/journey-j05-web-research-note.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+PATH	test/browser/large-text-overlap.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/legacy-notes-access.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+PATH	test/browser/managed-maps-unavailable.production.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/maps-list-focus.spec.ts	scripts/quint-lib.ts
+IMPORT	test/browser/native-cloud-subscription.spec.ts	scripts/cloud-deployment.ts
+IMPORT	test/browser/native-speech.production.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/note-audio-delete-recovery.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/note-audio-legacy-restore.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/note-audio-native-fence.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/note-calendar-handoff.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/note-read-aloud.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/note-source.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-document-receipt.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-document-storage.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-pending-save.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-permanent-delete-backstop.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-photos-list-focus.spec.ts	scripts/quint-lib.ts
+PATH	test/browser/notes-query-review.spec.ts	apps/app/src/prototype/notes-query-review.ts apps/app/src/prototype/phone.css apps/app/src/prototype/source-review-dialog.ts apps/app/src/runtime/modal-inert.ts
+IMPORT	test/browser/notes-responsive.production.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-save-failure.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-status-layout.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-trash-dialog-accessibility.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-trash-full.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-trash-recovery.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-trash-resume.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/notes-trash.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+PATH	test/browser/one-calendar.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/ongoing-call-bar.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/photo-email.spec.ts	scripts/fixtures/native-telephony
+IMPORT	test/browser/reminder-v2-assistant.spec.ts	apps/app/src/runtime/device-record-presentation.ts
+IMPORT	test/browser/responsive-surfaces.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/settings-navigation-refinement.spec.ts	scripts/quint-lib.ts
+IMPORT	test/browser/share-panel.spec.ts	apps/app/src/runtime/share-panel
+PATH	test/browser/shaw-ui-fixtures.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/standalone-shell.spec.ts	apps/app/src/ui/gestures/constants
+PATH	test/browser/startup-access.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/summary-source-note.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+PATH	test/browser/view-focus.spec.ts	apps/app/src/ui/accessibility/screen-focus.ts
+IMPORT	test/browser/voice-phone-navigation.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/voice-preparation-ownership.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/web-summary-note.spec.ts	apps/app/src/runtime/browser-notes-document.ts
+IMPORT	test/browser/workflow-notification-recovery.spec.ts	scripts/local-agent-dev-storage
+IMPORT	test/calendar-agent-review.test.mjs	apps/app/src/browser/calendar-agent-review.ts
+IMPORT	test/calendar-approval-client.test.mjs	apps/app/src/runtime/calendar-approval-client.ts apps/app/src/runtime/calendar-approval.ts
+IMPORT	test/calendar-approval-ui.test.mjs	apps/app/src/prototype/calendar-approval-fields.ts apps/app/src/prototype/locale-time.ts apps/app/src/runtime/action-message-presentation.ts apps/app/src/runtime/calendar-approval.ts
+IMPORT	test/calendar-availability-reader.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/calendar-date-picker-label.test.mjs	apps/app/src/prototype/calendar-month-focus.ts apps/app/src/prototype/template.html
+PATH	test/calendar-day-context.test.mjs	apps/app/src/prototype/calendar-interval-presentation.ts apps/app/src/prototype/locale-time.ts apps/app/src/runtime/agent-calendar.ts apps/app/src/runtime/canvas-geometry.ts
+IMPORT	test/calendar-deferred-delete.test.mjs	apps/app/src/prototype/calendar-deferred-delete.ts
+IMPORT	test/calendar-deletion-identity.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/calendar-deletions.test.mjs	apps/app/src/browser/calendar-deletions.ts
+IMPORT	test/calendar-end-after-start.test.mjs	apps/app/src/runtime/calendar-form-draft.ts
+IMPORT	test/calendar-event-detail.test.mjs	apps/app/src/prototype/calendar-event-detail.ts
+IMPORT	test/calendar-managed-rejection.test.mjs	scripts/local-agent-source.ts
+PATH	test/calendar-mounted-draft-handoff.test.mjs	apps/app/src/main.tsx apps/app/src/prototype/agent-calendar-adapter.ts apps/app/src/prototype/camera-adapter.ts
+PATH	test/calendar-mounted-edit-admission.test.mjs	apps/app/src/main.tsx apps/app/src/prototype/agent-calendar-adapter.ts apps/app/src/prototype/camera-adapter.ts
+PATH	test/calendar-mounted-editor.test.mjs	apps/app/src/main.tsx apps/app/src/prototype/agent-calendar-adapter.ts apps/app/src/prototype/camera-adapter.ts
+PATH	test/calendar-option-save-ownership.test.mjs	apps/app/src/prototype/calendar-adapter.ts apps/app/src/prototype/calendar-days.ts apps/app/src/prototype/calendar-edit-draft-adapter.ts apps/app/src/prototype/calendar-form-draft-adapter.ts …+1
+IMPORT	test/calendar-recurrence.test.mjs	apps/app/src/browser/calendar-recurrence.ts
+IMPORT	test/calendar-schedule.test.mjs	apps/app/src/prototype/calendar-schedule.ts
+IMPORT	test/calendar-sync-consent.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/calendar-sync-mutation.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/calendar-sync-receipt-recovery.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/calendar-sync-snapshot.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/call-state-native.test.mjs	apps/app/src/runtime/call-state.ts scripts/prepare-patched-native.ts
+IMPORT	test/call-state.test.mjs	apps/app/src/runtime/call-state.ts apps/app/src/runtime/comms-bar.ts
+IMPORT	test/camera-controls.test.mjs	apps/app/src/prototype/camera-controls.ts
+PATH	test/camera-direct-request.test.mjs	apps/app/src/runtime/device-actions.ts apps/app/src/ui/device-actions/client-coordinator.ts
+PATH	test/camera-rapid-leave.test.mjs	apps/app/src/main.tsx apps/app/src/prototype/agent-calendar-adapter.ts apps/app/src/prototype/camera-adapter.ts
+PATH	test/camera-view-first.test.mjs	apps/app/src/prototype/agent-adapter.ts apps/app/src/runtime/connection-ui.tsx apps/app/src/ui/device-actions/client-coordinator.ts
+PATH	test/canonical-calendar-draft-ownership.test.mjs	apps/app/src/prototype/canonical-calendar-drafts.ts apps/app/src/runtime/canonical-calendar-draft.ts apps/app/src/ui/state/durable-draft.ts
+IMPORT	test/canonical-notes-draft-copy.test.mjs	scripts/quint-lib.ts
+IMPORT	test/canonical-notes-webview-abort.test.mjs	apps/app/src/runtime/note-default-title.ts
+IMPORT	test/canvas-geometry.test.mjs	apps/app/src/runtime/canvas-geometry.ts
+PATH	test/chat-tools-history.test.mjs	apps/app/src/prototype/chat-tools-adapter.ts
+IMPORT	test/check-quint-cache.test.mjs	scripts/quint-cache.ts scripts/quint-lib.ts
+IMPORT	test/checkin-choice-presentation.test.mjs	apps/app/src/runtime/action-message-presentation.ts
+PATH	test/ci-emulator-evidence.test.mjs	scripts/reminder-recovery-fixture.ts scripts/test-browser-storage-format.ts scripts/test-installed-upgrade.ts scripts/test-native-calendar-deletion-restart.ts …+4
+IMPORT	test/ci-required-checks.test.mjs	scripts/quint-lib.ts
+IMPORT	test/client-feature-preparation.test.mjs	scripts/prepare-client-features.ts
+PATH	test/client-observation-handshake.test.mjs	apps/app/src/runtime/client-observation-support.ts
+IMPORT	test/clock-handoff-current-envelope.test.mjs	apps/app/src/runtime/clock-handoff-history.ts
+IMPORT	test/clock-native-contract.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/clock-repeat-days.test.mjs	apps/app/src/runtime/clock-contract.ts
+IMPORT	test/cloud-candidate-deployment.test.mjs	scripts/cloud-deployment.ts scripts/cloud-sdk-authority.ts
+PATH	test/cloud-delegation-callback.test.mjs	apps/app/src/runtime/cloud-delegation-ui.tsx
+IMPORT	test/cloud-deployment.test.mjs	apps/app/src/product/alpha-product-registration.ts scripts/cloud-deployment.ts scripts/cloud-sdk-authority.ts
+IMPORT	test/cloud-email-deployment.test.mjs	scripts/cloud-deployment.ts
+IMPORT	test/cloud-email-resend.test.mjs	scripts/cloud-email-code.ts scripts/prepare-patched-native.ts
+IMPORT	test/cloud-environment-selection.test.mjs	apps/app/src/runtime/cloud-environment-selection.ts
+PATH	test/cloud-maps-session.test.mjs	apps/app/src/maps/cloud-maps.ts apps/app/src/maps/share.ts
+PATH	test/cloud-membership-presentation.test.mjs	apps/app/src/runtime/cloud-membership-ui.tsx
+PATH	test/cloud-membership-ui.test.mjs	apps/app/src/runtime/cloud-membership-ui.tsx
+IMPORT	test/cloud-phone-login.test.mjs	apps/app/src/runtime/cloud-sign-in.ts
+IMPORT	test/cloud-plans.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts apps/app/src/runtime/cloud-plans.ts apps/app/src/runtime/managed-service-routes.ts scripts/prepare-patched-native.ts
+IMPORT	test/cloud-reachability.test.mjs	apps/app/src/runtime/subscription-entitlement.ts
+IMPORT	test/cloud-readiness.test.mjs	scripts/cloud-readiness.ts
+IMPORT	test/cloud-resident-authority.test.mjs	scripts/browser-cloud-dev-bridge.ts
+IMPORT	test/cloud-resident-embedding-route.test.mjs	scripts/agent-embeddings.ts scripts/cloud-resident-host.ts scripts/cloud-sdk-authority.ts scripts/core-state-patch.ts …+3
+IMPORT	test/cloud-resident-host.test.mjs	scripts/agent-embeddings.ts scripts/cloud-sdk-authority.ts scripts/core-state-patch.ts scripts/local-agent-source.ts …+2
+IMPORT	test/cloud-sdk-routing.test.mjs	scripts/cloud-sdk-authority.ts
+IMPORT	test/cloud-service-info.test.mjs	apps/app/src/runtime/cloud-service-info.ts
+IMPORT	test/cloud-sign-in-network.test.mjs	apps/app/src/runtime/cloud-sign-in.ts
+IMPORT	test/cloud-speech-stream.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/cloud-speech-timing.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/cloud-voice-limit.test.mjs	apps/app/src/runtime/cloud-voice.ts
+IMPORT	test/cloud-voice-profile.test.mjs	scripts/check-cloud-recording-signature.ts
+IMPORT	test/cloud-worker.test.mjs	cloud/edge/worker.ts scripts/cloud-deployment.ts scripts/cloud-registration.ts
+PATH	test/committed-device-changes.test.mjs	apps/app/src/runtime/device-actions.ts
+IMPORT	test/comms-alpha.test.mjs	apps/app/src/runtime/stage-session-store.ts
+IMPORT	test/comms-messages-bar.test.mjs	apps/app/src/runtime/message-draft.ts
+PATH	test/comms-settings.test.mjs	apps/app/src/prototype/contacts-adapter.ts
+IMPORT	test/comms-shell-model.test.mjs	apps/app/src/runtime/comms-bar.ts
+IMPORT	test/connection-routes.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/context-selection.test.mjs	apps/app/src/prototype/context-selection.ts apps/app/src/runtime/phone-context.ts
+IMPORT	test/core-runtime-transform.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/core-state-patch.test.mjs	scripts/build-policy-source.ts scripts/combined-agent-source.ts scripts/core-state-patch.ts
+IMPORT	test/deletion-window.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/dev-local-launcher.test.mjs	apps/app/src/build-flags.ts scripts/dev-local.ts scripts/local-agent-source.ts scripts/prepare-client-features.ts …+1
+PATH	test/dev-surface-gates.test.mjs	apps/app/src/maps/regional-provider.ts
+PATH	test/developer-archive.test.mjs	scripts/reminder-recovery-fixture.ts scripts/test-browser-storage-format.ts scripts/test-installed-upgrade.ts scripts/test-native-calendar-deletion-restart.ts …+4
+IMPORT	test/development-cartesia-conversation.test.mjs	apps/app/src/ui/voice/voice-session-state.ts
+IMPORT	test/development-cloud-voice.test.mjs	scripts/local-agent-dev-bridge.ts
+IMPORT	test/development-conversation-stream.test.mjs	scripts/local-agent-dev-bridge.ts
+IMPORT	test/device-capability-selection.test.mjs	apps/app/src/runtime/phone-context.ts
+IMPORT	test/device-record-presentation.test.mjs	apps/app/src/runtime/device-record-presentation.ts
+IMPORT	test/diagnostics-export.test.mjs	apps/app/src/runtime/crash-log.ts apps/app/src/runtime/diagnostics-export.ts apps/app/src/runtime/voice-timing.ts scripts/aggregate-voice-latency.ts …+1
+PATH	test/digest-capabilities.test.mjs	apps/app/src/runtime/hosted-digests.ts
+IMPORT	test/digest-missed-run-now.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/digest-occurrence-delivery.test.mjs	apps/app/src/browser/development-digest-occurrence.ts apps/app/src/runtime/hosted-digests.ts
+PATH	test/digest-restart-input.test.mjs	scripts/test-local-digest-restart.ts
+PATH	test/direct-browser-grounding.test.mjs	apps/app/src/runtime/device-actions.ts
+IMPORT	test/direct-transcription-proxy.test.mjs	apps/app/src/runtime/conversation-read-path.ts
+IMPORT	test/enabled-view-transport.test.mjs	scripts/local-agent-dev-bridge.ts
+PATH	test/error-boundary-home-escape.test.mjs	apps/app/src/runtime/error-boundary.tsx
+IMPORT	test/eval-phone-actions.test.mjs	scripts/fixtures/loopback.ts
+PATH	test/files-agent-patch.test.mjs	apps/app/src/ui/device-actions/client-coordinator.ts apps/app/src/ui/files/files-operation-presentation.ts
+IMPORT	test/files-browser-atomic-placement.test.mjs	scripts/prepare-client-features.ts
+PATH	test/files-browser-view.test.mjs	apps/app/src/prototype/model.js apps/app/src/prototype/template.html apps/app/src/ui/files/files-browser-adapter.ts
+IMPORT	test/files-browser.test.mjs	apps/app/src/ui/files/storage-presentation.ts scripts/prepare-patched-native.ts
+IMPORT	test/files-legacy-storage.test.mjs	apps/app/src/startup-permission-flow.ts
+IMPORT	test/files-native-details.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/files-native-share-admission.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/files-picker-lifecycle.test.mjs	apps/app/src/ui/files/files-browser-adapter.ts
+IMPORT	test/files-result-text.test.mjs	apps/app/src/ui/files/storage-presentation.ts
+IMPORT	test/fixtures/agent-identity-canonical.test.ts	scripts/agent-identity.ts
+IMPORT	test/gmail-agent-read-host.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/browser-cloud-dev-bridge.ts scripts/gmail-agent-read-host.ts
+IMPORT	test/gmail-background-binding.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/gmail-grants.test.mjs	apps/app/src/runtime/gmail-grants.ts
+IMPORT	test/google-accounts.test.mjs	scripts/test-google-accounts.ts
+IMPORT	test/google-agent-access.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/native-google-product-host.ts
+IMPORT	test/google-authorization.test.mjs	apps/app/src/runtime/google-authorization.ts
+PATH	test/google-connections-resource-budget.test.mjs	apps/app/src/runtime/google-connection-ui.tsx
+PATH	test/google-maps-content.test.mjs	apps/app/src/maps/cloud-provider.ts apps/app/src/maps/saved-places.ts apps/app/src/maps/state.ts
+IMPORT	test/google-native-mfa.test.mjs	apps/app/src/runtime/cloud-sign-in.ts
+IMPORT	test/google-workspace-return-flow.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/google-workspace-return-native.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/google-workspace-return.test.mjs	apps/app/src/runtime/cloud-protocol.ts apps/app/src/runtime/google-accounts.ts apps/app/src/runtime/google-workspace-return.ts
+IMPORT	test/haptics.test.mjs	apps/app/src/runtime/haptics.ts scripts/prepare-patched-native.ts
+PATH	test/home-agent-navigation.test.mjs	apps/app/src/runtime/view-navigation.ts apps/app/src/ui/shell/completed-action-navigation.ts
+PATH	test/home-calendar-selection.test.mjs	apps/app/src/runtime/home-calendar-selection.ts
+IMPORT	test/home-cards.test.mjs	apps/app/src/prototype/home-cards.ts apps/app/src/prototype/locale-time.ts apps/app/src/ui/overview/daily-overview.ts
+PATH	test/home-overview-cards.test.mjs	apps/app/src/prototype/home-cards.ts apps/app/src/prototype/home-overview-cards.ts apps/app/src/prototype/locale-time.ts apps/app/src/runtime/hosted-digests.ts
+IMPORT	test/home-role-recovery-contract.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/host-speech-admission.test.mjs	scripts/combined-agent-source.ts
+IMPORT	test/host-test-runtime.test.mjs	scripts/host-test-runtime.ts
+IMPORT	test/hosted-digest-mutation-ownership.test.mjs	scripts/quint-lib.ts
+PATH	test/hosted-digest-panel.test.mjs	apps/app/src/runtime/hosted-digests.ts
+IMPORT	test/hosted-digest-refresh-ownership.test.mjs	scripts/quint-lib.ts
+PATH	test/hosted-notice-question.test.mjs	apps/app/src/runtime/hosted-notice-question.ts
+IMPORT	test/hosted-notice-withdraw.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/hosted-result-notices.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/image-contacts-admission.test.mjs	apps/app/src/runtime/image-contacts.ts
+IMPORT	test/image-sms.test.mjs	apps/app/src/runtime/image-sms.ts
+IMPORT	test/image-telephony.test.mjs	apps/app/src/prototype/contacts-changes.ts apps/app/src/prototype/image-telephony.ts apps/app/src/runtime/call-state.ts apps/app/src/runtime/sms-subscription-revision.ts
+IMPORT	test/inbox-draft-copies.test.mjs	apps/app/src/runtime/inbox-unsaved-record.ts
+IMPORT	test/inbox-operation-guards.test.mjs	apps/app/src/runtime/inbox-edit-coalescer.ts apps/app/src/runtime/service-read-cache.ts apps/app/src/ui/mailbox/agent-email-draft.ts
+PATH	test/inbox-retention-cases.test.mjs	scripts/prepare-client-features.ts
+PATH	test/inbox.test.mjs	apps/app/src/prototype/inbox-unsaved.ts
+IMPORT	test/inline-modal-menu.test.mjs	apps/app/src/runtime/inline-modal.ts
+PATH	test/installed-upgrade-runner.test.mjs	scripts/test-installed-upgrade.ts
+IMPORT	test/keyboard-dictation.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/lemma-check.test.mjs	scripts/run-node-only-tests.ts
+IMPORT	test/lemma-checker.test.mjs	scripts/quint-lib.ts scripts/run-node-only-tests.ts
+IMPORT	test/live-voice.test.mjs	apps/app/src/runtime/diagnostics-export.ts apps/app/src/runtime/live-voice.ts apps/app/src/runtime/voice-timing.ts scripts/prepare-patched-native.ts
+IMPORT	test/llama-cpp-only.test.mjs	scripts/bun-lock.ts
+PATH	test/local-agent-contracts.test.mjs	scripts/test-agent-speech-bridge.ts scripts/test-agent-tts-bridge.ts scripts/test-digest-cancellation.ts scripts/test-local-agent-stream.ts …+2
+PATH	test/local-agent-native-events.test.mjs	apps/app/src/runtime/local-agent.ts
+PATH	test/local-agent-native-stream.test.mjs	apps/app/src/runtime/local-agent-native-stream.ts apps/app/src/runtime/local-agent.ts
+IMPORT	test/local-agent-provider-admission.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/local-agent-selection.test.mjs	scripts/local-agent-source.ts
+IMPORT	test/local-agent-voice-bridge.test.mjs	scripts/local-agent-dev-bridge.ts
+PATH	test/local-reply-speech.test.mjs	apps/app/src/runtime/local-reply-speech.ts
+PATH	test/local-speech-native-drain.test.mjs	apps/app/src/local-speech-playback.ts
+PATH	test/local-speech-text.test.mjs	apps/app/src/local-speech-playback.ts apps/app/src/runtime/local-speech-text.ts apps/app/src/runtime/local-voice.ts
+IMPORT	test/locale-time.test.mjs	apps/app/src/prototype/locale-time.ts
+IMPORT	test/mail-preview.test.mjs	apps/app/src/runtime/mail-preview.ts
+IMPORT	test/mail-sender-image.test.mjs	apps/app/src/runtime/mail-sender-image.ts
+IMPORT	test/managed-google-broker-diagnostic.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/native-google-product-host.ts
+IMPORT	test/managed-google-stage-diagnostic.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/native-google-product-host.ts
+IMPORT	test/managed-google-transport-code.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/native-google-product-host.ts
+IMPORT	test/managed-service-routes.test.mjs	apps/app/src/runtime/managed-service-routes.ts
+IMPORT	test/maps-agent-present.test.mjs	apps/app/src/maps/agent-present.ts
+IMPORT	test/maps-arrival-notification.test.mjs	scripts/quint-lib.ts
+IMPORT	test/maps-chat-near-handoff.test.mjs	apps/app/src/ui/maps/maps-screen.ts apps/app/src/ui/maps/state.ts
+IMPORT	test/maps-navigation.test.mjs	apps/app/src/maps/background-navigation.ts apps/app/src/maps/guidance.ts scripts/prepare-client-features.ts
+IMPORT	test/maps-notification-open.test.mjs	apps/app/src/runtime/maps-notification-open.ts
+IMPORT	test/maps-place-route-sheets.test.mjs	scripts/quint-lib.ts
+IMPORT	test/maps-route-distance.test.mjs	apps/app/src/maps/route-distance.ts
+IMPORT	test/message-draft.test.mjs	apps/app/src/runtime/message-draft.ts
+IMPORT	test/messages-composer-port.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/mobile-uuid-build.test.mjs	scripts/build-policy-source.ts scripts/core-state-patch.ts scripts/mobile-uuid-adapter.ts
+PATH	test/modal-scrim-ownership.test.mjs	apps/app/src/prototype/phone.css
+PATH	test/native-adapter-activity.test.mjs	apps/app/src/prototype/native-adapter.ts
+IMPORT	test/native-browser-view-binding.test.mjs	scripts/quint-lib.ts
+PATH	test/native-build-inputs.test.mjs	scripts/local-agent-source.ts
+PATH	test/native-campaign-evidence.test.mjs	scripts/test-native-permissions.ts scripts/test-native-restart.ts scripts/test-reminder-one-off.ts scripts/test-reminder-recovery.ts …+2
+IMPORT	test/native-copy-mappings.test.mjs	apps/app/src/browser/browser-errors.ts apps/app/src/ui/browser/browser-messages.ts apps/app/src/ui/camera/camera-capture-messages.ts apps/app/src/ui/clock/clock-handoff-presentation.ts …+6
+IMPORT	test/native-deletion-review-admission.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-deletion-review-fence.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-digest-sources.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-embedding-profile.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-google-agent-host-access.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/native-google-product-host.ts scripts/prepare-patched-native.ts
+IMPORT	test/native-google-agent-host.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/native-google-product-host.ts
+IMPORT	test/native-google-fetch-input.test.mjs	apps/app/src/runtime/cloud-deployment.generated.ts scripts/native-google-product-host.ts
+IMPORT	test/native-live-pcm.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-media-fork.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-network.test.mjs	apps/app/src/runtime/native-network.ts
+IMPORT	test/native-notification-channels.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/native-notification-device-slot.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-notification-session.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-patch-admission.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-permission-runner.test.mjs	scripts/test-native-permissions.ts
+IMPORT	test/native-plugin-teardown.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/native-reminder-recovery-runner.test.mjs	scripts/test-native-permissions.ts scripts/test-native-restart.ts scripts/test-reminder-one-off.ts scripts/test-reminder-recovery.ts …+2
+PATH	test/native-reminder-runner.test.mjs	scripts/test-native-permissions.ts scripts/test-native-restart.ts scripts/test-reminder-one-off.ts scripts/test-reminder-recovery.ts …+2
+PATH	test/native-request-cancel.test.mjs	apps/app/src/runtime/local-agent.ts
+PATH	test/native-restart-runner.test.mjs	scripts/test-native-permissions.ts scripts/test-native-restart.ts scripts/test-reminder-one-off.ts scripts/test-reminder-recovery.ts …+2
+PATH	test/native-start-cancel.test.mjs	apps/app/src/runtime/local-agent.ts
+IMPORT	test/native-voice-event-worker.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/native-voice-latency.test.mjs	scripts/aggregate-voice-latency.ts scripts/native-voice-latency.ts
+PATH	test/native-webview-admission.test.mjs	scripts/test-native-permissions.ts scripts/test-native-restart.ts scripts/test-reminder-one-off.ts scripts/test-reminder-recovery.ts …+2
+PATH	test/navigation-voice-pause.test.mjs	apps/app/src/local-speech-playback.ts apps/app/src/maps/navigation-voice.ts apps/app/src/runtime/local-voice.ts
+PATH	test/navigation-voice.test.mjs	apps/app/src/maps/navigation-voice.ts
+IMPORT	test/network-location.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/note-document-messages.test.mjs	apps/app/src/ui/notes/note-document-messages.ts
+IMPORT	test/note-origin.test.mjs	apps/app/src/prototype/summary-source.ts apps/app/src/runtime/calendar-form-draft.ts apps/app/src/runtime/maps-event-return.ts apps/app/src/runtime/note-origin.ts
+IMPORT	test/notes-capacity-fixture.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/notes-deletion-lease.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/notes-empty-close.test.mjs	apps/app/src/runtime/note-default-title.ts
+IMPORT	test/notes-logical-revision.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/notes-organize.test.mjs	apps/app/src/prototype/notes-organize-executor.ts apps/app/src/runtime/notes-view.ts
+PATH	test/notes-owner-retirement.test.mjs	apps/app/src/prototype/legacy-notes-access.ts apps/app/src/runtime/notes-secure-store.ts
+IMPORT	test/notes-query-explanation.test.mjs	apps/app/src/ui/notes/notes-query-explanation.ts
+IMPORT	test/notes-recorder-media-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/notes-recorder.test.mjs	apps/app/src/prototype/note-recorder.ts scripts/prepare-patched-native.ts
+IMPORT	test/notes-replay-identity.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/notes-store-lifecycle.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/notes-trash-read.test.mjs	scripts/quint-lib.ts
+IMPORT	test/notes-view.test.mjs	apps/app/src/runtime/notes-folders-model.ts apps/app/src/runtime/notes-view.ts
+IMPORT	test/offline-signed-out-speech.test.mjs	apps/app/src/runtime/voice-timing.ts
+PATH	test/ongoing-call-bar-state.test.mjs	apps/app/src/runtime/ongoing-call.ts
+IMPORT	test/own-provider.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/owner-copy-mappings.test.mjs	apps/app/src/runtime/automations-protocol.ts apps/app/src/ui/calendar/attendee-response.ts apps/app/src/ui/calendar/named-read-messages.ts apps/app/src/ui/reminders/reminder-result-messages.ts …+3
+IMPORT	test/owner-route-parity.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/paired-speech-contract.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/paradee-local-adapter.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/password-dev-editor.test.mjs	apps/app/src/passwords/dev-vault.ts
+PATH	test/password-manager-fences.test.mjs	apps/app/src/passwords/password-manager.ts
+PATH	test/password-manager-hidden.test.mjs	apps/app/src/passwords/password-manager.ts
+IMPORT	test/password-manager.test.mjs	apps/app/src/ui/passwords/passwords-presentation.ts
+IMPORT	test/phone-adapter.test.mjs	apps/app/src/runtime/aosp-telephony.ts
+PATH	test/phone-dial-agent-flow.test.mjs	apps/app/src/runtime/device-actions.ts
+IMPORT	test/phone-info-page.test.mjs	apps/app/src/prototype/phone-info-page.ts
+IMPORT	test/photo-crop.test.mjs	apps/app/src/prototype/photo-crop.ts
+IMPORT	test/photo-library.test.mjs	apps/app/src/runtime/photo-library.ts
+IMPORT	test/photo-viewport.test.mjs	apps/app/src/prototype/photo-viewport.ts
+IMPORT	test/photos-library-patch.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/photos-thumbnail-refresh.test.mjs	apps/app/src/ui/mobile-shell/photos-view.ts
+IMPORT	test/photos-view-contract.test.mjs	apps/app/src/runtime/photo-library.ts apps/app/src/ui/photos/photos-view-presentation.ts
+IMPORT	test/photos-view.test.mjs	apps/app/src/ui/mobile-shell/photos-view.ts
+PATH	test/pilot-units.test.mjs	scripts/reminder-recovery-fixture.ts scripts/test-browser-storage-format.ts scripts/test-installed-upgrade.ts scripts/test-native-calendar-deletion-restart.ts …+4
+PATH	test/pilot-update-export.test.mjs	scripts/reminder-recovery-fixture.ts scripts/test-browser-storage-format.ts scripts/test-installed-upgrade.ts scripts/test-native-calendar-deletion-restart.ts …+4
+IMPORT	test/plugin-worker-guard.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/power-launch-state.test.mjs	apps/app/src/runtime/power-launch-state.ts
+IMPORT	test/power-sense-entry.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/predictive-back.test.mjs	apps/app/src/runtime/predictive-back.ts
+IMPORT	test/prepared-workflow-worker.test.mjs	scripts/prepared-workflow-worker.ts scripts/workflow-worker-artifact.ts
+IMPORT	test/product-identity.test.mjs	apps/app/src/product/alpha-product-registration.ts
+IMPORT	test/provider-configuration-cancellation.test.mjs	apps/app/src/runtime/abort-signal.ts
+IMPORT	test/quick-settings-tile.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/quint-accessible-toast-lifetime.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-account-sheet-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-address-input.test.mjs	apps/app/src/browser/browser-poll.ts scripts/quint-lib.ts
+IMPORT	test/quint-agent-calendar-deferred-delete.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-agent-calendar-event-return.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-agent-calendar-mutation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-agent-calendar-refresh.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-agent-calendar-sync-control.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-android-browser-module-stage.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-android-build-input-readiness.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-android-gzip-asset-stage.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-android-installation-identity.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-app-info-handoff-composition.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-app-update-candidate.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-appearance-preference-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-application-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-approval-decision.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/quint-lib.ts scripts/workflow-renderer-fixture.ts
+IMPORT	test/quint-approval-routes.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-asr-pipe.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-automatic-app-update-schedule.test.mjs	apps/app/src/ui/state/app-update-gate.ts scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-automation-request-settlement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-back-dispatch.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-batch-capture-completion.test.mjs	apps/app/src/runtime/voice-call-pause.ts scripts/quint-lib.ts
+IMPORT	test/quint-bookmarks-hydration.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-agent-open.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-browser-alarm-ringing.test.mjs	apps/app/src/browser/alert-audio.ts apps/app/src/browser/clock.ts
+IMPORT	test/quint-browser-album-storage.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-cloud-request-custody.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-deletion-poll.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-external-handoff.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-files-trash-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts scripts/run-node-only-tests.ts
+IMPORT	test/quint-browser-google-return-contract.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-hosted-result-notice.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-journal-retention-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-note-recording-journal.test.mjs	apps/app/src/browser/note-recording-journal.ts scripts/quint-lib.ts
+IMPORT	test/quint-browser-owner-reminder-action.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-owner-reminder-read.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-page-egress.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-reminder-orphan-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-reviews.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-session-persistence.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-surface-navigation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-surface-presentation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-tab-lifecycle.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-browser-underlay-partial-contract.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-browser-view-layers.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-calendar-agent-selection.test.mjs	apps/app/src/prototype/calendar-adapter.ts apps/app/src/prototype/calendar-days.ts apps/app/src/prototype/calendar-edit-draft-adapter.ts apps/app/src/prototype/calendar-form-draft-adapter.ts …+1
+IMPORT	test/quint-calendar-agent-writes.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-calendar-approval-review.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-calendar-availability-review.test.mjs	apps/app/src/runtime/calendar-availability.ts scripts/quint-lib.ts
+IMPORT	test/quint-calendar-device-writes.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-calendar-editor-draft.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-calendar-form-controls.test.mjs	apps/app/src/prototype/calendar-form-inputs.ts scripts/quint-lib.ts
+IMPORT	test/quint-calendar-named-read.test.mjs	apps/app/src/ui/calendar/named-read-messages.ts scripts/quint-lib.ts
+IMPORT	test/quint-calendar-presentation-schedule.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-camera-agent-capture.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-camera-focus-writes.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-camera-preview-retirement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-camera-scan-keep.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-canonical-calendar-draft-handoff.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-calendar-draft.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-calendar-editor-close.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notes-controller.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notes-draft.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notes-feedback.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notes-list-filter.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notes-mutation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notes-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notes-view.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notification-tap-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-canonical-notification-tap-refinement.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-capture-frames.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-chat-attachments.test.mjs	apps/app/src/prototype/assistant-draft-controller.ts apps/app/src/prototype/chat-attachment-files.ts scripts/quint-lib.ts
+IMPORT	test/quint-chat-dock-gesture.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-chat-dock.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-chat-search.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-checker.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-client-observation-support.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-cloud-connection-notices.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-cloud-plan-recheck.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-combined-agent-launcher-refinement.test.mjs	scripts/build-policy-source.ts scripts/quint-lib.ts
+IMPORT	test/quint-committed-view-observation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-composer-send.test.mjs	apps/app/src/prototype/assistant-draft-controller.ts apps/app/src/runtime/action-message-presentation.ts apps/app/src/runtime/automation-completion.ts scripts/quint-lib.ts
+IMPORT	test/quint-conformance.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-connection-controller.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-contacts-session.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-copy-receipt.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-action-settlement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-core-approval-service.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-core-interaction-session.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-core-interactive-task-traces.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-core-plugin-lifecycle-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-retirement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-runtime-lifecycle-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-service-lifecycle-design-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-service-lifecycle.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-shutdown.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-task-scheduling.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-core-task-service-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-core-turns.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-credential-leases.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-current-approval-service.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-day-anchor.test.mjs	apps/app/src/prototype/calendar-adapter.ts apps/app/src/prototype/calendar-days.ts apps/app/src/prototype/calendar-edit-draft-adapter.ts apps/app/src/prototype/calendar-form-draft-adapter.ts …+1
+IMPORT	test/quint-delegation-receiver.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-deletion-notice-fence.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-development-digest-pending.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-device-action-review.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-dock-clearance-ownership.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-drawer-interaction.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-email-suggestion-review.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-embedding-sql-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-embedding-store-identity.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-fact-write-dedupe-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-fact-write-scope.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-files-agent-actions.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-files-browser-controller.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-files-filter.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-files-recent-index.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-find-in-page.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-first-send-draft-migration.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-fixture-busy-latch.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-forward-receipts.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-gmail-agent-mailbox-recovery.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-google-access-publication.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-google-browser-return-claim.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-google-calendar-access-choice.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-google-calendar-disconnect.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-google-calendar-link-flow.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-google-calendar-link-publication.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-google-consent-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-historical-calendar-navigation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-historical-camera-session.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-home-failure-notice.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-home-gesture.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-home-instance-handoff.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-home-surface.test.mjs	apps/app/src/prototype/home-cards.ts
+IMPORT	test/quint-hosted-background-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-hosted-digest-mutation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-hosted-digest-refresh.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-hosted-notice-question.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-inbox-edit-coalescer.test.mjs	apps/app/src/runtime/inbox-edit-coalescer.ts scripts/quint-lib.ts
+IMPORT	test/quint-inbox-list-paging.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-inbox-provider-drafts.test.mjs	apps/app/src/prototype/inbox-cloud-adapter.ts
+IMPORT	test/quint-indicator-provider.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+PATH	test/quint-inert-hold.test.mjs	apps/app/src/runtime/modal-inert.ts
+PATH	test/quint-inline-modal-focus.test.mjs	apps/app/src/runtime/inline-modal.ts
+PATH	test/quint-inline-modal-gestures.test.mjs	apps/app/src/runtime/inline-modal.ts
+IMPORT	test/quint-keyboard-detectors.test.mjs	apps/app/src/runtime/canvas-geometry.ts scripts/quint-lib.ts
+IMPORT	test/quint-keyboard-dictation-cloud.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-keyboard-focus.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-keyboard-geometry.test.mjs	apps/app/src/runtime/canvas-geometry.ts
+IMPORT	test/quint-launcher-favorites.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-launcher-observer.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-launcher-ownership.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-legacy-chat-input-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-legacy-files-browser-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-legacy-home-layout-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-legacy-maps-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-legacy-notes-view-refinement.test.mjs	apps/app/src/runtime/browser-notes-document.ts scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-legacy-photos-library-refinement.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-legacy-settings-nav-refinement.test.mjs	scripts/bun-lock.ts scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-lifeops-scheduled-task-route.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-list-focus-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-listener-input.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-listener-lease-recovery.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-listener-service.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-listener-store.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-live-capture.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-map-plane-ownership.test.mjs	apps/app/src/runtime/maps-notification-open.ts scripts/quint-lib.ts
+IMPORT	test/quint-maps-agent-surface-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-maps-connection.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-maps-event-return.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-maps-guidance-voice.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-maps-notification-open.test.mjs	apps/app/src/runtime/maps-notification-open.ts scripts/quint-lib.ts
+IMPORT	test/quint-maps-reroute-ownership.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-maps-screen-modes.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-maps-screen-source.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-maps-selected-read.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-maps-share-choice.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-media-copy-intent.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-mms-compose.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-mobile-bundle-admission.test.mjs	scripts/build-policy-source.ts scripts/core-state-patch.ts scripts/mobile-uuid-adapter.ts scripts/quint-lib.ts
+IMPORT	test/quint-modal-toast-forwarding.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-mounted-update-admission.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-named-embedding-provenance.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-action-recovery.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-app-info-handoff.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-assistant-entry.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-calendar-scoped-review.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-calendar-sync-enable.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-clock-review.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-crash-journal.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-deletion-review-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-native-digest-consent.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-gmail-background.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-google-access-file.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-google-host-artifact.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-hosted-inbox.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-hosted-result-notices.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-maps-location.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-native-mms-dispatch.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-navigation-ownership.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-native-recording.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-native-refinement.test.mjs	apps/app/src/product/owner-route-table.ts scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-reminder-delivery.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-request-withdrawal.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-settings-handoff.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-sms-dispatch.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-source-renewal.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-stream-bridge.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-native-text-scale-lifecycle.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-update-activation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-native-update-composition.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-update-staging.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-native-view-subscription.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-native-voice-draft.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-navigation-progress.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-note-permission.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-note-source-attachment.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-note-web-source-dialog.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-notes-agent-source.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-notes-coordinator-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-notes-document-transfer.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-notes-trash-session.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-observation-turn-dispatch.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-on-device-recognizer.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-os-application-refinement.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-own-notice-question.test.mjs	apps/app/src/prototype/context-selection.ts scripts/quint-lib.ts
+IMPORT	test/quint-password-entry-draft.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-password-provider-dialog.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-pending-action-recovery.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-permission-choices.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-permission-coordinator-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-personal-assistant-scheduled-task-custody.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-phone-call.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-phone-recents.test.mjs	apps/app/src/prototype/phone-adapter.ts
+IMPORT	test/quint-phone-session.test.mjs	apps/app/src/prototype/image-telephony.ts apps/app/src/runtime/aosp-telephony.ts apps/app/src/runtime/call-state.ts scripts/quint-lib.ts
+IMPORT	test/quint-photo-library-agent-review.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-photos-agent-host.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-photos-owned-album.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-photos-trash.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-photos-window.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-pilot-update-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-piped-capture.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-plan-admission-grace.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-plugin-connector-custody.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-prepared-source-stamp.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-prepared-workflow-worker.test.mjs	scripts/prepared-workflow-worker.ts scripts/quint-lib.ts scripts/workflow-worker-artifact.ts
+IMPORT	test/quint-previous-notes-availability.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-previous-notes-source-opening.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-protected-app-update-promotion-contract.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-prototype-surfaces-source-contracts.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-provider-execution-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-quiet-voice-retry.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-read-aloud.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-read-reply-lease.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-recognizer-availability.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-recorder-stage.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-recovery-ui-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-refinement-harness.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-reminder-decision.test.mjs	apps/app/src/prototype/reminder-adapter.ts apps/app/src/runtime/reminder-creations.ts apps/app/src/runtime/reminder-deletions.ts apps/app/src/runtime/reminder-journal-store.ts
+PATH	test/quint-reminder-intents.test.mjs	apps/app/src/prototype/reminder-adapter.ts apps/app/src/runtime/reminder-creations.ts apps/app/src/runtime/reminder-deletions.ts apps/app/src/runtime/reminder-journal-store.ts
+IMPORT	test/quint-reminder-open-intent.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-reminder-refresh.test.mjs	apps/app/src/prototype/reminder-adapter.ts apps/app/src/runtime/reminder-creations.ts apps/app/src/runtime/reminder-deletions.ts apps/app/src/runtime/reminder-journal-store.ts
+IMPORT	test/quint-reminder-reopen.test.mjs	scripts/quint-lib.ts
+PATH	test/quint-reminder-tap-tokens.test.mjs	apps/app/src/prototype/reminder-adapter.ts apps/app/src/runtime/reminder-creations.ts apps/app/src/runtime/reminder-deletions.ts apps/app/src/runtime/reminder-journal-store.ts
+PATH	test/quint-reminder-todo-attempt.test.mjs	apps/app/src/prototype/reminder-adapter.ts apps/app/src/runtime/reminder-creations.ts apps/app/src/runtime/reminder-deletions.ts apps/app/src/runtime/reminder-journal-store.ts
+IMPORT	test/quint-renderer-background-rebuild.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-renderer-digest-queue.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-renderer-hosted-inbox.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-renderer-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-renderer-speech-chunk.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-resident-java-source-stage.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-resident-liveness.test.mjs	apps/app/src/runtime/resident-recovery.ts scripts/quint-lib.ts
+IMPORT	test/quint-resident-maps-relay-offer.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-resident-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-resident-scheduling-admission.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-resident-start-cancel.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-retained-home-brief.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-retained-reminder-tap-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-reviewed-copies-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-room-handler-queue.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-saved-service-read.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-scan-review-dialogs.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-scheduled-snooze-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-screen-focus-ownership.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-selected-document-viewer.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-service-read-cache.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-services-refinement.test.mjs	apps/app/src/runtime/inbox-operation.ts apps/app/src/runtime/service-read-cache.ts apps/app/src/runtime/subscription-entitlement.ts scripts/prepare-client-features.ts …+1
+IMPORT	test/quint-settings-capability-reads.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-settings-listener-reads.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-settings-navigation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-settings-page-focus.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-settings-session.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-shade-notice-question-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-shade-pull.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-shade-row-custody.test.mjs	apps/app/src/prototype/context-selection.ts scripts/quint-lib.ts
+IMPORT	test/quint-share-panel-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-shared-recording.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-shell-screen.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-sign-in-chooser.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-sign-in-readiness-probe.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-single-flight-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-sms-send.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-source-renewal-question.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-speech-cleanup-latch.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-speech-gate.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-speech-output-preparation.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-speech-route-hold.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-speech-warmup.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-startup-update-admission.test.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	test/quint-stopped-reply-reconciliation.test.mjs	apps/app/src/ui/api/conversation-turn-controller.ts scripts/quint-lib.ts
+IMPORT	test/quint-system-picker-visibility.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-task-scheduler-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-task-scheduler-runtime-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-task-service-refinement.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/quint-tla-inventory.test.mjs	scripts/prepare-quint-history.ts scripts/quint-lib.ts
+IMPORT	test/quint-trigger-cursor.test.mjs	apps/app/src/browser/workflow-triggers.ts scripts/quint-lib.ts
+IMPORT	test/quint-vault-coordinator-refinement.test.mjs	scripts/prepare-patched-native.ts scripts/quint-lib.ts
+IMPORT	test/quint-video-edit-review.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-video-recorder.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-view-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-voice-owned-navigation.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-voice-surface-retirement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-voice-transcript-follow-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-voice-turn-review.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-wake-listener-stop.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-web-reading-review.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-workflow-clock-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-workflow-device-steps.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/quint-lib.ts scripts/workflow-renderer-fixture.ts
+IMPORT	test/quint-workflow-engine-refinement.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-workflow-execution-audit-admission.test.mjs	apps/app/src/runtime/phone-workflow-authoring.ts apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/quint-lib.ts …+1
+IMPORT	test/quint-workflow-lifecycle-change.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/quint-lib.ts scripts/workflow-renderer-fixture.ts
+IMPORT	test/quint-workflow-local-source.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-workflow-metadata-edit.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/quint-lib.ts scripts/workflow-renderer-fixture.ts
+IMPORT	test/quint-workflow-request-recovery-admission.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-workflow-run-ownership.test.mjs	scripts/quint-lib.ts
+IMPORT	test/quint-workflow-worker-staging.test.mjs	scripts/quint-lib.ts
+IMPORT	test/reading-capability-probe.test.mjs	apps/app/src/ui/browser/page-reading.ts scripts/quint-lib.ts
+IMPORT	test/reminder-capability-negotiation.test.mjs	apps/app/src/runtime/device-actions.ts apps/app/src/runtime/phone-context.ts
+IMPORT	test/reminder-card-presentation.test.mjs	apps/app/src/runtime/device-record-presentation.ts
+PATH	test/reminder-deletions.test.mjs	apps/app/src/browser/reminder-deletions.ts
+IMPORT	test/reminder-lifecycle-pure.test.mjs	apps/app/src/runtime/clock-contract.ts
+IMPORT	test/renderer-recovery-budget.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/renderer-slot-deployment-namespace.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/reset-cloud-revocation.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/reset-startup.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/reset-wiring.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/resident-admission-outcome.test.mjs	apps/app/src/runtime/subscription-entitlement.ts
+IMPORT	test/resident-android-json-compile.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/resident-attachment.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/resident-native-patch-admission.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/resident-recovery-review.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/resident-recovery.test.mjs	apps/app/src/runtime/resident-recovery.ts
+IMPORT	test/resident-result-transport.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/reviewed-handlers.test.mjs	apps/app/src/prototype/native-adapter.ts apps/app/src/prototype/template.html
+IMPORT	test/runtime-licenses.test.mjs	scripts/agent-bundle-dependencies.ts
+PATH	test/runtime-source-clone.test.mjs	scripts/local-agent-source.ts scripts/prepare-local-agent.ts
+IMPORT	test/saved-note-speech-policy.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/saved-note-transcript.test.mjs	apps/app/src/prototype/note-recorder.ts
+IMPORT	test/sbom.test.mjs	scripts/agent-bundle-dependencies.ts scripts/bun-lock.ts
+IMPORT	test/scan-all-day-draft.test.mjs	apps/app/src/prototype/scan-event.ts apps/app/src/runtime/calendar-form-draft.ts
+IMPORT	test/scan-document-draft-ownership.test.mjs	scripts/prepare-client-features.ts
+PATH	test/scan-document-drafts.test.mjs	apps/app/src/prototype/scan-document.ts
+IMPORT	test/scan-event.test.mjs	apps/app/src/prototype/scan-event.ts apps/app/src/ui/documents/scan-event.ts
+PATH	test/scan-page-camera.test.mjs	apps/app/src/prototype/scan-page-camera.ts
+PATH	test/scan-review-pdf-errors.test.mjs	apps/app/src/prototype/files-index.ts apps/app/src/prototype/scan-pdf.ts apps/app/src/prototype/scan-searchable-review.ts apps/app/src/ui/documents/scan-pdf-messages.ts
+IMPORT	test/scheduled-task-controls.test.mjs	scripts/quint-lib.ts
+IMPORT	test/scoped-calendar-snapshot.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/screen-copy-mappings.test.mjs	apps/app/src/runtime/calendar-approval.ts apps/app/src/runtime/calendar-availability.ts apps/app/src/runtime/telephony-executor.ts apps/app/src/ui/calendar/availability-review.ts …+7
+IMPORT	test/selected-document-messages.test.mjs	apps/app/src/ui/files/selected-document-messages.ts apps/app/src/ui/files/storage-presentation.ts
+IMPORT	test/selection-ask-readiness.test.mjs	apps/app/src/prototype/files-index.ts
+IMPORT	test/sense-listener-fork.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/serial-storage-tasks.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/service-read-cache.test.mjs	apps/app/src/runtime/service-read-cache.ts
+PATH	test/share-panel-watch.test.mjs	apps/app/src/runtime/share-panel.ts
+IMPORT	test/shared-deletion-window.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/sms-action-journal.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/sms-agent-flow.test.mjs	apps/app/src/runtime/phone-context.ts apps/app/src/runtime/sms-subscription-revision.ts apps/app/src/ui/telephony/sms-card-facts.ts
+PATH	test/sms-incomplete-rows.test.mjs	apps/app/src/prototype/sms-adapter.ts
+IMPORT	test/source-renewal-notices.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/source-renewal-question.test.mjs	apps/app/src/runtime/source-renewal-question.ts
+PATH	test/source-snapshot.test.mjs	android/upstream-native-sources.json scripts/prepare-client-features.ts
+IMPORT	test/staged-copy-mappings.test.mjs	apps/app/src/runtime/reviewed-mail-context.ts apps/app/src/ui/calendar/calendar-api-messages.ts apps/app/src/ui/cloud/subscription-presentation.ts apps/app/src/ui/documents/scan-pdf-messages.ts …+6
+IMPORT	test/startup-access-flow.test.mjs	apps/app/src/startup-permission-flow.ts apps/app/src/ui/components/permissions/permission-walkthrough.ts
+IMPORT	test/stopped-reply-match.test.mjs	apps/app/src/ui/api/conversation-turn-controller.ts
+IMPORT	test/streaming-speech.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/strict-build-inputs.test.mjs	scripts/local-agent-source.ts
+IMPORT	test/subscription-entitlement.test.mjs	apps/app/src/runtime/subscription-entitlement.ts apps/app/src/ui/cloud/subscription-presentation.ts
+IMPORT	test/subscription-presentation.test.mjs	apps/app/src/runtime/subscription-entitlement.ts apps/app/src/ui/cloud/subscription-presentation.ts
+IMPORT	test/system-bar-appearance.test.mjs	apps/app/src/prototype/system-bar-appearance.ts
+PATH	test/system-notice-collapse.test.mjs	apps/app/src/prototype/agent-adapter.ts apps/app/src/runtime/action-message-presentation.ts apps/app/src/runtime/connection-ui.tsx
+IMPORT	test/system-shade.test.mjs	apps/app/src/ui/shell/notification-shade.ts
+IMPORT	test/task-service-sql-concurrency.test.mjs	scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/task-service-stop.test.mjs	scripts/core-state-patch.ts
+IMPORT	test/telephony-agent-flow.test.mjs	apps/app/src/runtime/phone-context.ts
+PATH	test/telephony-attention-lifecycle.test.mjs	apps/app/src/prototype/telephony-attention.ts
+PATH	test/telephony-executor.test.mjs	apps/app/src/prototype/telephony-review.ts apps/app/src/runtime/telephony-executor.ts
+IMPORT	test/telephony-presenters.test.mjs	apps/app/src/prototype/locale-time.ts apps/app/src/prototype/telephony-presenters.ts
+PATH	test/telephony-receipt-text.test.mjs	apps/app/src/ui/telephony/telephony-receipt-text.ts
+PATH	test/test-runner.test.mjs	scripts/run-tests.ts
+IMPORT	test/theme-palette.test.mjs	apps/app/src/product/alpha-product-registration.ts
+IMPORT	test/trigger-cursor-isolation.test.mjs	apps/app/src/browser/workflow-triggers.ts scripts/core-state-patch.ts scripts/quint-lib.ts
+IMPORT	test/turn-effect-state.test.mjs	apps/app/src/runtime/turn-effect-state.ts
+IMPORT	test/ui-self-contained.test.mjs	scripts/prepare-client-features.ts
+PATH	test/unavailable-controls.test.mjs	apps/app/src/prototype/dc-lite.js apps/app/src/prototype/native-adapter.ts
+PATH	test/use-in-email-review.test.mjs	apps/app/src/prototype/use-in-email-review.ts apps/app/src/ui/mailbox/use-in-email.ts
+PATH	test/user-copy-vocabulary.test.mjs	apps/app/src/prototype/template.html apps/app/src/runtime/error-notice.ts
+PATH	test/verify-apks.test.mjs	scripts/stage-local-agent-sources.ts
+PATH	test/verify-wireless-launcher-update.test.mjs	scripts/reminder-recovery-fixture.ts scripts/test-browser-storage-format.ts scripts/test-installed-upgrade.ts scripts/test-native-calendar-deletion-restart.ts …+4
+PATH	test/video-capture-limit.test.mjs	apps/app/src/browser/video-capture.ts apps/app/src/browser/video-edit.ts
+PATH	test/view-navigation-settle.test.mjs	apps/app/src/runtime/view-navigation.ts
+IMPORT	test/voice-assistant.test.mjs	apps/app/src/runtime/voice-assistant.ts apps/app/src/runtime/voice-turn-routes.ts
+IMPORT	test/voice-call-pause.test.mjs	apps/app/src/runtime/call-state.ts apps/app/src/runtime/voice-call-pause.ts
+IMPORT	test/voice-calm-cloud-errors.test.mjs	apps/app/src/runtime/voice-states.ts
+PATH	test/voice-capture-retirement.test.mjs	apps/app/src/ui/voice/voice-session-client-core.ts
+PATH	test/voice-denied-recovery.test.mjs	apps/app/src/runtime/voice-states.ts
+IMPORT	test/voice-entry-timing.test.mjs	apps/app/src/runtime/voice-timing.ts scripts/aggregate-voice-latency.ts
+PATH	test/voice-progress-state-forwarding.test.mjs	apps/app/src/runtime/development-cartesia-conversation.ts
+PATH	test/voice-request-provenance.test.mjs	apps/app/src/runtime/development-cartesia-conversation.ts apps/app/src/ui/voice/voice-session-state.ts
+IMPORT	test/voice-timing.test.mjs	apps/app/src/runtime/voice-timing.ts scripts/aggregate-voice-latency.ts
+IMPORT	test/voice-turn-routes.test.mjs	apps/app/src/runtime/diagnostics-export.ts apps/app/src/runtime/voice-assistant.ts apps/app/src/runtime/voice-timing.ts apps/app/src/runtime/voice-turn-routes.ts
+IMPORT	test/workflow-account-switch.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/workflow-renderer-fixture.ts
+IMPORT	test/workflow-adapter-recovery.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-intents.ts apps/app/src/runtime/workflow-protocol.ts scripts/workflow-renderer-fixture.ts
+PATH	test/workflow-approval-notice-identity.test.mjs	apps/app/src/runtime/workflow-device-contract.ts
+IMPORT	test/workflow-approval-notice.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	test/workflow-calendar-run-anchor.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/workflow-renderer-fixture.ts
+PATH	test/workflow-definition-bounds.test.mjs	apps/app/src/prototype/locale-time.ts apps/app/src/runtime/phone-workflow-authoring.ts apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-local-time.ts …+2
+PATH	test/workflow-device-registration.test.mjs	apps/app/src/runtime/workflow-presentation.ts
+PATH	test/workflow-draft-reopen.test.mjs	apps/app/src/prototype/workflow-authoring.ts
+IMPORT	test/workflow-lifecycle-resend.test.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/workflow-renderer-fixture.ts
+IMPORT	test/workflow-notice-delivery.test.mjs	scripts/prepare-patched-native.ts
+PATH	test/workflow-output-contract.test.mjs	apps/app/src/runtime/phone-workflow-authoring.ts apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts
+PATH	test/workflow-reminder-contract.test.mjs	apps/app/src/runtime/workflow-device-contract.ts
+PATH	test/workflow-reminder-read.test.mjs	apps/app/src/runtime/workflow-reminder-read.ts
+PATH	test/workflow-reply-markup.test.mjs	apps/app/src/runtime/action-message-presentation.ts
+IMPORT	test/workflow-scope.test.mjs	apps/app/src/ui/workflows/workflow-scope.ts
+IMPORT	test/workflow-step-screen-guard.test.mjs	scripts/quint-lib.ts
+IMPORT	test/workflow-trigger-detection.test.mjs	apps/app/src/browser/workflow-triggers.ts
+PATH	test/workflow-typed-schedule.test.mjs	apps/app/src/runtime/phone-workflow-authoring.ts apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts
+IMPORT	test/workflow-worker-assets.test.mjs	scripts/prepare-patched-native.ts scripts/workflow-worker-artifact.ts
+IMPORT	test/workspace-return-fallback.test.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/legacy/chat-input/check-chat-input-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/check-view-refresh.mjs	scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/core/check-room-handler-queue-refinement.mjs	scripts/core-state-patch.ts
+IMPORT	specs/quint/legacy/files-browser/check-files-browser-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/google-connect/check-google-connect-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/home-layout/check-home-layout-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/maps/check-maps-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/notes-view/check-notes-view-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/photos-library/check-photos-library-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/settings-nav/check-settings-nav-refinement.mjs	scripts/bun-lock.ts scripts/prepare-client-features.ts scripts/quint-lib.ts
+IMPORT	specs/quint/legacy/sign-in/check-sign-in-refinement.mjs	scripts/prepare-client-features.ts scripts/quint-lib.ts
+PATH	specs/quint/refinement/application/accessible-toast-lifetime.mjs	apps/app/src/main.tsx apps/app/src/prototype/model.js apps/app/src/runtime/accessibility-timeout.ts
+IMPORT	specs/quint/refinement/application/address-input.mjs	apps/app/src/browser/browser-poll.ts
+PATH	specs/quint/refinement/application/agent-calendar-refresh.mjs	apps/app/src/runtime/agent-calendar.ts
+IMPORT	specs/quint/refinement/application/automatic-app-update-schedule.mjs	apps/app/src/ui/state/app-update-gate.ts scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/application/bookmarks-hydration.mjs	apps/app/src/prototype/browser-adapter.ts
+PATH	specs/quint/refinement/application/boundaries.mjs	apps/app/src/browser/notifications.ts apps/app/src/prototype/file-email-review.ts apps/app/src/runtime/inbox-attachment.ts apps/app/src/ui/mailbox/drafts-controller.ts …+5
+PATH	specs/quint/refinement/application/browser-adapter-host.mjs	apps/app/src/prototype/browser-adapter.ts
+PATH	specs/quint/refinement/application/browser-agent-open.mjs	apps/app/src/runtime/action-message-presentation.ts apps/app/src/runtime/device-actions.ts apps/app/src/runtime/view-navigation.ts
+PATH	specs/quint/refinement/application/browser-alarm-ringing.mjs	apps/app/src/browser/alert-audio.ts apps/app/src/browser/clock.ts
+IMPORT	specs/quint/refinement/application/browser-files-trash.mjs	scripts/prepare-client-features.ts scripts/run-node-only-tests.ts
+PATH	specs/quint/refinement/application/browser-session-persistence.mjs	apps/app/src/prototype/browser-adapter.ts
+PATH	specs/quint/refinement/application/browser-surface-presentation.mjs	apps/app/src/browser/browser-poll.ts apps/app/src/prototype/browser-adapter.ts
+PATH	specs/quint/refinement/application/browser-tab-lifecycle.mjs	apps/app/src/browser/browser-poll.ts apps/app/src/prototype/browser-adapter.ts
+PATH	specs/quint/refinement/application/browser-web-bookmarks.mjs	apps/app/src/main.tsx
+PATH	specs/quint/refinement/application/calendar-adapter-fixture.mjs	apps/app/src/prototype/calendar-adapter.ts apps/app/src/prototype/calendar-days.ts apps/app/src/prototype/calendar-edit-draft-adapter.ts apps/app/src/prototype/calendar-form-draft-adapter.ts …+1
+PATH	specs/quint/refinement/application/calendar-editor-draft.mjs	apps/app/src/browser/calendar-editor-draft.ts apps/app/src/browser/calendar-editor.ts
+PATH	specs/quint/refinement/application/calendar-editor-review-recovery.mjs	apps/app/src/browser/calendar-editor-draft.ts apps/app/src/browser/calendar-editor.ts apps/app/src/browser/domain-document.ts apps/app/src/browser/domain-recovery.ts …+4
+IMPORT	specs/quint/refinement/application/calendar-form-controls.mjs	apps/app/src/prototype/calendar-form-inputs.ts
+PATH	specs/quint/refinement/application/canonical-notes-controller.mjs	apps/app/src/prototype/canonical-notes-controller.ts
+PATH	specs/quint/refinement/application/canonical-notes-draft.mjs	apps/app/src/ui/notes/notes-editor.ts
+PATH	specs/quint/refinement/application/canonical-notes-feedback.mjs	apps/app/src/prototype/canonical-notes-ui.ts
+PATH	specs/quint/refinement/application/canonical-notification-tap-admission.mjs	apps/app/src/main.tsx apps/app/src/prototype/notifications-adapter.ts apps/app/src/runtime/connection-ui.tsx
+IMPORT	specs/quint/refinement/application/chat-attachments.mjs	apps/app/src/prototype/chat-attachment-files.ts
+PATH	specs/quint/refinement/application/chat-search.mjs	apps/app/src/prototype/chat-tools-adapter.ts
+PATH	specs/quint/refinement/application/clients.mjs	apps/app/src/runtime/alpha-client.ts
+PATH	specs/quint/refinement/application/cloud-plan-recheck.mjs	apps/app/src/runtime/connection-ui.tsx
+PATH	specs/quint/refinement/application/completed-view-delivery.mjs	apps/app/src/runtime/view-navigation.ts
+IMPORT	specs/quint/refinement/application/composer-send.mjs	apps/app/src/prototype/assistant-draft-controller.ts apps/app/src/runtime/action-message-presentation.ts apps/app/src/runtime/automation-completion.ts
+PATH	specs/quint/refinement/application/contracts.mjs	apps/app/src/passwords/dev-vault.ts apps/app/src/passwords/password-manager.ts apps/app/src/runtime/calendar-form-draft.ts apps/app/src/startup-permission-flow.ts …+1
+PATH	specs/quint/refinement/application/device-action-executor.mjs	apps/app/src/prototype/agent-adapter.ts
+IMPORT	specs/quint/refinement/application/drawer-interaction-fixture.tsx	apps/app/src/native apps/app/src/prototype/home-shell apps/app/src/ui/mobile-shell/installed-launcher apps/app/src/ui/mobile-shell/navigation
+PATH	specs/quint/refinement/application/drawer-interaction.mjs	apps/app/src/ui/mobile-shell/InstalledAppsGridDrawer.tsx
+PATH	specs/quint/refinement/application/files-filter.mjs	apps/app/src/ui/files/files-browser-adapter.ts
+PATH	specs/quint/refinement/application/files-preview.mjs	apps/app/src/ui/files/files-browser-adapter.ts apps/app/src/ui/files/storage-presentation.ts
+PATH	specs/quint/refinement/application/find-in-page.mjs	apps/app/src/prototype/browser-adapter.ts
+PATH	specs/quint/refinement/application/first-send-draft-migration.mjs	scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/application/hosted-digest-refresh.mjs	apps/app/src/browser/content-question.ts apps/app/src/runtime/hosted-digest-ui.tsx apps/app/src/runtime/hosted-notice-question.ts apps/app/src/runtime/source-renewal-question.ts
+PATH	specs/quint/refinement/application/keyboard-focus.mjs	apps/app/src/prototype/chat-overlay-motion-adapter.ts
+IMPORT	specs/quint/refinement/application/maps-notification-open.mjs	apps/app/src/runtime/maps-notification-open.ts
+PATH	specs/quint/refinement/application/maps-share-choice.mjs	apps/app/src/prototype/maps-adapter.ts apps/app/src/runtime/action-message-presentation.ts apps/app/src/runtime/error-notice.ts
+IMPORT	specs/quint/refinement/application/modal-scrim-ownership.mjs	scripts/prepare-client-features.ts
+IMPORT	specs/quint/refinement/application/mounted-update-admission.mjs	scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/application/notes-coordinator.mjs	apps/app/src/prototype/agent-adapter.ts scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/application/notes-recorder-media-admission.mjs	apps/app/src/browser/audio-capture.ts apps/app/src/browser/note-audio-store.ts apps/app/src/browser/note-recording-journal.ts apps/app/src/browser/voice.ts …+6
+PATH	specs/quint/refinement/application/notes-trash-session.mjs	apps/app/src/prototype/notes-trash-adapter.ts
+PATH	specs/quint/refinement/application/observation-turn-dispatch.mjs	apps/app/src/runtime/client-observation-support.ts apps/app/src/runtime/connection-ui.tsx apps/app/src/runtime/local-agent.ts apps/app/src/runtime/phone-context.ts
+PATH	specs/quint/refinement/application/os-provisioning.mjs	scripts/prepare-patched-native.ts
+PATH	specs/quint/refinement/application/password-entry-draft.mjs	apps/app/src/passwords/password-manager.ts
+PATH	specs/quint/refinement/application/photo-library-agent-review.mjs	apps/app/src/prototype/photo-library-adapter.ts
+PATH	specs/quint/refinement/application/photos-agent-host.mjs	apps/app/src/prototype/photo-library-adapter.ts
+PATH	specs/quint/refinement/application/photos-window.mjs	apps/app/src/prototype/camera-adapter.ts
+PATH	specs/quint/refinement/application/portable.mjs	apps/app/src/prototype/assistant-draft-controller.ts apps/app/src/runtime/canvas-geometry.ts apps/app/src/runtime/permanent-voice-deletion.ts apps/app/src/startup-permission-flow.ts
+PATH	specs/quint/refinement/application/previous-notes-availability.mjs	apps/app/src/prototype/agent-adapter.ts apps/app/src/prototype/legacy-notes-access.ts
+PATH	specs/quint/refinement/application/read-aloud.mjs	apps/app/src/prototype/local-speech-playback.ts apps/app/src/runtime/local-speech-text.ts apps/app/src/runtime/voice-selection.ts apps/app/src/runtime/voice-states.ts …+2
+PATH	specs/quint/refinement/application/read-reply-lease.mjs	apps/app/src/browser/documents.ts apps/app/src/prototype/agent-adapter.ts apps/app/src/runtime/connection-ui.tsx
+PATH	specs/quint/refinement/application/reminder-adapter-fixture.mjs	apps/app/src/prototype/reminder-adapter.ts apps/app/src/runtime/reminder-creations.ts apps/app/src/runtime/reminder-deletions.ts apps/app/src/runtime/reminder-journal-store.ts
+PATH	specs/quint/refinement/application/reminder-open-intent.mjs	scripts/prepare-client-features.ts
+IMPORT	specs/quint/refinement/application/resident-liveness.mjs	apps/app/src/runtime/resident-recovery.ts
+PATH	specs/quint/refinement/application/retained-reminder-tap-admission.mjs	scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/application/settings-page-focus.mjs	apps/app/src/prototype/model.js
+IMPORT	specs/quint/refinement/application/settings-resident-diagnostics.mjs	scripts/quint-lib.ts
+IMPORT	specs/quint/refinement/application/shell-coordinator.mjs	scripts/quint-lib.ts
+PATH	specs/quint/refinement/application/shell-core-fixture.mjs	apps/app/src/prototype/model.js apps/app/src/ui/mobile-shell/navigation.ts
+PATH	specs/quint/refinement/application/startup-permissions-coordinator.mjs	scripts/prepare-client-features.ts
+IMPORT	specs/quint/refinement/application/stopped-reply-reconciliation.mjs	apps/app/src/ui/api/conversation-turn-controller.ts
+PATH	specs/quint/refinement/application/storage.mjs	apps/app/src/browser/domain-document.ts
+PATH	specs/quint/refinement/application/support.mjs	scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/application/surfaces.mjs	apps/app/src/browser/dev-profile.ts apps/app/src/build-flags.ts apps/app/src/prototype/model.js apps/app/src/ui/mobile-shell/core.ts
+PATH	specs/quint/refinement/application/voice-surface-retirement.mjs	apps/app/src/prototype/voice-adapter.ts
+PATH	specs/quint/refinement/application/voice-transcript-follow.mjs	apps/app/src/prototype/agent-adapter.ts apps/app/src/prototype/model.js apps/app/src/prototype/voice-adapter.ts apps/app/src/runtime/development-cartesia-conversation.ts
+PATH	specs/quint/refinement/application/workflow-device-steps.mjs	apps/app/src/runtime/device-actions.ts apps/app/src/runtime/workflow-device-contract.ts
+IMPORT	specs/quint/refinement/check-traces.mjs	scripts/quint-lib.ts
+IMPORT	specs/quint/refinement/composition/controllers.mjs	scripts/quint-lib.ts
+IMPORT	specs/quint/refinement/composition/index.mjs	scripts/quint-lib.ts
+PATH	specs/quint/refinement/native/action-recovery.mjs	android/upstream-native-sources.json
+IMPORT	specs/quint/refinement/native/app-info-handoff.mjs	scripts/prepare-patched-native.ts
+PATH	specs/quint/refinement/native/assistant-entry.mjs	android/upstream-native-sources.json
+IMPORT	specs/quint/refinement/native/batch-capture-completion.mjs	apps/app/src/runtime/voice-call-pause.ts
+IMPORT	specs/quint/refinement/native/calendar-sync-enable-platform.mjs	scripts/prepare-patched-native.ts
+PATH	specs/quint/refinement/native/clock-review.mjs	android/upstream-native-sources.json
+IMPORT	specs/quint/refinement/native/crash-journal.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/native/credential-coordinator-platform.mjs	apps/app/src/product/owner-route-table.ts
+PATH	specs/quint/refinement/native/credential-coordinator.mjs	apps/app/src/product/owner-route-table.ts
+IMPORT	specs/quint/refinement/native/current-sources.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/native/deletion-coordinator.mjs	scripts/prepare-patched-native.ts
+PATH	specs/quint/refinement/native/deletion-notice-fence.mjs	apps/app/src/runtime/deletions.ts
+IMPORT	specs/quint/refinement/native/gmail-background.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/native/google-browser-return-claim.mjs	scripts/prepare-patched-native.ts
+PATH	specs/quint/refinement/native/local-agent.mjs	apps/app/src/runtime/local-agent.ts
+IMPORT	specs/quint/refinement/native/mms-dispatch.mjs	scripts/prepare-patched-native.ts
+PATH	specs/quint/refinement/native/native-digest.mjs	android/upstream-native-sources.json
+PATH	specs/quint/refinement/native/navigation-progress.mjs	apps/app/src/prototype/maps-adapter.ts apps/app/src/ui/maps/maps-screen.ts scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/native/request-withdrawal.mjs	apps/app/src/runtime/local-agent.ts
+IMPORT	specs/quint/refinement/native/reset-orchestration.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/native/scoped-calendar-review-platform.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/native/settings-handoff.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/native/shared-recording.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/native/sms-dispatch.mjs	scripts/prepare-patched-native.ts
+PATH	specs/quint/refinement/native/source-renewal.mjs	android/upstream-native-sources.json
+PATH	specs/quint/refinement/native/speech-cleanup-latch.mjs	apps/app/src/local-speech-playback.ts apps/app/src/runtime/app-speech.ts apps/app/src/runtime/cloud-voice.ts apps/app/src/runtime/voice-states.ts
+PATH	specs/quint/refinement/native/speech-cleanup-surface.mjs	apps/app/src/local-speech-playback.ts apps/app/src/prototype/local-speech-playback.ts apps/app/src/prototype/voice-adapter.ts apps/app/src/runtime/cloud-voice.ts
+PATH	specs/quint/refinement/native/telephony.mjs	apps/app/src/prototype/telephony-presenters.ts apps/app/src/runtime/message-draft.ts apps/app/src/runtime/telephony-executor.ts apps/app/src/runtime/voicemail-state.ts
+PATH	specs/quint/refinement/native/update-staging.mjs	apps/app/src/prototype/settings-adapter.ts
+PATH	specs/quint/refinement/native/wake-listener-stop.mjs	apps/app/src/runtime/always-on-listener.ts
+IMPORT	specs/quint/refinement/services/authorization.mjs	apps/app/src/runtime/subscription-entitlement.ts
+PATH	specs/quint/refinement/services/automation-request-settlement.mjs	apps/app/src/prototype/automations-adapter.ts apps/app/src/prototype/home-cards.ts apps/app/src/runtime/automations-protocol.ts apps/app/src/runtime/workflow-intents.ts …+2
+PATH	specs/quint/refinement/services/browser-google-return.mjs	scripts/browser-cloud-dev-bridge.ts
+IMPORT	specs/quint/refinement/services/cache.mjs	apps/app/src/runtime/service-read-cache.ts
+PATH	specs/quint/refinement/services/client-feature-publication.mjs	scripts/prepare-client-features.ts
+IMPORT	specs/quint/refinement/services/combined-agent-launcher-probe.mjs	scripts/build-policy-source.ts scripts/combined-agent-source.ts scripts/core-state-patch.ts
+IMPORT	specs/quint/refinement/services/core-runtime/module.mjs	scripts/core-state-patch.ts
+IMPORT	specs/quint/refinement/services/development-digest-pending-probe.mjs	apps/app/src/runtime/local-agent-storage.ts
+IMPORT	specs/quint/refinement/services/gmail-agent-mailbox-recovery-probe.mjs	apps/app/src/runtime/cloud-deployment.generated.ts
+PATH	specs/quint/refinement/services/google-accounts-lifecycle.mjs	apps/app/src/runtime/gmail-mailbox.ts apps/app/src/runtime/google-accounts.ts apps/app/src/runtime/google-connection-return.ts apps/app/src/runtime/google-workspace-return.ts
+PATH	specs/quint/refinement/services/google-accounts.mjs	apps/app/src/runtime/gmail-mailbox.ts apps/app/src/runtime/google-accounts.ts apps/app/src/runtime/google-workspace-return.ts
+PATH	specs/quint/refinement/services/inbox-coordinator-ports.mjs	scripts/prepare-client-features.ts
+IMPORT	specs/quint/refinement/services/inbox.mjs	apps/app/src/runtime/inbox-operation.ts
+PATH	specs/quint/refinement/services/maps.mjs	apps/app/src/maps/cloud-provider.ts apps/app/src/maps/device-navigation.ts apps/app/src/ui/maps/state.ts
+IMPORT	specs/quint/refinement/services/native-google-host-artifact-probe.mjs	scripts/build-policy-source.ts scripts/core-state-patch.ts scripts/workflow-worker-artifact.ts
+IMPORT	specs/quint/refinement/services/notes-store/module.mjs	scripts/core-state-patch.ts
+PATH	specs/quint/refinement/services/plan-admission-ports.mjs	apps/app/src/runtime/connection-ui.tsx scripts/prepare-client-features.ts
+IMPORT	specs/quint/refinement/services/plan-admission-sign-out.mjs	scripts/quint-lib.ts
+PATH	specs/quint/refinement/services/reading.mjs	apps/app/src/browser/content-question.ts
+PATH	specs/quint/refinement/services/scan.mjs	apps/app/src/browser/scan-draft.ts apps/app/src/prototype/scan-document.ts apps/app/src/prototype/scan-pdf.ts apps/app/src/runtime/abort-signal.ts …+2
+IMPORT	specs/quint/refinement/services/sign-in-coordinator.mjs	scripts/prepare-patched-native.ts
+IMPORT	specs/quint/refinement/services/source-inputs.mjs	scripts/prepare-client-features.ts
+IMPORT	specs/quint/refinement/services/task-scheduler/module.mjs	scripts/core-state-patch.ts
+IMPORT	specs/quint/refinement/services/task-service/module.mjs	scripts/core-state-patch.ts
+IMPORT	specs/quint/refinement/services/trigger-cursor-replay.mjs	apps/app/src/browser/workflow-triggers.ts
+IMPORT	specs/quint/refinement/services/workflow-adapter-fixture.mjs	apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-protocol.ts scripts/workflow-renderer-fixture.ts
+IMPORT	specs/quint/refinement/services/workflow-lifecycle-change-replay.mjs	apps/app/src/runtime/workflow-protocol.ts
+PATH	specs/quint/refinement/services/workflow-local-source.mjs	apps/app/src/prototype/workflow-adapter.ts apps/app/src/prototype/workflow-authoring.ts scripts/prepare-client-features.ts
+PATH	specs/quint/refinement/services/workflow-run-ownership.mjs	apps/app/src/prototype/workflow-adapter.ts
+PATH	specs/quint/refinement/services/workflow-worker-staging.mjs	scripts/stage-workflow-worker.ts scripts/workflow-worker-artifact.ts
+PATH	specs/quint/refinement/services/workflow.mjs	apps/app/src/runtime/phone-workflow-authoring.ts apps/app/src/runtime/workflow-device-contract.ts apps/app/src/runtime/workflow-intents.ts apps/app/src/runtime/workflow-protocol.ts
+PATH	specs/quint/services/scan-source-conformance.mjs	apps/app/src/prototype/scan-document.ts apps/app/src/ui/camera/scan-document.ts
+PATH	scripts/android-instrumentation.ts	scripts/reminder-recovery-fixture.ts scripts/test-browser-storage-format.ts scripts/test-installed-upgrade.ts scripts/test-native-calendar-deletion-restart.ts scripts/test-native-permissions.ts scripts/test-native-restart.ts scripts/test-reminder-one-off.ts scripts/test-reminder-recurrence.ts
+PATH	scripts/ci/calendar-bridge.py	android/upstream-native-sources.json
+IMPORT	scripts/ci/export-browser-proof.ts	scripts/workflow-worker-artifact.ts
