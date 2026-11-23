@@ -1,5 +1,5 @@
 // spec/telephony/callBar.md, "Story: See my live call over every view"; spec/telephony/callBar.md, "A reading older than the latest one never replaces it"; spec/telephony/callBar.md, "Return and End act only on the call the bar shows, and End is asked once"; spec/telephony/callBar.md, "The bar keeps Telecom's latest call-state reading for the emergency gate"; spec/telephony/common.md, "A call, text, dial handoff or contact write runs only on a fresh reading that rules out an emergency call"
-import { Machine as CallBarMachine, type CallPhase, type Event as CallBarEvent, type LiveCall } from "../../gen/telephony__callBar.effect.vibe"
+import { Machine as CallBarMachine, shownCall, type CallPhase, type Event as CallBarEvent, type LiveCall } from "../../gen/telephony__callBar.effect.vibe"
 import { effectAllowed, emergencyLive, noReading, type CallReading, type Known } from "../../gen/telephony__common.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { Microphone } from "../voice/capture.vibe"
@@ -25,10 +25,14 @@ export service CallWatch {
   returnToCall(callId: string): void!!
   /** End (or, ringing, decline) the bar's call, once. */
   end(callId: string): void!!
+  /** End the call the bar shows now, from End beside the comms bar; nothing when no call shows. */
+  endShown(): void!!
   /** A fresh Telecom reading that rules out an emergency call; any failure refuses. */
   allowed(): boolean!!
   /** Whether a call holds the phone now, from the latest reading: the shell's idle fact `call`. */
   live(): boolean!!
+  /** Whether the latest reading shows a live call that may be an emergency call: the display gate that holds every proposal. With no call or no readable state the shell keeps working; only `allowed` fails closed, for effects. */
+  emergencyLive(): boolean!!
 }
 
 /** A call holds the phone: Telecom says so, or the bar shows one of its calls. */
@@ -123,6 +127,14 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
     }
   }
 
+  effect function endCall(callId: string) {
+    const asked = try tell({ type: "endAsked", callId })
+    if (asked === undefined) return
+    const done = try (native.invoke(ONGOING_CALL_PLUGIN, "endCall", { id: callId }) catch () => false)
+    if (done === false) try tell({ type: "endRefused", callId })
+    try refresh()
+  }
+
   effect function poll() {
     while (true) {
       try sleep(POLL)
@@ -153,12 +165,11 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
     effect returnToCall(callId: string) {
       try (native.invoke(ONGOING_CALL_PLUGIN, "showCall", { id: callId }) catch () => undefined)
     },
-    effect end(callId: string) {
-      const asked = try tell({ type: "endAsked", callId })
-      if (asked === undefined) return
-      const done = try (native.invoke(ONGOING_CALL_PLUGIN, "endCall", { id: callId }) catch () => false)
-      if (done === false) try tell({ type: "endRefused", callId })
-      try refresh()
+    end: endCall,
+    effect endShown() {
+      const now = try bar.get()
+      if (!now.shown || now.calls.length === 0) return
+      try endCall(shownCall(now.calls).id)
     },
     effect allowed() {
       if (!callState) return false
@@ -169,6 +180,9 @@ export const callWatchLayer = Layer.effect(CallWatch, effect {
     },
     effect live() {
       return callHolds(try bar.get())
+    },
+    effect emergencyLive() {
+      return emergencyLive((try bar.get()).reading ?? noReading)
     },
   }
 })

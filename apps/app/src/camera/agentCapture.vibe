@@ -1,5 +1,5 @@
 // spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"; spec/camera/agentCapture.md, "The reveal ends only once the closing panel is gone; an abort, a changed context or a hidden Camera ends it with nothing taken"; spec/camera/viewfinder.md, "Another flow borrows the shutter only over the ready, idle preview: the assistant's photo, a scanned frame or a document page"
-import { Machine as CaptureMachine, type Capture, type Event as CaptureEvent, type Scene, type Wanted, panelLimitMs } from "../../gen/camera__agentCapture.effect.vibe"
+import { Machine as CaptureMachine, needsCard, openLimitMs, type Capture, type Event as CaptureEvent, type Scene, type Wanted, panelLimitMs } from "../../gen/camera__agentCapture.effect.vibe"
 import { chatCovers, type Camera } from "../../gen/camera__viewfinder.effect.vibe"
 import { CameraBridge, CameraFailed } from "./bridge.vibe"
 import { photoReceiptId } from "./bridge.schema.vibe"
@@ -129,7 +129,19 @@ export const agentCamera = Layer.effect(AgentCamera, effect {
     return try failed(outcome.status === "closed" ? "Camera closed" : "Camera busy")
   }
 
+  /**
+   * A request that may run, asked while Camera is not in front on an unprotected screen, first opens Camera and waits for it to
+   * show (upstream: "the requesting phone opens Camera itself"); a Camera that does not show in time leaves the request to fail.
+   */
+  effect function openCamera(request: CaptureRequest) {
+    if ((try scene()).shown || request.sensitive === true) return
+    if (needsCard(request.reviewed, request.ownerWords, (try machine.get()).directTaken)) return
+    try handoffs.open("camera")
+    try (timeout(Stream.runHead(Stream.filter(viewfinder.changes, (c) => c.visible)), Duration.millis(openLimitMs)) catch () => undefined)
+  }
+
   effect function run(request: CaptureRequest): CaptureAttempt!! {
+    try openCamera(request)
     const before = try scene()
     const asked = try send({ type: "ask", scene: before, wanted: wantedOf(request.lens), reviewed: request.reviewed, ownerWords: request.ownerWords, offersLibraryId: request.offersLibraryId, sensitive: request.sensitive === true })
     if (asked === undefined || asked.outcome === "Failed") {

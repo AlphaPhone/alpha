@@ -118,6 +118,11 @@ pure def alwaysColumnsInRange(b: Browse): bool = b.columns >= 3 and b.columns <=
 
 ### The viewer opens on an item the list shows, swipes within it, and closes only by the owner or when its item is gone
 
+The viewer's own Favorite, Move to trash, Add to album, Recover and Delete
+forever act on the item it shows as a one-item selection: the owner's tap
+closes the viewer, selects that one item and runs the same reviewed change as
+the grid would; after a favorite change the viewer opens on the item again.
+Sharing, asking Alpha and editing are offered only outside Recently deleted.
 The item may be on a later page than the window; only a failed read of it
 closes the viewer.
 

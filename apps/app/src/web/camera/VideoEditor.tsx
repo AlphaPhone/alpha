@@ -1,5 +1,6 @@
 // spec/camera/videoEdit.md, "Story: Trim a video into a copy"; spec/camera/videoEdit.md, "Story: Recover a video copy that may exist"
-import { Crop, RotateCw } from "lucide-react";
+import { Crop, Pause, Play, RotateCw } from "lucide-react";
+import { useEffect, useRef } from "react";
 import type { Event as VideoEvent, VideoEditor as VideoEditorState } from "../../../gen/camera__videoEdit.ts";
 import { videoClock } from "../../camera/messages.vibe";
 import { Button, Sheet, SheetContent, Slider } from "../components/ui/index.ts";
@@ -23,6 +24,16 @@ export interface VideoEditorProps {
  */
 export function VideoEditor({ state, can, source, editor }: VideoEditorProps) {
   const trim = state.trim;
+  const video = useRef<HTMLVideoElement | null>(null);
+  // The preview plays the trimmed range only: from the start handle, pausing at the end handle.
+  useEffect(() => {
+    const element = video.current;
+    if (element === null) return;
+    if (state.playing) {
+      if (element.currentTime < trim.start / 10 || element.currentTime >= trim.end / 10) element.currentTime = trim.start / 10;
+      void element.play().catch(() => editor((e) => e.videoEvent({ type: "pause" })));
+    } else element.pause();
+  }, [state.playing]);
   return (
     <Sheet open={!state.closed} onOpenChange={(next) => { if (!next) editor((e) => e.videoEvent({ type: "closeEditor" })); }}>
       <SheetContent side="full" title="Edit video" hideTitle>
@@ -33,8 +44,10 @@ export function VideoEditor({ state, can, source, editor }: VideoEditorProps) {
         </header>
         <div className="flex flex-1 items-center justify-center bg-foreground">
           {source !== "" && (
-            <video src={source} controls={false} playsInline className="max-h-full max-w-full" style={{ transform: `rotate(${trim.rotation}deg)` }}
-              onLoadedData={() => editor((e) => e.videoEvent({ type: "sourceLoaded" }))} onError={() => editor((e) => e.videoEvent({ type: "sourceError" }))} />
+            <video ref={video} src={source} controls={false} playsInline className="max-h-full max-w-full" style={{ transform: `rotate(${trim.rotation}deg)` }}
+              onLoadedData={() => editor((e) => e.videoEvent({ type: "sourceLoaded" }))} onError={() => editor((e) => e.videoEvent({ type: "sourceError" }))}
+              onTimeUpdate={(event) => { if (state.playing && event.currentTarget.currentTime >= trim.end / 10) editor((e) => e.videoEvent({ type: "pause" })); }}
+              onEnded={() => { if (state.playing) editor((e) => e.videoEvent({ type: "pause" })); }} />
           )}
         </div>
         <footer className="flex flex-col gap-3 px-4 pb-4">
@@ -45,6 +58,9 @@ export function VideoEditor({ state, can, source, editor }: VideoEditorProps) {
               else if (end !== trim.end) editor((e) => e.videoEvent({ type: "trimTo", startHandle: false, position: end! }));
             }} />
           <div className="flex justify-center gap-2">
+            {state.playing
+              ? <Button variant="secondary" size="icon" aria-label="Pause" disabled={!can({ type: "pause" })} onClick={() => editor((e) => e.videoEvent({ type: "pause" }))}><Pause /></Button>
+              : <Button variant="secondary" size="icon" aria-label="Play" disabled={!can({ type: "play" })} onClick={() => editor((e) => e.videoEvent({ type: "play" }))}><Play /></Button>}
             <Button variant="secondary" size="icon" aria-label="Rotate" disabled={!can({ type: "rotateVideo" })} onClick={() => editor((e) => e.videoEvent({ type: "rotateVideo" }))}><RotateCw /></Button>
             <Button variant={trim.crop ? "primary" : "secondary"} size="icon" aria-label="Crop" aria-pressed={trim.crop} disabled={!can({ type: "toggleCrop" })} onClick={() => editor((e) => e.videoEvent({ type: "toggleCrop" }))}><Crop /></Button>
           </div>

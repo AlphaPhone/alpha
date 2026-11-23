@@ -83,7 +83,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
   const points = new Map<number, { x: number; y: number }>()
   let borrowed = false
   let ticking = false
-  let volumeArmed = false
+  let volumeArmed: boolean | undefined = false
   let graceFiber: Fiber.Fiber<void> | undefined
   let zoomWanted: number | undefined
   let shellModal = false
@@ -131,10 +131,15 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     try armVolume(after.volumeKeys && shutterWanted(after))
   }
 
+  /** Arms or disarms the volume-key shutter; a failed native call leaves it unarmed as far as the next change knows, so the state is sent again. */
   effect function armVolume(wanted: boolean) {
     if (wanted === volumeArmed) return
     volumeArmed = wanted
-    bridge.setVolumeShutter(wanted) catch () => undefined
+    const done = try (effect {
+      try bridge.setVolumeShutter(wanted)
+      return true
+    } catch () => false)
+    if (!done) volumeArmed = undefined
   }
 
   effect function armGrace(c: Camera) {

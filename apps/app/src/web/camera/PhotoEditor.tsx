@@ -1,10 +1,10 @@
 // spec/camera/edit.md, "Story: Edit a photo and keep the original"
 import type { Effect } from "effect";
 import { Crop, RotateCw } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Edit, Event as EditEvent, Look } from "../../../gen/camera__edit.ts";
 import type { MediaEditor } from "../../camera/editor.vibe";
-import { CROP_ASPECTS, LOOKS, WHOLE_PHOTO, aspectFraction, fitAspect, nudgeCrop, toArea, type CropAspect, type CropRect } from "../../camera/imageEdit.ts";
+import { CROP_ASPECTS, LOOKS, WHOLE_PHOTO, aspectFraction, dragCrop, fitAspect, nudgeCrop, toArea, type CropAspect, type CropHandle, type CropRect } from "../../camera/imageEdit.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Sheet, SheetContent } from "../components/ui/index.ts";
 import { cn, focusRing } from "../lib/cn.ts";
 
@@ -31,6 +31,22 @@ export function PhotoEditor({ state, can, editor }: PhotoEditorProps) {
   const [confirmReplace, setConfirmReplace] = useState(false);
   const open = state.status !== "EditClosed";
   const pending = state.status === "SavingEdit" || state.status === "EditUncertain"
+  const photo = useRef<HTMLDivElement | null>(null);
+  const drag = useRef<{ handle: CropHandle; start: CropRect; x: number; y: number; width: number; height: number } | null>(null);
+  /** A drag of the crop area or one of its corners, measured against the fitted photo. */
+  const beginDrag = (handle: CropHandle) => (event: ReactPointerEvent<HTMLElement>) => {
+    const box = photo.current?.getBoundingClientRect();
+    if (box === undefined || box.width === 0 || box.height === 0) return;
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { handle, start: rect, x: event.clientX, y: event.clientY, width: box.width, height: box.height };
+  };
+  const moveDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    const at = drag.current;
+    if (at === null) return;
+    setRect(dragCrop(at.start, at.handle, (event.clientX - at.x) / at.width, (event.clientY - at.y) / at.height, aspectFraction(aspect, 1000, 1000)));
+  };
+  const endDrag = () => { drag.current = null; };
   return (
     <Sheet open={open} onOpenChange={(next) => { if (!next) editor((e) => e.askClose()); }}>
       <SheetContent side="full" title="Edit photo" hideTitle>
@@ -41,15 +57,24 @@ export function PhotoEditor({ state, can, editor }: PhotoEditorProps) {
           <Button loading={state.status === "SavingEdit"} disabled={!can({ type: "save", mode: "CopyMode" })} onClick={() => editor((e) => e.save("CopyMode"))}>Save copy</Button>
         </header>
         <div className="relative flex flex-1 items-center justify-center bg-foreground">
-          {state.image !== "" && <img src={state.image} alt="Photo being edited" style={{ filter: LOOKS[state.look].css }} className="max-h-full max-w-full object-contain" />}
-          {state.cropping && (
-            <div role="group" aria-label="Crop area" tabIndex={0} className={cn("absolute border-2 border-background", focusRing)}
-              style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }}
-              onKeyDown={(event) => {
-                const next = nudgeCrop(rect, event.key, event.shiftKey, aspectFraction(aspect, 1000, 1000));
-                if (next !== undefined) { event.preventDefault(); setRect(next); }
-              }} />
-          )}
+          <div ref={photo} className="relative inline-flex max-h-full max-w-full">
+            {state.image !== "" && <img src={state.image} alt="Photo being edited" style={{ filter: LOOKS[state.look].css }} className="max-h-full max-w-full object-contain" />}
+            {state.cropping && (
+              <div role="group" aria-label="Crop area" tabIndex={0} className={cn("absolute touch-none border-2 border-background", focusRing)}
+                style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%`, width: `${rect.width * 100}%`, height: `${rect.height * 100}%` }}
+                onPointerDown={beginDrag("move")} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                onKeyDown={(event) => {
+                  const next = nudgeCrop(rect, event.key, event.shiftKey, aspectFraction(aspect, 1000, 1000));
+                  if (next !== undefined) { event.preventDefault(); setRect(next); }
+                }}>
+                {(["nw", "ne", "sw", "se"] as const).map((corner) => (
+                  <span key={corner} aria-hidden onPointerDown={beginDrag(corner)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                    className={cn("absolute size-6 touch-none rounded-full border-2 border-background bg-foreground/40",
+                      corner[0] === "n" ? "-top-3" : "-bottom-3", corner[1] === "w" ? "-left-3" : "-right-3")} />
+                ))}
+              </div>
+            )}
+          </div>
           {state.status === "EditUncertain" && <span role="status" className="absolute top-4 rounded-md bg-scrim px-3 py-1 text-sm text-background">Unconfirmed</span>}
         </div>
         {state.cropping ? (
@@ -58,6 +83,7 @@ export function PhotoEditor({ state, can, editor }: PhotoEditorProps) {
               <Button key={choice.id} variant={aspect === choice.id ? "primary" : "secondary"} size="sm"
                 onClick={() => { setAspect(choice.id); const fraction = aspectFraction(choice.id, 1000, 1000); setRect(fraction === undefined ? rect : fitAspect(fraction)); }}>{choice.label}</Button>
             ))}
+            <Button variant="ghost" size="sm" onClick={() => { const fraction = aspectFraction(aspect, 1000, 1000); setRect(fraction === undefined ? WHOLE_PHOTO : fitAspect(fraction)); }}>Reset</Button>
             <span className="flex-1" />
             <Button variant="ghost" onClick={() => editor((e) => e.cancelCrop())}>Cancel</Button>
             <Button disabled={!can({ type: "applyCrop", area: toArea(rect) })} onClick={() => editor((e) => e.applyCrop(toArea(rect)))}>Done</Button>

@@ -134,7 +134,7 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       const cloud = usableSession(try session.current()) && (try entitlement.current()).host !== "HostRemoved"
       return cloud ? { where: "CloudHosted" as const, provider: "Eliza Cloud" } : { where: "OwnKeyHosted" as const, provider: "Your provider" }
     },
-    effect emergency() { return !(try calls.allowed()) },
+    effect emergency() { return try calls.emergencyLive() },
     effect openView(app: string, route?: string) {
       const known = appOfKey(`alpha:${app}`)
       if (known === undefined) return false

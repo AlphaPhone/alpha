@@ -7,6 +7,7 @@ import { phoneClient, telephonyPlugin, type PhoneClient } from "@elizaos/os/brid
 import { telephonyOffered, type BuildVariant } from "../../gen/telephony__common.effect.vibe"
 import { Build, type BuildInfo } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
+import { composerPlugin } from "./composer-port.ts"
 
 /** The native plugin the Alpha image registers only for a verified system install. */
 export const TELEPHONY_PLUGIN = "AlphaTelephony"
@@ -28,6 +29,8 @@ export error TelephonyRefused { method: string; code?: string; reason: string; c
 export interface TelephonyClients {
   readonly phone: PhoneClient
   readonly messages: MessagesClient
+  /** The owner's own Send from the Messages composer, through the launcher's composer port; never Alpha's. */
+  readonly composer: MessagesClient
   readonly contacts: AddressBookClient
   /** Display-only names for the numbers a surface shows. */
   readonly names: ContactNamesClient
@@ -98,6 +101,7 @@ export const bridgesLayer = Layer.effect(TelephonyBridges, effect {
     ? {
         phone: phoneClient(telephonyPlugin(TELEPHONY_PLUGIN), journal),
         messages: messagesClient(messagesPlugin(TELEPHONY_PLUGIN), journal),
+        composer: messagesClient(composerPlugin(messagesPlugin(TELEPHONY_PLUGIN)), journal),
         contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(CONTACTS_PLUGIN), journal }),
         names: createContactNames(addressBookPlugin(CONTACTS_PLUGIN)),
         deletions: createDeferredDeletions(journal),

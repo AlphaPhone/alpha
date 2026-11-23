@@ -40,6 +40,8 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **OWNER:** Telephony:
   - an Alpha `mms_send` operation settles as unavailable, with no card;
   - legacy kept `alpha-proposal:v1` in a native secure slot, while the port keeps it in the owner-keyed KeyValueStore. Nothing is migrated (the slot holds one card to redraw). Should it move to ElizaSecureStore?
+- **OWNER:** Legacy Messages drafts (secure slots `sms-draft:v1:<thread|new>`) are not adopted by the port's owner-keyed `telephony/drafts`. Unsent texts are lost at the cutover, and a send whose outcome was unknown loses its operation ID, so sending it again could duplicate it. Adopt them once in `draftsKept`, or accept the loss?
+- **OWNER:** The Camera developer-only pieces (the screen light and the development focus targets, legacy `browser-camera.ts` `setScreenLight`/`browserDevProfile`) are not ported. Port them behind `ELIZA_DEV_ALLOW_TEST_MOCKS=1`, or retire them?
 - **OWNER:** Legacy paired-agent voice (pairedVoiceStatus, synthesizePaired, transcribePairedRecording) is not ported, and Android still carries PairedSpeechContract.
 - **OWNER:** Two Settings password items:
   - the Proton Pass and development password-provider rows (`AlphaDevice.openPasswordProvider`) are not ported;
@@ -73,7 +75,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Areas consuming assistant changes
 
-- **Telephony:** `useComms` and CallBar approve/decline should call `commsReviewFromAssistant().approve/decline` (`src/assistant/call-facts.vibe`) after CommsStage, so a bar approval runs through DeviceReview. `askAlpha` should call `Assistant.askComms(key, text)` so asking the same text twice is detected.
+- **Telephony:** `useComms.approve/decline` now run through `commsReviewFromAssistant()` after CommsStage, but no screen draws the bar's proposal card with an Approve button, so nothing calls `useComms.approve` yet (`RestoredProposal` only dismisses). The CallBar has no approve or decline of its own.
 - **Clock:** the workflow notice tap calls `flows.askAboutNotice(id, revision, …)` (`src/clock/notifications.vibe`); it should build its question with the assistant's `workflowStepSource(notice, workflow, step, excerpt)` (`src/assistant/draft.vibe`). The clock area has no listener yet for the new native `remindersChanged`, `notificationsChanged` and `mirrorChanged` events.
 - **Workflows:** `src/workflows/notices.vibe` should call `DeviceReview.workflowStep(runId, stepId)` in its Executing phase, so an admitted phone step actually runs. `WorkflowCalendar` (`src/workflows/calendarRanges.vibe`) has no screen consumer; the simulator still uses the pure range helpers. The `post_notification` bindingHash omits the proposal digest, because `ExecutorCall` carries none.
 - **Notes:** `create_note` still treats "Workflows in front" as a workflow run. Notes sits before the assistant in the runtime order, so it needs a port, filled by the shell from `DeviceReview.callFacts(call).workflow`. `NotesListFilter.negotiate` and `filesCapabilities` can read the advertised names once the shell fills `AdvertisedCapabilities`.
@@ -108,6 +110,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - The Google App Link `appReturn` has no native source. The delegation-callback and workspace-return methods stay on AlphaConnection.
 - Java-side host models are missing: IdentitySession, NativeCredentialMutation, NativeGoogleAccessFile and GoogleBrowserReturnClaim. There is no native conformance driver for `voice__keyboard`.
 - `AlphaTelephonyBase` is still Alpha's fork of upstream TelephonyPlugin.
+- Every approved Alpha text (`sms_send`, a non-draft `sms_compose`) is refused natively with `not-approved`: `AlphaApprovedSms.claim` admits a card send only against an `applying` entry of the legacy scoped `AlphaActionJournal` named by a `journalIdentity`, but the port's assistant journals approvals in `DeviceExecutionJournal` (`device-execution:v1`) and `TelephonyActions` passes no identity. `AlphaApprovedSms` must admit against the device-execution entry (its digest, operation and operation ID) and the renderer must name it; until then the card send settles unavailable. The owner's own Send works through the composer port. Alpha's native send admission (`AlphaApprovedSms`, `AlphaMessagesComposerPort`, `composerGuard`) also has no spec rule; legacy modelled it in `specs/quint/native/NativeSmsDispatch.qnt`.
 
 ## Tooling / repository root
 
@@ -193,6 +196,33 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **No tests:** no camera test covers a chat that stays open during the reveal.
 - **No meta file:** MapsScreen, MapPlane and the runtime-bound telephony screens (PhoneScreen, MessagesScreen, ContactsScreen, CallBar, UndoNotice, ReviewRows, PhoneInfoPanel) have no `.meta.tsx`.
 
+## Telephony and Camera (parity audit, still open)
+
+- **Telephony:**
+  - after a restart, or for a recovered or spoken proposal, `TelephonyCalls.of` has no owner words, so an approved Call or Text card for a number is refused as unwritten; the re-judgement should use the assistant's own `contradicts` verdict (`spec/assistant/review.md`, `lawNoWrittenNumberContradictsNothing`) instead of `grounded()` over remembered text;
+  - the briefing (AC-25): `CommsStage.briefing()` and `callsBriefing` have no caller;
+  - call and text cards show only the title and raw number or query: `callCardText`, `smsSendFacts` and `smsPartEstimate` (`src/web/telephony/present.ts`) have no caller, and no name, SIM, part count or "sends at once" note is shown;
+  - the comms stage does not follow the real chat sheet: `heightChanged` and `voiceChanged` have no sender, so the full-sheet strip (AC-04) and End in the card, strip and voice panel are never reached;
+  - dictation in the bar and hold-Alpha-to-talk (AC-12): no screen passes `onDictate`;
+  - the "Sent to <name>" quiet note after a send (AC-15) is missing;
+  - the system-messaging handoff: `DraftSends.handoff` has no caller, and incomplete rows say "Use the system messaging app" with no action (SIM choice is offered beside the bar now);
+  - missing contact write access answers unavailable instead of asking for it;
+  - an approved text is not watched after "submitted" (`SMS_SETTLE` covers only the owner's sends);
+  - ring, "Screen it" and the in-app incoming call card exist only as model.
+- **Camera:**
+  - viewer zoom and pan are modelled (`zoomedTo`/`pans`/`doubleTapped` in `gen/camera__media`) but no control calls them; the viewer swipes and takes the arrow keys now;
+  - removing one item from a custom album is gone: `AlbumOp` has no remove, though `PhotoStore` keeps it; Empty Recently deleted has no event, store method or control;
+  - albums are a filter of the loaded window (at most 600 rows), and counts come from that window; `store.summary()` and `store.list({album})` are never called;
+  - the Photos grid is not virtualised, pages by a "Show more" button and keeps every thumbnail in Machine state;
+  - scan drafts are one base64 `localStorage` value (`alpha/camera/scan-draft/v1`) instead of upstream's IndexedDB `createScanDraftStore`; a failed write says "Another draft is saved…", and legacy drafts are not adopted. After a restart a stored draft cannot be deleted or resumed, and Close never asks Keep or Discard;
+  - scan re-implements `@elizaos/plugin-files` documents locally (`scanWork.ts`, `scanText.ts`): OCR and export failures say only "Scan failed"/"PDF failed", and the scanned-event suggestion lost zone, weekday and numeric-date handling and its disclosures;
+  - the focus target is never drawn, and browser focus points are not mapped through mirror and zoom;
+  - saved-copy recovery runs only when the next editor opens (`MediaEditor.recover` has no UI caller);
+  - browser build only: the whole photo library is one `localStorage` value; recordings ignore zoom and the front mirror, and every microphone failure reads as denied; no image import into Photos and no local save; the flash cycles Off/Auto/On with no torch read-back and the front lens zooms to 8×;
+  - no `.proof.dfy` beside `spec/camera/recorder.md` or `videoEdit.md` for the properties legacy proved (`video-capture.dfy`, `video-edit.dfy`), no conformance driver for any camera spec, and no rendered-UI test for Camera or Photos;
+  - shell decisions the spec does not state: batch sizes 20/500, the export status mapping, the built-in album folder rules, the 10-second chat grace, and the capture and Photos message sentences; `viewfinder.vibe` recomputes `chatCovers` inline;
+  - `spec/camera/viewfinder.md`'s secure-camera rule is a tautology; the real checks are `scripts/aosp-secure-camera-contract.ts` and `test/aosp-secure-camera*.test.mjs`.
+
 ## After merging develop through #1449 (#1422 retirement)
 
 - Android code that #1422 itself kept: `PairedAgentCredential`, `PairedSpeechContract`, `HostedTransport`, the paired branch in `AlphaVoiceCloudPlugin`, `ConnectionRoutes.retiredPairing`, `CalendarSyncBridge` and Android `AlphaCalendar.sync`. **OWNER:** retire these too, now that client Calendar linked sync is gone from the app?
@@ -219,6 +249,6 @@ vibestack-dp is an upstream question.
   - a view step's show may settle later (the Messages draft step settles once its thread is open); the voice release path waits for it before pinning, and while a navigation commit is still placing its view, changes on the claimed view count as current, so the voice conversation is kept.
 - **Telephony (#1453):**
   - the contact-save review shows each line on its own wrapping line, with its strike and weight, and says Remove, Add, Keep or Rename from in words;
-  - contact lookups read one row past the ten they list; when more contacts match, the card says "More than N contacts match …, including" and the on-phone review shows a note;
-  - a new contact's numbers are also looked up with Android's exact number matching, so a number saved under another name is shown before it is added again.
+  - when more contacts match, the card says "More than N contacts match …, including" (the on-phone review now reads one row past the ten and shows its note; the card is drawn before the lookup and says nothing);
+  - a new contact's numbers are also looked up with Android's exact number matching, so a number saved under another name is shown before it is added again. The port now looks each number up through the provider's own query (`contacts.list`), not Android's exact number matching.
 

@@ -28,6 +28,7 @@ export function ReviewRowsView({ actions, details, onChoose, onDismiss }: Review
   return (
     <div role="group" aria-label="Choose one" className="flex flex-col gap-1">
       {details.body && <p className="rounded-md bg-secondary px-3 py-2 whitespace-pre-wrap">{details.body}</p>}
+      {details.more !== undefined && <p role="note" className="text-sm text-muted-foreground">{`More than ${details.more} contacts match. Only the first ${details.more} are listed.`}</p>}
       {candidatesOf(actions.ongoing).map((c) => {
         const change = details.changes?.[c.candidateId];
         const lines = change

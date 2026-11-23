@@ -329,14 +329,15 @@ it.effect("Save to Notes runs once, and an unconfirmed save stays latched (spec/
     const dialogs = try Dialogs
     try dialogs.send({ type: "openText", image: "blob:page" })
     const early = dialogs.send({ type: "saveToNotes" }) catch () => "refused"
-    try dialogs.send({ type: "ocrSettled", ok: true, body: "Receipt" })
+    const stale = dialogs.send({ type: "ocrSettled", image: "blob:other", ok: true, body: "Elsewhere" }) catch () => "refused"
+    try dialogs.send({ type: "ocrSettled", image: "blob:page", ok: true, body: "Receipt" })
     try dialogs.send({ type: "editText", body: "Receipt total 12" })
     try dialogs.send({ type: "saveToNotes" })
     try dialogs.send({ type: "notesSettled", saved: false })
     const again = dialogs.send({ type: "saveToNotes" }) catch () => "refused"
     const text = (try dialogs.get()).text
-    try Effect.try(() => assert.deepStrictEqual({ early, again, note: text.note, calls: text.saveCalls, body: text.body },
-      { early: "refused", again: "refused", note: "NoteUnconfirmed", calls: 1, body: "Receipt total 12" }))
+    try Effect.try(() => assert.deepStrictEqual({ early, stale, again, note: text.note, calls: text.saveCalls, body: text.body },
+      { early: "refused", stale: "refused", again: "refused", note: "NoteUnconfirmed", calls: 1, body: "Receipt total 12" }))
   }
 })
 

@@ -481,7 +481,7 @@ it.live("Send a picture message (spec/telephony/drafts.md, \"Story: Send a pictu
     const pictures = slotOf((try drafts.get()).slots, thread).pictures.length
     const problem = try sends.send(thread)
     try Effect.try(() => assert.deepStrictEqual(
-      { webp, huge, added, pictures, problem, mms: fake.calls.includes("sendMms") },
+      { webp, huge, added, pictures, problem, mms: fake.calls.includes("composer.sendMms") && !fake.calls.includes("sendMms") },
       { webp: "unsupported", huge: "too-large", added: ["added", "added", "added", "added", "added", "too-many"], pictures: 5, problem: undefined, mms: true },
     ))
   }

@@ -27,22 +27,27 @@ export type AlphaDraftPlaced = "drafted" | "none-selected" | "occupied" | "unava
 /** The draft slots' effects: the reviewed send, its receipts, Alpha's draft and the pictures. */
 export service DraftSends {
   /** The owner's Send tap on the bar, the draft bubble or the strip: one reviewed SMS or MMS. */
-  send(thread: string): SendProblem | undefined!!
+  send(thread: string): (SendProblem | undefined)!!
   /** Read back a send's journal record after Android reported it changed. */
   reconcile(operationId: string): void!!
   /** Read back every bound operation, as a return to Messages does. */
   reconcileAll(): void!!
   /** Hand the draft to the system messaging app instead, where the owner sends it. */
-  handoff(thread: string): SmsHandoffReport | undefined!!
+  handoff(thread: string): (SmsHandoffReport | undefined)!!
   /** Add a number to the new message's recipients. */
   addRecipient(number: string): void!!
   /** Alpha's draft into a conversation's slot, addressed to exactly its recipients; it never sends. */
   placeAlphaDraft(thread: string, recipients: readonly string[], text: string): AlphaDraftPlaced!!
   /** Attach a picture the owner chose. */
-  addPicture(thread: string, contentType: string, bytes: Uint8Array): "added" | "too-many" | "unsupported" | "too-large"!!
+  addPicture(thread: string, contentType: string, bytes: Uint8Array): ("added" | "too-many" | "unsupported" | "too-large")!!
   /** Take a picture off the draft. */
   removePicture(thread: string, pictureName: string): void!!
+  /** The SIMs a text may go from, for the owner's choice when no default SMS SIM is set; empty when the status is unread. */
+  sims(): readonly SimChoice[]!!
 }
+
+/** One SIM the owner may send a text from. */
+export interface SimChoice { readonly id: number; readonly label: string }
 
 const ACCEPTED: readonly string[] = ["submitted", "sent", "delivered"]
 const RECEIPTS: Record<SmsSendStatus, Receipt> = {
@@ -146,8 +151,8 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
       if (checked.sms !== undefined && checked.sms.recipients.length === 1)
         try note({ type: "outgoingStarted", operationId, toThread: thread, body: checked.sms.body, at })
       const sent = checked.sms !== undefined
-        ? try (bridgeCall("sendSms", (c) => c.messages.sendSms(checked.sms, id)) catch (failure) => failure)
-        : try (bridgeCall("sendMms", (c) => c.messages.sendMms(checked.mms!, id)) catch (failure) => failure)
+        ? try (bridgeCall("sendSms", (c) => c.composer.sendSms(checked.sms, id)) catch (failure) => failure)
+        : try (bridgeCall("sendMms", (c) => c.composer.sendMms(checked.mms!, id)) catch (failure) => failure)
       if (sent instanceof TelephonyRefused) {
         try tell({ type: "sendAnswered", thread, operationId, receipt: receiptOfFailure(sent) }, "Device")
         try note({ type: "outgoingSettled", operationId })
@@ -204,6 +209,12 @@ export const draftSendsLayer = Layer.effect(DraftSends, effect {
       try (store.set(try keyOf(thread, pictureName), bytes) catch () => undefined)
       const added = try tell({ type: "pictureAdded", thread, picture: { pictureName, contentType, bytes: bytes.length } }, "Owner")
       return added === undefined ? "too-many" : "added"
+    },
+    effect sims() {
+      const current = try status()
+      return (current?.subscriptions ?? []).map((sim) => ({
+        id: sim.id, label: [sim.displayName, sim.carrierName].filter((part) => part !== "").join(" · ") || `SIM ${sim.slot + 1}`,
+      }) satisfies SimChoice)
     },
     effect removePicture(thread: string, pictureName: string) {
       if ((try tell({ type: "pictureRemoved", thread, pictureName }, "Owner")) !== undefined)

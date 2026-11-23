@@ -5,7 +5,7 @@ import { useCallback, useState } from "react";
 import { slotOf } from "../../../gen/telephony__drafts.ts";
 import { useMachine as useMessagesMachine } from "../../../gen/telephony__messages.react.ts";
 import { initial as messagesInitial, threadCallNumber } from "../../../gen/telephony__messages.ts";
-import { DraftSends, type SendProblem } from "../../telephony/drafts.vibe";
+import { DraftSends, type SendProblem, type SimChoice } from "../../telephony/drafts.vibe";
 import { MessagesView } from "../../telephony/messages.vibe";
 import { PictureAttach } from "../../telephony/share.vibe";
 import type { ScreenProps } from "../app-screen.ts";
@@ -36,6 +36,7 @@ export function MessagesScreen({ route }: MessagesScreenProps) {
   const [notice, setNotice] = useState("");
   const [answer, setAnswer] = useState("");
   const [query, setQuery] = useState("");
+  const [sims, setSims] = useState<readonly SimChoice[]>([]);
   const visit = useCallback((node: HTMLElement | null) => {
     if (!node) return;
     const stop = start(MessagesView.use((v) => v.visit(route)));
@@ -58,6 +59,13 @@ export function MessagesScreen({ route }: MessagesScreenProps) {
   const sendDraft = async () => {
     const problem: SendProblem | undefined = await perform(DraftSends.use((d) => d.send(thread)));
     setNotice(problem ? sendProblemText(problem) : "");
+    // With no default SMS SIM the owner picks the SIM; the next Send goes from it.
+    setSims(problem === "sim-required" ? await perform(DraftSends.use((d) => d.sims())) : []);
+  };
+  const chooseSim = (sim: number) => {
+    stage.sendDrafts({ type: "simChosen", thread, sim }, "Owner");
+    setSims([]);
+    setNotice("");
   };
   const typeToPerson = (text: string) => stage.sendDrafts({ type: "ownerTyped", thread, recipients, text }, "Owner");
   const openThread = (threadId: string) => {
@@ -200,6 +208,12 @@ export function MessagesScreen({ route }: MessagesScreenProps) {
           ))}
         </ul>
       )}
+      {sims.length > 0 && (
+        <div role="group" aria-label="Send from" className="flex flex-wrap items-center gap-2 px-4 py-1">
+          <span className="text-sm text-muted-foreground">Send from</span>
+          {sims.map((sim) => <Button key={sim.id} variant="secondary" size="sm" onClick={() => chooseSim(sim.id)}>{sim.label}</Button>)}
+        </div>
+      )}
       <RestoredProposal card={stage.card} onDismiss={stage.decline} />
       <CommsBar
         comms={stage.comms}
@@ -215,6 +229,7 @@ export function MessagesScreen({ route }: MessagesScreenProps) {
           }
         }}
         onAlpha={stage.openAlpha}
+        onEnd={stage.endCall}
         onBack={stage.closeChat}
         onAttach={person ? () => void attach() : undefined}
       />
