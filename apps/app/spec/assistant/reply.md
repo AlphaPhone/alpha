@@ -99,25 +99,27 @@ grammar, `spec/agent/conversation/planning.md` of Eliza) comes with its
 first tool calls, before any work runs, and the stream then restarts with
 the reply. The cue is the reply stream's `acknowledgment` frame
 (`spec/agent/conversation/replyStream.md`), which acknowledges the turn as
-it arrives. An agent that sends no such frame streams the cue as text, so
-at its first tool the text shown so far, if any, is the acknowledgment.
-Whichever comes first acknowledges; the other never acknowledges again. The
-cue is shown and spoken once, never stored or shown as the answer, and the
+it arrives, and it is the only acknowledgment: the agent restarts any text
+it streamed before its tools, and the frame and the reader that hears it
+ship in one release (elizaOS/eliza#40293), so a tool frame never
+acknowledges and a turn whose agent sends no frame has none. A second
+frame, or one after a tool has run, never acknowledges again. The cue is
+shown and spoken once, never stored or shown as the answer, and the
 settled reply shows and speaks every unit of the final text, never the cue.
 
 ```quint
 pure def canAcknowledge(r: ReplyView, units: int): bool = (r.status == Planning or r.status == Streaming) and r.acks == 0 and units >= 1 and units <= ackLimit
 pure def acknowledge(r: ReplyView, units: int): ReplyView = { ...r, status: Working, acks: 1, ackUnits: units, shown: 0, provisional: false }
-pure def fallbackUnits(r: ReplyView): int = if (r.shown > ackLimit) ackLimit else r.shown
 pure def canToolStarts(r: ReplyView): bool = live(r)
-pure def toolStarts(r: ReplyView): ReplyView =
-  if (canAcknowledge(r, fallbackUnits(r))) acknowledge(r, fallbackUnits(r)) else { ...r, status: Working }
-pure def lawAToolAfterAnAcknowledgmentNeverAcknowledgesAgain(r: ReplyView): bool =
-  r.acks == 1 implies (toolStarts(r).acks == 1 and toolStarts(r).ackUnits == r.ackUnits)
-pure def lawAnAcknowledgmentAfterTheToolFallbackIsRefused(r: ReplyView, units: int): bool =
-  toolStarts(r).acks == 1 implies not(canAcknowledge(toolStarts(r), units))
-pure def lawATextBeforeTheFirstToolIsTheFallbackAcknowledgment(units: int): bool =
-  (units >= 1 and units <= ackLimit) implies toolStarts(token(initial, units, false)).ackUnits == units
+pure def toolStarts(r: ReplyView): ReplyView = { ...r, status: Working }
+pure def lawAToolNeverAcknowledges(r: ReplyView): bool =
+  toolStarts(r).acks == r.acks and toolStarts(r).ackUnits == r.ackUnits
+pure def lawASecondAcknowledgmentIsRefused(r: ReplyView, units: int): bool =
+  r.acks == 1 implies not(canAcknowledge(r, units))
+pure def lawAnAcknowledgmentAfterAToolIsRefused(r: ReplyView, units: int): bool =
+  not(canAcknowledge(toolStarts(r), units))
+pure def lawTextBeforeTheFirstToolIsNeverAnAcknowledgment(units: int): bool =
+  toolStarts(token(initial, units, false)).acks == 0
 pure def canDone(r: ReplyView, units: int): bool = live(r) and units >= 0
 pure def done(r: ReplyView, units: int): ReplyView = { ...r, status: Settled, shown: units, final: units, spoken: units, provisional: false }
 pure def lawTheAnswerNeverCarriesTheCue(units: int): bool =
@@ -134,7 +136,8 @@ pure val unitsValues = Set(0, 1, 120, 121, 400)
 
 In a voice turn the cue starts being prepared as soon as it arrives, with no
 hold, so it plays as quickly as it can. A reply ready while the cue is still
-being synthesised or fetched drops it at once, so it is never heard. A cue
+being synthesised or fetched drops it at once, so it is never heard, and a
+cue that arrives only after the reply is ready is never said. A cue
 already audible finishes before reply speech starts, but never holds a ready
 reply longer than 2.5 s. Stop, barge-in and leaving the turn cancel it at
 once (#1450, #1456).

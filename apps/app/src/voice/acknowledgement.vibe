@@ -1,5 +1,6 @@
 // spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"; spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s"
-import { spokenCue, type AcknowledgingHooks } from "../assistant/cue.vibe"
+import type { ReplyStreamHooks } from "@elizaos/agent/client"
+import { spokenCue } from "../assistant/cue.vibe"
 import { Machine, machine, type Event } from "../../gen/voice__acknowledgement.effect.vibe"
 import { Speech } from "./speech.vibe"
 
@@ -22,7 +23,7 @@ export interface Acknowledgement {
  * its `reply_ready` frame. Text streamed before then may be the cue's own text, which the agent restarts before its
  * tools run, so it never readies the reply; `firstText` hears the first text shown, once.
  */
-export function voiceReplyHooks(ack: Acknowledgement, microphoneClear: () => boolean, firstText: () => void): AcknowledgingHooks {
+export function voiceReplyHooks(ack: Acknowledgement, microphoneClear: () => boolean, firstText: () => void): ReplyStreamHooks {
   let first = true
   return {
     onAcknowledgment: (text: string) => { runFork(ack.acknowledged(text, microphoneClear)) },
