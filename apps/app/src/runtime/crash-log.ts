@@ -19,9 +19,9 @@ import {describeNativeCrashEntry} from '../ui/settings/crash-entry.ts';
  * Alpha adds only its renderer-owned finite Cloud inference records and the browser-profile copy
  * used by web builds.
  */
-export {CRASH_LOG_MAX_ENTRIES,CRASH_LOG_RETENTION_MS,errorClassOf};
+export {errorClassOf};
 export type {RendererFailureKind};
-export type CrashSource=NativeCrashEntry['source']|'inference';
+type CrashSource=NativeCrashEntry['source']|'inference';
 export type CrashEntry=Omit<NativeCrashEntry,'source'>&{source:CrashSource;inference?:CloudInferenceFailure};
 export type CrashLog={entries:CrashEntry[];exitHistory:boolean};
 
@@ -29,9 +29,9 @@ export const browserCrashLogKey='alpha.crash-log.v1';
 
 
 /** Exact v1 public status projection. Unknown strings are never retained. */
-export const INFERENCE_SCHEMA_KEYWORDS=['pattern','minLength','maxLength','format','minItems','maxItems','oneOf','allOf','not','if','then','else','dependentRequired','dependentSchemas','patternProperties','unevaluatedProperties','$anchor'] as const;
-export const INFERENCE_PARAMETERS=['tools','response_format','tool_choice','messages','model','max_tokens','temperature','reasoning_effort'] as const;
-export const INFERENCE_TOOL_NAMES=['HANDLE_RESPONSE','READ_CONTEXT','RESTORE_CONTEXT','PROPOSE_DEVICE_ACTION','DISCOVER_ACTIONS','FINISH','REPLY','IGNORE','STOP','FACTS_AND_RELATIONSHIPS_VALIDATE','other'] as const;
+const INFERENCE_SCHEMA_KEYWORDS=['pattern','minLength','maxLength','format','minItems','maxItems','oneOf','allOf','not','if','then','else','dependentRequired','dependentSchemas','patternProperties','unevaluatedProperties','$anchor'] as const;
+const INFERENCE_PARAMETERS=['tools','response_format','tool_choice','messages','model','max_tokens','temperature','reasoning_effort'] as const;
+const INFERENCE_TOOL_NAMES=['HANDLE_RESPONSE','READ_CONTEXT','RESTORE_CONTEXT','PROPOSE_DEVICE_ACTION','DISCOVER_ACTIONS','FINISH','REPLY','IGNORE','STOP','FACTS_AND_RELATIONSHIPS_VALIDATE','other'] as const;
 const inferenceStages=['response-handler','action-planner','text','other'] as const;
 const inferenceReasons=['unsupported-schema-keyword','invalid-parameter','context-window','unavailable-model','rate-limit','credits','transport','unknown','schema-limit'] as const;
 export type CloudInferenceFailure={version:1;at:number;stage:typeof inferenceStages[number];status?:number;reason:typeof inferenceReasons[number];parameter?:typeof INFERENCE_PARAMETERS[number];keyword?:typeof INFERENCE_SCHEMA_KEYWORDS[number];strictTools:Array<typeof INFERENCE_TOOL_NAMES[number]>;schemaKeywords:Array<typeof INFERENCE_SCHEMA_KEYWORDS[number]>;schemaScanTruncated:boolean;schemaDepth?:number;schemaProperties?:number;schemaEnumValues?:number;schemaTextChars?:number};
@@ -107,8 +107,13 @@ export async function clearCrashLog():Promise<void>{
  if(!writeBrowser([],inferenceSeenAt()))throw Error('Problem log clear not confirmed');
 }
 
+const SCHEMA_LIMIT_LABELS={schemaDepth:'Depth',schemaProperties:'Properties',schemaEnumValues:'Enum values',schemaTextChars:'Schema text chars'} as const;
 /** One line per entry for Settings: time, where, and class or reason. */
 export function describeCrashEntry(entry:CrashEntry):{title:string;detail:string}{
- if(entry.source==='inference'){const v=entry.inference;return {title:'Cloud AI request failed',detail:v?[v.stage,v.reason,v.status?`HTTP ${v.status}`:'',v.parameter,v.keyword,...(['schemaDepth','schemaProperties','schemaEnumValues','schemaTextChars'] as const).flatMap(key=>v[key]===undefined?[]:[`${({schemaDepth:'Depth',schemaProperties:'Properties',schemaEnumValues:'Enum values',schemaTextChars:'Schema text chars'})[key]} ${v[key]}`]),v.schemaScanTruncated?'Schema scan incomplete':''].filter(Boolean).join(' · '):'Details unavailable'};}
+ if(entry.source==='inference'){
+  const v=entry.inference;if(!v)return {title:'Cloud AI request failed',detail:'Details unavailable'};
+  const limits=(Object.keys(SCHEMA_LIMIT_LABELS) as Array<keyof typeof SCHEMA_LIMIT_LABELS>).flatMap(key=>v[key]===undefined?[]:[`${SCHEMA_LIMIT_LABELS[key]} ${v[key]}`]);
+  return {title:'Cloud AI request failed',detail:[v.stage,v.reason,v.status?`HTTP ${v.status}`:'',v.parameter,v.keyword,...limits,v.schemaScanTruncated?'Schema scan incomplete':''].filter(Boolean).join(' · ')};
+ }
  return describeNativeCrashEntry({...entry,source:entry.source});
 }

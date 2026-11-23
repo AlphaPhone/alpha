@@ -2,11 +2,8 @@ package ai.alphacompute.alphaphone;
 
 import android.app.Instrumentation;
 import android.content.*;
-import android.database.Cursor;
-import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.*;
-import android.provider.MediaStore;
 import android.view.*;
 import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -48,7 +45,7 @@ public class PhotosMultiShareInstrumentedTest {
     instrumentation.addMonitor(monitor);monitorAdded=true;click("Share selected");for(int i=0;i<150&&chooser.get()==null;i++)SystemClock.sleep(100);assertNotNull("Real chooser opened",chooser.get());Intent send=chooser.get().getParcelableExtra(Intent.EXTRA_INTENT);assertEquals(Intent.ACTION_SEND_MULTIPLE,send.getAction());assertEquals("image/jpeg",send.getType());ArrayList<Uri> sent=send.getParcelableArrayListExtra(Intent.EXTRA_STREAM);assertEquals(new HashSet<>(fixtures.subList(0,2)),new HashSet<>(sent));assertEquals(2,sent.size());assertEquals(2,send.getClipData().getItemCount());assertTrue((send.getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0);assertEquals(0,send.getFlags()&Intent.FLAG_GRANT_WRITE_URI_PERMISSION);for(int i=0;i<2;i++)assertEquals(sent.get(i),send.getClipData().getItemAt(i).getUri());
     chooserForeground();WebViewTestDriver.pressBack();mainForeground();until("document.querySelector('button[aria-label=\"Share selected\"]')");assertArrayEquals(first,bytes(resolver,fixtures.get(0)));assertArrayEquals(second,bytes(resolver,fixtures.get(1)));assertArrayEquals(neighbor,bytes(resolver,fixtures.get(2)));
     chooser.set(null);click("Share selected");boolean picked=false;for(int i=0;i<100&&!picked;i++){for(AccessibilityNodeInfo node:nodes())if("Alpha share verification".equals(String.valueOf(node.getText()))&&press(node)){picked=true;break;}if(!picked)SystemClock.sleep(150);}assertTrue("Actual cross-UID recipient chosen",picked);
-    String h1=hash(first),h2=hash(second),h3=hash(neighbor);boolean received=false;for(int i=0;i<100&&!received;i++){for(AccessibilityNodeInfo node:nodes()){String text=String.valueOf(node.getText());if(text.contains("Read access verified")&&text.contains("Item count: 2")&&text.contains(h1)&&text.contains(h2)){assertFalse(text.contains(h3));assertFalse(text.contains("Receiver UID: "+android.os.Process.myUid()));received=true;break;}}if(!received)SystemClock.sleep(100);}assertTrue("Recipient reads exactly the selected originals, no neighbor",received);WebViewTestDriver.pressBack();mainForeground();
+    String h1=AlphaUtil.sha256Hex(first),h2=AlphaUtil.sha256Hex(second),h3=AlphaUtil.sha256Hex(neighbor);boolean received=false;for(int i=0;i<100&&!received;i++){for(AccessibilityNodeInfo node:nodes()){String text=String.valueOf(node.getText());if(text.contains("Read access verified")&&text.contains("Item count: 2")&&text.contains(h1)&&text.contains(h2)){assertFalse(text.contains(h3));assertFalse(text.contains("Receiver UID: "+android.os.Process.myUid()));received=true;break;}}if(!received)SystemClock.sleep(100);}assertTrue("Recipient reads exactly the selected originals, no neighbor",received);WebViewTestDriver.pressBack();mainForeground();
     until("document.querySelector('button[aria-label=\"Share selected\"]')");chooser.set(null);ContentValues changed=new ContentValues();changed.put("is_favorite",1);assertEquals(1,resolver.update(fixtures.get(1),changed,null,null));click("Share selected");until("document.body.innerText.includes('A selected item changed or is unavailable')");assertNull("Stale selection never opens a partial share",chooser.get());click("Cancel selection");assertArrayEquals(first,bytes(resolver,fixtures.get(0)));assertArrayEquals(second,bytes(resolver,fixtures.get(1)));assertArrayEquals(neighbor,bytes(resolver,fixtures.get(2)));
    }
   }catch(Exception|AssertionError failure){primary=failure;throw failure;}

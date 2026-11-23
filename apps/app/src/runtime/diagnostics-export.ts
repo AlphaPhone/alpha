@@ -11,7 +11,7 @@ import type {VoiceTimingLive,VoiceTimingEndpoint} from './voice-timing.ts';
  * apps' package names cannot reach the export even if a caller passes them in. Voice latency
  * records keep their timing fields only (marks, and for a live turn the ASR mode, partial count
  * and three spans); no transcript, partial or reply text is ever copied. Native voice timing
- * (issue #395, AlphaVoiceCloud.nativeVoiceTiming) keeps its monotonic marks, random turn ids, fixed
+ * (AlphaVoiceCloud.nativeVoiceTiming) keeps its monotonic marks, random turn ids, fixed
  * labels and build/model hashes only; it never carries audio, transcripts or replies.
  */
 export const DIAGNOSTICS_FORMAT='alpha-diagnostics/v1';
@@ -20,13 +20,13 @@ const VOICE_STARTUP_OUTCOMES=['pending','prepared','listening','timeout','cancel
 const VOICE_STARTUP_ROUTES=['direct-cartesia','cloud-cartesia'] as const;
 export type VoiceStartupStage=typeof VOICE_STARTUP_STAGES[number];
 export type VoiceStartupTiming={route?:typeof VOICE_STARTUP_ROUTES[number];stage:VoiceStartupStage;outcome:typeof VOICE_STARTUP_OUTCOMES[number];elapsedMs:number;phaseMs?:Partial<Record<VoiceStartupStage,number>>};
-export const RUNTIME_ASSETS=['agent/alpha-source.json','agent/agent-bundle.js','agent/workflow-worker/manifest.json','agent/workflow-worker/files.sha256'] as const;
+const RUNTIME_ASSETS=['agent/alpha-source.json','agent/agent-bundle.js','agent/workflow-worker/manifest.json','agent/workflow-worker/files.sha256'] as const;
 const PERMISSIONS=['Microphone','Location','Camera','Calendar','Notifications'] as const;
 const ROLES=['home','assistant','dialer','sms'] as const;
-// 'starting'/'recovering' are the resident before it has a session (P-43); 'offline' only parses older exports.
-const CONNECTIONS=['starting','recovering','offline','resident','remote','local','cloud'] as const;
+// 'starting'/'recovering' are the resident before it has a session.
+const CONNECTIONS=['starting','recovering','offline','resident','remote','local'] as const;
 // Voice latency records (voice-timing.ts): the same allowlists as its validator and the aggregator.
-export const VOICE_TIMING_FORMAT='alpha-voice-timing-v1';
+const VOICE_TIMING_FORMAT='alpha-voice-timing-v1';
 const VOICE_MARKS=['recording-end','transcript-ready','send','first-token','final-reply','first-audio'] as const;
 const VOICE_ROUTES=['on-device','browser','local-agent','eliza-cloud','paired-agent','development-agent','manual'] as const;
 const VOICE_LIMIT=200;
@@ -59,10 +59,10 @@ const pin=/^[0-9a-f]{40}$/;
 const sha256=/^[0-9a-f]{64}$/;
 const turnId=/^[0-9a-f-]{36}$/;
 // Native voice latency (alpha-native-voice-timing-v3, VoiceLatencyTrials): the aggregator's allowlists.
-export const NATIVE_VOICE_TIMING_FORMAT='alpha-native-voice-timing-v3';
+const NATIVE_VOICE_TIMING_FORMAT='alpha-native-voice-timing-v3';
 const NATIVE_MARKS=['last-user-audio','endpoint','asr-final','request','first-token','tts-start','tts-ready','first-pcm','audible-playback'] as const;
 const NATIVE_LIMIT=512;
-export const NATIVE_CLOUD_STREAM_TIMING_FORMAT='alpha-cloud-stream-timing-v1';
+const NATIVE_CLOUD_STREAM_TIMING_FORMAT='alpha-cloud-stream-timing-v1';
 const NATIVE_CLOUD_STREAM_LIMIT=100;
 const NATIVE_CLOUD_STREAM_STAGES=[
  'start','consent-start','consent-headers','consent-body','consent',
@@ -75,7 +75,7 @@ const nativeId=/^[0-9a-f]{0,40}-[0-9a-f]{1,16}-[0-9]{1,10}$/;
 const fixedLabel=/^[A-Za-z0-9+-]{1,80}$/;
 const deviceLabel=/^[A-Za-z0-9 ._()+-]{1,80}$/;
 
-export type DiagnosticsInput={
+type DiagnosticsInput={
  generatedAt?:unknown;platform?:unknown;
  app?:{version?:unknown;versionCode?:unknown;variant?:unknown;buildType?:unknown;testMocks?:unknown};
  os?:{androidRelease?:unknown;securityPatch?:unknown;sdkInt?:unknown};
@@ -103,7 +103,7 @@ type VoiceTimingRow={version:1;id:string;recordedAt:number;route:string;cold:boo
  /** Conversation path, derived from the copied enums: 'live' (the echo-cancelled voice assistant: it
   * records endpointing, or streaming ASR) or 'batch' (the recorded-clip loop, live mode 'batch'). */
  path?:'live'|'batch'};
-export type DiagnosticsReport={
+type DiagnosticsReport={
  nativeInferenceTiming?:NativeInferenceTiming;
  nativeInferenceVoiceTurnId?:string;
  realtimeVoiceTiming?:ReturnType<typeof sanitizeRealtimeTiming>;
@@ -127,17 +127,16 @@ export type DiagnosticsReport={
 
 const text=(value:unknown,pattern:RegExp)=>typeof value==='string'&&pattern.test(value)?value:undefined;
 const one=<T extends string>(value:unknown,allowed:readonly T[]):T|undefined=>allowed.includes(value as T)?value as T:undefined;
+const record=(value:unknown)=>value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;
 
 function nativeCloudStreamTiming(input:unknown):DiagnosticsReport['nativeCloudStreamTiming']{
- if(!input||typeof input!=='object'||Array.isArray(input))return undefined;
- const document=input as Record<string,unknown>;
- if(document.format!==NATIVE_CLOUD_STREAM_TIMING_FORMAT||!Array.isArray(document.records))return undefined;
+ const document=record(input);
+ if(!document||document.format!==NATIVE_CLOUD_STREAM_TIMING_FORMAT||!Array.isArray(document.records))return undefined;
  const bounded=(value:unknown,min:number,max:number):value is number=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=min&&value<=max;
  const sessions=new Map<number,number>(),records:NativeCloudStreamTimingRow[]=[];
  for(const value of document.records.slice(-NATIVE_CLOUD_STREAM_LIMIT)){
-  if(!value||typeof value!=='object'||Array.isArray(value))continue;
-  const row=value as Record<string,unknown>,stage=one(row.stage,NATIVE_CLOUD_STREAM_STAGES);
-  if(!stage||!bounded(row.session,1,Number.MAX_SAFE_INTEGER)||!bounded(row.elapsedMs,0,3_600_000))continue;
+  const row=record(value),stage=one(row?.stage,NATIVE_CLOUD_STREAM_STAGES);
+  if(!row||!stage||!bounded(row.session,1,Number.MAX_SAFE_INTEGER)||!bounded(row.elapsedMs,0,3_600_000))continue;
   // Keep grouping within this export without copying any raw identifier.
   const session=sessions.get(row.session)??sessions.size+1;
   sessions.set(row.session,session);
@@ -161,10 +160,10 @@ function voiceTimingRows(input:unknown):VoiceTimingRow[]{
  if(document.format!==VOICE_TIMING_FORMAT||!Array.isArray(document.records))return [];
  const rows:VoiceTimingRow[]=[];
  for(const value of document.records.slice(-VOICE_LIMIT)){
-  if(!value||typeof value!=='object'||Array.isArray(value))continue;
-  const row=value as Record<string,unknown>,route=one(row.route,VOICE_ROUTES),id=text(row.id,turnId);
+  const row=record(value);if(!row)continue;
+  const route=one(row.route,VOICE_ROUTES),id=text(row.id,turnId);
   if(row.version!==1||!id||!route||typeof row.cold!=='boolean'||!Number.isSafeInteger(row.recordedAt)||(row.recordedAt as number)<0)continue;
-  const raw=row.marks&&typeof row.marks==='object'&&!Array.isArray(row.marks)?row.marks as Record<string,unknown>:null;
+  const raw=record(row.marks);
   if(!raw)continue;
   const marks:Record<string,number>={};
   for(const mark of VOICE_MARKS){const at=raw[mark];if(typeof at==='number'&&Number.isFinite(at)&&at>=0&&at<3_600_000)marks[mark]=at;}
@@ -172,15 +171,15 @@ function voiceTimingRows(input:unknown):VoiceTimingRow[]{
   const entry=one(row.entry,['conversation','notes'] as const);if(entry)out.entry=entry;
   const policy=one(row.policy,['auto-send','review'] as const);if(policy)out.policy=policy;
   // Live ASR numbers only (voice-timing.ts recordLiveVoiceTiming): mode, a count and three spans.
-  const live=row.live&&typeof row.live==='object'&&!Array.isArray(row.live)?row.live as Record<string,unknown>:null;
+  const live=record(row.live);
   const liveMode=live?one(live.mode,['stream','batch','unknown'] as const):undefined;
   if(live&&liveMode&&Number.isSafeInteger(live.partials)&&(live.partials as number)>=0&&(live.partials as number)<=100000){
    const numbers:VoiceTimingLive={mode:liveMode,partials:live.partials as number};
    for(const key of ['firstPartialMs','finalFromSpeechEndMs','asrFinalFromSpeechEndMs'] as const){const at=live[key];if(typeof at==='number'&&Number.isFinite(at)&&at>=0&&at<3_600_000)numbers[key]=Math.round(at);}
    out.live=numbers;
   }
-  // Voice-assistant endpointing (#423; chain path local or clef) and heard-content outcomes: enums and numbers only.
-  const endpoint=row.endpoint&&typeof row.endpoint==='object'&&!Array.isArray(row.endpoint)?row.endpoint as Record<string,unknown>:null;
+  // Voice-assistant endpointing (chain path local or clef) and heard-content outcomes: enums and numbers only.
+  const endpoint=record(row.endpoint);
   const by=endpoint?one(endpoint.by,['semantic','gap'] as const):undefined,semantic=endpoint?one(endpoint.semantic,['complete','incomplete','unavailable','timeout','error','not-asked'] as const):undefined;
   if(endpoint&&by&&semantic){
    const value:VoiceTimingEndpoint={by,semantic};
@@ -200,12 +199,12 @@ function voiceTimingRows(input:unknown):VoiceTimingRow[]{
 }
 
 function nativeIdentity(value:unknown):NativeVoiceTimingIdentity|undefined{
- const id=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:null;if(!id)return undefined;
+ const id=record(value);if(!id)return undefined;
  const sourceCommit=text(id.sourceCommit,pin),engineSha256=id.engineSha256==='unavailable'?'unavailable':text(id.engineSha256,sha256),modelSha256=text(id.modelSha256,sha256),device=text(id.device,deviceLabel);
  const environment=one(id.environment,['device','emulator'] as const),abi=one(id.abi,['arm64-v8a','x86_64'] as const),build=text(id.build,/^(standalone|launcher)-(debug|release)$/);
  if(!sourceCommit||typeof id.sourceDirty!=='boolean'||!engineSha256||!modelSha256||!device||!environment||!abi||!build)return undefined;
  const out:NativeVoiceTimingIdentity={sourceCommit,sourceDirty:id.sourceDirty,engineSha256,modelSha256,device,environment,abi,build};
- const models=id.models&&typeof id.models==='object'&&!Array.isArray(id.models)?id.models as Record<string,unknown>:null;
+ const models=record(id.models);
  if(models){const kept:Record<string,string>={};for(const key of ['asr','vad','tts']){const hash=text(models[key],sha256);if(hash)kept[key]=hash;}out.models=kept;}
  if(Number.isSafeInteger(id.sdk)&&(id.sdk as number)>0&&(id.sdk as number)<1000)out.sdk=id.sdk as number;
  return out;
@@ -216,12 +215,12 @@ function nativeVoiceRows(input:unknown):{dropped:number;records:NativeVoiceTimin
  if(document.format!==NATIVE_VOICE_TIMING_FORMAT||!Array.isArray(document.records))return {dropped:0,records:[]};
  const records:NativeVoiceTimingRow[]=[];
  for(const value of document.records.slice(-NATIVE_LIMIT)){
-  if(!value||typeof value!=='object'||Array.isArray(value))continue;
-  const row=value as Record<string,unknown>,identity=nativeIdentity(row.identity);
+  const row=record(value);if(!row)continue;
+  const identity=nativeIdentity(row.identity);
   const id=text(row.id,nativeId),turn=text(row.turnId,uuid),pipeline=one(row.pipeline,['live-voice','harness-no-inference'] as const);
   const captureClock=one(row.captureClock,['audiorecord-timestamp','read-return','synthetic-feed'] as const),outcome=one(row.outcome,['passed','failed','abandoned'] as const);
   if(!identity||!id||!turn||!pipeline||row.clock!=='native-monotonic-ms'||!captureClock||!outcome||typeof row.cold!=='boolean')continue;
-  const raw=row.marks&&typeof row.marks==='object'&&!Array.isArray(row.marks)?row.marks as Record<string,unknown>:null;if(!raw)continue;
+  const raw=record(row.marks);if(!raw)continue;
   const marks:Record<string,number>={};
   for(const mark of NATIVE_MARKS){const at=raw[mark];if(typeof at==='number'&&Number.isFinite(at)&&at>=0&&at<1e12)marks[mark]=at;}
   const out:NativeVoiceTimingRow={id,turnId:turn,pipeline,clock:'native-monotonic-ms',captureClock,cold:row.cold,outcome,identity,marks};

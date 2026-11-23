@@ -3,17 +3,9 @@ package ai.alphacompute.alphaphone;
 import android.os.SystemClock;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStreamReader;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.json.JSONObject;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -22,11 +14,6 @@ import static org.junit.Assert.*;
 /** Native bridge integration against an explicitly synthetic HTTP peer; no real credentials. */
 @RunWith(AndroidJUnit4.class)
 public class ConnectionInstrumentedTest {
- private String slotHash(String slot) throws Exception {
-  StringBuilder text = new StringBuilder();
-  for (byte b : java.security.MessageDigest.getInstance("SHA-256").digest(slot.getBytes(StandardCharsets.UTF_8))) text.append(String.format(java.util.Locale.ROOT, "%02x", b & 255));
-  return text.toString();
- }
  private void until(String expression) throws Exception {
   long deadline = SystemClock.elapsedRealtime() + 15000;
   while (SystemClock.elapsedRealtime() < deadline) {
@@ -67,7 +54,7 @@ public class ConnectionInstrumentedTest {
   org.junit.Assume.assumeTrue("Owned native credential isolation campaign", "1".equals(InstrumentationRegistry.getArguments().getString("nativeSlotIsolation")));
   assertTrue("Fresh secondary user required",android.os.Process.myUid()/100000>0);
   AlphaCredentialStore nativeStore=new AlphaCredentialStore(InstrumentationRegistry.getInstrumentation().getTargetContext());
-  // One bare and one versioned slot per native-only namespace; test/native-secure-slots.test.mjs pins the list.
+  // One bare and one versioned slot per native-only namespace.
   java.util.List<String> slots=new java.util.ArrayList<>();
   for(String namespace:RendererCredentialSlots.nativeNamespaces()){slots.add(namespace);slots.add(namespace+":v1:fixture");}
   java.util.List<String> ownedSlots=new java.util.ArrayList<>();
@@ -83,7 +70,7 @@ public class ConnectionInstrumentedTest {
     }
     nativeStore.writeCredentialSlot(slot,forged);assertEquals("Trusted native internal access remains",forged,nativeStore.readCredentialSlot(slot));
    }
-   String allowed="workflow-draft:v1:"+slotHash(java.util.UUID.randomUUID().toString());
+   String allowed="workflow-draft:v1:"+AlphaUtil.sha256Hex(java.util.UUID.randomUUID().toString());
    assertNull(nativeStore.readCredentialSlot(allowed));ownedSlots.add(allowed);
    assertTrue(invoke("secureWrite",new JSONObject().put("slot",allowed).put("value",retained)).getBoolean("ok"));
    assertEquals(retained,invoke("secureRead",new JSONObject().put("slot",allowed)).getJSONObject("value").getString("value"));
@@ -95,7 +82,7 @@ public class ConnectionInstrumentedTest {
   String slot="inbox-drafts:v1:instrumentation-"+java.util.UUID.randomUUID();
   String first=new JSONObject().put("body","PRIVATE_SYNTHETIC_DRAFT_"+java.util.UUID.randomUUID()).put("revision","first").toString();
   String second=new JSONObject().put("body","SECOND_SYNTHETIC_BODY").put("revision","second").toString();
-  File stored=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getNoBackupFilesDir(),"connection-credentials/"+slotHash(slot));
+  File stored=new File(InstrumentationRegistry.getInstrumentation().getTargetContext().getNoBackupFilesDir(),"connection-credentials/"+AlphaUtil.sha256Hex(slot));
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
    AppNavigation.liveMode();ready();
    JSONObject initial=new JSONObject().put("slot",slot).put("expectedValue",JSONObject.NULL).put("value",first);

@@ -9,7 +9,6 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.SystemClock;
 import android.provider.MediaStore;
-import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -20,8 +19,6 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import static org.junit.Assert.*;
@@ -30,21 +27,21 @@ import static org.junit.Assert.*;
  * No bridge mocks, injected selection results, or arbitrary URI authorization. */
 @RunWith(AndroidJUnit4.class)
 public class SelectedDocumentInstrumentedTest {
- private String eval(BoundedActivityScenario<MainActivity> scenario, String script) throws Exception {
+ private String eval(String script) throws Exception {
   return WebViewTestDriver.evaluate(script);
  }
- private void waitFor(BoundedActivityScenario<MainActivity> scenario, String condition) throws Exception {
+ private void waitFor(String condition) throws Exception {
   long deadline = SystemClock.elapsedRealtime() + 15000;
   while (SystemClock.elapsedRealtime() < deadline) {
-   if ("true".equals(eval(scenario,"Boolean(" + condition + ")"))) return;
+   if ("true".equals(eval("Boolean(" + condition + ")"))) return;
    SystemClock.sleep(100);
   }
   fail("Document flow condition timed out: " + condition);
  }
- private void click(BoundedActivityScenario<MainActivity> scenario, String label) throws Exception {
+ private void click(String label) throws Exception {
   String target = "[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')===" + JSONObject.quote(label) + ")";
-  waitFor(scenario, target + " && !(" + target + ").disabled");
-  eval(scenario,"(" + target + ").click()");
+  waitFor(target + " && !(" + target + ").disabled");
+  eval("(" + target + ").click()");
  }
  Uri fixture(ContentResolver resolver, String name, String text) throws Exception {return fixtureBytes(resolver,name,"text/plain",text.getBytes(StandardCharsets.UTF_8));}
  Uri fixtureBytes(ContentResolver resolver,String name,String mime,byte[] bytes)throws Exception {
@@ -139,36 +136,36 @@ public class SelectedDocumentInstrumentedTest {
   try {
    a=fixture(resolver,nameA,textA);b=fixture(resolver,nameB,textB);
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)) {
-    waitFor(scenario,"document.documentElement.dataset.activeView");
-    eval(scenario,AppNavigation.request("Files"));
-    waitFor(scenario,AppNavigation.selected("Files"));
-    click(scenario,"Downloads");selectDocument(nameA);
-    waitFor(scenario,"document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA));
-    waitFor(scenario,"document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")");
-    ShareFlowAssertions.opensExactItemAndCancels(()->click(scenario,"Share file"),textA.getBytes(StandardCharsets.UTF_8),"text/plain");
-    waitFor(scenario,"document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA));
-    ShareFlowAssertions.receivesInSeparateApp(()->click(scenario,"Share file"),textA.getBytes(StandardCharsets.UTF_8));
-    waitFor(scenario,"document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA));
-    click(scenario,"Ask Alpha");
-    waitFor(scenario,"document.querySelector('dialog[aria-label=\"Ask about selected content\"][open]') && document.querySelector('textarea[aria-label=\"Content excerpt\"]').value==="+JSONObject.quote(textA));
-    assertEquals("Review does not send the selected document", "true", eval(scenario,"document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'true'"));
-    eval(scenario,"[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Use in conversation').click()");
-    waitFor(scenario,"document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'false' && ("+AppNavigation.composer()+")?.value.includes("+JSONObject.quote(textA)+")");
-    assertEquals("File remains the active agent view", "\"files\"", eval(scenario,"document.documentElement.dataset.activeView"));
-    click(scenario,"Minimize chat");
-    waitFor(scenario,"document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'true'");
-    assertEquals("Selected file survives the conversation", "true", eval(scenario,"document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA)));
-    click(scenario,"Back");
-    waitFor(scenario,"!document.querySelector('button[aria-label=Rename]')");
-    assertEquals("Closing A removes its private text","true",eval(scenario,"!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")"));
-    click(scenario,"Downloads");selectDocument(nameB);
-    waitFor(scenario,"document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameB));
-    assertEquals("A is never shown under B's identity","true",eval(scenario,"!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")"));
-    waitFor(scenario,"document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textB)+")");
-    assertEquals("B's actual private text replaces A","true",eval(scenario,"!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")"));
-    click(scenario,"Back");
-    waitFor(scenario,"!document.querySelector('button[aria-label=Rename]')");
-    assertEquals("Closing B removes its private text","true",eval(scenario,"!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textB)+")"));
+    waitFor("document.documentElement.dataset.activeView");
+    eval(AppNavigation.request("Files"));
+    waitFor(AppNavigation.selected("Files"));
+    click("Downloads");selectDocument(nameA);
+    waitFor("document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA));
+    waitFor("document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")");
+    ShareFlowAssertions.opensExactItemAndCancels(()->click("Share file"),textA.getBytes(StandardCharsets.UTF_8),"text/plain");
+    waitFor("document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA));
+    ShareFlowAssertions.receivesInSeparateApp(()->click("Share file"),textA.getBytes(StandardCharsets.UTF_8));
+    waitFor("document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA));
+    click("Ask Alpha");
+    waitFor("document.querySelector('dialog[aria-label=\"Ask about selected content\"][open]') && document.querySelector('textarea[aria-label=\"Content excerpt\"]').value==="+JSONObject.quote(textA));
+    assertEquals("Review does not send the selected document", "true", eval("document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'true'"));
+    eval("[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='Use in conversation').click()");
+    waitFor("document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'false' && ("+AppNavigation.composer()+")?.value.includes("+JSONObject.quote(textA)+")");
+    assertEquals("File remains the active agent view", "\"files\"", eval("document.documentElement.dataset.activeView"));
+    click("Minimize chat");
+    waitFor("document.querySelector('[data-alpha-layer=conversation]').getAttribute('aria-hidden') === 'true'");
+    assertEquals("Selected file survives the conversation", "true", eval("document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameA)));
+    click("Back");
+    waitFor("!document.querySelector('button[aria-label=Rename]')");
+    assertEquals("Closing A removes its private text","true",eval("!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")"));
+    click("Downloads");selectDocument(nameB);
+    waitFor("document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(nameB));
+    assertEquals("A is never shown under B's identity","true",eval("!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")"));
+    waitFor("document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textB)+")");
+    assertEquals("B's actual private text replaces A","true",eval("!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textA)+")"));
+    click("Back");
+    waitFor("!document.querySelector('button[aria-label=Rename]')");
+    assertEquals("Closing B removes its private text","true",eval("!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(textB)+")"));
    }
   } finally {
    // Only URIs created by this run are removed; no directory or unrelated data cleanup.
@@ -176,43 +173,43 @@ public class SelectedDocumentInstrumentedTest {
    if(b!=null)resolver.delete(b,null,null);
   }
  }
- private void openFiles(BoundedActivityScenario<MainActivity> scenario)throws Exception{waitFor(scenario,"document.documentElement.dataset.activeView");eval(scenario,AppNavigation.request("Files"));waitFor(scenario,AppNavigation.selected("Files"));}
- private void preview(BoundedActivityScenario<MainActivity> scenario,String name,String text)throws Exception{waitFor(scenario,"document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(name));waitFor(scenario,"document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(text)+")");}
+ private void openFiles()throws Exception{waitFor("document.documentElement.dataset.activeView");eval(AppNavigation.request("Files"));waitFor(AppNavigation.selected("Files"));}
+ private void preview(String name,String text)throws Exception{waitFor("document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(name));waitFor("document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(text)+")");}
  @Test public void selectedGrantSurvivesActivityRecreationAndExplicitForgetReleasesIt()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();ContentResolver resolver=context.getContentResolver();String name="alpha-grant-"+UUID.randomUUID()+".txt",text="Native persistent document lifecycle";Uri file=fixture(resolver,name,text);String selectedId=null;
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   openFiles(scenario);click(scenario,"Downloads");selectDocument(name);preview(scenario,name,text);
+   openFiles();click("Downloads");selectDocument(name);preview(name,text);
    com.getcapacitor.JSObject selected=SelectedDocumentAccess.restore(context);selectedId=selected.getString("selectionId");assertNotNull(selectedId);Uri grant=Uri.parse(selected.getString("uri"));
    assertTrue("Real picker offered persisted read access",resolver.getPersistedUriPermissions().stream().anyMatch(g->g.getUri().equals(grant)&&g.isReadPermission()));
-   scenario.recreate();openFiles(scenario);preview(scenario,name,text);
-   click(scenario,"Move file");waitFor(scenario,"document.body.innerText.includes('source and destination folders')");preview(scenario,name,text);
-   click(scenario,"Forget selected file");waitFor(scenario,"!document.querySelector('button[aria-label=Rename]')");
+   scenario.recreate();openFiles();preview(name,text);
+   click("Move file");waitFor("document.body.innerText.includes('source and destination folders')");preview(name,text);
+   click("Forget selected file");waitFor("!document.querySelector('button[aria-label=Rename]')");
    long deadline=SystemClock.elapsedRealtime()+5000;while(SystemClock.elapsedRealtime()<deadline&&resolver.getPersistedUriPermissions().stream().anyMatch(g->g.getUri().equals(grant)))SystemClock.sleep(50);
    assertFalse("Explicit forget releases the exact offered grant",resolver.getPersistedUriPermissions().stream().anyMatch(g->g.getUri().equals(grant)));
-   scenario.recreate();openFiles(scenario);assertEquals("Forgotten text is not restored","true",eval(scenario,"!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(text)+")"));
+   scenario.recreate();openFiles();assertEquals("Forgotten text is not restored","true",eval("!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(text)+")"));
   }finally{if(selectedId!=null)SelectedDocumentAccess.forget(selectedId);resolver.delete(file,null,null);}
  }
 
  @Test public void renameUsesRealProviderAndUserConfirmation()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();ContentResolver resolver=context.getContentResolver();String name="alpha-rename-"+UUID.randomUUID()+".txt",renamed="renamed-"+name,text="Rename retains exact file bytes";Uri file=fixture(resolver,name,text);String selectionId=null;
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   openFiles(scenario);click(scenario,"Downloads");selectDocument(name);preview(scenario,name,text);com.getcapacitor.JSObject selected=SelectedDocumentAccess.restore(context);selectionId=selected.getString("selectionId");boolean supported=selected.optBoolean("canRename");
-   click(scenario,"Rename");eval(scenario,"(()=>{const input=document.querySelector('input[aria-label=\"File name\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,"+JSONObject.quote(renamed)+");input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));})()");
-   waitFor(scenario,"document.querySelector('input[aria-label=\"File name\"]')?.value==="+JSONObject.quote(renamed));
-   assertEquals("Editing alone has no provider effect",name,SelectedDocumentAccess.restore(context).getString("name"));click(scenario,"Save name");
+   openFiles();click("Downloads");selectDocument(name);preview(name,text);com.getcapacitor.JSObject selected=SelectedDocumentAccess.restore(context);selectionId=selected.getString("selectionId");boolean supported=selected.optBoolean("canRename");
+   click("Rename");eval("(()=>{const input=document.querySelector('input[aria-label=\"File name\"]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,"+JSONObject.quote(renamed)+");input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   waitFor("document.querySelector('input[aria-label=\"File name\"]')?.value==="+JSONObject.quote(renamed));
+   assertEquals("Editing alone has no provider effect",name,SelectedDocumentAccess.restore(context).getString("name"));click("Save name");
    if(supported){try{
-    waitFor(scenario,"document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(renamed)+" || Boolean(document.querySelector('button[aria-label=\"Select renamed file\"]'))");
-    if("true".equals(eval(scenario,"Boolean(document.querySelector('button[aria-label=\"Select renamed file\"]'))"))){
+    waitFor("document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(renamed)+" || Boolean(document.querySelector('button[aria-label=\"Select renamed file\"]'))");
+    if("true".equals(eval("Boolean(document.querySelector('button[aria-label=\"Select renamed file\"]'))"))){
      assertEquals("A revoked rename grant cannot authorize more reads","unavailable",SelectedDocumentAccess.read(context,selectionId).getString("status"));
-     click(scenario,"Select renamed file");selectDocument(renamed);
+     click("Select renamed file");selectDocument(renamed);
     }
-    preview(scenario,renamed,text);selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");assertEquals("Provider reports actual saved name",renamed,SelectedDocumentAccess.restore(context).getString("name"));}catch(AssertionError failure){
+    preview(renamed,text);selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");assertEquals("Provider reports actual saved name",renamed,SelectedDocumentAccess.restore(context).getString("name"));}catch(AssertionError failure){
     JSONObject diagnostic=new JSONObject();com.getcapacitor.JSObject actual=SelectedDocumentAccess.restore(context);String actualName=actual.optString("name","");diagnostic.put("selectedStatus",actual.optString("status","")).put("sameSelection",selectionId.equals(actual.optString("selectionId",""))).put("selectedName",actualName.equals(name)?"original":actualName.equals(renamed)?"requested":"other-or-absent").put("canRename",actual.optBoolean("canRename"));
     try(android.database.Cursor row=resolver.query(MediaStore.Files.getContentUri("external"),new String[]{"_display_name"},"_id=? AND owner_package_name=?",new String[]{Long.toString(android.content.ContentUris.parseId(file)),context.getPackageName()},null)){if(row!=null&&row.moveToFirst()){String currentName=row.getString(0);diagnostic.put("fixtureProviderName",currentName.equals(name)?"original":currentName.equals(renamed)?"requested":"other");}else diagnostic.put("fixtureProviderName","absent");}
-    diagnostic.put("renderer",eval(scenario,"JSON.stringify({renaming:!!document.querySelector('input[aria-label=\"File name\"]'),inputMatches:document.querySelector('input[aria-label=\"File name\"]')?.value==="+JSONObject.quote(renamed)+",titleOriginal:document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(name)+",titleRequested:document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(renamed)+",permissionError:document.body.innerText.includes('did not grant rename access'),expired:document.body.innerText.includes('Access expired'),providerFailure:document.body.innerText.includes('could not confirm the rename'),emptyName:document.body.innerText.includes('Name required')})"));
+    diagnostic.put("renderer",eval("JSON.stringify({renaming:!!document.querySelector('input[aria-label=\"File name\"]'),inputMatches:document.querySelector('input[aria-label=\"File name\"]')?.value==="+JSONObject.quote(renamed)+",titleOriginal:document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(name)+",titleRequested:document.querySelector('button[aria-label=Rename]')?.textContent==="+JSONObject.quote(renamed)+",permissionError:document.body.innerText.includes('did not grant rename access'),expired:document.body.innerText.includes('Access expired'),providerFailure:document.body.innerText.includes('could not confirm the rename'),emptyName:document.body.innerText.includes('Name required')})"));
     throw new AssertionError("Exact fixture rename did not complete: "+diagnostic,failure);
    }}
-   else {waitFor(scenario,"document.body.innerText.includes('did not grant rename access')");assertEquals("Unsupported rename preserves original name",name,SelectedDocumentAccess.restore(context).getString("name"));}
+   else {waitFor("document.body.innerText.includes('did not grant rename access')");assertEquals("Unsupported rename preserves original name",name,SelectedDocumentAccess.restore(context).getString("name"));}
   }finally{if(selectionId!=null)SelectedDocumentAccess.forget(selectionId);resolver.delete(file,null,null);}
  }
  @Test public void realSelectedPdfRendersActualPagesAndRejectsMalformedBytes()throws Exception{
@@ -228,11 +225,11 @@ public class SelectedDocumentInstrumentedTest {
    bad=fixtureBytes(resolver,badName,"application/pdf","This is not a PDF".getBytes(StandardCharsets.UTF_8));
    name=providerName(resolver,file,"application/pdf");badName=providerName(resolver,bad,"application/pdf");
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-    openFiles(scenario);click(scenario,"Downloads");selectDocument(name);waitFor(scenario,"document.querySelector('img[alt=\"Page 1 of 2\"]')?.naturalWidth > 0");selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");
-    click(scenario,"Next PDF page");waitFor(scenario,"document.querySelector('img[alt=\"Page 2 of 2\"]')?.naturalWidth > 0");click(scenario,"Previous PDF page");waitFor(scenario,"document.querySelector('img[alt=\"Page 1 of 2\"]')?.naturalWidth > 0");
-    click(scenario,"Forget selected file");waitFor(scenario,"!document.querySelector('button[aria-label=Rename]')");
+    openFiles();click("Downloads");selectDocument(name);waitFor("document.querySelector('img[alt=\"Page 1 of 2\"]')?.naturalWidth > 0");selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");
+    click("Next PDF page");waitFor("document.querySelector('img[alt=\"Page 2 of 2\"]')?.naturalWidth > 0");click("Previous PDF page");waitFor("document.querySelector('img[alt=\"Page 1 of 2\"]')?.naturalWidth > 0");
+    click("Forget selected file");waitFor("!document.querySelector('button[aria-label=Rename]')");
     long deadline=SystemClock.elapsedRealtime()+5000;java.io.File cached=new java.io.File(context.getCacheDir(),"document-"+selectionId+".png");while(cached.exists()&&SystemClock.elapsedRealtime()<deadline)SystemClock.sleep(50);assertFalse("Forgetting clears rendered document pixels",cached.exists());
-    click(scenario,"Downloads");selectDocument(badName);waitFor(scenario,"document.querySelector('[data-screen]').textContent.includes('malformed, encrypted, or larger than 20 MiB')");assertEquals("Malformed PDF never uses simulated pages","true",eval(scenario,"!document.querySelector('img[alt^=\"Page \"]')"));selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");click(scenario,"Forget selected file");
+    click("Downloads");selectDocument(badName);waitFor("document.querySelector('[data-screen]').textContent.includes('malformed, encrypted, or larger than 20 MiB')");assertEquals("Malformed PDF never uses simulated pages","true",eval("!document.querySelector('img[alt^=\"Page \"]')"));selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");click("Forget selected file");
    }
   }finally{if(selectionId!=null)SelectedDocumentAccess.forget(selectionId);if(file!=null)resolver.delete(file,null,null);if(bad!=null)resolver.delete(bad,null,null);}
  }
@@ -247,30 +244,29 @@ public class SelectedDocumentInstrumentedTest {
    assertFalse("Prior restart fixture must be cleaned first",fixture.contains("fixtureUri"));String name="alpha-restart-"+UUID.randomUUID()+".txt",text="Process restart fixture "+UUID.randomUUID();Uri uri=fixture(resolver,name,text);
    assertTrue(fixture.edit().putString("fixtureUri",uri.toString()).putString("name",name).putString("text",text).putInt("pid",android.os.Process.myPid()).commit());
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-    openFiles(scenario);click(scenario,"Downloads");selectDocument(name);preview(scenario,name,text);com.getcapacitor.JSObject selected=SelectedDocumentAccess.restore(context);assertEquals("selected",selected.getString("status"));assertTrue(fixture.edit().putString("selectionId",selected.getString("selectionId")).putString("grantUri",selected.getString("uri")).commit());
+    openFiles();click("Downloads");selectDocument(name);preview(name,text);com.getcapacitor.JSObject selected=SelectedDocumentAccess.restore(context);assertEquals("selected",selected.getString("status"));assertTrue(fixture.edit().putString("selectionId",selected.getString("selectionId")).putString("grantUri",selected.getString("uri")).commit());
    }return;
   }
   assertEquals("verify",phase);assertTrue("Fixture setup completed",fixture.contains("selectionId"));assertNotEquals("Actual process restart, not Activity recreation",fixture.getInt("pid",-1),android.os.Process.myPid());
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   openFiles(scenario);preview(scenario,fixture.getString("name",""),fixture.getString("text",""));
+   openFiles();preview(fixture.getString("name",""),fixture.getString("text",""));
    Uri grant=Uri.parse(fixture.getString("grantUri",""));for(android.content.UriPermission permission:resolver.getPersistedUriPermissions())if(permission.getUri().equals(grant))resolver.releasePersistableUriPermission(grant,(permission.isReadPermission()?Intent.FLAG_GRANT_READ_URI_PERMISSION:0)|(permission.isWritePermission()?Intent.FLAG_GRANT_WRITE_URI_PERMISSION:0));
-   scenario.recreate();openFiles(scenario);waitFor(scenario,"!document.querySelector('button[aria-label=Rename]')");
+   scenario.recreate();openFiles();waitFor("!document.querySelector('button[aria-label=Rename]')");
    assertNotEquals("Revoked grant is removed from native restoration",fixture.getString("selectionId",""),SelectedDocumentAccess.restore(context).optString("selectionId",""));
-   assertEquals("Revoked document content is absent","true",eval(scenario,"!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(fixture.getString("text",""))+")"));
+   assertEquals("Revoked document content is absent","true",eval("!document.querySelector('[data-screen]').textContent.includes("+JSONObject.quote(fixture.getString("text",""))+")"));
   }
  }
 
  // J03 note source references: AlphaMailAttachments.retainSourceReference keeps a reference to a
  // document the owner selected in the real DocumentsUI (only while Android's persisted read grant
  // exists), and openSourceReference hands a viewer exactly the bytes that were reviewed, or nothing.
- private static String sha256(byte[] bytes)throws Exception{StringBuilder hex=new StringBuilder();for(byte b:java.security.MessageDigest.getInstance("SHA-256").digest(bytes))hex.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return hex.toString();}
- private JSONObject plugin(BoundedActivityScenario<MainActivity> scenario,String method,JSONObject args)throws Exception{
-  eval(scenario,"window.__sourceReference=null;Capacitor.Plugins.AlphaMailAttachments."+method+"("+args+").then(v=>window.__sourceReference={ok:true,value:v??{}},e=>window.__sourceReference={ok:false,message:String(e?.message??'')})");
-  waitFor(scenario,"window.__sourceReference!==null");
-  return new JSONObject(eval(scenario,"window.__sourceReference"));
+ private JSONObject plugin(String method,JSONObject args)throws Exception{
+  eval("window.__sourceReference=null;Capacitor.Plugins.AlphaMailAttachments."+method+"("+args+").then(v=>window.__sourceReference={ok:true,value:v??{}},e=>window.__sourceReference={ok:false,message:String(e?.message??'')})");
+  waitFor("window.__sourceReference!==null");
+  return new JSONObject(eval("window.__sourceReference"));
  }
  /** Opens the reference with an intercepted viewer and returns the bytes the viewer was given, or null when refused. */
- private byte[] openReference(BoundedActivityScenario<MainActivity> scenario,String reference,String sha,int size,String mime)throws Exception{
+ private byte[] openReference(String reference,String sha,int size,String mime)throws Exception{
   android.app.Instrumentation instrumentation=InstrumentationRegistry.getInstrumentation();AtomicReference<Intent> viewer=new AtomicReference<>();
   android.app.Instrumentation.ActivityMonitor monitor=new android.app.Instrumentation.ActivityMonitor(){
    @Override public android.app.Instrumentation.ActivityResult onStartActivity(Intent intent){
@@ -280,7 +276,7 @@ public class SelectedDocumentInstrumentedTest {
   };
   instrumentation.addMonitor(monitor);
   try{
-   JSONObject result=plugin(scenario,"openSourceReference",new JSONObject().put("reference",reference).put("sha256",sha).put("size",size).put("mimeType",mime));
+   JSONObject result=plugin("openSourceReference",new JSONObject().put("reference",reference).put("sha256",sha).put("size",size).put("mimeType",mime));
    if(!result.getBoolean("ok")){assertNull("A refused reference starts no viewer",viewer.get());return null;}
    assertNotNull("The viewer was started",viewer.get());
    Uri copy=viewer.get().getData();assertNotNull(copy);assertTrue("Read-only grant",(viewer.get().getFlags()&Intent.FLAG_GRANT_READ_URI_PERMISSION)!=0);assertEquals(mime,viewer.get().getType());
@@ -289,35 +285,35 @@ public class SelectedDocumentInstrumentedTest {
  }
  @Test public void sourceReferenceOpensExactBytesAndFailsClosedOnChangeDeletionOrReleasedGrant()throws Exception{
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();ContentResolver resolver=context.getContentResolver();
-  String suffix=UUID.randomUUID().toString(),name="alpha-source-"+suffix+".txt",text="Reviewed note source "+suffix;byte[] bytes=text.getBytes(StandardCharsets.UTF_8);String sha=sha256(bytes);
+  String suffix=UUID.randomUUID().toString(),name="alpha-source-"+suffix+".txt",text="Reviewed note source "+suffix;byte[] bytes=text.getBytes(StandardCharsets.UTF_8);String sha=AlphaUtil.sha256Hex(bytes);
   Uri file=fixture(resolver,name,text);String selectionId=null;boolean deleted=false;
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   openFiles(scenario);click(scenario,"Downloads");selectDocument(name);preview(scenario,name,text);
+   openFiles();click("Downloads");selectDocument(name);preview(name,text);
    com.getcapacitor.JSObject selected=SelectedDocumentAccess.restore(context);selectionId=selected.getString("selectionId");Uri grant=Uri.parse(selected.getString("uri"));
-   JSONObject retained=plugin(scenario,"retainSourceReference",new JSONObject().put("selectionId",selectionId).put("sha256",sha));
+   JSONObject retained=plugin("retainSourceReference",new JSONObject().put("selectionId",selectionId).put("sha256",sha));
    assertTrue("Retained: "+retained.optString("message"),retained.getBoolean("ok"));
    String reference=retained.getJSONObject("value").optString("reference",null);
    assertNotNull("A persisted DocumentsUI grant yields a reference",reference);assertTrue(reference.matches("a1:[a-f0-9]{64}"));
    // A stale review (another hash) never retains a reference.
-   assertFalse("Retaining with other bytes' hash is refused",plugin(scenario,"retainSourceReference",new JSONObject().put("selectionId",selectionId).put("sha256","0".repeat(64))).getBoolean("ok"));
-   byte[] opened=openReference(scenario,reference,sha,bytes.length,"text/plain");
+   assertFalse("Retaining with other bytes' hash is refused",plugin("retainSourceReference",new JSONObject().put("selectionId",selectionId).put("sha256","0".repeat(64))).getBoolean("ok"));
+   byte[] opened=openReference(reference,sha,bytes.length,"text/plain");
    assertNotNull("The linked source opens",opened);assertArrayEquals("The viewer receives exactly the reviewed bytes",bytes,opened);
-   assertNull("A different expected hash is refused",openReference(scenario,reference,"f".repeat(64),bytes.length,"text/plain"));
+   assertNull("A different expected hash is refused",openReference(reference,"f".repeat(64),bytes.length,"text/plain"));
    // Modified bytes fail closed.
    try(OutputStream out=resolver.openOutputStream(file,"wt")){assertNotNull(out);out.write((text+" changed").getBytes(StandardCharsets.UTF_8));}
-   assertNull("Changed bytes fail closed",openReference(scenario,reference,sha,bytes.length,"text/plain"));
+   assertNull("Changed bytes fail closed",openReference(reference,sha,bytes.length,"text/plain"));
    try(OutputStream out=resolver.openOutputStream(file,"wt")){assertNotNull(out);out.write(bytes);}
-   assertArrayEquals("Restored bytes open again",bytes,openReference(scenario,reference,sha,bytes.length,"text/plain"));
+   assertArrayEquals("Restored bytes open again",bytes,openReference(reference,sha,bytes.length,"text/plain"));
    // A released grant fails closed.
    resolver.releasePersistableUriPermission(grant,Intent.FLAG_GRANT_READ_URI_PERMISSION);
-   assertNull("A released grant fails closed",openReference(scenario,reference,sha,bytes.length,"text/plain"));
+   assertNull("A released grant fails closed",openReference(reference,sha,bytes.length,"text/plain"));
    // A deleted file fails closed (a fresh selection and reference first, so only deletion differs).
-   click(scenario,"Back");waitFor(scenario,"!document.querySelector('button[aria-label=Rename]')");
-   click(scenario,"Downloads");selectDocument(name);preview(scenario,name,text);selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");
-   String second=plugin(scenario,"retainSourceReference",new JSONObject().put("selectionId",selectionId).put("sha256",sha)).getJSONObject("value").optString("reference",null);
-   assertNotNull(second);assertArrayEquals(bytes,openReference(scenario,second,sha,bytes.length,"text/plain"));
+   click("Back");waitFor("!document.querySelector('button[aria-label=Rename]')");
+   click("Downloads");selectDocument(name);preview(name,text);selectionId=SelectedDocumentAccess.restore(context).getString("selectionId");
+   String second=plugin("retainSourceReference",new JSONObject().put("selectionId",selectionId).put("sha256",sha)).getJSONObject("value").optString("reference",null);
+   assertNotNull(second);assertArrayEquals(bytes,openReference(second,sha,bytes.length,"text/plain"));
    assertEquals(1,resolver.delete(file,null,null));deleted=true;
-   assertNull("A deleted source fails closed",openReference(scenario,second,sha,bytes.length,"text/plain"));
+   assertNull("A deleted source fails closed",openReference(second,sha,bytes.length,"text/plain"));
   }finally{if(selectionId!=null)SelectedDocumentAccess.forget(selectionId);if(!deleted)resolver.delete(file,null,null);}
  }
  /** bun scripts/test-native-restart.ts source-reference: prepare retains a reference in one
@@ -333,9 +329,9 @@ public class SelectedDocumentInstrumentedTest {
    assertFalse("Prior restart fixture must be cleaned first",fixture.contains("fixtureUri"));String name="alpha-source-restart-"+UUID.randomUUID()+".txt",text="Source restart fixture "+UUID.randomUUID();Uri uri=fixture(resolver,name,text);
    assertTrue(fixture.edit().putString("fixtureUri",uri.toString()).putString("name",name).putString("text",text).putInt("pid",android.os.Process.myPid()).commit());
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-    openFiles(scenario);click(scenario,"Downloads");selectDocument(name);preview(scenario,name,text);String id=SelectedDocumentAccess.restore(context).getString("selectionId");
+    openFiles();click("Downloads");selectDocument(name);preview(name,text);String id=SelectedDocumentAccess.restore(context).getString("selectionId");
     assertTrue(fixture.edit().putString("selectionId",id).commit());
-    JSONObject retained=plugin(scenario,"retainSourceReference",new JSONObject().put("selectionId",id).put("sha256",sha256(text.getBytes(StandardCharsets.UTF_8))));
+    JSONObject retained=plugin("retainSourceReference",new JSONObject().put("selectionId",id).put("sha256",AlphaUtil.sha256Hex(text.getBytes(StandardCharsets.UTF_8))));
     String reference=retained.getJSONObject("value").optString("reference",null);assertNotNull("Reference retained",reference);
     assertTrue(fixture.edit().putString("reference",reference).commit());
    }return;
@@ -343,8 +339,8 @@ public class SelectedDocumentInstrumentedTest {
   assertTrue("Fixture setup completed",fixture.contains("reference"));assertNotEquals("Actual process restart, not Activity recreation",fixture.getInt("pid",-1),android.os.Process.myPid());
   byte[] bytes=fixture.getString("text","").getBytes(StandardCharsets.UTF_8);
   try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   waitFor(scenario,"window.Capacitor?.Plugins?.AlphaMailAttachments&&document.documentElement.dataset.activeView");
-   assertArrayEquals("A new process reopens exactly the reviewed bytes",bytes,openReference(scenario,fixture.getString("reference",""),sha256(bytes),bytes.length,"text/plain"));
+   waitFor("window.Capacitor?.Plugins?.AlphaMailAttachments&&document.documentElement.dataset.activeView");
+   assertArrayEquals("A new process reopens exactly the reviewed bytes",bytes,openReference(fixture.getString("reference",""),AlphaUtil.sha256Hex(bytes),bytes.length,"text/plain"));
   }
  }
 }

@@ -1,0 +1,21 @@
+# specs/quint/refinement/check-traces.mjs
+- Lines: 269 | Kind: formal harness library (implementation-observation -> Quint `run` test checker, receipts) | Verdict: KEEP core, SIMPLIFY (drop evidence ceremony and the legacy family)
+- Covers: turns concrete implementation traces into generated Quint `run` tests (`init.then(action).expect(observation)`), runs them with the pinned Quint CLI and writes a receipt; also `qset`/`qmap`/`literal` serialisation and receipt input hashing. Duplicates: Quint CLI/seed in `assistant-model-traces.mjs`; manifest reading in `scripts/quint-lib.ts`/`check-changed-models.ts`; sha256 helper (C3). Importers: 273 files under `specs/`, 28 under `test/` (incl. 3 Playwright specs), `scripts/check-quint-refinement.ts`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 78-89, 92-99, 175 | B5 / P1 | `registeredModelInputs()` reads all four manifests and hashes every registered model (~380 `.qnt` files plus imports) into **every** receipt, twice per `checkTraces` call (before/after) and again in `captureInputs`. Any model edit anywhere invalidates every receipt; costs I/O on 273 harnesses. | Hash only the checked model and its imports (`modelDependencies(path)`) plus the harness's declared sources. | Low; `check-quint-refinement.ts` staleness report then becomes per-model (which is what it claims). |
+| 2 | 80, 139, 148 | P6 / A1 | Three loops over `['application','services','native','legacy']`; `modelFile` falls back to the legacy manifest (used by `legacy/calendar-navigation.mjs` model `Calendar`). | Remove `'legacy'` with the legacy family; import one `modelFamilies` constant and `readModelFamily` from `scripts/quint-lib.ts`. | Low after legacy deletion. |
+| 3 | 137-154 | C3 | `modelFile` and `invariantFor` each re-read and re-parse the manifests; `registeredModelInputs` does it a third time; `Array.isArray(document) ? document : document.models` repeated (also in `application/index.mjs`, `quint-lib.ts`). | One `findModel(module)` from `quint-lib.ts` returning `{path, invariant}`. | Low |
+| 4 | 18-58, 60-77, 252-255 | B5 | Temporary-source snapshot store (`isTemporarySource`, `isGeneratedFile`, `retainGeneratedSource`, hard-linked content-addressed copies under `test-results/quint-refinement/input-snapshots`, `verifyRefinementReceiptInputs`) exists so a later report can re-verify hashes of temp files that no longer exist. Nothing gates a release on it; it is receipt provenance. | Delete with the receipt-staleness report, or keep only in the nightly full run. Generated sources then need no special casing. | Medium: `check-quint-refinement.ts:177` and 20+ tests call `verifyRefinementReceiptInputs`; they go with it (those test assertions are B5 too). |
+| 5 | 167-171, 177-183 | B3 | Validates its own callers' arguments (identifier regexes, scope enum, batch size range, generated-source membership). Callers are in-repo harnesses. | Keep the scope enum (it is part of the receipt meaning); drop the rest. | Low |
+| 6 | 12-13 | C3 | Local sha256 `digest`/`hash` helper; ~40 copies in scripts. | Import the shared `scripts/lib` hash helper. | Low |
+| 7 | 225-241 | C3 | Quint CLI path and `--seed=20261107` duplicated with `assistant-model-traces.mjs:16-17`. | One shared constant/helper. | Low |
+| 8 | 186-194, 259-266 | B5 | Receipt carries `traceInputs`, full Quint output, before/after hashes, `driverInputsBound`, `inputsUnchanged`. Only `passed` and the failing output matter to a test. | Keep a small receipt (model, scope, assumptions, traces, checkpoints, actions, observedFields, passed, failure output) because `check-quint-refinement.ts` reports coverage from it. | Low |
+| 9 | 100-135, 197-242 | — | The core (literal serialisation, generated `run` tests, batch execution, mismatch vs tool-failure classification) is the actual refinement check. | Keep unchanged. | — |
+
+## Proposed end state
+~120 lines: `qset`, `qmap`, `literal`, `checkTraces` (generate run tests, run Quint, classify, write a small receipt), and `captureInputs` reduced to hashing declared sources.
+Manifest lookup and the family list come from `scripts/quint-lib.ts`; no `legacy` family.
+No snapshot store, no global model hashing, no `verifyRefinementReceiptInputs` unless the owner keeps the nightly staleness report.

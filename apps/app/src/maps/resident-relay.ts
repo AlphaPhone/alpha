@@ -1,5 +1,6 @@
 import { withMapsNavigationRelay } from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/navigation-relay.ts';
 import {anyAbortSignal} from '../runtime/abort-signal';
+import { asRecord } from '../lib/parse';
 import {alphaClient} from '../runtime/alpha-client';
 import { residentMapsNavigationPort } from './agent-navigation.ts';
 import { deviceNavigationFailure, type AgentPlaceRef, type MapsDeviceNavigation } from './device-navigation.ts';
@@ -13,7 +14,7 @@ export function withResidentMapsNavigation<T>(request: Request | undefined, conv
   anySignal:anyAbortSignal,
   current:()=>residentMapsNavigationPort.current,
   async execute(navigation,value,signal){
-   const operation=value&&typeof value==='object'&&!Array.isArray(value)?value as Record<string,unknown>:undefined;
+   const operation=asRecord(value);
    // Select and start bring Maps forward over the view the owner asked from. That move, and the
    // route sheet settling in Maps afterwards, is this turn's own: it does not stop the reply the
    // way the owner leaving the view would. The admission ends with the turn's request.

@@ -1,0 +1,24 @@
+# scripts/generate-licenses.ts
+- Lines: 1038 | Kind: release tooling (generates and checks the shipped third-party notices; refreshes the Android runtime classpath snapshot) | Verdict: KEEP, SPLIT by source and SIMPLIFY
+- Covers: `apps/app/public/licenses/third-party-notices.json` and `THIRD_PARTY_NOTICES.txt` from package-lock, pdf.js, tessdata, tesseract cores, fonts, elizaOS, the Android classpath, the voice host record, the staged runtime and OSM data. Duplicates: `scripts/generate-sbom.ts` walks the same inputs again (npm, fonts, OCR cores, Gradle, voice host, resident runtime) and also calls `collectNotices` up to twice. Callers/importers: package.json `licenses:packaged-runtime` and `android:build:local`; `.github/workflows/resident-android.yml:331`; `scripts/generate-sbom.ts`, `scripts/verify-apks.ts`, `scripts/gradle-verification.ts` (listed in its `MIRROR_FREE` text scan); tests `licenses`, `runtime-licenses`, `sbom`, `font-license`, `android-dependency-fingerprint`, `voice-host-record`, `llama-cpp-only`, `gradle-verification`, `android-build-path`, `test/fixtures/voice-host-product.mjs`. `--check` is run by `test/licenses.test.mjs` inside `npm test`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | file | D1 | 1,038 lines mixing licence detection, a WOFF2/SFNT name-table parser, ten collectors, Gradle tree parsing and fingerprinting, rendering and CLI. | Split into `scripts/licences/` : `detect.ts` (text and README detection, `packageNotice`), `font-names.ts` (OpenType parser), `collectors/*.ts` (npm, pdfjs, ocr, fonts, android, voice, runtime, map data), `render.ts`, `cli.ts`. | M |
+| 2 | 141-144 | C3 | `read`, `readJson`, `exists`, `sha256` defined and exported here; `generate-sbom.ts` imports them from this file. Twins in about 40 scripts (helpers.md). | Move to `scripts/lib/` and import from there in both files. | L |
+| 3 | 42, 685-686 | D4 | Re-exports licence-policy constants (`COMMERCIAL_FONT`, `HELD_OUTSIDE_REPOSITORY`, ...), aliases `VOICE_HOST = VOICE_HOST_MANIFEST` and re-exports `voiceHostProblems`, so `generate-sbom.ts` and tests import them through this file. | Importers take them from `licence-policy.ts` and `voice-host.ts` directly. | L |
+| 4 | various | A7 | Exports with no importer outside this file: `voiceHostLibraryLines`, `restrictedTerms`, `manifestLicense`, `declarationOnlyPackage`, `refreshAndroidClasspath`, `renderJson`, `renderText`, `MAVEN_FAMILIES`, `RUNTIME_ALLOWLIST`, `OUTPUT_DIR`, `JSON_OUTPUT`, `TEXT_OUTPUT`. `KNOWN_LICENSES`, `listFonts`, `mavenFamily`, `AGENT_ASSETS`, `TESSERACT_CORE_SOURCES` are used only by `generate-sbom.ts`. | Unexport the first group; the second moves with the shared collectors. | L |
+| 5 | 153-168, 417-427 | C3 | Two more recursive directory walkers (`declarationOnlyPackage.walk`, `listFonts.walk`); `generate-sbom.ts:walkFiles` and `regular-files.ts` are twins. | One walker in `scripts/lib/fs.ts`. | L |
+| 6 | 704, 725, 733 | B3 | `pinnedVoiceModels` re-checks `Array.isArray(record.models)` after `voiceHostProblems` validated the record; `licence()` maps the literal `'UNVERIFIED'` to the constant `UNVERIFIED` because the record spells it differently. | Trust the validated record; make the record and constant agree (or map once in `voice-host.ts`). | L |
+| 7 | 280-283 | A8 | JSDoc `@param` block repeats the TypeScript parameter type. | Delete. | L |
+| 8 | 868-876 | D4 | `payloadEntries(packaged)` returns a one-element array built from a ternary. | Inline as one entry. | L |
+| 9 | 1005-1011 | D9 | `--check` also builds the staged-runtime notices when a runtime is staged, only to print a summary and warnings. | Keep `--check` to "outputs current?"; the staged summary belongs to `--packaged-runtime`. | L |
+| 10 | 909-930 vs generate-sbom | C5 | Parallel inventory: the SBOM re-walks npm, fonts, OCR, Gradle and voice host instead of consuming one collected inventory; `withLicenceFlags` then calls `collectNotices` again to get flags. | One collector pass producing `{component, notice}` rows; notices and SBOM are two renderers of it (research/scripts.md "one collector, two renderers"). | M |
+| 11 | 1038 | — | Self-run guard `process.argv[1] === fileURLToPath(import.meta.url)` repeated in several scripts. | Keep, or use the shared `isMain(import.meta)` helper. | L |
+
+## Proposed end state
+A `scripts/licences/` folder (about 850 lines total) whose collectors return one inventory used by both the notices renderer and the SBOM
+renderer; a 60-line CLI with `--check`, `--refresh-android`, `--packaged-runtime`. No re-exports, no test-only exports except the
+detection functions `test/licenses.test.mjs` drives, shared fs/hash/json helpers from `scripts/lib/`. Generated outputs must stay
+byte-identical (`--check` in `npm test` proves it).

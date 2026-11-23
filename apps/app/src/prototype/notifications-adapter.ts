@@ -1,6 +1,7 @@
 import {alphaClient} from '../runtime/alpha-client';
 import {connectionController} from '../runtime/connection-ui';
 import { registerPlugin } from '../platform-plugins';
+import type { AlphaNotificationsPlugin, NotificationRow } from '../native/alpha-notifications';
 import { Capacitor } from '@capacitor/core';
 import { reviewContentQuestion } from '../browser/content-question';
 import { sensitiveReadingText } from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
@@ -15,8 +16,7 @@ export function ownNotificationSelection(notice:{id:string;revision:string;sourc
  const revision=notice.source==='own'&&opaque.test(notice.id)?ownNoticeRevisions(notice):undefined;
  return revision===undefined?undefined:{kind:'notification',id:notice.id,revision,accountId:'own'};
 }
-type Notice = { id: string; revision:string; source:'own'|'external'|'hosted'; kind?:string; appLabel:string; title: string; text: string; at: number; clearable: boolean; canOpen: boolean };
-const native = registerPlugin<{canonicalPending():Promise<{token?:string;ownerId?:string;agentId?:string;notificationId?:string;view?:string;conversationId?:string;messageId?:string}>;acknowledgeCanonical(options:{token:string}):Promise<{ok:boolean}>;addListener(name:'canonicalNotificationTap',listener:()=>void):Promise<{remove():Promise<void>}>;list(): Promise<{items: Notice[]; scope: string; calendarStatus?:string}>;open(options:{id:string;revision:string;source:string}):Promise<void>;dismiss(options:{id:string;revision:string;source:string}):Promise<void>;clear(options:{items:Array<{id:string;revision:string;source:string}>}):Promise<{outcomes:Array<{status:string}>}>}>('AlphaNotifications');
+const native = registerPlugin<AlphaNotificationsPlugin>('AlphaNotifications');
 /** Opens the view a tapped canonical Alpha notification names. Android posts these from the
  * system shade, so this runs on every Android build, independent of the simulated shade. */
 export function installCanonicalNotificationTaps(Component: any) {
@@ -94,8 +94,8 @@ export function installNotificationsAdapter(Component: any) {
  const p=Component.prototype, render=p.renderVals, mount=p.componentDidMount, update=p.componentDidUpdate, unmount=p.componentWillUnmount;
  const shadeActive=(shell:any)=>{const state=shell.S();return !!state.shade&&state.screen==='home';};
  const active=(shell:any)=>shell.alphaNoticesLive&&!document.hidden&&shadeActive(shell);
- const key=(row:Notice)=>({id:row.id,revision:row.revision,source:row.source});
- const clearableKeys=(rows:Notice[])=>rows.filter(row=>row.clearable).map(key);
+ const key=(row:NotificationRow)=>({id:row.id,revision:row.revision,source:row.source});
+ const clearableKeys=(rows:NotificationRow[])=>rows.filter(row=>row.clearable).map(key);
  const retireQuestion=(shell:any)=>{
   const close=shell.alphaNoticeQuestion;
   shell.alphaNoticeQuestion=undefined;
@@ -133,7 +133,7 @@ export function installNotificationsAdapter(Component: any) {
   this.alphaNoticesBusy=true;
   const visit=this.alphaNoticeVisit;
   const current=()=>active(this)&&this.alphaNoticeVisit===visit;
-  try{const result=await native.list();if(!current())return;if(result.calendarStatus==='unavailable'){if(!this.alphaCalendarAlertError)this.toast('Alerts didn’t load');this.alphaCalendarAlertError=true;}else this.alphaCalendarAlertError=false;const next=result.items;const chosen=this.alphaNoticeSelection;if(chosen&&!next.some((n:Notice)=>n.id===chosen.id&&n.revision===chosen.revision&&n.source==='own'&&noticeKind(n)===noticeKind(chosen)))this.alphaNoticeSelection=undefined;if(JSON.stringify(next)!==JSON.stringify(this.alphaNotices)){this.alphaNotices=next;this.setState({nativeNoticeRevision:Date.now()});}this.alphaNoticeError=false;}
+  try{const result=await native.list();if(!current())return;if(result.calendarStatus==='unavailable'){if(!this.alphaCalendarAlertError)this.toast('Alerts didn’t load');this.alphaCalendarAlertError=true;}else this.alphaCalendarAlertError=false;const next=result.items;const chosen=this.alphaNoticeSelection;if(chosen&&!next.some((n:NotificationRow)=>n.id===chosen.id&&n.revision===chosen.revision&&n.source==='own'&&noticeKind(n)===noticeKind(chosen)))this.alphaNoticeSelection=undefined;if(JSON.stringify(next)!==JSON.stringify(this.alphaNotices)){this.alphaNotices=next;this.setState({nativeNoticeRevision:Date.now()});}this.alphaNoticeError=false;}
   catch{if(current()&&!this.alphaNoticeError){this.alphaNoticeError=true;this.alphaNotices=[];this.alphaNoticeSelection=undefined;this.setState({nativeNoticeRevision:Date.now()});this.toast('Unavailable');}}
   finally{this.alphaNoticesBusy=false;}
  };
@@ -157,11 +157,11 @@ export function installNotificationsAdapter(Component: any) {
    }catch{if(currentVisit())self.toast('Changed');}
    if(currentVisit())await self.refreshAlphaNotices();
   };
-  const rows:Notice[]=this.alphaNotices||[];
+  const rows:NotificationRow[]=this.alphaNotices||[];
   const items=clearableKeys(rows);
-  const shadeN=rows.map((n:Notice)=>{
+  const shadeN=rows.map((n:NotificationRow)=>{
    const target=key(n);
-   const current=()=>currentVisit()?self.alphaNotices.find((row:Notice)=>row.id===target.id&&row.revision===target.revision&&row.source===target.source):undefined;
+   const current=()=>currentVisit()?self.alphaNotices.find((row:NotificationRow)=>row.id===target.id&&row.revision===target.revision&&row.source===target.source):undefined;
    const swipe=this.sw(()=>{
     const row=current();
     if(!row)return;
@@ -191,7 +191,7 @@ export function installNotificationsAdapter(Component: any) {
      try{
       if(!live()){refused();return;}
       const epoch=self.alphaNoticeEpoch;
-      const fresh=(await native.list()).items,same=fresh.find((row:Notice)=>row.id===reviewed.id&&row.source===reviewed.source);
+      const fresh=(await native.list()).items,same=fresh.find((row:NotificationRow)=>row.id===reviewed.id&&row.source===reviewed.source);
       if(!owned())return;
       if(epoch!==self.alphaNoticeEpoch||!live()||!noticeCurrent(reviewed,fresh)||!same||!noticeReviewable(same)||noticeKind(same)!==noticeKind(n)||noticeExcerpt(same)!==excerpt){refused();return;}
       self.api(self.S().view).composeContentQuestion(draft);

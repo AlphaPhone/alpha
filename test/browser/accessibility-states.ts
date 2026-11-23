@@ -2,10 +2,8 @@ import {chooseCalendarEventAction} from './helpers/browser-calendar';
 import {openConnectionDiagnostics} from './helpers/connection-diagnostics';
 import { expect, type Page, type Request } from '@playwright/test';
 import {openCanonicalCalendarForm} from './helpers/canonical-calendar';
-import {openLegacyNotes,openLegacyAttachment} from './helpers/legacy-notes';
 import {openOwnedPhotoViewer,openPhotoShare} from './helpers/owned-photo';
 import {installHomeCalendar} from './helpers/home-calendar';
-import {calendarSyncFixture} from './calendar-sync-fixture';
 import {settled} from './helpers/settled';
 
 /**
@@ -97,18 +95,6 @@ export async function openFilesStorage(page:Page,theme='light') {
   await expect(page.getByRole('button',{name:'Files options',exact:true})).toBeVisible();
 }
 
-/** Legacy-only controls remain covered through the explicit Older notes source. */
-const legacyNotes = (name: string, steps: string[], shows?: string): State => ({
-  name: `live ${name}`, shows,
-  open: async (page, theme) => {
-    await page.addInitScript(offline);
-    await goto(page, theme ? `/?theme=${theme}` : '/');
-    await openLegacyNotes(page);
-    await press(page, steps);
-    await settle(page);
-    await showing(page, shows);
-  },
-});
 /** Fixture screens that finish arriving on a timer: the control that marks them complete. */
 const ARRIVES: Record<string, string> = {};
 const mock = (start: string, steps: string[] = [], shows?: string): State => ({
@@ -139,14 +125,6 @@ export const LIVE_STATES: State[] = [
   live('Photos (empty)', ['Photos']),
   live('Maps (no location)', ['Maps']),
   live('Notes (empty)', ['Notes']),
-  legacyNotes('Notes new note', ['New note']),
-  // The current Previous notes surface recovers retained records; folder creation belongs to the earlier layout.
-  {name:'live Notes retained records',open:async(page,theme)=>{
-    await page.addInitScript(offline);await goto(page, theme?`/?theme=${theme}`:'/');
-    await openLegacyNotes(page,[{id:'retained-accessibility-note',kind:'text',title:'Retained note',body:'Existing text remains available.'}]);
-    await expect(page.getByRole('button',{name:'Open Retained note',exact:true})).toBeVisible();await settle(page);
-  }},
-  legacyNotes('Notes recently deleted', ['New note', 'More', 'Delete', 'Recently deleted'], 'notes-trash'),
   live('Files', ['Files']),
   live('Workflows', ['Workflows']),
   live('Settings', ['Settings']),
@@ -173,9 +151,6 @@ export const LIVE_STATES: State[] = [
   live('Browser menu', ['Browser', 'Menu']),
   live('Browser address', ['Browser', 'Edit address']),
   live('Workflow alarms', ['Workflows', 'Add to Workflows', 'Clock alarms']),
-  legacyNotes('Notes note menu', ['New note', 'More']),
-  {name:'live Notes attachment preview',open:async(page,theme)=>{await page.addInitScript(offline);await goto(page, theme ? `/?theme=${theme}` : '/');await openLegacyAttachment(page);await settle(page);}},
-  legacyNotes('Notes recorder', ['Record voice note'], 'notes-recorder'),
   live('Workflows new automation', ['Workflows', 'Add to Workflows'], 'automations-detail'),
 ];
 
@@ -489,10 +464,10 @@ const calendarWithEvents: State = {
 CONNECTED_STATES.push(calendarWithEvents);
 
 /**
- * Connected states other than a mailbox (MVP-48): an agent's own calendar, a linked Google Calendar
- * account and a connected agent with a conversation. Each is held at the same boundary its own
- * browser spec uses (home-daily-overview, calendar-sync-settings, journey-d-digests); every
- * account, event and reply is synthetic, and none of these states writes to a provider.
+ * Connected states other than a mailbox (MVP-48): an agent's own calendar and a connected agent
+ * with a conversation. Each is held at the same boundary its own browser spec uses
+ * (home-daily-overview, journey-d-digests); every account, event and reply is synthetic, and none
+ * of these states writes to a provider.
  */
 // A fixed local noon keeps the agent's event inside today's Calendar window whenever the sweep runs.
 const AGENT_CALENDAR_DAY = { year: 2026, month: 9, day: 14 };
@@ -509,20 +484,6 @@ const agentCalendar = (name: string, steps: string[] = []): State => ({
     await press(page, steps);
     if (steps.length) await expect(page.getByText(/^Synthetic planning review/).first()).toBeVisible();
     await settle(page);
-  },
-});
-/** The Google Calendar sync sheet for a linked account, before and after its read-only review. */
-const googleCalendar = (name: string, review: boolean): State => ({
-  name: `connected Google Calendar sync ${name}`,
-  open: async (page, theme) => {
-    const dialog = await calendarSyncFixture(page, false, theme);
-    await expect(dialog).toBeVisible();
-    if (review) {
-      await dialog.getByRole('switch', { name: 'Sync', exact: true }).click();
-      await expect(dialog.getByText(/owner@example.invalid.*Personal.*1 event/)).toBeVisible();
-    }
-    await settle(page);
-    expect(await page.evaluate(() => (window as any).calendarSyncFixture.writes)).toBe(0);
   },
 });
 const DEVELOPMENT_REPLY = 'Development reply. Edit this response in Agent connection.';
@@ -549,8 +510,6 @@ const developmentAgent = (name: string, conversation: boolean): State => ({
 CONNECTED_STATES.push(
   agentCalendar('on Home'),
   agentCalendar('in Calendar', ['Calendar']),
-  googleCalendar('account', false),
-  googleCalendar('review', true),
   developmentAgent('Settings', false),
   developmentAgent('Conversation', true),
 );

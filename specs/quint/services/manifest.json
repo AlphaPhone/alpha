@@ -228,12 +228,6 @@
       "apps/app/src/runtime/agent-calendar.ts",
       "apps/app/src/runtime/agent-calendar-client.ts",
       "apps/app/src/runtime/canonical-calendar-draft.ts",
-      "apps/app/src/runtime/calendar-sync-settings.ts",
-      "apps/app/src/runtime/calendar-linked-provider.ts",
-      "apps/app/src/runtime/calendar-linked-store.ts",
-      "apps/app/src/runtime/calendar-sync-host.ts",
-      "apps/app/src/ui/calendar/sync-host.ts",
-      "apps/app/src/runtime/native-calendar-sync.ts",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CalendarSyncConsent.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CalendarSyncFreshness.java",
       "android/app/src/main/java/ai/alphacompute/alphaphone/CalendarSyncMutation.java",
@@ -977,7 +971,6 @@
       "apps/app/src/browser/scan-draft.ts",
       "apps/app/src/prototype/scan-pdf.ts",
       "apps/app/src/prototype/scan-searchable-review.ts",
-      "apps/app/src/prototype/scan-text-layer.ts",
       "vendor/eliza/plugins/plugin-native-camera/src/scan-document.ts",
       "apps/app/src/ui/camera/scan-document.ts"
     ],
@@ -2425,9 +2418,7 @@
       "scripts/local-agent-source.ts",
       "scripts/core-state-patch.ts",
       "vendor/eliza/packages/app/scripts/lib/immutable-workspace-source.mjs",
-      "apps/app/src/browser/calendar-sync-fields.ts",
       "apps/app/src/runtime/browser-cloud-resident.ts",
-      "apps/app/src/runtime/calendar-linked-provider.ts",
       "apps/app/src/runtime/cloud-deployment.generated.ts",
       "apps/app/src/runtime/cloud-protocol.ts",
       "apps/app/src/runtime/cloud-sign-in.ts",
@@ -3690,10 +3681,6 @@
       {
         "path": "apps/app/src/runtime/service-read-cache-store.ts",
         "name": "ReadCacheService"
-      },
-      {
-        "path": "apps/app/src/runtime/service-read-cache-store.ts",
-        "name": "retireSharedMail"
       },
       {
         "path": "apps/app/src/prototype/inbox-cloud-adapter.ts",

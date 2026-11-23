@@ -12,22 +12,27 @@ import {notificationState} from './notification-store';
 import {noticeActionBlocked} from './notice-action';
 import {reminderDocument} from './reminder-store';
 import {journalEntry,retireJournal,trimDeletionJournal,settleExpiredDeletions,writeJournalEntry} from './journal-retention';
+import {isOperationId,isSha256Hex} from '../lib/ids';
 type State=ReminderDeletionState&{receipts?:Record<string,{binding:string;result:ReminderResult|ReminderCreateResult;at?:number}>};
 const initial=():State=>({sourceRevision:revision(),reminders:[]});
 async function notificationsAllowed(signal?:AbortSignal){const state=await notificationState(signal);return state.appEnabled&&state.channels.reminders!==false;}
 async function scheduledStatus():Promise<'scheduled'|'permission-denied'>{return await notificationsAllowed()?'scheduled':'permission-denied';}
 function target(data:State,row:DeletableReminder):ReminderTarget {return {...(row.alertMinutes!==undefined?{timingVersion:2 as const}:{}),sourceId:'browser-reminders',sourceRevision:data.sourceRevision,reminderId:row.id,occurrenceId:row.occurrenceId!,revision:row.revision};}
+/** The row still is the reviewed target: every field of its current target matches. */
+const sameTarget=(data:State,row:DeletableReminder,expected:ReminderTarget)=>Object.entries(target(data,row)).every(([key,value])=>expected[key as keyof ReminderTarget]===value);
 /** A digest, so the revision stays an opaque token a notice selection can carry. */
 export async function reminderNoticeRevision(selected:ReminderTarget):Promise<string>{
   const exact=JSON.stringify([selected.sourceRevision,selected.reminderId,selected.occurrenceId,selected.revision]);
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(exact))),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 function operationBinding(input:{operationId:string;bindingHash:string},operation:ReminderOperation|ReminderCreateOperation) {
-  if(!/^[A-Za-z0-9_-]{1,128}$/.test(input.operationId)||!/^[a-f0-9]{64}$/.test(input.bindingHash))throw Error('Invalid reminder operation binding.');
+  if(!isOperationId(input.operationId)||!isSha256Hex(input.bindingHash))throw Error('Invalid reminder operation binding.');
   return JSON.stringify([input.bindingHash,operation]);
 }
 /** Done and Snooze use the shared reminder engine's decisions: a one-off completes, a repeat
  * advances to its next civil occurrence. This browser owns storage, delivery state and revisions. */
+/** Snooze a ringing alarm by whole minutes from now. */
+async function snoozeAlarm(row:DeletableReminder,minutes:number){row.at=Date.now()+minutes*60000;row.snoozedAt=Date.now();row.status=await scheduledStatus();delete row.postedAt;row.revision=revision();}
 async function decide(row:DeletableReminder,action:'done'|'snooze') {
   const host={now:Date.now(),alertStatus:await scheduledStatus(),nextOccurrenceId:()=>crypto.randomUUID()};
   if((action==='snooze'?snoozeReminderOccurrence(row,host):completeReminderOccurrence(row,host))==='unchanged')return 'unchanged';
@@ -35,10 +40,10 @@ async function decide(row:DeletableReminder,action:'done'|'snooze') {
 }
 export class BrowserDaily extends WebPlugin {
   constructor(private files:BrowserFiles){super();window.addEventListener('focus',()=>void this.notifyListeners('appResumed',{}));}
-  async deletionSelection(expected:ReminderTarget){const data=await reminderDocument.read(initial),row=data.reminders.find(r=>r.id===expected.reminderId);if(!row||Object.entries(target(data,row)).some(([key,value])=>expected[key as keyof ReminderTarget]!==value))throw Error('Reminder changed. Review it again.');return {row:structuredClone(row),owner:'manual:'+data.sourceRevision};}
+  async deletionSelection(expected:ReminderTarget){const data=await reminderDocument.read(initial),row=data.reminders.find(r=>r.id===expected.reminderId);if(!row||!sameTarget(data,row,expected))throw Error('Reminder changed. Review it again.');return {row:structuredClone(row),owner:'manual:'+data.sourceRevision};}
   async stageDeletion(expected:ReminderTarget,owner:string,id?:string,binding?:string,journalBinding?:{scope:string;proposalId:string;operationHash:string}){return reminderDocument.edit(initial,data=>{
     if(!browserDeletionOwnerCurrent(owner))throw Error('Deletion owner changed during review.');
-    const row=data.reminders.find(r=>r.id===expected.reminderId);if(!row||Object.entries(target(data,row)).some(([key,value])=>expected[key as keyof ReminderTarget]!==value))throw Error('Reminder changed. Review it again.');
+    const row=data.reminders.find(r=>r.id===expected.reminderId);if(!row||!sameTarget(data,row,expected))throw Error('Reminder changed. Review it again.');
     if(binding&&id){if(journalEntry(data.deleteClaims,id))throw Error('Deletion operation already used.');trimDeletionJournal(data);if(Object.keys(data.deleteClaims||{}).length>=500)throw Error('Action deletion history requires review.');}
     // The claim is kept only while its deletion entry is, so it is added after staging.
     const staged=stageReminderDeletion(data,row,owner,id,binding);if(binding&&id)writeJournalEntry(data.deleteClaims??={},id,binding);if(journalBinding)data.deletions![staged.id].journalBinding=journalBinding;return staged;
@@ -119,7 +124,7 @@ export class BrowserDaily extends WebPlugin {
         data.reminders.push(row);writeJournalEntry(data.receipts??={},input.operationId,{binding,result,at:Date.now()});return {status:'succeeded',result};
       }
       const row=data.reminders.find(r=>r.id===operation.target.reminderId);
-      if(!row||operation.target.timingVersion!==target(data,row).timingVersion||Object.entries(target(data,row)).some(([k,v])=>operation.target[k as keyof ReminderTarget]!==v))throw Error('Reminder changed. Review it again.');
+      if(!row||operation.target.timingVersion!==target(data,row).timingVersion||!sameTarget(data,row,operation.target))throw Error('Reminder changed. Review it again.');
       if(operation.type!=='reminder_read_selected'&&(row.status==='cancelled'||row.status==='completed'&&operation.type!=='reminder_update'))throw Error('Reminder is no longer active.');
       if(operation.type==='reminder_update'){
         row.title=operation.fields.title;row.body=operation.fields.body;
@@ -146,7 +151,7 @@ export class BrowserDaily extends WebPlugin {
       if(input.action==='cancel'){row.status='cancelled';row.cancelledAt=Date.now();row.revision=revision();}
       else if(row.status!=='posted')return {status:'stale'};
       else if(input.action==='dismiss')await decide(row,'done');
-      else{row.at=Date.now()+input.minutes!*60000;row.snoozedAt=Date.now();row.status=await scheduledStatus();delete row.postedAt;row.revision=revision();}
+      else await snoozeAlarm(row,input.minutes!);
       return {status:'applied'};
     });
   }
@@ -163,7 +168,7 @@ export class BrowserDaily extends WebPlugin {
     }else if(input.action==='show')window.dispatchEvent(new Event('alpha:clock-open'));
     else{
       if(input.action==='snooze'&&(!Number.isInteger(input.snoozeMinutes)||input.snoozeMinutes<1||input.snoozeMinutes>60))throw Error('Choose 1 to 60 snooze minutes.');
-      await reminderDocument.edit(initial,async data=>{for(const row of data.reminders.filter(r=>r.id.startsWith('alarm_')&&r.status==='posted')){if(input.action==='dismiss')await decide(row,'done');else if(input.action==='snooze'){row.at=Date.now()+input.snoozeMinutes*60000;row.snoozedAt=Date.now();row.status=await scheduledStatus();delete row.postedAt;row.revision=revision();}}});
+      await reminderDocument.edit(initial,async data=>{for(const row of data.reminders.filter(r=>r.id.startsWith('alarm_')&&r.status==='posted')){if(input.action==='dismiss')await decide(row,'done');else if(input.action==='snooze')await snoozeAlarm(row,input.snoozeMinutes);}});
     }
     window.dispatchEvent(new Event('alpha:alarms-changed'));return {action:input.action,status:'opened',message:input.action==='set'?'Alarm saved.':input.action==='show'?'Alarms':input.action==='dismiss'?'Alarm dismissed.':'Alarm snoozed.'};
   }

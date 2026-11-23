@@ -19,7 +19,6 @@
       "vite/client",
       "node"
     ],
-    "ignoreDeprecations": "6.0",
     "paths": {
       "/src/*": ["./apps/app/src/*"],
       "@elizaos/capacitor-system/sense": ["./.eliza/client-features/plugins/plugin-native-system/src/sense-bridge.ts"],

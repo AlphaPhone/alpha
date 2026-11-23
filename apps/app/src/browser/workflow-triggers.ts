@@ -2,16 +2,19 @@ type Bag=Record<string,any>;
 export type TriggerOccurrence={flowId:string;definition:string;key:string;at:number;source:Bag};
 export type TriggerCursor={flowId:string;definition:string;through:number;seen:string[];inside?:boolean;placeKey?:string};
 export type TriggerSnapshot={messages:Record<string,Bag[]>;mails:Bag[];events:Bag[];places:{home?:boolean|null;work?:boolean|null};placeKeys?:Record<string,string>};
+const MAX_SEEN=10000;
 export const triggerDefinition=(flow:Bag)=>JSON.stringify({name:flow.name,trig:flow.trig,steps:flow.steps});
 const identity=(value:unknown)=>{if(typeof value!=='string'&&typeof value!=='number'||typeof value==='string'&&!value||typeof value==='number'&&!Number.isFinite(value))throw Error('A trigger source has no stable identity.');return value;};
 const messageKey=(person:string,row:Bag)=>JSON.stringify(['message',person,identity(row.id??row.k)]);
 const emailKey=(row:Bag)=>JSON.stringify(['email',identity(row.id)]);
 function incomingKeys(trigger:Bag,snapshot:TriggerSnapshot){
- if(trigger.kind==='message')return (snapshot.messages[trigger.person||'maya']||[]).filter(row=>!row.me).map(row=>{if(row.id===undefined&&row.k===undefined)throw Error('An incoming message has no stable identity.');return messageKey(trigger.person||'maya',row);});
+ const person=trigger.person||'maya';
+ if(trigger.kind==='message')return (snapshot.messages[person]||[]).filter(row=>!row.me).map(row=>{if(row.id===undefined&&row.k===undefined)throw Error('An incoming message has no stable identity.');return messageKey(person,row);});
  if(trigger.kind==='email')return snapshot.mails.map(row=>{if(row.id===undefined)throw Error('An incoming email has no stable identity.');return emailKey(row);});
  return [];
 }
-function placeValue(trigger:Bag,snapshot:TriggerSnapshot){return snapshot.places[trigger.place==='I arrive at work'?'work':'home'];}
+const placeZone=(trigger:Bag)=>trigger.place==='I arrive at work'?'work':'home';
+function placeValue(trigger:Bag,snapshot:TriggerSnapshot){return snapshot.places[placeZone(trigger)];}
 function timeDue(trigger:Bag,begin:number,end:number):{key:string;at:number;source:Bag}[]{
  const t=trigger.t??18,days=trigger.days||'Every day';if(!Number.isFinite(t)||t<0||t>=24||!['Every day','Weekdays','Weekends','Mondays','Fridays'].includes(days))throw Error('Choose a valid workflow time and day pattern.');
  const minutes=Math.round(t*60);if(minutes>=1440)throw Error('Choose a time before midnight.');const due=[];const date=new Date(begin);date.setHours(0,0,0,0);
@@ -23,7 +26,6 @@ function timeDue(trigger:Bag,begin:number,end:number):{key:string;at:number;sour
  return due;
 }
 export type TriggerError={flowId:string;message:string};
-const placeZone=(trigger:Bag)=>trigger.place==='I arrive at work'?'work':'home';
 /** A location cursor starts over only when both the stored and the current place are known and differ.
  * While the position is unknown the place has no key; the cursor then keeps its last known side. */
 export const placeChanged=(stored:string|undefined,current:string|undefined):boolean=>{
@@ -49,7 +51,7 @@ const eventKey=(event:Bag,ev:string)=>JSON.stringify(['event',event.id,event.beg
  * A flow that cannot be checked is reported in `errors` and keeps its previous cursor; the other flows are still checked. */
 export function detectWorkflowTriggers(flows:Bag[],previous:TriggerCursor[],snapshot:TriggerSnapshot,now=Date.now()):{cursors:TriggerCursor[];occurrences:TriggerOccurrence[];errors:TriggerError[]}{
  const validTime=(time:number)=>Number.isFinite(time)&&time>=0&&Number.isFinite(new Date(time).getTime());
- if(!validTime(now)||previous.some(cursor=>!validTime(cursor.through)||typeof cursor.flowId!=='string'||typeof cursor.definition!=='string'||!Array.isArray(cursor.seen)||cursor.seen.length>10000||cursor.seen.some(key=>typeof key!=='string'))||new Set(previous.map(cursor=>cursor.flowId)).size!==previous.length)throw Error('Workflow trigger state needs recovery.');
+ if(!validTime(now)||previous.some(cursor=>!validTime(cursor.through)||typeof cursor.flowId!=='string'||typeof cursor.definition!=='string'||!Array.isArray(cursor.seen)||cursor.seen.length>MAX_SEEN||cursor.seen.some(key=>typeof key!=='string'))||new Set(previous.map(cursor=>cursor.flowId)).size!==previous.length)throw Error('Workflow trigger state needs recovery.');
  const cursors:TriggerCursor[]=[],occurrences:TriggerOccurrence[]=[],errors:TriggerError[]=[],ids=new Set<string>();
  for(const flow of flows){const flowId=String(flow.id);if(ids.has(flowId))throw Error('Workflow identities must be unique.');ids.add(flowId);}
  for(const flow of flows){
@@ -59,13 +61,13 @@ export function detectWorkflowTriggers(flows:Bag[],previous:TriggerCursor[],snap
    const trigger=flow.trig;if(!trigger||!['time','event','message','email','location'].includes(trigger.kind))throw Error('Choose a supported workflow trigger.');
    const keys=incomingKeys(trigger,snapshot),inside=trigger.kind==='location'?placeValue(trigger,snapshot):undefined;
    const placeKey=trigger.kind==='location'?snapshot.placeKeys?.[placeZone(trigger)]:undefined;
-   if(!old||trigger.kind==='location'&&placeChanged(old.placeKey,placeKey)){if(keys.length>10000)throw Error('Workflow trigger history is full.');cursors.push({flowId,definition,through:now,seen:[...new Set(keys)],...(placeKey?{placeKey}:{}),...(typeof inside==='boolean'?{inside}:{})});continue;}
+   if(!old||trigger.kind==='location'&&placeChanged(old.placeKey,placeKey)){if(keys.length>MAX_SEEN)throw Error('Workflow trigger history is full.');cursors.push({flowId,definition,through:now,seen:[...new Set(keys)],...(placeKey?{placeKey}:{}),...(typeof inside==='boolean'?{inside}:{})});continue;}
    // Resume long absences in one-day batches; do not silently discard earlier due occurrences.
    const through=cursorThrough(old.through,now),cursor:TriggerCursor={...old,through,seen:[...old.seen]},seen=new Set(cursor.seen);
    // Keys still needed after this pass: sources present in the snapshot, and occurrences found now. Time, event
    // and location windows never overlap an earlier pass, so their older keys cannot recur and are dropped.
    const live=new Set<string>(keys),fresh=new Set<string>();
-   const add=(key:string,at:number,source:Bag)=>{if(seen.has(key))return;if(seen.size>=10000)throw Error('Workflow trigger history is full.');seen.add(key);fresh.add(key);found.push({flowId,definition,key,at,source:structuredClone(source)});};
+   const add=(key:string,at:number,source:Bag)=>{if(seen.has(key))return;if(seen.size>=MAX_SEEN)throw Error('Workflow trigger history is full.');seen.add(key);fresh.add(key);found.push({flowId,definition,key,at,source:structuredClone(source)});};
    if(trigger.kind==='time')for(const item of timeDue(trigger,old.through,through))add(item.key,item.at,item.source);
    if(trigger.kind==='event'){
     if(!['A deep-work event starts','An event ends','10 minutes before a meeting'].includes(trigger.ev))throw Error('Choose a supported Calendar trigger.');
@@ -77,10 +79,10 @@ export function detectWorkflowTriggers(flows:Bag[],previous:TriggerCursor[],snap
      if(at>old.through&&at<=through)add(key,at,{kind:'event',id:event.id,begin:event.begin,end:event.end,revision:event.revision??null,trigger:trigger.ev});
     }
    }
-   if(trigger.kind==='message')for(const row of snapshot.messages[trigger.person||'maya']||[]){if(row.me)continue;const key=messageKey(trigger.person||'maya',row);if(!seen.has(key))add(key,now,{kind:'message',person:trigger.person||'maya',id:row.id??null,k:row.k??null});}
+   if(trigger.kind==='message'){const person=trigger.person||'maya';for(const row of snapshot.messages[person]||[]){if(row.me)continue;const key=messageKey(person,row);if(!seen.has(key))add(key,now,{kind:'message',person,id:row.id??null,k:row.k??null});}}
    if(trigger.kind==='email'){
     const match=String(trigger.match||'receipt').trim().toLocaleLowerCase();if(!match)throw Error('Choose text for the email trigger.');
-    for(const row of snapshot.mails){const key=emailKey(row);if(seen.has(key))continue;if(!row.arch&&!row.del&&[row.subj,row.body].some(value=>typeof value==='string'&&value.toLocaleLowerCase().includes(match)))add(key,now,{kind:'email',id:row.id});else{if(seen.size>=10000)throw Error('Workflow trigger history is full.');seen.add(key);}}
+    for(const row of snapshot.mails){const key=emailKey(row);if(seen.has(key))continue;if(!row.arch&&!row.del&&[row.subj,row.body].some(value=>typeof value==='string'&&value.toLocaleLowerCase().includes(match)))add(key,now,{kind:'email',id:row.id});else{if(seen.size>=MAX_SEEN)throw Error('Workflow trigger history is full.');seen.add(key);}}
    }
    if(trigger.kind==='location'){
     if(!['I arrive home','I leave home','I arrive at work'].includes(trigger.place))throw Error('Choose a supported place trigger.');

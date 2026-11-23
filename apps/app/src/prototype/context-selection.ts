@@ -4,13 +4,14 @@
  *
  * Selection identities are opaque. Provider revisions, names and paths stay
  * local. Sharing content requires the owner's review. */
+import { randomHex } from '../lib/hash.ts';
 type Bag = Record<string, any>;
 // LemmaScript (specs/lemma) has no model for a RegExp; no proved function reads it.
 //@ skip
 const OPAQUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 /** Random per app session, so a later session can never repeat a revision for other content. */
-const sessionMarker = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => byte.toString(16).padStart(2, '0')).join('');
+const sessionMarker = () => randomHex(6);
 
 //@ skip
 const SETTINGS_SECTION = /^[a-z][a-z0-9-]{0,63}$/;
@@ -194,25 +195,20 @@ export function captureQuestion(module: string, key: string, path: string, state
   return path === 'v.ask' && typeof open === 'string' && open ? { kind: 'item', id: open } : { kind: 'none' };
 }
 
-//@ skip
-const MIME_TYPE = /^[a-z]+\/([a-z0-9][a-z0-9.+-]{0,126}|\*)$/;
 /** Document types for a Files location tile, as the list the native picker accepts
  * (DailyAppsPlugin.mimeTypes). Undefined means any document. */
 export function locationMimeTypes(name: string): string[] | undefined {
   const key = name.toLowerCase();
-  const types = /(picture|image|photo)/.test(key) ? ['image/*']
+  return /(picture|image|photo)/.test(key) ? ['image/*']
     : /(music|audio|recording)/.test(key) ? ['audio/*']
     : /video|movie/.test(key) ? ['video/*']
     : /doc|pdf/.test(key) ? ['application/pdf', 'text/*', 'application/*']
     : undefined;
-  return types?.every(type => MIME_TYPE.test(type)) ? types : undefined;
 }
 
-/** Publishes the folder and Settings identities the agent context reads from the shell.
- * The folder identity exists only while its folder is the visible Files subview. */
+/** Publishes the Settings identity the agent context reads from the shell. */
 export function installContextSelection(Component: any) {
-  const p = Component.prototype;
-  p.settingsSelection = function () {
+  Component.prototype.settingsSelection = function () {
     return document.hidden || this.S().view !== 'settings' ? undefined : settingsSelection(this.vget('settings'));
   };
 }

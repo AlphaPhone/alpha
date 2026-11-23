@@ -74,8 +74,8 @@ test('Phone card: new missed calls grouped by caller with new voicemail, and whe
     rows: [{title: 'Daniel Osei', detail: 'Missed · 2'}, {title: 'Marta Lindqvist', detail: 'Voicemail · 0:24'}]});
   assert.deepEqual(P.phoneCard([], voicemail, names, now).rows, [{title: 'Marta Lindqvist', detail: 'Voicemail · 0:24'}]);
   assert.equal(P.phoneCard(calls.filter(call => !call.isNew || call.type !== 'missed'), [], names, now), null);
-  assert.equal(P.phoneCardTarget(2), 'recents');
-  assert.equal(P.phoneCardTarget(0), 'voicemail');
+  assert.equal(P.presentTelephonyAttention({threads: null, calls, voicemail, names}, now).phoneTab, 'recents');
+  assert.equal(P.presentTelephonyAttention({threads: null, calls: [], voicemail, names}, now).phoneTab, 'voicemail');
 });
 test('two withheld missed calls are not merged into one caller', () => {
   const card = P.phoneCard([{number: '', cachedName: null, date: at(9), type: 'missed', isNew: true}, {number: '', cachedName: null, date: at(8), type: 'missed', isNew: true}], [], names, now);

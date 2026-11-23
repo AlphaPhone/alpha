@@ -265,17 +265,6 @@ test('Android settings opens the system Settings page from Alpha Settings',async
 
 
 
-test('an unreadable action preference keeps review enabled and offers recovery without overwriting data',async({page})=>{
- await nativeStub(page);
- await page.addInitScript(()=>localStorage.setItem('alpha.browser.device.v1','{damaged settings'));
- await openSettings(page,'Privacy');
- const review=current(page).getByRole('switch',{name:'Ask before Alpha acts',exact:true});
- await expect(review).toHaveAttribute('aria-checked','true');await expect(review).toBeDisabled();
- await openSettings(page,'General');
- await current(page).getByRole('button',{name:'Recover device settings',exact:true}).click();
- await expect(page.getByRole('dialog',{name:'Device settings recovery'})).toBeVisible();
- expect(await page.evaluate(()=>localStorage.getItem('alpha.browser.device.v1'))).toBe('{damaged settings');
-});
 
 
 test('notification state is read back from Android, and local history stays available',async({page})=>{

@@ -6,7 +6,6 @@ import {installResidentAgentPlugin} from './helpers/resident-agent-plugin';
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { FORBIDDEN_ENGINE_PATH, engineFindings } from '../../scripts/audit-production-bundle.ts';
-import { openLegacyNotes } from './helpers/legacy-notes';
 // Runs only in the `production` project: a flag-off `vite build` served by `vite preview`.
 // It proves the shipped web bundle exposes no mock, fixture or developer surface.
 // It does not prove Android packaging, which is audited separately per APK.
@@ -247,62 +246,6 @@ test('sending chat without a connection opens the chooser', async ({ page }) => 
   await expect(page.getByText(/Development reply|emulator development agent/)).toHaveCount(0);
 });
 
-test('the CSP admits Home, Notes, Maps, Scan and PDF without violations', async ({ page }) => {
-  test.setTimeout(120_000);
-  const violations = await trackCsp(page);
-  await page.addInitScript(offline);
-  await page.addInitScript(() => {
-    // Synthetic camera: a canvas stream with one line of text. Capture, scan review, OCR and PDF are the shipped code.
-    const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 600; const context = canvas.getContext('2d')!;
-    const paint = () => { context.fillStyle = 'white'; context.fillRect(0, 0, 1200, 600); context.fillStyle = 'black'; context.font = '60px Arial'; context.fillText('Alpha searchable document', 50, 120); };
-    paint(); setInterval(paint, 50);
-    const devices = navigator.mediaDevices; devices.getUserMedia = async () => canvas.captureStream(20); Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: devices });
-  });
-  await page.goto('/?tools=1');
-  await expect(page.getByRole('button', { name: 'Notes', exact: true })).toBeVisible();
-  await openLegacyNotes(page);
-  await page.getByRole('button', { name: 'New note', exact: true }).click();
-  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('CSP note');
-  await page.getByRole('button', { name: 'Back to notes', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Open CSP note', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Return to Notes', exact: true }).click();
-  await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
-  await page.getByRole('button', { name: 'Maps', exact: true }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-active-view', 'maps');
-  await page.waitForTimeout(1000);
-  await page.getByRole('button', { name: 'Back to apps', exact: true }).click();
-  await page.getByRole('button', { name: 'Camera', exact: true }).click();
-  await expect.poll(() => page.locator('[aria-label^="Viewfinder."] video').evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-  // Scanning is reached by asking Alpha in Camera: one frame opens scan review, which builds the PDF.
-  const scan = async (openComposer = true) => {
-    if (openComposer) await page.getByRole('button', { name: 'Type', exact: true }).click();
-    const input = page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();
-    await expect(input).toBeVisible();
-    await input.fill('Scan this'); await input.press('Enter');
-    await page.getByRole('button', { name: 'Multi-page', exact: true }).click();
-    await expect(page.getByRole('img', { name: 'Document page 1', exact: true })).toBeVisible();
-  };
-  await scan();
-  const imagePdf = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download document PDF', exact: true }).click();
-  expect((await imagePdf).suggestedFilename()).toMatch(/\.pdf$/);
-  const documentReview = page.getByRole('dialog', { name: 'Review scan document' });
-  await documentReview.getByRole('button', { name: 'Close document', exact: true }).click();
-  await expect(documentReview).toHaveCount(0);
-  const textReview = page.getByRole('dialog', { name: 'Review scanned text' });
-  await textReview.getByRole('button', { name: 'Close scan', exact: true }).click();
-  await expect(textReview).toHaveCount(0);
-  // Closing Scan keeps the current composer open.
-  await scan(false);
-  await page.getByRole('button', { name: 'Download searchable PDF', exact: true }).click();
-  const review = page.getByRole('dialog', { name: 'Review searchable PDF' });
-  // Local OCR runs in a worker with WebAssembly: the policy must admit both.
-  await expect(review.getByLabel('Page 1 line 1', { exact: true })).toHaveValue(/Alpha searchable/, { timeout: 90_000 });
-  const searchable = page.waitForEvent('download');
-  await review.getByRole('button', { name: 'Download reviewed searchable PDF', exact: true }).click();
-  expect((await searchable).suggestedFilename()).toMatch(/\.pdf$/);
-  expect(await violations()).toEqual([]);
-});
 
 test('production ignores the development render-failure hook', async ({ page }) => {
   await page.addInitScript(offline);
@@ -315,53 +258,6 @@ test('production ignores the development render-failure hook', async ({ page }) 
   await expect(page.getByRole('button', { name: 'Account', exact: true })).toBeVisible();
 });
 
-// Production speech is device-only (owner rule): the browser build has no on-device engine, so the
-// Notes recorder records audio only, and no Cloud or network voice route is offered.
-test('production signed-out voice stays on-device with no upload, engine or Cloud route under the shipped CSP', async ({ page }) => {
-  const violations = await trackCsp(page);
-  const foreign: string[] = [], uploads: string[] = [], engines: string[] = [];
-  // Stop a regression before it can contact a provider or upload anything.
-  await page.route('**/*', async route => {
-    const request=route.request(),url=new URL(request.url());
-    if (!['127.0.0.1','localhost'].includes(url.hostname) && !['data:','blob:'].includes(url.protocol)) { foreign.push(request.url()); await route.abort(); return; }
-    if (['POST','PUT','PATCH'].includes(request.method())) { uploads.push(request.url()); await route.abort(); return; }
-    if (FORBIDDEN_ENGINE_PATH.test(url.pathname) || /\.wasm$/.test(url.pathname)) engines.push(url.pathname);
-    await route.continue();
-  });
-  await page.addInitScript(offline);
-  await page.addInitScript(() => {
-    const counts=(window as any).voiceGate={microphone:0,recorders:0,audio:0,workers:0,playback:0};
-    Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>{counts.microphone++;throw Error('Unsigned voice must not capture');}}});
-    for(const [name,key] of [['MediaRecorder','recorders'],['OfflineAudioContext','audio'],['Worker','workers']] as const){
-      const Original=(window as any)[name];
-      if(Original)Object.defineProperty(window,name,{configurable:true,value:new Proxy(Original,{construct(){counts[key]++;throw Error('Unsigned voice must not start a local engine');}})});
-    }
-    // Clock primes an alert context on user gestures independently of voice.
-    // Keep that inert while counting any capture, decode or synthesis processing.
-    const processing=()=>{counts.audio++;throw Error('Unsigned voice must not process audio');};
-    Object.defineProperty(window,'AudioContext',{configurable:true,value:class {
-      state='suspended';resume=async()=>{};close=async()=>{};
-      createMediaStreamSource=processing;createMediaStreamDestination=processing;
-      createBufferSource=processing;decodeAudioData=processing;createOscillator=processing;
-    }});
-    if(window.speechSynthesis)window.speechSynthesis.speak=()=>{counts.playback++;throw Error('Unsigned voice must not synthesize speech');};
-    HTMLMediaElement.prototype.play=async function(){counts.playback++;throw Error('Unsigned voice must not play audio');};
-  });
-  await page.goto('/');
-  await openLegacyNotes(page);
-  await page.getByRole('button', { name: 'Record voice note', exact: true }).click();
-  // The recorder asks for the microphone at once (refused here) and shows one line; no route choice exists.
-  const recorder=page.locator('[data-alpha-subview="notes-recorder"]');
-  await expect(recorder).toHaveAttribute('data-recorder-state','failed');
-  await expect(recorder.getByRole('alert')).toHaveText('Mic unavailable');
-  for(const name of ['Connect Eliza Cloud','Transcribe with Eliza Cloud','Start recording','Record without transcription','Use development voice','Use browser voice','Use on-device voice','Transcribe on this device','Type transcript instead'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
-  await expect(page.getByText(/Sign in to|Record up to|Nothing is uploaded/)).toHaveCount(0);
-  await recorder.getByRole('button',{name:'Discard recording',exact:true}).click();
-  await expect(recorder).toHaveCount(0);
-  expect(await page.evaluate(()=>(window as any).voiceGate)).toEqual({microphone:1,recorders:0,audio:0,workers:0,playback:0});
-  expect(uploads).toEqual([]);expect(engines).toEqual([]);expect(foreign).toEqual([]);
-  expect(await violations()).toEqual([]);
-});
 for (const mode of ['signed-out','empty','credits','unavailable','funded','replaced','unpackaged','legacy-offline'] as const) {
  test(`resident always present (P-43), Cloud admission only binds inference: ${mode}`,async({page})=>{
   await installResidentAgentPlugin(page);

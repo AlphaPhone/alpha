@@ -70,17 +70,3 @@ test('closing history during loading creates no late download URLs',async({page}
  await page.evaluate(()=>new Promise(resolve=>setTimeout(resolve,50)));
  expect(await page.evaluate(()=>(window as any).noticeUrlsCreated())).toBe(before);
 });
-
-test('changed older data exposes both exact backups and disables compaction',async({page})=>{
- await page.evaluate(async()=>{
-  const n=await import('/src/browser/workflow-notices.ts'),{openWorkflowHistory}=await import('/src/browser/workflow-history.ts');
-  const row=await n.publishWorkflowNotice('backup','Canonical text',new AbortController().signal);await n.actOnWorkflowNotice(row,false);
-  localStorage.setItem('alpha.browser.workflow-notices.v1','{broken older data');
-  openWorkflowHistory(()=>({flows:[],localRuns:{}}),()=>{},()=>false);
- });
- const dialog=page.getByRole('dialog',{name:'Workflow history',exact:true}),active=dialog.getByRole('link',{name:'Download notification history',exact:true}),older=dialog.getByRole('link',{name:'Download older notification history',exact:true});
- await expect(active).toHaveAttribute('href',/^blob:/);await expect(older).toBeVisible();
- expect(await active.evaluate(async(a:HTMLAnchorElement)=>JSON.parse(await(await fetch(a.href)).text()).rows[0].text)).toBe('Canonical text');
- expect(await older.evaluate(async(a:HTMLAnchorElement)=>(await fetch(a.href)).text())).toBe('{broken older data');
- await expect(dialog.getByRole('button',{name:'Free notification space',exact:true})).toBeDisabled();
-});

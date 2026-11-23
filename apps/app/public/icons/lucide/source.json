@@ -122,11 +122,8 @@
     "folder-input.mjs": "33b0d1b0092385861f956423b9bd217a26f7864975aaf5345bf35f20807666de",
     "hard-drive.mjs": "4b3dee1fed5a8732a7be71a9954467865923b151f7e88cd408336c195029e36d",
     "file-archive.mjs": "6186b83a92a7e9de86b3fa14e259ae7f581d91a15f32abeefd82041355ec7f06",
-    "nfc.mjs": "79239f1eab0132aba55e194603cd4aa4b6a3d7f704393cd17aa8c625d34c74d4",
     "credit-card.mjs": "89b2eef0344be9ca250be285d47a10b79dc9d602bdcc84ad12a8dd8ac8d1d507",
     "ticket.mjs": "8b0dbf87e1035b4dc19103e95007be278604291fb94c5f9914f1728239b72eac",
-    "shopping-bag.mjs": "f32002ccea1948df004c82334d9db5b8dd0f1f853710e7a1150a46bd9e79e28f",
-    "lock-keyhole-open.mjs": "ca31e72c9f5eb05163e5a36bd5aa4c3ee82c04eee00c770f79121f3afc8eb593",
     "eye.mjs": "164d5aeabb301cd93b84d6865776af5eddd7a95abe6077c628d792c6c7893fa9",
     "diamond.mjs": "58e4b5b8c111ce1e330dc845d878fee8a86b5e313f5a5c64960245d4843fb0c1",
     "arrow-down.mjs": "7f24dee2505f9b29b079ed6a25c4d5ef9450bb89d69128bae46d225a2662aa65",
@@ -655,10 +652,6 @@
       "source": "file-archive.mjs",
       "sha256": "617ff3ec5c6e9ed4a2021fdcf994a8fbd77866d3daca6523686a299013458b48"
     },
-    "nfc.svg": {
-      "source": "nfc.mjs",
-      "sha256": "903a27d75a96471ee1726aac7fcdc2b58505569432d8ac1115eb1c3ecd05decc"
-    },
     "credit-card.svg": {
       "source": "credit-card.mjs",
       "sha256": "bbaec5ae45341eb23c9803eff33fc6ffa6872972808e105aafd44057bdcc5644"
@@ -666,14 +659,6 @@
     "ticket.svg": {
       "source": "ticket.mjs",
       "sha256": "f5e98a2d53f4ecb934ef56e3720aa866bda0b10f595ccc2e5fc604b123f06fb6"
-    },
-    "shopping-bag.svg": {
-      "source": "shopping-bag.mjs",
-      "sha256": "0ee7dee6169b9dc2c2f883f31679441b8d1dee7567c8b6628045660a04ed5e9f"
-    },
-    "lock-keyhole-open.svg": {
-      "source": "lock-keyhole-open.mjs",
-      "sha256": "bb995f0d5e26633acf43a2a2baa8ea4e029963f27d88a4914a19b178771ee534"
     },
     "eye.svg": {
       "source": "eye.mjs",

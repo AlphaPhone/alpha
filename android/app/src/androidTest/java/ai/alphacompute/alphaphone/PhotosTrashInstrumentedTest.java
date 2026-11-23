@@ -13,6 +13,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.io.*;
 import java.util.UUID;
+import static ai.alphacompute.alphaphone.PhotosTestFixture.bytes;
 import static org.junit.Assert.*;
 
 /** Real app-owned MediaStore fixture, prototype controls and independent bytes.
@@ -31,7 +32,6 @@ public final class PhotosTrashInstrumentedTest {
  private Bundle include(){Bundle b=new Bundle();b.putInt(MediaStore.QUERY_ARG_MATCH_TRASHED,MediaStore.MATCH_INCLUDE);return b;}
  private boolean trashed(ContentResolver resolver,Uri uri){try(Cursor row=resolver.query(uri,new String[]{MediaStore.MediaColumns.IS_TRASHED},include(),null)){assertNotNull(row);assertTrue("Exact fixture still exists",row.moveToFirst());return row.getInt(0)==1;}}
  private void state(ContentResolver resolver,Uri uri,boolean value)throws Exception{for(int i=0;i<150;i++){if(trashed(resolver,uri)==value)return;SystemClock.sleep(100);}fail("Actual Android trash flag did not change");}
- private byte[] bytes(ContentResolver resolver,Uri uri)throws Exception{try(InputStream input=resolver.openInputStream(uri)){assertNotNull(input);return input.readAllBytes();}}
  private JSONObject nativeCall(String method,JSONObject args)throws Exception{
   host("window.__photoTrashResult=null;Capacitor.nativePromise('AlphaPhotos',"+JSONObject.quote(method)+","+args+").then(r=>{delete r.image;delete r.path;if(r.items)r.items.forEach(i=>{delete i.image;delete i.path});window.__photoTrashResult=r},()=>window.__photoTrashResult={rejected:true})");
   ready("window.__photoTrashResult!==null");String encoded=host("JSON.stringify(window.__photoTrashResult)");return new JSONObject(new JSONArray("["+encoded+"]").getString(0));
@@ -39,12 +39,8 @@ public final class PhotosTrashInstrumentedTest {
  @Test public void ownedPhotoTrashUndoAndRecreatedRestorePreserveExactBytes()throws Exception{
   assertTrue("Real native trash requires Android11+",Build.VERSION.SDK_INT>=30);
   Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();ContentResolver resolver=context.getContentResolver();
-  ContentValues values=new ContentValues();values.put(MediaStore.MediaColumns.DISPLAY_NAME,"alpha-trash-"+UUID.randomUUID()+".jpg");values.put(MediaStore.MediaColumns.MIME_TYPE,"image/jpeg");values.put(MediaStore.MediaColumns.RELATIVE_PATH,"Pictures/AlphaPhone-tests");values.put(MediaStore.MediaColumns.IS_PENDING,1);
-  Uri uri=resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values);assertNotNull(uri);
+  Uri uri=fixture(resolver);
   try{
-   Bitmap bitmap=Bitmap.createBitmap(64,64,Bitmap.Config.ARGB_8888);bitmap.eraseColor(0xff3185aa);
-   try(OutputStream output=resolver.openOutputStream(uri)){assertNotNull(output);assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG,95,output));}finally{bitmap.recycle();}
-   values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);assertEquals(1,resolver.update(uri,values,null,null));
    String id=Long.toString(ContentUris.parseId(uri));byte[] original=bytes(resolver,uri);assertTrue(original.length>100);
    try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
     AppNavigation.liveMode();photos();media(id);click("Delete photo");state(resolver,uri,true);
@@ -70,15 +66,18 @@ public final class PhotosTrashInstrumentedTest {
   try{Bitmap bitmap=Bitmap.createBitmap(32,32,Bitmap.Config.ARGB_8888);bitmap.eraseColor(0xffd28039);try(OutputStream output=resolver.openOutputStream(uri)){assertNotNull(output);assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG,95,output));}finally{bitmap.recycle();}values.clear();values.put(MediaStore.MediaColumns.IS_PENDING,0);assertEquals(1,resolver.update(uri,values,null,null));return uri;}catch(Exception failure){resolver.delete(uri,include());throw failure;}
  }
  private String key(Uri uri){return Long.toString(ContentUris.parseId(uri));}
+ /** True when the exact app-owned image row still exists, trashed or not. */
+ private boolean ownedRowExists(Context context,Uri uri){
+  Bundle query=include();query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,"_id=? AND media_type=1 AND owner_package_name=?");query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{key(uri),context.getPackageName()});
+  try(Cursor row=context.getContentResolver().query(MediaStore.Files.getContentUri("external"),new String[]{"_id"},query,null)){assertNotNull("Owned fixture row can be inspected",row);return row.moveToFirst();}
+ }
  private JSONObject metadata(Uri uri)throws Exception{return nativeCall("read",new JSONObject().put("id",key(uri)));}
  private JSONObject trash(Uri uri,JSONObject row,boolean desired)throws Exception{JSONObject result=nativeCall("setTrashed",new JSONObject().put("id",key(uri)).put("revision",row.getString("mutationRevision")).put("trashed",desired));assertFalse("Native mutation verified",result.optBoolean("rejected"));return result;}
  private boolean contains(JSONArray rows,String id)throws Exception{for(int i=0;i<rows.length();i++)if(rows.getJSONObject(i).getString("id").equals(id))return true;return false;}
  private void cleanup(Context context,java.util.List<Uri> fixtures,Throwable primary){
   AssertionError errors=null;ContentResolver resolver=context.getContentResolver();
   for(Uri uri:fixtures)try{
-   Bundle query=include();query.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,"_id=? AND media_type=1 AND owner_package_name=?");query.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{key(uri),context.getPackageName()});
-   boolean exists;try(Cursor row=resolver.query(MediaStore.Files.getContentUri("external"),new String[]{"_id"},query,null)){assertNotNull("Cleanup can inspect its owned fixture",row);exists=row.moveToFirst();}
-   if(exists)assertEquals("Delete only remaining exact fixture",1,resolver.delete(uri,include()));
+   if(ownedRowExists(context,uri))assertEquals("Delete only remaining exact fixture",1,resolver.delete(uri,include()));
    assertTrue("Remove only fixture revision",context.getSharedPreferences("alpha-owned-media-versions",0).edit().remove(key(uri)).commit());
   }catch(Exception|AssertionError error){if(errors==null)errors=new AssertionError("Owned media fixture cleanup failed");errors.addSuppressed(error);}
   if(errors!=null){if(primary!=null)primary.addSuppressed(errors);else throw errors;}
@@ -115,8 +114,7 @@ public final class PhotosTrashInstrumentedTest {
    click("Delete all forever");ready("document.querySelector('button[aria-label=\"Delete forever\"]')");
    trash(later,metadata(later),true);click("Delete forever");
    ready("!document.querySelector('button[aria-label=\"Delete forever\"]')");
-   Bundle absentQuery=include();absentQuery.putString(ContentResolver.QUERY_ARG_SQL_SELECTION,"_id=? AND media_type=1 AND owner_package_name=?");absentQuery.putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS,new String[]{key(remove),context.getPackageName()});
-   try(Cursor row=resolver.query(MediaStore.Files.getContentUri("external"),new String[]{"_id"},absentQuery,null)){assertNotNull(row);assertFalse("Confirmed exact owned fixture is permanently deleted",row.moveToFirst());}
+   assertFalse("Confirmed exact owned fixture is permanently deleted",ownedRowExists(context,remove));
    state(resolver,later,true);state(resolver,restored,false);assertArrayEquals("Restored bytes remain untouched",original,bytes(resolver,restored));
    ready("document.querySelector('[data-owned-media-id=\"native-camera-"+key(later)+"\"]')");
   }catch(Exception|AssertionError failure){primary=failure;throw failure;}finally{cleanup(context,fixtures,primary);}

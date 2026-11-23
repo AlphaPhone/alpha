@@ -15,7 +15,6 @@ public class AlphaAssistActivity extends MainActivity {
  private int newIntentCallerUid = -1;
  private Intent sanitizedIntent;
  private Intent bridgeLoadIntent;
- /** This launch's origin until the renderer takes it; see {@link #takeInvocation}. */
  /** Window event the renderer listens for: a new invocation reached the already open surface. */
  static final String INVOCATION_EVENT = "alpha:assist-invocation";
  @Override public void onCreate(Bundle state) {

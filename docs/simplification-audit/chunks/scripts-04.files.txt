@@ -1,0 +1,11 @@
+scripts/ci/acquire-resident-bun.py
+scripts/ci/admit-cloud-signing-input.py
+scripts/ci/affected.ts
+scripts/ci/build-app-signing-fixtures.py
+scripts/ci/build-private-peer.py
+scripts/ci/calendar-bridge.init.gradle
+scripts/ci/calendar-bridge.py
+scripts/ci/check-changed-models.ts
+scripts/ci/embedding-artifacts.py
+scripts/ci/emulator-suite.ts
+scripts/ci/export-browser-proof.ts

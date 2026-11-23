@@ -11,7 +11,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
-import android.os.Build;
 import android.os.IBinder;
 import android.net.Uri;
 import java.util.UUID;
@@ -75,7 +74,7 @@ public final class AlphaNavigationService extends Service {
  static boolean declared(Context context) {
   try {
    ServiceInfo info = context.getPackageManager().getServiceInfo(new ComponentName(context, AlphaNavigationService.class), 0);
-   return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || (info.getForegroundServiceType() & ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) != 0;
+   return (info.getForegroundServiceType() & ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) != 0;
   } catch (PackageManager.NameNotFoundException missing) { return false; }
  }
 
@@ -224,8 +223,7 @@ public final class AlphaNavigationService extends Service {
      // current session's instruction if one exists, never the stale command's data.
      try {
       Notification notification = notification(active);
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
-      else startForeground(NOTIFICATION_ID, notification);
+      startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
       owned = active;
      } catch (RuntimeException refused) {
       if (live) retired = retireLocked(reason);

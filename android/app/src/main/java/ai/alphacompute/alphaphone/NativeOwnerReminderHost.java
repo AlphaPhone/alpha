@@ -28,8 +28,7 @@ final class NativeOwnerReminderHost {
  String reviewFence(JSONObject expected)throws Exception{
   JSONObject provider=ports.provider(),session=ports.ownerSession();String subject=expected.getString("subjectUserId"),agent=expected.getString("agentId");
   if(!subject.equals(session.getString("ownerId"))||session.getLong("expiresAt")<=System.currentTimeMillis()+30000)throw new SecurityException("Native review authority changed");
-  String account=provider.getString("accountRef");if("native-local".equals(account))account+=":"+subject;
-  if(!account.equals(expected.getString("accountRef"))||!provider.getString("environment").equals(expected.getString("environment"))||!provider.getString("sessionGeneration").equals(expected.getString("sessionGeneration")))throw new SecurityException("Native review authority changed");
+  if(!accountRef(provider,subject).equals(expected.getString("accountRef"))||!provider.getString("environment").equals(expected.getString("environment"))||!provider.getString("sessionGeneration").equals(expected.getString("sessionGeneration")))throw new SecurityException("Native review authority changed");
   String slot=deviceSlot(subject,agent),raw=ports.device(slot);
   if(raw==null)throw new SecurityException("Native review authority changed");JSONObject device=new JSONObject(raw);
   if(!expected.getString("installationId").equals(device.getString("installationId"))||!expected.getString("enrollmentId").equals(device.getString("enrollmentId")))throw new SecurityException("Native review enrollment changed");
@@ -41,6 +40,12 @@ final class NativeOwnerReminderHost {
   * Android JSONArray escapes slashes, so it cannot define this shared key. */
  static String deviceSlot(String owner,String agent)throws Exception{
   return NativeDeviceEnrollmentKey.local("https://device.alpha.invalid",owner,agent);
+ }
+
+ /** A native-local provider account is per owner; any other account reference is used as stored. */
+ private static String accountRef(JSONObject provider,String subject)throws Exception{
+  String account=provider.getString("accountRef");
+  return "native-local".equals(account)?account+":"+subject:account;
  }
 
  static JSONObject read(Ports ports)throws Exception{
@@ -84,13 +89,10 @@ final class NativeOwnerReminderHost {
   if(!installation.matches("[a-f0-9-]{36}")||!key.matches("[a-f0-9]{64}"))throw new SecurityException("Native device enrollment unavailable");
   HostedInbox.id(enrollment);current.check();
   JSONObject device=current.get("/api/client-devices/context",new JSONObject().put("X-Eliza-Device-Id",installation).put("X-Eliza-Device-Key",key));
-  for(String field:new String[]{"subjectUserId","agentId","installationId","enrollmentId"}){
-   String expected=field.equals("subjectUserId")?subject:field.equals("agentId")?agent:field.equals("installationId")?installation:enrollment;
-   if(!expected.equals(device.getString(field)))throw new SecurityException("Native enrolled device changed");
-  }
+  String[] fields={"subjectUserId","agentId","installationId","enrollmentId"},expected={subject,agent,installation,enrollment};
+  for(int i=0;i<fields.length;i++)if(!expected[i].equals(device.getString(fields[i])))throw new SecurityException("Native enrolled device changed");
   current.owner();current.check();
-  String account=provider.getString("accountRef");if("native-local".equals(account))account+=":"+subject;
   return new JSONObject().put("protocol",1).put("subjectUserId",subject).put("agentId",agent).put("installationId",installation).put("enrollmentId",enrollment)
-   .put("accountRef",account).put("environment",provider.getString("environment")).put("sessionGeneration",provider.getString("sessionGeneration"));
+   .put("accountRef",accountRef(provider,subject)).put("environment",provider.getString("environment")).put("sessionGeneration",provider.getString("sessionGeneration"));
  }
 }

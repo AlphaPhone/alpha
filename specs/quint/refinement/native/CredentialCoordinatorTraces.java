@@ -194,7 +194,7 @@ public final class CredentialCoordinatorTraces {
                        .toString()
                  : credential(2);
     if (full)
-      value = "x".repeat(AlphaCredentialStore.retainedLimit(selected) + 1);
+      value = "x".repeat(AlphaCredentialStore.slotLimit(selected) + 1);
     if (scenario.equals("write-before"))
       CredentialCoordinatorPorts.failBeforeSlot = key(selected);
     if (scenario.equals("write-after"))

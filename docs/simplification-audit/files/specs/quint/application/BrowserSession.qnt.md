@@ -1,0 +1,14 @@
+# specs/quint/application/BrowserSession.qnt
+- Lines: 205 | Kind: Quint model (live, 15 runs, 11 invariants, 4 witnesses) | Verdict: MERGE into `BrowserTabLifecycle.qnt`
+- Covers: normal/private tab projection, the open-tab limit, hydration-gated saving, late-restore merge, focus identity, history only from committed loads, clear-data keeping private tabs. Duplicates: `BrowserTabLifecycle` (tab limit, hydrate/late restore, typed-tab kept, retry), `BrowserSessionPersistence` (`UnreadRecordNeverOverwritten`, clear), and `test/quint-conformance.test.mjs:99-107` replays `privateRestartTest` against the same helpers. Callers/importers: manifest (sources `browser/browser-surface.ts`, `prototype/browser-adapter.ts`, `AlphaBrowserPlugin.java`; sharedSources `browsing-session.ts`, `BrowserSessionStore.java`); harness `portable.mjs` `browserSession()` (lines 108-129), run only via the application aggregate; `test/quint-conformance.test.mjs` second copy.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | harness | T10 / coverage | The only refinement is two 3-step traces through upstream `browsingSnapshot`/`restoreBrowsing` (portable.mjs:108-129). Its own assumption says "WebView navigation callbacks, late-restore admission and native encrypted persistence remain outside". 13 of 15 runs, focus, popup, clear and late-restore have no code tie beyond manifest text. | Move the properties that are not already elsewhere — `PrivateNeverSaved`, `PrivateHistoryIsolated`, `PrivatePagesDieWithTab`, `TabsDisjoint`, `OrderedTabs`, `FocusedTabIdentity`, `HistoryOnlyFromCommitted`, and the private-tab/popup-inherits-privacy actions — into `BrowserTabLifecycle`, whose harness already executes the adapter with the real `browsingSnapshot`/`restoreBrowsing`. Delete this file and `portable.mjs` `browserSession`. | Medium (model merge must keep Apalache/simulation bounds manageable) |
+| 2 | 84-136, 156-157, 163 | T4 | Hydration gate, late restore and clear duplicate `BrowserSessionPersistence` and `BrowserTabLifecycle`. | Do not carry them; they are covered. | None |
+| 3 | — | T4 | `test/quint-conformance.test.mjs` "Quint private-session trace agrees…" duplicates `portable.mjs` `browserSession` (and reads `vendor/eliza` directly). | Delete that test case with this model. | None |
+| 4 | 5 | — | `Cap = 3` stands for 8, as in `BrowserTabLifecycle`. | Keep one constant in the merged module. | — |
+
+## Proposed end state
+File deleted; `BrowserTabLifecycle.qnt` gains a `priv` tab attribute and the seven privacy/order/focus invariants with runs `privateRestartTest`, `closedPrivateTabForgetsPagesTest`, `closeEarlierTabKeepsFocusTest`, `failedLoadStaysOutOfHistoryTest`, `clearDataKeepsPrivateTabsTest`. Lower the application floor in `test/quint-checker.test.mjs` (or delete the floor, T-pattern §2.12).

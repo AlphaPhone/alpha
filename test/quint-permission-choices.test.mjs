@@ -279,7 +279,6 @@ function modelObservation(value) {
     's.savedChoices':saved.choices??[],
     's.savedHasChoices':saved.choices!==undefined,
     's.completed':saved.status==='completed',
-    's.legacyCompleted':saved.status==='completed'&&saved.version<(value.controller.native?4:1),
     's.states':qmap(permissionKeys.map((key,index)=>[index,value.component.states[key]])),
     's.attempted':qset(permissionKeys.map((key,index)=>value.durable.memory?.attempted?.[value.controller.native?key:'browser'+key]?index:null).filter(value=>value!==null)),
     's.requests':qmap(permissionKeys.map((key,index)=>[index,value.calls.filter(call=>call.kind==='request'&&call.key===key).length])),
@@ -444,7 +443,7 @@ async function runPermissionChoicesRefinement({scenarioFilter,checkModel=true}={
     assert.equal(f.snapshot().ui.heading,'Notifications');
     assert.deepEqual(f.snapshot().dismissal,{cancelPrevented:true,backPrevented:true});
   });
-  for(const count of [4,5,6,7])await scenario(`returning-auth-preserves-completed-${count}`,{progress:{version:count-3,status:'completed',step:count}},async(f,record)=>{
+  await scenario('returning-auth-preserves-completed-7',{progress:{version:4,status:'completed',step:7}},async(f,record)=>{
     assert.equal(f.snapshot().ui.visible,false);
     await f.auth();record('returning authentication',action('authSetup',false));
     assert.equal(f.snapshot().ui.visible,false);
@@ -657,7 +656,7 @@ test('actual permission coordinator traces refine the bounded walkthrough model'
   assert.equal(result.receipt.passed, true);
   assert.equal(result.receipt.inputsUnchanged, true);
   assert.equal(result.receipt.driverInputsBound, true);
-  assert.equal(result.receipt.observedFields.length, 41);
+  assert.equal(result.receipt.observedFields.length, 40);
   for (const name of ['credential-change-held-completion', 'credential-change-held-rejection',
     'stale-completion-keeps-newer-busy', 'stale-rejection-keeps-newer-busy',
     'same-turn-owner-completion', 'same-turn-owner-rejection',

@@ -48,7 +48,7 @@ test('local dev device opens each deferred app without dispatching external effe
  const requests:string[]=[];page.on('request',request=>{if(!request.url().startsWith('http://127.0.0.1:'))requests.push(request.url());});
  await page.goto('/?mode=dev&tools=1');
  await expect(page.getByText('Dev data',{exact:true})).toBeVisible();
- for(const name of ['Phone','Messages','Contacts','Wallet']){
+ for(const name of ['Phone','Messages','Contacts']){
   await page.getByRole('button',{name,exact:true}).first().click();
   await expect(page.locator('html')).toHaveAttribute('data-active-view',name.toLowerCase());
   await page.evaluate(()=>window.dispatchEvent(new Event('alpha-back',{cancelable:true})));

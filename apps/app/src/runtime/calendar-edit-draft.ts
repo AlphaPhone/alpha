@@ -1,9 +1,10 @@
 import {calendarEditFields,decodeCalendarForm,snapshotCalendarForm} from './calendar-form-draft';
+import {isRecord} from '../lib/parse.ts';
 import {reminderTarget} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
 type Form=Record<string,any>;
 const fail=()=>{throw Error('Saved calendar edits need recovery.');};
 const text=(value:any,max=256)=>{if(typeof value!=='string'||!value||value.length>max||value.includes('\0'))fail();return value as string;};
-const only=(value:any,keys:string[])=>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!keys.includes(k)))fail();};
+const only=(value:any,keys:string[])=>{if(!isRecord(value)||Object.keys(value).some(k=>!keys.includes(k)))fail();};
 export function snapshotCalendarEdit(form:Form){return {...snapshotCalendarForm(form),id:form.id,alphaCalendarId:form.alphaCalendarId,alphaReminderId:form.alphaReminderId,expected:form.expected,reminderEditTarget:form.reminderEditTarget,reminderEditSchedule:form.reminderEditSchedule};}
 export function encodeCalendarEdit(form:Form,anchor=new Date()){
  const editable=calendarEditFields(form,anchor);let target:Form;

@@ -1,6 +1,10 @@
-import {productionCloud, stagingCloud} from './cloud-deployment.generated.ts';
+import {productionCloud, stagingCloud as stagingAuthority} from './cloud-deployment.generated.ts';
 import {managedServiceRequest} from './managed-service-routes.ts';
 import {Capacitor} from '@capacitor/core';
+// Staging exists only in test-mocks builds, development serving and Node contract tests (no Vite).
+// The condition is written out here, not imported: Vite replaces import.meta.env before the bundler
+// links modules, so a product build drops this module's staging import whichever chunk holds it.
+const stagingCloud=import.meta.env===undefined||import.meta.env.VITE_ELIZA_DEV_ALLOW_TEST_MOCKS==='1'||import.meta.env.DEV===true?stagingAuthority:undefined;
 /** Explicit loopback development host with real Cloud services; never enabled in built artifacts. */
 export const browserCloudResidentEnabled=import.meta.env!==undefined&&import.meta.env.DEV===true&&import.meta.env.VITE_ALPHA_CLOUD_RESIDENT==='1'&&!Capacitor.isNativePlatform();
 export const browserCloudResidentEnvironment=browserCloudResidentEnabled&&import.meta.env.VITE_ALPHA_CLOUD_ENVIRONMENT==='staging'?'staging':'production';
@@ -21,21 +25,21 @@ export async function browserResidentCall(operation:'residentOwn'|'residentCloud
  return result;
 }
 
-export interface BrowserProviderStatus {
+interface BrowserProviderStatus {
  mode:'cloud'|'own';revision:string;persistence:'host-session';
  keys:{text:{configured:boolean};voice:{configured:boolean}};
  provider:'cerebras'|'elizacloud';configured:boolean;selected:boolean;voiceConfigured:boolean;
  model:string;attachable:boolean;
 }
-export interface BrowserProviderReveal {key:'text'|'voice';value:string;revision:string}
-export interface BrowserProviderInputMap {
+interface BrowserProviderReveal {key:'text'|'voice';value:string;revision:string}
+interface BrowserProviderInputMap {
  residentProviderSelect:{mode:'cloud'|'own';expectedRevision:string};
  residentProviderEdit:{textKey?:string;voiceKey?:string;expectedRevision:string};
  residentProviderRemove:{key:'text'|'voice';expectedRevision:string};
  residentProviderReveal:{key:'text'|'voice';expectedRevision:string};
 }
-export type BrowserProviderOperation=keyof BrowserProviderInputMap;
-export type BrowserProviderResultMap={
+type BrowserProviderOperation=keyof BrowserProviderInputMap;
+type BrowserProviderResultMap={
  [Operation in BrowserProviderOperation]:Operation extends 'residentProviderReveal'?BrowserProviderReveal:BrowserProviderStatus;
 };
 /** Explicit local-owner key management. Absent edit fields stay absent. Only
@@ -75,7 +79,7 @@ export async function browserProviderCall<Operation extends BrowserProviderOpera
 function browserCloudSignInHandOff(input:string,method:string,hasBody:boolean):boolean {
  if(!browserCloudResidentEnabled)return false;
  let url:URL;try{url=new URL(input);}catch{return false;}
- const api=browserCloudResidentEnvironment==='staging'?stagingCloud.api:productionCloud.api;
+ const api=browserCloudResidentEnvironment==='staging'?stagingCloud?.api:productionCloud.api;
  if(url.origin!==api||url.username||url.password||url.hash||url.search)return false;
  if(method==='POST')return url.pathname==='/api/auth/cli-session';
  return method==='GET'&&!hasBody&&/^\/api\/auth\/cli-session\/[0-9a-fA-F-]{36}$/.test(url.pathname);
@@ -85,7 +89,7 @@ export function browserCloudManagedServiceAllowed(input:string,method:string,has
  if(browserCloudSignInHandOff(input,method,hasBody))return true;
  if(browserCloudResidentEnabled&&browserCloudResidentEnvironment==='staging'){
   let url:URL;try{url=new URL(input);}catch{return false;}
-  if(url.origin!==stagingCloud.api)return false;
+  if(url.origin!==stagingCloud?.api)return false;
   // Policy comparison only. The transport still dispatches the original staging URL.
   url.hostname=new URL(productionCloud.api).hostname;
   return managedServiceRequest(url.href,method,hasBody);

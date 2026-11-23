@@ -1,0 +1,14 @@
+specs/quint/legacy/core/README.md
+specs/quint/legacy/core/check-action-settlement-refinement.mjs
+specs/quint/legacy/core/check-approval-service-refinement.mjs
+specs/quint/legacy/core/check-configurations.mjs
+specs/quint/legacy/core/check-embedding-sql-refinement.mjs
+specs/quint/legacy/core/check-fact-write-dedupe-refinement.mjs
+specs/quint/legacy/core/check-interaction-session-refinement.mjs
+specs/quint/legacy/core/check-interactive-task-refinement.mjs
+specs/quint/legacy/core/check-interactive-task-traces.mjs
+specs/quint/legacy/core/check-plugin-connector-custody.mjs
+specs/quint/legacy/core/check-plugin-lifecycle-refinement.mjs
+specs/quint/legacy/core/check-provider-execution-refinement.mjs
+specs/quint/legacy/core/check-room-handler-queue-refinement.mjs
+specs/quint/legacy/core/check-runtime-lifecycle-refinement.mjs

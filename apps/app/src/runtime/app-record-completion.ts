@@ -3,7 +3,7 @@ import { normalizeEffectReceipts } from '../../../../.eliza/client-features/pack
 export const NOTES_INVALIDATED_EVENT = 'alpha:canonical-notes-invalidated';
 export const CALENDAR_INVALIDATED_EVENT = 'alpha:canonical-calendar-invalidated';
 
-export interface AppRecordInvalidation {
+interface AppRecordInvalidation {
   event: typeof NOTES_INVALIDATED_EVENT | typeof CALENDAR_INVALIDATED_EVENT;
   revision?: number;
 }

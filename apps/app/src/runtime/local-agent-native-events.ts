@@ -1,9 +1,7 @@
-/** Live, voice-only native events. No replay, persistence or automatic resubscription. */
-export interface NativeVoiceEventPort {
- addListener(name: 'alphaVoiceEvent', listener: (value: any) => void): Promise<{remove(): Promise<void>}>;
- subscribeVoiceEvents(input: {subscriptionId: string; ownerId: string}): Promise<{subscriptionId: string}>;
- unsubscribeVoiceEvents(input: {subscriptionId: string}): Promise<unknown>;
-}
+import type {NativeVoiceEventPort} from '../native/agent';
+export type {NativeVoiceEventPort};
+/** One `alphaVoiceEvent` frame as native sends it; every field is checked before use. */
+type VoiceEventFrame = {subscriptionId?: unknown; type?: unknown; event?: {type?: unknown; stream?: unknown} | null} | null | undefined;
 export function subscribeNativeVoiceEvents(port: NativeVoiceEventPort, ownerId: string, listener: (envelope: unknown) => void): () => void {
  const subscriptionId=crypto.randomUUID();
  let active=true,dispatched=false,remove:(()=>Promise<void>)|undefined;
@@ -11,7 +9,8 @@ export function subscribeNativeVoiceEvents(port: NativeVoiceEventPort, ownerId: 
  const close=()=>{if(!active)return;active=false;if(remove)quiet(remove());if(dispatched)quiet(port.unsubscribeVoiceEvents({subscriptionId}));};
  void (async()=>{
   try{
-   const handle=await port.addListener('alphaVoiceEvent',value=>{
+   const handle=await port.addListener('alphaVoiceEvent',raw=>{
+    const value=raw as VoiceEventFrame;
     if(!active||value?.subscriptionId!==subscriptionId)return;
     if(value.type==='end'){close();return;}
     const envelope=value.event;

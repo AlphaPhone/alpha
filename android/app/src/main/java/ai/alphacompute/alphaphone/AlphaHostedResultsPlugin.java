@@ -4,8 +4,6 @@ import ai.eliza.plugins.notifications.NoticeOwner;
 import android.Manifest;
 import android.app.*;
 import android.content.*;
-import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import com.getcapacitor.*;
@@ -33,9 +31,9 @@ public class AlphaHostedResultsPlugin extends Plugin {
  private void channel(){new HostedNoticePoster(getContext());}
  private boolean enabled(){return new HostedNoticePoster(getContext()).allowed();}
  private void sourceForeground()throws Exception {
-  java.util.concurrent.CountDownLatch checked=new java.util.concurrent.CountDownLatch(1);java.util.concurrent.atomic.AtomicBoolean admitted=new java.util.concurrent.atomic.AtomicBoolean();
+  CountDownLatch checked=new CountDownLatch(1);java.util.concurrent.atomic.AtomicBoolean admitted=new java.util.concurrent.atomic.AtomicBoolean();
   android.os.Handler main=new android.os.Handler(android.os.Looper.getMainLooper());Runnable check=()->{try{admitted.set(getActivity()!=null&&!getActivity().isFinishing()&&!getActivity().isDestroyed()&&getActivity().hasWindowFocus()&&!getContext().getSystemService(android.app.KeyguardManager.class).isDeviceLocked());}finally{checked.countDown();}};
-  if(!main.post(check)||!checked.await(5,java.util.concurrent.TimeUnit.SECONDS)){main.removeCallbacks(check);throw new SecurityException("Phone review unavailable");}if(!admitted.get())throw new SecurityException("Review sources on the unlocked phone");
+  if(!main.post(check)||!checked.await(5,TimeUnit.SECONDS)){main.removeCallbacks(check);throw new SecurityException("Phone review unavailable");}if(!admitted.get())throw new SecurityException("Review sources on the unlocked phone");
  }
  @PluginMethod public void nativeSourceIdentity(PluginCall call){submit(call,()->{try{String session=call.getString("sessionId");if(session==null)throw new SecurityException();sourceForeground();call.resolve(new JSObject(HostedDelivery.get(getContext()).nativeSource(session,(binding,guard)->binding).toString()));}catch(Exception unavailable){call.reject("Native source identity unavailable");}});}
  @PluginMethod public void nativeSourceConsent(PluginCall call){submit(call,()->{try{
@@ -43,11 +41,11 @@ public class AlphaHostedResultsPlugin extends Plugin {
   boolean revoke=Boolean.TRUE.equals(call.getBoolean("revoke"));JSONObject result=new NativeDigestHost(getContext()).consent(call.getString("sessionId"),call.getString("sourceId"),revoke?null:call.getObject("scope"),revoke?0:call.getLong("expiresAt",0L),revoke,call.getObject("expectedBinding"),this::sourceForeground);call.resolve(new JSObject(result.toString()));
  }catch(Exception unavailable){call.reject("Native source consent could not be confirmed. Refresh the current connection.");}});}
  @PluginMethod public void beginBackground(PluginCall call){submit(call,()->{try{HostedDelivery.get(getContext()).begin(call.getString("attemptId"));call.resolve();}catch(Exception error){call.reject("Background reservation unavailable");}});}
- @PluginMethod public void cancelBackground(PluginCall call){java.util.concurrent.CompletableFuture.runAsync(()->{try{HostedDelivery.get(getContext()).cancel(call.getString("attemptId"));call.resolve();}catch(Exception error){call.reject("Background reservation could not be cancelled");}});}
+ @PluginMethod public void cancelBackground(PluginCall call){CompletableFuture.runAsync(()->{try{HostedDelivery.get(getContext()).cancel(call.getString("attemptId"));call.resolve();}catch(Exception error){call.reject("Background reservation could not be cancelled");}});}
  @PluginMethod public void configureBackground(PluginCall call){submit(call,()->{try{call.resolve(new JSObject(HostedDelivery.get(getContext()).configure(call.getData()).toString()));}catch(Exception error){call.reject("Background delivery needs a verified connection");}});}
- @PluginMethod public void disableBackground(PluginCall call){java.util.concurrent.CompletableFuture.runAsync(()->{try{HostedDelivery.get(getContext()).disableSession(call.getString("sessionId"));call.resolve();}catch(Exception error){call.reject("Background delivery could not be paused");}});}
+ @PluginMethod public void disableBackground(PluginCall call){CompletableFuture.runAsync(()->{try{HostedDelivery.get(getContext()).disableSession(call.getString("sessionId"));call.resolve();}catch(Exception error){call.reject("Background delivery could not be paused");}});}
  @PluginMethod public void syncInbox(PluginCall call){submit(call,()->{try{HostedDelivery d=HostedDelivery.get(getContext());JSObject out=new JSObject();out.put("entries",d.sync(d.generation(call.getString("sessionId"))));call.resolve(out);}catch(Exception error){call.reject("Result sync unavailable; saved history is unchanged");}});}
- @PluginMethod public void setBackgroundPolling(PluginCall call){java.util.concurrent.CompletableFuture.runAsync(()->{try{Boolean enabled=call.getBoolean("enabled");if(enabled==null)throw new IllegalArgumentException();HostedDelivery.get(getContext()).polling(enabled);status(call);}catch(Exception error){call.reject("Background preference could not be saved");}});}
+ @PluginMethod public void setBackgroundPolling(PluginCall call){CompletableFuture.runAsync(()->{try{Boolean enabled=call.getBoolean("enabled");if(enabled==null)throw new IllegalArgumentException();HostedDelivery.get(getContext()).polling(enabled);status(call);}catch(Exception error){call.reject("Background preference could not be saved");}});}
  @PluginMethod public void inboxHistory(PluginCall call){submit(call,()->{try{JSObject out=new JSObject();out.put("entries",HostedDelivery.get(getContext()).history(call.getString("sessionId")));call.resolve(out);}catch(Exception error){call.reject("Saved result history unavailable");}});}
  /** Arms (or clears) the redacted renewal notice for a source bound to a scheduled loop. Only an identity and expiry cross the bridge. */
  @PluginMethod public void scheduleSourceRenewal(PluginCall call){submit(call,()->{try{sourceForeground();Long expiresAt=call.getLong("expiresAt");if(expiresAt==null)throw new IllegalArgumentException();String key=SourceRenewalHost.get(getContext()).arm(call.getObject("selection"),expiresAt,System.currentTimeMillis());HostedDeliveryWorker.scheduleRenewal(getContext(),key,expiresAt,System.currentTimeMillis());call.resolve();}catch(Exception error){call.reject("Renewal reminder unavailable; the in-app notice remains");}});}
@@ -82,7 +80,7 @@ public class AlphaHostedResultsPlugin extends Plugin {
  @PluginMethod public void pendingSourceRenewal(PluginCall call){submit(call,()->{try{sourceForeground();retryCaptures();call.resolve(new JSObject(SourceRenewalHost.get(getContext()).pending(System.currentTimeMillis()).toString()));}catch(Exception unavailable){call.reject("Renewal source unavailable");}});}
  @PluginMethod public void settleSourceRenewal(PluginCall call){submit(call,()->{try{sourceForeground();SourceRenewalHost.get(getContext()).settle(call.getString("token",""),Boolean.TRUE.equals(call.getBoolean("discard",false)),System.currentTimeMillis());call.resolve();}catch(Exception stale){call.reject("Renewal source changed");}});}
  private void captureRenewal(Intent intent){if(intent==null||(!HostedNoticePoster.RENEW_ACTION.equals(intent.getAction())&&!HostedNoticePoster.ASK_RENEW_ACTION.equals(intent.getAction()))||intent.getData()==null)return;String data=intent.getData().toString();if(!data.startsWith(HostedNoticePoster.RENEW_PREFIX))return;uncommittedRenewal=intent;submit(null,()->captureRenewalNow(intent));}
- private void captureRenewalNow(Intent intent){if(intent.getData()==null)return;String key=intent.getData().toString().substring(HostedNoticePoster.RENEW_PREFIX.length());boolean question=HostedNoticePoster.ASK_RENEW_ACTION.equals(intent.getAction());try{SourceRenewalHost.get(getContext()).capture(key,question,System.currentTimeMillis());intent.setData(null);if(uncommittedRenewal==intent)uncommittedRenewal=null;notifyListeners("renewSource",new JSObject(),true);}catch(Exception unavailable){}}
+ private void captureRenewalNow(Intent intent){if(intent.getData()==null)return;String key=intent.getData().toString().substring(HostedNoticePoster.RENEW_PREFIX.length());boolean question=HostedNoticePoster.ASK_RENEW_ACTION.equals(intent.getAction());try{SourceRenewalHost.get(getContext()).capture(key,question,System.currentTimeMillis());intent.setData(null);if(uncommittedRenewal==intent)uncommittedRenewal=null;notifyListeners("renewSource",new JSObject(),true);}catch(Exception unavailable){/* Kept for a retry; never expose a source from an uncommitted tap. */}}
  /** Runs on the io worker. */
  private void retryCaptures(){Intent result=uncommittedTap,renewal=uncommittedRenewal;if(result!=null)captureNow(result);if(renewal!=null)captureRenewalNow(renewal);}
  @Override public void load(){channel();capture(getActivity().getIntent());captureRenewal(getActivity().getIntent());}

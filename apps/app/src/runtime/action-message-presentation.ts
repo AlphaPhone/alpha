@@ -140,18 +140,10 @@ export function projectActionMessages(rendered: Message[], source: Message[]): M
 }
 
 /*
- * Upstream escalation notices in Alpha's chat.
- *
- * The agent's escalation service posts a system notice into client chat when the same error
- * repeats (`packages/agent/src/runtime/error-escalation.ts`), and re-posts it on every agent start
- * and retry, each as a new stored message (`client-chat-sender.ts`). Conversation history returns
- * those rows as ordinary assistant text, so the text equal to pinned `systemNoticeText()`
- * (`packages/core/src/types/system-notice.ts`) is the only marker a runtime-error row carries.
- *
- * At most the latest notice is shown, and only until an ordinary agent reply follows it. A
- * runtime-error notice uses Alpha's words, not the upstream host-operator copy ("Check the
- * connected host's diagnostics"): it says a reply may not arrive only when it arrived while the
- * owner's latest message was unanswered; otherwise it says calmly that part of the agent is down.
+ * Upstream escalation notices in Alpha's chat. The agent stores each notice as ordinary assistant
+ * text, so text equal to the pinned `systemNoticeText()` is the only marker a notice row carries.
+ * At most the latest notice is shown, only until an ordinary agent reply follows it, and always in
+ * Alpha's words rather than the upstream host-operator copy.
  */
 export type SystemNoticeKind = 'model-unavailable' | 'runtime-error' | 'model-and-runtime-error';
 
@@ -317,7 +309,7 @@ export function mapsChatText(text:string){
  * their own lines counts, so prose that mentions the tag stays as written. A block with valid
  * JSON naming string runId and workflowId becomes a run card; a malformed or unterminated block
  * is removed and never shown or spoken raw. */
-export type WorkflowRunCard={workflowId:string;runId:string;title:string};
+type WorkflowRunCard={workflowId:string;runId:string;title:string};
 // String.replace resets a global pattern's lastIndex, so one shared pattern is safe. The body is
 // tried empty first, so an empty block ends at its own closing tag, not at the end of the reply.
 const blockPattern=/(^|\n)[ \t]*\[WORKFLOW\][ \t]*(?:\r?\n([\s\S]*?))??(?:\r?\n[ \t]*(\[\/WORKFLOW\])[ \t]*(?=\r?\n|$)|$)/g;

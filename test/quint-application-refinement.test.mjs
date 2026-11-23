@@ -4,7 +4,7 @@ import {scaledTimeout} from '../specs/quint/refinement/timeouts.mjs';
 import {startupPermissions, callbackLanding, preferences, browserSession, permanentVoiceDeletion, draftDispatch} from '../specs/quint/refinement/application/portable.mjs';
 import {application, assistantConversation} from '../specs/quint/refinement/application/clients.mjs';
 import {durableStore} from '../specs/quint/refinement/application/storage.mjs';
-import {notesLifecycle, calendarPresentation, credentialVault, permissionWalkthrough} from '../specs/quint/refinement/application/contracts.mjs';
+import {calendarPresentation, credentialVault, permissionWalkthrough} from '../specs/quint/refinement/application/contracts.mjs';
 import {filesAndSharing, notificationCollection, developmentHost} from '../specs/quint/refinement/application/boundaries.mjs';
 import {checkShellCoordinator} from '../specs/quint/refinement/application/shell-coordinator.mjs';
 import {checkCompletedViewDelivery} from '../specs/quint/refinement/application/completed-view-delivery.mjs';
@@ -14,7 +14,7 @@ import {checkModalScrimOwnership} from '../specs/quint/refinement/application/mo
 // Application source campaigns that share adapters across several models. Each runs the product
 // source against its model's transitions; a model with a single adapter has its own test file.
 for (const check of [application, assistantConversation, startupPermissions, callbackLanding, preferences, browserSession,
-  permanentVoiceDeletion, draftDispatch, durableStore, notesLifecycle, calendarPresentation, credentialVault,
+  permanentVoiceDeletion, draftDispatch, durableStore, calendarPresentation, credentialVault,
   permissionWalkthrough, filesAndSharing, notificationCollection, developmentHost, checkShellCoordinator,
   checkCompletedViewDelivery, filesPreview, checkModalScrimOwnership]) {
   test(`${check.name} source observations match its Quint model`, {timeout: scaledTimeout(600000)}, async () => {

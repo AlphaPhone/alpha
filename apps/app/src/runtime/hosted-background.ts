@@ -2,15 +2,8 @@ import { registerPlugin } from '../platform-plugins';
 import { isAndroid } from '../native';
 import { parseDigestResult, type DigestResult, type HostedDigestProtocol } from './hosted-digests';
 import type { ResultInbox } from './digest-inbox';
-interface NativeInbox {
- beginBackground(input:{attemptId:string}):Promise<void>;
- cancelBackground(input:{attemptId:string}):Promise<void>;
- configureBackground(input:Record<string,unknown>):Promise<{generation:string;scope:string}>;
- disableBackground(input?:{sessionId:string}):Promise<void>;
- syncInbox(input:{sessionId:string}):Promise<{entries:unknown[]}>;
- inboxHistory(input:{sessionId:string}):Promise<{entries:unknown[]}>;
-}
-const native=registerPlugin<NativeInbox>('AlphaHostedResults');
+import type { AlphaHostedResultsPlugin } from '../native/alpha-hosted-results.ts';
+const native=registerPlugin<Pick<AlphaHostedResultsPlugin,'beginBackground'|'cancelBackground'|'configureBackground'|'disableBackground'|'syncInbox'|'inboxHistory'>>('AlphaHostedResults');
 const configuring=new Map<AbortController,string>();
 export async function pauseHostedBackground(sessionId?:string){
  for(const [controller,session] of configuring)if(!sessionId||sessionId===session)controller.abort();

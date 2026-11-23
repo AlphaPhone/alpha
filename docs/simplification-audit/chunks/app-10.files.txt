@@ -1,0 +1,17 @@
+apps/app/src/prototype/automations-adapter.ts
+apps/app/src/prototype/automations.css
+apps/app/src/prototype/browser-adapter.ts
+apps/app/src/prototype/browser-camera.ts
+apps/app/src/prototype/browser-external-handoff.ts
+apps/app/src/prototype/calendar-adapter.ts
+apps/app/src/prototype/calendar-approval-adapter.ts
+apps/app/src/prototype/calendar-approval-fields.ts
+apps/app/src/prototype/calendar-approval-review.ts
+apps/app/src/prototype/calendar-availability-review.ts
+apps/app/src/prototype/calendar-confirmation.ts
+apps/app/src/prototype/calendar-days.ts
+apps/app/src/prototype/calendar-edit-draft-adapter.ts
+apps/app/src/prototype/calendar-form-draft-adapter.ts
+apps/app/src/prototype/calendar-form-inputs.ts
+apps/app/src/prototype/calendar-interval-presentation.ts
+apps/app/src/prototype/calendar-month-focus.ts

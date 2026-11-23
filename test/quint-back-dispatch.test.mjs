@@ -26,7 +26,7 @@ import {shellCore} from '../specs/quint/refinement/application/shell-core-fixtur
 const adapter = readFileSync('apps/app/src/prototype/agent-adapter.ts', 'utf8');
 const slice = (from, to) => { const a = adapter.indexOf(from), b = adapter.indexOf(to, a); assert.ok(a >= 0 && b > a, from); return stripTypeScriptTypes(adapter.slice(a, b)); };
 const pageCode = `${slice('  function modalPanels(){', '  // Native Back reaches')}
-${slice('  function updateBackAvailability(', '\n  const notesLeave')}
+${slice('  function updateBackAvailability(', '\n  const originalMount')}
 globalThis.updateBackAvailability = updateBackAvailability;
 globalThis.listen = function () { ${slice('this.backHandler = (event: Event) => {', 'this.selectionHandler =')} };`;
 

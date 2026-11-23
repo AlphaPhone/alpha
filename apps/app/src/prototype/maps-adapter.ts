@@ -1,7 +1,7 @@
 import {createMapsNotificationOpen} from '../runtime/maps-notification-open';
 import {agentMapsShowable} from '../maps/agent-present';
 import {mapsChatText} from '../runtime/action-message-presentation';
-import {BackgroundNavigation,type NavigationBridge} from '../maps/background-navigation';
+import {BackgroundNavigation} from '../maps/background-navigation';
 import {registerPlugin} from '../platform-plugins';
 import {DailyApps} from '../daily';
 import {mapsEventReturnOffered,mapsEventStillThere,type MapsEventOrigin} from '../runtime/maps-event-return';
@@ -20,13 +20,6 @@ import { describeMapsDisclosure } from '../ui/maps/cloud-provider';
 import { MAPS_CONNECT_PROVIDER, MAPS_CONNECT_PROVIDER_FOR_ROUTE, mapsStartFailureText } from '../ui/maps/maps-messages';
 import googleMapsLogo from '../maps/google-maps-attribution.svg?url';
 import { SavedPlaces } from '../maps/saved-places';
-
-/** Compact recipients at search; the information panel retains their full roles. */
-function searchRecipients(disclosure: CloudMapsDisclosure | undefined): string {
-  if (!disclosure) return '';
-  const names = [...new Set(disclosure.recipients.map(recipient => recipient.name))];
-  return names.length ? `Maps → ${names.join(', ')}` : '';
-}
 import { NativeMapsLocation, locationPermissionGranted } from '../maps/native-location';
 import { bindAgentNavigation, keepCloudMapsCoverage, residentMapsNavigationPort } from '../maps/agent-navigation';
 import { publishMapsSelection, clearMapsSelection } from '../maps/agent-context';
@@ -38,6 +31,9 @@ import { cloudServiceName } from '../runtime/cloud-protocol';
 import { coordinate, place, type Place, type TravelMode } from '../maps/contracts';
 import type { MapsCardPlace } from '../ui/components/chat/message-maps-parser';
 import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
+import type { AlphaDevicePlugin } from '../native/alpha-device';
+import type { AlphaMapsTransportPlugin } from '../native/alpha-maps-transport';
+import type { AlphaCalendarPlugin } from '../native/alpha-calendar';
 import {copySelectedText} from '../runtime/text-share';
 import {isMvpView} from './mvp-features';
 
@@ -48,6 +44,12 @@ const NORTH = 'M12 3l6 18-6-4-6 4z';
 const CLOCK = 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 7v5l3 2';
 const locationText = (text: string) => text === 'Your location' ? 'My location' : /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(text.trim()) ? 'Selected location' : text;
 const mapsConnected = () => mapsConnection().config.status === 'configured';
+/** Compact recipients at search; the information panel retains their full roles. */
+function searchRecipients(disclosure: CloudMapsDisclosure | undefined): string {
+  if (!disclosure) return '';
+  const names = [...new Set(disclosure.recipients.map(recipient => recipient.name))];
+  return names.length ? `Maps → ${names.join(', ')}` : '';
+}
 
 /**
  * Alpha's Maps screen: the shared plugin-maps screen controller rendered in the
@@ -57,7 +59,7 @@ const mapsConnected = () => mapsConnection().config.status === 'configured';
  * Product builds use Eliza Cloud Maps; the regional gateway is a test-mocks prototype.
  */
 export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views: Record<string, Bag>): () => void {
-  const device=registerPlugin<{openSettings(input:{page:string}):Promise<unknown>}>('AlphaDevice');
+  const device=registerPlugin<Pick<AlphaDevicePlugin,'openSettings'>>('AlphaDevice');
   const module = views.maps; if (!module) return () => {};
   const original = { render: module.render, back: module.back, onLeave: module.onLeave, reply: module.reply, suggestions: module.suggestions, ongoing: module.ongoing };
   let api: Bag | undefined, disposed=false, renders=0,placeShown=false;
@@ -131,7 +133,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     // Navigation speech is deferred; the assistant owns its separate speech lifecycle.
     () => false,
   );
-  const navigationTransport=registerPlugin<NavigationBridge & {consumeNavigationOpen():Promise<{open:boolean}>;clearNavigationOpen():Promise<unknown>;navigationArrived(input:{title:string;text:string}):Promise<{shown:boolean}>}>('AlphaMapsTransport');
+  const navigationTransport=registerPlugin<AlphaMapsTransportPlugin>('AlphaMapsTransport');
   const background=new BackgroundNavigation(navigationTransport,()=>Capacitor.isNativePlatform());
   // Alpha's navigation sheet has no Reroute control; the shared off-route copy names one. Point only
   // at the End control that remains (the screen-off notification keeps its own Stop action).
@@ -203,7 +205,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   // Explicit return to the event whose location opened Maps. It checks that exact event still exists,
   // restores Calendar on it and pops the cross-app stack. It never sets a Maps query.
   let returningToEvent: {raw: unknown; abort: AbortController} | undefined;
-  const calendarPlugin=registerPlugin<{list(input:{begin:number;end:number}):Promise<{status:string;events?:unknown[]}>}>('AlphaCalendar');
+  const calendarPlugin=registerPlugin<Pick<AlphaCalendarPlugin,'list'>>('AlphaCalendar');
   const returnIsCurrent = (currentApi: Bag, raw: unknown) =>
     !disposed && !document.hidden && !shell?.pageSuspended && currentApi.isActive()
       && currentApi.get('maps').fromEvent === raw && !!mapsEventReturnOffered(raw, api?.S.stack, screen.isNavigating());
@@ -483,7 +485,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
         screen.retryMap();
       },
       mode:view.mode==='navigation'?'nav':view.mode==='directions'?'dir':view.mode, isBase:view.mode==='base',isResults,isPlace,isDir:view.mode==='directions',isNav,
-      showSearch:view.showSearch, showRec:!isNav||view.map.overlay.follow===false, grid: '', major: '', fwy: '', water: '', parks: '', rwy: '', routeD: '', doneD: '', hasRoute: false, pins: [], labels: [], meCss: 'display:none;',
+      showSearch:view.showSearch, showRec:!isNav||view.map.overlay.follow===false,
       q: originDraft??queryDraft??view.query, hasQ: !!(originDraft??queryDraft??view.query), searchIcon:view.searchLead==='back'?'M15 5l-7 7 7 7':data.searchIcon, searchLabel: view.searchLead === 'back' ? 'Back' : 'Search', leadIsSearch: view.searchLead !== 'back',
       searchLead: () => {retireSearch();screen.searchLead();},
       onQ: (event: Event) => schedule(view.mode==='origin',(event.target as HTMLInputElement).value),
@@ -576,8 +578,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   }
   // The shell instance opens Maps for an agent request, exactly as a user's open would.
   let shell: Bag | undefined;
+  // The shell state of an unlocked, visible launcher with no shade, chooser or assistant window over it.
+  const idleLauncher=()=>{
+    const state=shell?.S?.();
+    return !disposed&&!document.hidden&&!!shell?.live&&!!state&&state.screen==='home'&&!state.secure&&!state.shade&&!shell.pageSuspended&&
+      !shell.props?.assistantSurface&&!connectionController.getSnapshot().open?state:undefined;
+  };
   const notificationOpen=createMapsNotificationOpen({
-    ready:()=>{const state=shell?.S?.();return Capacitor.isNativePlatform()&&!disposed&&!!shell?.live&&!document.hidden&&!shell.pageSuspended&&!shell.props?.assistantSurface&&!connectionController.getSnapshot().open&&state?.screen==='home'&&!state.secure&&!state.shade;},
+    ready:()=>Capacitor.isNativePlatform()&&!!idleLauncher(),
     consume:()=>navigationTransport.consumeNavigationOpen(),clear:()=>navigationTransport.clearNavigationOpen(),
     open:()=>shell!.openView('maps',{keepState:true}),
   });
@@ -606,10 +614,11 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   surface.planFrom=origin=>{retireSearch();return agentPlanFrom(origin);};
   surface.reroute=origin=>{retireSearch();return agentReroute(origin);};
   surface.stop=()=>{retireSearch();return agentStop();};
+  // Eliza Cloud Maps in the launcher renderer only; never the regional gateway or the assistant window.
+  const launcherCloudMaps=()=>!regionalMapsConfigured&&!shell?.props?.assistantSurface&&!document.documentElement.classList.contains('alpha-assistant-surface');
   // Offered to the agent only while Eliza Cloud Maps is installed for the signed-in account.
   const agentNavigation=bindAgentNavigation({
-    // Eliza Cloud Maps in the launcher renderer only; never the regional gateway or the assistant window.
-    enabled:()=>!regionalMapsConfigured&&!shell?.props?.assistantSurface&&!document.documentElement.classList.contains('alpha-assistant-surface'),
+    enabled:launcherCloudMaps,
     installation:()=>{const coverage=cloudMapsCoverage();return coverage&&{providerId:coverage.providerId,attribution:coverage.attribution};},
     connection:mapsConnection,onChange:onMapsConnectionChange,surface,port:residentMapsNavigationPort,
   });
@@ -617,7 +626,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   // before Maps is opened. A new account gets coverage only; its routes still need a new search.
   const stopSearchConnection=onMapsConnectionChange(()=>{retireSearch();recentSearches=[];});
   const stopCoverage=keepCloudMapsCoverage({
-    enabled:()=>!regionalMapsConfigured&&!shell?.props?.assistantSurface&&!document.documentElement.classList.contains('alpha-assistant-surface'),
+    enabled:launcherCloudMaps,
     ready:()=>!!connectionController.getSnapshot().session,
     account:()=>connectionController.getCloudClient(),
     initialize:readCloudMaps,

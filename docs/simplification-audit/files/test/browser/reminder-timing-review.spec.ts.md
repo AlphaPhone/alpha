@@ -1,0 +1,17 @@
+# test/browser/reminder-timing-review.spec.ts
+- Lines: 107 | Kind: Playwright, chromium, `page.clock` + UTC; ~19 tests. About half drive Calendar New/Edit event → Reminders → alert chips → Save; the other half call `DailyApps` plugin methods, the upstream `validateReminderResult` (via `/@fs/.eliza/...reminder-contract.ts`) or construct `DeviceActions` directly; failures injected by patching `BrowserDaily.prototype` | Verdict: **MERGE** 8 UI cases into `journeys/reminders.spec.ts` ("timing and alerts"); **DELETE** the API-level cases (or move 2 to `test/integration/browser-daily.test.mjs`)
+- Covers: a reviewed alert lead (10 min / None) is stored as `at`/`dueAt`/`alertMinutes` and shown after reload; no-alert reminders keep no notification through edits and completion (one-time and daily); snooze keeps the numeric lead; editing a no-alert reminder to 10 min re-arms it; lost responses recover without replay; an old native without timing v2 refuses before persistence ("Update required"); late timing admission after navigation dispatches nothing; the editor waits for refresh before showing Complete; API cases: v1 "legacy" targets, v2 downgrade refusal, forged v2 marker, partial timing, peer negotiation gating v2 proposals. Duplicates: `reminder-v2-assistant.spec.ts` (agent v1/v2 timing), `reminder-decision-review.spec.ts` (snooze), `reminder-create-review.spec.ts` (lost response), `browser-reminder-recurrence.spec.ts`. Callers/importers: imports `helpers/browser-calendar`, `app-navigation`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 35-36 | T5 / D13 | Imports the upstream `reminder-contract.ts` through a computed `/@fs` path to validate the result. | Delete the contract call; assert the snoozed time in the UI. | none |
+| 2 | 52-59 | T3 / T6 | Constructs `DeviceActions` with eight positional fakes to test peer negotiation. | Delete; negotiation is covered end to end by `reminder-v2-assistant` (`older-peer`). | Low |
+| 3 | 47-51, 60-63, 71-74 | T6 / A1 (owner check) | Plugin-API cases on "legacy" (v1, no `timingVersion`) targets, downgrade and forged markers. If v1 timing records cannot exist on a fresh install (the agent is the on-device resident of the same build), these guard a legacy format. | Owner question; if v1 is legacy, delete together with the v1 code path. Otherwise move "partial timing refused" and "forged marker refused" to `test/integration/browser-daily.test.mjs`. | Medium |
+| 4 | 6-22, 27-32, 33-41, 42-46, 75-86, 88-107 | – | Unique UI coverage of alert leads and timing admission. | Carry: alert lead preserved (both), no-alert completion (repeat on/off), snooze keeps lead, no-alert → 10 min, one lost-response case, older native refusal (`missing` only), late admission after navigation, editor waits for refresh. | none |
+| 5 | 14-15, 26 | T6 | Rows read with `reminderDocument.readRaw()` and attached as JSON. | Assert the detail view after reload; drop the attachment. | Low |
+| 6 | 23-25 | D8 | `create()` is one 600-character line. | Make it a named fixture helper `createReminder(page,{alert,repeat})` in `harness/plugins/calendar.ts`. | none |
+
+## Proposed end state
+A "timing and alerts" section of `journeys/reminders.spec.ts` with eight UI steps on a shared `createReminder` helper. API-level
+cases are deleted or, after the owner answers the v1 question, two of them move to the browser-daily integration test.

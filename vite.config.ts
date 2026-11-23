@@ -7,9 +7,10 @@ import { browserFullReload } from './scripts/browser-full-reload.ts';
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import path from "node:path";
 import { localAgentDevBridge } from './scripts/local-agent-dev-bridge.ts';
+import appConfig from './app.config.json' with { type: 'json' };
 
 // One switch, upstream name (vendor/eliza/packages/app/scripts/dev-ui.ts): "1" opts
 // test-only mocks, fixtures and developer surfaces into a build. Anything else is off.
@@ -17,8 +18,7 @@ import { localAgentDevBridge } from './scripts/local-agent-dev-bridge.ts';
 checkCloudDeployment(fileURLToPath(new URL('.', import.meta.url)));
 const flagOn = process.env.ELIZA_DEV_ALLOW_TEST_MOCKS === '1';
 const viteCacheScope = (process.env.ALPHA_VITE_CACHE_SCOPE ?? '').replace(/[^\w.-]/g, '');
-const appConfig = JSON.parse(readFileSync(fileURLToPath(new URL('./app.config.json', import.meta.url)), 'utf8')) as { version?: unknown };
-const appVersion = process.env.ELIZAOS_VERSION_NAME?.trim() || (typeof appConfig.version === 'string' ? appConfig.version : '0.0.0');
+const appVersion = process.env.ELIZAOS_VERSION_NAME?.trim() || appConfig.version;
 const prototypeDirectory = fileURLToPath(new URL('./apps/app/src/prototype/', import.meta.url));
 const fixturesModule = path.join(prototypeDirectory, 'fixtures.js');
 const emptyFixturesModule = path.join(prototypeDirectory, 'fixtures.empty.js');
@@ -39,7 +39,7 @@ const disabledModulePrefix = '\0alpha-disabled-';
 const srcDirectory = fileURLToPath(new URL('./apps/app/src/', import.meta.url));
 
 /** Production CSP. Dev serve stays relaxed for HMR and the local agent bridge. */
-export function productionContentSecurityPolicy(testMocks: boolean): string {
+function productionContentSecurityPolicy(testMocks: boolean): string {
   // data: and blob: only resolve bytes already in the renderer (saved photos, captures).
   const connect = ["'self'", 'data:', 'blob:', 'https:', ...(testMocks ? ['http://10.0.2.2:*', 'http://127.0.0.1:*', 'http://localhost:*'] : [])];
   return [
@@ -68,8 +68,7 @@ function productionSurface(): Plugin[] {
         const resolved = await this.resolve(source, importer, { ...options, skipSelf: true });
         if (!resolved || resolved.external) return null;
         const id = resolved.id.split('?')[0];
-        // Tolerates a tree where the fixture module has not been extracted yet.
-        if (path.resolve(id) !== fixturesModule || !existsSync(emptyFixturesModule)) return null;
+        if (path.resolve(id) !== fixturesModule) return null;
         return emptyFixturesModule;
       },
     },

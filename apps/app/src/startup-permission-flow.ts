@@ -34,15 +34,13 @@ export function startupFilesAccess(value: unknown) {
 /** Installed names: which OS prompts were already shown, and the Settings reopen event. */
 export const STARTUP_PERMISSIONS_KEY = 'alpha.startup-permissions.v1';
 export const STARTUP_PERMISSIONS_REOPEN = 'alpha:startup-permissions-reopen';
-export type StartupPermissionMemory = WalkthroughMemory;
-type Store = WalkthroughStore;
-const memory = (store: Store | null) => walkthroughMemory(STARTUP_PERMISSIONS_KEY, STARTUP_PERMISSIONS_REOPEN, () => store);
+const memory = (store: WalkthroughStore | null) => walkthroughMemory(STARTUP_PERMISSIONS_KEY, STARTUP_PERMISSIONS_REOPEN, () => store);
 
-export function readStartupPermissionMemory(store: Store | null = defaultStore()): StartupPermissionMemory {
+export function readStartupPermissionMemory(store: WalkthroughStore | null = defaultStore()): WalkthroughMemory {
   return memory(store).read();
 }
 /** Best effort: unavailable storage keeps the in-memory behavior for this session. */
-export function writeStartupPermissionMemory(patch: Partial<StartupPermissionMemory>, store: Store | null = defaultStore()) {
+export function writeStartupPermissionMemory(patch: Partial<WalkthroughMemory>, store: WalkthroughStore | null = defaultStore()) {
   return memory(store).write(patch);
 }
 /** Access setup opens once an account (or saved own Cerebras keys) is in place. A foreground
@@ -68,13 +66,13 @@ export function startupPermissionsActiveCore(facts: StartupConnectionFacts): boo
 }
 /** Settings → "Set up Alpha access" calls this to show the panel again. Prompts already denied
  * stay on the Android-settings path; nothing is requested until the user taps. */
-export function reopenStartupPermissions(store: Store | null = defaultStore()) {
+export function reopenStartupPermissions(store: WalkthroughStore | null = defaultStore()) {
   memory(store).reopen();
 }
 
 /** Requests occur only from an explicit tap; a denial never schedules another prompt, including
  * after a restart when `key` names the persisted attempt. */
-export function createStartupPermissionFlow(bridge: StartupPermissionBridge, options: {key?: string; store?: Store | null} = {}) {
+export function createStartupPermissionFlow(bridge: StartupPermissionBridge, options: {key?: string; store?: WalkthroughStore | null} = {}) {
   const store = options.store === undefined ? defaultStore() : options.store;
   return createPermissionStepFlow(bridge, {attemptKey: options.key, memory: memory(store)});
 }

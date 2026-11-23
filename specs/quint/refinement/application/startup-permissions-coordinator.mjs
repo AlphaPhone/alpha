@@ -202,7 +202,6 @@ function modelObservation(value) {
     's.progress':value.component.progress?.step??-1,
     's.savedProgress':value.durable.effectiveProgress.step,
     's.completed':value.durable.effectiveProgress.status==='completed',
-    's.legacyCompleted':value.durable.effectiveProgress.status==='completed'&&value.durable.effectiveProgress.version<4,
     's.pending':value.refs.actionPending?permissionKeys.indexOf(value.component.target??permissionKeys[value.component.progress?.step??0]):-1,
     's.generation':value.refs.sequence,
     's.ticket':value.ticket,
@@ -443,7 +442,7 @@ export async function runStartupPermissionsCoordinatorRefinement() {
     assert.equal(f.snapshot().ui.heading,'Notifications');
     assert.deepEqual(f.snapshot().dismissal,{cancelPrevented:true,backPrevented:true});
   });
-  for(const count of [4,5,6,7])await scenario(`auth-ready-preserves-completed-${count}`,{progress:{version:count-3,status:'completed',step:count},permissions:{camera:'denied',calendar:'denied',photos:'denied'}},async(f,record)=>{
+  await scenario('auth-ready-preserves-completed-7',{progress:{version:4,status:'completed',step:7},permissions:{camera:'denied',calendar:'denied',photos:'denied'}},async(f,record)=>{
     assert.equal(f.snapshot().ui.visible,false);
     await f.auth();
     record('existing-account-stays-home',action('authSetup',false));

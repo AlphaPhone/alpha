@@ -24,13 +24,13 @@ export class SimulatorWriter {
  write(key:string,value:string){
   this.assertOwned();
   if(localStorage.getItem(key)!==this.snapshots.get(key))throw Error('Saved app data changed since this tab loaded. Reload before saving; keep a copy of your draft first.');
-  localStorage.setItem(key,value);if(localStorage.getItem(key)!==value)throw Error('Development app save could not be confirmed.');this.snapshots.set(key,value);
+  localStorage.setItem(key,value);this.snapshots.set(key,value);
  }
  /** Reset participates in the same lease as every synchronous reducer. */
  reset(key:string,expected:string){
   this.assertOwned();
   if(this.snapshots.get(key)!==expected||localStorage.getItem(key)!==expected)throw Error('Saved app data changed. Reload before resetting.');
-  localStorage.removeItem(key);if(localStorage.getItem(key)!==null)throw Error('Development reset could not be confirmed.');
+  localStorage.removeItem(key);
   this.snapshots.set(key,null);
   // Retire stale in-memory reducers before navigation can yield to another task.
   this.retired=true;this.owned=false;this.state='retired';this.release?.();

@@ -91,7 +91,7 @@ public final class AlphaSystemPlugin extends ai.eliza.plugins.system.SystemPlugi
   * package in that profile: a disabled app, or one in a paused or locked work profile, still opens
   * it (that is where it is enabled again); a removed app or profile is refused. */
  @PluginMethod public void openAppInfo(PluginCall call){
-  if(SystemLauncherApps.malformedText(call.getData(),"packageName")||SystemLauncherApps.malformedText(call.getData(),"activityName")||SystemLauncherApps.malformedText(call.getData(),"user")){call.reject("Choose an installed app");return;}
+  for(String key:new String[]{"packageName","activityName","user"})if(SystemLauncherApps.malformedText(call.getData(),key)){call.reject("Choose an installed app");return;}
   String name=call.getString("packageName"),activity=call.getString("activityName"),user=call.getString("user");
   if(name==null||name.isEmpty()||name.equals(getContext().getPackageName())){call.reject("Choose an installed app");return;}
   try{

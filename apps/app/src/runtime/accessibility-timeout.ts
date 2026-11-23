@@ -1,5 +1,6 @@
 import {Capacitor} from '@capacitor/core';
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaDevicePlugin} from '../native/alpha-device.ts';
 
 /**
  * Android's "Time to take action" accessibility setting, as a multiplier for the shell's own
@@ -8,10 +9,10 @@ import {registerPlugin} from '../platform-plugins';
  * first reply and when the setting is unset. TalkBack focus raises no DOM event, so this setting is
  * what keeps a toast up for screen-reader users.
  */
-export type TimeoutPort={recommendedTimeout(options:{baseMs:number}):Promise<{timeoutMs?:unknown}>};
-export type ResumePort={addListener(event:'appResumed',listener:()=>void):Promise<unknown>};
+type TimeoutPort=Pick<AlphaDevicePlugin,'recommendedTimeout'>;
+type ResumePort={addListener(event:'appResumed',listener:()=>void):Promise<unknown>};
 
-export const ACCESSIBILITY_TIMEOUT_BASE_MS=5000;
+const ACCESSIBILITY_TIMEOUT_BASE_MS=5000;
 let scale=1;
 let latestRefresh: object | undefined;
 

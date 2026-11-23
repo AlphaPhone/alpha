@@ -2,7 +2,7 @@ import {parseClientCalendarDayObservation,type ClientCalendarDayObservation} fro
 import {getZonedDateParts,addDaysToLocalDate} from '../../../../.eliza/client-features/plugins/plugin-calendar/src/internal/time';
 
 /** The ordinary canonical Calendar surface, without event/feed contents. */
-export interface CalendarDaySurface {
+interface CalendarDaySurface {
  live:boolean;view:string;screen:string;hidden:boolean;pageSuspended:boolean;
  secure:boolean;shade:boolean;connectionOpen:boolean;recovery:boolean;clockDraft:boolean;
  ownerCurrent:boolean;ownerKey:string|null;expectedOwnerKey:string|null;status:string;mutating:boolean;

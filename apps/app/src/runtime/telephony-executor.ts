@@ -1,7 +1,8 @@
 /**
  * Runs one agent-proposed telephony action on the verified Alpha image after the owner approved it
  * (shared contract: `@elizaos/contracts/telephony-actions`; models: PhoneCalls.qnt and
- * ContactsBook.qnt; MessageThreads.qnt for a draft placed in the open conversation). The agent names a contact by search text and never receives the address book:
+ * ContactsBook.qnt; MessageThreads.qnt for a draft placed in the open conversation). The agent names
+ * a contact by search text and never receives the address book:
  * the lookup happens here, the owner sees the exact name and number (or the before and after) on the
  * phone, and only then does anything call, send or write. Each path returns exactly what was
  * observed; nothing is retried, and a contact that changed since it was shown is `stale`.
@@ -17,7 +18,7 @@ import {contactLookupMatches} from '../../../../.eliza/client-features/packages/
 import {telephonyActionResultText} from '../ui/telephony/telephony-receipt-text';
 import {contactChoiceName} from '../ui/telephony/telephony-messages';
 
-export type ContactMatch = {id: string; name: string; number: string};
+type ContactMatch = {id: string; name: string; number: string};
 export type ContactRecord = {id: string; version: string; displayName: string; phoneNumbers: {number: string; type: string}[]; emailAddresses: {address: string; type: string}[]};
 export type ContactDraft = Omit<ContactRecord, 'id' | 'version'>;
 /** What the owner is shown on the phone before a telephony action takes effect. */
@@ -29,6 +30,9 @@ export type TelephonyReview =
   /** `keeps`: one whole-field request shown twice for one contact, adding to its numbers and addresses or replacing them. */
   | {kind: 'contact-save'; options: {before: ContactRecord; after: ContactDraft; keeps?: 'add' | 'replace'}[]}
   | {kind: 'contact-delete'; options: ContactRecord[]};
+/** The conversation the owner has open, as the agent may read it. */
+export type OpenThread = {participant: string | null; messages: {direction: 'in' | 'out'; date: number; body: string}[]; truncated: boolean};
+export type VoicemailDeleteResult = 'deleted' | 'none-selected' | 'cancelled' | 'failed';
 export type TelephonyPorts = {
   /** Throws when the review is no longer current (hidden, locked, context or session changed). */
   current(): void;
@@ -72,13 +76,13 @@ export type TelephonyPorts = {
   openContact(): Pick<ContactDraft, 'displayName' | 'phoneNumbers' | 'emailAddresses'> | 'unavailable' | null;
   /** The agent negotiated `contacts.write.v2`: it names each value to add or remove, so a `set` it sends replaces the field. */
   contactValues: boolean;
-  openThread(): {participant: string | null; messages: {direction: 'in' | 'out'; date: number; body: string}[]; truncated: boolean} | null;
+  openThread(): OpenThread | null;
   latestIncomingSender?(includeAddress?:boolean): Promise<SmsLatestSenderMetadata>;
   openVoicemail(): {caller: string | null; date: number; durationSeconds: number; transcriptState: 'ready' | 'pending' | 'unavailable' | 'failed'; engine: 'device' | 'cloud' | 'carrier' | null; transcript: string | null} | null;
-  deleteOpenVoicemail(current: () => void, signal: AbortSignal): Promise<'deleted' | 'none-selected' | 'cancelled' | 'failed'>;
+  deleteOpenVoicemail(current: () => void, signal: AbortSignal): Promise<VoicemailDeleteResult>;
 };
 /** `present`: the view change that shows a successful outcome (the drafted conversation, the filtered Contacts list), run by the coordinator after the receipt. */
-export type TelephonyExecution = {status: 'succeeded' | 'failed' | 'unknown'; summary: string; telephonyResult: TelephonyActionResult; present?: () => void};
+type TelephonyExecution = {status: 'succeeded' | 'failed' | 'unknown'; summary: string; telephonyResult: TelephonyActionResult; present?: () => void};
 type Present = (step: () => void) => void;
 
 const LOOKUP_LIMIT = 10;

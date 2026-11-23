@@ -89,8 +89,6 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Durable profile shared by every normal tab. Never "Default" (the host's). */
  static final String PERSISTENT_PROFILE = AlphaBrowserStores.PERSISTENT_PROFILE;
  static final String PRIVATE_PREFIX = AlphaBrowserStores.PRIVATE_PREFIX;
- /** Builds before the sign-in decision gave every tab an ephemeral profile. */
- static final String LEGACY_PREFIX = AlphaBrowserStores.LEGACY_PREFIX;
  static boolean ephemeralProfile(String name) { return AlphaBrowserStores.IDENTITY.ephemeral(name); }
  /** Alpha's installed identity and the product names its notices use. */
  private static BrowserTabHostConfig config() { return AlphaBrowserStores.IDENTITY; }
@@ -212,7 +210,7 @@ public class AlphaBrowserPlugin extends Plugin {
   // Chromium keeps loaded profile instances until process exit. Delete retired
   // shells before this process loads any child profile; one failure must not
   // prevent cleanup of other independently retired profiles.
-  // Only private and legacy per-tab profiles are ephemeral. The persistent
+  // Only private per-tab profiles are ephemeral. The persistent
   // normal-tab profile is retained across restarts by product decision.
   for(String name:ProfileStore.getInstance().getAllProfileNames()) if(ephemeralProfile(name)) {
    try { ProfileStore.getInstance().deleteProfile(name);

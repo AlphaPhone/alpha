@@ -9,7 +9,8 @@ import {beginNoticeAction,noticeActionBlocked} from './notice-action';
 import {calendarAlerts} from './calendar-alerts';
 import {editCalendarResponse,calendarResponses} from './calendar-response';
 import {openCalendarMeeting} from './calendar-meeting';
-import {calendarRecord,calendarRange,remapCalendarExclusions,onceCalendarSeries,replaceCalendarRecord,type CalendarRecord} from './calendar-records';
+import {CALENDAR_ALERT_MINUTES,calendarRecord,calendarRange,remapCalendarExclusions,onceCalendarSeries,replaceCalendarRecord,type CalendarRecord} from './calendar-records';
+import {calendarRepeats} from './calendar-recurrence';
 import { editCalendarEvent } from './calendar-editor';
 import { calendarInstant,calendarWall } from './calendar-time';
 import { BrowserReviews } from './review';
@@ -19,9 +20,11 @@ import { WebPlugin } from '@capacitor/core';
 import { revision } from './revision';
 import {calendarDocument,initialCalendarState as initial,prepareCalendarSource,type BrowserCalendarState as State} from './calendar-store';
 import {journalEntry,retireJournal,trimDeletionJournal,settleExpiredDeletions,writeJournalEntry} from './journal-retention';
-type EventRow=CalendarRecord;
+import {sha256Hex} from '../lib/hash';
+import {isOperationId,isUuidV4} from '../lib/ids';
+import {DAY_MS,deviceTimeZone} from '../lib/civil-date';
 const source={id:'local',name:'App calendar',account:'Alpha Phone',local:true,writable:true};
-const matches=(row:EventRow,expected:Partial<EventRow>|undefined)=>!!expected&&(!expected.revision||expected.revision===row.revision)&&(['title','body','location','begin','end'] as const).every(k=>row[k]===expected[k]);
+const matches=(row:CalendarRecord,expected:Partial<CalendarRecord>|undefined)=>!!expected&&(!expected.revision||expected.revision===row.revision)&&(['title','body','location','begin','end'] as const).every(k=>row[k]===expected[k]);
 export class BrowserCalendar extends WebPlugin {
   private reviews=new BrowserReviews();
   private async presentationState(){
@@ -38,16 +41,16 @@ export class BrowserCalendar extends WebPlugin {
   private active=new Map<string,{cancelled:boolean;controller:AbortController}>();
   async cancelAgent(input:{operationId:string}){const pending=this.active.get(input.operationId);if(pending){pending.cancelled=true;pending.controller.abort();}this.reviews.cancel(input.operationId);return {status:'cancelled'};}
   async executeAgent(input:{operation:unknown;operationId:string;journalIdentity?:{scope:string;proposalId:string}}) {
-    if(!/^[A-Za-z0-9_-]{1,128}$/.test(input.operationId))throw Error('Invalid operation identity.');
+    if(!isOperationId(input.operationId))throw Error('Invalid operation identity.');
     const operation=validateCalendarOperation(input.operation);
     if(operation.type==='calendar_read_next')return this.readNextAgent(input);
     const deletionOwner=operation.type==='calendar_delete'?browserDeletionOwner():null;
     const binding=JSON.stringify(operation),identity=operation.type==='calendar_create'?operation.source:operation.type==='calendar_create_local'?null:operation.target;
     if(this.active.has(input.operationId))return {status:'busy'};
     const ticket={cancelled:false,controller:new AbortController()};this.active.set(input.operationId,ticket);
-    const fields=(row:EventRow):CalendarFields=>({title:row.title,description:row.body,location:row.location,start:new Date(row.begin).toISOString(),end:new Date(row.end).toISOString(),timeZone:row.timeZone||Intl.DateTimeFormat().resolvedOptions().timeZone});
+    const fields=(row:CalendarRecord):CalendarFields=>({title:row.title,description:row.body,location:row.location,start:new Date(row.begin).toISOString(),end:new Date(row.end).toISOString(),timeZone:row.timeZone||deviceTimeZone()});
     try {
-      const operationHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(operation))))).map(v=>v.toString(16).padStart(2,'0')).join('');
+      const operationHash=await sha256Hex(JSON.stringify(operation));
       if(operation.type==='calendar_create_local'){if(ticket.cancelled||document.hidden)return {status:'cancelled'};await prepareCalendarSource();}
       const data=(await calendarDocument.read(initial,ticket.controller.signal)),row=operation.type==='calendar_create'||operation.type==='calendar_create_local'?undefined:calendarRecord(data.events,operation.target.eventId);
       if(operation.type==='calendar_delete'&&journalEntry(data.deleteClaims,input.operationId))return {status:'unknown'};
@@ -74,7 +77,7 @@ export class BrowserCalendar extends WebPlugin {
         }
         let result:CalendarResult;
         if(operation.type==='calendar_create'||operation.type==='calendar_create_local'||operation.type==='calendar_update'){
-          const f=operation.fields,event:EventRow={...before,id:before?.id||crypto.randomUUID(),calendarId:'local',title:f.title,body:f.description,location:f.location,begin:Date.parse(f.start),end:Date.parse(f.end),timeZone:f.timeZone,revision:revision()};
+          const f=operation.fields,event:CalendarRecord={...before,id:before?.id||crypto.randomUUID(),calendarId:'local',title:f.title,body:f.description,location:f.location,begin:Date.parse(f.start),end:Date.parse(f.end),timeZone:f.timeZone,revision:revision()};
           replaceCalendarRecord(current.events,event);
           result={version:1,kind:operation.type,sourceId:'local',eventId:event.id,revision:event.revision};
         }else{
@@ -100,22 +103,22 @@ export class BrowserCalendar extends WebPlugin {
       const prior=journalEntry(data.receipts,input.operationId);
       if(prior)return prior.binding===binding?{status:'applied',result:validateCalendarResult(operation,prior.result)}:{status:'conflict'};
       if(ticket.cancelled||document.hidden)return {status:'cancelled'};
-      const now=Date.now(),timeZone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const now=Date.now(),timeZone=deviceTimeZone();
       const today=Date.parse(calendarWall(now,timeZone).slice(0,10)+'T00:00:00.000Z');
-      const lastDay=new Date(today+30*86400000).toISOString().slice(0,10);
+      const lastDay=new Date(today+30*DAY_MS).toISOString().slice(0,10);
       const end=calendarInstant(lastDay+'T00:00:00.000',timeZone,Number.NaN,'forward');
       const window={start:new Date(now).toISOString(),end:new Date(end).toISOString(),timeZone};
       // UTC-encoded all-day dates need civil overlap filtering, as in agenda reads.
-      const expanded=calendarRange(data.events,{begin:now-86400000,end:end+86400000});
+      const expanded=calendarRange(data.events,{begin:now-DAY_MS,end:end+DAY_MS});
       if(expanded.truncated)return {status:'overflow'};
       const candidates=expanded.events.filter(row=>row.calendarId===source.id&&calendarEventOverlapsRange(window,{start:new Date(row.begin).toISOString(),end:new Date(row.end).toISOString(),allDay:!!row.allDay})&&(row.allDay||row.begin>=now));
-      const at=(row:EventRow)=>row.allDay?calendarInstant(new Date(row.begin).toISOString().slice(0,10)+'T00:00:00.000',timeZone,Number.NaN,'forward'):row.begin;
+      const at=(row:CalendarRecord)=>row.allDay?calendarInstant(new Date(row.begin).toISOString().slice(0,10)+'T00:00:00.000',timeZone,Number.NaN,'forward'):row.begin;
       candidates.sort((a,b)=>Math.max(now,at(a))-Math.max(now,at(b))||a.id.localeCompare(b.id));
       const row=candidates[0],result=validateCalendarResult(operation,{version:1,kind:operation.type,window,event:row?{title:row.title,start:new Date(row.begin).toISOString(),end:new Date(row.end).toISOString(),allDay:!!row.allDay,timing:row.allDay&&at(row)<now?'ongoing':'upcoming',timeZone}:null});
       const approved=await this.reviews.confirm(input.operationId,'Share next event?',`${source.name} · next 30 days\nShares next event only`);
       if(!approved||ticket.cancelled||document.hidden)return {status:'cancelled'};
       // A read has no outcome to recover, so it is not journaled and never writes the document.
-      if(Intl.DateTimeFormat().resolvedOptions().timeZone!==timeZone||await calendarDocument.readRaw(ticket.controller.signal)!==raw)return {status:'conflict'};
+      if(deviceTimeZone()!==timeZone||await calendarDocument.readRaw(ticket.controller.signal)!==raw)return {status:'conflict'};
       if(ticket.cancelled||document.hidden)return {status:'cancelled'};
       return {status:'applied',result};
     }catch(error){if(ticket.controller.signal.aborted&&error===ticket.controller.signal.reason)return {status:'cancelled'};throw error;}
@@ -179,7 +182,7 @@ export class BrowserCalendar extends WebPlugin {
         if(noticeActionBlocked())throw Error('Unlock to use this Calendar alert.');
         const active=calendarAlerts(current.events,current.alertDismissed||{}).find(row=>row.id===input.id&&row.revision===input.revision);
         if(!active)throw Error('Calendar alert changed.');
-        current.alertDismissed=Object.fromEntries(Object.entries(current.alertDismissed||{}).filter(([,at])=>at>Date.now()-2*86400000));current.alertDismissed[active.receipt]=Date.now();return active.eventId;
+        current.alertDismissed=Object.fromEntries(Object.entries(current.alertDismissed||{}).filter(([,at])=>at>Date.now()-2*DAY_MS));current.alertDismissed[active.receipt]=Date.now();return active.eventId;
       },action.signal);
       // A committed dismissal remains durable, even if its navigation is retired.
       if(input.open){if(action.signal.aborted||noticeActionBlocked())return {status:'cancelled'};const result=await this.open({id:eventId});if(result.status!=='opened')throw Error('Calendar navigation was cancelled.');}
@@ -190,20 +193,20 @@ export class BrowserCalendar extends WebPlugin {
   async requestWorkflowReadAccess(){return {status:'granted'};}
   async workflowCalendars(){return {status:'ready',calendars:[source]};}
   /** The in-app calendar is the only free/busy source in the browser. Its name stays on this device. */
-  async availabilitySources(input:{timeZone:string}){if(input?.timeZone!==Intl.DateTimeFormat().resolvedOptions().timeZone)return {status:'timezone-changed'};const {sourceRevision}=await this.prepareAgentSource();return {status:'ready',timeZone:input.timeZone,calendars:[{id:source.id,name:'In this app',account:'Saved on this device',sourceRevision}]};}
+  async availabilitySources(input:{timeZone:string}){if(input?.timeZone!==deviceTimeZone())return {status:'timezone-changed'};const {sourceRevision}=await this.prepareAgentSource();return {status:'ready',timeZone:input.timeZone,calendars:[{id:source.id,name:'In this app',account:'Saved on this device',sourceRevision}]};}
   /**
    * Free/busy rows for the chosen calendar: interval, all-day flag and availability only.
    * Titles, notes, places and guests are never projected. All-day rows are matched by the
    * owner's civil dates. In-app events have no "show as free" setting, so each one is busy.
    */
   async readAvailability(input:{calendars:{id:string;revision:string}[];start:string;end:string;timeZone:string}){
-    if(input.timeZone!==Intl.DateTimeFormat().resolvedOptions().timeZone)return {status:'timezone-changed'};
+    if(input.timeZone!==deviceTimeZone())return {status:'timezone-changed'};
     const begin=Date.parse(input.start),end=Date.parse(input.end);
-    if(!Array.isArray(input.calendars)||input.calendars.length!==1||!Number.isFinite(begin)||!Number.isFinite(end)||begin<0||end<=begin||end-begin>7*86400000)throw Error('Invalid availability read.');
+    if(!Array.isArray(input.calendars)||input.calendars.length!==1||!Number.isFinite(begin)||!Number.isFinite(end)||begin<0||end<=begin||end-begin>7*DAY_MS)throw Error('Invalid availability read.');
     const data=await calendarDocument.read(initial);
     if(input.calendars[0].id!==source.id||input.calendars[0].revision!==data.sourceRevision)return {status:'changed'};
     const civil=(instant:number)=>Date.parse(new Intl.DateTimeFormat('en-CA',{timeZone:input.timeZone,year:'numeric',month:'2-digit',day:'2-digit'}).format(instant)+'T00:00:00Z');
-    const civilBegin=civil(begin),civilEnd=civil(end-1)+86400000;
+    const civilBegin=civil(begin),civilEnd=civil(end-1)+DAY_MS;
     const range=calendarRange(data.events.filter(row=>row.calendarId===source.id),{begin:Math.min(begin,civilBegin),end:Math.max(end,civilEnd)});
     const rows=range.events.filter(row=>row.allDay?row.begin<civilEnd&&row.end>civilBegin:row.begin<end&&row.end>begin);
     if(range.truncated||rows.length>200)return {status:'too-many'};
@@ -213,7 +216,7 @@ export class BrowserCalendar extends WebPlugin {
   async prepareAgentSource(){return prepareCalendarSource();}
   /** Foreground standalone agenda over this SAME local Calendar document; no mirror. */
   async readAgenda(input:{operationId:string;source:unknown;operation:unknown}){
-    if(!/^[A-Za-z0-9_-]{1,128}$/.test(input.operationId)||document.hidden)return {status:'cancelled',events:[]};
+    if(!isOperationId(input.operationId)||document.hidden)return {status:'cancelled',events:[]};
     const selected=calendarSource(input.source),op=parseWorkflowRead(input.operation);if(op.type!=='read_calendar_range'||op.calendarIds.length!==1||op.calendarIds[0]!==source.id||selected.sourceId!==source.id)throw Error('Calendar range source changed');
     const raw=await calendarDocument.readRaw(),data:State=raw===null?initial():JSON.parse(raw);
     if(selected.sourceRevision!==data.sourceRevision)return {status:'changed',events:[]};
@@ -227,19 +230,19 @@ export class BrowserCalendar extends WebPlugin {
 
   async pendingCreations(){const data=await calendarDocument.read(initial);return {status:'ready',creations:Object.values(data.creations||{}).filter(row=>!row.acknowledged).map(row=>row.result)};}
   async acknowledgeCreation(input:{creationId:string}){return calendarDocument.edit(initial,data=>{const receipt=journalEntry(data.creations,input.creationId);if(!receipt)throw Error('Creation receipt unavailable');receipt.acknowledged=true;return {status:'acknowledged'};});}
-  async save(input:Partial<EventRow>&{expected?:Partial<EventRow>;creationId?:string;separateCreation?:boolean}) {
+  async save(input:Partial<CalendarRecord>&{expected?:Partial<CalendarRecord>;creationId?:string;separateCreation?:boolean}) {
     if(!input.title?.trim()||!Number.isFinite(input.begin)||!Number.isFinite(input.end)||input.end!<=input.begin!||input.calendarId!=='local')throw Error('Review the event title, calendar and dates.');
-    if(input.alert!==undefined&&input.alert!==null&&![0,10,60].includes(input.alert))throw Error('Choose an event alert.');
+    if(input.alert!==undefined&&input.alert!==null&&!CALENDAR_ALERT_MINUTES.includes(input.alert))throw Error('Choose an event alert.');
     if(input.who!==undefined&&(!Array.isArray(input.who)||input.who.length>100||input.who.some(id=>typeof id!=='string'||!id||id.length>128)))throw Error('Review the event attendees.');
     if(input.video!==undefined&&typeof input.video!=='boolean')throw Error('Invalid meeting option.');
     if(input.allDay!==undefined&&typeof input.allDay!=='boolean')throw Error('Invalid all-day setting.');
     if(input.timeZone!==undefined)new Intl.DateTimeFormat('en',{timeZone:input.timeZone});
-    if(input.repeat!==undefined&&!['none','daily','weekdays','weekly'].includes(input.repeat))throw Error('Invalid event repeat rule.');
+    if(input.repeat!==undefined&&!calendarRepeats.includes(input.repeat))throw Error('Invalid event repeat rule.');
     let binding='';
     if(!input.id){
-      if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(input.creationId||''))throw Error('Calendar creation identity required');
+      if(!isUuidV4(input.creationId))throw Error('Calendar creation identity required');
       const fields=Object.fromEntries(Object.entries(input).filter(([name])=>!['creationId','separateCreation','expected','id'].includes(name)).sort(([a],[b])=>a.localeCompare(b)));
-      binding=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(fields))))).map(b=>b.toString(16).padStart(2,'0')).join('');
+      binding=await sha256Hex(JSON.stringify(fields));
     }
     return calendarDocument.edit(initial,data=>{
       if(!input.id){
@@ -252,19 +255,19 @@ export class BrowserCalendar extends WebPlugin {
       const old=input.id?calendarRecord(data.events,input.id):undefined;
       if(input.id&&(!old||!matches(old,input.expected)))return {status:'conflict'};
       const allDay=input.allDay??old?.allDay??false;
-      if(allDay&&(input.begin!%86400000!==0||input.end!%86400000!==0))throw Error('All-day events require whole calendar dates.');
-      const row:EventRow={...old,id:old?.id||crypto.randomUUID(),calendarId:'local',title:input.title!.trim(),body:input.body||'',location:input.location||'',begin:input.begin!,end:input.end!,allDay,revision:revision(),timeZone:old?.timeZone||input.timeZone||Intl.DateTimeFormat().resolvedOptions().timeZone,repeat:old?.seriesId?'none':input.repeat||old?.repeat||'none',who:input.who?[...new Set(input.who)]:old?.who||[],video:input.video??old?.video??false,alert:input.alert===undefined?old?.alert??null:input.alert};
+      if(allDay&&(input.begin!%DAY_MS!==0||input.end!%DAY_MS!==0))throw Error('All-day events require whole calendar dates.');
+      const row:CalendarRecord={...old,id:old?.id||crypto.randomUUID(),calendarId:'local',title:input.title!.trim(),body:input.body||'',location:input.location||'',begin:input.begin!,end:input.end!,allDay,revision:revision(),timeZone:old?.timeZone||input.timeZone||deviceTimeZone(),repeat:old?.seriesId?'none':input.repeat||old?.repeat||'none',who:input.who?[...new Set(input.who)]:old?.who||[],video:input.video??old?.video??false,alert:input.alert===undefined?old?.alert??null:input.alert};
       if(row.responses)row.responses=Object.fromEntries(Object.entries(row.responses).filter(([person])=>row.who?.includes(person)));
       replaceCalendarRecord(data.events,row);
-      const result={status:'saved' as const,id:row.repeat&&row.repeat!=='none'?calendarRange([row],{begin:row.begin,end:row.begin+8*86400000}).events[0].id:row.id,calendarId:'local',creationId:input.creationId||''};
+      const result={status:'saved' as const,id:row.repeat&&row.repeat!=='none'?calendarRange([row],{begin:row.begin,end:row.begin+8*DAY_MS}).events[0].id:row.id,calendarId:'local',creationId:input.creationId||''};
       if(!input.id)data.creations![input.creationId!]={binding,result,acknowledged:false,at:Date.now()};
       return result;
     });
   }
-  async inspect(input:{id:string;calendarId:string;expected?:Partial<EventRow>}) {const data=(await calendarDocument.read(initial)),row=calendarRecord(data.events,input.id);return row&&row.calendarId===input.calendarId&&matches(row,input.expected)?{status:'ready',revision:row.revision,sourceRevision:data.sourceRevision}:{status:'conflict'};}
+  async inspect(input:{id:string;calendarId:string;expected?:Partial<CalendarRecord>}) {const data=(await calendarDocument.read(initial)),row=calendarRecord(data.events,input.id);return row&&row.calendarId===input.calendarId&&matches(row,input.expected)?{status:'ready',revision:row.revision,sourceRevision:data.sourceRevision}:{status:'conflict'};}
   /** One review step, as on Android: the reviewed event is named and nothing is deleted on Cancel,
    * Back, hiding or locking. The removal below still requires the reviewed revision. */
-  async remove(input:{id:string;calendarId:string;expected:Partial<EventRow>;revision:string}) {
+  async remove(input:{id:string;calendarId:string;expected:Partial<CalendarRecord>;revision:string}) {
     const state=await this.presentationState();if(!state)return {status:'cancelled'};
     const reviewed=calendarRecord(state.events,input.id);
     if(!reviewed||reviewed.calendarId!==input.calendarId||reviewed.revision!==input.revision||!matches(reviewed,input.expected))return {status:'conflict'};
@@ -277,10 +280,10 @@ export class BrowserCalendar extends WebPlugin {
   async dismissDeletion(id:string){return calendarDocument.edit(initial,data=>{const entry=journalEntry(data.deletions,id);if(!entry||!browserDeletionOwnerVisible(entry.owner)||!['unknown','dispatching'].includes(entry.phase))throw Error('Uncertain deletion is unavailable.');entry.acknowledged=true;return {status:'acknowledged'};});}
   async undoDeletion(id:string){return calendarDocument.edit(initial,data=>undoCalendarDeletion(data,id,browserDeletionOwnerVisible));}
   async readWorkflowRange(input:{calendarIds:string[];start:string;end:string;timeZone?:string;maximumEvents:number}) {
-    const timeZone=input.timeZone||Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const timeZone=input.timeZone||deviceTimeZone();
     const op=parseWorkflowRead({type:'read_calendar_range',...input,timeZone});if(op.type!=='read_calendar_range')throw Error('Invalid Calendar range');
     if(op.calendarIds.some(id=>id!==source.id))return {status:'unavailable',events:[]};
-    const data=await calendarDocument.read(initial),range=calendarRange(data.events,{begin:Date.parse(op.start)-86400000,end:Date.parse(op.end)+86400000});
+    const data=await calendarDocument.read(initial),range=calendarRange(data.events,{begin:Date.parse(op.start)-DAY_MS,end:Date.parse(op.end)+DAY_MS});
     const events=range.events.filter(e=>op.calendarIds.includes(e.calendarId)).map(e=>({id:e.id,calendarId:e.calendarId,title:e.title,start:new Date(e.begin).toISOString(),end:new Date(e.end).toISOString(),allDay:!!e.allDay})).filter(e=>calendarEventOverlapsRange(op,e));
     if(range.truncated||events.length>op.maximumEvents)return {status:'overflow',events:[]};
     return {status:'ready',events};

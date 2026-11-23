@@ -1,0 +1,13 @@
+# specs/quint/native/NativeNoteRecording.qnt
+- Lines: 178 | Kind: Quint model, live (listed in `specs/quint/native/manifest.json`, read by `scripts/check-quint.ts` and `scripts/check-quint-refinement.ts`); harness `note-recording.mjs` compiles the whole real `AlphaNoteRecorder` with real temporary journal files | Verdict: KEEP (drop one legacy action + run)
+- Covers: Segmented Notes recorder: pause accounting, 27 s rollover, durable journal prefix, transcript persistence, restart recovery, corrupt journal / missing segment blocking, stale recorder callbacks (9 runs, 8 invariants). Duplicates: `NativeNoteRecordingService.qnt` covers the foreground service, not the recorder; no overlap in state. Callers/importers: manifest (`tests` lists all 9 runs); `specs/quint/refinement/native/note-recording.mjs` (+`note-recording-platform.mjs`, `NoteRecordingTraces.java`, `NoteRecordingPorts.java`); `test/quint-native-recording.test.mjs` (shared with the service model); also re-run by the family aggregate `specs/quint/refinement/native/index.mjs` (`test/quint-native-refinement.test.mjs`); `native/README.md`
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 112-117, 175-176 | A1 / owner question | `legacyRestart` and `legacyAudioRetainsNoOwnerTest` model recovery of a journal with no owner/folder. In `AlphaNoteRecorder.java:107-109` a record whose `ownerDigest`/`folderId` is missing or invalid recovers with `ownerDigest=null`. No harness scenario drives it (`NoteRecordingTraces.java` has no legacy case), so it is model-only. The paired instrumentation test `KeptCaptureLegacyPathInstrumentedTest.java` is already deleted in this worktree. A fresh package cannot hold an older journal, so the only remaining source is an ownerless current start. | If A5 removes the ownerless-journal fallback: delete `legacyRestart`, its `step` entry, the run and its manifest `tests` entry. If the fallback stays (current starts can be ownerless), rename to `ownerlessJournalRecoversWithoutOwner` and keep. | Low; model-only |
+| 2 | test | T4 | Wrapper test also asserts `traces == noteRecordingScenarios.length` and runs the service campaign; aggregate repeats both. | One runner. | None |
+| 3 | harness | B5 | `checkTraces` re-hashes every input before and after the run (`driverHashes`, `inputsUnchanged`) and the wrapper test asserts exact trace counts. | Pass/fail only. | None |
+
+## Proposed end state
+Model stays live, minus the legacy restart action/run if the product fallback goes. Harness unchanged (whole-class compile). One runner; path-filtered to `AlphaNoteRecorder.java` and harness files.

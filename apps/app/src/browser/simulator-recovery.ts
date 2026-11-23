@@ -1,12 +1,12 @@
 import {layoutBrowserDialog} from './dialog-layout';
 import {devSurfacesEnabled} from '../build-flags';
+import {isRecord} from '../lib/parse';
 type Bag=Record<string,any>;
 type Failure={title:string;raw?:string};
 const failures=new Map<string,Failure>();
 let resetSavedApp:((key:string,expected:string)=>void)|undefined;
 export function configureSimulatorRecovery(reset:(key:string,expected:string)=>void){resetSavedApp=reset;}
 const key=(name:string)=>'alpha.dev.app.'+name;
-const object=(value:unknown):value is Bag=>!!value&&typeof value==='object'&&!Array.isArray(value);
 /** Only persisted fields can enter a simulator; damaged records stay untouched. */
 export function loadSimulatedState(name:string,view:Bag,onRead?:(raw:string|null)=>void){
  if(!devSurfacesEnabled)return {};
@@ -14,13 +14,13 @@ export function loadSimulatedState(name:string,view:Bag,onRead?:(raw:string|null
  try{
   raw=localStorage.getItem(key(name));onRead?.(raw);if(raw===null)return {};
   if(raw.length>(['inbox','messages'].includes(name)?12_000_000:2_000_000))throw Error('Saved app is too large');
-  const saved=JSON.parse(raw);if(!object(saved))throw Error('Invalid saved app');
+  const saved=JSON.parse(raw);if(!isRecord(saved))throw Error('Invalid saved app');
   for(const [field,value] of Object.entries(saved)){
    if(!view.persist.includes(field))throw Error('Unknown saved field');const initial=view.state[field];
-   if(Array.isArray(initial)){if(!Array.isArray(value)||value.some(row=>!object(row)))throw Error('Invalid saved list');}
-   else if(object(initial)){if(!object(value))throw Error('Invalid saved map');}
+   if(Array.isArray(initial)){if(!Array.isArray(value)||value.some(row=>!isRecord(row)))throw Error('Invalid saved list');}
+   else if(isRecord(initial)){if(!isRecord(value))throw Error('Invalid saved map');}
    else if(typeof value!==typeof initial||typeof value==='number'&&!Number.isFinite(value))throw Error('Invalid saved value');
-   if(name==='messages'&&field==='threads'&&Object.values(value as Bag).some(rows=>!Array.isArray(rows)||rows.some(row=>!object(row))))throw Error('Invalid saved messages');
+   if(name==='messages'&&field==='threads'&&Object.values(value as Bag).some(rows=>!Array.isArray(rows)||rows.some(row=>!isRecord(row))))throw Error('Invalid saved messages');
   }
   return saved;
  }catch{failures.set(name,{title:view.title,raw:raw??undefined});return {};}

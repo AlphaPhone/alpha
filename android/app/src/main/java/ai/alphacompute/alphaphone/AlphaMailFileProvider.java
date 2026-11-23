@@ -5,10 +5,12 @@ import java.io.File;
 import java.io.FileNotFoundException;
 /** Dedicated temporary read-only provider, including expiry after process recreation. */
 public final class AlphaMailFileProvider extends androidx.core.content.FileProvider {
+ /** Installed cache folder and provider path of reviewed copies (res/xml/mail_attachment_paths.xml). */
+ static final String FOLDER="mail-attachments";
  @Override public ParcelFileDescriptor openFile(Uri uri,String mode)throws FileNotFoundException{
-  if(!"r".equals(mode)||getContext()==null||uri.getPathSegments().size()!=2||!"mail-attachments".equals(uri.getPathSegments().get(0)))throw new FileNotFoundException("Read-only reviewed attachment required");
+  if(!"r".equals(mode)||getContext()==null||uri.getPathSegments().size()!=2||!FOLDER.equals(uri.getPathSegments().get(0)))throw new FileNotFoundException("Read-only reviewed attachment required");
   String name=uri.getLastPathSegment();if(name==null||name.contains("/")||name.contains("\\"))throw new FileNotFoundException();
-  File file=new File(new File(getContext().getCacheDir(),"mail-attachments"),name);long age=System.currentTimeMillis()-file.lastModified();
+  File file=new File(new File(getContext().getCacheDir(),FOLDER),name);long age=System.currentTimeMillis()-file.lastModified();
   if(!file.isFile()||age<0||age>ReviewedCopies.GRANT_MILLIS){file.delete();throw new FileNotFoundException("Reviewed attachment expired");}
   return super.openFile(uri,mode);
  }

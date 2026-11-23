@@ -2,11 +2,11 @@ package ai.alphacompute.alphaphone;
 
 /**
  * Pure policy for bringing the resident agent back after reboot, an app update, or a clock or
- * time-zone change (#394). Digests and agent schedules live in the resident runtime and run only
+ * time-zone change. Digests and agent schedules live in the resident runtime and run only
  * while it does, so this only starts a resident that is not running; a running resident is left
  * untouched (the start is a no-op) and keeps relying on the runtime's own timers. Nothing is
  * replayed here; how the runtime treats an occurrence that passed while it was off is upstream
- * behaviour and was not exercised by this policy's tests. Lifecycle state is process-local, so an
+ * behaviour. Lifecycle state is process-local, so an
  * owner stop does not survive process death or reboot: the next broadcast brings the agent back, as
  * the always-on on-device agent intends. No Android imports: plain-JVM tested.
  */

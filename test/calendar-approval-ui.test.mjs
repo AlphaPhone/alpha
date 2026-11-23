@@ -273,7 +273,7 @@ test('the review read asks one calendar for one instant and answers only from a 
  const complete=window=>({state:'complete',events:[offsiteEvent],timeMin:window.timeMin,timeMax:window.timeMax}),reads=[];let current=true,feed=complete;
  const port={identity:{origin:'https://fixture.invalid',ownerId:'owner',agentId:'agent'},sessionId:'session',scope:'owner',current:()=>current};
  const api={getLifeOpsCalendarFeed:async window=>{reads.push(window);return feed(window);},getLifeOpsCalendars:async()=>({calendars:[offsiteSource]})};
- const calendar=new AgentCalendar(()=>port,{capture:async()=>({fingerprint:'same',present:false,readable:true,pending:false,records:[]}),retainedReadOnly:async()=>true},()=>api),before=structuredClone(calendar.state);
+ const calendar=new AgentCalendar(()=>port,()=>api),before=structuredClone(calendar.state);
  const read=signal=>calendar.readSourceAt({grantId:'grant',calendarId:'work@example.invalid'},offsiteStart,signal??new AbortController().signal);
  assert.deepEqual(await read(),{events:[offsiteEvent],calendars:[offsiteSource]});
  assert.deepEqual(reads,[{side:'owner',grantId:'grant',calendarId:'work@example.invalid',timeMin:'2027-03-12T16:59:59.999Z',timeMax:'2027-03-12T17:00:00.001Z',timeZone:'UTC'}]);

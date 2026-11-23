@@ -18,9 +18,6 @@ final class ResidentResultTransport implements HostedInbox.DeliveryTransport {
  private final LongSupplier clock;
  private final long deadline;
  private volatile boolean closed;
- ResidentResultTransport(Channel channel,String owner,String agent,String session) {
-  this(channel,owner,agent,session,System::nanoTime);
- }
  ResidentResultTransport(Channel channel,String owner,String agent,String session,LongSupplier clock) {
   if(owner==null||owner.isEmpty()||agent==null||agent.isEmpty()||session==null||session.isEmpty())throw new IllegalArgumentException("Missing resident binding");
   this.channel=channel;this.owner=owner;this.agent=agent;this.session=session;this.clock=clock;

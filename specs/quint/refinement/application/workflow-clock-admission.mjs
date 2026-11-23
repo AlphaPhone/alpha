@@ -28,11 +28,10 @@ export async function checkWorkflowClockAdmission(extraSources = []) {
     const finish = status => step('finish', () => f.finish(status), status);
     const remember = () => step('remember', f.remember);
     const close = (back = false) => step('closeClock', back ? f.back : f.close);
-    const mock = value => step('setMock', () => f.mock(value), value);
     const visibility = value => step('setVisibility', () => f.visibility(value), value);
     const save = async () => {await open();await review();await approve();};
     try {
-      await run({f, open, navigate, review, approve, opening, finish, remember, close, mock, visibility, save});
+      await run({f, open, navigate, review, approve, opening, finish, remember, close, visibility, save});
       traces.push(t);
     } finally {f.unmount();}
   }
@@ -55,9 +54,8 @@ export async function checkWorkflowClockAdmission(extraSources = []) {
     await c.save();await c.opening();await c.navigate('home');await c.finish('unknown');
     await c.navigate('workflows');await c.open();c.f.assertMessage(/^Unknown$/);await c.close();
   });
-  for (const mocks of [false, true]) await scenario(`mock request retires a held write with the flag ${mocks ? 'on' : 'off'}`, async c => {
-    await c.save();await c.mock(true);await c.opening();c.f.assertMessage(/^Not sent$/);await c.close();
-  }, {mocks});
+  // Mock mode is fixed at load and admitted only with test mocks (main.tsx), so the adapter no longer
+  // re-checks it mid-flight or refuses it with 'Offline' (ledger C-app-11). Those schedules are unreachable.
   await scenario('visibility loss retires a held write even after resuming', async c => {
     await c.save();await c.visibility(true);await c.visibility(false);await c.opening();await c.close();
   });
@@ -65,12 +63,8 @@ export async function checkWorkflowClockAdmission(extraSources = []) {
     await c.open();await c.remember();await c.navigate('home');await c.open('stale');
     await c.navigate('workflows');await c.open('stale');await c.open('list');
   }, {browser: true});
-  await scenario('browser flag-off mock request stays in a closed review', async c => {
-    await c.mock(true);await c.open();await c.review();await c.approve();
-    c.f.assertMessage(/^Offline$/);await c.close();
-  }, {browser: true});
   return checkTraces({model: 'WorkflowClockAdmission', scope: 'bounded-orchestration', sources, driverHashes, traces,
     assumptions: ['Bindings are read from the actual Workflows template. Its actions invoke the real Clock renderer, shell leave method, agent context projection and authenticated shared receipt code. A closed shell supplies committed routes and a synthetic current Workflow selection.',
-      'The release of the opening write and the synthetic external Clock response are separate checkpoints. Two flags, a browser direct-show request, and held native-mode writes run without opening Android or browser Clock.',
+      'The release of the opening write and the synthetic external Clock response are separate checkpoints. Two flags, a browser direct-show request, and held native writes run without opening Android or browser Clock.',
       'The projection observes the selection offered to the agent client, without claiming client publication or privacy behavior. Physical modal focus, complete Scast commit timing, Android intent handling and browser alarm behavior are separate.']});
 }

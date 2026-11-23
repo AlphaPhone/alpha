@@ -23,7 +23,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
-/** Patch 0040: stable refusals, once-per-boot re-post, due channel and undated to-dos. Disposable fixtures only. */
+/** Stable refusals, once-per-boot re-post, due channel and undated to-dos. Disposable fixtures only. */
 @RunWith(AndroidJUnit4.class)
 public class ReminderLifecycleInstrumentedTest {
  private Context context(){return InstrumentationRegistry.getInstrumentation().getTargetContext();}
@@ -44,7 +44,7 @@ public class ReminderLifecycleInstrumentedTest {
 
  @Test public void fullStoreRefusesWithStorageFullBeforeAnyWrite()throws Exception{
   Context base=context();String prefix="full_"+UUID.randomUUID().toString().replace("-","");
-  Context c=new ContextWrapper(base){@Override public SharedPreferences getSharedPreferences(String name,int mode){return super.getSharedPreferences(name.equals("alpha-local-reminders-v1")||name.equals("alpha-reminder-envelope-v1")?prefix+"_"+name:name,mode);}};
+  Context c=new ContextWrapper(base){@Override public SharedPreferences getSharedPreferences(String name,int mode){return super.getSharedPreferences(name.equals(AlphaReminders.CONFIGURATION.legacyName)||name.equals(AlphaReminders.CONFIGURATION.envelopeName)?prefix+"_"+name:name,mode);}};
   ReminderLifecycleTestAccess.Isolated store=new ReminderLifecycleTestAccess.Isolated(c);ArrayList<String> ids=new ArrayList<>();long future=System.currentTimeMillis()+86400000L;
   try{
    for(int i=0;i<250;i++){String id=prefix+"_"+i;ids.add(id);store.schedule(c,id,"Full fixture "+i,future+i*1000L);}
@@ -54,7 +54,7 @@ public class ReminderLifecycleInstrumentedTest {
    assertNull("Refusal leaves the ID absent",store.read(c,refused));
   }finally{
    for(String id:ids)store.cancel(c,id);
-   assertTrue(base.getSharedPreferences(prefix+"_alpha-reminder-envelope-v1",0).edit().clear().commit());assertTrue(base.getSharedPreferences(prefix+"_alpha-local-reminders-v1",0).edit().clear().commit());
+   assertTrue(base.getSharedPreferences(prefix+"_"+AlphaReminders.CONFIGURATION.envelopeName,0).edit().clear().commit());assertTrue(base.getSharedPreferences(prefix+"_"+AlphaReminders.CONFIGURATION.legacyName,0).edit().clear().commit());
   }
  }
 
@@ -64,7 +64,7 @@ public class ReminderLifecycleInstrumentedTest {
    JSONObject saved=ReminderLifecycleTestAccess.saveTodo(c,id,"Undated fixture "+id,"");
    assertEquals("todo",saved.getString("status"));assertTrue(saved.getBoolean("undated"));assertFalse("No instant",saved.has("at"));assertFalse(saved.has("dueAt"));assertEquals("none",saved.getString("mode"));
    assertEquals("Retried save is idempotent",saved.toString(),ReminderLifecycleTestAccess.saveTodo(c,id,"Undated fixture "+id,"").toString());
-   try{ReminderLifecycleTestAccess.saveTodo(c,id,"Different text","");fail("Existing ID overwritten");}catch(IllegalArgumentException expected){}
+   assertThrows("Existing ID overwritten",IllegalArgumentException.class,()->ReminderLifecycleTestAccess.saveTodo(c,id,"Different text",""));
    Intent alarm=new Intent(c,ReminderReceiver.class).setAction(AlphaReminders.CONFIGURATION.remindAction).setData(Uri.parse(AlphaReminders.CONFIGURATION.alarmUriPrefix+id+"/"+saved.getString("occurrenceId")));
    assertNull("No AlarmManager route",PendingIntent.getBroadcast(c,0,alarm,PendingIntent.FLAG_NO_CREATE|PendingIntent.FLAG_IMMUTABLE));
    // Notification decisions never apply to a to-do: Snooze would otherwise arm an alarm.
@@ -74,9 +74,9 @@ public class ReminderLifecycleInstrumentedTest {
    ReminderTestAccess.restore(c);assertNull("Restore never posts a to-do",notification(id));
    JSONObject listed=find(ReminderTestAccess.list(c),id);assertNotNull(listed);assertFalse(listed.has("at"));
    JSONObject target=ReminderTestAccess.selected(c,id);
-   try{ReminderTestAccess.operate(c,UUID.randomUUID().toString(),ReminderTestAccess.digest("x"),new JSONObject().put("type","reminder_complete").put("target",target));fail("Reviewed operation changed a to-do");}catch(IllegalArgumentException expected){}
+   assertThrows("Reviewed operation changed a to-do",IllegalArgumentException.class,()->ReminderTestAccess.operate(c,UUID.randomUUID().toString(),ReminderTestAccess.digest("x"),new JSONObject().put("type","reminder_complete").put("target",target)));
    JSONObject done=ReminderLifecycleTestAccess.todoDecision(c,target,"done");assertEquals("completed",done.getString("status"));
-   try{ReminderLifecycleTestAccess.todoDecision(c,target,"reopen");fail("Stale target accepted");}catch(IllegalArgumentException expected){}
+   assertThrows("Stale target accepted",IllegalArgumentException.class,()->ReminderLifecycleTestAccess.todoDecision(c,target,"reopen"));
    JSONObject reopened=ReminderLifecycleTestAccess.todoDecision(c,done.getJSONObject("target"),"reopen");assertEquals("todo",reopened.getString("status"));
    assertNotEquals("Reopen starts a new occurrence",saved.getString("occurrenceId"),ReminderTestAccess.read(c,id).getString("occurrenceId"));
    assertEquals(1,ReminderTestAccess.read(c,id).getJSONArray("history").length());

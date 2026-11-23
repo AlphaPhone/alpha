@@ -1,14 +1,14 @@
-import type {BrowserTabSession} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts";
+import type {BrowserTabHostPlugin, BrowserTabSession} from "../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/tab-host.ts";
 import type {BrowserReviews} from '../browser/review';
 
 /** The Browser adapter's presentation flags the handoff reads and sets. */
-export interface ExternalHandoffFlags { sharing: boolean; confirming: boolean; lastGeometry: string; readonly disposed: boolean; }
+interface ExternalHandoffFlags { sharing: boolean; confirming: boolean; lastGeometry: string; readonly disposed: boolean; }
 
-export interface ExternalHandoffDeps {
+interface ExternalHandoffDeps {
   tabs: BrowserTabSession;
   reviews: Pick<BrowserReviews, 'confirm'>;
   shell: () => any;
-  Browser: {openExternalBrowser(input: Record<string, unknown>): Promise<unknown>};
+  Browser: Pick<BrowserTabHostPlugin, 'openExternalBrowser'>;
   state: () => Record<string, any> | undefined;
   isPrivate: (id: string) => boolean;
   update: () => unknown;

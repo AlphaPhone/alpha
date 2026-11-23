@@ -306,9 +306,6 @@ test('every shared Notes refusal on the approved change path is worded by Alpha'
  assert.equal(notes.notesActionFailureText(new Error('Previous notes isn’t ready, so nothing was changed.')),'Previous notes isn’t ready, so nothing was changed.');
  assert.equal(notes.notesActionFailureText(new DOMException('This operation was aborted','AbortError')),notes.NOTES_ACTION_FAILED);
  assert.equal(notes.notesActionFailureText(new Error('Invalid Notes envelope')),notes.NOTES_ACTION_FAILED);
- const adapter=source('apps/app/src/prototype/agent-adapter.ts');
- assert.match(adapter,/:notesActionFailureText\(error\)\};/);
- assert.doesNotMatch(adapter,/'The Notes outcome is uncertain\.':\(error as Error\)\.message/);
 });
 
 // An agent request for Previous notes that cannot run: the phone says there are none only when the

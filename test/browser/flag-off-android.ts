@@ -59,7 +59,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
   await page.addInitScript(installNativeNavigationFixture);
   await page.addInitScript(({ options, agentName }) => {
     const w = window as any; w.androidBridge = {};
-    if(!options.freshAccess)localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4}));
+    if(!options.freshAccess)localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:4,status:'completed',step:7}));
     const id = '9f1dc45a-4011-4e44-947a-30d999d24fa5', agentId = '6f1d3c3e-8c55-4c1b-9d1f-2b6f0b0d3a11';
     const kept = (key: string, initial: unknown) => { try { return JSON.parse(sessionStorage.getItem(key) || 'null') ?? initial; } catch { return initial; } };
     // Keystore-backed slots and the resident agent's own store survive a reload of the page.
@@ -473,9 +473,19 @@ export async function expectNoDevelopmentSurface(page: Page) {
   await expect(button(page, 'Device controls')).toHaveCount(0);
   await expect(page.getByText(/Development (connections|device actions|reply|provider|inbox)/)).toHaveCount(0);
 }
-/** Existing-installation fixtures seed UI progress only. OS/plugin grants remain independent. */
+/** Existing-installation fixtures seed UI progress only. OS/plugin grants remain independent.
+ * The record's format follows the platform: the browser reads version 1 (four steps), Android
+ * reads version 4 (seven steps). Specs often install `androidBridge` in a later init script, so
+ * the native record is written when the bridge is installed rather than when this script runs. */
 export async function seedCompletedAccessSetup(page: Page) {
-  await page.addInitScript(()=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify({version:1,status:'completed',step:4})));
+  await page.addInitScript(()=>{
+    const w=window as any;
+    const seed=(native:boolean)=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify(native?{version:4,status:'completed',step:7}:{version:1,status:'completed',step:4}));
+    if('androidBridge' in w){seed(true);return;}
+    seed(false);
+    let bridge:unknown;
+    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(true);}});
+  });
 }
 /** Dismiss the explicit post-auth Ready card; quiet restoration of completed setup opens no card.
  * Waits for one of the two outcomes: the Ready card is showing, or no panel and completed setup is stored. */

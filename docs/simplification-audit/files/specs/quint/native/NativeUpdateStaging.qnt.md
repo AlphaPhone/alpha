@@ -1,0 +1,15 @@
+# specs/quint/native/NativeUpdateStaging.qnt
+- Lines: 333 | Kind: Quint model, live (listed in `specs/quint/native/manifest.json`, read by `scripts/check-quint.ts` and `scripts/check-quint-refinement.ts`); also defines `UpdateBootAdmissionPolicy` used by the composition; harness slices `apps/app/src/prototype/settings-adapter.ts`, strips types and runs it in `vm`, and compiles the update-barrier slice | Verdict: KEEP (harness: PORT)
+- Covers: Settings update offer and cache-file custody before activation: 15-minute check cadence, failed refresh retains old offer, exact reviewed tuple survives replacement offers, busy peer cannot sweep owned file, verified staging only, automatic installs wait for a ready boot (>30 s uptime, SDK 31, consent), process restart keeps warm readiness, same-process cache revalidation (18 runs, 7 invariants). Duplicates: none. Callers/importers: manifest (sources incl. `apps/app/src/prototype/settings-adapter.ts` and upstream `ConnectionTransport`); `specs/quint/refinement/native/update-staging.mjs` (240 lines); `test/quint-native-update-staging.test.mjs`; also re-run by the family aggregate `specs/quint/refinement/native/index.mjs` (`test/quint-native-refinement.test.mjs`); `NativeUpdateComposition.qnt` imports its first module
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | `update-staging.mjs:53-64` | T2 / T10 | Renderer half is a source transplant: slices `settings-adapter.ts` from `export const UPDATE_SCHEMA` to `/** Field updates wait for Home` and from `const UPDATE_KEY` to `/** Keep the reference settings components`, strips `export`, runs `stripTypeScriptTypes`, evaluates with fake `Date`, `localStorage`, `Capacitor`. Any comment edit or the planned `prototype/` restructure breaks it. | PORT: move the update manifest parser and check cache (`parseUpdateManifest`, `updateCheckDue`, `checkForUpdate`, `savedUpdate`) into an exported module (e.g. `apps/app/src/runtime/app-update.ts`) and load it with `loadBrowserModule` as `native-stream-bridge.mjs` does, injecting clock/storage/device as parameters. | Medium |
+| 2 | `update-staging.mjs:13,165` | T10 | Native half depends on `exactUpdateMembers` slice of `AlphaDevicePlugin`. | Port with `AlphaUpdater`. | Medium |
+| 3 | 3-18 | C5 | `UpdateBootAdmissionPolicy` is a shared policy module living in this file. | Optional split into its own file (see Composition). | None |
+| 4 | test + `index.mjs` | T4 | Runs twice. | One runner. | None |
+| 5 | harness | B5 | `checkTraces` re-hashes every input before and after the run (`driverHashes`, `inputsUnchanged`) and the wrapper test asserts exact trace counts. | Pass/fail only. | None |
+
+## Proposed end state
+Model unchanged. Renderer half imports an exported update module; native half compiles `AlphaUpdater.java`; no source slicing or `vm` transplant. One runner, path-filtered to the update module, `AlphaUpdater.java`, `AlphaUpdateStatusReceiver.java`, `UpdateConfirmationReceipt.java`, `PluginWorkers.java`.

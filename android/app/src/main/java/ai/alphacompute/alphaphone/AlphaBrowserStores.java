@@ -12,11 +12,11 @@ import android.content.Context;
 import java.util.Set;
 
 /**
- * Alpha's installed-data identifiers for its Browser tab host (AlphaBrowserPlugin) and the shared
- * stores in plugin-native-browser-surface: the WebView profiles, preferences files, activity-result keys and
- * Android Keystore aliases that earlier builds wrote, so website sign-ins, saved bookmarks, tabs,
- * history, downloads and site-permission decisions stay readable. The stores, their
- * formats and the profile rules are upstream; the tab host and its native windows are Alpha's.
+ * Alpha's persisted identifiers for its Browser tab host (AlphaBrowserPlugin) and the shared
+ * stores in plugin-native-browser-surface: the WebView profiles, preferences files, activity-result
+ * keys and Android Keystore aliases that hold website sign-ins, saved bookmarks, tabs, history,
+ * downloads and site-permission decisions; never rename them. The stores, their formats and the
+ * profile rules are upstream; the tab host and its native windows are Alpha's.
  */
 final class AlphaBrowserStores {
  /** Alpha's own URL scheme: an intent: link may never carry it as data. */
@@ -25,14 +25,11 @@ final class AlphaBrowserStores {
  static final String PERSISTENT_PROFILE="alpha_browser_v1";
  /** Private tabs: alpha_private_<namespace>_<tab>, purged on close and at start. */
  static final String PRIVATE_PREFIX="alpha_private_";
- /** Builds before P-04 gave every tab an ephemeral profile; leftovers are purged at start. */
- static final String LEGACY_PREFIX="alpha_public_";
  /**
   * Derived names keep the installed files and keys: alpha-browser-downloads (download list),
   * alpha-browser-retired-profiles, alpha-browser-notices and the alpha-browser-* activity-result keys.
   */
  static final BrowserTabHostConfig IDENTITY=BrowserTabHostConfig.builder(PERSISTENT_PROFILE,PRIVATE_PREFIX,"alpha-browser")
-  .legacyEphemeralPrefix(LEGACY_PREFIX)
   .names("Alpha Phone","Alpha","Alpha Browser")
   .hostScheme("alphaphone")
   // The integrated vault's per-field and top-level origin extras for engine-bound login fields.

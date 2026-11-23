@@ -1,5 +1,4 @@
 package ai.alphacompute.alphaphone;
-import ai.eliza.plugins.media.OwnedVideoPlayback;
 
 import android.Manifest;
 import android.content.ContentUris;
@@ -33,14 +32,6 @@ public class VideoInstrumentedTest {
   until(selector);eval("("+selector+").click()");
  }
  private void navigate(String label)throws Exception{until("document.documentElement.dataset.activeView");eval(AppNavigation.request(label));until(AppNavigation.selected(label));}
- private String playbackDiagnostics()throws Exception{
-  java.util.concurrent.atomic.AtomicReference<String> result=new java.util.concurrent.atomic.AtomicReference<>("unavailable");
-  WebViewTestDriver.withActivity(MainActivity.class,activity->{try{
-   Object plugin=activity.getBridge().getPlugin("AlphaPhotos").getInstance();
-   java.lang.reflect.Field field=AlphaPhotosPlugin.class.getDeclaredField("playback");field.setAccessible(true);
-   result.set(((OwnedVideoPlayback)field.get(plugin)).diagnostics());
-  }catch(Exception error){result.set(error.getClass().getSimpleName());}});return result.get();
- }
  private Set<Uri> owned(){
   Set<Uri> result=new HashSet<>();
   try(Cursor c=context().getContentResolver().query(MediaStore.Video.Media.EXTERNAL_CONTENT_URI,new String[]{"_id"},MediaStore.MediaColumns.OWNER_PACKAGE_NAME+"=? AND is_pending=0",new String[]{context().getPackageName()},null)){
@@ -53,6 +44,7 @@ public class VideoInstrumentedTest {
   do{created=owned();created.removeAll(before);if(!created.isEmpty())break;SystemClock.sleep(100);}while(SystemClock.elapsedRealtime()<end);
   return created;
  }
+ private void deleteCreated(Set<Uri> before){Set<Uri> created=owned();created.removeAll(before);for(Uri uri:created)context().getContentResolver().delete(uri,null,null);}
  private void permission(){
   for(String permission:new String[]{Manifest.permission.CAMERA,Manifest.permission.RECORD_AUDIO}) InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context().getPackageName(),permission);
   if(android.os.Build.VERSION.SDK_INT>=33)InstrumentationRegistry.getInstrumentation().getUiAutomation().grantRuntimePermission(context().getPackageName(),Manifest.permission.POST_NOTIFICATIONS);
@@ -96,9 +88,8 @@ public class VideoInstrumentedTest {
    click("Pause video");until("document.querySelector('video[data-alpha-captured-video]')?.paused && document.querySelector('button[aria-label=\"Play video\"]')");
    byte[] prefix;
    try(java.io.InputStream input=context().getContentResolver().openInputStream(created.iterator().next())){assertNotNull(input);prefix=input.readNBytes(32);}
-   String rangeBaseline=playbackDiagnostics();
    eval("window.__videoRange={phase:'requesting',done:false};(async()=>{const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),8000);try{const video=document.querySelector('video[data-alpha-captured-video]');if(!video?.src)throw new Error('Video source unavailable');const source=new URL(video.src,location.href);window.__videoRange={...window.__videoRange,sameOrigin:source.origin===location.origin,protocol:source.protocol,documentProtocol:location.protocol,ownedPath:source.pathname.startsWith('/_alpha_owned_video/'),connected:video.isConnected,readyState:video.readyState,currentTime:video.currentTime};const r=await fetch(source.href,{headers:{Range:'bytes=16-31'},signal:abort.signal});window.__videoRange={phase:'reading',done:false,status:r.status,length:r.headers.get('content-length'),range:r.headers.get('content-range')};const bytes=new Uint8Array(await r.arrayBuffer());window.__videoRange={...window.__videoRange,phase:'complete',done:true,bytes:btoa(String.fromCharCode(...bytes))};}catch(error){window.__videoRange={...window.__videoRange,done:true,error:String(error?.name||'Error')+': '+String(error?.message||'Range request failed')};}finally{clearTimeout(timer);}})()");
-   until("window.__videoRange?.done");assertEquals("Range fetch failed: "+eval("JSON.stringify(window.__videoRange)")+" nativeBefore="+rangeBaseline+" nativeAfter="+playbackDiagnostics(),"false",eval("!!window.__videoRange.error"));assertEquals("Real nonzero byte range", "206",eval("window.__videoRange.status"));assertArrayEquals("Exact selected byte range",java.util.Arrays.copyOfRange(prefix,16,32),android.util.Base64.decode((String)new org.json.JSONTokener(eval("window.__videoRange.bytes")).nextValue(),android.util.Base64.DEFAULT));assertEquals("\"16\"",eval("window.__videoRange.length"));
+   until("window.__videoRange?.done");assertEquals("Range fetch failed: "+eval("JSON.stringify(window.__videoRange)"),"false",eval("!!window.__videoRange.error"));assertEquals("Real nonzero byte range", "206",eval("window.__videoRange.status"));assertArrayEquals("Exact selected byte range",java.util.Arrays.copyOfRange(prefix,16,32),android.util.Base64.decode((String)new org.json.JSONTokener(eval("window.__videoRange.bytes")).nextValue(),android.util.Base64.DEFAULT));assertEquals("\"16\"",eval("window.__videoRange.length"));
    click("Play video");until("!document.querySelector('video[data-alpha-captured-video]')?.paused");
    click("Back from photo");until("!document.querySelector('video[data-alpha-captured-video]')");
    navigate("Home");s.recreate();admitAccount();navigate("Photos");
@@ -108,7 +99,7 @@ public class VideoInstrumentedTest {
    until(savedVideoSelector);eval(savedVideoSelector+".click()");click("Play video");
    until("(()=>{const v=document.querySelector('video[data-alpha-captured-video]');return v&&v.currentTime>0.2&&v.videoWidth>0})()");
    navigate("Home");until("!document.querySelector('video[data-alpha-captured-video]')");
-  }finally{Set<Uri> created=owned();created.removeAll(before);for(Uri uri:created)context().getContentResolver().delete(uri,null,null);}
+  }finally{deleteCreated(before);}
  }
  @Test public void leavingCameraFinalizesInsteadOfRecordingInBackground()throws Exception{
   permission();Set<Uri> before=owned();
@@ -120,6 +111,6 @@ public class VideoInstrumentedTest {
    until("window.__videoState && window.__videoState.isRecording===false");
    navigate("Camera");until("document.querySelector('[data-alpha-camera-screen]')");
    assertEquals("No recording resumes implicitly","false",eval("!!document.querySelector('button[aria-label=\"Stop recording\"]')"));
-  }finally{Set<Uri> created=owned();created.removeAll(before);for(Uri uri:created)context().getContentResolver().delete(uri,null,null);}
+  }finally{deleteCreated(before);}
  }
 }

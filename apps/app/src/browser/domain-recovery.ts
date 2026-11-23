@@ -5,9 +5,11 @@ import type {DomainRecovery,BrowserDomainDocument} from './domain-document';
 let current:HTMLDialogElement|undefined;
 type RestoreOption={prepare:(raw:string)=>{raw:string;summary:string};salvage?:(raw:string)=>{raw:string;summary:string};save:(expected:DomainRecovery,raw:string,signal:AbortSignal)=>Promise<void>};
 /** Exact-byte backup and explicitly confirmed, revision-checked recovery. */
-export function openDomainRecovery(domain:Pick<BrowserDomainDocument,'capture'|'reset'>,name:string,heading:string,description:string,signal?:AbortSignal,restoreOption?:RestoreOption,storage:'browser'|'device'='browser'){
+export function openDomainRecovery(domain:Pick<BrowserDomainDocument,'capture'|'reset'>,name:string,heading:string,description:string,signal?:AbortSignal,option?:RestoreOption|'browser'|'device',storage:'browser'|'device'='browser'){
  if(!testMocksEnabled){openRetainedDataNotice(heading,signal);return;}
  if(signal?.aborted||current?.open)return;
+ const restoreOption=typeof option==='string'?undefined:option;
+ if(typeof option==='string')storage=option;
  const dialog=current=document.createElement('dialog');dialog.setAttribute('aria-label',heading);dialog.style.cssText='box-sizing:border-box;width:min(400px,94vw);max-height:85dvh;overflow:auto;padding:24px;border:0;border-radius:20px;background:var(--bg,#fff);color:var(--fg,#111);font:16px/1.5 system-ui';
  const previous=document.activeElement as HTMLElement|null,abort=new AbortController();let closed=false,confirming=false,busy=false,captured:DomainRecovery|undefined;
  const title=document.createElement('h2');title.textContent=heading;
@@ -57,5 +59,5 @@ export function openDomainRecovery(domain:Pick<BrowserDomainDocument,'capture'|'
  const dispose=()=>{if(closed)return;closed=true;abort.abort();signal?.removeEventListener('abort',dispose);dialog.remove();if(current===dialog)current=undefined;window.removeEventListener('alpha-back',back,true);for(const event of retireEvents)window.removeEventListener(event,dispose,true);document.removeEventListener('visibilitychange',visibility);previous?.focus();};
  signal?.addEventListener('abort',dispose,{once:true});
  const back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();dispose();},visibility=()=>{if(document.hidden)dispose();};close.onclick=dispose;dialog.oncancel=e=>{e.preventDefault();dispose();};window.addEventListener('alpha-back',back,true);for(const event of retireEvents)window.addEventListener(event,dispose,true);document.addEventListener('visibilitychange',visibility);dialog.append(title,text,backup,legacy,reset,status);if(restoreOption){dialog.append(importLabel);if(restoreOption.salvage)dialog.append(salvageLabel);dialog.append(preview,restore);}dialog.append(close);layoutBrowserDialog(dialog,[close]);(document.querySelector('.os')||document.body).append(dialog);dialog.showModal();close.focus();
- void domain.capture(abort.signal).then(value=>{if(closed)return;captured=value;if(prepared)restore.disabled=false;backup.disabled=value.raw===null;reset.disabled=value.raw===null&&!value.snapshot;legacy.hidden=value.legacy===null||value.legacy===value.raw;status.textContent=value.legacyChanged?'Conflict in another tab':value.format==='unrecognized'?'Needs recovery':value.raw===null?`No saved ${storage} ${name}.`:'Nothing deleted until you confirm';},()=>{if(!closed)status.textContent='Unreadable';});
+ void domain.capture(abort.signal).then(value=>{if(closed)return;captured=value;if(prepared)restore.disabled=false;backup.disabled=value.raw===null;reset.disabled=value.raw===null&&!value.snapshot;legacy.hidden=typeof value.legacy!=='string'||value.legacy===value.raw;status.textContent=value.legacyChanged?'Conflict in another tab':value.format==='unrecognized'?'Needs recovery':value.raw===null?`No saved ${storage} ${name}.`:'Nothing deleted until you confirm';},()=>{if(!closed)status.textContent='Unreadable';});
 }

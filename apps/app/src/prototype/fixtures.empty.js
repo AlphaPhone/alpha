@@ -3,7 +3,7 @@
 // module, so the product starts from empty, honest state: no seeded people,
 // messages, mail, events, pages, photos, places, notes, files, cards,
 // workflows, accounts, device facts, notifications, scripted replies or images.
-// Export names must match ./fixtures.js exactly (test/fixtures-parity.test.mjs).
+// Export names must match ./fixtures.js exactly; the production build fails on a missing name.
 // Values are empty arrays, empty objects or null; nothing here names a person,
 // place, account or asset.
 
@@ -47,11 +47,6 @@ export const CT_SEED = [];
 export const FILES_FOLDERS_EXTRA = [];
 export const FILES_SEED = [];
 
-export const WAL_CARDS = [];
-export const WAL_TRIPS = [];
-export const WAL_MERCH = [];
-export const WAL_PASSES = [];
-
 export const WF_SEED = [];
 
 export const ST_ACCOUNTS = [];
@@ -65,7 +60,6 @@ export const ST_DEVICE = null;
 export const ST_ABOUT = null;
 
 export const NOTIF = [];
-export const LOCK_SUM = [];
 export const QUICK_SETTINGS = {};
 export const QUICK_TILES = [];
 export const HEADS = null;

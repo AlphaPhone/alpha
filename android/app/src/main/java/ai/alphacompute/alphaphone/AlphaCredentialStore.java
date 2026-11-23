@@ -12,14 +12,14 @@ final class AlphaCredentialStore {
  static final class StorageFullException extends Exception {
   StorageFullException(){super("Secure storage slot is full");}
  }
- static final String NOTES_RECORDS="notes-records:v1:device";
- static final String NOTES_TRASH="notes-trash:v1:device";
+ static final String NOTES_RECORDS=Slots.NOTES_RECORDS;
+ static final String NOTES_TRASH=Slots.NOTES_TRASH;
  /** Encrypted copy of Notes edits whose collection commit failed or is uncertain. */
- static final String NOTES_DRAFT="notes-draft:v1:device";
+ static final String NOTES_DRAFT=Slots.NOTES_DRAFT;
  /** Reminder-to-note back-references: identity only, at most 200 links (runtime/note-origin.ts). */
- static final String NOTE_ORIGINS="note-origins:v1:device";
+ static final String NOTE_ORIGINS=Slots.NOTE_ORIGINS;
  /** Notes folder list: at most 100 names of 40 characters (runtime/notes-folders.ts). */
- static final String NOTES_FOLDERS="notes-folders:v1:device";
+ static final String NOTES_FOLDERS=Slots.NOTES_FOLDERS;
  interface CloudChangeObserver {void changed()throws Exception;}
  private static CloudChangeObserver cloudChange=()->{};
  static void observeCloudChanges(CloudChangeObserver observer){synchronized(JsonCredentialSlots.LOCK){cloudChange=observer;}}
@@ -29,45 +29,42 @@ final class AlphaCredentialStore {
  AlphaCredentialStore(Context context){this(context,()->{});}
  AlphaCredentialStore(Context context,Runnable assertOwner){
   this.context=context.getApplicationContext();this.assertOwner=assertOwner;
-  slots=new JsonCredentialSlots(new File(context.getApplicationContext().getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",AlphaCredentialStore::slotLimit,AlphaCredentialStore::retainedLimit);
+  slots=open(this.context);
+ }
+ private static JsonCredentialSlots open(Context context){
+  return new JsonCredentialSlots(new File(context.getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",AlphaCredentialStore::slotLimit,AlphaCredentialStore::retainedLimit);
  }
  static int slotLimit(String name){
-  if("sms-send-ledger:v1:device".equals(name))return 1024*1024;
+  if(Slots.SMS_SEND_LEDGER.equals(name))return 1024*1024;
   // Up to five individually valid pictures with base64 overhead before the owner's MMS review.
   if(name!=null&&name.matches("sms-draft:v1:(new|thread:[1-9][0-9]{0,18})"))return 8*1024*1024;
-  if("gmail-background:v1".equals(name))return 2*1024*1024;
-  if("native-delete-journal:v1".equals(name)||"native-calendar-sync:v1".equals(name))return 4*1024*1024;
-  if("notes-audio-deletions:v1:device".equals(name))return 1024*1024;
-  if(name!=null&&name.matches("note-audio-metadata:v1:[A-Za-z0-9_-]{1,100}"))return 512*1024;
+  if(Slots.GMAIL_BACKGROUND.equals(name))return 2*1024*1024;
+  if(Slots.NATIVE_DELETE_JOURNAL.equals(name)||Slots.NATIVE_CALENDAR_SYNC.equals(name))return 4*1024*1024;
+  if(Slots.NOTES_AUDIO_DELETIONS.equals(name))return 1024*1024;
+  if(name!=null&&name.matches(Slots.NOTE_AUDIO_METADATA_PREFIX+"[A-Za-z0-9_-]{1,100}"))return 512*1024;
   if(NOTES_RECORDS.equals(name))return 32*1024*1024;
   // Restorable copies of deleted notes, purged thirty days after deletion. The cap is the Trash
-  // policy's byte limit (runtime/notes-trash-policy.ts NOTES_TRASH_MAX_BYTES); a document written
-  // under the earlier 32 MiB cap stays readable and shrinkable through retainedLimit.
+  // policy's byte limit (runtime/notes-trash-policy.ts NOTES_TRASH_MAX_BYTES).
   if(NOTES_TRASH.equals(name))return NOTES_TRASH_BYTES;
   if(NOTES_DRAFT.equals(name))return 32*1024*1024;
   // 200 links of bounded ids and a hash stay well under this; a larger value is not a valid index.
   if(NOTE_ORIGINS.equals(name))return 512*1024;
   if(NOTES_FOLDERS.equals(name))return 64*1024;
-  if(name!=null&&(name.startsWith("inbox-drafts:v1:")||name.matches("inbox-operation:v1:[a-f0-9]{64}")))return 8*1024*1024;
-  if(name!=null&&name.matches("calendar-linked-sync:v1:[a-f0-9]{64}"))return 4*1024*1024;
-  if(name!=null&&name.matches("connected-read-cache:v1:[a-f0-9]{64}"))return 4*1024*1024;
+  if(name!=null&&(name.startsWith(Slots.INBOX_DRAFTS_PREFIX)||name.matches(Slots.INBOX_OPERATION_PATTERN)))return 8*1024*1024;
+  if(name!=null&&name.matches(Slots.CALENDAR_LINKED_SYNC_PATTERN))return 4*1024*1024;
+  if(name!=null&&name.matches(Slots.CONNECTED_READ_CACHE_PATTERN))return 4*1024*1024;
   return 256*1024;
  }
- /** Notes Trash policy limit (30 MiB), now also its slot cap. */
- static final int NOTES_TRASH_BYTES=30*1024*1024;
- /** The cap a slot had before it was lowered. Data stored under it stays readable, and a write
-  * that does not grow it is accepted, until it fits the current cap (JsonCredentialSlots,
-  * elizaOS/eliza#35910). Never below slotLimit. */
  static int retainedLimit(String name){
   if(NOTES_TRASH.equals(name))return 32*1024*1024;
   return slotLimit(name);
  }
- /** Refuses only what no stored value can admit (above the retained cap) before any shutdown or
-  * write. Values between the cap and the retained cap are decided by the shared slot, whose
-  * CapacityException mutateSlot reports as StorageFullException. */
+ /** Notes Trash policy limit (30 MiB), also its slot cap. */
+ static final int NOTES_TRASH_BYTES=30*1024*1024;
+ /** Refuses a value no stored data may reach (its retained cap) before any shutdown or write. */
  private static void requireCapacity(String name,String value)throws StorageFullException{
   if(value==null)return;
-  // UTF-8 never encodes a char in fewer than 1 byte, so a short string cannot exceed the cap.
+  // UTF-8 encodes a char in at most 3 bytes, so a short string cannot exceed the cap.
   if(value.length()<=retainedLimit(name)/3)return;
   if(value.getBytes(StandardCharsets.UTF_8).length>retainedLimit(name))throw new StorageFullException();
  }
@@ -76,7 +73,7 @@ final class AlphaCredentialStore {
  String readCredentialSlot(String name)throws Exception{return slots.read(CloudDeployment.storageSlot(name));}
  /** Reads a saved slot before Application startup during pending reset recovery. */
  static String readSlotBeforeAttach(Context base,String name)throws Exception{
-  return new JsonCredentialSlots(new File(base.getNoBackupFilesDir(),"connection-credentials"),"alpha.connection.aes.v1",AlphaCredentialStore::slotLimit).read(CloudDeployment.storageSlot(name));
+  return open(base).read(CloudDeployment.storageSlot(name));
  }
  /** Critical credential changes cannot leave a child process using the old environment. */
  void writeCredentialSlot(String name,String value)throws Exception{if(value==null)throw new IllegalArgumentException("Credential value required");requireCapacity(name,value);mutateSlot(name,null,value,false);}
@@ -88,7 +85,7 @@ final class AlphaCredentialStore {
   catch(JsonCredentialSlots.CapacityException full){throw new StorageFullException();}
  }
  private boolean mutateSlotOnce(String name,String expected,String value,boolean compare)throws Exception{
-  if(!"cloud:production".equals(name)&&!"cloud:staging".equals(name)&&!LocalAgentProviderAdmission.PROVIDER_SLOT.equals(name)){
+  if(!Slots.CLOUD_PRODUCTION.equals(name)&&!Slots.CLOUD_STAGING.equals(name)&&!LocalAgentProviderAdmission.PROVIDER_SLOT.equals(name)){
    return AlphaLocalAgentPlugin.withCredentialSlotMutation(assertOwner,()->{
     if(compare&&!java.util.Objects.equals(slots.read(CloudDeployment.storageSlot(name)),expected))return false;
     if(value==null)slots.remove(CloudDeployment.storageSlot(name));else slots.write(CloudDeployment.storageSlot(name),value);return true;
@@ -105,8 +102,8 @@ final class AlphaCredentialStore {
     // No stored provider: the running agent was launched unbound (removing a provider stops it),
     // so no process holds a Cloud key and a sign-in change never needs to stop the agent.
     if(provider==null)return false;
-    String environment=provider==null?"production":new org.json.JSONObject(provider).optString("environment","production");
-    return name.equals("cloud:"+environment)&&!LocalAgentProviderAdmission.sameCloudCredential(before,value);
+    String environment=new org.json.JSONObject(provider).optString("environment","production");
+    return name.equals(Slots.CLOUD_PREFIX+environment)&&!LocalAgentProviderAdmission.sameCloudCredential(before,value);
    }
    public Boolean commit()throws Exception{
     if(conflict)return false;
@@ -114,7 +111,7 @@ final class AlphaCredentialStore {
     if(!java.util.Objects.equals(before,slots.read(CloudDeployment.storageSlot(name)))||!java.util.Objects.equals(provider,slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT))))throw new IllegalStateException("Credential changed");
     // Only a replaced or removed Cloud key retires Cloud-bound background state; changing the agent's
     // inference provider does not (background Gmail binds the Cloud credential, not the provider).
-    if("cloud:production".equals(name)&&!LocalAgentProviderAdmission.sameCloudCredential(before,value))cloudChange.changed();
+    if(Slots.CLOUD_PRODUCTION.equals(name)&&!LocalAgentProviderAdmission.sameCloudCredential(before,value))cloudChange.changed();
     String committed=LocalAgentProviderAdmission.PROVIDER_SLOT.equals(name)?value==null?LocalAgentProviderAdmission.unbindProvider(before):LocalAgentProviderAdmission.withoutAdmission(value):value;
     // Metadata/valid expiry refresh is not replacement; use the same canonical credential
     // comparison that retains provider admission. Provider writes still strip admission.
@@ -122,7 +119,7 @@ final class AlphaCredentialStore {
       ?!java.util.Objects.equals(before,committed):!LocalAgentProviderAdmission.sameCloudCredential(before,committed);
     if(authorityChanged)AlphaLocalAgentPlugin.powerAuthorizationChanged();
     invalidateProviderAdmission(name,value);
-    if("cloud:production".equals(name)&&authorityChanged)slots.remove(CloudDeployment.storageSlot(GoogleWorkspaceReturn.SLOT));
+    if(Slots.CLOUD_PRODUCTION.equals(name)&&authorityChanged)slots.remove(CloudDeployment.storageSlot(GoogleWorkspaceReturn.SLOT));
     if(committed==null)slots.remove(CloudDeployment.storageSlot(name));
     else slots.write(CloudDeployment.storageSlot(name),committed);
     return true;
@@ -150,16 +147,15 @@ final class AlphaCredentialStore {
    assertOwner.run();
    String provider=slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));
    if(provider==null||expected!=null&&!expected.equals(provider))throw new SecurityException("Provider changed");
-   String cloud=slots.read(CloudDeployment.storageSlot("cloud:production"));
+   String cloud=slots.read(CloudDeployment.storageSlot(Slots.CLOUD_PRODUCTION));
    String value=new org.json.JSONArray().put(provider).put(cloud).put(authority).put(AlphaLocalAgentPlugin.currentCredentialIntent()).toString();
-   byte[] bytes=java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
-   StringBuilder hash=new StringBuilder();for(byte b:bytes)hash.append(String.format(java.util.Locale.ROOT,"%02x",b&255));return hash.toString();
+   return AlphaUtil.sha256Hex(value);
   });
  }
  static final class ProviderChanged extends Exception {}
  /** Automatic cleanup never reserves an intent or alters a different binding. */
  boolean removeProviderIfCurrent(String guard)throws Exception{
-  if(guard==null||!guard.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid binding guard");
+  if(!AlphaUtil.isSha256Hex(guard))throw new IllegalArgumentException("Invalid binding guard");
   final long[] intent={-1};
   try{
    return AlphaLocalAgentPlugin.mutateCredentials(context,()->{
@@ -170,7 +166,7 @@ final class AlphaCredentialStore {
      try{if(!guard.equals(providerBindingGuard(null)))throw new ProviderChanged();}
      catch(SecurityException changed){throw new ProviderChanged();}
      provider=slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));
-     cloud=slots.read(CloudDeployment.storageSlot("cloud:production"));
+     cloud=slots.read(CloudDeployment.storageSlot(Slots.CLOUD_PRODUCTION));
      authority=AlphaLocalAgentPlugin.credentialAuthorityEpoch();
      intent[0]=AlphaLocalAgentPlugin.reserveCredentialIntent();
      return true;
@@ -178,7 +174,7 @@ final class AlphaCredentialStore {
     public Boolean commit()throws Exception{
      if(authority!=AlphaLocalAgentPlugin.credentialAuthorityEpoch()
        ||!java.util.Objects.equals(provider,slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT)))
-       ||!java.util.Objects.equals(cloud,slots.read(CloudDeployment.storageSlot("cloud:production"))))throw new ProviderChanged();
+       ||!java.util.Objects.equals(cloud,slots.read(CloudDeployment.storageSlot(Slots.CLOUD_PRODUCTION))))throw new ProviderChanged();
      AlphaLocalAgentPlugin.powerAuthorizationChanged();
      String retained=LocalAgentProviderAdmission.unbindProvider(provider);
      if(retained==null)slots.remove(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));else slots.write(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT),retained);
@@ -191,12 +187,12 @@ final class AlphaCredentialStore {
  }
  void assertCurrent(){assertOwner.run();}
  private void invalidateProviderAdmission(String changedSlot,String replacement)throws Exception{
-  if(!"cloud:production".equals(changedSlot)&&!"cloud:staging".equals(changedSlot))return;
+  if(!Slots.CLOUD_PRODUCTION.equals(changedSlot)&&!Slots.CLOUD_STAGING.equals(changedSlot))return;
   String saved=slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));
   if(saved==null)return;
   org.json.JSONObject provider=new org.json.JSONObject(saved);
   if(!"elizacloud".equals(provider.optString("provider")))return;
-  if(!changedSlot.equals("cloud:"+provider.optString("environment","production")))return;
+  if(!changedSlot.equals(Slots.CLOUD_PREFIX+provider.optString("environment","production")))return;
   String previous=slots.read(CloudDeployment.storageSlot(changedSlot));
   if(replacement!=null&&LocalAgentProviderAdmission.currentGeneration(saved,previous)!=null
      &&LocalAgentProviderAdmission.sameCloudCredential(previous,replacement))return;
@@ -213,9 +209,9 @@ final class AlphaCredentialStore {
     org.json.JSONObject requested=new org.json.JSONObject(selection);
     boolean cloud="elizacloud".equals(requested.optString("provider"));
     boolean refreshServices=!cloud&&credentialSlot!=null;
-    if(cloud&&!"cloud:production".equals(credentialSlot))throw new IllegalArgumentException();
+    if(cloud&&!Slots.CLOUD_PRODUCTION.equals(credentialSlot))throw new IllegalArgumentException();
     if(refreshServices){
-     if(!"cloud:production".equals(credentialSlot)||expected==null||verifiedIdentity==null)throw new IllegalArgumentException();
+     if(!Slots.CLOUD_PRODUCTION.equals(credentialSlot)||expected==null||verifiedIdentity==null)throw new IllegalArgumentException();
      org.json.JSONObject old=new org.json.JSONObject(expected),services=requested.getJSONObject("cloudServices");
      if(!"cerebras".equals(old.optString("provider")))throw new IllegalArgumentException();
      for(String field:new String[]{"provider","key","cartesiaKey","model","revision"})if(!java.util.Objects.equals(old.opt(field),requested.opt(field)))throw new IllegalArgumentException();
@@ -263,16 +259,6 @@ final class AlphaCredentialStore {
    }
   });
  }
- /** Read-only correlation, not an authorization or migration API. Legacy selections remain unavailable. */
- String providerAdmissionGeneration()throws Exception{
-  synchronized(JsonCredentialSlots.LOCK){
-   String saved=slots.read(CloudDeployment.storageSlot(LocalAgentProviderAdmission.PROVIDER_SLOT));
-   if(saved==null||!AlphaLocalAgentPlugin.providerAdmissionReadable())return null;
-   org.json.JSONObject selected=new org.json.JSONObject(saved);
-   String credential="elizacloud".equals(selected.optString("provider"))?slots.read(CloudDeployment.storageSlot("cloud:production")):null;
-   return LocalAgentProviderAdmission.currentGeneration(saved,credential);
-  }
- }
  /** Private whitelist only; neither the logical fingerprint nor billing credentials leave the store. */
  org.json.JSONObject providerAdmissionSnapshot()throws Exception{
   synchronized(JsonCredentialSlots.LOCK){
@@ -280,7 +266,7 @@ final class AlphaCredentialStore {
    if(saved==null||!AlphaLocalAgentPlugin.providerAdmissionReadable())throw new SecurityException("Native provider binding unavailable");
    org.json.JSONObject selected=new org.json.JSONObject(saved);
    String kind=selected.optString("provider","cerebras");
-   String cloud="elizacloud".equals(kind)?slots.read(CloudDeployment.storageSlot("cloud:production")):null;
+   String cloud="elizacloud".equals(kind)?slots.read(CloudDeployment.storageSlot(Slots.CLOUD_PRODUCTION)):null;
    String generation=LocalAgentProviderAdmission.currentGeneration(saved,cloud);
    if(generation==null)throw new SecurityException("Native provider binding unavailable");
    String accountRef="elizacloud".equals(kind)?LocalAgentProviderAdmission.cloudAccountRef(selected):"native-local";

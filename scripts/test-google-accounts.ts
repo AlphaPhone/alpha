@@ -85,7 +85,7 @@ test('abort and an empty connection ID cannot start a disconnect',async()=>{
   assert.deepEqual(f.calls,[]);
 });
 test('disconnect copy names the account and keeps personal data',()=>{
-  const prompt=googleDisconnectConfirmation(account.label,'Nebula'),done=googleDisconnectMessage('disconnected',account.label);
+  const prompt=googleDisconnectConfirmation(account.label),done=googleDisconnectMessage('disconnected',account.label);
   assert.equal(prompt,`Disconnect ${account.label}? Mail and events stay.`);assert.doesNotMatch(prompt+done,/Eliza/);
   assert.equal(done,`${account.label} disconnected`);
   assert.equal(googleDisconnectMessage('still-connected',account.label),`${account.label}: Still connected`);

@@ -16,8 +16,9 @@
  */
 export const TEXT_XL_CLASS = 'alpha-text-xl';
 const TEXT_XL_ABOVE = 1.5;
+const LARGE_TEXT_AT = 1.5;
 export const TEXT_SCALE_PROPERTY = '--alpha-text-scale';
-export const LARGE_TEXT_CLASS = 'alpha-large-text';
+const LARGE_TEXT_CLASS = 'alpha-large-text';
 
 export function installTextScale(): () => void {
   const probe = document.createElement('div');
@@ -36,7 +37,7 @@ export function installTextScale(): () => void {
     published = scale;
     document.documentElement.style.setProperty(TEXT_SCALE_PROPERTY, String(scale));
     // CSS cannot compare a custom property, so large text also gets a class: app titles wrap from here.
-    document.documentElement.classList.toggle(LARGE_TEXT_CLASS, scale >= 1.5);
+    document.documentElement.classList.toggle(LARGE_TEXT_CLASS, scale >= LARGE_TEXT_AT);
     document.documentElement.classList.toggle(TEXT_XL_CLASS, scale > TEXT_XL_ABOVE);
   };
   read();

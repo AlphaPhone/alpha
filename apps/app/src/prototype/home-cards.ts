@@ -12,7 +12,6 @@ import {
   overviewWhenLabel,
   presentOverviewAgendaCard,
   presentOverviewAgendaFeed,
-  presentOverviewAgendaNext,
   presentOverviewAgendaSource,
   presentOverviewAttention,
   presentOverviewBrief,
@@ -48,7 +47,6 @@ export const presentHomeBrief = (brief: HomeBriefSummary | null | undefined, now
 /** The newest retained result for the current connection; shown only when one exists. */
 export const presentHomeBriefCard = (brief: HomeBriefSummary | null | undefined, now: number) => presentOverviewBriefCard(brief, now, format);
 export const presentHomeCalendarSource = (input: Parameters<typeof presentOverviewAgendaSource>[0]) => presentOverviewAgendaSource(input, format);
-export const presentHomeNext = (input: Parameters<typeof presentOverviewAgendaNext>[0]) => presentOverviewAgendaNext(input, format);
 /** The agenda card when its source is the agent's calendar feed (states, freshness and staleness). */
 export const presentHomeAgendaFeed = (input: Parameters<typeof presentOverviewAgendaFeed>[0]) => presentOverviewAgendaFeed(input, format);
 export const homeCalendarName = overviewCalendarName;

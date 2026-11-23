@@ -1,8 +1,6 @@
 import {DailyApps} from '../daily';
-import {createReminderActionJournal,type PendingReminderAction,type PendingReminderActions} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts';
+import {createReminderActionJournal,type PendingReminderActions} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-journal.ts';
 import {reminderJournalStore} from './reminder-journal-store';
-/** Selected-reminder cancel, complete, snooze and edit requests awaiting a durable receipt. */
-export type PendingReminderDeletion=PendingReminderAction;
 // Keep the installed slot and document: they hold every pending reminder action.
 const journal=createReminderActionJournal({
  store:reminderJournalStore<PendingReminderActions>('reminder-deletions:v1:device',async()=>(await import('../browser/reminder-action-document')).reminderActionDocument),

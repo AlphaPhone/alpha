@@ -4,7 +4,7 @@ import ai.eliza.plugins.messages.ImageCapability;
 import android.content.Context;
 
 /**
- * Whether this install is Alpha Phone inside the Alpha AOSP image (owner decision P-36, issue #420).
+ * Whether this install is Alpha Phone inside the Alpha AOSP image.
  *
  * Phone, Contacts and SMS exist only there. The decision is the shared
  * {@link ImageCapability#admitted(Context)}: a release launcher build without the test-mocks switch

@@ -1,0 +1,3 @@
+specs/quint/legacy/core/source-inventory.json
+specs/quint/legacy/core/source-support.mjs
+specs/quint/legacy/core/task-service-refinement.md

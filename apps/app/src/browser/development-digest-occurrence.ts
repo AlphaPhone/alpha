@@ -10,7 +10,7 @@ import {DIGEST_MISSED_TEXT as MISSED_TEXT,DIGEST_PAUSED_TEXT,DIGEST_RUN_WINDOW_M
  *  - an occurrence is settled at most once.
  * Development schedules exist only with ELIZA_DEV_ALLOW_TEST_MOCKS.
  */
-export type OccurrenceLoop={active:boolean;removed?:boolean;createdAt:number;spec:{timeZone:string;localTime:string};
+type OccurrenceLoop={active:boolean;removed?:boolean;createdAt:number;spec:{timeZone:string;localTime:string};
  /** Newest settled civil time (`YYYY-MM-DDTHH:MM`). */
  lastOccurrence?:string;
  /** Settled civil times, ascending and bounded. Absent on documents written before it existed. */
@@ -19,7 +19,7 @@ export type OccurrenceLoop={active:boolean;removed?:boolean;createdAt:number;spe
  settledFloor?:string;
  /** Set with the one `unavailable` record; a new reviewed version of the loop clears it. */
  sourcePaused?:true};
-export type Occurrence={at:number;local:string;missed:boolean};
+type Occurrence={at:number;local:string;missed:boolean};
 /** Agent: an occurrence admitted more than this long after its time is missed. */
 export const DIGEST_RUN_WINDOW_MS=RUN_WINDOW_MS;
 export const DIGEST_MISSED_TEXT=MISSED_TEXT;

@@ -30,7 +30,7 @@ const HOME_EDIT_CSS = `
 `;
 
 /** Home and its app grid from Alpha's mobile shell (ui/mobile-shell), and Alpha's Apps drawer, themed by the Alpha
- * record (view refresh PLAN section 5). The template fills Home's notice and card slots; open state
+ * record. The template fills Home's notice and card slots; open state
  * and Back go through the shared navigation reducer (Component.shellNavigate), so Back and Home close
  * the drawer. The installed favorites are the record's (alpha.launcher.favorites.v1, product views as
  * `alpha:<canonical id>`); the shell migrates their older view ids once before the launcher first

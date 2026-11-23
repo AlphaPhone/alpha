@@ -1,0 +1,14 @@
+# specs/quint/services/DevelopmentDigestPending.qnt
+- Lines: 118 | Kind: Quint model, live (`specs/quint/services/manifest.json`, checked by `scripts/check-quint.ts`; refinement `specs/quint/refinement/services/development-digest-pending.mjs` + `-probe.mjs`) | Verdict: KEEP, SIMPLIFY with delete-candidate B297 (drop the `legacy` phase)
+- Covers: the pending-digest slot's raw-byte compare-and-exchange: an existing intent may only advance `review`→`dispatched` with the same payload, refused writes leave exact bytes, a lost acknowledgement needs readback, a stale tab conflicts (6 runs, 6 invariants). Duplicates: none (no other model of `local-agent-storage.ts` digest CAS). Callers/importers: manifest; `refinement/services/index.mjs` (aggregate, `test/quint-services-refinement.test.mjs`); `test/quint-development-digest-pending.test.mjs`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 12, 17, 61-67, 99-101, 115-117 | A1 | `Phases` includes `"legacy"` (a record with no `phase`, "older build") and `permitsAdvance` accepts it; `legacyRetryUsesOriginalNoncanonicalBytesTest` and `rawByteDriftRejectsEquivalentLegacyRetryTest` exercise it. Product side is `local-agent-storage.ts:60` `prior.phase===undefined`, `hosted-digests.ts:42`, `hosted-digest-ui.tsx:66` — delete-candidate B297 (D1). | When B297 lands: remove `"legacy"` from `Phases` and `permitsAdvance`; rewrite the two runs with `startState(1, "review", true)` (pretty-encoded review record) so the raw-byte CAS property (`hostReencode`, `expected.pretty`) stays covered; update probe (`development-digest-pending-probe.mjs:86-94,175-217`) and the wrapper test's `legacy` trace lookup in the same commit. | Low; model and harness change together |
+| 2 | 61 | A8 | Comment "A legacy host writer can change only serialization" — the action models any host re-encoding, which is current behaviour of the dev host store. | Reword to "the host may re-encode the same value". | None |
+| 3 | manifest `sources` | — | Models `scripts/local-agent-dev-storage.ts` (dev-only host, kept under D6) plus the renderer guard; production Android counterpart is not modelled here. Correct scoping, keep. | Path filter: `apps/app/src/runtime/local-agent-storage.ts`, `hosted-digest*.ts(x)`, `scripts/local-agent-dev-storage.ts`, this model + harness. | None |
+| 4 | harness / test | T4, B5 | Runs twice (wrapper + aggregate); wrapper asserts exact counts (`traces === 7`, `checkpoints === 52`); harness hashes inputs before/after (`captureInputs`). | One runner; pass/fail only. | None |
+
+## Proposed end state
+Model kept with phases `{review, dispatched}` plus `none`; raw-byte re-encoding scenario kept on a `review` record. Harness keeps importing the real `developmentDigestStore`/`localAgentStorage` through the esbuild probe (already an import, not a slice). One runner, path-filtered.

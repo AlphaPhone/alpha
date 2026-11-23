@@ -2,12 +2,14 @@ import {decodedFile,type SelectedChatFile} from './chat-attachment-files';
 import {reviewFileEmail} from './file-email-review';
 import {AttachmentNotice} from '../ui/mailbox/drafts-controller';
 import {registerPlugin} from '../platform-plugins';
-import {reviewMailAttachment,type MailAttachment} from '../runtime/inbox-attachment';
-import type {Source} from './note-source-adapter';
-const sourceFiles=registerPlugin<{readSelected(input:{selectionId:string}):Promise<MailAttachment & {sha256:string;size:number;sourceReferenceVersion?:1}>;retainSourceReference(input:{selectionId:string;sha256:string}):Promise<{reference?:string}>}>('AlphaMailAttachments');
+import {reviewMailAttachment} from '../runtime/inbox-attachment';
+import type {DocumentSourceLink as Source} from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/source-links.ts';
+import type {AlphaMailAttachmentsPlugin} from '../native/alpha-mail-attachments';
+import type {AlphaFilesPlugin,AlphaFilesBrowserMethods} from '../native/alpha-files';
+const sourceFiles=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'|'retainSourceReference'>>('AlphaMailAttachments');
 import {reviewContentQuestion,SourceUnavailableError} from '../browser/content-question';
 import {sensitiveReadingText} from '../../../../.eliza/client-features/plugins/plugin-native-browser-surface/src/page-reading.ts';
-import { installFilesBrowserAdapter, type FilesStoragePort } from '../ui/files/files-browser-adapter.ts';
+import { installFilesBrowserAdapter } from '../ui/files/files-browser-adapter.ts';
 import { formatSize, selectedPreviewText, shortDate, typeLabel } from '../ui/files/storage-presentation.ts';
 import { selectedDocumentText } from '../ui/files/selected-document-messages.ts';
 import { Capacitor } from '@capacitor/core';
@@ -131,7 +133,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
       // approval prepared for the old name cannot be dispatched against the renamed file.
       // Keep Recent on the new name: same row, or the replacement capability when the provider issued one.
       const old=filesIndex.list().find(row=>row.selectionId===selected.result.selectionId);
-      if(old&&response.selectionId){if(old.selectionId!==response.selectionId)filesIndex.remove(old.key);for(const evicted of filesIndex.record({kind:old.kind,...(old.treeId?{treeId:old.treeId}:{}),name:response.name||'Selected document',mimeType:response.mimeType||'application/octet-stream',selectionId:response.selectionId}))if(evicted!==response.selectionId)release(evicted);}
+      if(old&&response.selectionId){if(old.selectionId!==response.selectionId)filesIndex.remove(old.key);for(const evicted of filesIndex.record({kind:old.kind,name:response.name||'Selected document',mimeType:response.mimeType||'application/octet-stream',selectionId:response.selectionId}))if(evicted!==response.selectionId)release(evicted);}
       if(response.selectionId&&old?.kind==='selected'&&rememberedPicker(response.selectionId))filesIndex.setOpen(response.selectionId);
       else if(filesIndex.open()===selected.result.selectionId)filesIndex.setOpen(null);
       // A rename keeps the bytes, so the known size still holds when the rename reports none.
@@ -282,7 +284,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     const back = definition.back;
     definition.back = (st: Bag, api: Bag) => { if (st.open === marker) { clear(); api.set({ open: null }); return true; } return back?.(st, api); };
   }
-  async function accept(module: string, result: NativeResult, api: Bag, recent: {kind:'selected'}|{kind:'tree';treeId:string}|false = {kind:'selected'}) {
+  async function accept(module: string, result: NativeResult, api: Bag, recent: {kind:'selected'}|false = {kind:'selected'}) {
     if (!Capacitor.isNativePlatform()&&result.status==='selected'&&result.action==='photos'&&result.selectionId?.startsWith('browser-photo:')) { clear();api.open('photos',{open:'native-camera-'+result.selectionId.slice(14)});return; }
     if (result.status !== 'selected' || !result.selectionId) return;
     clear();
@@ -309,7 +311,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     }
   }
   Component.prototype.filesAgent=installFilesBrowserAdapter(views.files as Parameters<typeof installFilesBrowserAdapter>[0],accept,clear,{
-    storage:registerPlugin<FilesStoragePort<NativeResult>>('AlphaFiles'),
+    storage:registerPlugin<AlphaFilesPlugin>('AlphaFiles'),
     createInlineModal,
     menuFocus:()=>document.querySelector<HTMLElement>('[data-alpha-subview="files-folder"] button[aria-label="Files options"]'),
     forgetSelected:selectionId=>DailyApps.forgetSelected({selectionId}),
@@ -327,7 +329,7 @@ export function installSelectedDocumentAdapter(Component: {prototype: Bag}, view
     out.fileReadNotice=storageAccessible&&!out.browse?.loading?(out.nativeTreeStatus||out.fd?.note):'';
     if(!Capacitor.isNativePlatform()&&Array.isArray(items)&&items.length&&items.every((row:Bag)=>{try{return /^Photos\/(Images|Videos)\//.test(JSON.parse(row.id)[1]);}catch{return false;}})){
       out.mediaCollection=true;out.filePlacement=false;out.canRename=false;
-      out.selSaveLocally=()=>registerPlugin<{storageSaveMedia(input:{paths:string[]}):Promise<unknown>}>('AlphaFiles').storageSaveMedia({paths:items.filter((row:Bag)=>row.selOn).map((row:Bag)=>JSON.parse(row.id)[1])});
+      out.selSaveLocally=()=>registerPlugin<AlphaFilesBrowserMethods>('AlphaFiles').storageSaveMedia({paths:items.filter((row:Bag)=>row.selOn).map((row:Bag)=>JSON.parse(row.id)[1])});
     }
     return out;
   };

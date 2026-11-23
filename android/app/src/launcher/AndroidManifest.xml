@@ -18,18 +18,18 @@
       sideloaded launcher never holds it and shows no identifiers; without it a live call's kind is
       unknown, so AC-19 treats any live call as possibly an emergency call. -->
  <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" tools:ignore="ProtectedPermissions" />
- <!-- SMS/MMS provider reads and reviewed native sends (#421), on the verified image only. Both are
+ <!-- SMS/MMS provider reads and reviewed native sends, on the verified image only. Both are
       hard-restricted: Android grants them to the preinstalled image app or the SMS role holder, never
       to a sideloaded launcher APK. AlphaTelephonyPlugin requests them only on the verified image. -->
  <uses-permission android:name="android.permission.READ_SMS" />
  <uses-permission android:name="android.permission.SEND_SMS" />
- <!-- SMS role (#421): Android grants these hard-restricted permissions to the SMS role holder, and Alpha
+ <!-- SMS role: Android grants these hard-restricted permissions to the SMS role holder, and Alpha
       can be offered the role only on the verified image, where AlphaTelephonyRoles enables the
       SMS-role components below. -->
  <uses-permission android:name="android.permission.RECEIVE_SMS" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
  <uses-permission android:name="android.permission.RECEIVE_MMS" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
  <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
- <!-- Dialer role (#420): the role grants CALL_PHONE to its holder, and Alpha can hold the role only on
+ <!-- Dialer role: the role grants CALL_PHONE to its holder, and Alpha can hold the role only on
       the verified image, where AlphaTelephonyRoles enables the components below. Alpha never asks for
       CALL_PHONE at runtime. The shared phone module's call-log writes and self-managed-call
       permissions are not used. -->
@@ -51,7 +51,7 @@
   <intent><action android:name="android.intent.action.SENDTO"/><data android:scheme="smsto"/></intent>
   <package android:name="com.android.systemui" />
  </queries>
- <!-- Launcher flavor only (#417): a downward pull on empty Home
+ <!-- Launcher flavor only: a downward pull on empty Home
       asks Android to expand its own notification shade, as stock launchers do. Install-time
       permission; see SystemShade.java. -->
  <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />

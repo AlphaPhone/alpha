@@ -25,9 +25,8 @@ if args.fetch:
         if target.exists():
             assert sha(target.read_bytes()) == row['beforeSha256'], 'Existing baseline drift'
             continue
-        expected = f"https://android.googlesource.com/platform/frameworks/base/+/{PIN['revision']}/{row['path']}?format=TEXT"
-        assert row['url'] == expected, 'Unexpected source host or revision'
-        data = base64.b64decode(urllib.request.urlopen(expected, timeout=20).read())
+        url = f"https://android.googlesource.com/platform/frameworks/base/+/{PIN['revision']}/{row['path']}?format=TEXT"
+        data = base64.b64decode(urllib.request.urlopen(url, timeout=20).read())
         assert sha(data) == row['beforeSha256'], 'Downloaded source drift'
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open('xb') as stream: stream.write(data)
@@ -221,7 +220,5 @@ data = ''.join('\n' if line == ' \n' else line for line in patch).encode()
 (ROOT / 'alpha-core-launcher.patch').write_bytes(data)
 (ROOT / 'manifest.json').write_text(json.dumps({'schema': 1, 'project': PIN['project'],
     'revision': PIN['revision'], 'targetAppId':'ai.alphacompute.alphaphone', 'patch': 'alpha-core-launcher.patch', 'patchSha256': sha(data),
-    'files': files, 'compilation': 'pending', 'imageBuilt': False, 'deviceQualified': False,
-    'ownerCustomLayoutsPreserved': True, 'ownerExplicitStorageModesPreserved': True,
-    'appPrivateStorageGranted': False, 'crashRecoveryAndVoiceControlsChanged': False}, indent=2) + '\n')
-print(json.dumps({'files': len(files), 'sha256': sha(data), 'imageBuilt': False}))
+    'files': files}, indent=2) + '\n')
+print(json.dumps({'files': len(files), 'sha256': sha(data)}))

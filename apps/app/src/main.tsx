@@ -70,7 +70,8 @@ import { DailyApps } from './daily';
 import { installPrototypeVoiceAdapter } from './prototype/voice-adapter';
 import { installPrototypeBrowserAdapter } from './prototype/browser-adapter';
 import { installCalendarAdapter } from './prototype/calendar-adapter';
-import { installSystemBarAppearance, type SystemBars } from './prototype/system-bar-appearance';
+import { installSystemBarAppearance } from './prototype/system-bar-appearance';
+import type { SystemBarsPort } from './native/alpha-device';
 import {installPredictiveBack} from './runtime/predictive-back';
 import {installHaptics,type HapticDevice} from './runtime/haptics';
 import { automaticUpdateIdle, hasAppearancePreview, installSettingsAdapter, readAppearanceChoice, resolveAppearance } from './prototype/settings-adapter';
@@ -118,7 +119,7 @@ const savedMock = testMocksEnabled && (() => {
 // Resolve mock before mounting any native adapter, including after a cold start.
 // Production builds never admit mock or fixture state, whatever the URL or storage says.
 const mock = testMocksEnabled && (query.get('mode') === 'mock' || savedMock);
-// Android's shade is the notification surface (#416, #417); only the browser development build simulates it.
+// Android's shade is the notification surface; only the browser development build simulates it.
 const systemShade=shadeSurface({native:isAndroid,simulated:devSurfacesEnabled});
 const fixture = testMocksEnabled && (mock || (devSurfacesEnabled && !isAndroid && query.get('fixture') === '1'));
 const initialTheme = (() => {
@@ -150,7 +151,7 @@ if (!fixture) {
   installCanonicalCalendarDrafts(Component,VIEWS);
   // Android notification taps are independent of the development stand-in shade.
   if(isAndroid)installCanonicalNotificationTaps(Component);
-  // Notice rows feed only the development stand-in shade; product builds read no notice list (#416).
+  // Notice rows feed only the development stand-in shade; product builds read no notice list.
   if(systemShade==='simulated')installNotificationsAdapter(Component);
   installContextSelection(Component);
   installPrototypeVoiceAdapter(Component, VIEWS);
@@ -166,21 +167,22 @@ if (!fixture) {
   installPrototypeBrowserAdapter(Component, VIEWS);
   installSettingsAdapter(Component, VIEWS);
   if(!isAndroid){if(devSurfacesEnabled)installBrowserDeviceAdapter(Component);else installBrowserCapabilityTiles(Component);}
-  if(!browserDevProfile) {installInboxCloudAdapter(Component, VIEWS);installUseInEmailReview(Component, VIEWS);installAgentEmailCards(Component,VIEWS);}
-  // Home cards read only the provider summaries: unread count, account label and read time for
-  // mail, and the latest retained brief. Nothing here starts a read or a run.
   if(!browserDevProfile){
+    installInboxCloudAdapter(Component, VIEWS);installUseInEmailReview(Component, VIEWS);installAgentEmailCards(Component,VIEWS);
+    // Home cards read only the provider summaries: unread count, account label and read time for
+    // mail, and the latest retained brief. Nothing here starts a read or a run.
     const homeSourcesChanged=()=>window.dispatchEvent(new Event(HOME_SOURCES_CHANGED));
     subscribeInboxAttention(homeSourcesChanged);subscribeRetainedDigest(homeSourcesChanged);
     setHomeSources({
       attention:()=>{const value=inboxAttention();return {state:value.state,unread:value.unread,...(value.source?{source:value.source}:{}),...(value.updatedAt?{updatedAt:value.updatedAt}:{})};},
       brief:latestRetainedDigest,
     });
+    installWorkflowAdapter(Component, VIEWS);installAutomationsAdapter(Component,VIEWS);
+  }else{
+    // The development profile has no provider mail summary, but its scheduled digests retain results
+    // the same way, so its Home reads the latest retained brief from the same source.
+    subscribeRetainedDigest(()=>window.dispatchEvent(new Event(HOME_SOURCES_CHANGED)));setHomeSources({brief:latestRetainedDigest});
   }
-  if(!browserDevProfile) {installWorkflowAdapter(Component, VIEWS);installAutomationsAdapter(Component,VIEWS);}
-  // The development profile has no provider mail summary, but its scheduled digests retain results
-  // the same way, so its Home reads the latest retained brief from the same source.
-  if(browserDevProfile){subscribeRetainedDigest(()=>window.dispatchEvent(new Event(HOME_SOURCES_CHANGED)));setHomeSources({brief:latestRetainedDigest});}
   installSharePanelAdapter(Component,VIEWS);
 }
 if(devSurfacesEnabled&&simulatedApps)installSimulatedApps(Component,VIEWS,simulatedApps);
@@ -194,7 +196,7 @@ installCommsAlpha(Component, VIEWS);
 installOngoingCallBar(Component,VIEWS,isAndroid&&aospImage&&!fixture?registerPlugin<OngoingCallPlugin>('AlphaOngoingCall'):null);
 installReplyAnnouncer(Component);
 installSystemShade(Component,{native:isAndroid});
-installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBars>('AlphaDevice'));
+installSystemBarAppearance(Component,isAndroid,registerPlugin<SystemBarsPort>('AlphaDevice'));
 // Android's held Back gesture previews the layer it closes; switches, confirmed deletes and the Home long press give touch feedback.
 installPredictiveBack();
 installHaptics(isAndroid?registerPlugin<HapticDevice>('AlphaDevice'):null);

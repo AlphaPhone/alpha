@@ -8,7 +8,7 @@ module PermissionChoices {
   pure val PhotoDescriptions = Set("", "All photos and videos allowed", "Selected photos and videos only", "Limited photo or video access allowed", "Not allowed")
   type State = { native: bool, image: bool, signedIn: bool, enabled: bool, connectionOpen: bool, googleOpen: bool, setupReady: bool, accountCreated: bool,
     active: bool, ready: bool, reopened: bool, review: bool, progress: int, choices: List[str],
-    savedProgress: int, savedChoices: List[str], savedHasChoices: bool, completed: bool, legacyCompleted: bool,
+    savedProgress: int, savedChoices: List[str], savedHasChoices: bool, completed: bool,
     states: int -> str, attempted: Set[int], requests: int -> int, pending: int, generation: int,
     ticket: int, target: int, writeWorks: bool, operations: int -> int, flowTickets: int -> int, progressError: bool,
     canSkip: bool, checkNotice: str, pendingChoice: str, dismissed: bool, homeRequests: int, locationDescription: str, photoDescription: str }
@@ -32,7 +32,7 @@ module PermissionChoices {
   pure def initial(native: bool): State = { native: native, image: false, signedIn: false, enabled: false,
     connectionOpen: false, googleOpen: false, setupReady: false, accountCreated: false, active: true, ready: false, reopened: false, review: false,
     progress: 0, choices: List(), savedProgress: 0, savedChoices: List(), savedHasChoices: false,
-    completed: false, legacyCompleted: false, states: AllKeys.mapBy(_ => "checking"),
+    completed: false, states: AllKeys.mapBy(_ => "checking"),
     attempted: Set(), requests: AllKeys.mapBy(_ => 0), pending: -1, generation: 0, ticket: 0,
     target: -1, writeWorks: true, operations: AllKeys.mapBy(_ => -1), flowTickets: AllKeys.mapBy(_ => -1), progressError: false,
     canSkip: false, checkNotice: "", pendingChoice: "", dismissed: false, homeRequests: 0, locationDescription: "", photoDescription: "" }
@@ -53,7 +53,6 @@ module PermissionChoices {
       savedHasChoices: if (saved) skipped else before.savedHasChoices,
       savedChoices: if (saved) (if (skipped) choices else List()) else before.savedChoices,
       completed: if (saved) step < 0 else before.completed,
-      legacyCompleted: if (saved) false else before.legacyCompleted,
       progressError: if (before.review) before.progressError else not(before.writeWorks) }
   }
   pure def advanced(before: State, choice: str): State = {
@@ -135,8 +134,8 @@ module PermissionChoices {
   action finish = all { visible, s.ready, s.pending == -1, s' = { ...s, active: false, ready: false,
     homeRequests: if (s.reopened) s.homeRequests else s.homeRequests + 1, canSkip: false, checkNotice: "" } }
   action restoreCompleted(steps: int): bool = all { s.generation == 0,
-    (s.native and Set(4, 5, 6, 7).contains(steps)) or (not(s.native) and steps == 4),
-    s' = { ...s, completed: true, legacyCompleted: steps < count, savedProgress: steps,
+    steps == count,
+    s' = { ...s, completed: true, savedProgress: steps,
       progress: -1, active: false } }
   action restorePending(step: int): bool = all { s.generation == 0, Keys.contains(step),
     s' = { ...s, savedProgress: step, progress: step, choices: continuedChoices(step) } }
@@ -186,7 +185,7 @@ module PermissionChoices {
     and (s.progress >= 0 implies s.choices.length() == s.progress)
   val CurrentOperation = s.pending >= 0 implies (s.enabled or s.reopened) and s.active and not(s.ready)
     and Keys.contains(s.pending) and s.ticket == s.generation and s.flowTickets.get(s.pending) == s.ticket
-  val DurableCompletion = s.completed implies (s.savedProgress == count or (s.legacyCompleted and Set(4, 5, 6).contains(s.savedProgress)))
+  val DurableCompletion = s.completed implies s.savedProgress == count
   val InactiveKeysChecking = AllKeys.exclude(Keys).forall(key => s.states.get(key) == "checking")
   val ImageProfileIsNative = s.image implies s.native
   val DescriptionDomains = LocationDescriptions.contains(s.locationDescription) and PhotoDescriptions.contains(s.photoDescription)
@@ -226,8 +225,8 @@ module PermissionChoices {
     .then(platformStatus(6, true)).then(begin).then(result(true))
     .expect(s.ready and not(s.completed) and s.progressError and safety).then(finish)
     .then(restart).expect(s.progress == 6 and safety)
-  run legacyReviewPreservesCompletionTest = init.then(restoreCompleted(4)).then(signIn).then(reopen).then(skipAvailable).then(skip)
-    .expect(s.review and s.progress == 1 and s.savedProgress == 4 and s.completed and safety)
+  run completedReviewPreservesCompletionTest = init.then(restoreCompleted(7)).then(signIn).then(reopen).then(skipAvailable).then(skip)
+    .expect(s.review and s.progress == 1 and s.savedProgress == 7 and s.completed and safety)
     .then(closeReview).expect(not(visible) and safety)
   run ownerChangeRetiresPendingTest = init.then(signIn).then(platformStatus(0, false)).then(begin).then(request)
     .then(ownerChange).then(staleResult(0)).expect(s.pending == -1 and s.progress == 0 and safety)

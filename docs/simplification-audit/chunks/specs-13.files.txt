@@ -1,0 +1,13 @@
+specs/quint/legacy/core/check-service-lifecycle-refinement.mjs
+specs/quint/legacy/core/check-single-flight-refinement.mjs
+specs/quint/legacy/core/check-task-scheduling-refinement.mjs
+specs/quint/legacy/core/check-task-service-refinement.mjs
+specs/quint/legacy/core/fact-write-dedupe-refinement.md
+specs/quint/legacy/core/formal-source-inventory.mjs
+specs/quint/legacy/core/interaction-metadata.json
+specs/quint/legacy/core/interactive-task-source-traces.md
+specs/quint/legacy/core/lifecycle-metadata.json
+specs/quint/legacy/core/migration-report.md
+specs/quint/legacy/core/plugin-connector-custody-baseline.md
+specs/quint/legacy/core/plugin-lifecycle-refinement.md
+specs/quint/legacy/core/service-lifecycle-refinement.md

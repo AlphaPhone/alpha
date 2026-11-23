@@ -1,10 +1,11 @@
 import { createScanPdf as createPdf } from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/scan-pdf.ts';
-import type { ScanTextLine } from './scan-text-layer';
+import type { ScanTextLine } from '../../../../.eliza/client-features/plugins/plugin-files/src/documents/scan-text-layer.ts';
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaNoteDocumentsPlugin} from '../native/alpha-note-documents';
 import {filesIndex} from './files-index';
 import {DailyApps} from '../daily';
 import {scanPdfErrorText} from '../ui/documents/scan-pdf-messages';
-const documents=registerPlugin<{exportPdf(input:{title:string;dataBase64:string}):Promise<{status:string;message:string}>}>('AlphaNoteDocuments',{
+const documents=registerPlugin<Pick<AlphaNoteDocumentsPlugin,'exportPdf'>>('AlphaNoteDocuments',{
  web:()=>import('../runtime/browser-note-documents').then(module=>new module.BrowserNoteDocuments()),
 });
 /** A readable local date, without filename separators or an internal operation timestamp. */
@@ -23,14 +24,14 @@ export function scanPdfFailure(error:unknown):{message:string;retry:boolean}{
  if(error instanceof DOMException&&error.name==='AbortError')return {message:'Cancelled',retry:true};
  return {message:scanPdfErrorText(error),retry:true};
 }
-/** Resolved provider outcomes that wrote nothing confirmed: the user may retry.
- * 'unverified', 'exported' and 'requested' keep retry locked. */
 let systemPickers=0;
 /** Android covers the WebView while a system picker or document chooser is open,
  * which reports the page hidden. Review dialogs that started that picker stay
  * open; every other hidden-page rule still applies. */
 export function systemPickerActive(){return systemPickers>0;}
 export async function duringSystemPicker<T>(task:()=>Promise<T>):Promise<T>{systemPickers++;try{return await task();}finally{systemPickers--;}}
+/** Resolved provider outcomes that wrote nothing confirmed: the user may retry.
+ * 'unverified', 'exported' and 'requested' keep retry locked. */
 export function scanPdfRetryable(status:string){return ['cancelled','failed','unavailable','too-large'].includes(status);}
 /** `onRequest` runs just before the export request is made; until then nothing can have been written.
  * A confirmed export is listed in Recent. A row it pushes out gives up its picker grant here,

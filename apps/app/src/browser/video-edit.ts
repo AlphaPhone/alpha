@@ -64,14 +64,6 @@ export function videoDurationReached(start:number,end:number,known:boolean,reach
 export async function renderVideoEdit(source:{path:string;duration:number},edit:VideoEdit,signal:AbortSignal){
  validateVideoEdit(edit,source.duration);signal.throwIfAborted();
  if(source.path.length>140_000_000)throw Error('Choose a local video up to 100 MB.');
- // Older recordings could lose their MIME at stop time. Recover only recognized
- // local video containers; keep the stored original and the strict format gate.
- if(source.path.startsWith('data:application/octet-stream;base64,')){
-  const payload=source.path.slice('data:application/octet-stream;base64,'.length);
-  let header='';try{header=atob(payload.slice(0,16));}catch{}
-  const mime=header.startsWith('\x1a\x45\xdf\xa3')?'video/webm':header.slice(4,8)==='ftyp'?'video/mp4':null;
-  if(mime)source={...source,path:`data:${mime};base64,${payload}`};
- }
  if(!/^data:video\/(webm|mp4);base64,/.test(source.path))throw Error('Choose a local video up to 100 MB.');
  const video=document.createElement('video');video.playsInline=true;video.preload='auto';const sourceUrl=source.path.startsWith('data:video/webm;')?URL.createObjectURL(await(await fetch(source.path,{signal})).blob()):undefined;video.src=sourceUrl||source.path;
  let audio:AudioContext|undefined,output:MediaStream|undefined,recorder:MediaRecorder|undefined,timer:ReturnType<typeof setInterval>|undefined;

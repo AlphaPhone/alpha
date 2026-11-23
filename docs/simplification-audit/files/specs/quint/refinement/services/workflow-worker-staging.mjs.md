@@ -1,0 +1,20 @@
+# specs/quint/refinement/services/workflow-worker-staging.mjs
+- Lines: 208 | Kind: Quint refinement harness (imports and runs the real module) | Verdict: KEEP, SIMPLIFY
+- Covers: `stageWorkerArtifact`/`verifyWorkerArtifact` from `scripts/workflow-worker-artifact.ts` against model `specs/quint/services/WorkflowWorkerStaging.qnt`, run on 14 scratch-directory cases: 7 source-quality refusals, copied-byte drift, manifest swap during copy, publish/restore/cleanup rename faults. The real `fs` is wrapped and restored around each call with `syncBuiltinESMExports`. Duplicates: the 7 refusal kinds (hash, missing, extra, wrongPin, wrongLock, overlay, symlink) are also checked in test 1 of `test/workflow-worker-assets.test.mjs:11-36`. Only this harness covers the rename/restore/cleanup fault paths. Callers/importers: `test/quint-workflow-worker-staging.test.mjs`, `specs/quint/refinement/services/index.mjs` (aggregate, `withDriver`). Reads `test/fixtures/workflow-worker-assets.mjs` (`writeWorkerFixture`), which `test/workflow-worker-assets.test.mjs` also imports.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 7, 182-184 | — | Binds to the code through a real ESM import of the script's exports and the manifest `sources` path list. There is no text slicing or symbol pin (`WorkflowWorkerStaging` has no `symbols`). This is the robust style named in research §2.6. | Keep it as it is. Use it as the reference style when porting the text-sliced harnesses. | none |
+| 2 | 14-22, 133-139 | T10 (mild) | Product error **messages** are the observation keys (`'Worker file hash mismatch'`, `'Patched worker artifact is not upstream source; rebuild into a fresh directory'`, …). If the script's wording changes, the harness fails. | Keep for now. If `workflow-worker-artifact.ts` is simplified, have it throw `Error` with a `code` (`hash`, `missing`, …) and key the harness on `error.code`. | low |
+| 3 | 182-184, 206 | B5 | `captureInputs(sources)` plus a `driverHashes` check that re-hashes inputs before and after the run. This is ceremony against inputs changing on an ephemeral runner. The `'test/fixtures/...'` and `driver` entries exist only for that hash. | Drop it when `check-traces.mjs` drops input re-hashing (research §2.8). | low |
+| 4 | 24 | C3 | Local `action = (name, ...args) => ({name, args})` duplicates `support.mjs:action`. The two differ: this one always writes `args`, the shared one omits an empty list. | Import from `support.mjs` and accept that empty `args` is omitted (check `check-traces` compares by name+args). | low |
+| 5 | test wrapper | B5 | `test/quint-workflow-worker-staging.test.mjs` asserts `receipt.traces === 14`, so adding a case means editing two files. | Assert `traces > 0` in the wrapper, or assert it once in a merged refinement runner. | none |
+| 6 | 11-36 of `test/workflow-worker-assets.test.mjs` | T4 | Every refusal case here is already in that host test. | Keep the harness. Cut test 1 of `workflow-worker-assets.test.mjs` down to the cases this harness lacks: traversal `../escape.js`, the 64 MiB size cap, the redirected target-parent symlink. | low |
+| 7 | 112-130 | — | The monkey-patched `fs.copyFileSync/renameSync/rmSync` is the only way to inject faults into a synchronous helper. It is scoped to fixture paths and restored in `finally`. | Keep. | none |
+
+## Proposed end state
+- Keep as the services harness for `WorkflowWorkerStaging`. It is the model of the live build stage (`agent:stage-workflow-worker`).
+- Use the shared `action` helper. Remove the input re-hash once `check-traces.mjs` stops requiring it. Make the wrapper assert `traces > 0`.
+- Move the duplicated refusal coverage out of `test/workflow-worker-assets.test.mjs`, so the harness becomes the one place that proves staging refusals and backups.
+- If the owner decides to drop the build-tool models (research §2.11), delete this harness together with `WorkflowWorkerStaging.qnt` and its wrapper. `test/workflow-worker-assets.test.mjs` would then become the only coverage and must take back the rename/restore/cleanup fault cases.

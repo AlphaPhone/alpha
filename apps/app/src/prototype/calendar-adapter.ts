@@ -9,18 +9,18 @@ import { registerPlugin } from '../platform-plugins';
 import { Capacitor } from '@capacitor/core';
 import { DailyApps } from '../daily';
 import {calendarFormTimeProblem} from '../runtime/calendar-form-draft';
-import {calendarAgenda,calendarAgendaRows,calendarDayColumns,calendarDayCount,calendarDayLabel,calendarReturnDay,msToLocalMidnight,visibleCalendarDays} from './calendar-days';
+import {calendarReturnDay,msToLocalMidnight} from './calendar-days';
 import {mapsEventOriginFor} from '../runtime/maps-event-return';
 import {rememberNoteOrigin,forgetNoteOrigin,noteOriginSupported,eventNoteOriginId} from './note-origin-adapter';
 import {reminderEvents,reminderWallTime} from '../runtime/reminder-creations';
+import {DAY_MS,civilDay,deviceTimeZone} from '../lib/civil-date';
 type Bag = Record<string, any>;
 const calendar = registerPlugin<any>('AlphaCalendar');
-const DAY=86400000;
 // Status strings stay parse-compatible with the overview state in ui/overview/daily-overview.ts; the calendar screen shows their short form.
 const STATUS_SHORT:Record<string,string>={'Device calendars are available in the Android app.':'','Calendar access denied':'No access','Connect device calendars':'Connect','Calendar range limited to 2,000 events':'2,000 max','Device calendar access allowed':'Allowed','No device calendars found':'No calendars','Calendar range could not be loaded. Open device calendars to retry.':'Couldn’t load','App calendar could not be loaded. Retry or open Calendar recovery.':'Couldn’t load'};
 const shortStatus=(text:string)=>STATUS_SHORT[text]??text;
-// Resolves when Alpha is shown again after another app covered it.
-const civilDay=(date:Date,utc=false)=>Date.UTC(utc?date.getUTCFullYear():date.getFullYear(),utc?date.getUTCMonth():date.getMonth(),utc?date.getUTCDate():date.getDate());
+/** The provider fields a write or inspection expects the event to still have. */
+const expectedOf=(event:Bag)=>({title:event.title||'',body:event.body||'',location:event.location||'',begin:event.begin,end:event.end});
 
 /** Instant of a civil wall time in an IANA zone; undefined when it does not exist or occurs twice. */
 export function zonedInstant(date:{year:number;month:number;day:number},minutes:number,zone:string):number|undefined{
@@ -49,7 +49,7 @@ export function calendarOptionEvent(form:Bag,deviceZone:string,now=new Date()):{
   const rrule=form.repeat&&form.repeat!=='none'?RRULES[form.repeat]:'';
   if(rrule===undefined)throw Error('Choose a supported repeat. Nothing was saved.');
   const base={title:String(form.title||'').trim(),body:form.notes||'',location:form.where||'',rrule};
-  if(form.allDay){const begin=Date.UTC(date.year,date.month-1,date.day);return {...base,begin,end:begin+DAY,allDay:true,timeZone:'UTC'};}
+  if(form.allDay){const begin=Date.UTC(date.year,date.month-1,date.day);return {...base,begin,end:begin+DAY_MS,allDay:true,timeZone:'UTC'};}
   const zone=form.zone||deviceZone,start=Math.round(Number(form.t)*60),length=Math.round(Number(form.d)*60);
   if(!Number.isFinite(start)||!Number.isFinite(length)||length<=0)throw Error('Choose a start and end time. Nothing was saved.');
   const begin=zonedInstant(date,start,zone),end=zonedInstant(date,start+length,zone);
@@ -83,11 +83,11 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
   const schedule=()=>{if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;if(owner&&!loading&&desired?.key!==attemptedKey)void refresh();});};
   const mapEvent=(event:Bag)=>{
     const begin=new Date(event.begin),end=new Date(event.end),today=new Date(),allDay=!!event.allDay;
-    const off=(civilDay(begin,allDay)-civilDay(today))/DAY;
+    const off=(civilDay(begin,allDay)-civilDay(today))/DAY_MS;
     return {id:`calendar:${event.id}:${event.begin}`,alphaCalendarId:event.id,nativeEvent:event,
       off,t:allDay?0:begin.getHours()+begin.getMinutes()/60,
-      d:allDay?0:Math.max(.25,(civilDay(end)-civilDay(begin))/DAY*24+end.getHours()+end.getMinutes()/60-begin.getHours()-begin.getMinutes()/60),
-      nativeAllDayEndOff:allDay?off+Math.max(1,Math.ceil((event.end-event.begin)/DAY)):undefined,
+      d:allDay?0:Math.max(.25,(civilDay(end)-civilDay(begin))/DAY_MS*24+end.getHours()+end.getMinutes()/60-begin.getHours()-begin.getMinutes()/60),
+      nativeAllDayEndOff:allDay?off+Math.max(1,Math.ceil((event.end-event.begin)/DAY_MS)):undefined,
       title:event.title||'Untitled event',notes:event.body||'',where:event.location||'',
       cal:'personal',who:event.who||[],video:event.video?'Room':false,repeat:'none',alert:event.alert??null,allDay};
   };
@@ -165,7 +165,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
     if(!currentOwner||!active(currentOwner)||typeof request?.id!=='string'||!Number.isFinite(request.begin)||typeof request.complete!=='function')return;
     event.preventDefault();
     void (async()=>{let opened=false;try{
-      const day=(civilDay(new Date(request.begin),request.allDay)-civilDay(new Date()))/DAY;
+      const day=(civilDay(new Date(request.begin),request.allDay)-civilDay(new Date()))/DAY_MS;
       // Cover the day list until the event opens, so a deep link never flashes the full calendar.
       currentOwner.vset('calendar',{day,month:null,open:null,openDay:null,form:null,deepOpening:request.id});desired=rangeFor({day});
       await refresh(false,true,{waitForRecovery:false});
@@ -212,9 +212,6 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
     out.openingBackCss=!!state.deepOpening&&!state.open?'position:relative;z-index:5':'';
     if(browserCalendar?.visible===false&&state.open){const detail=render(providerState,api);out.ev=detail.ev;out.detail=detail.detail;}
     out.emptyText=rangeReady?(truncated?'Incomplete':reminderStale?'Reminders unavailable':'Free'):shortStatus(status);
-    // Source disclosure: Android CalendarProvider calendars only. Connected Google calendars need OAuth (not yet available).
-    out.calendarSourceLabel=Capacitor.isNativePlatform()?'On-device calendars':'Browser calendar';
-    out.calendarSourceText=Capacitor.isNativePlatform()?'':'';
     out.nativeStatusLabel=[rangeReady&&truncated?'Incomplete':'',reminderStale?'Stale':''].filter(Boolean).join(' ');
     out.nativeStatusRetry=()=>{void refresh(false,true);void owner?.refreshReminders();};out.nativeStatusAria='Retry calendar and reminders';out.nativeStatusRetries=true;
     out.browserRecovery=!Capacitor.isNativePlatform()&&loadFailed&&!loading;out.openBrowserRecovery=openCalendarRecovery;
@@ -259,7 +256,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
       out.f.nativeReviewDate=reviewedDate?reviewedDate.toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'}):'Invalid date';
       const destinations=[{id:'local',name:(Capacitor.isNativePlatform()?'On this phone':'In this app')},...calendars.filter(c=>c.writable&&!c.local).map(c=>({id:c.id,name:c.name}))];
       out.f.cals=f.alphaCalendarId ? [{name:(Capacitor.isNativePlatform()?'On this phone':'In this app'),dot:'var(--acc)',on:true,css:'background:var(--fg);color:var(--bg)',pick:()=>{}}] : [...out.f.cals.filter((c:Bag)=>c.name==='Reminders'),...destinations.map(c=>({name:c.name,dot:'var(--acc)',on:f.cal===`native:${c.id}`,css:f.cal===`native:${c.id}`?'background:var(--fg);color:var(--bg)':'background:var(--bg)',pick:()=>api.set({form:{...api.get('calendar').form,cal:`native:${c.id}`,alert:null}})}))];
-      const deviceZone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const deviceZone=deviceTimeZone();
       const nativeOptions=Capacitor.isNativePlatform()&&!f.alphaCalendarId&&!!f.cal?.startsWith('native:');
       out.f.optionsAvailable=nativeOptions;
       out.f.allDay=!!f.allDay;out.f.zone=f.zone||deviceZone;
@@ -341,7 +338,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
             creationId=current.creationId||crypto.randomUUID();
             if(!current.creationId){submittedForm={...current,creationId};api.set({form:submittedForm});}
           }
-          const result=await calendar.save({creationId,separateCreation:current.separateCreation===true,id:current.alphaCalendarId || '',expected:current.expected,calendarId:current.cal.slice(7),title:current.title.trim(),body:current.notes||'',location:current.where||'',begin:date.getTime(),end:end.getTime(),...(!Capacitor.isNativePlatform()?{repeat:current.repeat,who:current.who||[],video:!!current.video,alert:current.alert??null,timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone}:{})});
+          const result=await calendar.save({creationId,separateCreation:current.separateCreation===true,id:current.alphaCalendarId || '',expected:current.expected,calendarId:current.cal.slice(7),title:current.title.trim(),body:current.notes||'',location:current.where||'',begin:date.getTime(),end:end.getTime(),...(!Capacitor.isNativePlatform()?{repeat:current.repeat,who:current.who||[],video:!!current.video,alert:current.alert??null,timeZone:deviceTimeZone()}:{})});
           if(!ownsForm())return;
           if(result.status==='pending-creation'){await readCreations();api.toast('Checking');api.set({});return;}
           if(result.status==='conflict'){api.toast('Changed');return;}
@@ -364,19 +361,19 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
           const saved=currentOwner.nativeCalendarRows?.find((e:Bag)=>e.alphaCalendarId===result.id);
           if(saved)api.set({open:saved.id,day:saved.off,openDay:saved.off});
           api.toast('Saved');
-        }catch{if(current.alphaCalendarId)currentOwner.calendarWriteUncertain={eventId:current.alphaCalendarId,kind:'edit'};else{try{await readCreations();}catch{if(owner===currentOwner&&creationDraftEpoch===epoch){creationPending=null;creationRecoveryFailed=true;}}}if(owner===currentOwner&&!document.hidden&&api.isActive()&&creationDraftEpoch===epoch)api.toast(current.alphaCalendarId?'Unconfirmed':'Unconfirmed');}
+        }catch{if(current.alphaCalendarId)currentOwner.calendarWriteUncertain={eventId:current.alphaCalendarId,kind:'edit'};else{try{await readCreations();}catch{if(owner===currentOwner&&creationDraftEpoch===epoch){creationPending=null;creationRecoveryFailed=true;}}}if(owner===currentOwner&&!document.hidden&&api.isActive()&&creationDraftEpoch===epoch)api.toast('Unconfirmed');}
         finally{currentOwner.calendarSaving=false;if(owner===currentOwner)api.set({});}
       };
     }
     const selected=providerState.events?.find((e:Bag)=>e.id===state.open);
     if(selected?.alphaCalendarId&&out.ev){
       const key=JSON.stringify([selected.id,selected.nativeEvent]);
-      if(agentSelectionKey!==key){agentSelectionKey=key;agentSelection=undefined;const token=++agentSelectionEpoch,currentOwner=owner,event=selected.nativeEvent;queueMicrotask(async()=>{try{const request={id:event.id,calendarId:event.calendarId,expected:{title:event.title||'',body:event.body||'',location:event.location||'',begin:event.begin,end:event.end}};let value=await calendar.inspect(request);if(Capacitor.isNativePlatform()&&value.status!=='ready')value=await calendar.inspectDeletion(request);if(owner===currentOwner&&token===agentSelectionEpoch&&api.get('calendar').open===selected.id&&value.status==='ready'){agentSelection={kind:'calendar-event',id:value.eventId||event.id,open:selected.id,revision:value.revision,accountId:event.calendarId,sourceRevision:value.sourceRevision};api.set({nativeAgentRevision:value.revision});}}catch{}});}
+      if(agentSelectionKey!==key){agentSelectionKey=key;agentSelection=undefined;const token=++agentSelectionEpoch,currentOwner=owner,event=selected.nativeEvent;queueMicrotask(async()=>{try{const request={id:event.id,calendarId:event.calendarId,expected:expectedOf(event)};let value=await calendar.inspect(request);if(Capacitor.isNativePlatform()&&value.status!=='ready')value=await calendar.inspectDeletion(request);if(owner===currentOwner&&token===agentSelectionEpoch&&api.get('calendar').open===selected.id&&value.status==='ready'){agentSelection={kind:'calendar-event',id:value.eventId||event.id,open:selected.id,revision:value.revision,accountId:event.calendarId,sourceRevision:value.sourceRevision};api.set({nativeAgentRevision:value.revision});}}catch{}});}
       out.ev.close=()=>{agentSelection=undefined;agentSelectionKey='';agentSelectionEpoch++;api.set({open:null,openDay:null,day:calendarReturnDay(Number(state.day||0),state.openDay??state.day??selected.off)});};
       if(selected.allDay){
         out.ev.when='All day';
         const options:Intl.DateTimeFormatOptions={weekday:'short',month:'short',day:'numeric',year:'numeric',timeZone:'UTC'};
-        const first=new Date(selected.nativeEvent.begin).toLocaleDateString(undefined,options),last=new Date(selected.nativeEvent.end-DAY).toLocaleDateString(undefined,options);
+        const first=new Date(selected.nativeEvent.begin).toLocaleDateString(undefined,options),last=new Date(selected.nativeEvent.end-DAY_MS).toLocaleDateString(undefined,options);
         out.ev.day=first===last?first:`${first} – ${last}`;
       }
       if(!selected.allDay){
@@ -406,7 +403,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
         if(!source?.local||source.account!=='Alpha Phone'||event.recurring||event.allDay||complex){
           api.toast('Edit in Calendar');external();return;
         }
-        const expected={title:event.title||'',body:event.body||'',location:event.location||'',begin:event.begin,end:event.end};
+        const expected=expectedOf(event);
         const currentOwner=owner;
         try {
           const inspected=await calendar.inspect({id:event.id,calendarId:event.calendarId,expected});
@@ -429,7 +426,7 @@ export function installCalendarAdapter(Component: any, views: Bag, options:{acti
       out.ev.uncertain=uncertain;out.ev.checkUncertain=()=>{if(!loading)void refresh(true);};
       const deleteSelection=async(scope?:'series')=>{
         if(!owner||owner.calendarSaving||owner.calendarWriteUncertain?.eventId===selected.alphaCalendarId)return;
-        const currentOwner=owner,event=selected.nativeEvent,expected={title:event.title||'',body:event.body||'',location:event.location||'',begin:event.begin,end:event.end};
+        const currentOwner=owner,event=selected.nativeEvent,expected=expectedOf(event);
         currentOwner.calendarSaving=true;api.set({});let dispatched=false;
         try{
           const inspected=await (Capacitor.isNativePlatform()?calendar.inspectDeletion({id:event.id,calendarId:event.calendarId,expected,...(scope?{scope}:{})}):calendar.inspect({id:event.id,calendarId:event.calendarId,expected}));

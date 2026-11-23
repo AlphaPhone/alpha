@@ -1,6 +1,7 @@
 import {SseEventFramer} from '../ui/api/transport.ts';
 import {findViewActionHandoff} from '../../../../.eliza/client-features/packages/core/src/views/view-action-handoff.ts';
 import type {RemoteChatReply} from './remote-protocol';
+import {isUuid} from '../lib/ids';
 
 /** Only finalized, navigation-only reply_ready snapshots can be retained.
  * Tool/status frames and prose never become effects; durable completion remains done. */
@@ -37,15 +38,12 @@ export function emitBatchReply(binding: ReturnType<typeof batchProgressBinding>)
 /** Correlation comes from the actual already-dispatched local stream request, not status prose. */
 export function batchProgressBinding(request?: { path: string; ownerId: string; body: string }):
   Pick<BatchProgressCue, 'turnId' | 'conversationId' | 'ownerId'> | undefined {
-  if (!request || typeof request.body !== 'string' || request.body.length > 200000 ||
-      typeof request.ownerId !== 'string' || !request.ownerId.trim() || request.ownerId.length > 128) return;
+  if (!request || request.body.length > 200000 || !request.ownerId.trim() || request.ownerId.length > 128) return;
   const conversation = /^\/api\/conversations\/([a-f0-9-]{36})\/messages\/stream$/i.exec(request.path)?.[1];
-  if (!conversation) return;
-  const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
-  if (!uuid.test(conversation)) return;
+  if (!isUuid(conversation)) return;
   try {
     const body = JSON.parse(request.body);
-    if (body?.channelType !== 'VOICE_DM' || typeof body.clientMessageId !== 'string' || !uuid.test(body.clientMessageId)) return;
+    if (body?.channelType !== 'VOICE_DM' || !isUuid(body.clientMessageId)) return;
     return { turnId: body.clientMessageId, conversationId: conversation, ownerId: request.ownerId };
   } catch { return; }
 }
@@ -101,8 +99,7 @@ export function createBatchProgressAcknowledgment(input: {
       if (used || final || retired || cue.signal.aborted || value.kind !== 'thinking' || !genuineBatchProgress(value) ||
           value.turnId !== input.turnId || value.conversationId !== input.conversationId || value.ownerId !== input.ownerId)
         return;
-      const label = value.label;
-      if (typeof label !== 'string' || !label.trim() || label.length > 160) return;
+      const label = value.label!;
       try { check(); if (!microphoneClear()) return; } catch { cancel(); return; }
       used = true;
       // The hold lets a reply that arrives soon after the status replace the cue instead of clipping it.

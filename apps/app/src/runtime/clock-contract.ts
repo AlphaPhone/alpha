@@ -20,11 +20,10 @@ import {
   clockHandoffFormDays,
   describeClockHandoff as describeAlphaClockHandoff,
 } from '../ui/clock/clock-handoff-presentation';
-export {CLOCK_CAPABILITY, clockTimeZone} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
-export type {ClockDay, ClockHandoffOperation as ClockOperation, ClockHandoffResult as ClockResult, ClockHandoffResult} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
+export {clockTimeZone} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
+export type {ClockDay} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-contract.ts';
 export {clockHandoffCapabilities} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/clock-handoff.ts';
 export {CLOCK_DAY_NAMES, describeClockDays} from '../ui/clock/clock-handoff-presentation';
-export type {ClockHandoffSetRequest as ClockSetRequest, ClockHandoffRequest as ClockDraftRequest} from '../ui/clock/clock-handoff-presentation';
 
 /** The phone's current time zone; a zone the shared check refuses is worded by Alpha. */
 export function currentClockTimeZone(): string {

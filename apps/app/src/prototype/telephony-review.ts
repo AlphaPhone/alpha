@@ -28,6 +28,8 @@ export function askTelephonyReview(review: TelephonyReview | TabReview, signal: 
     pending = entry; signal.addEventListener('abort', abort, {once: true}); repaint();
   });
 }
+/** A contact's numbers, then its email addresses. */
+const contactLines = (contact: ContactDraft) => [...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)];
 /**
  * A contact's fields as lines; a line the change removes is struck, a line it adds is strong. A number
  * is the same line written either way ("+14155550100", "(415) 555-0100"), an address without case.
@@ -64,7 +66,7 @@ export function presentTelephonyReview(entry: Pending | null) {
         lines: style([...(way ? [{text: way, struck: false, added: true}] : []), ...(renamed ? [{text: change.before.displayName, struck: true, added: false}] : []), ...contactChangeLines(change.before, change.after)]), choose, icon: change.keeps === 'add' ? ICON.add : ICON.save, bg: 'var(--acc)',
         label: way ? `${way}: save changes to ${change.before.displayName}` : `Save changes to ${change.before.displayName}`}; }
     const contact = option as ContactRecord;
-    return {ini: initials(contact.displayName), name: contact.displayName, lines: style([...contact.phoneNumbers.map(row => displayNumber(row.number)), ...contact.emailAddresses.map(row => row.address)].slice(0, 2).flatMap(plain)),
+    return {ini: initials(contact.displayName), name: contact.displayName, lines: style(contactLines(contact).slice(0, 2).flatMap(plain)),
       choose, icon: ICON.delete, bg: 'var(--alpha-call-red)', label: `Delete ${contact.displayName}`};
   });
   return {open: true, rows, body: review.kind === 'message' ? review.body : '', hasBody: review.kind === 'message', dismiss: () => settle(null)};
@@ -100,13 +102,13 @@ export function installTelephonyReview(Component: any) {
     return {...out, msgs, telephonyReview};
   };
   p.componentDidMount = function () {
-    mount?.call(this);
+    mount.call(this);
     repaint = () => this.setState({telephonyReviewRevision: Date.now()});
     this.telephonyReviewHide = () => { if (document.hidden) pending?.settle(null); };
     document.addEventListener('visibilitychange', this.telephonyReviewHide);
   };
   p.componentWillUnmount = function () {
     document.removeEventListener('visibilitychange', this.telephonyReviewHide); pending?.settle(null); repaint = () => {};
-    unmount?.call(this);
+    unmount.call(this);
   };
 }

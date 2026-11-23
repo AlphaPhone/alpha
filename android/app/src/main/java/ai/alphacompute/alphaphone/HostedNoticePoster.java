@@ -7,11 +7,6 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
-import com.getcapacitor.*;
-import com.getcapacitor.annotation.*;
-import java.util.concurrent.*;
-import org.json.JSONObject;
 
 final class HostedNoticePoster implements HostedResultNotices.Poster {
  private final Context context;

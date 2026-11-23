@@ -1,10 +1,13 @@
 import {iconStyle} from '../icon-style';
 import React from "react";
 import templateHtml from "./template-source";
-/* Minimal renderer for the prototype's .dc.html template: {{holes}}, sc-if, sc-for, events, refs. */
+/* Minimal renderer for template.html: {{holes}}, sc-if, sc-for, events, refs. */
 
   var h = React.createElement;
-  var EVENTS = { onsubmit:"onSubmit", onerror:"onError", onload:"onLoad", onfocuscapture: "onFocusCapture", onfocus: "onFocus", onblur: "onBlur", onclick: "onClick", oncontextmenu: "onContextMenu", onpointermove: "onPointerMove", onpointerdown: "onPointerDown", onpointerup: "onPointerUp", onpointerleave: "onPointerLeave", onpointercancel: "onPointerCancel", onlostpointercapture: "onLostPointerCapture", onchange: "onChange", onkeydown: "onKeyDown", oninput: "onInput" };
+  // Template attribute names (lower-cased by the HTML parser) to React prop names.
+  var ATTRIBUTES = { class: "className", for: "htmlFor", onsubmit:"onSubmit", onerror:"onError", onload:"onLoad", onfocuscapture: "onFocusCapture", onfocus: "onFocus", onblur: "onBlur", onclick: "onClick", oncontextmenu: "onContextMenu", onpointermove: "onPointerMove", onpointerdown: "onPointerDown", onpointerup: "onPointerUp", onpointerleave: "onPointerLeave", onpointercancel: "onPointerCancel", onlostpointercapture: "onLostPointerCapture", onchange: "onChange", onkeydown: "onKeyDown", oninput: "onInput",
+    viewbox: "viewBox", srcdoc: "srcDoc", referrerpolicy: "referrerPolicy", enterkeyhint: "enterKeyHint", autocomplete: "autoComplete", autocapitalize: "autoCapitalize", autocorrect: "autoCorrect", spellcheck: "spellCheck",
+    popovertarget: "popoverTarget", popovertargetaction: "popoverTargetAction", tabindex: "tabIndex", maxlength: "maxLength", minlength: "minLength", readonly: "readOnly" };
   var HOLE = /\{\{\s*([^}]+?)\s*\}\}/g;
   var WHOLE = /^\{\{\s*([^}]+?)\s*\}\}$/;
   var UNAVAILABLE_CONTROL = Symbol.for("alpha.unavailableControl");
@@ -69,25 +72,7 @@ import templateHtml from "./template-source";
       var m = raw.match(WHOLE);
       var val = m ? lookup(m[1], scope) : (raw.indexOf("{{") >= 0 ? interp(raw, scope) : raw);
       if (n === "aria-label" && raw === "{{name}}: summarize this file" && scope.files?.pv?.askLabel) val = scope.files.pv.askLabel;
-      if (n === "aria-label" && raw === "Stop and save" && scope.notes?.rec?.primaryLabel) val = scope.notes.rec.primaryLabel;
-      if (n === "d" && raw === "{{ic.stop}}" && scope.notes?.rec?.primaryIcon) val = scope.notes.rec.primaryIcon;
-      if (n === "class") n = "className";
-      else if (n === "for") n = "htmlFor";
-      else if (EVENTS[n]) n = EVENTS[n];
-      else if (n === "viewbox") n = "viewBox";
-      else if (n === "srcdoc") n = "srcDoc";
-      else if (n === "referrerpolicy") n = "referrerPolicy";
-      else if (n === "enterkeyhint") n = "enterKeyHint";
-      else if (n === "autocomplete") n = "autoComplete";
-      else if (n === "autocapitalize") n = "autoCapitalize";
-      else if (n === "autocorrect") n = "autoCorrect";
-      else if (n === "spellcheck") n = "spellCheck";
-      else if (n === "popovertarget") n = "popoverTarget";
-      else if (n === "popovertargetaction") n = "popoverTargetAction";
-      else if (n === "tabindex") n = "tabIndex";
-      else if (n === "maxlength") n = "maxLength";
-      else if (n === "minlength") n = "minLength";
-      else if (n === "readonly") n = "readOnly";
+      if (ATTRIBUTES[n]) n = ATTRIBUTES[n];
       if (n === "style") { p.style = typeof val === "string" ? parseStyle(val) : val; continue; }
       if (n === "value" && el.tagName.toLowerCase() === "input") { p.value = val == null ? "" : val; continue; }
       p[n] = val;

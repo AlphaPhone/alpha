@@ -10,7 +10,6 @@ export function reviewWorkflowNoticeQuestion(options:{result:Extract<Result,{kin
  const excerpt=noticeExcerpt(notice),same=(fresh:Result)=>fresh.kind==='ready'&&fresh.question&&fresh.token===result.token&&JSON.stringify(fresh.notice)===JSON.stringify(notice);
  let canceled=false,composing=false,ended=false;
  const done=()=>{if(ended)return;ended=true;window.removeEventListener('launcher-home',abort);window.removeEventListener('blur',abort);options.closed();};
- let abort=()=>{};
  const close=reviewContentQuestion({name:'Alpha Phone notification',text:excerpt,question:'Help me with this notification.',current:options.current,validate:text=>!sensitiveReadingText(text),closed:dismissed=>{queueMicrotask(()=>{if(!composing){
   // An explicit Cancel settles the native tap so the review never reopens itself; interruptions keep it.
   if(dismissed&&!canceled)void options.discard().catch(()=>{});
@@ -24,7 +23,7 @@ export function reviewWorkflowNoticeQuestion(options:{result:Extract<Result,{kin
    options.compose(draft);
   }catch{options.report('Changed');}finally{done();}})();
  }});
- abort=()=>{canceled=true;close();done();};
+ function abort(){canceled=true;close();done();}
  window.addEventListener('launcher-home',abort);window.addEventListener('blur',abort);
  return abort;
 }

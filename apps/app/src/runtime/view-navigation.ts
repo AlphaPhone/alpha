@@ -24,6 +24,18 @@ const object = (value: unknown): Record<string, unknown> => {
 		throw Error("Navigation reply was not verified");
 	return value as Record<string, unknown>;
 };
+/** The only values a completed-action handoff carries: navigation takes no record parameters. */
+const HANDOFF_VALUE_KEYS = new Set([
+	"mode",
+	"viewId",
+	"viewPath",
+	"viewType",
+	"label",
+	"completedActionDelivered",
+	"completedActionHandoffId",
+	"navigationPrepared",
+	"navigationBinding",
+]);
 /** A view command refused before anything ran, with a reason the agent can pass on. Its result is
  * reported as `<code>: <reason>`; any other executor failure stays "failed or unknown". */
 export class ViewInteractionRefused extends Error {
@@ -266,7 +278,7 @@ export class ViewNavigationClient {
   async ready(){await this.renderer?.ready;}
   private async receiveInteraction(value:unknown){
     if(!this.executeView||this.disposed||!this.currentSession()||document.hidden||!value||typeof value!=='object'||Array.isArray(value))return;
-    const frame=value as Record<string,any>,context=this.context();
+    const frame=value as Record<string,unknown>,context=this.context();
     if(frame.type!=='view:interact'||frame.viewType!=='gui'||!context||context.sensitive||typeof frame.viewId!=='string'||typeof frame.requestId!=='string'||typeof frame.installationId!=='string'||typeof frame.capability!=='string'||this.interactions.has(frame.requestId))return;
     this.interactions.add(frame.requestId);
     const controller=new AbortController();this.executing.add(controller);let claimId:string|undefined;
@@ -331,29 +343,17 @@ export class ViewNavigationClient {
 						binding.requestId,
 				),
 			values = object(object(selected).values);
-		if (
-			Object.keys(values).some(
-				(key) =>
-					![
-						"mode",
-						"viewId",
-						"viewPath",
-						"viewType",
-						"label",
-						"completedActionDelivered",
-						"completedActionHandoffId",
-						"navigationPrepared",
-						"navigationBinding",
-					].includes(key),
-			)
-		)
+		if (Object.keys(values).some((key) => !HANDOFF_VALUE_KEYS.has(key)))
 			throw Error("Navigation does not accept record parameters");
-		attempt.current();
-		if (!attempt.fence())
-			throw new AlphaClientError(
-				"stale",
-				"Navigation cancelled because the screen changed.",
-			);
+		const assertFresh = () => {
+			attempt.current();
+			if (!attempt.fence())
+				throw new AlphaClientError(
+					"stale",
+					"Navigation cancelled because the screen changed.",
+				);
+		};
+		assertFresh();
 		const claimed = object(
 			await this.request(
 				"/api/views/interact-claim",
@@ -367,12 +367,7 @@ export class ViewNavigationClient {
 		// navigation slot (409) until its two-minute preparation timeout.
 		let acknowledged = false;
 		try {
-		attempt.current();
-		if (!attempt.fence())
-			throw new AlphaClientError(
-				"stale",
-				"Navigation cancelled because the screen changed.",
-			);
+		assertFresh();
     this.delivering = true;
     try {
 		let switched = false;
@@ -405,10 +400,8 @@ export class ViewNavigationClient {
 			this.disposed ||
 			!this.currentSession() ||
 			attempt.controller.signal.aborted
-		) {
-
+		)
 			return { status: "unknown" };
-    }
 		switched =
 			switched &&
 			this.context()?.view === target &&
@@ -440,7 +433,6 @@ export class ViewNavigationClient {
 			this.deliveredContexts.set(attempt.controller, structuredClone(this.context()!));
       this.observationView = target;
       this.observationAccepted = true;
-
 			return {
 				status: "delivered",
 				label:

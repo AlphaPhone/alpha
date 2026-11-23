@@ -9,7 +9,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class InboxFixtureConnection extends Plugin {
  static final String OWNER=InboxFixtureScope.runId,LOGIN="12345678-1234-4234-8234-123456789def";
  static final CopyOnWriteArrayList<String> routes=new CopyOnWriteArrayList<>();
- static int rejectedWrites;
+ static volatile int rejectedWrites;
  private final AlphaConnectionPlugin store=new AlphaConnectionPlugin();
  @Override public void load(){store.setBridge(getBridge());}
  @Override protected void handleOnDestroy(){store.handleOnDestroy();super.handleOnDestroy();}

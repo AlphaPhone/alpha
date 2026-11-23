@@ -1,11 +1,13 @@
 import {scanEventDraft,scanAllDayEventDraft,suggestScanEventDetails,type ScanEventDraft,type ScanEventSuggestion} from './scan-event';
+import {errorText} from '../lib/error-text';
+import {deviceTimeZone} from '../lib/civil-date';
 
 const repeatLabel:Record<NonNullable<ScanEventSuggestion['recurrence']>['repeat'],string>={daily:'daily',weekdays:'on weekdays',weekly:'weekly'};
 /** Suggestions only. Every inference is listed, repeats need an explicit tick and Calendar's own Save remains the only write. */
 export function createScanEventReview(text:()=>string,active:()=>boolean,review:(draft:ScanEventDraft)=>boolean,now:()=>Date=()=>new Date()){
  const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Create event draft';summary.style.cssText='cursor:pointer;min-height:44px;padding-top:12px';
  const description=document.createElement('p');const descriptionDot=document.createElement('span');descriptionDot.setAttribute('aria-hidden','true');descriptionDot.style.cssText='display:inline-block;width:8px;height:8px;border-radius:4px;background:#f5a524;margin-right:6px;vertical-align:middle';description.append(descriptionDot,'Check blanks');description.hidden=true;
- const zone=document.createElement('p');zone.textContent='Local time · '+Intl.DateTimeFormat().resolvedOptions().timeZone;
+ const zone=document.createElement('p');zone.textContent='Local time · '+deviceTimeZone();
  const notes=document.createElement('ul');notes.setAttribute('aria-label','Suggestion notes');notes.style.cssText='margin:0;padding-left:20px;display:grid;gap:4px';notes.hidden=true;
  const source=document.createElement('p');source.setAttribute('aria-label','Printed time zone');source.hidden=true;
  const form=document.createElement('form');form.style.cssText='display:grid;gap:12px';
@@ -27,6 +29,6 @@ export function createScanEventReview(text:()=>string,active:()=>boolean,review:
   let blanks=false;for(const [value,dot] of unclear){dot.hidden=!!value.value||value.disabled;if(!dot.hidden){blanks=true;value.setAttribute('aria-description','Unclear');}}description.hidden=!blanks;
   const hint=suggested.recurrence;repeat.label.hidden=!hint;repeat.value.checked=false;if(hint){repeat.text.textContent=`✦ Repeat ${repeatLabel[hint.repeat]}`;repeat.value.setAttribute('aria-label',`Repeat ${repeatLabel[hint.repeat]} (suggested)`);}};
  details.addEventListener('toggle',initialize);
- form.onsubmit=event=>{event.preventDefault();if(submitted||!active())return;try{const hint=suggested?.recurrence;const reviewedRepeat=hint&&repeat.value.checked?hint.repeat:'none';const draft=allDay.value.checked?scanAllDayEventDraft({title:title.value,date:date.value,location:location.value,repeat:reviewedRepeat},text()):scanEventDraft({title:title.value,date:date.value,time:time.value,minutes:Number(minutes.value),location:location.value,repeat:reviewedRepeat},text());if(!review(draft)){status.textContent='Calendar unavailable';return;}submitted=true;button.disabled=true;}catch(error){for(const [value] of unclear)if(!value.disabled&&!value.checkValidity()){value.style.borderColor='#d70015';value.setAttribute('aria-invalid','true');}status.textContent=error instanceof Error?error.message:'Check fields';}};
+ form.onsubmit=event=>{event.preventDefault();if(submitted||!active())return;try{const hint=suggested?.recurrence;const reviewedRepeat=hint&&repeat.value.checked?hint.repeat:'none';const draft=allDay.value.checked?scanAllDayEventDraft({title:title.value,date:date.value,location:location.value,repeat:reviewedRepeat},text()):scanEventDraft({title:title.value,date:date.value,time:time.value,minutes:Number(minutes.value),location:location.value,repeat:reviewedRepeat},text());if(!review(draft)){status.textContent='Calendar unavailable';return;}submitted=true;button.disabled=true;}catch(error){for(const [value] of unclear)if(!value.disabled&&!value.checkValidity()){value.style.borderColor='#d70015';value.setAttribute('aria-invalid','true');}status.textContent=errorText(error,'Check fields');}};
  details.append(summary,description,zone,notes,source,form);return details;
 }

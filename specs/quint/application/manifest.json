@@ -792,7 +792,7 @@
       "deniedPermissionCannotAdvanceTest",
       "revokedAfterReviewPreservesCompletionTest",
       "failedProgressWriteTest",
-      "legacyCompletionTest",
+      "completedInstallTest",
       "failedAttemptWriteRestartTest",
       "failedChoiceWriteStillAdvancesTest",
       "ownerChangeRetiresPendingTest",
@@ -1056,7 +1056,6 @@
       "apps/app/src/prototype/calendar-adapter.ts",
       "apps/app/src/prototype/calendar-month-focus.ts",
       "apps/app/src/prototype/calendar-days.ts",
-      "apps/app/src/runtime/google-calendar-selection.ts",
       "apps/app/src/runtime/calendar-form-draft.ts",
       "apps/app/src/prototype/agent-calendar-adapter.ts",
       "apps/app/src/runtime/agent-calendar.ts",
@@ -1608,7 +1607,7 @@
       "browserFourProgressTest",
       "failedProgressAdvancesTest",
       "failedCompletionResumesTest",
-      "legacyReviewPreservesCompletionTest",
+      "completedReviewPreservesCompletionTest",
       "ownerChangeRetiresPendingTest",
       "staleCompletionKeepsNewPendingTest",
       "skippedRequestCannotAdvanceNextTest",
@@ -1724,7 +1723,6 @@
       "cleanRemovedNoteClosesTest"
     ],
     "sources": [
-      "apps/app/src/prototype/canonical-notes-editor.ts",
       "apps/app/src/ui/notes/notes-editor.ts",
       ".eliza/client-features/plugins/plugin-notes/src/types.ts",
       ".eliza/client-features/plugins/plugin-notes/src/note-authored.ts"
@@ -1776,7 +1774,6 @@
       "lostOwnerCannotPublishTest"
     ],
     "sources": [
-      "apps/app/src/prototype/canonical-notes-editor.ts",
       "apps/app/src/ui/notes/notes-editor.ts",
       "apps/app/src/ui/notes/notes-controller.ts",
       ".eliza/client-features/plugins/plugin-notes/src/client/notes-api.ts",
@@ -3404,40 +3401,6 @@
     ]
   },
   {
-    "path": "specs/quint/application/CalendarPreservationConfirmation.qnt",
-    "module": "CalendarPreservationConfirmation",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "sameOwnerReplacementBeforeDispatchTest",
-      "reentryAndOldFinallyTest",
-      "committedMarkerSurvivesRetirementTest",
-      "currentExactMarkerPublishesTest",
-      "changedInventoryRequiresFreshReviewTest",
-      "pageHideRetiresHeldApprovalTest"
-    ],
-    "invariants": [
-      "ActiveReviewOwnsVisit",
-      "MarkerHasDispatch",
-      "PublishedHasCurrentReadback"
-    ],
-    "sources": [
-      "apps/app/src/prototype/agent-calendar-adapter.ts",
-      "apps/app/src/prototype/settings-adapter.ts",
-      "apps/app/src/prototype/model.js",
-      "apps/app/src/prototype/template.html",
-      "apps/app/src/runtime/agent-calendar.ts",
-      "apps/app/src/runtime/legacy-calendar-preservation.ts",
-      "apps/app/src/browser/calendar-store.ts",
-      "apps/app/src/browser/documents.ts"
-    ],
-    "abstractions": [
-      "Exact mounted Settings review, live port and pending confirmation, with separate marker capture, expected receipt, CAS commit and UI settlement.",
-      "Two owners, four port lifetimes and attempts, two real inventory equality classes. Chromium IndexedDB and closed record transport. Installed provider and arbitrary device loss are separate."
-    ]
-  },
-  {
     "path": "specs/quint/application/CanonicalCalendarEditorClose.qnt",
     "module": "CanonicalCalendarEditorClose",
     "init": "init",
@@ -3676,7 +3639,6 @@
       "apps/app/src/runtime/connection-ui.tsx",
       "apps/app/src/runtime/local-agent.ts",
       "apps/app/src/runtime/remote-protocol.ts",
-      "apps/app/src/runtime/development-cloud-agents.ts",
       "apps/app/src/prototype/camera-adapter.ts"
     ],
     "stateMapping": {
@@ -8141,8 +8103,6 @@
     "tests": [
       "thirdDocumentEvictsOldestTest",
       "sameNamePickedTwiceKeepsBothTest",
-      "treeEntryReopenedTest",
-      "revokedTreeRowReplacedByNameTest",
       "closeKeepsRecentGrantForgetReleasesTest",
       "exportEvictsRowAndReleasesGrantTest",
       "exportKeepsOpenDocumentGrantTest",
@@ -8161,7 +8121,6 @@
     ],
     "witnesses": [
       "EvictedGrantWitness",
-      "RevokedTreeRowWitness",
       "UnlistedOpenWitness",
       "ExportReleasesGrantWitness",
       "ExportEvictsOpenDocumentWitness",
@@ -8184,10 +8143,6 @@
       {
         "path": "apps/app/src/prototype/files-index.ts",
         "name": "record"
-      },
-      {
-        "path": "apps/app/src/prototype/files-index.ts",
-        "name": "revokeTree"
       },
       {
         "path": "apps/app/src/prototype/files-index.ts",
@@ -8225,8 +8180,7 @@
       "opened": "The open selected document (filesIndex.open)"
     },
     "abstractions": [
-      "Two rows stand for the source limit of 24; two folder identities and two names. MIME type is folded into the name.",
-      "revokeTree is modeled as the index operation it is; the app has no caller for it at this revision.",
+      "Two rows stand for the source limit of 24, and two names. MIME type is folded into the name.",
       "A release is modeled as succeeding at once; a failed forgetSelected call (ignored on the export path, a toast on the picker path) is not modeled.",
       "Model safety checks do not establish implementation refinement or device acceptance."
     ]
@@ -8522,68 +8476,6 @@
       "A replacement track has its own independent chain and is not modeled.",
       "A tap starts its driver write in the same turn when no write is in flight, and the taps waiting behind a write run as soon as the driver answers; neither is a separate step.",
       "Trace replay: test/quint-camera-focus-writes.test.mjs replays simulator traces step by step against BrowserCameraFocus with a DOM and a camera track whose driver replies are model steps and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
-    ]
-  },
-  {
-    "path": "specs/quint/application/DomainDocumentCreation.qnt",
-    "module": "DomainDocumentCreation",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "emptyDomainReadWritesNothingTest",
-      "firstReadImportsLegacyTest",
-      "firstEditCreatesTest",
-      "legacyWriteAfterImportStopsAccessTest",
-      "legacyAppearsAfterCreationTest"
-    ],
-    "invariants": [
-      "AbsentUntouched",
-      "ReadImportsOnce",
-      "ImportRecordsItsSource",
-      "ImportedLegacyRetained",
-      "BlockedMeansLegacyMoved"
-    ],
-    "witnesses": [
-      "AbsentAfterReadWitness",
-      "ImportedLegacyWitness",
-      "CreatedByEditWitness",
-      "LegacyMovedWitness"
-    ],
-    "sources": [
-      "apps/app/src/browser/domain-document.ts"
-    ],
-    "symbols": [
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "BrowserDomainDocument"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "readOrCreate"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "unchanged"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "load"
-      },
-      {
-        "path": "apps/app/src/browser/domain-document.ts",
-        "name": "edit"
-      }
-    ],
-    "stateMapping": {
-      "present/value/baseline": "The stored envelope: whether it exists, its value and the legacy bytes it recorded",
-      "legacy/legacyWrites": "Legacy storage as older code leaves it",
-      "writes/readWrites/reads": "Document writes, writes made by a read, and reads",
-      "blocked": "The last access stopped because legacy storage no longer matches the envelope"
-    },
-    "abstractions": [
-      "Legacy bytes are absent, old or changed; the value is none, the import or an edit. The document store transaction is atomic here; revisions, corruption and reviewed recovery are in DurableStore.",
-      "Trace replay: test/quint-domain-document-creation.test.mjs replays simulator traces step by step against BrowserDomainDocument over an in-memory revisioned document store and compares the observed state after every step. It is bounded evidence for the sampled traces, not a refinement proof or device acceptance."
     ]
   },
   {
@@ -9819,43 +9711,23 @@
     "step": "step",
     "invariant": "safety",
     "tests": [
-      "reviewedTurnIsSentAsEditedTest",
-      "emptyReviewCannotBeSentTest",
-      "discardEndsConversationTest",
-      "closingDropsHeldReviewTest",
       "reviewRequiredDoesNotResumeTest",
       "staleReplyClosesVoiceTest",
       "failedReplyStartsOverTest",
       "ownerInputPauseIsNotAReviewRequirementTest"
     ],
     "invariants": [
-      "NothingSentWithoutSend",
-      "EmptyTextIsNeverSent",
-      "ReviewSettlesOnce",
-      "HeldReviewNeedsVoice",
-      "DiscardClosesVoice",
       "ReviewRequiredStopsListening",
       "ClosedVoiceHoldsNothing",
-      "SendsNeedReviews"
+      "SendsNeedTurns"
     ],
     "witnesses": [
-      "EditedTextSentWitness",
-      "DiscardedWitness",
-      "ReviewRequiredClosesWitness",
-      "AbortedReviewWitness"
+      "ReviewRequiredClosesWitness"
     ],
     "sources": [
       "apps/app/src/prototype/voice-adapter.ts"
     ],
     "symbols": [
-      {
-        "path": "apps/app/src/prototype/voice-adapter.ts",
-        "name": "reviewConversationTurn"
-      },
-      {
-        "path": "apps/app/src/prototype/voice-adapter.ts",
-        "name": "conversationReview"
-      },
       {
         "path": "apps/app/src/prototype/voice-adapter.ts",
         "name": "conversationReviewRequired"
@@ -9878,18 +9750,16 @@
       }
     ],
     "stateMapping": {
-      "review/text/outcome/settles": "conversationReview, its editable text, and how the promise of reviewConversationTurn settled",
-      "sentText/sends": "The text the review resolved with and handed to sendVoiceTurn",
+      "sends": "The transcripts the conversation sent with sendVoiceEntry (policy auto-send) and handed to sendVoiceTurn",
       "reviewRequired": "conversationReviewRequired",
       "phase/restarts": "conversationState.phase and beginConversation calls",
       "voice/current": "chatDestination and the panel's owned() check"
     },
     "abstractions": [
-      "One held review at a time; its text is empty, the spoken transcript or an edited one.",
       "The reply is reduced to whether it requires a phone action review, whether it is an owner-input pause, and whether the turn failed. A reply that requires a review ends the turn in the error phase with the microphone off. Reply text, speech and proposals are in VoiceSession, ReadReplyLease and ApprovalRoutes.",
-      "A transcript is held and a reply is taken only while the chat is current; a reply for a chat that is no longer current closes voice.",
-      "Settings, sign-in and connection recovery of the panel's primary control, and the unconfirmed-media latch that hides the review, are outside this model (VoiceSurfaceRetirement).",
-      "At most three conversation starts per trace."
+      "A turn is sent and a reply is taken only while the chat is current; a reply for a chat that is no longer current closes voice.",
+      "Settings, sign-in and connection recovery of the panel's primary control, and the unconfirmed-media latch, are outside this model (VoiceSurfaceRetirement).",
+      "At most three conversation starts per trace, and at most three sent turns per start."
     ]
   },
   {
@@ -11716,144 +11586,6 @@
       "Production recovery only opens the retained-data notice. The development workflow uses a captured browser document revision and separate confirmation. The host ports control storage, downloads and reload. The held review assumes the visible editor text is current. A differing persisted copy is resolved by the controller's storage checks.",
       "Extended field limits and event date validation remain separate.",
       "This is the browser Calendar's modal editor; the prototype Calendar's retained forms are modeled separately."
-    ]
-  },
-  {
-    "path": "specs/quint/application/CalendarLinkedLocalPort.qnt",
-    "module": "CalendarLinkedLocalPort",
-    "init": "init",
-    "step": "step",
-    "invariant": "safety",
-    "tests": [
-      "readThenApplyTest",
-      "seriesAndGuestsRoundTripTest",
-      "staleUpdateRefusedTest",
-      "pendingDeletionBlocksTest",
-      "deleteIsStagedTest",
-      "deleteByAnotherOwnerRefusedTest",
-      "replacedSourceAbortsTest",
-      "unboundBeforeStartTest",
-      "unboundAfterWriteTest",
-      "editAfterWriteTest",
-      "lossyProviderEventRefusedTest",
-      "absentDeleteTest"
-    ],
-    "invariants": [
-      "TypeOK",
-      "NoStaleWrite",
-      "WritesAreFenced",
-      "PendingDeletionHolds",
-      "OneCall",
-      "NoticesFollowCompletion",
-      "WritesAreCounted",
-      "KnownWasRead"
-    ],
-    "witnesses": [
-      "AppliedWitness",
-      "StagedWitness",
-      "StaleRefusedWitness",
-      "PendingBlockedWitness",
-      "SourceReplacedWitness",
-      "WrittenThenAbortedWitness",
-      "AbsentDeleteWitness"
-    ],
-    "sources": [
-      "apps/app/src/browser/calendar-linked-local.ts",
-      "apps/app/src/browser/calendar-store.ts",
-      "apps/app/src/browser/calendar-deletions.ts",
-      "apps/app/src/browser/calendar-records.ts",
-      "apps/app/src/browser/calendar-sync-fields.ts",
-      "apps/app/src/runtime/deletion-owner.ts"
-    ],
-    "symbols": [
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "browserCalendarSyncPort"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "applyProviderEvent"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "expectedRevision"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "sourceRevision"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "Calendar sync source changed"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "Deletion pending"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "The local event changed before sync could apply."
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "The local event or owner changed before deletion."
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "alpha:calendar-document-changed"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "alpha:deletions-changed"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "browserDeletionOwnerCurrent"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-linked-local.ts",
-        "name": "stageCalendarDeletion"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-store.ts",
-        "name": "calendarDocument"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-store.ts",
-        "name": "guardPendingCalendarChanges"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-deletions.ts",
-        "name": "calendarDeletionPending"
-      },
-      {
-        "path": "apps/app/src/browser/calendar-deletions.ts",
-        "name": "stageCalendarDeletion"
-      },
-      {
-        "path": "apps/app/src/runtime/deletion-owner.ts",
-        "name": "browserDeletionOwnerCurrent"
-      }
-    ],
-    "stateMapping": {
-      "bound/sourceSame": "current() of the controller's binding, and the stored sourceRevision compared with the one the port was created for",
-      "exists/revision/pending": "The event row in the stored calendar document, its revision, and calendarDeletionPending for it",
-      "series/guests/richUpdate/stagedScope": "Stored recurrence and attendee presence, the dedicated provider payload, and the most recent deletion scope staged by this port",
-      "known/expected": "The revision the controller last received from get or applyProviderEvent, and the expectedRevision of the running call",
-      "op/phase/result/wrote": "The running get, applyProviderEvent or delete: before the document step, or after it with only the closing check left; what the document step did and the revision it stored",
-      "ownerCurrent": "browserDeletionOwnerCurrent for the owner captured when delete started",
-      "outcome": "The call's result or the error it threw",
-      "documentNotices/deletionNotices": "alpha:calendar-document-changed and alpha:deletions-changed events dispatched by the port",
-      "finished/writes": "Calls that returned a result, and document edits by the port that changed the stored calendar",
-      "staleWrite/unboundWrite/heldWrite/lateAbort": "History of a stored write over another revision, for an ended binding or replaced source, over an unresolved deletion, and of a write whose call then threw"
-    },
-    "abstractions": [
-      "One stored event and one call at a time; the sync controller serializes its port calls. Revisions are counted; the stored ones are opaque strings.",
-      "A provider event is valid or not; the checks behind that (title, dates, whole all-day dates, time zone) are one input. A stored event that needs recovery before syncing is not modeled.",
-      "A dedicated provider round trip tracks whether a supported series and a nonempty attendee list survive applying, reading, and staging a series deletion. The source replay checks literal recurrence, exclusions and optionality.",
-      "The generated schedules use single events without attendees. Unsupported recurrence and guest forms are outside this scenario. Deletion uses the owner's Undo window and is undone or finished by the owner's steps.",
-      "The step weights its choices so sampled walks complete calls; every action stays enabled in every state its guard allows.",
-      "CalendarLinkedSync (services) models the shared sync controller and assumes this port's contract."
     ]
   },
   {

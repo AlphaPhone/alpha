@@ -6,7 +6,7 @@ import {withWorkflowResource} from './workflow-resources';
 import {WorkflowTriggerRuntime,hydrateTriggerJob,type TriggerJob} from './workflow-trigger-runtime';
 import {assessWorkflowUrgency,type UrgencyDecision} from './workflow-urgency';
 import {workflowAwayFromHome} from './workflow-location';
-import {requestWorkflowReceipt,receiptAttachment,recordWorkflowExpense,type ReceiptInput} from './workflow-receipts';
+import {requestWorkflowReceipt,receiptAttachment,type ReceiptInput} from './workflow-receipts';
 import {readDatedWorkflowSource} from './workflow-dated-sources';
 import {openWorkflowHistory} from './workflow-history';
 import {readWorkflowMessages} from './workflow-messages';
@@ -16,13 +16,15 @@ import {speakWorkflowText,waitForWorkflowPickup} from './workflow-speech';
 import {publishWorkflowNotice} from './workflow-notices';
 import {sendWorkflowLocal} from './workflow-local-send';
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaDevicePlugin,AlphaDeviceBrowserMethods} from '../native/alpha-device';
+import {isAbortError} from '../lib/abort';
 type Bag=Record<string,any>;
 type Run={id:string;flowId:string|number;definition:string;workflow:Bag;status:string;when:string;sum:string;dur:string;log:string[][];out:string;cursor:number;inflight:number|null;started:number;trigger?:TriggerJob;context:{focus?:FocusBlock;triggerAt?:number;triggerMessages?:Record<string,Bag[]>;triggerMail?:Bag;event?:Bag;messages?:Record<string,Bag[]>;receipt?:ReceiptInput;urgency?:Record<string,UrgencyDecision>}};
 const definition=(flow:Bag)=>JSON.stringify({name:flow.name,trig:flow.trig,steps:flow.steps});
 /** Persist intent and each completed local step; never derive success from a label alone. */
 export function installSimulatedWorkflows(view:Bag){
  if(!devSurfacesEnabled)return Object.assign(()=>{},{connect:(_api:()=>Bag,_ready:()=>boolean)=>{}});
- const device=registerPlugin<any>('AlphaDevice'),calendar=registerPlugin<any>('AlphaCalendar'),files=registerPlugin<any>('AlphaFiles');
+ const device=registerPlugin<AlphaDevicePlugin&AlphaDeviceBrowserMethods>('AlphaDevice'),calendar=registerPlugin<any>('AlphaCalendar'),files=registerPlugin<any>('AlphaFiles');
  // Keep failed-save warnings outside view state, which navigation resets.
  const runErrors=new Map<string,{runId:string;message:string}>();
  const live=new Map<string,{abort:AbortController;run:Run}>();let recoveryAttempted=false;
@@ -33,7 +35,7 @@ export function installSimulatedWorkflows(view:Bag){
   if(item.k==='Notify'&&text==='a notification, only if urgent'){progress('Checking urgency');const decision=await assessWorkflowUrgency(input,(instruction,input,signal)=>api.localWorkflowText(instruction,input,signal),signal);context.urgency={...context.urgency,[operationId]:decision};progress(decision.urgent?'Urgent notification ready':'Not urgent');if(decision.urgent)await publishWorkflowNotice(operationId,input,signal);return {output:input,detail:(decision.urgent?'Notification saved':'Notification not posted')+' · '+decision.source+': '+decision.reason};}
   if(item.k==='Notify'&&(text==='a notification'||text==='a notification when the block ends'&&context.focus?.phase==='ended')){await publishWorkflowNotice(operationId,input,signal);return {output:input,detail:'Notification saved ('+operationId+')'};}
   if(item.k==='Send')return sendWorkflowLocal(item,input,operationId,api,signal,context.messages);
-  if(item.k==='Write'&&text==='a note in notes'){await withWorkflowResource('notes',signal,()=>api.localWorkflowNotes({operationId,text:input},signal));return {output:input,detail:'Note saved ('+operationId+')'};}
+  if(item.k==='Write'&&text==='a note in notes')throw Error('This local write target is not supported: '+item.t);
   if(item.k==='Read'){
    context.messages=context.triggerMessages;let output:string;const when=new Date(context.triggerAt??Date.now()),range=workflowCalendarRange(text,when);const dated=await readDatedWorkflowSource(text,api,calendar,signal,when);
    if(dated)output=JSON.stringify(dated);
@@ -41,7 +43,6 @@ export function installSimulatedWorkflows(view:Bag){
    else if(text==='inbox')output=JSON.stringify(context.triggerMail?[context.triggerMail]:api.get('inbox').mails);
    else if(text==='contacts')output=JSON.stringify(api.get('contacts').list);
    else if(text==='files'||text==='recent files')output=JSON.stringify(await files.workflowFiles({recent:text==='recent files'},signal));
-   else if(text==='notes')output=JSON.stringify(await api.localWorkflowNotes({},signal));
    else if(range)output=JSON.stringify(await readWorkflowCalendar(calendar,range,signal));
    else throw Error('This local read source is not supported: '+item.t);
    if(output.length>16000)throw Error('Local input is too large for this run. Narrow the source before retrying.');
@@ -56,7 +57,7 @@ export function installSimulatedWorkflows(view:Bag){
    if(/favorite|from maya/.test(text)){const messages=context.messages;if(!messages)throw Error('Read messages before checking their sender.');const ids=/from maya/.test(text)?['maya']:api.get('contacts').list.filter((p:Bag)=>p.fav).map((p:Bag)=>p.id);const matches=Object.fromEntries(Object.entries(messages).filter(([id,rows])=>ids.includes(id)&&rows.some((message:Bag)=>!message.me)));context.messages=matches;return {output:input===JSON.stringify(messages)?JSON.stringify(matches):input,skip:!Object.keys(matches).length};}
    throw Error('Choose a condition with local input for this run.');
   }
-  if(item.k==='Do'&&(text==='save the attachment to files'||text==='add the amount to wallet')){if(!context.receipt)throw Error('Choose a receipt for this run.');const attachment=await receiptAttachment(context.receipt,api,signal);if(text==='save the attachment to files'){const saved=await files.saveWorkflowAttachment({...attachment,operationId},signal);return {output:JSON.stringify(saved),detail:'Attachment saved in Files / Receipts ('+saved.name+')'};}recordWorkflowExpense(context.receipt,operationId,api,signal);return {output:JSON.stringify({merchant:context.receipt.merchant,amount:context.receipt.cents!/100,currency:'USD'}),detail:'Receipt recorded in local Wallet ('+operationId+')'};}
+  if(item.k==='Do'&&text==='save the attachment to files'){if(!context.receipt)throw Error('Choose a receipt for this run.');const attachment=await receiptAttachment(context.receipt,api,signal);const saved=await files.saveWorkflowAttachment({...attachment,operationId},signal);return {output:JSON.stringify(saved),detail:'Attachment saved in Files / Receipts ('+saved.name+')'};}
   if(item.k==='Do'&&/^turn (on|off) do not disturb$/.test(text)){const enabled=text.startsWith('turn on');if(context.focus){context.focus.dnd=enabled;progress(enabled?'Focus Do Not Disturb on':'Focus Do Not Disturb off');focusChanged();if(enabled)return {output:'Focus Do Not Disturb on',detail:'Focus policy active until the Calendar block ends'};}await device.setSensor({field:'doNotDisturb',enabled});return {output:'Do Not Disturb '+(enabled?'on':'off')};}
   throw Error('This step needs its local action configured: '+item.t);
  };
@@ -72,7 +73,7 @@ export function installSimulatedWorkflows(view:Bag){
    if(isFocusWorkflow(flow))run.context.focus={...await prepareFocus(api,run.context.event,abort.signal),flowId:String(flow.id),definition:definition(flow)};
    persist(api,run);if(run.context.focus)focusChanged();
    if(!run.workflow.steps.length)throw Error('Add a step before running this workflow.');
-   if(run.workflow.steps.some((item:Bag)=>item.k==='Do'&&/^(save the attachment to files|add the amount to wallet)$/i.test(item.t))){run.sum='Waiting for receipt';persist(api,run);run.context.receipt=await requestWorkflowReceipt(api,run.workflow.steps.some((item:Bag)=>item.k==='Do'&&/^add the amount to wallet$/i.test(item.t)),abort.signal,run.context.triggerMail?.id);persist(api,run);}
+   if(run.workflow.steps.some((item:Bag)=>item.k==='Do'&&/^save the attachment to files$/i.test(item.t))){run.sum='Waiting for receipt';persist(api,run);run.context.receipt=await requestWorkflowReceipt(api,abort.signal,run.context.triggerMail?.id);persist(api,run);}
    for(let index=0;index<run.workflow.steps.length;index++){
     abort.signal.throwIfAborted();const current=readWorkflowAppState(api,'workflows').flows.find((f:Bag)=>String(f.id)===String(run.flowId));if(!current||definition(current)!==run.definition||run.trigger&&!current.on)throw Error('Workflow changed during this run. Completed steps were retained.');
     run.inflight=index;persist(api,run,128_000);const item=run.workflow.steps[index];if(run.context.focus?.phase==='ended'&&item.k==='Write'){run.sum='Waiting for focus summary';persist(api,run);await waitForFocusReview(api,run.flowId,abort.signal,run.definition);}const result=await step(item,run.out,api,abort.signal,run.id+'-'+index,message=>{abort.signal.throwIfAborted();const current=readWorkflowAppState(api,'workflows').flows.find((f:Bag)=>String(f.id)===String(run.flowId));if(!current||definition(current)!==run.definition||run.trigger&&!current.on)throw Error('Workflow changed during this run. Completed steps were retained.');run.sum=message;persist(api,run);},run.context);
@@ -80,7 +81,7 @@ export function installSimulatedWorkflows(view:Bag){
     if(result.skip){run.status='skip';run.sum='Condition did not match';break;}
    }
    if(run.status==='running'){abort.signal.throwIfAborted();run.status='ok';run.sum='Completed locally';}
-  }catch(error){const cancelled=abort.signal.aborted||error instanceof DOMException&&error.name==='AbortError';run.status=cancelled?'cancelled':'fail';run.sum=cancelled?'Cancelled; completed steps retained':error instanceof Error?error.message:'Local run failed';}
+  }catch(error){const cancelled=abort.signal.aborted||isAbortError(error);run.status=cancelled?'cancelled':'fail';run.sum=cancelled?'Cancelled; completed steps retained':error instanceof Error?error.message:'Local run failed';}
   finally{if(run.context.focus){if(run.context.focus.phase==='active')run.context.focus.phase='cancelled';retireFocusRun(run.id);}run.dur=((Date.now()-run.started)/1000).toFixed(1)+' s';try{persist(api,run);}catch{runErrors.set(String(run.flowId),{runId:run.id,message:'Run state could not be saved. Reload to inspect its last saved step.'});api.setView('workflows',{localRunErrors:Object.fromEntries(runErrors)});if(!api.isActive())api.toast('Run state could not be saved. Reload to inspect its last saved step.');else if(String(api.get('workflows').open)!==String(run.flowId)||api.get('workflows').run||api.get('workflows').build||api.get('workflows').create||api.get('workflows').sheet)api.toast('Could not save '+flow.name+'. Open that workflow to inspect its last saved step.');}live.delete(run.id);api.setView('workflows',{localRunRevision:crypto.randomUUID()});}
  };
  const scheduler=new WorkflowTriggerRuntime(flowId=>[...live.values()].some(item=>String(item.run.flowId)===flowId),(flow,api,job)=>start(flow,api,job));

@@ -1,0 +1,4 @@
+apps/app/src/prototype/agent-adapter.ts
+apps/app/src/prototype/agent-calendar-adapter.ts
+apps/app/src/prototype/asset-manifest.json
+apps/app/src/prototype/assistant-draft-controller.ts

@@ -2,6 +2,7 @@ import {connectionController} from '../runtime/connection-ui';
 import {alphaClient} from '../runtime/alpha-client';
 import {calendarReviewText,inboxChoiceText,calendarApprovalStatus,type CalendarApproval,type CalendarApprovalResolution} from '../runtime/calendar-approval';
 import {reviewCalendarApproval} from './calendar-approval-review';
+import {sessionKey} from '../lib/session-key';
 import {calendarApprovalTarget,type CalendarApprovalLabels} from './calendar-approval-fields';
 import {calendarApprovalCardText} from '../ui/calendar/calendar-approval-messages';
 import {CALENDAR_INVALIDATED_EVENT} from '../runtime/app-record-completion';
@@ -10,15 +11,14 @@ type CalendarReview=ReturnType<typeof calendarReviewText>;
 /** Parses of the agent messages on screen, by message id. A message whose text has not changed keeps
  * its parse (the same object, which callers must not change), so a render parses only new or edited
  * messages. `retain` forgets the ids that are no longer in the conversation. */
-export function createCalendarReviewParses(parseText:(text:string)=>CalendarReview=calendarReviewText){
+function createCalendarReviewParses(){
  const known=new Map<string,{text:string;parsed:CalendarReview}>();
  return {
   parse(id:string,text:string):CalendarReview{
    const hit=known.get(id);if(hit&&hit.text===text)return hit.parsed;
-   const parsed=parseText(text);known.set(id,{text,parsed});return parsed;
+   const parsed=calendarReviewText(text);known.set(id,{text,parsed});return parsed;
   },
   retain(ids:Iterable<string>){const keep=new Set(ids);for(const id of [...known.keys()])if(!keep.has(id))known.delete(id);},
-  get size(){return known.size;},
  };
 }
 /** Presentation only: stored messages, model context and copied source text remain unchanged. */
@@ -26,14 +26,14 @@ export function installCalendarApprovalAdapter(Component:Shell){
  const p=Component.prototype,render=p.renderVals,unmount=p.componentWillUnmount;
  const states=new WeakMap<object,{abort?:AbortController;statuses:Map<string,string>;results:Map<string,CalendarApprovalResolution>}>();
  const state=(shell:Shell)=>{let value=states.get(shell);if(!value){value={statuses:new Map(),results:new Map()};states.set(shell,value);}return value;};
- const binding=()=>{const snapshot=connectionController.getSnapshot();return JSON.stringify([snapshot.session,snapshot.history?.conversationId]);};
+ const binding=()=>{const snapshot=connectionController.getSnapshot();return sessionKey(snapshot.session,snapshot.history?.conversationId);};
  // The loaded Calendar window verifies the reviewed event when it holds it. An event outside that window,
  // or a window that another source left incomplete, is verified by one read of the event's own calendar
  // at its start; a failed read leaves the target unverified, and the review can still be declined.
  const target=async(shell:Shell,row:CalendarApproval,signal:AbortSignal):Promise<CalendarApprovalLabels>=>{
   const port=connectionController.getAppRecordClient?.(),calendar=shell.agentCalendar,model=calendar?.state;
   if(!port?.current()||!model)return {};
-  const p=row.payload,loaded=model.savedAt===null&&(model.status==='ready'||model.status==='partial')&&model.ownerKey===JSON.stringify([new URL(port.identity.origin).origin,port.identity.ownerId,port.identity.agentId]);
+  const p=row.payload,loaded=model.savedAt===null&&(model.status==='ready'||model.status==='partial')&&model.ownerKey===sessionKey(new URL(port.identity.origin).origin,port.identity.ownerId,port.identity.agentId);
   const labels=loaded?calendarApprovalTarget(p,model.calendars,model.status==='ready'?model.feed?.events??[]:[]):{};
   if(row.action==='schedule_event'||labels.targetVerified||typeof p.expectedEventStartAtMs!=='number')return labels;
   const read=await calendar.readSourceAt({grantId:typeof p.grantId==='string'?p.grantId:undefined,calendarId:String(p.calendarId)},p.expectedEventStartAtMs,signal).catch(()=>null);
@@ -79,5 +79,5 @@ export function installCalendarApprovalAdapter(Component:Shell){
    return {...message,displayText,hasCalendarText:message.hasCalendarText!==false&&!!displayText,messageActionsLabel:message.messageActionsLabel?'Message actions: '+(displayText||'Calendar request'):message.messageActionsLabel,calendarReviews:parsed.ids.map(id=>({id,status:value.statuses.get(key+id)||'',canOpen:value.results.get(key+id)?.kind==='succeeded',open:()=>void review(this,id),openCalendar:()=>{if(this.live&&!document.hidden&&binding()===key)this.openView('calendar');}}))};
   });return out;
  };
- p.componentWillUnmount=function(){states.get(this)?.abort?.abort();states.delete(this);parses.delete(this);return unmount?.call(this);};
+ p.componentWillUnmount=function(){states.get(this)?.abort?.abort();states.delete(this);parses.delete(this);return unmount.call(this);};
 }

@@ -1,13 +1,15 @@
 /** Core owner-reminder boundary. No client singleton, credentials, UI or platform imports. */
+import {sha256Hex} from '../lib/hash.ts';
+import {UUID_PATTERN as uuid} from '../lib/ids.ts';
+import {expectRecord} from '../lib/parse.ts';
 export const OWNER_REMINDER_LIST = '/api/notifications?category=reminder&unreadOnly=true&limit=20';
 export const OWNER_REMINDER_READBACK = '/api/notifications?category=reminder&unreadOnly=false&limit=20';
-export const OWNER_REMINDER_BYTES = 65536;
-const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const OWNER_REMINDER_BYTES = 65536;
 export function reminderReadPath(id:string) { if(!uuid.test(id)) throw Error('Invalid reminder identity'); return '/api/notifications/'+id+'/read'; }
 export function ownerReminderRoute(path:unknown,method:unknown,body:unknown): boolean {
  return body===undefined && typeof path==='string' && (method==='GET'&&(path===OWNER_REMINDER_LIST||path===OWNER_REMINDER_READBACK)||method==='POST'&&/^\/api\/notifications\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/read$/i.test(path));
 }
-export interface ReminderOwner { readonly origin:string; readonly ownerId:string; readonly agentId:string; readonly sessionId:string; readonly generation:number; }
+interface ReminderOwner { readonly origin:string; readonly ownerId:string; readonly agentId:string; readonly sessionId:string; readonly generation:number; }
 export interface ReminderNotificationBinding {
  readonly key:string; readonly identity:ReminderOwner;
  current():boolean; passiveAllowed():boolean; actionAllowed():boolean;
@@ -21,12 +23,12 @@ export interface CoreReminderNotice {
  id:string; revision:string; agentId:string; title:string; text:string; at:number; readAt:number|null;
  expiresAt:number|null; groupKey:string; conversationId?:string; messageId?:string;
 }
-function record(value:unknown):Record<string,any> { if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid reminder response');return value as Record<string,any>; }
+function record(value:unknown):Record<string,any> { return expectRecord(value,()=>Error('Invalid reminder response')); }
 function keys(value:Record<string,any>,allowed:readonly string[],required:readonly string[]=[]) { if(Object.keys(value).some(k=>!allowed.includes(k))||required.some(k=>!Object.hasOwn(value,k)))throw Error('Unknown reminder response field'); }
 function integer(value:unknown):value is number { return typeof value==='number'&&Number.isSafeInteger(value)&&value>=0; }
 function text(value:unknown,max:number):value is string { return typeof value==='string'&&value.length<=max; }
 function canonical(value:any):string { if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value); }
-export async function reminderDigest(value:unknown):Promise<string> { const raw=new TextEncoder().encode(canonical(value));const hash=await crypto.subtle.digest('SHA-256',raw);return Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join(''); }
+function reminderDigest(value:unknown):Promise<string> { return sha256Hex(canonical(value)); }
 const fields=['id','nativeEpoch','nativeSequence','title','body','category','priority','source','deepLink','icon','groupKey','data','createdAt','readAt','expiresAt','agentId'];
 const dataFields=['ownerType','ownerId','subjectType','scheduledFor','dueAt','conversationId','messageId','count'];
 /** Unknown fields fail closed; valid other producers remain in Core and are not imported. */

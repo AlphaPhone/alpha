@@ -1,8 +1,8 @@
 import {createElement} from 'react';
-import {registerPlugin} from '../platform-plugins';
+import {alphaTelephony} from '../native/alpha-telephony';
 import {aospImage} from '../runtime/aosp-image';
-import {createAospTelephony,normalizePhoneNumber,type AlphaTelephonyPlugin,type AospTelephony} from '../runtime/aosp-telephony';
-import type {TelephonyCallLogEntry} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
+import {createAospTelephony,normalizePhoneNumber,type AospTelephony} from '../runtime/aosp-telephony';
+import type {TelephonyCallLogEntry,VoicemailCarrierState,VoicemailEntry} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {audioReplied,audioRequested,callStarted,closed,closedVoicemail,deleteAsked,deleteCancelled,deleteFinished,ended,opened,paused,played,readinessLost,transcriptReplied,transcriptRequested,type OpenVoicemail,type TranscriptEngine} from '../runtime/voicemail-state';
 import {watchReturnToApp} from './native-adapter';
 import {isMvpView} from './mvp-features';
@@ -11,7 +11,6 @@ import {callKind,callRow,callsBriefing,clockLength,displayNumber,initials,matche
 import {placeOwnerCall} from './place-owner-call';
 import {clearListFilter,setListFilterHandler,type CommsBarSpec,type CommsListFilter} from '../runtime/comms-bar';
 type Bag=Record<string,any>;
-type Voicemail={id:string;number:string;cachedName:string|null;date:number;durationSeconds:number;isNew:boolean;hasAudio:boolean;carrierTranscript:string|null};
 const CALL_TYPE:Record<TelephonyCallLogEntry['type'],string>={incoming:'Incoming',outgoing:'Outgoing',missed:'Missed',voicemail:'Voicemail',rejected:'Declined',blocked:'Blocked',answered_externally:'Other device',unknown:'Call'};
 /** Plain rows of recent calls (label, detail and whether the number can be called). */
 export function phoneRows(calls:readonly TelephonyCallLogEntry[],dial:(number:string)=>void){
@@ -89,13 +88,13 @@ export const openKeypadStep=(number?:string)=>keypadOpener?.(number)??null;
  * transcribed under the owner's speech setting (Voicemail.qnt). Off the image this adapter returns
  * before registering anything, and the Phone view is not admitted.
  */
-export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(registerPlugin<AlphaTelephonyPlugin>('AlphaTelephony'),true):null){
+export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony|null=aospImage?createAospTelephony(alphaTelephony,true):null){
  if(!client)return;
  const p=Component.prototype,mount=p.componentDidMount,update=p.componentDidUpdate,unmount=p.componentWillUnmount;
  let owner:any,api:Bag|null=null,calls:TelephonyCallLogEntry[]=[],number='',status='',notice='',reading=false,dialing=false,session=0,needsAccess=false,retryRecents=false,active=false,epoch=0,tab:PhoneTab='recents';
  /* AC-22: the bar's query over Recents, held for the visit only; an Alpha filter also shows a chip. */
  let filter:CommsListFilter|null=null;
- let voicemails:Voicemail[]=[],carrier:'ready'|'unconfigured'|'unsupported'|null=null,vm:OpenVoicemail=closedVoicemail();
+ let voicemails:VoicemailEntry[]=[],carrier:VoicemailCarrierState|null=null,vm:OpenVoicemail=closedVoicemail();
  type Observation={session:number;stop:(()=>Promise<void>)|null;ready:Promise<void>};
  let observation:Observation|null=null,observationTail:Promise<void>=Promise.resolve();
  let audio:HTMLAudioElement|null=null,audioUrl='',wav:Uint8Array|null=null,position=0,work:AbortController|null=null,inCall=false;
@@ -176,9 +175,9 @@ export function installPhoneAdapter(Component:any,views:Bag,client:AospTelephony
   finally{if(token===session){dialing=false;changed();}}
  }
  const ready=()=>active&&available();
- const open=(row:Voicemail)=>{if(vm.id===row.id){closeVoicemail();changed();return;}cancelDelete();releaseAudio();vm=opened(vm,row.id,!row.isNew,row.carrierTranscript);void loadAudio(row);changed();};
+ const open=(row:VoicemailEntry)=>{if(vm.id===row.id){closeVoicemail();changed();return;}cancelDelete();releaseAudio();vm=opened(vm,row.id,!row.isNew,row.carrierTranscript);void loadAudio(row);changed();};
  /* The decoded audio serves both playback and transcription; it stays in memory for the open voicemail only. */
- async function loadAudio(row:Voicemail){
+ async function loadAudio(row:VoicemailEntry){
   const before=vm;vm=audioRequested(vm,ready());if(vm===before)return;const ticket=vm.ticket,controller=new AbortController();work?.abort();work=controller;changed();
   try{
    if(!row.hasAudio){const fetched=await client!.fetchVoicemailAudio(row.id);if(ticket!==vm.ticket)return;if(fetched!=='ready')throw Error(fetched);}

@@ -1,8 +1,10 @@
 import {readClientTurnObservationPeerSupport,type ClientBrowserPageObservation,type ClientTurnObservationOptionalField,type ClientTurnObservationSupport} from '../../../../.eliza/client-features/packages/contracts/src/client-turn-observation.ts';
 import {normalizeRemoteAgentPairingInstanceId} from '../../../../.eliza/client-features/packages/contracts/src/contracts/remote-agent-pairing.ts';
 import type {VerifiedSession,ContextEnvelope} from './alpha-client';
+import {isRecord} from '../lib/parse.ts';
+import {sessionKey} from '../lib/session-key.ts';
 
-export interface ClientObservationBinding extends VerifiedSession {
+interface ClientObservationBinding extends VerifiedSession {
  connectionEpoch:number;
  /** Existing API-process pairing instance, learned through the authenticated handshake. */
  serverInstanceId:string;
@@ -15,7 +17,7 @@ export class ClientObservationSupportCache {
  private key(binding:ClientObservationBinding):string|undefined {
   const instance=normalizeRemoteAgentPairingInstanceId(binding.serverInstanceId);
   if(!instance||!Number.isSafeInteger(binding.connectionEpoch)||binding.connectionEpoch<0||![binding.origin,binding.ownerId,binding.agentId,binding.sessionId].every(value=>typeof value==='string'&&value.length>0))return;
-  return JSON.stringify([binding.origin,binding.ownerId,binding.agentId,binding.sessionId,binding.connectionEpoch,instance]);
+  return sessionKey(binding.origin,binding.ownerId,binding.agentId,binding.sessionId,binding.connectionEpoch,instance);
  }
  admit(status:unknown,binding:ClientObservationBinding):boolean {
   this.clear();const key=this.key(binding);
@@ -72,7 +74,7 @@ export class ClientObservationSupportSession {
   this.check(signal);
   try{
    const status=await this.status(signal);this.check(signal);
-   const instance=status&&typeof status==='object'&&!Array.isArray(status)?normalizeRemoteAgentPairingInstanceId(Reflect.get(status,'serverInstanceId')):null;
+   const instance=isRecord(status)?normalizeRemoteAgentPairingInstanceId(status.serverInstanceId):null;
    if(!instance)return;
    const binding={...this.session,serverInstanceId:instance};
    if(this.cache.admit(status,binding))this.known=Object.freeze(binding);

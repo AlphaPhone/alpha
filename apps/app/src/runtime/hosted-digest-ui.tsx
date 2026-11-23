@@ -8,12 +8,16 @@ const chip={display:'inline-block',padding:'2px 8px',borderRadius:12,background:
 const switchRow={display:'flex',flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12,margin:'4px 0',minHeight:44} as const;
 const switchInput={width:22,height:22,flex:'none',padding:0};
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaHostedResultsPlugin} from '../native/alpha-hosted-results';
+import type {AlphaCalendarPlugin} from '../native/alpha-calendar';
+import {agentOwnerKey} from '../lib/session-key';
+import {deviceTimeZone} from '../lib/civil-date';
 import {openDomainRecovery} from '../browser/domain-recovery';
 import {browserDevProfile} from '../browser/dev-profile';
 import {browserScreenLocked} from '../browser/screen-locked';
 import { holdPhoneInert } from './modal-inert';
 import { browserHostedResults } from '../browser/hosted-results';
-import { devSurfacesEnabled, testMocksEnabled } from '../build-flags';
+import { devSurfacesEnabled } from '../build-flags';
 import { browserLocalAgentEnabled } from './local-agent';
 import { NativeResultInbox, configureHostedBackground } from './hosted-background';
 import { createDigestInbox, type ResultInbox } from './digest-inbox';
@@ -69,15 +73,17 @@ type Pending = {
  /** Renewal: after the new source saves, these loops move to it (same mutation IDs on retry). */
  rebind?:Array<{id:string;expectedVersionId:string;mutationId:string;spec:Record<string,unknown>}>;
  renews?:string;
- /** Run now of this missed record (#394): hidden here once confirmed; the agent returns the same run on repeat. */
+ /** Run now of this missed record: hidden here once confirmed; the agent returns the same run on repeat. */
  missedRunId?:string;
  /** 'review' until the request is about to reach the agent; a record without a phase (older build) counts as dispatched. */
  phase?:'review'|'dispatched';
 };
 // Refreshes replace state only when the agent's data changed, so a quiet poll renders nothing.
 const same=(a:unknown,b:unknown)=>a===b||JSON.stringify(a)===JSON.stringify(b);
-const nativeSources=registerPlugin<{nativeSourceConsent(input:Record<string,unknown>):Promise<Record<string,unknown>>;nativeSourceIdentity(input:{sessionId:string}):Promise<Record<string,unknown>>;scheduleSourceRenewal(input:{selection:SourceRenewalTap['selection'];expiresAt:number}):Promise<void>;clearSourceRenewal(input:{selection:SourceRenewalTap['selection']}):Promise<void>;pendingSourceRenewal():Promise<Partial<SourceRenewalTap>>;settleSourceRenewal(input:{token:string;discard:boolean}):Promise<void>;addListener(event:'renewSource',listener:()=>void):Promise<{remove():Promise<void>}>}>('AlphaHostedResults');
-const nativeCalendars=registerPlugin<{requestWorkflowReadAccess():Promise<{status:string}>;workflowCalendars():Promise<{status:string;calendars:Array<{id:string;name:string;account:string;sourceRevision:string}>}>}>('AlphaCalendar');
+const nativeSources=registerPlugin<AlphaHostedResultsPlugin>('AlphaHostedResults');
+const nativeCalendars=registerPlugin<Pick<AlphaCalendarPlugin,'requestWorkflowReadAccess'|'workflowCalendars'>>('AlphaCalendar');
+/** Whether the runtime knows this IANA time zone. */
+const validTimeZone=(zone:string)=>{try{new Intl.DateTimeFormat('en',{timeZone:zone}).format(0);return true;}catch{return false;}};
 function canSyncResults(){return !document.hidden&&(isAndroid||(document.documentElement.dataset.devBackground!=='true'&&!browserScreenLocked()));}
 export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQuestion?:(draft:string,sessionId:string)=>boolean;canComposeQuestion?:(sessionId:string)=>boolean}={}) {
  const questionClose=useRef<undefined|(()=>void)>(undefined);
@@ -112,7 +118,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 		[hours, setHours] = useState(DIGEST_SOURCE_MAX_HOURS),
 		[sourceId, setSourceId] = useState(""),
 		[zone, setZone] = useState(
-			Intl.DateTimeFormat().resolvedOptions().timeZone,
+			deviceTimeZone(),
 		),
 		[morning, setMorning] = useState("08:00"),
 		[evening, setEvening] = useState("18:00");
@@ -223,8 +229,8 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 			setAvailable(supported);
             const nativeSupported=supported&&advertised.nativeSources&&isAndroid&&connection.kind==='resident';
             // The dossier needs native phone sources, which only the resident agent has. That agent is staged
-            // from upstream.lock.json, whose plugin-workflow registers POST /api/workflow/hosted/dossier
-            // (elizaOS/eliza#35906); /status does not advertise it.
+            // from upstream.lock.json, whose plugin-workflow registers POST /api/workflow/hosted/dossier;
+            // /status does not advertise it.
             setNativeSourceProtocol(nativeSupported);const advertisedFeatures={nativeEvening:nativeSupported&&advertised.nativeEvening,sourcePause:supported&&advertised.sourcePause,dossier:nativeSupported};setFeatures(prior=>same(prior,advertisedFeatures)?prior:advertisedFeatures);
 			if (!supported) {
 				setMessage("Not available");
@@ -282,22 +288,18 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
         let releaseBrowser:undefined|(()=>void),releaseScheduler:undefined|(()=>void);
 		void (async () => {
 			const session = connection.session!,
-				slot =
-					"hosted-digests:v1:" +
-					(await actionScope(
-						JSON.stringify([session.origin, session.ownerId, session.agentId]),
-					));
+				scope = await actionScope(agentOwnerKey(session)),
+				slot = "hosted-digests:v1:" + scope;
 			if (disposed) return;
             const client=selected.client.hosted();let inbox:ResultInbox;
             const development=devSurfacesEnabled&&browserDevProfile&&JSON.parse(localStorage.getItem('alpha.connection.selection.v1')||'null')?.kind==='development';
             const storage=development?await (await import('../browser/digest-storage')).browserDigestStore(session,()=>!disposed&&connectionController.getSnapshot().session?.sessionId===session.sessionId,controller.signal):devSurfacesEnabled&&!isAndroid&&browserLocalAgentEnabled&&connection.kind==='resident'?(await import('./local-agent-storage')).developmentDigestStore():secureConnectionStore;
-            const notices:HostedResultBinding={scope:slot.slice('hosted-digests:v1:'.length),origin:session.origin,ownerId:session.ownerId,agentId:session.agentId,current:()=>!disposed&&binding.current?.sessionId===session.sessionId&&connectionController.getSnapshot().session?.sessionId===session.sessionId,revalidate:signal=>client.available(signal),history:()=>inbox.history()};
+            const notices:HostedResultBinding={scope,origin:session.origin,ownerId:session.ownerId,agentId:session.agentId,current:()=>!disposed&&binding.current?.sessionId===session.sessionId&&connectionController.getSnapshot().session?.sessionId===session.sessionId,revalidate:signal=>client.available(signal),history:()=>inbox.history()};
             let ready=false;
             if(isAndroid){
-                const cloud=testMocksEnabled&&connection.kind==='cloud'?await secureConnectionStore.read<Record<string,unknown>>(`cloud-runtime:${session.sessionId}`):null;
                 controller.signal.throwIfAborted();
                 if(connectionController.getSnapshot().session?.sessionId!==session.sessionId)return;
-                ready=await configureHostedBackground({...cloud,mode:connection.kind,origin:session.origin,ownerId:session.ownerId,agentId:session.agentId,sessionId:session.sessionId},controller.signal);
+                ready=await configureHostedBackground({mode:connection.kind,origin:session.origin,ownerId:session.ownerId,agentId:session.agentId,sessionId:session.sessionId},controller.signal);
             }
             controller.signal.throwIfAborted();if(disposed)return;
             setNativeReady(ready);
@@ -444,9 +446,9 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
     }
     const renewalLoops=(id:string|null)=>id?loops.filter(l=>!l.removed&&l.spec.enabled&&l.spec.sourceId===id).map(l=>({id:l.id,expectedVersionId:l.versionId,mutationId:crypto.randomUUID(),spec:{version:1,template:l.spec.template,timeZone:l.spec.timeZone,localTime:l.spec.localTime,enabled:true}})):[];
     const renewalNote=(id:string|null)=>{const moved=renewalLoops(id);return moved.length?`\nRenewal: ${moved.map(l=>l.spec.template+' at '+l.spec.localTime).join(', ')} ${moved.length===1?'moves':'move'} to this source when you confirm.`:'';};
-    // On the phone Cloud supplies the agent's model, so usage is the owner's plan allowance (P-43).
+    // On the phone Cloud supplies the agent's model, so usage is the owner's plan allowance.
     const billing=interactiveDevelopment?'Development reply':isAndroid&&connection.kind==='resident'?`${cloudServiceName(connectionController.getCloudEnvironment()??connection.cloudAccount?.environment??connection.signIn?.environment??'production')} plan`:'Billed by agent';
-    // A missed occurrence is never replayed; Run now is one new, separately reviewed run (#394).
+    // A missed occurrence is never replayed; Run now is one new, separately reviewed run.
     const missedOffers=available?missedRunNowOffers(binding.current?.sessionId===connection.session?.sessionId?results:[],loops,sources):new Map<string,MissedRunNow>();
     function reviewMissedRunNow(offer:MissedRunNow){
      setMessage('');
@@ -549,7 +551,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
   if(!nativeLabel.trim()){setMessage('Name this source selection before reviewing it.');return;}
   if(selectedCalendars.length>16){setMessage('Choose at most 16 calendars for this source.');return;}
   if(!selectedCalendars.length&&!selectedReminders){setMessage('Select a calendar or reminders first.');return;}
-  try{new Intl.DateTimeFormat('en',{timeZone:zone}).format(0);if(!Number.isInteger(hours)||hours<1||hours>DIGEST_SOURCE_MAX_HOURS)throw Error();}catch{setMessage('Choose a valid time zone and expiry from 1 to 168 hours (7 days).');return;}
+  if(!validTimeZone(zone)||!Number.isInteger(hours)||hours<1||hours>DIGEST_SOURCE_MAX_HOURS){setMessage('Choose a valid time zone and expiry from 1 to 168 hours (7 days).');return;}
   let expectedBinding:Record<string,unknown>;try{expectedBinding=await nativeSources.nativeSourceIdentity({sessionId:b.sessionId});if(binding.current!==b)return;}catch{setMessage('Reconnect your agent, then try again.');return;}
   // One clock reading: the agent refuses an expiry later than observedAt + 7 days, so a 168-hour source must not drift past it.
   const sourceId=crypto.randomUUID(),reviewedAt=Date.now(),observedAt=new Date(reviewedAt).toISOString(),expiresAt=reviewedAt+hours*3600000;
@@ -569,9 +571,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 			});
 			return;
 		}
-		try {
-			new Intl.DateTimeFormat("en", { timeZone: zone }).format(0);
-		} catch {
+		if (!validTimeZone(zone)) {
 			setMessage("Enter a valid time zone.");
 			return;
 		}
@@ -735,7 +735,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 										aria-label="Expires after hours"
 										type="number"
 										min={1}
-										max={168}
+										max={DIGEST_SOURCE_MAX_HOURS}
 										value={hours}
 										onChange={(e) => setHours(Number(e.target.value))}
 									/>
@@ -746,7 +746,7 @@ export function HostedDigestPanel({composeQuestion,canComposeQuestion}:{composeQ
 										!label.trim() ||
 										!Number.isFinite(hours) ||
 										hours < 1 ||
-										hours > 168 ||
+										hours > DIGEST_SOURCE_MAX_HOURS ||
 										JSON.stringify({ text, label }).length > 14000 ||
 										busy
 									}

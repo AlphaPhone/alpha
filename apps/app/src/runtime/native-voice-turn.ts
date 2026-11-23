@@ -1,22 +1,19 @@
-import { Capacitor } from '@capacitor/core';
 import { registerPlugin } from '../platform-plugins';
+import { voiceCloudAvailable as available } from '../native/alpha-voice-cloud.ts';
 import { setNativeVoiceStageSink } from './voice-timing';
 import { nativeVoiceStageSink, readNativeVoiceTiming as readBridgeTiming, type NativeVoiceTimingPort } from '../../../../.eliza/client-features/packages/voice/src/native-live-voice.ts';
 
 /**
- * Issue #395: Alpha's binding of the shared native voice-turn sink (`@elizaos/voice/native-live`)
+ * Alpha's binding of the shared native voice-turn sink (`@elizaos/voice/native-live`)
  * to the AlphaVoiceCloud bridge's latency collector (LocalSpeechBridgePlugin.markVoiceTurn,
  * VoiceLatencyTrials). The renderer reports only a stage name and the native turn id it was given;
  * the native side stamps the monotonic time on arrival. No text, account or conversation id is sent.
  */
 const plugin = () => registerPlugin<NativeVoiceTimingPort>('AlphaVoiceCloud');
-const available = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('AlphaVoiceCloud');
-let installed = false;
 
-/** On the phone, forward conversation stage marks to the native collector. Idempotent. */
+/** On the phone, forward conversation stage marks to the native collector. */
 export function installNativeVoiceTurnMarks() {
-  if (installed || !available()) return;
-  installed = true;
+  if (!available()) return;
   setNativeVoiceStageSink(nativeVoiceStageSink(plugin()));
 }
 

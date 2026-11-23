@@ -1,0 +1,1 @@
+apps/app/src/prototype/template.html  (ONLY lines 1-2296; write your report to docs/simplification-audit/files/apps/app/src/prototype/template.html.part1.md)

@@ -2,7 +2,8 @@ import {CALENDAR_APPROVAL_FALLBACK,calendarApprovalOutcomeText} from '../ui/cale
 export const CALENDAR_APPROVAL_READ_PATH='/api/approvals?state=all&limit=500';
 /** Calendar markup identifies a candidate review; only the authenticated queue can authorize it. */
 const uuid='[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}';
-export const calendarApprovalId=(value:unknown):value is string=>typeof value==='string'&&new RegExp('^'+uuid+'$','i').test(value);
+const approvalIdPattern=new RegExp('^'+uuid+'$','i');
+export const calendarApprovalId=(value:unknown):value is string=>typeof value==='string'&&approvalIdPattern.test(value);
 // String.replace resets a global pattern's lastIndex, so one shared pattern is safe.
 const reviewPattern=new RegExp('\\[CHOICE:approval-('+uuid+') id=\\1\\]\\s*\\r?\\n([\\s\\S]*?)\\r?\\n\\[/CHOICE\\]','gi');
 export function calendarReviewText(text:string){

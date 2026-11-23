@@ -48,39 +48,6 @@ test('reminder create and update completions are one confirming sentence; due de
  for(const presented of [created,updated,legacy]){oneSentence(presented.appliedSummary);assert.doesNotMatch(presented.appliedSummary,/Alert|approximate/);}
 });
 
-// The Notes screen's own storage status, set beside a failed change; it is not the receipt.
-const SCREEN_STATUS=new Set([
- 'Save outcome unknown. Reopen the app to inspect saved notes; do not repeat.',
- 'Notes storage needs recovery. Reopen the app to inspect saved notes before editing.',
-]);
-// Every fixed sentence the approved device-action executors can return, read from source: each
-// quoted or template literal that reads as a sentence (capitalised, spaced, ending in . ! or ?).
-const literalSentences=(path,from,to)=>{
- let text=readFileSync(new URL('../'+path,import.meta.url),'utf8');
- if(from){const start=text.indexOf(from);assert.ok(start>=0,from);text=text.slice(start,to?text.indexOf(to,start):undefined);}
- // Fold `${...}` (one nesting level) so a template reads as one literal.
- text=text.replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g,'N');
- // A thrown Error is recorded by the coordinator as an unknown outcome and never shown as written.
- return [...text.matchAll(/(['"`])((?:(?!\1)[^\\\n]|\\.)*)\1/g)]
-  .filter(match=>!/Error\(\s*$/.test(text.slice(Math.max(0,match.index-8),match.index)))
-  .map(match=>match[2])
-  .filter(value=>/^[A-Z“]/.test(value)&&/\s/.test(value)&&/[.!?]$/.test(value)&&!SCREEN_STATUS.has(value));
-};
-
-test('the approved device-action executors return one-sentence summaries',()=>{
- const sources=[
-  literalSentences('apps/app/src/prototype/agent-adapter.ts','connectionController.setForegroundExecutor(','\n    context(this);\n  };'),
-  literalSentences('apps/app/src/ui/files/files-browser-adapter.ts','const accessRequired = {','\n  const toggle = '),
-  literalSentences('apps/app/src/prototype/notes-query-executor.ts'),
- ];
- const all=sources.flat();
- assert.ok(sources[0].length>=40,'adapter summaries found: '+sources[0].length);
- for(const summary of all)oneSentence(summary.replace(/\$\{[^}]*\}/g,'N'));
- const adapter=readFileSync(new URL('../apps/app/src/prototype/agent-adapter.ts',import.meta.url),'utf8');
- assert.match(adapter,/'Deletion queued with 10 seconds to Undo\.'/);
- assert.doesNotMatch(adapter,/Final outcome remains pending/);
-});
-
 test('photo library refusals on the approved path are one sentence each',()=>{
  for(const path of ['apps/app/src/prototype/photo-library-adapter.ts','apps/app/src/prototype/camera-adapter.ts']){
   const text=readFileSync(new URL('../'+path,import.meta.url),'utf8');

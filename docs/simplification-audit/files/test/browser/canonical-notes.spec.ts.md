@@ -1,0 +1,24 @@
+# test/browser/canonical-notes.spec.ts
+- Lines: 550 | Kind: Playwright, `chromium` project; mostly real UI over the canonical Notes fixture transport, plus four module-in-page tests (T6) and one served-source rewrite (P4) | Verdict: **KEEP** as the basis of `journeys/notes.spec.ts`; DELETE one legacy case, REWRITE five in-page/API cases
+- Covers: agent-backed Notes CRUD with committed identity and `expectedRevision`, restore-only Trash with dated entries and fresh review on change, Undo refusing a replaced trash entry, last-edit ordering and local date labels, empty state, voice recording saved locally with on-request transcript and "Ask Alpha about this transcript", failed save keeps the draft, checklist/pin, Delete on unsaved note, slow saves (one record, Delete waits), agent append refresh and stale-edit refusal, editor beside half/full chat, read-failure and accepted-write-uncertainty states, lost-reply reconciliation for voice saves, recording summary save/refuse. Duplicates: Trash also in `notes-trash.spec.ts`, `notes-trash-full.spec.ts`, `notes-trash-recovery.spec.ts`; recorder in `notes-audio-journey.spec.ts`, `browser-speech.spec.ts`; failed save in `canonical-notes-draft-copy.spec.ts`. Callers/importers: none. Helper: `helpers/canonical-notes.ts` (10 importers).
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 325-346 | A1, T6 | "Notes keeps previous device data behind an explicit recovery route" seeds the legacy `browser-notes-document.ts` store and asserts the "Previous notes" button. D1 deletes this source mode. | Delete with the legacy reader. | none |
+| 2 | 61-89 | T6 | "lost canonical recording save reply is reconciled" constructs `CanonicalNotesUi` in the page and calls `saveVoice` three times with a hand-made `claim`. No UI. | Rewrite as a journey: record a voice note with `fixture.failAfterApplied=true`, then retry/reopen and assert one `create-note`, one note, folder kept. If the claim/reconcile branches cannot be reached from the UI, move the case to a Node integration test (`test/notes-voice-save.integration.test.ts`) that runs `CanonicalNotesUi` against the same fixture transport. | Medium: this is the only coverage of the idempotent voice-save claim; do not delete without a replacement. |
+| 3 | 480-498, 500-515 | T6 | Same pattern for audio-only saves (separate voice note beside a dirty text draft; lost create read back before attaching audio). | Same target as #2 (one integration file, two cases). | Medium (same reason). |
+| 4 | 517-550 | P4, T6 | Rewrites `/src/main.tsx` through `page.route` to expose `shell`, then calls `shell.agentSay(...)` with a hand-built `sourceSummary` card and `canonicalNotesUi.refresh()`. Breaks on any edit to `main.tsx` (`expect(source).toContain('let shell;')`). | Rewrite: have the agent fixture reply with the summary card (the resident stub or a transport reply), click Review, save; trigger the stale case by bumping the fixture revision and announcing invalidation (as `replaceTrashEntry` does). | Medium: requires the fixture to emit a summary card through the real reply path. |
+| 5 | 136-157 | P3 | Recording test overrides `connectionController.getCloudEnvironment`/`getCloudClient` and redefines `getUserMedia` with an oscillator. The media stub is a browser boundary (fine); the controller overrides are backdoors. | Seed a signed-in Cloud account through the bridge harness instead of patching the controller. | Low. |
+| 6 | 161 | T8 | `waitForTimeout(1200)` to let the recorder run. | Use `page.clock.runFor` or wait for the recorder's elapsed label. | Low. |
+| 7 | 3, 377-380 | none | `snapshot` and `refreshCanonicalRead` (dispatches the product's own `alpha:canonical-notes-invalidated` event) are fixture-boundary helpers. | Keep; move into `harness/plugins/notes.ts`. | none |
+| 8 | 397-478 | none | Read-failure / accepted-write-uncertainty states are subtle and only covered here. | Keep as the notes journey's "sync failures" test group. | none |
+| 9 | 1-550 | D8 | Dense formatting (several statements per line in many tests). | Reformat on move (Prettier commit). | none |
+
+## Proposed end state
+Moved to `journeys/notes.spec.ts` and grouped: CRUD and Trash, ordering and empty state, checklist (absorbs
+`canonical-notes-checklist-labels`), failed save (absorbs `canonical-notes-draft-copy`), slow saves, agent append and
+stale edit, chat overlay, sync failures, voice recording and transcript, recording summary (rewritten through the
+agent fixture). Legacy "Previous notes" test deleted. The three `CanonicalNotesUi` API cases move to one Node
+integration test unless a UI route reaches them. `helpers/canonical-notes.ts` should stop patching
+`CanonicalNotesController.prototype.refresh` and `BrowserDaily.prototype.perform` (record accepted reads at the transport).

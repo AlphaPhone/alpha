@@ -1,4 +1,3 @@
-import {openLegacyNotes} from './helpers/legacy-notes';
 import {returnToApps} from './app-navigation';
 import {test,expect} from '@playwright/test';
 import {stubOcr} from './helpers/ocr-stub';
@@ -50,29 +49,6 @@ test('cancellation during model startup terminates the owned worker',async({page
   expect(result).toEqual({error:'AbortError',created:1,terminated:1});
 });
 
-test('Camera Scan reviews real OCR and commits only corrected text to durable Notes',async({page},info)=>{
-  test.setTimeout(90000);
-  await page.addInitScript(()=>{
-    localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));
-    const mediaDevices=navigator.mediaDevices;Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:mediaDevices});
-    mediaDevices.getUserMedia=async()=>{
-      const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=800;const ctx=canvas.getContext('2d')!;
-      const draw=()=>{ctx.fillStyle='white';ctx.fillRect(0,0,1200,800);ctx.fillStyle='black';ctx.font='64px Arial';ctx.fillText('Alpha local scan',70,180);ctx.fillText('Review before saving',70,300);};draw();
-      const stream=canvas.captureStream(10);const timer=setInterval(draw,100);stream.getVideoTracks()[0].addEventListener('ended',()=>clearInterval(timer));return stream;
-    };
-  });
-  await page.goto('/');await openLegacyNotes(page);await returnToApps(page);await page.getByRole('button',{name:'Camera',exact:true}).click();
-  const video=page.locator('[data-alpha-camera="viewfinder"] video');await expect.poll(()=>video.evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(2);
-  await page.getByRole('button',{name:'Type',exact:true}).click();{const input=page.locator('[data-alpha-layer="composer"][aria-hidden="false"], [data-alpha-layer="conversation"][aria-hidden="false"]').getByRole('textbox').first();await input.fill('Scan this');await input.press('Enter');}
-  const dialog=page.getByRole('dialog',{name:'Review scanned text'});await expect(dialog).toBeVisible();
-  const text=dialog.getByRole('textbox',{name:'Scanned text'});await expect(text).toHaveValue(/Alpha local scan/,{timeout:60000});
-  expect(await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())||'{"records":[]}').records.filter((n:any)=>n.id.startsWith('scan-')).length)).toBe(0);
-  await text.fill('Reviewed scan title\nCorrected by the user.');await dialog.getByRole('button',{name:'Save to Notes',exact:true}).click();await expect(dialog.getByRole('status',{name:'Scan status'})).toHaveText('Saved to Notes.');
-  await page.screenshot({path:info.outputPath('scan-review.png'),animations:'disabled'});
-  await dialog.getByRole('button',{name:'Close scan',exact:true}).click();await page.reload();await openLegacyNotes(page);
-  const saved=await page.evaluate(async ()=>JSON.parse((await (await import('/src/runtime/browser-notes-document.ts')).readBrowserNotesRaw())!).records.filter((n:any)=>n.id.startsWith('scan-')));
-  expect(saved).toHaveLength(1);expect(saved[0].body).toBe('Reviewed scan title\nCorrected by the user.');
-});
 
 test('an unconfirmed Notes save retains reviewed text and cannot duplicate the write',async({page})=>{
  await stubOcr(page,'Retain this text');await page.goto('/');

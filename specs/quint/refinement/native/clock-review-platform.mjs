@@ -2,20 +2,17 @@ import assert from 'node:assert/strict';
 
 /** The complete Clock-specific source methods with unrelated recovery ports omitted. */
 export function clockJournalBridge(source) {
-  const read=source.match(/^ private static JSONObject read\([^\n]+/m)?.[0];
   const start=source.indexOf(' private final android.os.Handler clockMain');
-  assert.ok(read && start>=0 && source.slice(start).includes('ClockAgentReview.abandon(this)'));
+  assert.ok(start>=0 && source.slice(start).includes('ClockAgentReview.abandon(this)'));
   return `package ai.alphacompute.alphaphone;
 import com.getcapacitor.*;
 import ai.eliza.plugins.actionjournal.ActionJournal;
 import ai.eliza.plugins.actionjournal.ActionJournalPlugin;
 import java.util.Set;
 import org.json.JSONObject;
-import static ai.eliza.plugins.actionjournal.ActionJournal.field;
 import static ai.eliza.plugins.actionjournal.ActionJournal.sameJson;
 public final class AlphaActionJournalPlugin extends ActionJournalPlugin {
  @Override protected ActionJournal createJournal(){return AlphaActionJournal.get(getContext());}
- ${read}
  ${source.slice(start,source.lastIndexOf('}'))}
 }
 `;

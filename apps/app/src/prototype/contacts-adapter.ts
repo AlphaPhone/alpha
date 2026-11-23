@@ -8,9 +8,9 @@ import {UNNAMED_CONTACT,contactEmailFieldLabel,contactEmailLabel,contactEmailRem
 import {CONTACT_MAX_NAME,CONTACT_MAX_NOTES,contactDraftProblem,parseContactDetail,parseContactRemove,parseContactSave,type ContactDetail,type ContactDraft,type ContactDraftProblem} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 type Bag=Record<string,any>;
 const contacts=registerPlugin<any>('AlphaContacts');
-const PHONE='M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4',BUBBLE='M4 5h16v11H9l-5 4z';
+const PHONE='M4 4h4l2 5-2 2 5 5 2-2 5 2v4C10 22 2 14 4 4',BUBBLE='M4 5h16v11H9l-5 4z',MAIL='M3 5h18v14H3zM3 5l9 7 9-7';
 /** Per-number Call and Message open Phone or Messages with the number filled in; nothing dials or sends until the owner does it there. */
-export function contactActs(phones:readonly string[],api:Bag){
+function contactActs(phones:readonly string[],api:Bag){
  return phones.flatMap(number=>[
   ...(isMvpView('phone')?[{d:PHONE,label:`Call ${number}`,go:()=>api.open('phone',{prefill:number})}]:[]),
   ...(isMvpView('messages')?[{d:BUBBLE,label:`Message ${number}`,go:()=>api.open('messages',{prefill:number})}]:[])]);
@@ -37,7 +37,6 @@ export function installContactsAdapter(Component:any,views:Bag){
  /* The open contact as the phone holds it now, the in-app editor and a pending delete confirmation. */
  let detail:ContactDetail|null=null,detailFor='',detailEpoch=0,form:Editor|null=null,confirming=false,saving=false,opening=false,api:Bag|null=null;
  const changed=()=>owner?.setState({contactsNativeRevision:Date.now()});
- const setApi=(next:Bag)=>{api=next;};
  const clear=()=>{epoch++;visit++;rows=[];rowsQuery='';readable=false;writable=false;more=false;loading=false;loaded=false;detail=null;detailFor='';detailEpoch++;form=null;confirming=false;saving=false;opening=false;changed();};
  const available=()=>!!owner&&owner.S().view==='contacts'&&isMvpView('contacts')&&!document.hidden;
  const opened=()=>available()?String(owner.vget('contacts').open||''):'';
@@ -168,7 +167,6 @@ export function installContactsAdapter(Component:any,views:Bag){
   }catch{if(token===visit&&owner===ownerAtStart&&detail===target&&available())unknownWrite();}
   finally{pendingWrite=false;writeEpoch++;if(unconfirmed)uncertain=true;if(token===visit&&owner===ownerAtStart)saving=false;if(available())changed();}
  }
- views.contacts.reply=()=>null;
  views.contacts.suggestions=()=>[];
  /* The rows the list and the bar show: names only, from the last read, and only while that read
     answered the query on screen. Another query shows no rows until the provider answers it. */
@@ -186,12 +184,12 @@ export function installContactsAdapter(Component:any,views:Bag){
   return {...spec,closed,briefing:null};
  };
  views.contacts.render=function(st:Bag,viewApi:Bag){
-  const api=viewApi;setApi(viewApi);
+  api=viewApi;
   const search=String(st.q??''),query=search.trim(),matchesQuery=query===rowsQuery,visible=visibleRows(st);
   if(st.open&&st.open!==detailFor&&readable&&visible.some(row=>row.id===st.open))void loadDetail(String(st.open));
   if(!st.open&&detailFor){detailFor='';detail=null;detailEpoch++;confirming=false;}
   // The native provider already applied its query. Use the shared grouping without filtering by display name again.
-  const model=render({...st,list:shown(visible),q:'',chip:null,edit:null,add:null,form:null},api);
+  const model=render({...st,list:shown(visible),q:'',chip:null,edit:null,add:null,form:null},viewApi);
   model.q=search;model.qRaw=query;
   /* AC-22: an Alpha filter keeps its clearable chip, counted over the provider's answer. */
   model.chip=st.chip&&query?{label:String(st.chip),count:visible.length,clearLabel:`Clear filter ${st.chip}`,clear:()=>clearListFilter('contacts')}:null;
@@ -206,9 +204,9 @@ export function installContactsAdapter(Component:any,views:Bag){
   model.noHits=false;model.addNew=()=>void openEditor();
   /* A short list needs no letter headings. */
   for(const group of model.groups||[])group.head=visible.length>=20;
-  if(model.d){const selected=visible.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],api):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
-   model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v:displayNumber(v)})),...(selected.emails||[]).map((v:string)=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v}))]:[];
-   if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:contactPhoneLabel(row.type)})),...detail.emailAddresses.map(row=>({d:'M3 5h18v14H3zM3 5l9 7 9-7',v:row.address,sub:contactEmailLabel(row.type)}))];
+  if(model.d){const selected=visible.find(row=>row.id===st.open);model.d.nativeManaged=true;model.d.acts=selected?contactActs(detail&&detail.id===selected.id?detail.phoneNumbers.map(row=>row.number):selected.phones||[],viewApi):[];model.d.hasActs=model.d.acts.length>0;model.d.hasCtx=false;
+   model.d.fields=selected?[...(selected.phones||[]).map((v:string)=>({d:PHONE,v:displayNumber(v)})),...(selected.emails||[]).map((v:string)=>({d:MAIL,v}))]:[];
+   if(selected&&detail&&detail.id===selected.id)model.d.fields=[...detail.phoneNumbers.map(row=>({d:PHONE,v:displayNumber(row.number),sub:contactPhoneLabel(row.type)})),...detail.emailAddresses.map(row=>({d:MAIL,v:row.address,sub:contactEmailLabel(row.type)}))];
    if(selected&&detail&&detail.id===selected.id&&detail.notes)model.d.fields.push({d:'M4 3h16v18H4zM8 7h8M8 11h8M8 15h5',v:detail.notes,sub:'Notes'});
    model.d.hasFields=model.d.fields.length>0;model.d.edit=()=>selected&&void openEditor(selected);model.d.canFav=false;
    model.d.canDelete=!pendingWrite&&!uncertain&&!!selected&&!!detail&&detail.id===selected.id&&writable;model.d.del=()=>{if(model.d.canDelete&&!saving&&!opening&&!form){confirming=true;changed();}};

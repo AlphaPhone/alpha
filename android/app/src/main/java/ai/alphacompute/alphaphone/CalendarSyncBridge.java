@@ -19,7 +19,7 @@ import org.json.JSONObject;
 /** Native owner, destination consent, exact provider CAS and delayed Undo boundary.
  * Renderer bindings select a review, never confer permission to mutate CalendarProvider. */
 final class CalendarSyncBridge {
- static final String SLOT="native-calendar-sync:v1";
+ static final String SLOT=Slots.NATIVE_CALENDAR_SYNC;
  private final AlphaCalendarPlugin plugin;
  private final java.util.concurrent.ExecutorService worker=java.util.concurrent.Executors.newSingleThreadExecutor();
  private final AlphaCredentialStore store;
@@ -27,9 +27,9 @@ final class CalendarSyncBridge {
  private volatile long epoch;
  private volatile boolean retired;
  private android.app.AlertDialog dialog;
- private volatile Context lease;
+ private volatile Lease lease;
  private final android.database.ContentObserver observer=new android.database.ContentObserver(new android.os.Handler(android.os.Looper.getMainLooper())){@Override public void onChange(boolean self){if(!retired)plugin.calendarSyncChanged();}};
- private static final class Context {
+ private static final class Lease {
   String id,generation,credential,credentialId,fingerprint;
   long calendar,epoch,expires;
   JSONObject owner,binding,destination;
@@ -57,57 +57,57 @@ final class CalendarSyncBridge {
   if(!revisions.containsKey(data)||!store.compareExchangeCredentialSlot(SLOT,revisions.get(data),encoded))throw new IllegalStateException("Calendar sync journal changed");revisions.put(data,encoded);
  }
  // The final enabled write and lease retirement must have one order, even when pause leaves the same raw journal bytes.
- private synchronized void saveEnabled(Context context,JSONObject data)throws Exception{
+ private synchronized void saveEnabled(Lease context,JSONObject data)throws Exception{
   if(retired||context!=lease||context.epoch!=epoch)throw new SecurityException("Calendar review changed");
   save(data);
  }
- private static String digest(Object value)throws Exception{return HostedResultNotices.hash(value.toString());}
+ private static String digest(Object value){return AlphaUtil.sha256Hex(value.toString());}
  private static boolean same(Object left,Object right)throws Exception{return DeferredDeletionJournal.same(left,right);}
- private static String scope(Context context)throws Exception{
+ private static String scope(Lease context)throws Exception{
   JSONObject identity=context.owner.getJSONObject("identity");JSONArray stable=new JSONArray().put(context.binding);
   for(String key:new String[]{"subjectUserId","agentId","installationId","enrollmentId","accountRef","environment"})stable.put(identity.getString(key));
   return digest(stable);
  }
- private boolean enabled(Context context)throws Exception{JSONObject data=saved();return data.getBoolean("enabled")&&same(data.opt("binding"),context.binding)&&same(data.opt("identity"),context.owner.getJSONObject("identity"))&&context.credentialId.equals(data.optString("credentialId"));}
- private void check(Context context,boolean mutation)throws Exception{
+ private boolean enabled(Lease context)throws Exception{JSONObject data=saved();return data.getBoolean("enabled")&&same(data.opt("binding"),context.binding)&&same(data.opt("identity"),context.owner.getJSONObject("identity"))&&context.credentialId.equals(data.optString("credentialId"));}
+ private void check(Lease context,boolean mutation)throws Exception{
   if(context==null||context!=lease||context.epoch!=epoch||android.os.SystemClock.elapsedRealtime()>=context.expires||!foreground()||!granted()||!NativeDeletionCoordinator.get(plugin.getContext()).stageAdmissible(context.owner))throw new SecurityException("Calendar sync context changed");
-  String credential=store.readCredentialSlot("cloud:production");
+  String credential=store.readCredentialSlot(Slots.CLOUD_PRODUCTION);
   if(!LocalAgentProviderAdmission.sameCloudCredential(context.credential,credential))throw new SecurityException("Calendar Cloud account changed");
   LocalAgentProviderAdmission.cloudProviderToken(credential,context.credentialId,System.currentTimeMillis());
   if(mutation&&!enabled(context))throw new SecurityException("Calendar sync is paused");
   // Idle expiry must not truncate a long foreground pass; every renewal rechecks native authority.
   context.expires=android.os.SystemClock.elapsedRealtime()+120000;
  }
- private CalendarSyncSnapshot read(Context context,long id,boolean review)throws Exception{
+ private CalendarSyncSnapshot read(Lease context,long id,boolean review)throws Exception{
   check(context,false);
   CalendarSyncSnapshot result=review?CalendarSyncSnapshot.review(plugin.getContext().getContentResolver(),context.calendar,id,AlphaCalendarPlugin.CONFIGURATION.accountName,AlphaCalendarPlugin.CONFIGURATION.localCalendarName,context.generation):CalendarSyncSnapshot.read(plugin.getContext().getContentResolver(),context.calendar,id,AlphaCalendarPlugin.CONFIGURATION.accountName,AlphaCalendarPlugin.CONFIGURATION.localCalendarName,context.generation);
   if(NativeDeletionCoordinator.get(plugin.getContext()).calendarPending(context.calendar,id))throw new IllegalStateException("Finish or undo this pending Calendar deletion before syncing");
   check(context,false);return result;
  }
- private JSONArray events(Context context)throws Exception{
+ private JSONArray events(Lease context)throws Exception{
   check(context,false);ArrayList<Long> ids=new ArrayList<>();
   try(Cursor rows=plugin.getContext().getContentResolver().query(CalendarContract.Events.CONTENT_URI,new String[]{"_id"},"calendar_id=? AND deleted=0 AND original_id IS NULL AND (original_sync_id IS NULL OR original_sync_id='')",new String[]{Long.toString(context.calendar)},"_id ASC")){
    if(rows==null)throw new IllegalStateException("Calendar source read unavailable");while(rows.moveToNext()){if(ids.size()>=2000)throw new IllegalStateException("Calendar sync supports up to 2,000 local events");ids.add(rows.getLong(0));}
   }
   JSONArray result=new JSONArray();for(long id:ids){CalendarSyncSnapshot snapshot=read(context,id,true);if(snapshot.missing||snapshot.deleted)throw new IllegalStateException("Calendar changed during review");CalendarSyncMutation.plan(snapshot,snapshot.revision,snapshot.semantic());result.put(new JSONObject().put("id",Long.toString(id)).put("revision",snapshot.revision));}check(context,false);return result;
  }
- private Context prepare(JSONObject selection)throws Exception{
+ private Lease prepare(JSONObject selection)throws Exception{
   if(!"production".equals(selection.optString("environment")))throw new SecurityException("Calendar Cloud environment changed");
   if(!foreground()||!granted())throw new SecurityException("Calendar permission and unlocked foreground are required");
-  observe();Context previous=lease;lease=null;
+  observe();Lease previous=lease;lease=null;
   long admittedEpoch=epoch;
   JSONObject owner=NativeDeletionCoordinator.get(plugin.getContext()).agentOwner();
-  String credential=store.readCredentialSlot("cloud:production");if(credential==null)throw new SecurityException("Connect Cloud before enabling sync");
+  String credential=store.readCredentialSlot(Slots.CLOUD_PRODUCTION);if(credential==null)throw new SecurityException("Connect Cloud before enabling sync");
   String credentialId=new JSONObject(credential).getString("credentialId"),token=LocalAgentProviderAdmission.cloudProviderToken(credential,credentialId,System.currentTimeMillis());
   JSONObject identity=AlphaConnectionPlugin.readCloudIdentity(token);
-  if(admittedEpoch!=epoch||!foreground()||!granted()||!NativeDeletionCoordinator.get(plugin.getContext()).stageAdmissible(owner)||!LocalAgentProviderAdmission.sameCloudCredential(credential,store.readCredentialSlot("cloud:production")))throw new SecurityException("Calendar review changed");
+  if(admittedEpoch!=epoch||!foreground()||!granted()||!NativeDeletionCoordinator.get(plugin.getContext()).stageAdmissible(owner)||!LocalAgentProviderAdmission.sameCloudCredential(credential,store.readCredentialSlot(Slots.CLOUD_PRODUCTION)))throw new SecurityException("Calendar review changed");
   JSONArray account=new JSONArray().put("cloud").put("production").put(identity.getString("userId")).put(identity.getString("organizationId"));
   if(!account.toString().equals(owner.getJSONObject("identity").getString("accountRef")))throw new SecurityException("Calendar and agent Cloud accounts differ");
   String connection=selection.getString("connectionId"),calendar=selection.getString("calendarId");
   JSONObject capabilities=AlphaConnectionPlugin.readCalendarSyncCapabilities(token,connection,calendar);
   if(capabilities.getInt("version")!=1||!calendar.equals(capabilities.getString("calendarId"))||!capabilities.getBoolean("read")||!capabilities.getBoolean("write")||!capabilities.getBoolean("conditionalWrites")||!capabilities.getBoolean("idempotentCreate")||capabilities.getBoolean("providerExactlyOnce"))throw new SecurityException("Google Calendar does not support safe sync");
   String email=capabilities.getString("accountEmail"),label=capabilities.getString("calendarLabel");if(!email.matches("[^\\s@]+@[^\\s@]+")||email.length()>320||label.trim().isEmpty()||label.length()>1024||label.chars().anyMatch(c->c<32||c==127))throw new SecurityException("Google destination could not be verified");
-  Context context=new Context();context.id=UUID.randomUUID().toString();context.epoch=admittedEpoch;context.expires=android.os.SystemClock.elapsedRealtime()+120000;context.owner=owner;context.credential=credential;context.credentialId=credentialId;
+  Lease context=new Lease();context.id=UUID.randomUUID().toString();context.epoch=admittedEpoch;context.expires=android.os.SystemClock.elapsedRealtime()+120000;context.owner=owner;context.credential=credential;context.credentialId=credentialId;
   String marker=null;
   try(Cursor rows=plugin.getContext().getContentResolver().query(CalendarContract.Calendars.CONTENT_URI,new String[]{"_id","cal_sync1"},"account_name=? AND account_type=? AND name=?",new String[]{AlphaCalendarPlugin.CONFIGURATION.accountName,CalendarContract.ACCOUNT_TYPE_LOCAL,AlphaCalendarPlugin.CONFIGURATION.localCalendarName},null)){
    if(rows==null||!rows.moveToFirst())throw new IllegalStateException("Create a local Calendar event before linking Google");context.calendar=rows.getLong(0);marker=rows.isNull(1)?null:rows.getString(1);if(rows.moveToNext())throw new IllegalStateException("Multiple local Calendar sources need review");
@@ -116,22 +116,22 @@ final class CalendarSyncBridge {
   context.generation=marker==null||marker.isEmpty()?previous!=null&&previous.calendar==context.calendar&&same(previous.owner,owner)?previous.generation:UUID.randomUUID().toString():marker;
   context.destination=new JSONObject().put("account",email).put("calendar",label);
   context.binding=new JSONObject().put("environment","production").put("userId",identity.getString("userId")).put("organizationId",identity.getString("organizationId")).put("connectionId",connection).put("providerAccountId",capabilities.getString("accountId")).put("calendarId",calendar).put("agentId",owner.getJSONObject("identity").getString("agentId")).put("localSourceId","native:"+context.calendar).put("localSourceRevision",context.generation);
-  if(!LocalAgentProviderAdmission.sameCloudCredential(credential,store.readCredentialSlot("cloud:production"))||!foreground()||!granted()||admittedEpoch!=epoch||!NativeDeletionCoordinator.get(plugin.getContext()).stageAdmissible(owner))throw new SecurityException("Calendar context changed during review");
+  if(!LocalAgentProviderAdmission.sameCloudCredential(credential,store.readCredentialSlot(Slots.CLOUD_PRODUCTION))||!foreground()||!granted()||admittedEpoch!=epoch||!NativeDeletionCoordinator.get(plugin.getContext()).stageAdmissible(owner))throw new SecurityException("Calendar context changed during review");
   lease=context;
   context.source=read(context,Long.MAX_VALUE,true);context.events=events(context);
   context.fingerprint=digest(new JSONArray().put(context.binding).put(context.owner).put(context.destination).put(context.source.sourceRevision).put(context.events));
   if(previous!=null&&context.fingerprint.equals(previous.fingerprint))context.id=previous.id;
   return context;
  }
- private JSObject projection(Context context)throws Exception{return JSObject.fromJSONObject(new JSONObject().put("status","ready").put("lease",context.id).put("binding",context.binding).put("destination",context.destination).put("events",context.events).put("enabled",enabled(context)));}
+ private JSObject projection(Lease context)throws Exception{return JSObject.fromJSONObject(new JSONObject().put("status","ready").put("lease",context.id).put("binding",context.binding).put("destination",context.destination).put("events",context.events).put("enabled",enabled(context)));}
  void call(PluginCall call){String kind=call.getString("kind","");
  if(kind.equals("pause")){pause();try{boolean saved=false;for(int attempt=0;attempt<8&&!saved;attempt++){JSONObject data=saved();data.put("enabled",false);try{save(data,true);saved=true;}catch(IllegalStateException conflict){if(attempt==7)throw conflict;}}call.resolve(status("paused"));}catch(Exception unavailable){call.resolve(status("unavailable"));}return;}
  if(kind.equals("cancel")){pause();call.resolve(status("cancelled"));return;}final long requestedEpoch=epoch;try{worker.execute(()->{
   try{
    if(requestedEpoch!=epoch||retired){call.resolve(status("cancelled"));return;}
    if(kind.equals("prepare")&&!granted()){call.resolve(status("permission-required"));return;}
-   if(kind.equals("prepare")){Context context=prepare(call.getObject("selection",new JSObject()));call.resolve(projection(context));return;}
-   Context context=lease;if(context==null||!context.id.equals(call.getString("lease")))throw new SecurityException("Review Calendar sync again");check(context,false);
+   if(kind.equals("prepare")){Lease context=prepare(call.getObject("selection",new JSObject()));call.resolve(projection(context));return;}
+   Lease context=lease;if(context==null||!context.id.equals(call.getString("lease")))throw new SecurityException("Review Calendar sync again");check(context,false);
    if(kind.equals("enable")){plugin.getActivity().runOnUiThread(()->consent(call,context));return;}
    if(kind.equals("status")){call.resolve(projection(context));return;}
    if(kind.equals("list")){JSObject out=status("ready");out.put("events",events(context));call.resolve(out);return;}
@@ -157,7 +157,7 @@ final class CalendarSyncBridge {
  private static String cloudFailure(LocalAgentProviderAdmission.CloudReadFailure failure){return failure.status==408||failure.status==429||failure.status>=500?"unavailable":"context-changed";}
  private static JSObject snapshot(CalendarSyncSnapshot snapshot)throws Exception{return JSObject.fromJSONObject(new JSONObject().put("status","ready").put("snapshot",snapshot.missing||snapshot.deleted?JSONObject.NULL:new JSONObject().put("eventId",Long.toString(snapshot.eventId)).put("revision",snapshot.revision).put("event",snapshot.semantic())));}
  private static String link(int count){String calendar="your \u201c"+AlphaCalendarPlugin.CONFIGURATION.displayName+"\u201d calendar.";return count==0?"Link future events from "+calendar:"Link "+count+(count==1?" event":" events")+" and future events from "+calendar;}
- private void consent(PluginCall call,Context context){
+ private void consent(PluginCall call,Lease context){
   try{check(context,false);if(dialog!=null){call.resolve(status("busy"));return;}
    final boolean[] accepted={false};
    dialog=new android.app.AlertDialog.Builder(plugin.getActivity()).setTitle("Sync Calendar with Google?").setMessage("Google account: "+context.destination.getString("account")+"\nCalendar: "+context.destination.getString("calendar")+"\n\n"+link(context.events.length())+" Google receives event details and guest email addresses. Changes to linked events sync both ways while Alpha is open. Existing Google events stay separate. Deletions have a 10-second Undo window. Unsupported events stay unchanged.").setNegativeButton("Cancel",(d,w)->{}).setPositiveButton("Enable sync",null).create();
@@ -169,9 +169,9 @@ final class CalendarSyncBridge {
    });
   }catch(Exception changed){call.resolve(status("cancelled"));}
  }
- private void enable(PluginCall call,Context context){
+ private void enable(PluginCall call,Lease context){
   try{
-   check(context,false);Context current=prepare(context.binding);if(current.epoch!=context.epoch||!current.fingerprint.equals(context.fingerprint))throw new SecurityException("Calendar review changed");
+   check(context,false);Lease current=prepare(context.binding);if(current.epoch!=context.epoch||!current.fingerprint.equals(context.fingerprint))throw new SecurityException("Calendar review changed");
    check(current,false);
    String marker=current.source.source.getAsString("cal_sync1");
    if(marker==null||marker.isEmpty()){
@@ -183,8 +183,8 @@ final class CalendarSyncBridge {
    current.events=events(current);call.resolve(projection(current));
   }catch(LocalAgentProviderAdmission.CloudReadFailure failure){call.resolve(status(cloudFailure(failure)));}catch(Exception changed){call.resolve(status("context-changed"));}
  }
- private void mutate(PluginCall call,Context context,String kind)throws Exception{
-  check(context,true);String operationId=call.getString("operationId","");if(!operationId.matches("[a-f0-9]{64}"))throw new IllegalArgumentException("Invalid Calendar sync operation");
+ private void mutate(PluginCall call,Lease context,String kind)throws Exception{
+  check(context,true);String operationId=call.getString("operationId","");if(!AlphaUtil.isSha256Hex(operationId))throw new IllegalArgumentException("Invalid Calendar sync operation");
   long id=Long.parseLong(call.getString("eventId",""));String expected=call.getString("expectedRevision","");CalendarSyncSnapshot before=read(context,id,false);
   JSONObject payload=new JSONObject().put("kind",kind).put("binding",context.binding).put("eventId",id).put("expectedRevision",expected).put("event",kind.equals("apply")?call.getObject("event"):JSONObject.NULL);String fingerprint=digest(payload);
   JSONObject data=saved(),operations=data.getJSONObject("operations"),retained=operations.optJSONObject(operationId);

@@ -11,11 +11,10 @@ import { captureQuestion, locationMimeTypes } from './context-selection';
 
 type Bag = Record<string, any>;
 type Callback = (...args: any[]) => any;
-export type PrototypeNativeOptions = {
+type PrototypeNativeOptions = {
   /** A picker capability is process-scoped. Do not persist its URI as read authority. */
   onSelection?: (module: string, result: NativeResult, api: Bag) => void;
 };
-const installed = new WeakSet<object>();
 /** Marks a handler whose only effect is to say the feature is unavailable. dc-lite.js drops any
  * element bound to one, so such a control is not shown. A wrapper that calls it is unmarked and
  * still shows; the marked handler itself keeps the toast as a fallback. */
@@ -24,7 +23,7 @@ const systemPages = new Set(['wifi', 'bluetooth', 'mobile', 'sound', 'notificati
 /** Session whose phone action history this view read successfully; an unread history is never shown as empty. */
 let actionHistoryRead: string | null = null;
 
-export type EgressPrivacy = { big: string; sub: string };
+type EgressPrivacy = { big: string; sub: string };
 type EgressConnection = Pick<ConnectionSnapshot, 'kind' | 'session' | 'cloudAccount' | 'residentInference' | 'providerStatus'>;
 /** Who a native resident session sends AI content to, from the inference binding it already reports.
  * Names a provider, never a key. Null when the agent is not a native resident session. */
@@ -58,7 +57,7 @@ export function egressPrivacy(connection: EgressConnection, native = Capacitor.i
   // Only a build without the resident (the production web preview, test mocks) gets here.
   return { big: 'Offline', sub: 'AI off' };
 }
-const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'wallet', 'workflows']);
+const externalModules = new Set(['phone', 'messages', 'inbox', 'browser', 'camera', 'photos', 'maps', 'calendar', 'contacts', 'files', 'settings', 'workflows']);
 /** PROD-09: the handlers each reference view may keep unchanged in a product build. A handler key
  * that no rule in replacement() covers and that is not listed here is treated as unavailable: its
  * control is not shown. A new control in template.html fails test/reviewed-handlers.test.mjs until
@@ -152,12 +151,8 @@ const REVIEWED_HANDLERS: Readonly<Record<string, readonly string[]>> = {
     'details selDeleteForever selDetails selRestore selectTrash',
   ],
   settings: [
-    'action back change close color go ok onKey onName onPw openAccount pick rootRef set',
+    'action back change close go ok onKey onName onPw openAccount pick rootRef set',
     'sheetModal toggle togglePreview',
-  ],
-  wallet: [
-    'addCal auth back cancel close dirs done go lock manual next onCode onCvv onExp onName',
-    'onNum open pay reload remove scan setDef startAdd startPay swDown swUp verify',
   ],
   workflows: [
     'add again allowAnother approve ask builderFocus cancel cancelGeneration cancelReview',
@@ -186,7 +181,7 @@ export const tileKeys: Record<string, TileKey> = { 'Wi-Fi': 'wifi', 'Bluetooth':
 export const tileSettingsPages: Partial<Record<TileKey, string>> = SYSTEM_TILE_SETTINGS_PAGES;
 /** Android system switches as AlphaDevice.snapshot() read them (the shared SystemFacts keys). */
 export const tileFactsFromSnapshot: (snapshot: unknown, torch?: boolean) => TileFacts = tileFactsFromSystemFacts;
-export { broaderPageNotice, handoffGate, switchValue, tileAccessibleName, tileStateText };
+export { broaderPageNotice, handoffGate, switchValue };
 /** `on` colours the tile; `aria` is its accessible name and `pressed` its toggle state (toggles only). */
 export type ShadeTile = { label: string; on?: boolean; aria?: string; pressed?: boolean; css?: string; toggle?: () => void; stateText?: string; [key: string]: unknown };
 /** Present tiles with state only from native facts. Hide the flashlight without a native control.
@@ -231,10 +226,7 @@ export function installPrototypeNativeAdapters(
   _Component: unknown,
   views: Record<string, Bag>,
   options: PrototypeNativeOptions = {},
-): () => void {
-  if (installed.has(views)) return () => {};
-  installed.add(views);
-  const restore: Array<() => void> = [];
+): void {
   const busy = new Set<string>();
   const notify = (api: Bag, message: string) => api.toast(message);
   const unavailable = (api: Bag, message = 'Unavailable'): Callback => Object.assign(() => notify(api, message), { [UNAVAILABLE_CONTROL]: true });
@@ -383,11 +375,6 @@ export function installPrototypeNativeAdapters(
       if (['del', 'saveRn', 'selDel', 'move', 'selMove'].includes(key)) return native('files');
       if (key === 'selShare') return unavailable(api, 'Use Files app');
     }
-    if (module === 'wallet') {
-      if (key === 'addCal') return native('calendar');
-      if (['onNum', 'onCvv', 'onExp', 'onCode', 'onName'].includes(key)) return unavailable(api, 'Not connected');
-      if (['pay', 'auth', 'verify', 'next', 'scan', 'reload', 'remove', 'setDef', 'startPay'].includes(key)) return unavailable(api, 'Not connected');
-    }
     if (module === 'settings') {
       // Opening Activity only shows what is already known; reading history is a separate explicit step.
       if (st.page === 'privacy' && key === 'go' && row.label === 'Activity') return () => api.set({ log: true });
@@ -454,6 +441,7 @@ export function installPrototypeNativeAdapters(
     const connection = connectionController.getSnapshot();
     const info = (label: string, val: string): Bag => ({ kInfo: true, label, val, hasVal: !!val, noAB: true });
     const nav = (label: string, go: () => void, aria = label, lucide = ''): Bag => ({ kNav: true, label, lbl: aria, chev: true, noAB: true, go, ...(lucide ? { lucide } : {}) });
+    const repaint = (patch: Bag) => { try { api.set(patch); } catch { /* view closed */ } };
     for (const page of out.stack) {
       if (!page || !Array.isArray(page.groups)) continue;
       if (st.page === 'privacy' && st.log && page.title === 'Activity') {
@@ -465,7 +453,7 @@ export function installPrototypeNativeAdapters(
           void connectionController.actionHistory().then(() => {
             const after = connectionController.getSnapshot();
             if (sessionId && after.session?.sessionId === sessionId && !after.error && after.actionHistory !== before) actionHistoryRead = sessionId;
-            try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ }
+            repaint({ actionHistoryReadAt: Date.now() });
           });
         }, aria, 'rotate-cw');
         // A decision clears the read history; show it as unread rather than as empty.
@@ -474,7 +462,7 @@ export function installPrototypeNativeAdapters(
           const busyKey = 'activity:' + id;
           if (busy.has(busyKey)) return;
           busy.add(busyKey);
-          void run().catch(() => notify(api, 'Not recorded')).finally(() => { busy.delete(busyKey); actionHistoryRead = null; try { api.set({ actionHistoryReadAt: Date.now() }); } catch { /* view closed */ } });
+          void run().catch(() => notify(api, 'Not recorded')).finally(() => { busy.delete(busyKey); actionHistoryRead = null; repaint({ actionHistoryReadAt: Date.now() }); });
         }, label, lucide);
         const entryRows = (entry: ConnectionSnapshot['actionHistory'][number]): Bag[] => [
           info(entry.description, activityState(entry.state)),
@@ -503,7 +491,7 @@ export function installPrototypeNativeAdapters(
   }
   for (const [module, definition] of Object.entries(views)) {
     if (!externalModules.has(module) || typeof definition.render !== 'function') continue;
-    const render = definition.render, actions = definition.actions, leave = definition.onLeave, ongoing = definition.ongoing, bar = definition.bar, callBar = definition.callBar;
+    const render = definition.render, actions = definition.actions, leave = definition.onLeave, bar = definition.bar, callBar = definition.callBar;
     definition.render = (state: Bag, api: Bag) => {
       // Rendering cannot start a fake phone call, navigation timer, capture or booking.
       const renderingApi = ['phone', 'browser', 'camera', 'maps'].includes(module)
@@ -519,15 +507,10 @@ export function installPrototypeNativeAdapters(
     // The reference phone never has a call here; the image's calls come from Telecom (runtime/ongoing-call.ts).
     if (callBar) definition.callBar = () => null;
     if (leave && ['phone', 'camera', 'maps'].includes(module)) definition.onLeave = () => {};
-    restore.push(() => { definition.render = render; definition.actions = actions; definition.onLeave = leave; definition.ongoing = ongoing; definition.bar = bar; definition.callBar = callBar; });
   }
   const settings = views.settings;
-  if (settings && typeof settings.render === 'function') {
-    // Later adapters replace settings.render; keep this honesty pass outermost.
-    const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => honestSettings(next(state, api), state, api) : next;
-    let exposed = finalize(settings.render);
-    Object.defineProperty(settings, 'render', { configurable: true, enumerable: true, get: () => exposed, set: next => { exposed = finalize(next); } });
-    restore.unshift(() => { delete settings.render; settings.render = exposed; });
-  }
-  return () => { for (const reset of restore) reset(); installed.delete(views); };
+  // Later adapters replace settings.render; keep this honesty pass outermost.
+  const finalize = (next: any) => typeof next === 'function' ? (state: Bag, api: Bag) => honestSettings(next(state, api), state, api) : next;
+  let exposed = finalize(settings.render);
+  Object.defineProperty(settings, 'render', { configurable: true, enumerable: true, get: () => exposed, set: next => { exposed = finalize(next); } });
 }

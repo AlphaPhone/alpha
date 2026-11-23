@@ -5,8 +5,6 @@
  * verified Alpha image only.
  */
 export {
-  isTelephonyAction, telephonyActionCapabilities, validateTelephonyAction,
-  PHONE_CALL_CAPABILITY, CONTACT_WRITE_CAPABILITY, CONTACT_UPDATE_VALUES_CAPABILITY, CONTACT_SHOW_CAPABILITY, CONTACT_READ_CAPABILITY,
-  SMS_COMPOSE_CAPABILITY, SMS_COMPOSE_TARGET_CAPABILITY, MESSAGES_READ_CAPABILITY, VOICEMAIL_READ_CAPABILITY, VOICEMAIL_DELETE_CAPABILITY,
-  type TelephonyActionOperation,
+  isTelephonyAction, telephonyActionCapabilities,
+  CONTACT_UPDATE_VALUES_CAPABILITY, CONTACT_WRITE_CAPABILITY, SMS_COMPOSE_CAPABILITY, SMS_COMPOSE_TARGET_CAPABILITY,
 } from '../../../../.eliza/client-features/packages/contracts/src/telephony-actions.ts';

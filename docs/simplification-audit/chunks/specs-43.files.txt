@@ -1,0 +1,15 @@
+specs/quint/refinement/services/cloud-qa-launcher-probe.mjs
+specs/quint/refinement/services/cloud-qa-launcher.md
+specs/quint/refinement/services/cloud-qa-launcher.mjs
+specs/quint/refinement/services/combined-agent-launcher-baseline.md
+specs/quint/refinement/services/combined-agent-launcher-probe.mjs
+specs/quint/refinement/services/combined-agent-launcher.md
+specs/quint/refinement/services/combined-agent-launcher.mjs
+specs/quint/refinement/services/contacts-session-replay.mjs
+specs/quint/refinement/services/core-runtime/connector-custody.md
+specs/quint/refinement/services/core-runtime/connector-custody.mjs
+specs/quint/refinement/services/core-runtime/lifecycle.mjs
+specs/quint/refinement/services/core-runtime/module.mjs
+specs/quint/refinement/services/core-runtime/retirement.mjs
+specs/quint/refinement/services/core-runtime/shutdown.mjs
+specs/quint/refinement/services/core-runtime/turns.mjs

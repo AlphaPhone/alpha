@@ -1,16 +1,17 @@
 import {Capacitor} from '@capacitor/core';
 import type {BrowserJsonDomainDocument} from '../browser/json-domain-document';
+import {isRecord} from '../lib/parse.ts';
 
-export const conversationSelectionKey='alpha.connection.conversations.v1';
+const conversationSelectionKey='alpha.connection.conversations.v1';
 export type ConversationChoice={id:string;revision?:string};
 type Choices=Record<string,string|ConversationChoice>;
+const isChoice=(item:unknown):item is ConversationChoice=>isRecord(item)&&typeof item.id==='string'&&!!item.id&&Object.keys(item).every(k=>k==='id'||k==='revision')&&(item.revision===undefined||typeof item.revision==='string'&&!!item.revision);
 function validate(value:unknown):Choices{
  if(value===null)return {};
- if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Conversation selections need recovery.');
+ if(!isRecord(value))throw Error('Conversation selections need recovery.');
  for(const [key,item] of Object.entries(value)){
   if(!key)throw Error('Conversation selection owner is invalid.');
-  const choice=typeof item==='string'?{id:item}:item;
-  if(!choice||typeof choice!=='object'||typeof choice.id!=='string'||!choice.id||Object.keys(choice).some(k=>!['id','revision'].includes(k))||choice.revision!==undefined&&(typeof choice.revision!=='string'||!choice.revision))throw Error('Conversation selections need recovery.');
+  if(!isChoice(typeof item==='string'?{id:item}:item))throw Error('Conversation selections need recovery.');
  }
  return value as Choices;
 }
@@ -32,9 +33,9 @@ export async function selectConversation(key:string,expected:ConversationChoice|
  const update=(raw:unknown)=>{
   signal.throwIfAborted();assertCurrent();const values=validate(raw);
   if(JSON.stringify(choice(values,key))!==JSON.stringify(expected))throw Error('Another view changed this conversation selection.');
-  const next={...values,[key]:native?id:{id,revision:crypto.randomUUID()}};validate(next);return next;
+  return {...values,[key]:native?id:{id,revision:crypto.randomUUID()}};
  };
  signal.throwIfAborted();
- if(native){const next=JSON.stringify(update(JSON.parse(localStorage.getItem(conversationSelectionKey)||'null')));localStorage.setItem(conversationSelectionKey,next);if(localStorage.getItem(conversationSelectionKey)!==next)throw Error('Conversation selection could not be confirmed.');}
+ if(native)localStorage.setItem(conversationSelectionKey,JSON.stringify(update(JSON.parse(localStorage.getItem(conversationSelectionKey)||'null'))));
  else await(await conversationSelectionDocument()).editJson(update,signal);
 }

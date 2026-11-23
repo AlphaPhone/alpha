@@ -21,18 +21,20 @@ final class GoogleWorkspaceReturn {
   return !enabled||!ownCallback?null:verified?"verified":selected?"user-selected":null;
  }
 
-
  private static String uuid(String value) {
   if(value==null||!value.matches("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"))throw new IllegalArgumentException("Invalid Workspace identity");
   return value;
  }
  private static String opaque(String value) {
-  if(value==null||value.isEmpty()||value.length()>256||value.trim().isEmpty())throw new IllegalArgumentException("Invalid Workspace binding");
+  if(value==null||value.length()>256||value.trim().isEmpty())throw new IllegalArgumentException("Invalid Workspace binding");
   for(int i=0;i<value.length();i++)if(Character.isISOControl(value.charAt(i)))throw new IllegalArgumentException("Invalid Workspace binding");
   return value;
  }
+ static boolean isNonce(String value) {
+  return value!=null&&value.matches("[A-Za-z0-9_-]{43}");
+ }
  private static String nonce(String value) {
-  if(value==null||!value.matches("[A-Za-z0-9_-]{43}"))throw new IllegalArgumentException("Invalid Workspace nonce");
+  if(!isNonce(value))throw new IllegalArgumentException("Invalid Workspace nonce");
   return value;
  }
 

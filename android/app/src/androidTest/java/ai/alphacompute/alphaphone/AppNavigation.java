@@ -24,6 +24,15 @@ final class AppNavigation {
    + "if(nav.lastView==='home'){const b=[...document.querySelectorAll('[data-screen] button')].find(e=>e.getAttribute('aria-label')===label&&e.getClientRects().length);if(b&&!b.disabled)b.click();again();return;}"
    + "window.dispatchEvent(new Event('alpha-back'));again();};step();})()";
  }
+ /** Set once the request(view) helper has finished; a later step that changes the view must wait for
+  * it, or the helper's next poll can navigate again. */
+ static final String SETTLED = "window.__alphaTestNavigation?.status==='complete'";
+ /** Requests a view and waits until it is selected. */
+ static void open(String view) throws Exception { WebViewTestDriver.evaluate(request(view)); until(selected(view), view + " opens"); }
+ private static void until(String condition, String what) throws Exception {
+  for (int i = 0; i < 200; i++) { if ("true".equals(WebViewTestDriver.evaluate("Boolean(" + condition + ")"))) return; android.os.SystemClock.sleep(100); }
+  throw new AssertionError(what + ": " + condition);
+ }
  /**
   * A fresh install without notification and microphone access opens the modal "Set up Alpha
   * access" panel, which takes every real touch and swipe. Tests that drive real gestures first
@@ -49,9 +58,13 @@ final class AppNavigation {
   * that reason instead of timing out behind the dialog.
   */
  static void assumeNoRequiredSignIn(String journey) throws Exception {
-  android.content.Context context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
   org.junit.Assume.assumeTrue(journey + " needs the views: this flag-off build is signed out of Eliza Cloud, so P-43's sign-in screen opens by itself and cannot be dismissed (tests never sign in). Run it on a phone its owner signed in.",
-   new AlphaCredentialStore(context).readCredentialSlot("cloud:production") != null);
+   !requiredSignIn());
+ }
+ /** A build without a stored Cloud credential: P-43's required sign-in page covers every view. */
+ static boolean requiredSignIn() throws Exception {
+  android.content.Context context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().getTargetContext();
+  return new AlphaCredentialStore(context).readCredentialSlot("cloud:production") == null;
  }
  /** P-43's required sign-in page (signed out, flag-off) has finished its readiness check and takes an email. */
  static final String SIGN_IN_PAGE_READY = "(()=>{const p=document.querySelector('.alpha-auth-page .alpha-auth-content');return !!p&&p.getAttribute('aria-busy')!=='true'&&!!p.querySelector('input[name=email]:not(:disabled)')})()";

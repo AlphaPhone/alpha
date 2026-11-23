@@ -6,16 +6,15 @@ import {NoticeOwnerCoordinator,revalidateWorkflowApprovalNotice} from '../../../
 import {WorkflowIntentStore,workflowIntentKey,runIntentReconcilable} from '../runtime/workflow-intents';
 import {Capacitor} from '@capacitor/core';
 import {registerPlugin} from '../platform-plugins';
-import {resolveWorkflowTap,readyTapStep,tapRecheck,type WorkflowTapNative} from '../runtime/workflow-device-contract';
-import { createWorkflowAuthoring } from './workflow-authoring';
+import {resolveWorkflowTap,readyTapStep,tapRecheck,workflowApprovalNotice,type WorkflowTapNative,type WorkflowPhoneReview} from '../runtime/workflow-device-contract';
+import { createWorkflowAuthoring, showWorkflowAgentUnavailable } from './workflow-authoring';
 import { homeReadIsStale, presentHomeWorkflowFreshness } from './home-cards';
 import { alphaClient, type ActionProposal } from '../runtime/alpha-client';
-import { workflowApprovalNotice, type WorkflowPhoneReview } from '../runtime/workflow-device-contract';
 import type { WorkflowNoticeRoute } from '../runtime/device-actions';
+import type { AlphaHostedResultsPlugin } from '../native/alpha-hosted-results';
 import { connectionController, agentAvailabilityNotice, residentAlwaysPresent } from '../runtime/connection-ui';
 import { testMocksEnabled } from '../build-flags';
 import { AUTOMATIONS_COMMITTED_EVENT } from '../runtime/automation-completion';
-import { showWorkflowAgentUnavailable } from './workflow-authoring';
 import { WorkflowAdmissionRejected, WorkflowMetadataRejected, WorkflowLifecycleRejected, WorkflowActivationRejected, type RemoteWorkflow, type WorkflowRun, type WorkflowApproval, type WorkflowApprovalReceipt } from '../runtime/workflow-protocol';
 import { workflowRefusalText, workflowIntentText } from '../ui/workflows/workflow-messages';
 import { occurrenceNotRunText, workflowRunStatusLabel, workflowRunErrorText, workflowReconciliationText, workflowEventLabel, workflowApprovalStatusLabel, workflowPhoneStepTitle } from '../ui/workflows/workflow-run-presentation';
@@ -218,7 +217,7 @@ export function installWorkflowAdapter(Component:any,views:Bag){
  const clear=(keepList=false)=>{noticeQuestion?.();noticeQuestion=undefined;unadmitted=null;reviewResend=false;unverifiable=null;reviewClear=false;unsentLifecycle=null;reviewLifecycleResend=false;intentStore=null;authoring.close();phoneReview=null;phoneSteps=[];phoneConfirm=null;phoneStatus='';phoneDiscovery=null;generation++;operation?.abort();operation=null;editor=null;notificationsOff=false;lifecycleAvailable=false;lifecycleReview=false;unknownReview=false;reviewRerun=false;noSchedule=false;if(!keepList){flows=[];listPhase='idle';listSession=null;}homeVisit=null;detail=null;detailSession=null;runs=[];receipt=null;approvalReceipt=null;approvalReview=null;reviewRun=false;reviewActivation=false;reviewCancel=false;phase='idle';publish();};
  const runAccountsUnavailable=()=>{if(status==='Run history unavailable'&&phase==='failed')return;clear();status='Run history unavailable';phase='failed';api?.toast(status);publish();};
  // The unified list owns its reads, but retained workflow history still needs this capability.
- // Share that list's cancellation/current authority without fetching the legacy workflow list again.
+ // Share that list's cancellation/current authority; this reads only lifecycle support.
  view.refreshManagement=async(signal:AbortSignal,current:()=>boolean,removed=false):Promise<RemoteWorkflow[]|undefined>=>{
   const shell=owner,session=connectionController.getSnapshot().session,binding=connectionController.getWorkflowClient();
   const valid=()=>!signal.aborted&&current()&&owner===shell&&connectionController.getSnapshot().session===session&&binding?.sessionId===connectionController.getWorkflowClient()?.sessionId;
@@ -407,8 +406,7 @@ export function installWorkflowAdapter(Component:any,views:Bag){
  // after leaving the app. An open receipt posts its own steps; the poller below posts steps of every other
  // waiting run (scheduled, agent- or owner-started) while Alpha's process runs. A killed process posts nothing.
  // A tap only opens the run read-only; a decision or expiry withdraws it.
- interface ApprovalNoticeNative {postWorkflowApprovalNotice(input:{id:string;bindingHash:string;expiresAt:number;route:WorkflowNoticeRoute}):Promise<{status:string}>;withdrawWorkflowApprovalNotice(input:{id:string}):Promise<void>;resumeWorkflowApprovalNotice(input:{id:string;bindingHash:string;expiresAt:number;route:WorkflowNoticeRoute}):Promise<{status:string}>;withdrawOtherOwnerApprovalNotices(input:{owner:{origin:string;ownerId:string;agentId:string}|null}):Promise<{withdrawn:number;suspended?:Array<{id:string;bindingHash:string;expiresAt:number;route:WorkflowNoticeRoute}>}>}
- const approvalNative=()=>registerPlugin<ApprovalNoticeNative>('AlphaHostedResults');
+ const approvalNative=()=>registerPlugin<Pick<AlphaHostedResultsPlugin,'postWorkflowApprovalNotice'|'resumeWorkflowApprovalNotice'|'withdrawWorkflowApprovalNotice'|'withdrawOtherOwnerApprovalNotices'>>('AlphaHostedResults');
  const noticeRoute=(run:WorkflowRun):WorkflowNoticeRoute|null=>{const selected=connectionController.getWorkflowClient(),session=connectionController.getSnapshot().session;if(!Capacitor.isNativePlatform()||!selected?.scope||!session)return null;return {scope:selected.scope,origin:session.origin,ownerId:session.ownerId,agentId:session.agentId,workflowId:run.workflowId,runId:run.id,versionId:run.versionId};};
  async function syncApprovalNotices(route:WorkflowNoticeRoute,identity:string,pending:ActionProposal[],resolved:string[]){
   const native=approvalNative();

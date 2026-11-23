@@ -8,20 +8,20 @@ import {layoutBrowserDialog} from '../browser/dialog-layout';
  * autofill selection: no Keystore, no system prompt, nothing persisted. It honours the native
  * contract exactly: no method resolves with a password.
  */
-type Record_={id:string;label:string;username:string;bindings:string[];secret:string;updatedAt:number;revision:number};
+type DevPasswordRecord={id:string;label:string;username:string;bindings:string[];secret:string;updatedAt:number;revision:number};
 const UNLOCK_MS=60_000;
 const fail=(code:string,message:string)=>Object.assign(new Error(message),{code});
 const display=(facet:string)=>facet.replace(/^https:\/\//,'');
 
 export function createDevelopmentVault():ElizaPasswordsPlugin & {readonly selection:string;expire():void}{
- const records=new Map<string,Record_>();
+ const records=new Map<string,DevPasswordRecord>();
  let unlockedUntil=0,selected:'none'|'this-app'='none',sequence=0;
  const seed=(label:string,username:string,origin:string)=>{const id=`dev-${++sequence}`;records.set(id,{id,label,username,bindings:[origin],secret:`synthetic-dev-${sequence}-not-real`,updatedAt:Date.now(),revision:1});};
  seed('Example sign-in','alex@example.test','https://example.test');
  seed('Library account','reader@example.test','https://library.example.test');
  const unlocked=()=>Date.now()<unlockedUntil;
  const need=()=>{if(!unlocked())throw fail('locked','Unlock saved passwords first');};
- const summary=(r:Record_):PasswordEntrySummary=>({id:r.id,label:r.label,username:r.username,updatedAt:r.updatedAt,revision:r.revision,bindings:r.bindings.map(facet=>({kind:'web' as const,facet,display:display(facet)}))});
+ const summary=(r:DevPasswordRecord):PasswordEntrySummary=>({id:r.id,label:r.label,username:r.username,updatedAt:r.updatedAt,revision:r.revision,bindings:r.bindings.map(facet=>({kind:'web' as const,facet,display:display(facet)}))});
  const surface=(title:string,text:string)=>{
   const dialog=document.createElement('dialog');dialog.setAttribute('aria-label','Development vault secret');
   dialog.style.cssText='box-sizing:border-box;width:min(92vw,360px);border:0;border-radius:20px;padding:22px;background:var(--bg,#fff);color:var(--fg,#111);font:16px system-ui';

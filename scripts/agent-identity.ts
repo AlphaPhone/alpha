@@ -10,7 +10,6 @@ import {writePrivateRuntimeJson, type ResidentConfig} from './private-runtime-la
 // is supplied: the bundled default preset keeps its style and its "{{name}}, made by Alpha Compute"
 // origin line, which build-character-config renders with this name.
 const {identity}=ALPHA_PRODUCT_REGISTRATION;
-for(const key of ['characterName','appName'] as const)if(typeof identity?.[key]!=='string'||!identity[key].trim())throw Error(`apps/app/src/product/alpha-product-registration.ts identity.${key} required`);
 export const AGENT_CHARACTER=Object.freeze({name:identity.characterName,bio:[`The assistant built into ${identity.appName} for writing, research, decisions and practical follow-through.`]});
 export const AGENT_CHARACTER_ENVIRONMENT=Object.freeze({ELIZA_AGENT_CHARACTER_JSON:JSON.stringify(AGENT_CHARACTER)});
 

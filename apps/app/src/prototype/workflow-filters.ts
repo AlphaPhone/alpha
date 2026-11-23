@@ -2,8 +2,8 @@ import {iconStyle} from '../icon-style';
 import {holdPhoneInert} from '../runtime/modal-inert';
 export type WorkflowTypeFilter='all'|'reminders'|'prompts'|'workflows'|'schedules';
 export type WorkflowStatusFilter='all'|'active'|'inactive'|'removed';
-export const WORKFLOW_TYPES=[['all','All types'],['reminders','Reminders'],['prompts','Prompts'],['workflows','Workflows'],['schedules','Schedules']] as const;
-export const WORKFLOW_STATUSES=[['all','All'],['active','Active'],['inactive','Inactive'],['removed','Removed']] as const;
+const WORKFLOW_TYPES=[['all','All types'],['reminders','Reminders'],['prompts','Prompts'],['workflows','Workflows'],['schedules','Schedules']] as const;
+const WORKFLOW_STATUSES=[['all','All'],['active','Active'],['inactive','Inactive'],['removed','Removed']] as const;
 export function workflowFilterLabel(type:WorkflowTypeFilter,status:WorkflowStatusFilter):string {
  const name=type==='all'?'All workflows':WORKFLOW_TYPES.find(([key])=>key===type)![1];
  return name+(status==='all'?'':` · ${WORKFLOW_STATUSES.find(([key])=>key===status)![1]}`);
@@ -31,7 +31,7 @@ export function openWorkflowFilters(input:{type:WorkflowTypeFilter;status:Workfl
  }
  group('Type',WORKFLOW_TYPES,()=>type,value=>type=value);
  group('Status',WORKFLOW_STATUSES.filter(([key])=>key!=='removed'||input.removed||input.status==='removed'),()=>status,value=>status=value,true);
- const refresh=button('');refresh.setAttribute('aria-label','Refresh list');refresh.className='workflow-filter-refresh';refresh.prepend(glyph('rotate-cw'));refresh.disabled=input.busy;refresh.onclick=()=>{if(!input.current()){close();return;}close();input.refresh();};content.append(refresh);
+ const refresh=button('');refresh.setAttribute('aria-label','Refresh list');refresh.className='workflow-filter-refresh';refresh.prepend(glyph('rotate-cw'));refresh.disabled=input.busy;refresh.onclick=()=>{const current=input.current();close();if(current)input.refresh();};content.append(refresh);
  const footer=document.createElement('footer'),apply=button('Done');apply.className='workflow-filter-apply';apply.onclick=()=>{if(input.current())input.apply(type,status);close();};footer.append(apply);dialog.append(header,content,footer);
  dialog.oncancel=event=>{event.preventDefault();close();};dialog.onclose=close;dialog.onclick=event=>{if(event.target===dialog){const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)close();}};
  window.addEventListener('alpha-back',back,true);window.addEventListener('pagehide',close);document.addEventListener('visibilitychange',visibility);window.addEventListener('resize',position);

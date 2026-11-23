@@ -2,13 +2,16 @@ package ai.alphacompute.alphaphone;
 
 import android.Manifest;
 import android.app.KeyguardManager;
+import android.content.ComponentName;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.inputmethodservice.InputMethodService;
 import android.media.AudioManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
@@ -25,6 +28,8 @@ import java.util.concurrent.Executors;
 
 /** LatinIME's auxiliary voice target. Never submits a message or opens conversation voice. */
 public final class AlphaKeyboardDictationService extends InputMethodService {
+ /** Characters each side of the cursor that must be unchanged when the transcript is inserted. */
+ private static final int FIELD_CONTEXT = 64;
  private final Handler main = new Handler(Looper.getMainLooper());
  private final KeyboardDictationPolicy policy = new KeyboardDictationPolicy();
  private final ExecutorService worker = Executors.newSingleThreadExecutor();
@@ -41,7 +46,7 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
  private boolean inputViewVisible;
  private final Runnable monitor = new Runnable() {
   public void run() {
-   if (policy.state() != KeyboardDictationPolicy.State.RECORDING && policy.state() != KeyboardDictationPolicy.State.TRANSCRIBING) return;
+   if (!active()) return;
    if (!allowedNow() || authority != AlphaLocalAgentPlugin.credentialAuthorityEpoch()) { fail("Dictation stopped. Tap Start to try again."); return; }
    main.postDelayed(this, 250);
   }
@@ -57,7 +62,7 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
  @Override public View onCreateInputView() {
   LinearLayout panel = new LinearLayout(this); panel.setOrientation(LinearLayout.VERTICAL);
   int pad = (int)(20 * getResources().getDisplayMetrics().density); panel.setPadding(pad, pad, pad, pad);
-  boolean dark = (getResources().getConfiguration().uiMode & 0x30) == 0x20;
+  boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
   panel.setBackgroundColor(dark ? Color.rgb(20,20,20) : Color.WHITE);
   TextView title = new TextView(this); title.setText("Voice typing"); title.setTextSize(20);
   title.setTextColor(dark ? Color.WHITE : Color.BLACK); panel.addView(title);
@@ -90,9 +95,9 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
   super.onWindowHidden();
   // Back closes dictation and restores the normal IME for the next tap. A switch caused by
   // Cancel already selected that keyboard and must keep its newly opening window visible.
-  String selected = android.provider.Settings.Secure.getString(getContentResolver(), android.provider.Settings.Secure.DEFAULT_INPUT_METHOD);
-  android.content.ComponentName component = selected == null ? null : android.content.ComponentName.unflattenFromString(selected);
-  if (wasVisible && new android.content.ComponentName(this, AlphaKeyboardDictationService.class).equals(component)) {
+  String current = Settings.Secure.getString(getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
+  ComponentName component = current == null ? null : ComponentName.unflattenFromString(current);
+  if (wasVisible && new ComponentName(this, AlphaKeyboardDictationService.class).equals(component)) {
    keyboard(false); requestHideSelf(0);
   }
   MainActivity.refreshKeyboardInsets();
@@ -102,6 +107,7 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
   selectionStart = info.initialSelStart; selectionEnd = info.initialSelEnd;
   policy.open(); renderReady();
  }
+ private boolean active() { return policy.state() == KeyboardDictationPolicy.State.RECORDING || policy.state() == KeyboardDictationPolicy.State.TRANSCRIBING; }
  private boolean fieldAllowed() { return editor != null && KeyboardDictationPolicy.permitted(editor.inputType, editor.imeOptions); }
  private boolean allowedNow() {
   KeyguardManager lock = getSystemService(KeyguardManager.class);
@@ -131,7 +137,7 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
    target = getCurrentInputConnection();
    ExtractedText selection = target.getExtractedText(new ExtractedTextRequest(), 0);
    if (selection != null) { selectionStart = selection.startOffset + selection.selectionStart; selectionEnd = selection.startOffset + selection.selectionEnd; }
-   before = text(target.getTextBeforeCursor(64, 0)); after = text(target.getTextAfterCursor(64, 0)); selected = text(target.getSelectedText(0));
+   before = text(target.getTextBeforeCursor(FIELD_CONTEXT, 0)); after = text(target.getTextAfterCursor(FIELD_CONTEXT, 0)); selected = text(target.getSelectedText(0));
    cloud = new KeyboardDictationCloud(this); authority = AlphaLocalAgentPlugin.credentialAuthorityEpoch();
    ticket = policy.start();
    String recordingId = capture.start(LocalVoiceRecording.LONG_LIMIT_MS).getString("recordingId");
@@ -142,8 +148,8 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
  private boolean sameField() {
   InputConnection current = getCurrentInputConnection();
   return target != null && current == target && editor == getCurrentInputEditorInfo() && allowedNow()
-   && Objects.equals(before, text(current.getTextBeforeCursor(64, 0)))
-   && Objects.equals(after, text(current.getTextAfterCursor(64, 0)))
+   && Objects.equals(before, text(current.getTextBeforeCursor(FIELD_CONTEXT, 0)))
+   && Objects.equals(after, text(current.getTextAfterCursor(FIELD_CONTEXT, 0)))
    && Objects.equals(selected, text(current.getSelectedText(0)));
  }
  private void transcribe(String recordingId) {
@@ -194,8 +200,7 @@ public final class AlphaKeyboardDictationService extends InputMethodService {
  }
  @Override public void onUpdateSelection(int oldStart, int oldEnd, int newStart, int newEnd, int candidateStart, int candidateEnd) {
   super.onUpdateSelection(oldStart,oldEnd,newStart,newEnd,candidateStart,candidateEnd);
-  if ((policy.state() == KeyboardDictationPolicy.State.RECORDING || policy.state() == KeyboardDictationPolicy.State.TRANSCRIBING)
-      && (newStart != selectionStart || newEnd != selectionEnd)) fail("The text field changed. Please dictate again.");
+  if (active() && (newStart != selectionStart || newEnd != selectionEnd)) fail("The text field changed. Please dictate again.");
   selectionStart = newStart; selectionEnd = newEnd;
  }
  @Override public void onFinishInputView(boolean finishingInput) { cancel(); super.onFinishInputView(finishingInput); }

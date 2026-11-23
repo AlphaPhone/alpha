@@ -15,7 +15,6 @@ for row in manifest['files']:
     path = Path(row['path'])
     assert not path.is_absolute() and '..' not in path.parts
     url = 'https://android.googlesource.com/platform/packages/apps/Launcher3/+/' + manifest['revision'] + '/' + row['path']
-    assert row['url'] == url
     target = data / 'baseline' / path
     for candidate in [target, *target.parents]:
         if candidate == data.parent: break

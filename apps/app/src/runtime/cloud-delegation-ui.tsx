@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { registerPlugin } from '../platform-plugins';
-import { type PluginListenerHandle } from '@capacitor/core';
+import type { AlphaConnectionPlugin } from '../native/alpha-connection';
 import {
 	secureConnectionStore,
 	openConnectionBrowser,
@@ -20,16 +20,7 @@ function DelegationStatus({ message }: { message: string }) {
 		</p>
 	);
 }
-export const delegationNative = registerPlugin<{
-	addListener(
-		event: "cloudDelegationCallback",
-		callback: () => void,
-	): Promise<PluginListenerHandle>;
-	readDelegationCallback(): Promise<{
-		callback: { state: string; code?: string; error?: string } | null;
-	}>;
-	clearDelegationCallback(input: { state: string }): Promise<void>;
-}>("AlphaConnection");
+export const delegationNative = registerPlugin<Pick<AlphaConnectionPlugin, "addListener" | "readDelegationCallback" | "clearDelegationCallback">>("AlphaConnection");
 /** The secure slot shape AlphaConnectionPlugin admits for this panel (RendererCredentialSlots). */
 export const cloudDelegationSlot = /^cloud-delegation:v1:[a-f0-9]{64}$/;
 type Pending = {

@@ -2,6 +2,9 @@ import {rendererDeletionClock,deletionWindow,type DeletionDeadline} from '../../
 /** Shared bounds for the browser Calendar and Reminder journals. Only definite rows retire:
  * an unacknowledged creation or an unresolved deletion stays until it is resolved. */
 const KEEP=200,AGE=30*86400000,SETTLED=127;
+/** The agent proposal a journaled operation answers, and the hash of its exact operation. */
+export type JournalIdentity={scope:string;proposalId:string};
+export type JournalBinding=JournalIdentity&{operationHash:string};
 /** Operation identities are opaque, including names inherited by ordinary JS objects. */
 export function journalEntry<T>(rows:Record<string,T>|undefined,id:string):T|undefined{
  return rows&&Object.hasOwn(rows,id)?rows[id]:undefined;

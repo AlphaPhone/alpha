@@ -72,7 +72,6 @@
 <sc-element value="{{homeShell}}">
 <sc-slot name="header">
 <sc-if value="{{storageAccessWarning}}"><details role="alert" class="storage-access-warning"><summary><span class="settings-dot" data-dot="warn" aria-hidden="true"></span>Storage</summary>{{storageAccessWarning}}</details></sc-if>
-<sc-if value="{{homeShowDate}}"><div class="home-date-line" data-alpha-home-date><span class="serif home-date-text">{{homeDateLabel}}</span><sc-if value="{{homeShowSetup}}"><button class="tap home-date-setup" aria-label="Connect Google" onClick="{{connectGoogle}}"><span class="alpha-google-icon" aria-hidden="true"></span>Connect</button></sc-if></div></sc-if>
 <sc-if value="{{homeEdit.on}}">
   <div data-alpha-home-edit style="display: flex; justify-content: space-between; align-items: center; padding: 0 16px 12px">
     <button class="ib" data-alpha-home-add onClick="{{homeEdit.add}}" disabled="{{homeEdit.noAdd}}" aria-label="Add to Home" aria-haspopup="dialog" style="background: var(--s2)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button>
@@ -121,7 +120,6 @@
 <sc-if value="{{isView}}">
 <div data-alpha-layer="app" data-alpha-stage="{{stage.on}}" data-alpha-stage-enter="{{stageEnter}}" onFocusCapture="{{focusAppContent}}" role="region" aria-label="{{activeViewLabel}}" aria-hidden="{{appHidden}}" inert="{{appHidden}}" class="enter" style="position: absolute; inset: 0; z-index: 20; background: {{viewBg}}; color: {{viewFg}}; display: flex; flex-direction: column">
 <sc-if value="{{storageAccessWarning}}"><p role="alert" class="storage-access-warning">{{storageAccessWarning}}</p></sc-if>
-<sc-if value="{{homeShowDate}}"><div class="home-date-line" data-alpha-home-date><span class="serif home-date-text">{{homeDateLabel}}</span><sc-if value="{{homeShowSetup}}"><button class="tap home-date-setup" onClick="{{connectGoogle}}">Connect Google</button></sc-if></div></sc-if>
 
 <sc-if value="{{is.phone}}">
 <sc-if value="{{phone.nativeManaged}}">
@@ -3410,302 +3408,6 @@
 </sc-if>
 
 
-<sc-if value="{{is.wallet}}">
-<div style="display: flex; flex-direction: column; height: 100%; position: relative">
-  <sc-if value="{{wallet.notSecure}}">
-  <div style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px 0 20px; gap: 2px; flex-shrink: 0">
-    <h1 class="serif" style="margin: 0; font-size: 32px; flex-grow: 1; letter-spacing: -.01em">Wallet</h1>
-    <button class="ib" aria-label="Pay" onClick="{{wallet.startPay}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.walTap}}"></path></svg></button>
-    <button class="ib" aria-label="Add card" onClick="{{wallet.startAdd}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.plus}}"></path></svg></button>
-  </div>
-  <div class="scr" style="flex-grow: 1; overflow-y: auto; padding: 12px 20px 130px; touch-action: pan-y">
-    <sc-for list="{{wallet.stack}}" as="c">
-      <button aria-label="{{c.label}}" onClick="{{c.open}}" style="display: block; width: 100%; position: relative; margin-top: {{c.mt}}px">
-        <div style="height: 232px; border-radius: 24px; padding: 20px 22px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 -3px 14px var(--shc), inset 0 0 0 1px rgba(255,255,255,.1); {{c.css}}">
-          <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-size: 17px; font-weight: 600">{{c.name}}</span><span style="font-size: 15px; letter-spacing: .06em; opacity: .85">{{c.last4}}</span></div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-end">
-            <span style="width: 44px; height: 32px; border-radius: 8px; background: {{c.chip}}"></span>
-            <sc-if value="{{c.unlocked}}"><svg class="i" viewBox="0 0 24 24" style="width: 28px; height: 28px; opacity: .85"><path d="{{ic.walTap}}"></path></svg></sc-if>
-            <sc-if value="{{c.locked}}"><svg class="i" viewBox="0 0 24 24" style="width: 26px; height: 26px"><path d="{{ic.lock}}"></path></svg></sc-if>
-          </div>
-        </div>
-      </button>
-    </sc-for>
-    <sc-if value="{{wallet.noCards}}">
-      <button onClick="{{wallet.startAdd}}" style="width: 100%; height: 232px; border-radius: 24px; box-shadow: inset 0 0 0 1.5px var(--line); display: flex; align-items: center; justify-content: center; color: var(--mut)" aria-label="Add card"><svg class="i" viewBox="0 0 24 24" style="width: 32px; height: 32px"><path d="{{ic.plus}}"></path></svg></button>
-    </sc-if>
-    <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 22px">
-      <sc-for list="{{wallet.passes}}" as="p">
-        <button class="tap" onClick="{{p.go}}" style="display: flex; align-items: center; gap: 14px; padding: 14px 18px 14px 14px; border-radius: 24px; background: var(--s2)">
-          <span style="width: 48px; height: 48px; border-radius: 16px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; {{p.iconCss}}"><svg class="i" viewBox="0 0 24 24"><path d="{{p.d}}"></path></svg></span>
-          <div style="flex-grow: 1; min-width: 0; text-align: left">
-            <div style="font-size: 16px; font-weight: 600">{{p.title}}</div>
-            <div style="font-size: 13px; color: var(--mut); margin-top: 3px">{{p.sub}}</div>
-          </div>
-          <span style="font-size: 16px; font-weight: 600">{{p.right}}</span>
-        </button>
-      </sc-for>
-    </div>
-  </div>
-  </sc-if>
-
-  
-  <sc-if value="{{wallet.isDet}}">
-    <div class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 4">
-      <div style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px; gap: 2px; flex-shrink: 0">
-        <button class="ib" aria-label="Back to wallet" onClick="{{wallet.det.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
-      </div>
-      <div class="scr" style="flex-grow: 1; overflow-y: auto; padding: 4px 20px 130px; touch-action: pan-y">
-        <div style="height: 232px; border-radius: 24px; padding: 20px 22px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 10px 30px var(--shc), inset 0 0 0 1px rgba(255,255,255,.1); {{wallet.det.css}}">
-          <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-size: 17px; font-weight: 600">{{wallet.det.name}}</span><span style="font-size: 15px; letter-spacing: .06em; opacity: .85">{{wallet.det.last4}}</span></div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-end">
-            <span style="width: 44px; height: 32px; border-radius: 8px; background: {{wallet.det.chip}}"></span>
-            <span style="font-size: 13px; opacity: .8">{{wallet.det.kind}}</span>
-          </div>
-        </div>
-        <div style="display: flex; gap: 8px; margin-top: 16px">
-          <button onClick="{{wallet.det.pay}}" style="flex-grow: 1; height: 52px; border-radius: 26px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 16px; font-weight: 600"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.walTap}}"></path></svg>Pay</button>
-        </div>
-        <sc-if value="{{wallet.det.hasTx}}">
-          <div style="margin-top: 18px">
-            <sc-for list="{{wallet.det.tx}}" as="x">
-              <div style="display: flex; align-items: center; gap: 14px; padding: 10px 0">
-                <span style="width: 42px; height: 42px; border-radius: 21px; background: var(--s2); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{x.d}}"></path></svg></span>
-                <div style="flex-grow: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">{{x.m}}</div><div style="font-size: 13px; color: var(--mut); margin-top: 2px">{{x.sub}}</div></div>
-                <span style="font-size: 15px; font-variant-numeric: tabular-nums">{{x.amt}}</span>
-              </div>
-            </sc-for>
-          </div>
-        </sc-if>
-        <div style="margin-top: 18px; border-radius: 24px; background: var(--s2); overflow: hidden">
-          <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px 0 18px; height: 56px">
-            <svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.lock}}"></path></svg>
-            <span style="flex-grow: 1; font-size: 15px">Lock card</span>
-            <button aria-label="Lock card" aria-pressed="{{wallet.det.lockOn}}" onClick="{{wallet.det.lock}}" style="position: relative; width: 52px; height: 32px; border-radius: 16px; flex-shrink: 0; transition: background .25s; {{wallet.det.lockTrack}}">
-              <span style="position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 13px; background: var(--alpha-white); box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform .25s cubic-bezier(.19,1,.22,1); transform: translateX({{wallet.det.lockKx}}px)"></span>
-            </button>
-          </div>
-          <div style="display: flex; align-items: center; gap: 14px; padding: 0 16px 0 18px; height: 56px">
-            <svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.star}}"></path></svg>
-            <span style="flex-grow: 1; font-size: 15px">Default card</span>
-            <button aria-label="Default card" aria-pressed="{{wallet.det.defOn}}" onClick="{{wallet.det.setDef}}" style="position: relative; width: 52px; height: 32px; border-radius: 16px; flex-shrink: 0; transition: background .25s; {{wallet.det.defTrack}}">
-              <span style="position: absolute; top: 3px; left: 3px; width: 26px; height: 26px; border-radius: 13px; background: var(--alpha-white); box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform .25s cubic-bezier(.19,1,.22,1); transform: translateX({{wallet.det.defKx}}px)"></span>
-            </button>
-          </div>
-          <button class="tap" onClick="{{wallet.det.remove}}" style="width: 100%; display: flex; align-items: center; gap: 14px; padding: 0 18px; height: 56px; font-size: 15px"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.trash}}"></path></svg>Remove card</button>
-        </div>
-      </div>
-    </div>
-  </sc-if>
-
-
-  
-  <sc-if value="{{wallet.isPass}}">
-    <div class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 4">
-      <div style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px; gap: 2px; flex-shrink: 0">
-        <button class="ib" aria-label="Back to wallet" onClick="{{wallet.ps.close}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
-      </div>
-      <div class="scr" style="flex-grow: 1; overflow-y: auto; padding: 4px 20px 130px; touch-action: pan-y">
-        <sc-if value="{{wallet.ps.isBp}}">
-          <div style="border-radius: 28px; background: var(--s2); overflow: hidden">
-            <div style="padding: 20px 22px 18px">
-              <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--mut)"><span>Flight 1482</span><span>{{wallet.ps.date3}}</span></div>
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 12px">
-                <div><div class="serif" style="font-size: 54px; line-height: 1">SFO</div><div style="font-size: 13px; color: var(--mut); margin-top: 4px">San Francisco</div></div>
-                <svg class="i" viewBox="0 0 24 24" style="width: 28px; height: 28px; color: var(--acct); transform: rotate(45deg)"><path d="{{ic.plane}}"></path></svg>
-                <div style="text-align: right"><div class="serif" style="font-size: 54px; line-height: 1">JFK</div><div style="font-size: 13px; color: var(--mut); margin-top: 4px">New York</div></div>
-              </div>
-              <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 14px; margin-top: 22px">
-                <div><div style="font-size: 12px; color: var(--mut)">Boards</div><div style="font-size: 19px; font-weight: 600; margin-top: 2px">7:25 AM</div></div>
-                <div><div style="font-size: 12px; color: var(--mut)">Departs</div><div style="font-size: 19px; font-weight: 600; margin-top: 2px">8:05 AM</div></div>
-                <div><div style="font-size: 12px; color: var(--mut)">Arrives</div><div style="font-size: 19px; font-weight: 600; margin-top: 2px">4:40 PM</div></div>
-                <div><div style="font-size: 12px; color: var(--mut)">Gate</div><div style="font-size: 19px; font-weight: 600; margin-top: 2px">B12</div></div>
-                <div><div style="font-size: 12px; color: var(--mut)">Seat</div><div style="font-size: 19px; font-weight: 600; margin-top: 2px">14A</div></div>
-                <div><div style="font-size: 12px; color: var(--mut)">Group</div><div style="font-size: 19px; font-weight: 600; margin-top: 2px">2</div></div>
-              </div>
-            </div>
-            <div style="position: relative; height: 2px; margin: 0 22px; border-top: 2px dashed var(--line)"><span style="position: absolute; left: -34px; top: -13px; width: 24px; height: 24px; border-radius: 12px; background: var(--bg)"></span><span style="position: absolute; right: -34px; top: -13px; width: 24px; height: 24px; border-radius: 12px; background: var(--bg)"></span></div>
-            <div style="display: flex; justify-content: center; padding: 22px">
-              <div style="width: 196px; height: 196px; padding: 12px; border-radius: 16px; background: var(--alpha-white); box-sizing: border-box"><svg viewBox="0 0 25 25" style="width: 100%; height: 100%; display: block; shape-rendering: crispEdges"><path d="{{wallet.ps.qr}}" style="fill: var(--alpha-black)"></path></svg></div>
-            </div>
-          </div>
-          <div style="display: flex; gap: 8px; margin-top: 16px">
-            <sc-if value="{{wallet.ps.calOff}}">
-              <button onClick="{{wallet.ps.addCal}}" style="flex-grow: 1; height: 52px; border-radius: 26px; background: var(--s2); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.cal}}"></path></svg>Add to calendar</button>
-            </sc-if>
-            <sc-if value="{{wallet.ps.calOn}}">
-              <div style="flex-grow: 1; height: 52px; border-radius: 26px; box-shadow: inset 0 0 0 1.5px var(--line); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; color: var(--mut)"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; color: var(--acct)"><path d="{{ic.check}}"></path></svg>In calendar</div>
-            </sc-if>
-            <button class="ib" aria-label="Directions to SFO" onClick="{{wallet.ps.dirs}}" style="width: 52px; height: 52px; border-radius: 26px; background: var(--s2)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.pin}}"></path></svg></button>
-          </div>
-        </sc-if>
-
-        <sc-if value="{{wallet.ps.isTicket}}">
-          <div style="border-radius: 28px; background: var(--s2); overflow: hidden">
-            <div style="padding: 22px 22px 20px">
-              <div class="serif" style="font-size: 40px; line-height: 1.05">Night Signals</div>
-              <div style="font-size: 15px; color: var(--mut); margin-top: 6px">The Warfield · 982 Market St</div>
-              <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 22px">
-                <div><div style="font-size: 12px; color: var(--mut)">Date</div><div style="font-size: 17px; font-weight: 600; margin-top: 2px">{{wallet.ps.date4}}</div></div>
-                <div><div style="font-size: 12px; color: var(--mut)">Doors</div><div style="font-size: 17px; font-weight: 600; margin-top: 2px">7:00 PM</div></div>
-                <div><div style="font-size: 12px; color: var(--mut)">Section</div><div style="font-size: 17px; font-weight: 600; margin-top: 2px">GA</div></div>
-              </div>
-            </div>
-            <div style="position: relative; height: 2px; margin: 0 22px; border-top: 2px dashed var(--line)"><span style="position: absolute; left: -34px; top: -13px; width: 24px; height: 24px; border-radius: 12px; background: var(--bg)"></span><span style="position: absolute; right: -34px; top: -13px; width: 24px; height: 24px; border-radius: 12px; background: var(--bg)"></span></div>
-            <div style="display: flex; justify-content: center; padding: 22px">
-              <div style="width: 196px; height: 196px; padding: 12px; border-radius: 16px; background: var(--alpha-white); box-sizing: border-box"><svg viewBox="0 0 25 25" style="width: 100%; height: 100%; display: block; shape-rendering: crispEdges"><path d="{{wallet.ps.qr}}" style="fill: var(--alpha-black)"></path></svg></div>
-            </div>
-          </div>
-          <div style="display: flex; gap: 8px; margin-top: 16px">
-            <sc-if value="{{wallet.ps.calOff}}">
-              <button onClick="{{wallet.ps.addCal}}" style="flex-grow: 1; height: 52px; border-radius: 26px; background: var(--s2); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.cal}}"></path></svg>Add to calendar</button>
-            </sc-if>
-            <sc-if value="{{wallet.ps.calOn}}">
-              <div style="flex-grow: 1; height: 52px; border-radius: 26px; box-shadow: inset 0 0 0 1.5px var(--line); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; color: var(--mut)"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; color: var(--acct)"><path d="{{ic.check}}"></path></svg>In calendar</div>
-            </sc-if>
-          </div>
-        </sc-if>
-
-        <sc-if value="{{wallet.ps.isTransit}}">
-          <div style="border-radius: 28px; background: var(--s2); padding: 22px">
-            <svg class="i" viewBox="0 0 24 24" style="width: 26px; height: 26px; color: var(--mut)"><path d="{{ic.walBus}}"></path></svg>
-            <div class="serif" style="font-size: 64px; line-height: 1; margin-top: 18px">{{wallet.ps.balance}}</div>
-            <button onClick="{{wallet.ps.reload}}" style="margin-top: 22px; height: 48px; padding: 0 20px 0 14px; border-radius: 24px; background: var(--acc); color: var(--alpha-white); display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.plus}}"></path></svg>$20</button>
-          </div>
-          <div style="margin-top: 14px">
-            <sc-for list="{{wallet.ps.trips}}" as="r">
-              <div style="display: flex; align-items: center; gap: 14px; padding: 10px 0">
-                <span style="width: 42px; height: 42px; border-radius: 21px; background: var(--s2); display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px"><path d="{{ic.walBus}}"></path></svg></span>
-                <div style="flex-grow: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">{{r.m}}</div><div style="font-size: 13px; color: var(--mut); margin-top: 2px">{{r.sub}}</div></div>
-                <span style="font-size: 15px; color: var(--mut)">{{r.amt}}</span>
-              </div>
-            </sc-for>
-          </div>
-        </sc-if>
-      </div>
-    </div>
-  </sc-if>
-
-  
-  <sc-if value="{{wallet.addPage}}">
-    <div class="enter" style="position: absolute; inset: 0; background: var(--bg); display: flex; flex-direction: column; z-index: 5">
-      <div style="display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 12px 0 8px; gap: 2px; flex-shrink: 0">
-        <button class="ib" aria-label="Back" onClick="{{wallet.add.back}}"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.back}}"></path></svg></button>
-        <span style="flex-grow: 1"></span>
-        <sc-if value="{{wallet.add.isForm}}">
-          <button onClick="{{wallet.add.next}}" aria-disabled="{{wallet.add.notOk}}" style="height: 36px; padding: 0 18px; border-radius: 18px; font-size: 15px; font-weight: 600; text-align: center; transition: background .2s; {{wallet.add.nextCss}}">Next</button>
-        </sc-if>
-        <sc-if value="{{wallet.add.isVerify}}">
-          <button onClick="{{wallet.add.verify}}" aria-disabled="{{wallet.add.codeBad}}" style="height: 36px; padding: 0 18px; border-radius: 18px; font-size: 15px; font-weight: 600; text-align: center; transition: background .2s; {{wallet.add.verifyCss}}">Verify</button>
-        </sc-if>
-      </div>
-      <sc-if value="{{wallet.add.isPick}}">
-        <div style="padding: 4px 20px 0">
-          <h1 class="serif" style="margin: 0; font-size: 38px; line-height: 1.05; letter-spacing: -.01em">Add a card</h1>
-          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 26px">
-            <button class="tap" onClick="{{wallet.add.scan}}" style="height: 150px; border-radius: 26px; background: var(--acc); color: var(--alpha-white); padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between"><svg class="i" viewBox="0 0 24 24" style="width: 30px; height: 30px"><path d="{{ic.walScan}}"></path></svg><span style="font-size: 17px; font-weight: 600">Scan</span></button>
-            <button class="tap" onClick="{{wallet.add.manual}}" style="height: 150px; border-radius: 26px; background: var(--s2); padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between"><svg class="i" viewBox="0 0 24 24" style="width: 30px; height: 30px"><path d="{{ic.kbd}}"></path></svg><span style="font-size: 17px; font-weight: 600">Manual</span></button>
-          </div>
-        </div>
-      </sc-if>
-      <sc-if value="{{wallet.add.isForm}}">
-        <div class="scr" style="flex-grow: 1; overflow-y: auto; padding: 4px 20px 130px; touch-action: pan-y">
-          <div style="height: 200px; border-radius: 24px; padding: 20px 22px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; background: var(--alpha-wallet-navy); color: var(--alpha-white); box-shadow: 0 10px 30px var(--shc)">
-            <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-size: 16px; font-weight: 600; opacity: .9">{{wallet.add.name}}</span><span style="font-size: 15px; letter-spacing: .06em">{{wallet.add.prevNum}}</span></div>
-            <div style="display: flex; justify-content: space-between; align-items: flex-end"><span style="width: 44px; height: 32px; border-radius: 8px; background: rgba(255,255,255,.28)"></span><span style="font-size: 14px; opacity: .85">{{wallet.add.prevExp}}</span></div>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 20px">
-            <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-radius: 16px; background: var(--s2); padding: 0 16px; box-sizing: border-box; "><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; color: var(--mut)"><path d="{{ic.walCard}}"></path></svg><input aria-label="Card number" placeholder="Card number" inputmode="numeric" value="{{wallet.add.num}}" onChange="{{wallet.add.onNum}}" style="flex-grow: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 16px; padding: 0"></div>
-            <sc-if value="{{wallet.add.hasNumErr}}"><div style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); padding: 0 4px"><svg class="i" viewBox="0 0 24 24" style="width: 15px; height: 15px"><path d="{{ic.info}}"></path></svg>{{wallet.add.numErr}}</div></sc-if>
-            <div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px">
-              <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-radius: 16px; background: var(--s2); padding: 0 16px; box-sizing: border-box; "><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; color: var(--mut)"><path d="{{ic.cal}}"></path></svg><input aria-label="Expiry" placeholder="MM/YY" inputmode="numeric" value="{{wallet.add.exp}}" onChange="{{wallet.add.onExp}}" style="flex-grow: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 16px; padding: 0"></div>
-              <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-radius: 16px; background: var(--s2); padding: 0 16px; box-sizing: border-box; "><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; color: var(--mut)"><path d="{{ic.lock}}"></path></svg><input aria-label="Security code" placeholder="CVV" inputmode="numeric" value="{{wallet.add.cvv}}" onChange="{{wallet.add.onCvv}}" style="flex-grow: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 16px; padding: 0"></div>
-            </div>
-            <sc-if value="{{wallet.add.hasExpErr}}"><div style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--fg); padding: 0 4px"><svg class="i" viewBox="0 0 24 24" style="width: 15px; height: 15px"><path d="{{ic.info}}"></path></svg>{{wallet.add.expErr}}</div></sc-if>
-            <div style="display: flex; align-items: center; gap: 12px; height: 56px; border-radius: 16px; background: var(--s2); padding: 0 16px; box-sizing: border-box; "><svg class="i" viewBox="0 0 24 24" style="width: 20px; height: 20px; color: var(--mut)"><path d="{{ic.user}}"></path></svg><input aria-label="Name on card" placeholder="Name on card" value="{{wallet.add.name}}" onChange="{{wallet.add.onName}}" style="flex-grow: 1; min-width: 0; height: 44px; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 16px; padding: 0"></div>
-          </div>
-        </div>
-      </sc-if>
-      <sc-if value="{{wallet.add.isVerify}}">
-        <div style="padding: 4px 20px 0">
-          <h1 class="serif" style="margin: 0; font-size: 38px; line-height: 1.05; letter-spacing: -.01em">Verify</h1>
-          <input aria-label="Verification code" placeholder="••••••" inputmode="numeric" value="{{wallet.add.code}}" onChange="{{wallet.add.onCode}}" style="width: 100%; box-sizing: border-box; margin-top: 24px; height: 72px; border-radius: 16px; border: 0; outline: 0; background: var(--s2); color: var(--fg); font-size: 32px; letter-spacing: .5em; text-align: center; padding: 0 0 0 .5em">
-          <sc-if value="{{wallet.add.auto}}">
-            <div class="enter" style="display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14px; color: var(--mut)"><span style="font-family: Denton, Fraunces, Georgia, serif; font-style: italic; font-size: 18px; color: var(--acct)"><span class="alpha-compute-mark" aria-hidden="true"></span></span><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 16px; height: 16px"><path d="{{ic.check}}"></path></svg><span class="settings-sr-only">Filled from Messages</span></div>
-          </sc-if>
-        </div>
-      </sc-if>
-    </div>
-  </sc-if>
-
-  <sc-if value="{{wallet.addScan}}">
-    <div class="fadein" style="position: absolute; inset: 0; background: var(--alpha-black); color: var(--alpha-white); z-index: 8; display: flex; flex-direction: column; align-items: center">
-      <div style="align-self: stretch; display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px">
-        <button aria-label="Cancel scan" onClick="{{wallet.add.back}}" style="width: 44px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; color: var(--alpha-white)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
-      </div>
-      <div style="position: relative; width: 340px; height: 214px; margin-top: 150px; border-radius: 22px; background: var(--alpha-gray-0d); overflow: hidden">
-        <span style="position: absolute; left: 0; top: 0; width: 34px; height: 34px; border-left: 3px solid var(--alpha-white); border-top: 3px solid var(--alpha-white); border-radius: 22px 0 0 0"></span>
-        <span style="position: absolute; right: 0; top: 0; width: 34px; height: 34px; border-right: 3px solid var(--alpha-white); border-top: 3px solid var(--alpha-white); border-radius: 0 22px 0 0"></span>
-        <span style="position: absolute; left: 0; bottom: 0; width: 34px; height: 34px; border-left: 3px solid var(--alpha-white); border-bottom: 3px solid var(--alpha-white); border-radius: 0 0 0 22px"></span>
-        <span style="position: absolute; right: 0; bottom: 0; width: 34px; height: 34px; border-right: 3px solid var(--alpha-white); border-bottom: 3px solid var(--alpha-white); border-radius: 0 0 22px 0"></span>
-        <span class="dot" style="position: absolute; left: 18px; right: 18px; top: 106px; height: 2px; background: var(--alpha-blue); box-shadow: 0 0 16px var(--alpha-blue-glow)"></span>
-      </div>
-      <button aria-label="Type it in" onClick="{{wallet.add.manual}}" style="margin-top: auto; margin-bottom: 40px; width: 48px; height: 48px; border-radius: 24px; background: var(--alpha-gray-26); color: var(--alpha-white); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.kbd}}"></path></svg></button>
-    </div>
-  </sc-if>
-
-  
-  <sc-if value="{{wallet.isPay}}">
-    <div class="fadein" style="position: absolute; inset: 0; background: var(--alpha-black); color: var(--alpha-white); z-index: 8; display: flex; flex-direction: column; align-items: center">
-      <div style="align-self: stretch; display: flex; align-items: center; height: 56px; margin-top: 44px; padding: 0 8px">
-        <button aria-label="Cancel payment" onClick="{{wallet.pay.cancel}}" style="width: 44px; height: 44px; border-radius: 22px; display: flex; align-items: center; justify-content: center; color: var(--alpha-white)"><svg class="i" viewBox="0 0 24 24"><path d="{{ic.x}}"></path></svg></button>
-      </div>
-      <sc-if value="{{wallet.pay.has}}">
-        <div onPointerDown="{{wallet.pay.swDown}}" onPointerUp="{{wallet.pay.swUp}}" style="width: 340px; height: 214px; margin-top: 40px; border-radius: 24px; padding: 20px 22px; box-sizing: border-box; display: flex; flex-direction: column; justify-content: space-between; touch-action: none; box-shadow: 0 20px 60px rgba(0,0,90,.45), inset 0 0 0 1px rgba(255,255,255,.12); {{wallet.pay.c.css}}">
-          <div style="display: flex; justify-content: space-between; align-items: center"><span style="font-size: 17px; font-weight: 600">{{wallet.pay.c.name}}</span><span style="font-size: 15px; letter-spacing: .06em; opacity: .85">{{wallet.pay.c.last4}}</span></div>
-          <div style="display: flex; justify-content: space-between; align-items: flex-end"><span style="width: 44px; height: 32px; border-radius: 8px; background: {{wallet.pay.c.chip}}"></span><svg class="i" viewBox="0 0 24 24" style="width: 28px; height: 28px; opacity: .85"><path d="{{ic.walTap}}"></path></svg></div>
-        </div>
-        <div style="display: flex; gap: 2px; margin-top: 12px; height: 28px; align-items: center">
-          <sc-for list="{{wallet.pay.dots}}" as="dt">
-            <button aria-label="{{dt.label}}" onClick="{{dt.go}}" style="height: 28px; padding: 0 3px; display: flex; align-items: center"><span style="display: block; height: 8px; border-radius: 4px; transition: width .3s, background .3s; {{dt.css}}"></span></button>
-          </sc-for>
-        </div>
-        <sc-if value="{{wallet.pay.isAuth}}">
-          <div style="margin-top: auto; margin-bottom: 70px; display: flex; flex-direction: column; align-items: center; gap: 18px">
-            <button aria-label="Confirm with fingerprint" onClick="{{wallet.pay.auth}}" style="position: relative; width: 96px; height: 96px; border-radius: 48px; background: var(--alpha-gray-15); color: var(--alpha-white); display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1.5px var(--alpha-gray-33)">
-              <svg class="i" viewBox="0 0 24 24" style="width: 46px; height: 46px; "><path d="{{ic.fp}}"></path></svg>
-            </button>
-            <div class="settings-sr-only">Touch to pay</div>
-          </div>
-        </sc-if>
-        <sc-if value="{{wallet.pay.isHold}}">
-          <div style="margin-top: auto; margin-bottom: 70px; display: flex; flex-direction: column; align-items: center; gap: 22px">
-            <div style="position: relative; width: 96px; height: 96px">
-              <span class="ring" style="position: absolute; inset: 0; border-radius: 48px; background: var(--alpha-blue)"></span>
-              <span class="ring" style="position: absolute; inset: 0; border-radius: 48px; background: var(--alpha-blue); animation-delay: .6s"></span>
-              <span style="position: absolute; inset: 0; border-radius: 48px; background: var(--alpha-blue); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24" style="width: 40px; height: 40px"><path d="{{ic.walTap}}"></path></svg></span>
-            </div>
-            <div class="settings-sr-only">Hold near reader</div>
-          </div>
-        </sc-if>
-        <sc-if value="{{wallet.pay.isDone}}">
-          <div class="enter" style="margin-top: auto; margin-bottom: 40px; display: flex; flex-direction: column; align-items: center">
-            <span style="width: 96px; height: 96px; border-radius: 48px; background: var(--alpha-blue); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24" style="width: 44px; height: 44px; "><path d="{{ic.check}}"></path></svg></span>
-            <div class="serif" style="font-size: 44px; margin-top: 18px; line-height: 1">{{wallet.pay.paid}}</div>
-            <div style="font-size: 15px; color: var(--alpha-gray-8f); margin-top: 8px">{{wallet.pay.paidAt}}</div>
-            <button onClick="{{wallet.pay.done}}" style="margin-top: 26px; height: 48px; padding: 0 28px; border-radius: 24px; background: var(--alpha-gray-26); color: var(--alpha-white); font-size: 15px; font-weight: 600; text-align: center">Done</button>
-          </div>
-        </sc-if>
-      </sc-if>
-      <sc-if value="{{wallet.pay.none}}">
-        <div style="margin-top: 200px; font-size: 16px; color: var(--alpha-gray-8f); display: flex; flex-direction: column; align-items: center; gap: 10px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 28px; height: 28px"><path d="{{ic.walCard}}"></path></svg><span class="settings-sr-only">No unlocked card · </span>Locked</div>
-      </sc-if>
-    </div>
-  </sc-if>
-</div>
-</sc-if>
-
-
 <sc-if value="{{is.workflows}}">
 <div onFocusCapture="{{workflows.captureSubviewFocus}}" style="display: flex; flex-direction: column; height: 100%; position: relative; background:var(--bg)">
   <sc-if value="{{workflows.clock}}">
@@ -4298,7 +4000,6 @@
                 </div>
               </sc-if>
 
-              <sc-if value="{{r.kCalendarDisplay}}"><div style="display:flex;align-items:center;gap:10px;padding:8px 16px;min-height:62px;box-sizing:border-box"><button class="ib" aria-label="{{r.colorLabel}}" disabled="{{r.busy}}" onClick="{{r.color}}" style="min-height:52px;min-width:52px"><span style="width:18px;height:18px;border-radius:9px;background:{{r.sw}}"></span></button><div style="flex:1;min-width:0"><div>{{r.label}}</div><div style="font-size:13px;color:var(--mut)">{{r.sub}}</div></div><button role="switch" aria-label="{{r.aria}}" aria-checked="{{r.on}}" disabled="{{r.busy}}" onClick="{{r.toggle}}" style="min-width:52px;min-height:52px;width:52px;height:52px;display:flex;align-items:center;justify-content:center;background:transparent;border:0;padding:0;flex-shrink:0"><span aria-hidden="true" style="position:relative;display:block;width:52px;height:32px;border-radius:16px;{{r.track}}"><span style="position:absolute;top:3px;left:3px;width:26px;height:26px;border-radius:13px;background:var(--alpha-white);box-shadow:0 1px 3px rgba(0,0,0,.2);transform:translateX({{r.kx}}px)"></span></span></button></div></sc-if>
 
               <sc-if value="{{r.kSlider}}">
                 <div style="padding: 12px 18px 8px">
@@ -4836,16 +4537,13 @@
 </sc-if>
 
 
-<!-- No heads-up banner: Alpha posts real notices as Android notifications; Android shows them. -->
-
 <!-- Development stand-in for Android's shade (ELIZA_DEV_ALLOW_TEST_MOCKS=1 browser builds only,
      simulatedShade). A browser has no SystemUI, so this simulates it for development tests.
-     Product builds, including every APK, render nothing here: Android's shade is the surface (#416). -->
+     Product builds, including every APK, render nothing here: Android's shade is the surface. -->
 <sc-if value="{{simulatedShade}}">
 <sc-if value="{{isOn}}">
 <div data-alpha-layer="shade" id="alpha-notifications" role="region" aria-label="Notifications" aria-hidden="{{shadeHidden}}" inert="{{shadeHidden}}" onKeyDown="{{shadeKey}}" style="position: absolute; inset: 0; z-index: 66; background: var(--bg); transform: translateY({{shadeY}}); transition: transform .55s cubic-bezier(.19,1,.22,1); display: flex; flex-direction: column; padding: 56px 14px 0; box-sizing: border-box">
 <sc-if value="{{storageAccessWarning}}"><details role="alert" class="storage-access-warning"><summary><span class="settings-dot" data-dot="warn" aria-hidden="true"></span>Storage</summary>{{storageAccessWarning}}</details></sc-if>
-<sc-if value="{{homeShowDate}}"><div class="home-date-line" data-alpha-home-date><span class="serif home-date-text">{{homeDateLabel}}</span><sc-if value="{{homeShowSetup}}"><button class="tap home-date-setup" aria-label="Connect Google" onClick="{{connectGoogle}}"><span class="alpha-google-icon" aria-hidden="true"></span>Connect</button></sc-if></div></sc-if>
   <sc-if value="{{systemShell}}">
   <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
     <sc-for list="{{tiles}}" as="t">

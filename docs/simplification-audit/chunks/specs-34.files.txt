@@ -1,0 +1,13 @@
+specs/quint/refinement/native/ClockReviewTraces.java
+specs/quint/refinement/native/ComponentTraces.java
+specs/quint/refinement/native/CrashJournalTraces.java
+specs/quint/refinement/native/CredentialCoordinatorPorts.java
+specs/quint/refinement/native/CredentialCoordinatorTraces.java
+specs/quint/refinement/native/CredentialLeaseTraces.java
+specs/quint/refinement/native/CredentialResidentTraces.java
+specs/quint/refinement/native/DeletionCoordinatorTraces.java
+specs/quint/refinement/native/DeletionReviewAdmissionTraces.java
+specs/quint/refinement/native/DeletionTestPorts.java
+specs/quint/refinement/native/FinitePolicyTraces.java
+specs/quint/refinement/native/GmailBackgroundTraces.java
+specs/quint/refinement/native/GoogleBrowserReturnClaimTraces.java

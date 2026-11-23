@@ -7,6 +7,7 @@ import type {
   ReminderSchedule,
 } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts";
 import type { ReminderCreateOperation } from "../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-create-contract.ts";
+import { deviceTimeZone } from "../lib/civil-date.ts";
 
 /** Minute-precision review-card copy; relative reminders carry millisecond instants that only receipts print exactly. */
 const formatReviewDateTime = (value: string | number, timeZone: string) =>
@@ -32,6 +33,23 @@ function presentReminderTiming(
   return { description: lines.join("\n"), due: `${formatDeviceRecordDateTime(schedule.dueAt ?? schedule.at, zone)} (${zone})` };
 }
 
+/** Review and receipt copy for operations whose wording does not depend on their fields. */
+const FIXED_COPY = {
+  notes_read_selected: { title: "Share selected note", applied: "Shared selected note", details: "Send this note’s exact title and text to the connected agent." },
+  // An approved agent deletion moves the note, and a voice note's recording, to Trash.
+  notes_delete: { title: "Move selected note to Trash", applied: "Moved selected note to Trash", details: "Move this note to Trash. A voice note’s recording moves with it." },
+  calendar_read_next: { title: "Share next Calendar event", applied: "Shared the reviewed Calendar search result", details: "Search readable phone calendars from now through the next 30 local days. Review the exact event or no-events-in-window result before sharing its title and times. No calendar changes are authorized." },
+  calendar_read_selected: { title: "Share selected event", applied: "Shared selected event", details: "Send this event’s title, details, location and time to the connected agent." },
+  // The phone queues an agent deletion behind a 10-second Undo; an account calendar's
+  // provider then syncs the delete to that account.
+  calendar_delete: { title: "Delete selected event", applied: "Deleted selected event", details: "Delete this event. You can Undo for 10 seconds. If its calendar syncs with an account, the account is updated after that." },
+  reminder_read_selected: { title: "Share selected reminder", applied: "Shared selected reminder", details: "Send this reminder’s title, details and schedule to the connected agent." },
+  reminder_complete: { title: "Complete selected reminder", applied: "Completed selected reminder", details: "Complete this occurrence. A repeating reminder advances to its next future occurrence." },
+  reminder_snooze: { title: "Snooze selected reminder", applied: "Snoozed selected reminder", details: "Snooze this occurrence for ten minutes." },
+  reminder_cancel: { title: "Cancel selected reminder", applied: "Cancelled selected reminder", details: "Cancel this reminder and all its future repeats." },
+} as const;
+const hasFixedCopy = (type: string): type is keyof typeof FIXED_COPY => Object.hasOwn(FIXED_COPY, type);
+
 /** Use appliedSummary only after the existing native receipt proves application. */
 export function presentDeviceRecordOperation(
   operation:
@@ -41,8 +59,12 @@ export function presentDeviceRecordOperation(
     | ReminderCreateOperation
     | { type: "create_reminder"; title: string; dueAt: string }
     | { type: "create_note"; title: string; body: string },
-  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  timeZone = deviceTimeZone(),
 ): { title: string; description: string; appliedSummary: string } {
+  if (hasFixedCopy(operation.type)) {
+    const fixed = FIXED_COPY[operation.type];
+    return { title: fixed.title, description: `${fixed.title}\n${fixed.details}`, appliedSummary: `${fixed.applied}.` };
+  }
   let title: string;
   let applied: string;
   let details = "";
@@ -59,17 +81,6 @@ export function presentDeviceRecordOperation(
       summaryDetails = fields.title.trim() ? `“${fields.title}”.` : "";
       break;
     }
-    case "notes_read_selected":
-      title = "Share selected note";
-      applied = "Shared selected note";
-      details = "Send this note’s exact title and text to the connected agent.";
-      break;
-    case "notes_delete":
-      // An approved agent deletion moves the note, and a voice note's recording, to Trash.
-      title = "Move selected note to Trash";
-      applied = "Moved selected note to Trash";
-      details = "Move this note to Trash. A voice note’s recording moves with it.";
-      break;
     case "calendar_create_local":
     case "calendar_create":
     case "calendar_update": {
@@ -96,25 +107,6 @@ export function presentDeviceRecordOperation(
       ].join("\n");
       break;
     }
-    case "calendar_read_next":
-      title = "Share next Calendar event";
-      applied = "Shared the reviewed Calendar search result";
-      details = "Search readable phone calendars from now through the next 30 local days. Review the exact event or no-events-in-window result before sharing its title and times. No calendar changes are authorized.";
-      break;
-    case "calendar_read_selected":
-      title = "Share selected event";
-      applied = "Shared selected event";
-      details =
-        "Send this event’s title, details, location and time to the connected agent.";
-      break;
-    case "calendar_delete":
-      title = "Delete selected event";
-      applied = "Deleted selected event";
-      // The phone queues an agent deletion behind a 10-second Undo; an account calendar's
-      // provider then syncs the delete to that account.
-      details =
-        "Delete this event. You can Undo for 10 seconds. If its calendar syncs with an account, the account is updated after that.";
-      break;
     case "reminder_create":
     case "reminder_update": {
       const fields = operation.fields;
@@ -143,28 +135,6 @@ export function presentDeviceRecordOperation(
       applied = "Created reminder";
       details = `“${operation.title}”\nDue ${formatReviewDateTime(operation.dueAt, timeZone)} (${timeZone}).\nNotification delivery may be approximate.`;
       summaryDetails = `“${operation.title}”, due ${formatDeviceRecordDateTime(operation.dueAt, timeZone)} (${timeZone}).`;
-      break;
-    case "reminder_read_selected":
-      title = "Share selected reminder";
-      applied = "Shared selected reminder";
-      details =
-        "Send this reminder’s title, details and schedule to the connected agent.";
-      break;
-    case "reminder_complete":
-      title = "Complete selected reminder";
-      applied = "Completed selected reminder";
-      details =
-        "Complete this occurrence. A repeating reminder advances to its next future occurrence.";
-      break;
-    case "reminder_snooze":
-      title = "Snooze selected reminder";
-      applied = "Snoozed selected reminder";
-      details = "Snooze this occurrence for ten minutes.";
-      break;
-    case "reminder_cancel":
-      title = "Cancel selected reminder";
-      applied = "Cancelled selected reminder";
-      details = "Cancel this reminder and all its future repeats.";
       break;
   }
   return {

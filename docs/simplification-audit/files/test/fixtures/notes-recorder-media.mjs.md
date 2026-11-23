@@ -1,0 +1,14 @@
+# test/fixtures/notes-recorder-media.mjs
+- Lines: 134 | Kind: Quint refinement fixture (in-page monkey-patching driver for Playwright) | Verdict: PORT (keep the scenario, drop prototype patching)
+- Covers: Notes recorder start while saved-note audio playback is still stopping: the recorder must wait for the playback stop to be confirmed before capturing, across button and voice-control entries and owner switches (model checked by `specs/quint/refinement/application/notes-recorder-media-admission.mjs`). Duplicates: `test/notes-recorder-media-admission.test.mjs` runs the same harness that is also in the application aggregate `specs/quint/refinement/application/index.mjs:31` (T4). Callers/importers: `specs/quint/refinement/application/notes-recorder-media-admission.mjs:4,10` only.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | 12-17 | T6 / D13 | `page.evaluate` imports `/src/browser/note-audio-store.ts`, `/src/browser/voice.ts`, `/src/browser/audio-capture.ts`, `/src/prototype/notes-recorder-control.ts`, `/src/prototype/note-recorder.ts`, `/src/runtime/connection-ui.tsx` directly. | Keep (this is how a browser harness reaches the real modules) but go through the shared page-module helper `test/browser/helpers/page-modules.ts` the legacy harnesses already use. | Low |
+| 2 | 24-39, 54-71 | T6 | Rewrites `NoteRecorderSession.prototype.begin`, `BrowserVoice.prototype.stop`, `BrowserAudioCapture.prototype.{start,elapsed,metrics,pause,cancel}` and `HTMLMediaElement.prototype.{play,pause}` to observe epochs and hold the stop. Prototype patching ties the harness to private method names and fields (`options.prepareCapture`, `epoch`, `phase`). | Replace with the product's test-mocks capture/playback ports (`ELIZA_DEV_ALLOW_TEST_MOCKS=1` build) or an injectable capture driver; observe via DOM (`data-recorder-state`, alert text) and a held fake `getUserMedia`. Carry the cases: (a) start during pending stop waits, (b) stop refused -> no capture, (c) owner switch drops the pending attempt, (d) control entry and button entry behave alike. | Medium: needs a product seam that today does not exist. |
+| 3 | 18, 91 | D3 | Reads `window.quintMountedCalendar` (a mounted-shell global set by another fixture) for `S().view`. | Use the visible view (DOM) instead. | Low |
+| 4 | 110 | T6 | `leaveNotes` dispatches the private `launcher-home` window event (backdoor navigation). | Press the Home control. | Low |
+
+## Proposed end state
+A ~60-line fixture that seeds one saved voice note, installs a held playback/capture port through the dev test-mocks surface, and drives only user controls; the harness keeps checking `NotesRecorderMediaAdmission` traces. `test/notes-recorder-media-admission.test.mjs` is removed in favour of the family runner.

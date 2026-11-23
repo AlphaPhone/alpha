@@ -1,0 +1,16 @@
+# specs/quint/native/NativeActionRecovery.qnt
+- Lines: 234 | Kind: Quint model (live, `native` manifest; JVM refinement harness) | Verdict: KEEP; PORT the harness slice; trim the binding-less "legacy reminder" dimension with D1
+- Covers: exact recovery of one action-journal row (notice, calendar/reminder deletion, reminder read/mutate, passive reads) from child receipts, with commit-boundary faults and redacted `list` reads. Duplicates: none at model level (DeletionJournal/NativeReminderDelivery model neighbouring stages). Callers/importers: `specs/quint/native/manifest.json` (10 tests, 6 invariants, bounds), harness `specs/quint/refinement/native/action-recovery.mjs` (+ `action-recovery-platform.mjs`, `ActionRecoveryTraces.java`), run by `test/quint-native-action-recovery.test.mjs` and again by the family aggregate `refinement/native/index.mjs` → `test/quint-native-refinement.test.mjs`; prose in `specs/quint/native/README.md:776`.
+
+## Findings
+| # | Lines | Pattern | Finding | Change | Risk |
+|---|---|---|---|---|---|
+| 1 | harness | T10 | Product code tie: manifest pins files only (no `symbols`). The harness compiles `AlphaActionJournal.java`, `WorkflowNoticeDelivery.java` and pinned upstream journal/notice/reminder classes whole, but **slices `AlphaActionJournalPlugin.java`** from the start to the anchor `' private final android.os.Handler clockMain'` (`action-recovery-platform.mjs:31`). Anchor is present after stage A. | PORT: move the recovery dispatch (`list/get/notice/reminder/deletion` handlers) into a package-private class the plugin delegates to, and compile that class whole; or compile the full plugin with Capacitor stubs. Drop the prefix slice. | M: any reorder of the plugin's fields breaks the harness today |
+| 2 | 46-63, 117, 125, 182, 221-227 | A1 | `completeBinding=false` models journal rows written without `enrollmentId` (harness removes the field, `ActionRecoveryTraces.java:111`). Tests `settledLegacyReminderStillReadableTest` and `legacyReminderWithoutBindingCannotSettleTest` cover those "legacy" rows. The package was renamed and starts empty (D1), so binding-less rows cannot be on a device unless the current writer can still produce them. | Confirm in `AlphaActionJournal`/upstream `ActionJournal` that every current write includes the binding; if so delete `completeBinding`, `initWithMetadata`, the two tests and the matching Java tolerance in the same change. Otherwise keep and rename "legacy" to what the row is. | M (needs D1 confirmation per writer) |
+| 3 | 5-23 | D9 | 13 kinds × 6 phases × 12 proofs × 10 statuses as strings; `resultFor`/`passive` are if-chains. Readable enough for a model. | None. | - |
+| 4 | test wrapper | T4, B5 | Replayed twice per `npm test` (per-model test + native aggregate); the wrapper asserts exact `traces === 35`, `observedFields.length === 22`. | Keep one runner (per-model); assert `> 0` (research §2.4, §2.8). | L |
+
+## Proposed end state
+Model unchanged except the binding-less dimension, which goes with D1 once the writers are confirmed. The harness
+compiles a delegate class whole instead of a text prefix of `AlphaActionJournalPlugin.java`, and runs from one test file
+without exact-count pins.

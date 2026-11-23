@@ -1,6 +1,7 @@
 import {DailyApps} from '../daily';
 import {devSurfacesEnabled} from '../build-flags';
 import {registerPlugin} from '../platform-plugins';
+import type {AlphaMailAttachmentsPlugin} from '../native/alpha-mail-attachments';
 import {reviewMailAttachment} from '../runtime/inbox-attachment';
 type Bag=Record<string,any>;
 type MailAction='archive'|'restoreArchive'|'trash'|'restoreTrash'|'read'|'unread'|'discard';
@@ -11,7 +12,7 @@ const rowKey=(row:Bag,index:number,drafts:boolean)=>drafts
  ? (row.localDraftId?'draft:'+row.localDraftId:'legacy-draft:'+index)
  : (row.sent?'sent:':'received:')+String(row.id);
 const selectionScope=(state:Bag)=>JSON.stringify([state.localMailFolder,state.acct,state.q,state.open,!!state.compose]);
-const attachments=registerPlugin<any>('AlphaMailAttachments');
+const attachments=registerPlugin<Pick<AlphaMailAttachmentsPlugin,'readSelected'|'openReviewed'|'cancel'>>('AlphaMailAttachments');
 const address=(value:unknown):value is string=>typeof value==='string'&&value.length<=254&&/^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(value);
 /** Local development messages never enter a provider transport. */
 export function installSimulatedInbox(view:Bag){

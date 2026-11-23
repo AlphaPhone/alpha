@@ -3,6 +3,7 @@ import {Capacitor} from '@capacitor/core';
 import {secureConnectionStore} from './native-connection';
 import {compareExchangeDraftStore,emptyDurableDraft,transactionalDraftStore} from '../ui/state/durable-draft.ts';
 import type {DomainRecovery} from '../browser/domain-document';
+import {sha256Hex} from '../lib/hash.ts';
 
 /**
  * Alpha's installed draft storage over Alpha's durable draft stores (ui/state/durable-draft.ts). The slot name
@@ -11,8 +12,7 @@ import type {DomainRecovery} from '../browser/domain-document';
  */
 export async function assistantDraftStore(binding:string){
  if(!binding||binding.length>4096)throw Error('Invalid assistant draft identity.');
- const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(binding))),n=>n.toString(16).padStart(2,'0')).join('');
- const slot='assistant-draft:v1:'+hash;
+ const slot='assistant-draft:v1:'+await sha256Hex(binding);
  if(Capacitor.getPlatform()==='android'){
   const raw={read:()=>secureConnectionStore.readRaw(slot),compareExchange:(expected:string|null,value:string)=>secureConnectionStore.compareExchangeRaw(slot,expected,value)};
   return compareExchangeDraftStore(binding,raw,{recovery:nativeAssistantDraftRecovery(binding,raw)});

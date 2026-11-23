@@ -6,6 +6,7 @@ import { Capacitor } from '@capacitor/core';
 import { networkLocation, type NetworkFix } from '../runtime/network-location';
 export type { Position } from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/location.ts';
 const location = registerPlugin<LocationBridge>('ElizaLocation');
+const available = () => Capacitor.isPluginAvailable('ElizaLocation');
 /** How long Maps waits for GPS before asking for a Wi-Fi/cell position. */
 export const GPS_GRACE_MS = 4000;
 type NetworkSource = { locate(): Promise<NetworkFix | undefined>; cached?(): NetworkFix | undefined };
@@ -17,7 +18,7 @@ type NetworkSource = { locate(): Promise<NetworkFix | undefined>; cached?(): Net
  */
 export class NativeMapsLocation extends SharedLocation {
  private attempt = 0;
- constructor(private readonly network: NetworkSource = networkLocation(), private readonly graceMs = GPS_GRACE_MS, bridge: LocationBridge = location, platform = { isNative: () => Capacitor.isNativePlatform(), available: () => Capacitor.isPluginAvailable('ElizaLocation') }) {
+ constructor(private readonly network: NetworkSource = networkLocation(), private readonly graceMs = GPS_GRACE_MS, bridge: LocationBridge = location, platform = { isNative: () => Capacitor.isNativePlatform(), available }) {
   super(bridge, platform);
  }
  override async stop(): Promise<void> { this.attempt++; return super.stop(); }
@@ -46,6 +47,7 @@ export class NativeMapsLocation extends SharedLocation {
 }
 /** Whether location is already granted, without showing a permission prompt. */
 export async function locationPermissionGranted(): Promise<boolean> {
- if (!Capacitor.isPluginAvailable('ElizaLocation')) return false;
+ if (!available()) return false;
+ // A failed read counts as not granted: this check must never prompt or throw into Maps.
  try { return (await location.checkPermissions()).location === 'granted'; } catch { return false; }
 }

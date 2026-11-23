@@ -1,5 +1,6 @@
 import {revision} from './revision';
-export type DevelopmentGrant={id:string;revision:string;kinds:string[];expiresAt:string;revoked:boolean};
+import {isOpaque36} from '../lib/ids';
+type DevelopmentGrant={id:string;revision:string;kinds:string[];expiresAt:string;revoked:boolean};
 type Request={mutationId:string;state:string;kinds:string[];expiresAt:string;status:'waiting'|'complete'|'failed';grantId?:string};
 export type DevelopmentDelegation={requests:Request[];grants:DevelopmentGrant[]};
 const kinds=(value:unknown):string[]=>{if(!Array.isArray(value)||!value.length||value.length>2||new Set(value).size!==value.length||value.some(v=>!['email','calendar'].includes(v)))throw Error('Choose a read scope.');return [...value].sort();};
@@ -8,7 +9,7 @@ export function grantAccount(grant:DevelopmentGrant){return {accountId:'cloud:'+
 export function developmentDelegationRequest(data:DevelopmentDelegation,path:string,body:any,now:number){
  if(path==='revocations')return {grants:[]};
  if(path==='start'){
-  if(body?.confirmed!==true||typeof body.mutationId!=='string'||!/^[a-f0-9-]{36}$/.test(body.mutationId))throw Error('Review Cloud read access.');const selected=kinds(body.kinds),prior=data.requests.find(r=>r.mutationId===body.mutationId);if(prior){if(JSON.stringify(prior.kinds)!==JSON.stringify(selected))throw Error('Authorization request changed.');return prior;}
+  if(body?.confirmed!==true||!isOpaque36(body.mutationId))throw Error('Review Cloud read access.');const selected=kinds(body.kinds),prior=data.requests.find(r=>r.mutationId===body.mutationId);if(prior){if(JSON.stringify(prior.kinds)!==JSON.stringify(selected))throw Error('Authorization request changed.');return prior;}
   if(data.requests.length>=100)throw Error('Authorization history is full.');const request:Request={mutationId:body.mutationId,state:revision(),kinds:selected,expiresAt:new Date(now+600000).toISOString(),status:'waiting'};data.requests.push(request);return request;
  }
  if(path==='revoke'){

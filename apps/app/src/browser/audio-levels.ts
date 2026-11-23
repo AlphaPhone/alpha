@@ -1,4 +1,5 @@
 /** Meter only the microphone stream already admitted by the recording session. */
+const BARS=44;
 const meters=new Map<string,{context:AudioContext;analyser:AnalyserNode;samples:Float32Array<ArrayBuffer>}>();
 export function startRecordingMeter(id:string,stream:MediaStream):()=>void {
  let context:AudioContext|undefined,source:MediaStreamAudioSourceNode|undefined,analyser:AnalyserNode|undefined;
@@ -10,9 +11,9 @@ export function startRecordingMeter(id:string,stream:MediaStream):()=>void {
 }
 export function recordingLevels(id?:string):{h:number}[]{
  const meter=id?meters.get(id):undefined;
- if(!meter||meter.context.state!=='running')return Array.from({length:44},()=>({h:4}));
+ if(!meter||meter.context.state!=='running')return Array.from({length:BARS},()=>({h:4}));
  meter.analyser.getFloatTimeDomainData(meter.samples);
- return Array.from({length:44},(_,index)=>{const from=Math.floor(index*meter.samples.length/44),to=Math.floor((index+1)*meter.samples.length/44);let power=0;for(let i=from;i<to;i++)power+=meter.samples[i]**2;return {h:4+Math.round(44*Math.min(1,Math.sqrt(power/(to-from))*4))};});
+ return Array.from({length:BARS},(_,index)=>{const from=Math.floor(index*meter.samples.length/BARS),to=Math.floor((index+1)*meter.samples.length/BARS);let power=0;for(let i=from;i<to;i++)power+=meter.samples[i]**2;return {h:4+Math.round(44*Math.min(1,Math.sqrt(power/(to-from))*4))};});
 }
 
 /** PCM metrics from the same admitted microphone stream, never synthesized activity. */

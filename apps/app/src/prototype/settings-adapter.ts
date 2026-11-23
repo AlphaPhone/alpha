@@ -2,16 +2,21 @@ import { externalVoiceInvocationEnabled } from '../runtime/voice-entry-policy';
 import {BrowserReviews} from '../browser/review';
 import {residentRecoveryCopy} from '../runtime/resident-recovery';
 import {cloudServiceName} from '../runtime/cloud-protocol';
-import {browserDevProfile as devProfileQuery,developerTools} from '../browser/dev-profile';
+import {browserDevProfile,developerTools} from '../browser/dev-profile';
 import {testMocksEnabled,devSurfacesEnabled} from '../build-flags';
 import {speechRoute,type SpeechRoute} from '../runtime/voice-selection';
-import {openCalendarRecovery} from '../browser/calendar-recovery';
 import {openNotificationRecovery} from '../browser/notification-recovery';
 import {openAlertSoundRecovery,openDevicePreferencesRecovery,openDeviceRolesRecovery} from '../browser/preference-recovery';
 import {notificationDocument} from '../browser/notification-store';
 import {alertSoundDocument,deviceRolesDocument} from '../browser/preference-documents';
 import {cachedDevicePreferences,devicePreferencesStatus,initializeDevicePreferences,editDevicePreferences,readDevicePreferences} from '../browser/device-preferences';
 import { registerPlugin } from '../platform-plugins';
+import { System as system } from '../native';
+import { alphaPhotos as photoLibrary, type LibraryAccess as PhotoAccess } from '../native/alpha-photos';
+import type { AlphaDevicePlugin } from '../native/alpha-device';
+import type { AlphaFilesPlugin } from '../native/alpha-files';
+import type { AlphaNotificationsBrowserMethods, AlphaNotificationsPlugin } from '../native/alpha-notifications';
+import { sessionKey } from '../lib/session-key';
 import {aospImage} from '../runtime/aosp-image';
 import {telephonyProfile} from '../../../../.eliza/client-features/packages/contracts/src/native-telephony.ts';
 import {createPhoneInfoLoader,identifiersElsewhere,phoneDefaultRows,phoneLineSections} from './phone-info-page';
@@ -41,17 +46,14 @@ import { leavePasswordEntry, leavePasswordManager, passwordEntryPage, passwordMa
 import {ERROR_TOAST} from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
-type PhotoAccess = {scope:'full'|'partial'|'selected'|'denied';images:string;videos:string};
-const photoLibrary = registerPlugin<{libraryAccess():Promise<PhotoAccess>;requestLibraryAccess():Promise<PhotoAccess>;openLibrarySettings():Promise<void>}>('AlphaPhotos');
 /** Shared-storage access as Android reports it; `settings` opens Android's page without a prompt. */
-const fileStorage = registerPlugin<{storageState():Promise<{access?:unknown}>;storageRequestAccess(options?:{settings?:boolean}):Promise<unknown>}>('AlphaFiles');
+const fileStorage = registerPlugin<Pick<AlphaFilesPlugin, 'storageState' | 'storageRequestAccess'>>('AlphaFiles');
 // The prover (specs/lemma) cannot read a constant without a value; no proved function uses it.
 //@ skip
 declare const __APP_VERSION__: string;
-const browserDevProfile = devSurfacesEnabled && devProfileQuery;
 /** Build version injected at build time from app.config.json or ELIZAOS_VERSION_NAME. */
-export const buildVersion = typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? __APP_VERSION__ : 'Unavailable';
-export type LicenseNotice = { name: string; version: string; license: string; source: string; text: string; flags?: unknown; obligations?: unknown };
+const buildVersion = typeof __APP_VERSION__ === 'string' && __APP_VERSION__ ? __APP_VERSION__ : 'Unavailable';
+type LicenseNotice = { name: string; version: string; license: string; source: string; text: string; flags?: unknown; obligations?: unknown };
 /** Labels for the flags scripts/licence-policy.ts writes into the shipped notices. An unlisted flag is shown as written. */
 const LICENSE_FLAG_LABELS: Record<string, string> = {
   'copyleft-strong': 'Copyleft (GPL family)', 'network-copyleft': 'Network copyleft (AGPL)', 'copyleft-weak': 'Weak copyleft (LGPL, MPL, EPL)',
@@ -91,10 +93,10 @@ const recoveryActions: Record<RecoveryDomain, { label: string; open: () => void 
 };
 /** Browser stores report recovery when saved bytes or their metadata cannot be read normally. */
 async function recoveryNeeded(): Promise<RecoveryDomain[]> {
-  const probe = async (domain: { capture(signal?: AbortSignal): Promise<{ format: string; legacyChanged: boolean }>; readRaw(signal?: AbortSignal): Promise<string | null> }, validate?: () => Promise<unknown>) => {
+  const probe = async (domain: { capture(signal?: AbortSignal): Promise<{ format: string }>; readRaw(signal?: AbortSignal): Promise<string | null> }, validate?: () => Promise<unknown>) => {
     try {
       const captured = await domain.capture();
-      if (captured.format === 'unrecognized' || captured.legacyChanged) return true;
+      if (captured.format === 'unrecognized') return true;
       const raw = await domain.readRaw();
       if (raw !== null) JSON.parse(raw);
       if (validate) await validate();
@@ -103,7 +105,7 @@ async function recoveryNeeded(): Promise<RecoveryDomain[]> {
   };
   const checks: Array<[RecoveryDomain, Promise<boolean>]> = [
     ['notifications', probe(notificationDocument)],
-    ['device settings', probe({ capture: signal => readDevicePreferences(signal).then(() => ({ format: 'domain', legacyChanged: false })), readRaw: async () => null })],
+    ['device settings', probe({ capture: signal => readDevicePreferences(signal).then(() => ({ format: 'domain' })), readRaw: async () => null })],
     // Simulated device roles exist only in test-mocks builds; production browsers have none to recover.
     ...(testMocksEnabled ? [['device roles', probe(deviceRolesDocument)] as [RecoveryDomain, Promise<boolean>]] : []),
     ['alert sound history', probe(alertSoundDocument)],
@@ -111,40 +113,30 @@ async function recoveryNeeded(): Promise<RecoveryDomain[]> {
   const results = await Promise.all(checks.map(async ([name, check]) => [name, await check] as const));
   return results.filter(([, needed]) => needed).map(([name]) => name);
 }
-const device = registerPlugin<{
-  snapshot(): Promise<Bag>;
-  openPasswordProvider(input:{action:string}):Promise<{status:string;destination?:string}>;
-  openSettings(input: { page: string }): Promise<{ status: string }>;
-  setTextScale(input:{percent:number}):Promise<{textScalePercent:number;effectiveTextZoom:number}>;
-  diagnosticsFacts(): Promise<Bag>;
-  shareDiagnostics(input: { text: string }): Promise<{ status: string }>;
+// The update lifecycle carries the manifest digest that binds an automatic install to its offer.
+const device = registerPlugin<Omit<AlphaDevicePlugin, 'checkForUpdate' | 'installUpdate'> & {
   checkForUpdate(): Promise<{manifest?: string; manifestSha256?: string}>;
   openUpdatePermissionSettings(): Promise<{status: 'opened' | 'unsupported'}>;
-  updateState(): Promise<{pending?: boolean}>;
   installUpdate(input: Pick<AppUpdate, 'apkUrl' | 'sha256' | 'sizeBytes' | 'versionCode'> &
     ({automatic: true; manifestSha256: string} | {automatic?: never; manifestSha256?: never})): Promise<{status?: string; manifest?: string}>;
 }>('AlphaDevice');
-const notifications = registerPlugin<{status():Promise<Bag>;setAlertPreferences(input:{appEnabled?:boolean;channelId?:string;enabled?:boolean}):Promise<Bag>;openAppSettings():Promise<Bag>;openChannelSettings(input:{id:string}):Promise<{status:string}>;crossAppStatus():Promise<Bag>;notificationApps():Promise<{apps:Bag[]}>;setNotificationPolicy(input:Bag):Promise<Bag>;resumeCrossApp(input:{expectedRevision:string}):Promise<Bag>;openNotificationAccess():Promise<Bag>;notificationHistory():Promise<{items:Bag[]}>;clearNotificationHistory():Promise<void>}>('AlphaNotifications');
-const system = registerPlugin<{ getDeviceSettings(): Promise<Bag>; getStatus(): Promise<{ roles?: Bag[] }>; requestRole(input: { role: string }): Promise<{ role: string; held: boolean; resultCode: number }>; getBuildInfo(): Promise<{ launcher?: boolean; version?: string }> }>('ElizaSystem');
+// setAlertPreferences exists only on the browser host; its callers run off native.
+const notifications = registerPlugin<AlphaNotificationsPlugin & Pick<AlphaNotificationsBrowserMethods, 'setAlertPreferences'>>('AlphaNotifications');
 type RoleRow = { role: string; held: boolean; available: boolean; holders: string[] };
 /** Android role state exactly as ElizaSystem.getStatus() reports it (shared parser); malformed rows are dropped. */
-export function readRoles(status: unknown): Record<string, RoleRow> {
+function readRoles(status: unknown): Record<string, RoleRow> {
   return Object.fromEntries(parseRoleStatuses(status).map(row => [row.role, row]));
 }
 /** Shared truthful wording: an empty holder lookup never claims that no app holds the role. */
-export function roleValue(row: RoleRow | undefined): string {
+function roleValue(row: RoleRow | undefined): string {
   return androidRoleLabel(row, { packageName: 'ai.alphacompute.alphaphone', appName: 'Alpha Phone' });
 }
 
-// settings-facts:begin (dependency-free)
+// settings-facts:begin (dependency-free; the app-update tests load this region)
 /** Version as packaged, with Android's version code when it is a real positive integer. */
 export function versionLabel(version: unknown, code: unknown): string {
   const name = typeof version === 'string' && version ? version : 'Unavailable';
   return Number.isSafeInteger(code) && (code as number) > 0 && name !== 'Unavailable' ? `${name} (${code})` : name;
-}
-/** Only the install time Android recorded. */
-export function installedRows(updatedAt: unknown, format: (at: number) => string = at => new Date(at).toLocaleDateString()): Array<[string, string]> {
-  return Number.isSafeInteger(updatedAt) && (updatedAt as number) > 0 ? [['Installed or last updated', format(updatedAt as number)]] : [];
 }
 /**
  * Software update manifest (app.config.json updateManifestUrl, fetched by AlphaDevice.checkForUpdate):
@@ -315,10 +307,10 @@ export function readAppearanceChoice(): AppearanceChoice {
   try { const value = localStorage.getItem(APPEARANCE_KEY); return value === 'dark' || value === 'system' ? value : 'light'; }
   catch { return 'light'; }
 }
-const systemScheme = () => { try { return matchMedia('(prefers-color-scheme: dark)'); } catch { return null; } };
-/** The theme a choice draws now; an unreadable system preference draws light. */
+const systemScheme = () => matchMedia('(prefers-color-scheme: dark)');
+/** The theme a choice draws now. */
 export function resolveAppearance(choice: AppearanceChoice): 'light' | 'dark' {
-  return choice === 'system' ? (systemScheme()?.matches ? 'dark' : 'light') : choice;
+  return choice === 'system' ? (systemScheme().matches ? 'dark' : 'light') : choice;
 }
 
 const UPDATE_KEY = 'alpha.app-update.v1';
@@ -436,12 +428,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   const definition = views.settings, render = definition.render, p = Component.prototype;
   definition.state={...definition.state,settingsCategory:null};
   const mount = p.componentDidMount, unmount = p.componentWillUnmount, openView = p.openView, update = p.componentDidUpdate;
-  // Android Back on New or Edit password returns to the unlocked list, like the page's own Back.
-  const back = definition.back;
-  definition.back = (st: Bag, api: Bag) => {
-    if (st.page === 'password-entry' && !st.sheet) { leavePasswordEntry(); api.set({ page: 'password-provider' }); return true; }
-    return back?.(st, api) ?? false;
-  };
   let owner: any, facts: Bag = {}, controls: Bag = {}, delivery: Bag = {}, generation = 0,scaleGeneration=0,scaleVersion=0,scalePending=false,scaleResults=textScaleSettlement(), cross:Bag={}, choices:Bag[]|null=null, history:Bag[]|null=null, notificationBusy=false;
   let passwordOpening=false,photoAccessBusy=false,protonOpen=false;
   let photoAccess:PhotoAccess|null=null;
@@ -498,7 +484,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
   }
   let gmail = 'Not checked';
   let inferenceProvider = 'Not reported';
-  // The AOSP image's always-on listener (#424): status, Pause and Turn off only. Turning listening on
+  // The AOSP image's always-on listener: status, Pause and Turn off only. Turning listening on
   // or resuming happens in the listener's own consent screen, never here.
   let listener: ListenerStatus = { available: false };
   let listenerStopUnconfirmed = false;
@@ -618,7 +604,7 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         realtimeVoiceTiming: exportRealtimeVoiceTiming(),
         voiceStartup: voiceStartupTiming(),
         voiceTiming: (() => { try { return JSON.parse(exportVoiceTiming()); } catch { return null; } })(),
-        // Native audio-clock voice latency (issue #395): timings, turn ids and hashes only.
+        // Native audio-clock voice latency: timings, turn ids and hashes only.
         nativeVoiceTiming: nativeTiming.status === 'fulfilled' ? nativeTiming.value : null,
         nativeCloudStreamTiming: nativeCloudTiming.status === 'fulfilled' ? nativeCloudTiming.value : null,
         nativeInferenceTiming: connection.session===session ? diagnostic?.nativeInferenceTiming : undefined,
@@ -738,10 +724,10 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       this.appearanceScheme?.addEventListener?.('change',this.appearanceSchemeListener);
     }
 
-    let lastBinding = JSON.stringify([connectionController.getSnapshot().session?.sessionId, connectionController.getCloudClient()?.sessionId]);
+    let lastBinding = sessionKey(connectionController.getSnapshot().session?.sessionId, connectionController.getCloudClient()?.sessionId);
     this.settingsConnectionUnsubscribe = connectionController.subscribe(() => {
       this.vset('settings', { connectionReadAt: Date.now() });
-      const next = JSON.stringify([connectionController.getSnapshot().session?.sessionId, connectionController.getCloudClient()?.sessionId]);
+      const next = sessionKey(connectionController.getSnapshot().session?.sessionId, connectionController.getCloudClient()?.sessionId);
       if (next !== lastBinding) { lastBinding = next; void refreshCapabilities(); }
     });
     this.googleAccountsChanged=()=>void refreshCapabilities();
@@ -837,7 +823,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
       ?modelLabel(providerName,residentProvider.model):'Not reported';
     const manage = (page: string) => () => void device.openSettings({ page }).then(opened => { const notice = broaderPageNotice(page, opened); if (notice) api.toast(notice); }, () => api.toast('Unavailable'));
     const info = (label: string, val: string, id = label): Bag => ({ id, kInfo: true, label, val, hasVal: true, noAB: true });
-    const note = (label: string, sub: string): Bag => ({ kInfo: true, label, val: '', hasVal: false, hasSub: true, sub, noAB: true });
     // Permission state: one word beside a dot (never colour alone).
     const permissionDot = (val: string) => val === 'Allowed' || val === 'All' || val === 'Precise' ? 'ok' : val === 'Ask' || val === 'Selected' || val === 'Limited' || val === 'Approx.' || val === 'Chosen files' || val === 'Alpha only' ? 'warn' : 'off';
     const permissionInfo = (label: string, val: string): Bag => ({ ...info(label, val), hasDot: val !== '—' && val !== 'Unavailable', dot: permissionDot(val) });
@@ -937,22 +922,14 @@ export function installSettingsAdapter(Component: any, views: Bag) {
           const checking=gmail==='Checking authorization…',unavailable=gmail==='Authorization not verified';
           const googleStatus:[string,string]=checking?['','off']:unavailable?['Couldn’t check','err']:googleCalendars.length?(hasGoogleWrites?['Connected','ok']:['Finish setup','warn']):['Not connected','off'];
           const groups:Bag[]=[group([{kNav:true,label:'Google Calendar',lbl:'Google Calendar',sub:googleStatus[0],hasSub:!checking,hasSubDot:!checking,dot:googleStatus[1],hasSpin:checking,lucide:'calendar-days',chev:true,noAB:true,go:()=>{const scope=owner?.calendarConnectionScope?.();if(scope)googleConnectionController.openCalendar(scope);}}])];
-          const needsRecovery=['legacy','android-native','browser-local'].includes(authority)||model?.status==='transition-required'||model?.status==='legacy-recovery';
-          if(needsRecovery){
-            const recovery:Bag[]=[];
-            if(calendarView?.canConfirmCalendarTransition)recovery.push({kNav:true,label:'Review',lbl:'Review saved events',chev:true,noAB:true,go:calendarView.confirmCalendarTransition});
-            if(model?.status==='legacy-recovery')recovery.push({kNav:true,label:'Recover',lbl:'Recover saved events',chev:true,noAB:true,go:()=>openCalendarRecovery()});
-            if(['legacy','android-native','browser-local'].includes(authority)){
-              const useCalendar=calendarView?.calendarAuthorityChoices?.find((choice:Bag)=>choice.label==='Agent Calendar');
-              if(useCalendar)recovery.push({kNav:true,label:'Use Calendar',lbl:'Return to Calendar',chev:true,noAB:true,go:useCalendar.go});
-            }
-            if(recovery.length)groups.push({...group(recovery),cap:'Recovery',hasCap:true});
+          if(['android-native','browser-local'].includes(authority)){
+            const useCalendar=calendarView?.calendarAuthorityChoices?.find((choice:Bag)=>choice.label==='Agent Calendar');
+            if(useCalendar)groups.push({...group([{kNav:true,label:'Use Calendar',lbl:'Return to Calendar',chev:true,noAB:true,go:useCalendar.go}]),cap:'Recovery',hasCap:true});
           }else if(['error','partial','unavailable'].includes(model?.status)||model?.status==='ready'&&calendarView?.nativeStatusLabel){
             groups.push(group([{kNav:true,label:'Calendar',lbl:'Retry calendar',val:model?.status==='partial'||model?.status==='ready'?'Partly loaded':'Not loaded',hasVal:true,hasDot:true,dot:'warn',lucide:'rotate-cw',chev:false,noAB:true,go:calendarView?.nativeStatusRetry??display?.retry}]));
           }else if(display?.native&&!display.loading&&!display.ready){
             groups.push(group([{kNav:true,label:'Allow access',lbl:'Review calendar access',chev:true,noAB:true,go:display.connect??display.retry}]));
           }
-          if(developerTools&&!Capacitor.isNativePlatform())groups.push({...group([{kNav:true,label:'Calendar backups',lbl:'Calendar backups',sub:'Events saved in this app',hasSub:true,chev:true,noAB:true,go:()=>openCalendarRecovery()}]),cap:'Saved data',hasCap:true});
           const calendarChannel=(delivery.channels||[]).find((c:Bag)=>c.id==='calendar');
           if(calendarChannel&&!Capacitor.isNativePlatform())groups.push(group([{kTog:true,label:'Alerts',aria:'Calendar alerts',on:!calendarChannel.blocked,track:!calendarChannel.blocked?'background:var(--acc)':'background:var(--line)',kx:!calendarChannel.blocked?20:0,toggle:()=>void run(async()=>{await notifications.setAlertPreferences({channelId:calendarChannel.id,enabled:!!calendarChannel.blocked});})}]));
           out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Calendar',hasTitle:true,backLabel:'Back to Settings',back:()=>api.set({page:null}),hero:{},groups});
@@ -1026,7 +1003,6 @@ export function installSettingsAdapter(Component: any, views: Bag) {
         // Every Alpha Phone signs in to Eliza Cloud and holds a plan: account, plan and sign-in expiry.
         const plan=connectionController.residentPlanSettings();
         if(plan){
-          const day=(at:number)=>new Date(at).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'});
           if(state.page==='cloud-plan')out.stack.push({isTop:false,notTop:true,cls:'enter',z:4,title:'Account',hasTitle:true,backLabel:'Back to Settings',back:()=>api.set({page:null}),hero:{},groups:[group([{kNav:true,label:'Open account',lbl:'Open account',chev:true,noAB:true,go:()=>connectionController.openPlan()}])]});
         }
 

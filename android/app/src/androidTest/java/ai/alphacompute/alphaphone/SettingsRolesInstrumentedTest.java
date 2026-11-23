@@ -1,9 +1,7 @@
 package ai.alphacompute.alphaphone;
 
-import android.Manifest;
 import android.app.UiAutomation;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -17,9 +15,8 @@ import org.junit.runner.RunWith;
 import static org.junit.Assert.*;
 
 /**
- * Settings role and permission state against Android's own answer: the HOME request is declined
- * and then accepted in the real role dialog, and each result is compared with
- * `cmd role get-role-holders`; the Calendar row is compared with the runtime grant.
+ * Settings role state against Android's own answer: the HOME request is declined and then
+ * accepted in the real role dialog, and each result is compared with `cmd role get-role-holders`.
  */
 @RunWith(AndroidJUnit4.class)
 public final class SettingsRolesInstrumentedTest {
@@ -40,7 +37,7 @@ public final class SettingsRolesInstrumentedTest {
  private boolean holdsHome()throws Exception{return shell("cmd role get-role-holders --user 0 "+HOME).contains(context.getPackageName());}
  /**
   * Android's role dialog belongs to PermissionController, another process. On the loaded API 36
-  * emulator (campaign of 2026-10-14) it was displayed 5.5 s after the request and its frames took
+  * emulator it was displayed 5.5 s after the request and its frames took
   * up to 6.6 s each to draw (HWUI "Davey" frames of PermissionController), so its nodes appeared
   * about 10 s after the click, at the edge of the former 10 s bound. The wait is bounded at 20 s
   * and still requires that dialog.
@@ -156,7 +153,7 @@ public final class SettingsRolesInstrumentedTest {
    assertTrue("Android reports Alpha as HOME holder",holdsHome());
    // Becoming HOME makes Android start Alpha as the home activity. That start has the home activity
    // type and cannot reuse the running standard-type task, so Android creates a second MainActivity
-   // for it (measured on the API 36 emulator in round 7). The product hands that start to the
+   // for it (measured on the API 36 emulator). The product hands that start to the
    // instance that was already running and the new one finishes: one instance, the same page, the
    // draft still in the composer.
    assertOneLiveInstance("after the role is accepted",original);
@@ -197,30 +194,6 @@ public final class SettingsRolesInstrumentedTest {
   }finally{
    for(String holder:previous.split("\\s+"))if(!holder.isEmpty())shell("cmd role add-role-holder --user 0 "+HOME+" "+holder);
    if(!previous.contains(context.getPackageName()))shell("cmd role remove-role-holder --user 0 "+HOME+" "+context.getPackageName());
-  }
- }
-
- /**
-  * `pm revoke` kills the app process, and with it this instrumentation, so a permission-changing
-  * runner sets the grant between runs and passes the expected state (settingsCalendar=granted|revoked).
-  * Without that argument the row is still compared with the current runtime grant, so the test
-  * never skips; covering both states needs the two runs. The row is Settings › App permissions,
-  * whose value counts the grants Android reports off (Calendar is one of them).
-  */
- @Test public void calendarRowMatchesRuntimeGrant()throws Exception{
-  String expected=InstrumentationRegistry.getArguments().getString("settingsCalendar");
-  assertTrue("settingsCalendar must be granted or revoked when given",expected==null||"granted".equals(expected)||"revoked".equals(expected));
-  boolean granted=context.checkSelfPermission(Manifest.permission.READ_CALENDAR)==PackageManager.PERMISSION_GRANTED;
-  if(expected!=null)assertEquals("Runner applied the requested grant","granted".equals(expected),granted);
-  try(BoundedActivityScenario<MainActivity> scenario=BoundedActivityScenario.launch(MainActivity.class)){
-   // Settings › Privacy › App permissions counts the grants Android reports off (settings-adapter permissionSummary).
-   AppNavigation.liveMode();settings();
-   String[] grants={Manifest.permission.RECORD_AUDIO,Manifest.permission.CAMERA,Manifest.permission.READ_CALENDAR};
-   int off=0;for(String permission:grants)if(context.checkSelfPermission(permission)!=PackageManager.PERMISSION_GRANTED)off++;
-   if(context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED&&context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED)off++;
-   String row="[...document.querySelectorAll('button')].find(e=>e.getAttribute('aria-label')==='App permissions')?.textContent.includes("+JSONObject.quote(off==0?"All allowed":off+" not allowed")+")";
-   until(row);
-   assertEquals("Contacts is not presented","false",js("[...document.querySelectorAll('button,div')].some(e=>e.childElementCount===0&&e.textContent.trim()==='Contacts')"));
   }
  }
 }

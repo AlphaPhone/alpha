@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
-import android.os.Bundle;
 import androidx.test.platform.app.InstrumentationRegistry;
 import java.util.List;
 import org.json.JSONArray;
@@ -24,6 +23,5 @@ public final class BrowserInstalledResolverInstrumentedTest {
    if(BrowserExternalHandoff.genericHttps(row.filter))eligible.put(row.activityInfo.packageName+"/"+row.activityInfo.name);
   }
   assertTrue("Owned image must have a real eligible installed browser under product package visibility",eligible.length()>0);
-  Bundle receipt=new Bundle();receipt.putString("installedGenericHttpsBrowsers",eligible.toString());InstrumentationRegistry.getInstrumentation().addResults(receipt);
  }
 }

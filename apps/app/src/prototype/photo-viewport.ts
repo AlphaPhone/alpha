@@ -17,7 +17,7 @@ export function createPhotoViewport(){
  const distance=(a:Point,b:Point)=>Math.hypot(a.x-b.x,a.y-b.y);
  function clamp(){
   if(!frame)return;
-  const w=frame?.clientWidth||0,h=frame?.clientHeight||0;
+  const w=frame.clientWidth,h=frame.clientHeight;
   const fit=binding&&binding.width>0&&binding.height>0?Math.min(w/binding.width,h/binding.height):0;
   const maxX=Math.max(0,((binding?.width||0)*fit*scale-w)/2),maxY=Math.max(0,((binding?.height||0)*fit*scale-h)/2);
   x=Math.max(-maxX,Math.min(maxX,x));y=Math.max(-maxY,Math.min(maxY,y));
@@ -49,7 +49,7 @@ export function createPhotoViewport(){
    if(!valid()||event.button>0)return;
    touchPointer=event.pointerType==='touch';
    const point={x:event.clientX,y:event.clientY};pointers.set(event.pointerId,point);
-   try{(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);}catch{/* The pointer may already have been retired by the host. */}
+   try{(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);}catch{/* The pointer may already have been retired by the host. */}
    if(pointers.size===1){start=last=point;moved=false;suppressTap=false;}
    if(pointers.size===2){clearPendingTap();lastTouch=undefined;const[a,b]=[...pointers.values()];pinch={distance:distance(a,b),scale,x,y,center:center(a,b)};moved=true;}
   },
