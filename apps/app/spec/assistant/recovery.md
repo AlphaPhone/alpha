@@ -61,15 +61,22 @@ pure def sometimesReadAgainAfterExpiry(r: Recovery): bool = r.applied == 2 and r
 
 ### Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap
 
-The composer offers Restart while the resident connection is refused and
-the agent service reports a reviewable hold; the tap archives what the
-owner reviewed under its one-use token and starts the agent again. A
-failed restart says so and offers it again; nothing kept is replayed
-(#1302).
+The composer offers Restart Alpha while the resident connection is refused
+and the agent service reports a reviewable hold; starting up and a
+temporary reattachment stay quiet. The tap runs only while the assistant is
+in front and no restart is running; it archives what the owner reviewed
+under its one-use token and starts the agent again. An unsent draft stays
+in the composer across the restart for the same owner and agent, never for
+another. A failed restart says so and offers it again; nothing kept is
+replayed (#1302).
 
 ```quint
 pure def restartOffered(refused: bool, reviewable: bool, restarting: bool): bool = refused and reviewable and not(restarting)
+pure def restartRuns(offered: bool, visible: bool): bool = offered and visible
+pure def draftKept(sameOwner: bool): bool = sameOwner
 pure def lawNoRestartWhileConnected(reviewable: bool): bool = not(restartOffered(false, reviewable, false))
 pure def lawNoRestartWithoutAHold(refused: bool): bool = not(restartOffered(refused, false, false))
 pure def lawOneRestartPerTap(refused: bool, reviewable: bool): bool = not(restartOffered(refused, reviewable, true))
+pure def lawAHiddenTapRestartsNothing(offered: bool): bool = not(restartRuns(offered, false))
+pure def lawAnotherOwnerNeverGetsTheDraft(sameOwner: bool): bool = draftKept(sameOwner) implies sameOwner
 ```

@@ -35,10 +35,11 @@ export const integrationLive = Layer.effectDiscard(effect {
     const nav = try navigation.get()
     const front = try foreground.get()
     const launch = try bindings.powerLaunchNow()
+    const signIn = (try bindings.idle()).signInOpen
     const latest = (conversations.list() catch () => [])[0] as { readonly id: string; readonly roomId?: string } | undefined
     const screen = {
       unlocked: !front.locked, visible: !nav.hidden, dialogOpen: nav.layers.length > 0,
-      connectionPrompt: nav.layers.some((layer) => layer.id.startsWith("account")), voiceActive: nav.voice,
+      connectionPrompt: signIn || nav.layers.some((layer) => layer.id.startsWith("account")), voiceActive: nav.voice,
       ...(launch.initialRestorePending || launch.accountRef === null ? {} : { powerAccountRef: launch.accountRef }),
     }
     const callActive = !(try calls.allowed())

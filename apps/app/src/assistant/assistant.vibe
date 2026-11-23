@@ -1,10 +1,11 @@
-// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/index.md, "Back closes what the assistant opened before it leaves the assistant"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"
+// spec/assistant/index.md, "Something handed to the assistant is only ever a draft the owner sends"; spec/assistant/index.md, "Back closes what the assistant opened before it leaves the assistant"; spec/assistant/dock.md, "Story: Open and size the chat with one gesture"; spec/assistant/dock.md, "Home keeps its bar, and a dragged height lasts only while the chat it was dragged in is open"; spec/assistant/entry.md, "An invocation opens the chat once, and starts voice only when it came by voice, unlocked, fresh and for this account"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/search.md, "A search answer shows only while search is open and its owner scope is the one that asked"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"
 import { Machine as DockMachine, swallowWindow, type Dock, type Surface } from "../../gen/assistant__dock.effect.vibe"
 import type { Detent } from "../../gen/assistant__detents.ts"
 import { chatOf, restOf, type Nav } from "../../gen/shell__navigation.effect.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
 import { Machine as DraftsMachine, shown, slotOf, type Drafts } from "../../gen/assistant__draft.effect.vibe"
 import { Machine as SummonsMachine, closesSurface, startsVoice, takesLaunch, type Origin } from "../../gen/assistant__entry.effect.vibe"
+import { draftKept } from "../../gen/assistant__recovery.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { AttachmentRefused, ChatAttachments, type Picked } from "./attachments.vibe"
@@ -109,6 +110,7 @@ export const assistantLayer = Layer.effect(Assistant, effect {
   effect function followShell() {
     let context: string | undefined
     let owner: string | undefined
+    let agentKey = ""
     let voiced = false
     let locked = false
     let placed: Detent | undefined
@@ -147,13 +149,16 @@ export const assistantLayer = Layer.effect(Assistant, effect {
       context = key
       const identity = try host.identity()
       const who = identity === undefined ? "" : JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
+      const agentOf = identity === undefined ? agentKey : JSON.stringify([identity.origin, identity.owner, identity.agent])
       if (owner !== undefined && who !== owner) {
         try quiet(summons.send({ type: "accountChanges" }))
         try search.retire()
         try files.retire("owner")
-        if (who !== "") try composer.open(null, true)
+        const open = Option.getOrUndefined(try Stream.runHead(composer.transcript))?.conversation ?? null
+        if (who !== "") try composer.open(draftKept(agentOf === agentKey) ? open : null, true)
       }
       owner = who
+      if (identity !== undefined) agentKey = agentOf
     }
   }
   effect function pushDock() {

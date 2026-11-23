@@ -1,12 +1,14 @@
-// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "A named change or deletion runs only for the selected event whose title is the name given"; spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/deviceActions.md, "There is no direct path: the only way in is the owner's card on the bound screen"; spec/calendar/deviceActions.md, "A deletion is only queued, and its receipt says unknown while Undo can still win"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"
+// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "A named change or deletion runs only for the selected event whose title is the name given"; spec/calendar/deviceActions.md, "Story: Let the agent change my phone's calendar only through my reviews"; spec/calendar/deviceActions.md, "There is no direct path: the only way in is the owner's card on the bound screen"; spec/calendar/deviceActions.md, "A deletion is only queued, and its receipt says unknown while Undo can still win"; spec/calendar/availability.md, "Story: Choose the calendars and see the answer before it is shared"; spec/calendar/namedRead.md, "Story: Be told plainly what a named read shared"; spec/calendar/deviceActions.md, "Story: Offer the agent only the Calendar actions this phone runs"
 import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
 import { readOperation, readResult } from "@elizaos/agent/operations"
 import { deleteUndoMs } from "@elizaos/os/bridges/deletion-window"
-import type { CalendarOperation, ScreenView } from "../../gen/calendar__deviceActions.effect.vibe"
+import { type CalendarCapability, type CalendarOperation, type ScreenView, calendarAdvertised } from "../../gen/calendar__deviceActions.effect.vibe"
 import { namedChangeAllowed } from "../../gen/calendar__namedRead.effect.vibe"
 import { overlapsRange, rangeOutcome, rangeReadAdmitted } from "../../gen/calendar__rangeRead.ts"
+import { AssistantHost } from "../assistant/host.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { Native } from "../platform/native.vibe"
+import { Foreground } from "../shell/foreground.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { AgentCalendar } from "./agent.vibe"
 import { type DeviceEventRecord, decodeAccess, decodeList } from "./device.schema.vibe"
@@ -178,18 +180,33 @@ export function summarizeCalendarOperation(op: Wire, result: string): string {
   return isRead(op) ? "Nothing was shared." : "Nothing was changed in Calendar."
 }
 
+const CAPABILITY_NAMES: Readonly<Record<CalendarCapability, string>> = {
+  CapLocalEvent: "calendar.local-event.v1", CapAgendaRead: "calendar.agenda-read.v1", CapCreate: "calendar.create.v1",
+  CapNextRead: "calendar.next-read.v1", CapAvailabilityRead: "calendar.availability-read.v1", CapNamedRead: "calendar.named-read.v1",
+}
+
+/** Of the capabilities the agent `offered`, those Calendar advertises in `x-eliza-device-capabilities` on a build of `variant`. */
+export function calendarCapabilities(offered: readonly string[], variant: "launcher" | "aosp" | "browser"): string[] {
+  return (Object.keys(CAPABILITY_NAMES) as CalendarCapability[])
+    .filter((capability) => calendarAdvertised(capability, offered.includes(CAPABILITY_NAMES[capability]), variant === "browser"))
+    .map((capability) => CAPABILITY_NAMES[capability])
+}
+
 /** Calendar's family of agent device operations over its own services; the shell registers it in `deviceExecutorsLive`. */
 export const operationPorts = effect {
   const requests = try AgentRequests
   const device = try DeviceCalendar
   const agent = try AgentCalendar
   const navigation = try Navigation
+  const foreground = try Foreground
   const native = try Native
+  const host = try AssistantHost
 
   effect function screen() {
     const nav = try navigation.get()
+    const front = try foreground.get()
     const view: ScreenView = nav.app === "calendar" ? "CalendarScreen" : nav.app === "" && !nav.library ? "HomeScreen" : "OtherScreen"
-    return { view, hidden: nav.hidden }
+    return { view, hidden: nav.hidden || !front.visible, sensitive: front.locked }
   }
 
   effect function access(op: CalendarOperation) {
@@ -199,8 +216,10 @@ export const operationPorts = effect {
   }
 
   effect function journalOf(call: ExecutorCall) {
-    const view = try agent.view()
-    return { scope: view.state.portOwner, proposalId: call.proposalId }
+    const identity = try host.identity()
+    if (identity === undefined) return undefined
+    const scope = try tryPromise({ try: () => sha256Hex(JSON.stringify([identity.origin, identity.owner, identity.agent, identity.installationId])), catch: () => "" }) catch () => ""
+    return scope === "" ? undefined : { scope, proposalId: call.proposalId }
   }
 
   function answer(done: ApprovedAction, record: (result: unknown) => unknown) {
@@ -221,7 +240,7 @@ export const operationPorts = effect {
       : false
     const permission = unbound ? (try access(op)) : true
     const shown = try screen()
-    try requests.scene(shown.view, false, bound && !unbound ? selected?.id ?? "" : "", permission)
+    try requests.scene(shown.view, shown.sensitive, bound && !unbound ? selected?.id ?? "" : "", permission)
     if (shown.hidden) try requests.hidden()
     if (!(try requests.propose(op))) return { kind: "refused", code: NOT_DISPATCHED }
     const done = try requests.approve({ operation: exact, operationId: call.operationId, journalIdentity: try journalOf(call) })
@@ -250,7 +269,7 @@ export const operationPorts = effect {
       const view = try agent.view()
       return {
         view: shown.hidden ? "hidden" : shown.view === "CalendarScreen" ? "calendar" : shown.view === "HomeScreen" ? "home" : "other",
-        sensitive: false, owner: view.state.portOwner,
+        sensitive: shown.sensitive, owner: view.state.portOwner,
         ...(selected?.kind === "calendar-event" ? { selectedObject: selected } : {}),
       }
     }
@@ -330,7 +349,7 @@ export const operationPorts = effect {
     },
     classOf: (operation) => {
       const op = calendarOperation(operation)
-      return op !== undefined && !isRead(op) ? "CreateReminder" : "NotesRead"
+      return op !== undefined && !isRead(op) ? "CalendarWrite" : "CalendarRead"
     },
     target: () => ({ tag: "NoTarget" }),
     summarize: (operation, result) => {

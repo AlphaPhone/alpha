@@ -1,10 +1,13 @@
-// spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"; spec/files/picker.md, "A tapped file is chosen only after its identity and its listing agree"; spec/files/picker.md, "Attaching reads the chosen files again and answers the caller once"
+// spec/files/picker.md, "Story: Choose a file from my phone for another app on Alpha"; spec/shell/navigation.md, "A layer is listed once, closes with its owner or with Back, and holds the phone while open"; spec/files/picker.md, "A tapped file is chosen only after its identity and its listing agree"; spec/files/picker.md, "Attaching reads the chosen files again and answers the caller once"
 import { type Picked, type Picker, Machine as PickerMachine } from "../../gen/files__picker.effect.vibe"
 import type { ListingOutcome } from "../../gen/files__storage.ts"
+import { Navigation } from "../shell/navigation.vibe"
 import { keyPath, parentOf, toRow } from "./paths.vibe"
 import { Documents, FilesStorage } from "./storage.vibe"
 import { accessOf } from "./browser.vibe"
 import type { AttachmentBytes } from "./native.schema.vibe"
+
+const PICKER_LAYER = "files-picker"
 
 /** A file the owner chose, with the bytes read when they attached it. */
 export interface PickedFile {
@@ -124,6 +127,31 @@ export const layer = Layer.effect(FilePicker, effect {
   effect function dismiss() {
     try ignore(picker.send({ type: "dismiss" }))
     try answer([])
+  }
+
+  const navigation = try Effect.serviceOption(Navigation)
+  if (Option.isSome(navigation)) {
+    const nav = navigation.value
+    const listed = try Ref.make(false)
+    fork.scoped (effect {
+      for try (const s of picker.changes) {
+        const was = try Ref.get(listed)
+        if (s.open && !was) {
+          const opened = nav.openLayer(PICKER_LAYER, "SheetLayer", true) catch () => false
+          try Ref.set(listed, opened)
+        } else if (!s.open && was) {
+          try Ref.set(listed, false)
+          try ignore(nav.closeLayer(PICKER_LAYER))
+        }
+      }
+    })
+    fork.scoped (effect {
+      for try (const _ of nav.changes) {
+        if (!(try Ref.get(listed)) || (try nav.get()).layers.some((l) => l.id === PICKER_LAYER)) continue
+        try Ref.set(listed, false)
+        if ((try picker.get()).open) try dismiss()
+      }
+    })
   }
 
   return {

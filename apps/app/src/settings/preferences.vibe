@@ -1,6 +1,6 @@
-// spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"
+// spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/preferences.md, "A preference an update added starts at its new-phone value, and the owner's saved choices stay"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { type Preference, type Preferences as State, Machine, asksBefore, decodeState, loadsMailImages, machine, sensorAllowed, sharesLocation, stored, allowsCalendarEdits, allowsGmailChanges } from "../../gen/settings__preferences.effect.vibe"
+import { type Preference, type Preferences as State, Machine, asksBefore, decodeState, initial, loadsMailImages, machine, sensorAllowed, sharesBrowserPage, sharesLocation, stored, allowsCalendarEdits, allowsGmailChanges } from "../../gen/settings__preferences.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { ownerKey } from "../platform/storage.vibe"
 
@@ -17,6 +17,8 @@ export service Preferences {
   asksBeforeActions(): boolean!!
   /** Whether a chat turn may carry the phone's last known location. */
   sharesLocation(): boolean!!
+  /** Whether a chat turn sent with Browser on screen may carry the open page; never where the preferences cannot be read. */
+  sharesBrowserPage(): boolean!!
   loadsMailImages(): boolean!!
   allowsGmailChanges(): boolean!!
   allowsCalendarEdits(): boolean!!
@@ -33,7 +35,11 @@ effect function readable() {
   if (raw === undefined) return true
   if (raw === null) return false
   const value = try (Effect.try(() => JSON.parse(raw) as unknown) catch () => null)
-  return value !== null && (try (decodeState(value) catch () => undefined)) !== undefined
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const filled = { ...initial, ...value }
+  if ((try (decodeState(filled) catch () => undefined)) === undefined) return false
+  if (Object.keys(initial).every((key) => Object.hasOwn(value, key))) return true
+  return try (Effect.as(store.set(PREFERENCES_KEY, JSON.stringify(filled)), true) catch () => false)
 }
 
 /** The preferences Machine kept under the owner's key, or in memory while the key cannot be read. */
@@ -51,6 +57,7 @@ export const preferences = Layer.unwrap(effect {
       current: read,
       asksBeforeActions: effect () => { const { value, readable } = try read(); return asksBefore(value, readable) },
       sharesLocation: effect () => { const { value, readable } = try read(); return sharesLocation(value, readable) },
+      sharesBrowserPage: effect () => { const { value, readable } = try read(); return sharesBrowserPage(value, readable) },
       loadsMailImages: effect () => { const { value, readable } = try read(); return loadsMailImages(value, readable) },
       allowsGmailChanges: effect () => { const { value, readable } = try read(); return allowsGmailChanges(value, readable) },
       allowsCalendarEdits: effect () => { const { value, readable } = try read(); return allowsCalendarEdits(value, readable) },

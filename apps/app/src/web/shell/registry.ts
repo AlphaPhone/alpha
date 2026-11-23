@@ -1,7 +1,7 @@
 // spec/shell/index.md, "An app is offered only where its availability admits it"
 import type { AppId, AppScreen, AppSurface, SurfaceSlot } from "../app-screen.ts";
 import { AOSP_ONLY } from "../../shell/apps.vibe";
-import { screens as accountScreens, surfaces as accountSurfaces } from "../account/index.tsx";
+import { ReadyAccountChips, screens as accountScreens, surfaces as accountSurfaces } from "../account/index.tsx";
 import { screens as assistantScreens, surfaces as assistantSurfaces } from "../assistant/index.tsx";
 import { screens as browserScreens, surfaces as browserSurfaces } from "../browser/index.tsx";
 import { HomeAgendaCard, screens as calendarScreens, surfaces as calendarSurfaces } from "../calendar/index.tsx";
@@ -32,6 +32,9 @@ export const allSurfaces: readonly AppSurface[] = [
 
 /** What Home mounts from other areas: Calendar's agenda card and, on the Alpha image only, Telephony's attention cards. */
 export const homeMounts = { agenda: HomeAgendaCard, attention: HomeCards } as const;
+
+/** What the access walkthrough mounts from other areas: the account's chips on its Ready card. */
+export const walkthroughMounts = { account: ReadyAccountChips } as const;
 
 /** Whether the build that admitted these apps is the Alpha AOSP image. */
 export function onImage(admitted: readonly string[]): boolean {

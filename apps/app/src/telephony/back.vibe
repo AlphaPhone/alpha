@@ -1,4 +1,4 @@
-// spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/messages.md, "Back closes Messages' own layers one at a time, innermost first, before it leaves Messages"; spec/telephony/contacts.md, "Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/phone.md, "Back clears Alpha's filter before it leaves Phone"
+// spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/messages.md, "Back closes Messages' own layers one at a time, innermost first, before it leaves Messages"; spec/telephony/contacts.md, "Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/phone.md, "Back clears Alpha's filter before it leaves Phone"; spec/telephony/phoneInfo.md, "Story: See my SIM, carrier and number on the image"
 import { backStep, Machine as CommsMachine } from "../../gen/telephony__comms.effect.vibe"
 import { contactsBack, Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
 import { messagesBack, Machine as MessagesMachine } from "../../gen/telephony__messages.effect.vibe"
@@ -8,6 +8,9 @@ import { Navigation } from "../shell/navigation.vibe"
 import { ContactsView } from "./contacts.vibe"
 import { MessagesView } from "./messages.vibe"
 import { VoicemailView } from "./voicemail.vibe"
+
+/** Phone's route for Settings → Phone, a page of its own whose Back is the shell's. */
+export const PHONE_INFO_ROUTE = "info"
 
 /** The three telephony apps a Back can land in. */
 export type TelephonyApp = "phone" | "messages" | "contacts"
@@ -103,12 +106,21 @@ export const telephonyBackLayer = Layer.effect(TelephonyBack, effect {
       try (contacts.send({ type: "contactClosed" }) catch () => undefined)
       try (comms.send({ type: "subjectShown", app: "ContactsApp", subject: "ListSubject", key: "contacts:list:" }, "Owner") catch () => undefined)
     } else if (step === "ChipClears") try contactsView.clearChip()
-    else if (step === "SearchClears") try contactsView.read("", false)
+    else if (step === "SearchClears") {
+      if ((try contacts.get()).query !== "") try contactsView.read("", false)
+      try (contacts.send({ type: "searchClosed" }) catch () => undefined)
+    }
     return true
+  }
+
+  effect function onPhoneInfo() {
+    const nav = try navigation.get()
+    return nav.app === "phone" && nav.places.find((place) => place.app === "phone")?.route === PHONE_INFO_ROUTE
   }
 
   return {
     effect back(app: TelephonyApp) {
+      if (app === "phone" && (try onPhoneInfo())) return false
       if (try stage(app)) return true
       if (app === "phone") return try phoneLayers()
       if (app === "messages") return try messagesLayers()

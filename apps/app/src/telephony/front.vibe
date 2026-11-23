@@ -6,9 +6,9 @@ export function readableIn(state: ForegroundState): boolean {
   return state.visible && !state.locked && state.screen !== "off"
 }
 
-/** Whether the call bar may show now: the screen on and unlocked, outside the assistant's own surface. */
+/** Whether the call bar may show now: the screen on and unlocked, outside Android's assistant surface (`AlphaAssistActivity`). */
 export function barEligibleIn(state: ForegroundState): boolean {
-  return readableIn(state) && state.view !== "assistant"
+  return readableIn(state) && state.assistantSurface !== true
 }
 
 /** Each change of whether the page is readable, starting with the current one, as a layer captures it. */

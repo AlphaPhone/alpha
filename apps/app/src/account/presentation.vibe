@@ -32,7 +32,8 @@ export service AccountPresentation {
   openSection(section: Section): void!!
   /**
    * Back inside Account, as the screen shows it: the own-keys form returns to sign-in, sign-in steps back, a key removal
-   * review ends, a section returns to the account section and a sign-out review ends. Whether Account took it.
+   * review ends, a section returns to the account section and a sign-out review ends. Whether Account took it; closing the
+   * chooser of a sign-in opened while signed out leaves Account too, as the screen's own Back does.
    */
   back(): boolean!!
 }
@@ -66,7 +67,11 @@ export const presentationService = Layer.effect(AccountPresentation, effect {
       if (entry.work === "SavingOwnKeys") return try provider.leave()
       const shown = try sheet.current()
       const signedIn = isSignedIn((try session.current()).phase)
-      if (shown.section !== "ProviderSection" && (!signedIn || entryOf(entry) === "OpenedEntry")) return try signIn.back()
+      if (shown.section !== "ProviderSection" && (!signedIn || entryOf(entry) === "OpenedEntry")) {
+        const leavesAccount = !signedIn && entryOf(entry) === "OpenedEntry" && entry.screen === "Choose" && entry.work === "NoWork"
+        const took = try signIn.back()
+        return took && !leavesAccount
+      }
       if (shown.section === "ProviderSection" && (try provider.current()).review.tag === "Reviewing") {
         try provider.cancelRemove()
         return true

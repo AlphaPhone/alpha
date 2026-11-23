@@ -6,7 +6,7 @@ import { useMachine as useMirror } from "../../../gen/clock__mirror.react.ts";
 import type { Mirror as MirrorState, MirrorReport } from "../../../gen/clock__mirror.ts";
 import { canHistoryClearAnswered, canResumeRequested, canSaveRequested, collecting, initial as mirrorStart, maxApps } from "../../../gen/clock__mirror.ts";
 import { Mirror } from "../../clock/mirror.vibe";
-import { Native } from "../../platform/native.vibe";
+import { Shade } from "../../shell/shade.vibe";
 import { Button, Card, EmptyState, ListRow, Separator, Switch } from "../components/ui/index.ts";
 import { runtime } from "../runtime.ts";
 import { act, answer } from "./services.ts";
@@ -193,7 +193,7 @@ export function NotificationsSettings() {
       mirror={mirror}
       choices={choices}
       history={history}
-      onOpenChannels={() => act(Effect.flatMap(Effect.service(Native), (n) => Effect.catch(Effect.asVoid(n.invoke("AlphaDevice", "openSettings", { page: "notifications" })), () => Effect.void)))}
+      onOpenChannels={() => act(Effect.flatMap(Effect.service(Shade), (s) => s.settings()))}
       onOpenAccess={() => mirrorDo((m) => m.openAccess())}
       onMirror={(enabled) => mirrorDo((m) => m.save({ enabled }))}
       onKeepHistory={(keep) => { setHistory(undefined); mirrorDo((m) => m.save({ history: keep })); }}

@@ -1,5 +1,5 @@
-// spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"; spec/settings/diagnostics.md, "A licence flag is shown by Alpha's name for it, an unlisted flag as written, with what it obliges"
-import { FileText, Share2, Trash2 } from "lucide-react";
+// spec/settings/diagnostics.md, "Story: See what went wrong and share it with support"; spec/settings/diagnostics.md, "Story: Read the licences Alpha ships"; spec/settings/diagnostics.md, "A licence flag is shown by Alpha's name for it, an unlisted flag as written, with what it obliges"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"
+import { FileText, History, Share2, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { Page, Settings } from "../../../gen/settings.ts";
 import type { Diagnostics } from "../../../gen/settings__diagnostics.ts";
@@ -30,13 +30,15 @@ export interface AboutPagesProps {
   readonly onOpen: (page: Page) => void;
   readonly onOpenLicence: (index: number) => void;
   readonly onAppInfo: () => void;
+  /** Open the assistant's Agent activity; undefined where the build has no on-device agent. */
+  readonly onActivity?: () => void;
 }
 
 /**
  * About, the problem log and the licences.
  * @model spec/settings/diagnostics.md
  */
-export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen, onOpenLicence, onAppInfo }: AboutPagesProps) {
+export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen, onOpenLicence, onAppInfo, onActivity }: AboutPagesProps) {
   const [query, setQuery] = useState("");
   const read = facts.read;
   const exporting = diagnostics.exportState === "Exporting";
@@ -111,6 +113,7 @@ export function AboutPages({ nav, facts, native, diagnostics, aboutActs, onOpen,
         {native && read.android && <SettingRow label="Android version" state={{ word: read.android }} />}
         {native && read.installedAt > 0 && <SettingRow label="Installed or last updated" state={{ word: new Date(read.installedAt).toLocaleDateString() }} />}
         {native && <SettingRow label="App info" onHandoff={onAppInfo} ariaLabel="Alpha's app info in Android" />}
+        {onActivity && <SettingRow label="Agent activity" icon={<History aria-hidden className="size-5" />} onOpen={onActivity} />}
         <SettingRow label="Problem log" ariaLabel={count ? `Problem log, ${count}` : "Problem log"} state={count === undefined ? { word: "Unavailable" } : count > 0 ? { word: String(count), tone: "warn" } : undefined}
           onOpen={() => onOpen("Problems")} />
         {exportRow}

@@ -10,6 +10,7 @@ import { WorkflowRuns } from "../../src/workflows/runs.vibe"
 import { NotesOrigins } from "../../src/notes/origins.vibe"
 import { AssistantHost } from "../../src/assistant/host.vibe"
 import { AssistantFlows } from "../../src/assistant/flows.vibe"
+import { AssistantDraft, type AskSource } from "../../src/assistant/draft.vibe"
 import { DeviceFacts } from "../../src/settings/facts.vibe"
 import { Reminders } from "../../src/clock/reminders.vibe"
 import { RemindersPage } from "../../src/clock/reminder-page.vibe"
@@ -98,10 +99,13 @@ export type Listed = (id: string) => { readonly id: string; readonly revision: s
 
 /**
  * The assistant: a composer that is quiet unless `busy` writes a reply or `holding` keeps a draft, the drafts reviewed
- * questions opened, and a notice question that drafts only for an askable notice still `listed` at the revision asked.
+ * questions opened, a notice question that drafts only for an askable notice still `listed` at the revision asked, and
+ * a question review that remembers each question it was asked to review and each one dismissed.
  */
 export function fakeAssistant(busy = false, holding = false, listed?: Listed) {
   const asked: string[] = []
+  const reviews: AskSource[] = []
+  const dismissed: number[] = []
   const composer = { transcript: Stream.make({ conversation: null, rows: [], hasMore: false, typing: busy }) }
   const assistant = { holdingDraft: () => succeed(holding), holdingDraftChanges: Stream.make(holding), openWith: (draft: string) => sync(() => { asked.push(draft) }) }
   const flows = {
@@ -112,12 +116,20 @@ export function fakeAssistant(busy = false, holding = false, listed?: Listed) {
       return true
     }),
   }
+  const draft = {
+    review: Stream.make(undefined),
+    askAbout: (source: AskSource) => sync(() => { reviews.push(source) }),
+    dismiss: (id: number) => sync(() => { dismissed.push(id) }),
+  }
   return {
     asked,
+    reviews,
+    dismissed,
     layer: Layer.mergeAll(
       Layer.succeed(Composer, composer as unknown as Composer.Shape),
       Layer.succeed(Assistant, assistant as unknown as Assistant.Shape),
       Layer.succeed(AssistantFlows, flows as unknown as AssistantFlows.Shape),
+      Layer.succeed(AssistantDraft, draft as unknown as AssistantDraft.Shape),
     ),
   }
 }

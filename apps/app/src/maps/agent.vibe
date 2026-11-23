@@ -10,6 +10,7 @@ import {
   deviceMapsNavigation, withMapsNavigationRelay,
 } from "@elizaos/plugin-maps/client/device-navigation"
 import { MapsRelay } from "../assistant/ports.vibe"
+import { newId } from "../platform/ids.ts"
 import { Resident } from "../platform/resident.vibe"
 import { modelTravel, wireMode } from "./cloud.vibe"
 import { emptyContent, MapsContent, type MapsContentState } from "./content.vibe"
@@ -22,9 +23,24 @@ import { MapsScreen } from "./screen.vibe"
 
 const RELAY_PATH = "/api/client-devices/maps-navigation"
 
+/** The wire name of the reviewed read of the selected place or route. */
+export const MAPS_SELECTED_READ_CAPABILITY = "maps.selected-read.v1"
+
+/** The Maps capabilities this phone advertises in `x-eliza-device-capabilities`, of those the agent offered: the selected read, on every build. */
+export function mapsDeviceCapabilities(offered: readonly string[]): string[] {
+  return [MAPS_SELECTED_READ_CAPABILITY].filter((capability) => offered.includes(capability))
+}
+
 /** What a view navigation must say to the host: its binding, as the host prepared it. */
 export interface NavigationBinding {
   readonly [field: string]: unknown
+}
+
+/** What Maps shows the agent now, as the turn observation's selected object and a `maps_read_selected` target name it. */
+export interface MapsContext {
+  readonly kind: "map-place" | "map-route" | "map-search"
+  readonly id: string
+  readonly revision: string
 }
 
 /** The agent's way into Maps on this phone. */
@@ -37,7 +53,18 @@ export service MapsAgent {
   readSelected(): string | undefined!!
   review(): boolean!!
   approve(): boolean!!
+  /** What Maps shows now with its identity and revision; undefined off Maps, on a locked screen, or with nothing shown. */
+  context(): MapsContext | undefined!!
 }
+
+/** The identity of what is shown, kept while the same place or search stays selected: a route keeps its destination's. */
+export function selectionOf(s: Screen, c: MapsContentState, kind: ContextKind): string {
+  if (kind === "MapSearch") return JSON.stringify(["search", s.searched])
+  if ((kind === "MapPlace" || kind === "MapRoute") && c.shown) return JSON.stringify(["place", c.shown.providerId, c.shown.providerPlaceId, c.shown.label, c.shown.coordinate])
+  return ""
+}
+
+const KEPT_IDENTITIES = 32
 
 function providerConfig(c: MapsContentState): ProviderConfig {
   const coverage = c.coverage
@@ -87,6 +114,8 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
   const actions = try MapsScreen
   let latest: { screen: Screen; content: MapsContentState; guidance: Guidance } = { screen: try screen.get(), content: emptyContent, guidance: try guidanceMachine.get() }
   let contextKey = ""
+  let selection = ""
+  const identities = new Map<string, string>()
   let reported = { session: 0, intent: 0 }
   const offers = new Map<string, number>()
   const connected = try Queue.unbounded<{ value: boolean; offerId: string }>()
@@ -96,6 +125,7 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
     const context = contextOf(s, c, g.phase !== "NotGuiding")
     if (context.key !== contextKey) {
       contextKey = context.key
+      selection = selectionOf(s, c, context.kind)
       reads.send({ type: "publish", kind: context.kind, changed: true }) catch () => undefined
     }
   })
@@ -109,6 +139,7 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
       else surface.send({ type: "goTo", view }) catch () => undefined
     }
     reads.send(state.view === "maps" ? { type: "enterContext" } : { type: "leaveContext" }) catch () => undefined
+    if ((try reads.get()).sensitive !== state.secure) reads.send({ type: "protect", on: state.secure }) catch () => undefined
   })
 
   fork.detached Stream.runForEach(Stream.fromQueue(connected), ({ value, offerId }) => effect {
@@ -241,6 +272,18 @@ export const agentLayer = Layer.effect(MapsAgent, effect {
     effect approve() {
       const approved = reads.send({ type: "approveRead" }) catch () => undefined
       return approved?.phase === "Executing"
+    },
+    effect context() {
+      const r = try reads.get()
+      if (!r.inMaps || r.sensitive || r.kind === "NoContext" || selection === "") return undefined
+      let id = identities.get(selection)
+      if (id === undefined) {
+        id = `maps_${newId()}`
+        identities.set(selection, id)
+        if (identities.size > KEPT_IDENTITIES) identities.delete(identities.keys().next().value ?? "")
+      }
+      const kind = r.kind === "MapRoute" ? "map-route" as const : r.kind === "MapPlace" ? "map-place" as const : "map-search" as const
+      return { kind, id, revision: String(r.revision) } satisfies MapsContext
     },
     effect readSelected() {
       const executed = reads.send({ type: "executeRead" }) catch () => undefined

@@ -6,6 +6,7 @@ import { cameraFor, secondsLeft, showsTimeLeft } from "../../gen/camera__viewfin
 import { CameraActions } from "../../src/camera/actions.vibe"
 import { CameraChat } from "../../src/camera/chat.vibe"
 import { recordingLabel } from "../../src/camera/messages.vibe"
+import { admitted, classOfOperation } from "../../src/camera/operations.vibe"
 import type { FrameQuestion } from "../../src/camera/ports.vibe"
 import { Viewfinder } from "../../src/camera/viewfinder.vibe"
 import { cameraOver, cameraWith, onHome, phone, preview, until } from "./support.vibe"
@@ -287,4 +288,30 @@ it.live("Back stops a recording and keeps Camera, and hands Back to the shell wh
       { idle: false, recording: "RecordingActive", stopped: true, after: false, finalised: 1 },
     ))
   }
+})
+
+// spec/camera/libraryReview.md, "Story: Approve each library change the assistant proposes"
+it.effect("only a photo and a Photos view change may run directly; every library read or change is a Photos card (spec/camera/libraryReview.md, \"Story: Approve each library change the assistant proposes\")", () => effect {
+  const classOf = (operation: unknown) => {
+    const op = admitted(operation)
+    return op === undefined ? "unadmitted" : classOfOperation(op)
+  }
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      capture: classOf({ type: "camera_capture_photo", lens: "back" }),
+      filter: classOf({ type: "photos_filter", favorite: true }),
+      open: classOf({ type: "photos_open", id: "lib:i:1" }),
+      select: classOf({ type: "photo_library_select", ids: ["lib:i:1"] }),
+      search: classOf({ type: "photo_library_search", kind: "image" }),
+      inspect: classOf({ type: "photo_library_inspect", id: "lib:i:1" }),
+      review: classOf({ type: "photo_library_review", action: "trash", items: [{ id: "lib:i:1", revision: "3" }] }),
+      album: classOf({ type: "photos_album_create", name: "Trip", ids: ["lib:i:1"] }),
+      share: classOf({ type: "photos_share", selected: true }),
+      unknown: classOf({ type: "photos_delete_everything" }),
+    },
+    {
+      capture: "CameraCapture", filter: "OpenView", open: "OpenView", select: "OpenView", search: "PhotosChange",
+      inspect: "PhotosChange", review: "PhotosChange", album: "PhotosChange", share: "PhotosChange", unknown: "unadmitted",
+    },
+  ))
 })

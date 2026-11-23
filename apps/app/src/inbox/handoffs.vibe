@@ -1,8 +1,8 @@
-// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/operations.md, "A chat-reviewed email is sent once per reviewed version, only as a new email of the selected, checked account"; spec/inbox/attachments.md, "A shared file always starts a new local draft for the account it was reviewed for"
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/operations.md, "The phone advertises the agent's local email draft only when the agent offers it"; spec/inbox/operations.md, "A chat-reviewed email is sent once per reviewed version, only as a new email of the selected, checked account"; spec/inbox/attachments.md, "A shared file always starts a new local draft for the account it was reviewed for"
 import type { CameraHandoffs, ReviewedFile } from "../camera/ports.vibe"
 import type { AssistantEmail } from "../assistant/ports.vibe"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
-import { chatEmailSendable, chatBodyLimit } from "../../gen/inbox__operations.ts"
+import { chatEmailSendable, chatBodyLimit, inboxAdvertised } from "../../gen/inbox__operations.ts"
 import { ShellMail, type ReviewedEmail } from "../shell/ports.vibe"
 import { Navigation } from "../shell/navigation.vibe"
 import { InboxAccounts } from "./accounts.vibe"
@@ -92,4 +92,9 @@ export const cameraEmailTarget = effect {
     }
   }
   return target
+}
+
+/** Of the capabilities the agent `offered`, those Inbox advertises in `x-eliza-device-capabilities`: the agent's local email draft, when offered. */
+export function inboxCapabilities(offered: readonly string[]): string[] {
+  return [...inboxAdvertised([...offered])]
 }

@@ -1,4 +1,4 @@
-// spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"; spec/clock/vocabulary.md, "Story: Hear only what Clock could know"; spec/clock/handoff.md, "Story: Try the Clock screen without opening Clock"; spec/clock/handoffHistory.md, "Story: Know what became of my last Clock request after a restart"; spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/reminderReads.md, "Story: Let a workflow read today's reminders only as I reviewed"
+// spec/clock/handoff.md, "Story: Ask Clock for an alarm after I review it"; spec/clock/agentReview.md, "Story: Be offered only the Clock and reminder requests this phone can carry out"; spec/clock/vocabulary.md, "Story: Hear only what Clock could know"; spec/clock/handoff.md, "Story: Try the Clock screen without opening Clock"; spec/clock/handoffHistory.md, "Story: Know what became of my last Clock request after a restart"; spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/reminderReads.md, "Story: Let a workflow read today's reminders only as I reviewed"
 // @vitest-environment happy-dom
 import { assert, describe, it } from "@effect/vitest"
 import { Machine as HandoffMachine } from "../../gen/clock__handoff.effect.vibe"
@@ -8,7 +8,7 @@ import { workflowClockPort } from "../../src/clock/workflow-port.vibe"
 import { WorkflowClockPort } from "../../src/workflows/ports.vibe"
 import { opening } from "../../gen/clock__handoffHistory.ts"
 import { ClockReview, agentReviewLayer } from "../../src/clock/agent-review.vibe"
-import { operationPorts } from "../../src/clock/operations.vibe"
+import { advertisedBy, clockCapabilities, operationPorts } from "../../src/clock/operations.vibe"
 import { build, fakeHost, fakePhone, fakeReminders, machines, refuse } from "./phone.vibe"
 
 describe("Clock handoff (spec/clock/handoff.md, \"Story: Ask Clock for an alarm after I review it\")", () => {
@@ -100,8 +100,8 @@ describe("Agent Clock operations (spec/clock/agentReview.md, \"Story: Let the ag
       const answer = try promise(() => ports.execute(operation, at))
       const reviewed = phone.calls.find((c) => c.method === "reviewClock")?.args as { scope: string; operation: unknown } | undefined
       try Effect.try(() => assert.deepStrictEqual(
-        { valid: ports.validate(operation) !== undefined, other: ports.validate({ type: "notes_search", query: "x" }), answer, sent: reviewed?.operation, scoped: /^[a-f0-9]{64}$/.test(reviewed?.scope ?? "") },
-        { valid: true, other: undefined, answer: { kind: "applied", result: { kind: "clock-handoff", action: "show", status: "opened" } }, sent: operation, scoped: true },
+        { valid: ports.validate(operation) !== undefined, other: ports.validate({ type: "notes_search", query: "x" }), answer, sent: reviewed?.operation, scoped: /^[a-f0-9]{64}$/.test(reviewed?.scope ?? ""), cls: ports.classOf(operation), handoff: ports.handoff?.(operation) },
+        { valid: true, other: undefined, answer: { kind: "applied", result: { kind: "clock-handoff", action: "show", status: "opened" } }, sent: operation, scoped: true, cls: "CreateReminder", handoff: true },
       ))
     }
   })
@@ -117,8 +117,8 @@ describe("Agent Clock operations (spec/clock/agentReview.md, \"Story: Let the ag
       const ports = try operationPorts
       const answer = try promise(() => ports.execute({ type: "reminder_complete", target }, { proposalId: "p2", operationId: "op_2", attemptId: 1 }))
       try Effect.try(() => assert.deepStrictEqual(
-        { answer, operated: phone.calls.filter((c) => c.method === "operateReminder").length },
-        { answer: { kind: "refused", code: "reminder_changed" }, operated: 0 },
+        { answer, operated: phone.calls.filter((c) => c.method === "operateReminder").length, cls: ports.classOf({ type: "reminder_complete", target }), handoff: ports.handoff?.({ type: "reminder_complete", target }) },
+        { answer: { kind: "refused", code: "reminder_changed" }, operated: 0, cls: "CreateReminder", handoff: false },
       ))
     }
   })
@@ -194,13 +194,35 @@ describe("Reminder reads (spec/clock/reminderReads.md, \"Story: Let a workflow r
       try Effect.try(() => assert.deepStrictEqual(
         {
           kind: shared.kind, ids: shared.result?.reminders.map((r) => [r.id, r.status]), notes: JSON.stringify(shared.result ?? {}).includes("private"),
-          overflow: [overflow.kind, overflow.code, overflow.result?.overdue], cls: ports.classOf(read),
+          overflow: [overflow.kind, overflow.code, overflow.result?.overdue], cls: ports.classOf(read), handoff: ports.handoff?.(read),
         },
         {
           kind: "applied", ids: [["overdue", "open"], ["done", "completed"], ["today", "open"]], notes: false,
-          overflow: ["refused", "reminders_overflow", 1], cls: "NotesRead",
+          overflow: ["refused", "reminders_overflow", 1], cls: "CalendarRead", handoff: false,
         },
       ))
     }
+  })
+})
+
+describe("What Clock advertises (spec/clock/agentReview.md, \"Story: Be offered only the Clock and reminder requests this phone can carry out\")", () => {
+  it.effect("advertise the handoff, repeat days and one reminder version only where the phone carries them (spec/clock/agentReview.md, \"Clock advertises a Clock handoff only with a Clock handler, repeat days only where Clock carries them, and one reminder version only where the phone keeps reminders\")", () => effect {
+    const offered = ["clock.handoff.v1", "clock.handoff.v2", "clock.alarms.v1", "reminders.local-record.v1", "reminders.local-record.v2", "reminders.create.v1", "notes.query.v1"]
+    const phone = fakePhone({ "DailyApps.surfaceInfo": () => ({ clockRepeatDaysVersion: 1 }) })
+    const plain = fakePhone({ "DailyApps.surfaceInfo": () => ({}) })
+    const advertised = (on: typeof phone.layer, variant: "launcher" | "aosp" | "browser") =>
+      Effect.provide(Effect.flatMap(clockCapabilities, (clock) => clock.advertise(offered)), Layer.merge(on, build(variant)))
+    const onPhone = try advertised(phone.layer, "aosp")
+    const noRepeat = try advertised(plain.layer, "launcher")
+    const browser = try advertised(phone.layer, "browser")
+    try Effect.try(() => assert.deepStrictEqual(
+      { onPhone, noRepeat, browser, v1Only: advertisedBy({ handler: true, store: true, repeatDays: true }, ["reminders.local-record.v1", "clock.handoff.v2"]) },
+      {
+        onPhone: ["clock.handoff.v1", "clock.handoff.v2", "reminders.local-record.v2", "reminders.create.v1"],
+        noRepeat: ["clock.handoff.v1", "reminders.local-record.v2", "reminders.create.v1"],
+        browser: [],
+        v1Only: ["clock.handoff.v2", "reminders.local-record.v1"],
+      },
+    ))
   })
 })

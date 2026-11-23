@@ -100,3 +100,37 @@ pure def stepAResetForgetsTheOwner(before: Storage, via: str, after: Storage): b
 
 pure def sometimesBoundAgainAfterAReset(s: Storage): bool = s.resets >= 1 and s.owner != ""
 ```
+
+## Story: Keep what the earlier Alpha kept in its encrypted slots
+
+> As the owner, I want the drafts and pending records the earlier Alpha kept in its encrypted slots to
+> be there after the update, and never to lose one in the move.
+
+### A legacy slot is cleared only once the secure store holds a value for it
+
+The earlier Alpha kept drafts and operation records in the connection plugin's encrypted slots; Alpha
+now keeps them in the hardware-backed secure store. A slot is moved by copying its value into the
+secure store only where that slot is still empty there. The legacy slot is cleared only once the secure
+store holds a value for it: the copy, or a newer one the area saved since, which wins. A value that
+could not be read, copied or compared stays in its legacy slot, to be moved on a later read; a legacy
+slot that cannot be cleared is cleared on a later read, once the secure store is seen to hold a value.
+
+```quint
+type SlotAdoption = NothingToAdopt | Adopted | AlreadyKept | NotAdopted
+
+pure def adoptionOf(legacyHeld: bool, currentHeld: bool, copied: bool): SlotAdoption =
+  if (not(legacyHeld)) NothingToAdopt
+  else if (currentHeld) AlreadyKept
+  else if (copied) Adopted
+  else NotAdopted
+
+pure def legacyCleared(a: SlotAdoption): bool = a == Adopted or a == AlreadyKept
+
+pure def lawALegacyValueIsClearedOnlyWhenTheSecureStoreHoldsOne(legacyHeld: bool, currentHeld: bool, copied: bool): bool =
+  legacyCleared(adoptionOf(legacyHeld, currentHeld, copied)) implies (currentHeld or copied)
+
+pure def lawAnUncopiedValueStaysInItsLegacySlot(legacyHeld: bool): bool = not(legacyCleared(adoptionOf(legacyHeld, false, false)))
+
+pure def lawANewerValueIsNeverOverwritten(legacyHeld: bool, copied: bool): bool =
+  adoptionOf(legacyHeld, true, copied) != Adopted
+```

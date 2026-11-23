@@ -20,8 +20,9 @@ import org.json.JSONObject;
  * process over an abstract local socket to the app's own uid only: one length-prefixed UTF-8 JSON
  * frame in, one out. It answers the enrolled phone this installation is, reads an exact reviewed
  * Calendar range for a device step addressed to that enrollment, and describes or reads a reviewed
- * native digest source through {@link NativeDigestHost}. Every other device operation is refused,
- * so nothing is performed that the phone cannot read back.
+ * native digest source through {@link NativeDigestHost}. Every other device operation is refused
+ * here: the resident offers those steps to the phone as reviewed device requests
+ * (workflowDeviceOffer of @elizaos/agent), which the owner approves on screen.
  */
 final class WorkflowBridgeHost {
  static final String SOCKET_ENV = "ALPHA_WORKFLOW_SOCKET";

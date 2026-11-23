@@ -279,7 +279,8 @@ pure def sometimesSignedInWithACode(s: SignIn): bool = s.signedIn and s.adoptedK
 
 During a check, Back ends it, and an owner's check still ensures the agent. During a send or a
 verification it cancels that attempt. On the required or first-run page showing its chooser with
-nothing pending, Back changes nothing.
+nothing pending, Back changes nothing. In the Account app, Back from the chooser of a sign-in the owner
+opened while signed out closes it and leaves Account too, since nothing of Account is behind it.
 
 ```quint
 pure def canBack(s: SignIn): bool = entryOf(s) != NoEntry and s.work != GoogleWork

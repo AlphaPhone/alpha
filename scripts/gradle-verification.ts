@@ -49,8 +49,8 @@ export const MIRROR_PROPERTY = 'mavenCentralMirrorUrl';
 export const HOST_TEMPLATES = 'vendor/eliza/packages/os/android/host-templates';
 // The generator script writes the host's gradle.properties and wrapper settings itself.
 const MIRROR_FREE = [HOST_DESCRIPTOR, 'android/app/product.gradle', `${HOST_TEMPLATES}/settings.gradle`, `${HOST_TEMPLATES}/build.gradle`,
-  `${HOST_TEMPLATES}/app.gradle`, `${HOST_TEMPLATES}/toolchain.json`, `${HOST_TEMPLATES}.mjs`, 'scripts/android-host.ts',
-  'vendor/eliza/packages/auth/android/build.gradle', 'scripts/build-android.ts', 'scripts/build-notification-fixture.ts', 'scripts/generate-licenses.ts', 'scripts/toolchain.ts'];
+  `${HOST_TEMPLATES}/app.gradle`, `${HOST_TEMPLATES}/toolchain.json`, 'vendor/eliza/packages/os/src/build/android-host.vibe', 'scripts/android-host.ts',
+  'vendor/eliza/packages/os/android/sign-in/build.gradle', 'scripts/build-android.ts', 'scripts/build-notification-fixture.ts', 'scripts/generate-licenses.ts', 'scripts/toolchain.ts'];
 /**
  * Publisher groups reviewed for this build, with the date and what was looked at. A component in
  * another group fails --check until someone looks at where it comes from and adds the group.

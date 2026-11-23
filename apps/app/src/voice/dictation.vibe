@@ -1,10 +1,11 @@
-// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/dictation.md, "Recording starts only on a free microphone, after Alpha's speech confirmed it stopped, with the recognizer of the route in use now"
+// spec/voice/dictation.md, "Story: Dictate into the draft I am writing"; spec/voice/dictation.md, "Story: Keep my recording when transcription fails"; spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/dictation.md, "Recording starts only on a free microphone, after Alpha's speech confirmed it stopped, with the recognizer of the route in use now"; spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"
 import { Native } from "../platform/native.vibe"
 import { Machine, maxMsOf, onPhoneMaxMs, type Dictation as DictationState, type DictationEffect, type DictationFailure, type Event, type Recognizer, type SpeechGate } from "../../gen/voice__dictation.effect.vibe"
 import type { Chain, SpeechChains } from "../../gen/voice__speech.ts"
 import type { Route } from "../../gen/voice__route.ts"
 import { Microphone } from "./capture.vibe"
 import { refusalOf } from "./failure.vibe"
+import { Latency } from "./latency.vibe"
 import { newId } from "../platform/ids.ts"
 import { RecordingClip, RecordingStarted, RecordingStopped, TranscriptReply } from "./native.schema.vibe"
 import { VoiceRoute, attemptFailed } from "./route.vibe"
@@ -76,6 +77,7 @@ export const dictationService = Layer.effect(Dictation, effect {
   const routes = try VoiceRoute
   const microphone = try Microphone
   const speech = try Speech
+  const latency = try Latency
   const ids = new Map<string, number>()
   let target: DictationTarget | undefined
   let recordingId: string | undefined
@@ -106,6 +108,7 @@ export const dictationService = Layer.effect(Dictation, effect {
       if (effectOut.tag === "Insert" && target !== undefined) {
         const existing = try target.draftLength()
         try target.insert(existing > 0 ? `\n${text}` : text, effectOut.voiceOriginated)
+        try latency.noteDraft(effectOut.voiceOriginated && existing === 0 ? text : undefined)
         recordingId = undefined
       }
       if (effectOut.tag === "DiscardClip") try discardClip()
@@ -137,7 +140,10 @@ export const dictationService = Layer.effect(Dictation, effect {
     }
     if (decoded?.durationMs !== undefined) {
       const ms = Math.min(Math.max(1, Math.round(decoded.durationMs)), maxMsOf((try held.get()).recognizer))
-      if (try send({ type: "stop", ticket, ms })) try transcribe()
+      if (try send({ type: "stop", ticket, ms })) {
+        try latency.beginDraft()
+        try transcribe()
+      }
       return
     }
     try send({ type: "captureLost", ticket, byCall: false })
@@ -169,9 +175,10 @@ export const dictationService = Layer.effect(Dictation, effect {
       if (now.stage === "Transcribing") try send({ type: "transcribeFailed", ticket: now.ticket, fallsBack: false })
       return undefined
     }
-    if (text === undefined) return
+    if (text === undefined) return try latency.noteDraft(undefined)
     const now = try held.get()
     try send({ type: "transcribed", ticket: now.ticket, target: idOf(owner.id), account: idOf(owner.account), chars: text.length, draftChars: try owner.draftLength() }, text)
+    try latency.noteDraft(undefined)
   }
 
   return {
@@ -223,7 +230,10 @@ export const dictationService = Layer.effect(Dictation, effect {
         return
       }
       const ms = Math.min(Math.max(1, Math.round(clip.durationMs)), maxMsOf(now.recognizer))
-      if (try send({ type: "stop", ticket: now.ticket, ms })) try transcribe()
+      if (try send({ type: "stop", ticket: now.ticket, ms })) {
+        try latency.beginDraft()
+        try transcribe()
+      }
     },
     effect retry() {
       const now = try held.get()

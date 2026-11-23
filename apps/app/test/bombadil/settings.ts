@@ -1,4 +1,4 @@
-// spec/settings/passwords.md, "An entry opens from the list, and only a listed entry stays open"; spec/settings/passwords.md, "Each visit of the page has its own generation, and only its own answers count"; spec/settings/passwords.md, "Only Android's own authentication unlocks the vault, and the list follows the unlock"; spec/settings/index.md, "Developer pages open only in a build with test mocks"; spec/settings/updates.md, "One check or install runs at a time, and an explicit check keeps its answer in Settings"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/reset.md, "Settings offers no backup, import or export of the owner's data"; spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"; spec/settings/diagnostics.md, "One export runs at a time, and it is shared only when Android's chooser opened"; spec/settings/vocabulary.md, "A reported switch is on or off, and anything else is unknown"
+// spec/settings/passwords.md, "An entry opens from the list, and only a listed entry stays open"; spec/settings/passwords.md, "Each visit of the page has its own generation, and only its own answers count"; spec/settings/passwords.md, "Only Android's own authentication unlocks the vault, and the list follows the unlock"; spec/settings/index.md, "Developer pages open only in a build with test mocks"; spec/settings/updates.md, "One check or install runs at a time, and an explicit check keeps its answer in Settings"; spec/settings/reset.md, "The native answer is worded by Alpha, and one Alpha does not know claims nothing"; spec/settings/reset.md, "Settings offers no backup, import or export of the owner's data"; spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"; spec/settings/preferences.md, "The open Browser page goes with a chat turn only while Browser page for Alpha is on"; spec/settings/diagnostics.md, "One export runs at a time, and it is shared only when Android's chooser opened"; spec/settings/vocabulary.md, "A reported switch is on or off, and anything else is unknown"
 // What Bombadil checks of Settings and Passwords in every state it reaches.
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
@@ -28,6 +28,16 @@ const entry = extract(({ document }) => ({
 const askSwitch = extract(({ document }) => {
   const toggle = document.querySelector('[role="switch"][aria-label="Ask before Alpha acts"]');
   return {
+    locked: toggle?.hasAttribute("disabled") === true || toggle?.hasAttribute("data-disabled") === true,
+    on: toggle?.getAttribute("aria-checked") === "true",
+    recovering: Array.from(document.querySelectorAll("button")).some((b) => b.getAttribute("aria-label") === "Reset device preferences"),
+  };
+});
+
+const pageSwitch = extract(({ document }) => {
+  const toggle = document.querySelector('[role="switch"][aria-label="Browser page for Alpha"]');
+  return {
+    shown: toggle !== null,
     locked: toggle?.hasAttribute("disabled") === true || toggle?.hasAttribute("data-disabled") === true,
     on: toggle?.getAttribute("aria-checked") === "true",
     recovering: Array.from(document.querySelectorAll("button")).some((b) => b.getAttribute("aria-label") === "Reset device preferences"),
@@ -64,6 +74,9 @@ export const settingsVaultEntryOnlyWhileUnlocked = always(() => !(entry.current.
 
 /** Preferences that need recovery keep Ask before Alpha acts on and locked. */
 export const settingsUnreadablePreferencesAskFirst = always(() => !askSwitch.current.recovering || (askSwitch.current.locked && askSwitch.current.on));
+
+/** Preferences that need recovery show Browser page for Alpha off and locked, so no page is shared. */
+export const settingsUnreadablePreferencesShareNoPage = always(() => !pageSwitch.current.shown || !pageSwitch.current.recovering || (pageSwitch.current.locked && !pageSwitch.current.on));
 
 /** Settings offers no import, export or backup of the owner's data. */
 export const settingsOffersNoDataImportOrExport = always(() => dataActions.current === 0);

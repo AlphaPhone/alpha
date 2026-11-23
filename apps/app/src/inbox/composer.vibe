@@ -14,6 +14,7 @@ import { Gmail } from "./gmail.vibe"
 import { MailOperations, type OperationOutcome } from "./operations.vibe"
 import { FilePicker } from "../files/picker.vibe"
 import { Navigation } from "../shell/navigation.vibe"
+import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { checkMailFile, isRefusal, supportedMimeTypes, type FileRefusal } from "./files.ts"
 import { addressKey, forwardBody, forwardSubject, jsonBytes, literalMailAddress, oneLineSubject, replySubject } from "./text.ts"
 import { newId } from "../platform/ids.ts"
@@ -186,6 +187,15 @@ export const layer = Layer.effect(MailComposer, effect {
       if (left) try hide()
     }
   })
+
+  const lifecycle = try Effect.serviceOption(AppLifecycle)
+  if (Option.isSome(lifecycle)) {
+    fork.scoped (effect {
+      for try (const app of lifecycle.value.changes) {
+        if (!app.foreground) try flush()
+      }
+    })
+  }
 
   fork.scoped (effect {
     for try (const _ of accounts.changes) {

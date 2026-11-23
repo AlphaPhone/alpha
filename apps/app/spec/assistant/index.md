@@ -23,7 +23,7 @@ handing area.
 - [Conversation](./conversation.md): the client attachment, epochs, proposals and the consumed set.
 - [Attachments](./attachments.md): files, photos and captures, their custody and limits.
 - [Search](./search.md): chat search that only answers its live owner.
-- [Reply](./reply.md): how a reply renders: text, fences, cards, notices, failures and acknowledgments.
+- [Reply](./reply.md): how a reply renders: text, fences, cards, notices, failures with the owner's fix and wait, and acknowledgments, spoken ones included.
 - [Email card](./emailCard.md): an email the agent drafted, reviewed and sent inside the chat.
 - [Receipts](./receipts.md): honest attribution of what a turn's actions did, and action history.
 - [Approvals](./approvals.md): live and recovered action cards, decline and the card's states.
@@ -31,7 +31,7 @@ handing area.
 - [Review](./review.md): which proposal may produce a device effect, on whose authority, and at most once.
 - [Decision](./decision.md): one owner decision on a workflow approval request.
 - [Stopped reply](./stoppedReply.md): the single later check after the owner stopped a reply.
-- [Turn context](./context.md): what a turn tells the agent about the screen, the phone's location and hosted inference.
+- [Turn context](./context.md): what a turn tells the agent about the screen, the phone's location, the open Browser page and hosted inference.
 - [Entry](./entry.md): opening the assistant from the system assist gesture, and withdrawing a request.
 - [Withdrawal](./withdrawal.md): giving up on a bridge request so that it never reaches the agent later.
 - [Suggestion](./suggestion.md): inserting one exact reviewed suggestion into a text field.

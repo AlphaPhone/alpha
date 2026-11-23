@@ -31,7 +31,7 @@ export interface InvocationScreen {
   readonly dialogOpen: boolean
   readonly connectionPrompt: boolean
   readonly voiceActive: boolean
-  /** The signed-in account a protected power launch was granted for, when the account area knows it; the cold launch is claimed once under it. */
+  /** The signed-in account a protected power launch was granted for, when the account area knows it; the cold launch is claimed once under it, and a first free take without it settles the launch unclaimed. */
   readonly powerAccountRef?: string
 }
 
@@ -176,8 +176,9 @@ export const listenerService = Layer.effect(Listener, effect {
   }
 
   effect function claimedLaunch(binding: { readonly generation: number; readonly bindingId: string; readonly sessionKey: string }, accountRef: string | undefined) {
-    if (launchSettled || accountRef === undefined) return undefined
+    if (launchSettled) return undefined
     launchSettled = true
+    if (accountRef === undefined) return undefined
     const launch = timeout(native.invoke(SENSE, "claimProtectedPowerLaunch", { ...binding, accountRef }), STOP_DEADLINE) catch () => undefined
     return parseAssistantInvocation(launch) === "power" ? launch : undefined
   }

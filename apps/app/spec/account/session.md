@@ -17,7 +17,10 @@ The deployment and environment are fixed when the session loads, and they are th
 (spec/platform/index.md, "Staging is reached only by a test-mocks build that chose it, or a browser
 preview of the Cloud resident"), so the session and every Cloud request address one Cloud. A
 production build addresses only production; staging needs `ELIZA_DEV_ALLOW_TEST_MOCKS=1`, or the
-development server's browser preview of the Cloud resident.
+development server's browser preview of the Cloud resident. Each deployment's public hosts (its API,
+its web pages and the agents host its Google callbacks may name) are the ones the published Cloud
+deployment, `cloud/deployment.json`, names for that environment, so Alpha Cloud is addressed at its own
+zone and never at a host the deployment does not publish.
 
 ```quint
 type Deployment = ElizaCloud | AlphaCloud

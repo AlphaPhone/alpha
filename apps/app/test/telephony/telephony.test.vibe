@@ -1,10 +1,14 @@
-// spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/drafts.md, "Story: Send only what I reviewed, once"; spec/telephony/contacts.md, "Story: Change only the contact I reviewed"; spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/callBar.md, "Story: See my live call over every view"
+// spec/telephony/common.md, "A question for Alpha leaves the bar only once a turn took it"; spec/telephony/callBar.md, "The bar shows only on a trusted reading, where it may show, while a call is live"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/telephony/phone.md, "Story: Read my recent calls while Phone is open"; spec/telephony/drafts.md, "Story: Send only what I reviewed, once"; spec/telephony/contacts.md, "Story: Change only the contact I reviewed"; spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/callBar.md, "Story: See my live call over every view"
 import { assert, it } from "@effect/vitest"
 import { Machine as CallBarMachine, barPhase } from "../../gen/telephony__callBar.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
 import { Machine as DraftsMachine, slotOf } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/telephony__phone.effect.vibe"
+import { Assistant } from "../../src/assistant/assistant.vibe"
 import { TelephonyActions } from "../../src/telephony/actions.vibe"
+import { barEligibleIn } from "../../src/telephony/front.vibe"
+import { askFromList, askRoute } from "../../src/telephony/list-ask.vibe"
+import { advertisedOf, classOf, handoffOf } from "../../src/telephony/operations.vibe"
 import { CallWatch } from "../../src/telephony/call-bar.vibe"
 import { ContactsView } from "../../src/telephony/contacts.vibe"
 import { DraftSends } from "../../src/telephony/drafts.vibe"
@@ -133,4 +137,60 @@ it.live("See my live call over every view (spec/telephony/callBar.md, \"Story: S
       { live: "LiveBar", untrusted: "NoBar", ended: 1 },
     ))
   }
+})
+
+const QUESTION = "what should I say back to her?"
+const heard = (taken: boolean) => Layer.succeed(Assistant, { commsAsks: Stream.make({ key: "phone:recents:", taken }) } as unknown as Assistant.Shape)
+
+it.live("A question a turn took leaves the bar (spec/telephony/common.md, \"A question for Alpha leaves the bar only once a turn took it\")", () => effect {
+  const fake = fakePhone()
+  const layer = Layer.merge(fake.layer, heard(true))
+  provide layer {
+    const phone = try PhoneMachine
+    try phone.send({ type: "queryTyped", typed: QUESTION })
+    const line = try askFromList("phone", "phone:recents:", QUESTION)
+    const after = (try phone.get()).listQuery
+    try Effect.try(() => assert.deepStrictEqual(
+      { line, after: after.tag, opened: fake.calls.filter((c) => c.startsWith("navigation.open:assistant")) },
+      { line: null, after: "NoQuery", opened: [`navigation.open:assistant:${askRoute("phone:recents:", QUESTION)}`] },
+    ))
+  }
+})
+
+it.live("A question no turn took stays where it was typed (spec/telephony/common.md, \"A question for Alpha leaves the bar only once a turn took it\")", () => effect {
+  const fake = fakePhone()
+  const layer = Layer.merge(fake.layer, heard(false))
+  provide layer {
+    const phone = try PhoneMachine
+    try phone.send({ type: "queryTyped", typed: QUESTION })
+    const line = try askFromList("phone", "phone:recents:", QUESTION)
+    const after = (try phone.get()).listQuery
+    try Effect.try(() => assert.deepStrictEqual(
+      { line, after },
+      { line: null, after: { tag: "OwnerQuery", typed: QUESTION } },
+    ))
+  }
+})
+
+it("The call bar stays off Android's assistant surface only (spec/telephony/callBar.md, \"The bar shows only on a trusted reading, where it may show, while a call is live\")", () => {
+  const front = { visible: true, locked: false, screen: "home" as const, view: "assistant", shade: false, chat: "closed" as const, modal: false }
+  assert.deepStrictEqual(
+    [barEligibleIn(front), barEligibleIn({ ...front, assistantSurface: true }), barEligibleIn({ ...front, assistantSurface: false, locked: true })],
+    [true, false, false],
+  )
+})
+
+it("Calls, texts, reads and contact changes are reviewed comms acts, and only reads may not stay unresolved (spec/assistant/receipts.md, \"An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved\")", () => {
+  assert.deepStrictEqual(
+    {
+      classes: [classOf({ type: "contact_show", query: "maya" }), classOf({ type: "phone_keypad" }), classOf({ type: "phone_call" }), classOf({ type: "messages_read_selected" })],
+      handoffs: [handoffOf({ type: "sms_send" }), handoffOf({ type: "phone_dial" }), handoffOf({ type: "contact_update" }), handoffOf({ type: "messages_read_selected" }), handoffOf({ type: "sms_latest_sender" })],
+      advertised: advertisedOf(["sms.send.v1", "sms.latest-sender.v2", "phone.call.v1"], ["sms.send.v1", "sms.latest-sender.v2", "calendar.create.v1"]),
+    },
+    {
+      classes: ["OpenView", "OpenView", "CommsAct", "CommsAct"],
+      handoffs: [true, true, true, false, false],
+      advertised: ["sms.send.v1"],
+    },
+  )
 })

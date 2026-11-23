@@ -1,4 +1,4 @@
-// spec/browser/session.md, "Opening the menu, the switcher or the library ends address editing, and the menu never covers editing"; spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"; spec/browser/egress.md, "What the shell reads at each tap is the selected tab's page and whether the Browser view shows it"; spec/browser/reading.md, "The question goes to the editor only with an excerpt or clean pasted text, and only while the same page is shown"; spec/browser/session.md, "A started Browser always has a tab, selects one of them, and never holds more than eight"; spec/browser/session.md, "Next and previous step through matches only when there are matches, and closing clears the native search"; spec/browser/reviews.md, "Reviews are open dialogs, one per identity, each of a kind"
+// spec/browser/session.md, "Opening the menu, the switcher or the library ends address editing, and the menu never covers editing"; spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"; spec/browser/egress.md, "What the shell reads at each tap is the selected tab's page and whether the Browser view shows it"; spec/browser/reading.md, "The question goes to the editor only with an excerpt or clean pasted text, and only while the same page is shown"; spec/browser/session.md, "A started Browser always has a tab, selects one of them, and never holds more than eight"; spec/browser/session.md, "Next and previous step through matches only when there are matches, and closing clears the native search"; spec/browser/reviews.md, "Reviews are open dialogs, one per identity, each of a kind"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
 import { always } from "@antithesishq/bombadil";
 import { extract } from "@antithesishq/bombadil/browser";
 
@@ -72,3 +72,23 @@ const questionWithoutText = extract(({ document }) => {
 
 /** Ask about page never continues without an excerpt or pasted text. */
 export const browserQuestionNeedsText = always(() => !questionWithoutText.current);
+
+const privatePageShareable = extract(({ document }) => {
+  const shareable = document.querySelector('section[aria-label="Browser"][data-page-shareable="true"]') !== null;
+  const privateTab = [...document.querySelectorAll('nav[aria-label="Browser"] span')].some((span) => span.textContent === "Private");
+  return shareable && privateTab;
+});
+
+/** A private tab's page is never offered to a message. */
+export const browserPrivatePageIsNeverShared = always(() => !privatePageShareable.current);
+
+const unloadedPageShareable = extract(({ document }) => {
+  const shareable = document.querySelector('section[aria-label="Browser"][data-page-shareable="true"]') !== null;
+  const viewport = document.querySelector("[data-browser-surfaces]");
+  const blank = viewport !== null && [...viewport.querySelectorAll("p")].some((p) => p.textContent === "New tab" || p.textContent === "Private · cleared on close");
+  const loading = viewport?.getAttribute("aria-label") === "Loading website";
+  return shareable && (blank || loading);
+});
+
+/** A blank or loading tab is never offered to a message. */
+export const browserUnloadedPageIsNeverShared = always(() => !unloadedPageShareable.current);

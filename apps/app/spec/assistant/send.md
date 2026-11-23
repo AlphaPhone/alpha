@@ -151,3 +151,27 @@ pure val idValues = Set(1, 2, 3)
 pure val promptValues = Set(List()).union(Set(List(7)))
 pure val textValues = Set(List()).union(Set(List(1))).union(Set(List(2)))
 ```
+
+## Story: Send what I dictated and have it timed like a voice turn
+
+> As the owner, when I dictate into the composer and send exactly what was
+> inserted, I want the turn timed as a voice turn, without the reply being
+> spoken, so that the phone's latency record covers dictated messages too.
+
+### A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken
+
+Dictation into an empty composer marks the inserted words. When the next
+composer send carries exactly those words, in the same conversation and
+session, its request, first token and final reply are timed through the
+voice area's latency record; an edited, handed-over or moved draft is not
+timed. Only a voice conversation speaks replies, so the timed reply is
+never spoken, and there is no setting for it.
+
+```quint
+pure def timedAsVoice(voiceOriginated: bool, sentUnchanged: bool, sameConversation: bool, handed: bool): bool =
+  voiceOriginated and sentUnchanged and sameConversation and not(handed)
+pure def replySpoken(timed: bool): bool = false
+pure def lawAnEditedDictationIsNotTimed(sameConversation: bool): bool = not(timedAsVoice(true, false, sameConversation, false))
+pure def lawAHandedPromptIsNotTimed(sentUnchanged: bool): bool = not(timedAsVoice(true, sentUnchanged, true, true))
+pure def lawADictatedReplyIsNeverSpoken(timed: bool): bool = not(replySpoken(timed))
+```

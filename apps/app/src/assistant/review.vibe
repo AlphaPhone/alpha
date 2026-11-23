@@ -1,16 +1,16 @@
 // spec/assistant/review.md, "Story: Let my agent act only with my say-so"; spec/assistant/recovery.md, "A listing is read once per key, applies only to its own key, and a failed one waits for a new key"; spec/assistant/review.md, "A card is listed only on the foreground, recovered only under the current screen, and approved only under the session that listed it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/review.md, "A call, dial or text that contradicts the number I wrote gets a notice instead of a card, and is rejected so a reload cannot bring it back"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/review.md, "The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"; spec/assistant/receipts.md, "A result is shown only after its journal entry and receipt settled"
-import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type ExecutorCall } from "@elizaos/agent/client"
+import { DeviceExecution, type ApproveResult, type DeviceAgent, type DeviceJournal, type DeviceProposal, type DeviceReceipt, type ExecutorCall } from "@elizaos/agent/client"
 import { Machine as RoutesMachine, machine as routesMachine, initial as routesStart, type CardState, type Event as RoutesEvent, type Routes } from "../../gen/assistant__approvals.effect.vibe"
-import { Machine as CustodyMachine, approvable, canDirect, cardOffered, contradicts, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
+import { Machine as CustodyMachine, approvable, browserCarded, canDirect, cardOffered, contradicts, type Event as CustodyEvent, type Listing, type Op, type Preference, type Target } from "../../gen/assistant__review.effect.vibe"
 import { offered, titleOf, type Evidence, type Resolution, type Result } from "../../gen/assistant__receipts.effect.vibe"
 import { Native } from "../platform/native.vibe"
 import { deviceJournalOver } from "../platform/native-plugins.ts"
 import { Preferences } from "../settings/preferences.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
-import { PendingListing, type PendingProposal } from "./payloads.schema.vibe"
+import { BrowserOpen, ClaimAnswer, PendingListing, type WireProposal } from "./payloads.schema.vibe"
 import { actionResultText, copy, receiptTitle, unsyncedSummary } from "./presentation.vibe"
-import type { ItemizedSet, ProposalCard } from "./transcript.vibe"
+import type { CardDestination, ItemizedSet, ProposalCard } from "./transcript.vibe"
 import { ask } from "./transport.vibe"
 import { browserCommand, writtenNumbers } from "./grounding.vibe"
 import { WithdrawableRequests } from "./withdrawable.vibe"
@@ -24,7 +24,7 @@ export interface OperationPorts {
   /** Read back whether an earlier call took effect; `{ kind: "found" | "refused", result? }`. */
   readBack(operation: unknown, call: ExecutorCall): Promise<unknown>
   /** The card's title, detail and navigation destination. */
-  describe(operation: unknown): { readonly title: string; readonly detail: string; readonly destination?: "home" | "notes" | "calendar" }
+  describe(operation: unknown): { readonly title: string; readonly detail: string; readonly destination?: CardDestination }
   /** The operation class the direct pass reasons about. */
   classOf(operation: unknown): Op
   /** What the operation targets against the owner's words, for a call, dial, text or contact. */
@@ -81,7 +81,8 @@ export service DeviceReview {
   /** Mark a card whose review time passed. */
   expire(card: ProposalCard): ProposalCard!!
   /** Run the direct pass over the proposals of the owner's message; what still needs review is returned as cards. */
-  directPass(messageId: string, text: string): { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] }!!
+  /** `pageLinks` are the links of the Browser page the message carried; an open of one keeps its card and never runs directly. */
+  directPass(messageId: string, text: string, pageLinks?: readonly string[]): { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] }!!
   /** Upload every settled receipt the journal still holds. */
   sync(): void!!
   /** What the assistant knows of an executor call it started. */
@@ -94,6 +95,65 @@ export service DeviceReview {
 
 const historyWire = { happened: "ReviewedApplied", didnt: "ReviewedNotApplied", unresolved: "ReviewedUnresolved" } as const
 const resolutionOf = { happened: "ResolvedApplied", didnt: "ResolvedNotApplied", unresolved: "Unresolved" } as const satisfies Record<HistoryOutcome, Resolution>
+
+/** A pending device proposal as the phone reviews it: the wire proposal with its payload's operation, request message and binding. */
+export interface PendingProposal {
+  readonly id: string
+  readonly digest: string
+  readonly state: string
+  readonly expiresAt: string
+  readonly operation: unknown
+  readonly requestMessageId?: string
+  readonly workflow?: unknown
+  readonly title?: string
+  readonly description?: string
+}
+
+/** The pending proposal a wire proposal of the agent's review routes describes. */
+export function pendingOf(wire: WireProposal): PendingProposal {
+  const { operation, requestMessageId, workflow } = wire.payload
+  return {
+    id: wire.id, digest: wire.digest, state: wire.state, expiresAt: wire.expiresAt, operation,
+    ...(requestMessageId === undefined || requestMessageId === "" ? {} : { requestMessageId }),
+    ...(workflow === undefined ? {} : { workflow }),
+  }
+}
+
+/** The device receipt as the agent's receipt route takes it: `outcome` for what the client reports. */
+export function wireReceipt(receipt: DeviceReceipt) {
+  return {
+    outcome: receipt.reported,
+    ...(receipt.operationId === "" ? {} : { operationId: receipt.operationId }),
+    ...(receipt.code === undefined ? {} : { code: receipt.code }),
+    ...(receipt.result === undefined ? {} : { result: receipt.result }),
+  }
+}
+
+/** The DeviceAgent the upstream DeviceExecution drives, over the agent's proposal routes: a decision is approve or reject, the claim answers the agent's attempt id, and every receipt and review names it. */
+export function deviceAgentOver(post: (path: string, body: unknown) => Promise<unknown>): DeviceAgent {
+  const route = (id: string, step: string) => `/api/client-devices/proposals/${encodeURIComponent(id)}/${step}`
+  return {
+    decide: (id, body) => post(route(id, "decision"), { digest: body.digest, decision: body.approved ? "approve" : "reject" }),
+    claim: async (id, body) => {
+      const answer = await post(route(id, "claim"), { digest: body.digest })
+      const claimed = Schema.decodeUnknownOption(ClaimAnswer)(answer)
+      if (Option.isNone(claimed) || claimed.value.digest !== body.digest) throw new Error("ClaimRefused")
+      return { attemptId: 1, agentAttemptId: claimed.value.proposal.execution.attemptId }
+    },
+    receipt: (id, body) => body.agentAttemptId === undefined
+      ? Promise.reject(new Error("NoAgentAttempt"))
+      : post(route(id, "receipt"), { digest: body.digest, attemptId: body.agentAttemptId, receipt: wireReceipt(body.receipt) }),
+    reconcile: (id, body) => body.agentAttemptId === undefined
+      ? Promise.reject(new Error("NoAgentAttempt"))
+      : post(route(id, "reconciliation"), { digest: body.digest, attemptId: body.agentAttemptId, review: body.review }),
+  }
+}
+
+/** Whether an operation opens a link of the Browser page the owner's message carried, exactly as the page gave it. */
+export function opensPageLink(operation: unknown, pageLinks: readonly string[]): boolean {
+  const open = Schema.decodeUnknownOption(BrowserOpen)(operation)
+  return Option.isSome(open) && pageLinks.includes(open.value.url)
+}
 
 /** The listing an operation's card needs, from what its family's `itemize` said. */
 export function listingOf(said: ItemizedSet | string | undefined): Listing {
@@ -148,12 +208,9 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   let executions: { readonly key: string; readonly execution: DeviceExecution<unknown> } | undefined
   const post = (path: string, body: unknown) => runPromise(run(ask("POST", path, body)))
   const journalCall = (method: string, args: unknown) => runPromise(native.invoke("AlphaActionJournal", method, args))
-  const agent: DeviceAgent = {
-    decide: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/decision`, body),
-    claim: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/claim`, body),
-    receipt: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/receipt`, body),
-    reconcile: (id, body) => post(`/api/client-devices/proposals/${encodeURIComponent(id)}/reconciliation`, body),
-  }
+  const agent = deviceAgentOver(post)
+  const reject = (proposal: { readonly id: string; readonly digest: string }) =>
+    requests.ask("POST", `/api/client-devices/proposals/${encodeURIComponent(proposal.id)}/decision`, { digest: proposal.digest, decision: "reject" })
   const journal = deviceJournalOver(journalCall) as DeviceJournal
   effect function executionFor(identity: AgentIdentity) {
     const key = JSON.stringify([identity.origin, identity.owner, identity.agent, identity.installationId, identity.enrollmentId])
@@ -177,7 +234,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
   effect function listed() {
     const data = requests.ask("GET", "/api/client-devices/proposals") catch () => undefined
     const decoded = Schema.decodeUnknownOption(PendingListing)(data)
-    return Option.isSome(decoded) ? decoded.value.proposals : undefined
+    return Option.isSome(decoded) ? decoded.value.proposals.map(pendingOf) : undefined
   }
   effect function listing() {
     return (try listed()) ?? []
@@ -289,7 +346,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       return card
     }
     if (!(try step(routes, { type: "tapDecline" }))) return { ...card, state: try stateOf(routes) }
-    const answered = requests.ask("POST", `/api/client-devices/proposals/${encodeURIComponent(card.proposalId)}/decision`, { digest: card.digest, approved: false }) catch () => undefined
+    const answered = reject({ id: card.proposalId, digest: card.digest }) catch () => undefined
     const accepted = answered !== undefined
     try step(routes, { type: "declineSettles", accepted })
     if (!accepted) try host.toast(copy.declineFailed)
@@ -361,7 +418,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
       try step(routes, { type: "expires" })
       return { ...card, state: try stateOf(routes) }
     },
-    directPass: (messageId: string, text: string) => effect {
+    directPass: (messageId: string, text: string, pageLinks: readonly string[] = []) => effect {
       const identity = try host.identity()
       if (identity === undefined) return { receipts: [], cards: [], notices: [] }
       const listed = (try listing()).filter((proposal) => proposal.state === "pending" && proposal.requestMessageId === messageId)
@@ -377,9 +434,9 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
           continue
         }
         const target = ports.target(proposal.operation, text)
-        const ungrounded = ports.classOf(proposal.operation) === "BrowserNavigate" && target.tag === "NoTarget"
+        const ungrounded = ports.classOf(proposal.operation) === "BrowserNavigate" && !browserCarded(target.tag !== "NoTarget", opensPageLink(proposal.operation, pageLinks))
         if (contradicts(writtenNumbers(text).length, target) || ungrounded) {
-          requests.ask("POST", `/api/client-devices/proposals/${encodeURIComponent(proposal.id)}/decision`, { digest: proposal.digest, approved: false }) catch () => undefined
+          reject(proposal) catch () => undefined
           notices.push(ungrounded ? copy.browserUngrounded : target.tag === "ContactTarget" ? copy.wrongNumberContact : copy.wrongNumber)
           continue
         }

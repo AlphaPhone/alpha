@@ -1,7 +1,6 @@
 // spec/assistant/index.md, "Story: Ask my assistant from anywhere"
 import { Effect } from "effect";
-import { act, ask } from "../shell/services.ts";
-import { runtime } from "./runtime.ts";
+import { act, ask, readNow } from "../shell/services.ts";
 import { Assistant } from "../../assistant/assistant.vibe";
 import { ChatAttachments } from "../../assistant/attachments.vibe";
 import { Composer } from "../../assistant/composer.vibe";
@@ -23,13 +22,17 @@ export const hitsStream = Effect.map(Effect.service(ChatSearch), (search) => sea
 /** The question review open now. */
 export const reviewStream = Effect.map(Effect.service(AssistantDraft), (draft) => draft.review);
 /** Where inference runs, read once per mount. */
-export const inferenceOf = () => runtime.runSync(Effect.flatMap(Effect.service(AssistantHost), (host) => host.inference()));
+export const inferenceOf = () => readNow(Effect.flatMap(Effect.service(AssistantHost), (host) => host.inference()));
 /** The selected Inbox account's address, for an email card's "me". */
-export const ownAddressNow = () => runtime.runSync(Effect.flatMap(Effect.service(AssistantEmail), (mail) => mail.address()));
+export const ownAddressNow = () => readNow(Effect.flatMap(Effect.service(AssistantEmail), (mail) => mail.address()));
 /** Whether an emergency call is live now. */
-export const emergencyNow = () => runtime.runSync(Effect.flatMap(Effect.service(AssistantHost), (host) => host.emergency()));
-/** Whether Restart is offered for an agent the service holds for review. */
+export const emergencyNow = () => readNow(Effect.flatMap(Effect.service(AssistantHost), (host) => host.emergency()));
+/** Whether Restart Alpha is offered for an agent the service holds for review. */
 export const restartStream = Effect.map(Effect.service(AgentRestart), (restart) => restart.offered);
+/** Whether a restart of the agent is running. */
+export const restartBusyStream = Effect.map(Effect.service(AgentRestart), (restart) => restart.busy);
+/** The open draft as voice dictation fills it. */
+export const dictationTargetNow = () => readNow(Effect.flatMap(Effect.service(Composer), (composer) => composer.dictationTarget()));
 /** The assistant's own route the shell shows now, or "" off the assistant. */
 const routeNow = Effect.map(Effect.flatMap(Effect.service(Navigation), (navigation) => navigation.get()),
   (nav) => nav.app === "assistant" ? nav.places.find((place) => place.app === "assistant")?.route ?? "" : "");

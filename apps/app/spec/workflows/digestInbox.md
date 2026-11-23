@@ -81,3 +81,45 @@ pure def ackMayBeRecorded(reply: AckReply): bool = reply != AckRefused
 pure def ackContinues(reply: AckReply, cancelled: bool): bool = reply == AckOk and not(cancelled)
 pure def lawALostAckIsNeverTakenAsRefused(cancelled: bool): bool = ackMayBeRecorded(AckLost) and not(ackContinues(AckLost, cancelled))
 ```
+
+### A page is acknowledged only once each result is stored, indexed and its notice armed, and a kept result is never replaced
+
+Android's `HostedInbox` and upstream's renderer `DigestInbox` write each page in cursor order. A
+result whose run is already kept with another cursor or revision, an out-of-order page, a closed or
+retired sync and a lost reply end the sync to retry with what is stored untouched; a failed row,
+index or notice write ends it as a storage error, which, like a reconnect demand, pauses the inbox
+until it is configured again. An empty page ends it current. A row written before its index failed
+stays as an orphan and is read back before the next acknowledgement (legacy `RendererHostedInbox`,
+`NativeHostedInbox` `writePage`, `AckFollowsExactCommit`).
+
+```quint
+type Kept = NotKept | KeptSame | KeptOther
+type PageWrite = WriteOk | RowFailed | IndexFailed | NoticeFailed
+type PageEnd = PageAcked | PageRetry | PageStorageError | PageCurrent | PageReconnect
+pure def pageEnd(entries: int, ordered: bool, kept: Kept, write: PageWrite): PageEnd =
+  if (not(ordered)) PageRetry
+  else if (entries == 0) PageCurrent
+  else if (kept == KeptOther) PageRetry
+  else if (write != WriteOk) PageStorageError
+  else PageAcked
+pure def pausesInbox(end: PageEnd): bool = end == PageStorageError or end == PageReconnect
+pure def lawAChangedResultIsNeverAcknowledged(entries: int, ordered: bool, write: PageWrite): bool =
+  pageEnd(entries, ordered, KeptOther, write) != PageAcked
+pure def lawAFailedWriteIsNeverAcknowledged(entries: int, ordered: bool, kept: Kept): bool =
+  pageEnd(entries, ordered, kept, RowFailed) != PageAcked and pageEnd(entries, ordered, kept, IndexFailed) != PageAcked and
+  pageEnd(entries, ordered, kept, NoticeFailed) != PageAcked
+pure def lawAnOutOfOrderPageIsRetried(entries: int, kept: Kept, write: PageWrite): bool =
+  pageEnd(entries, false, kept, write) == PageRetry
+pure def lawAStorageErrorPausesTheInbox(entries: int, kept: Kept): bool =
+  (entries > 0 and kept != KeptOther) implies pausesInbox(pageEnd(entries, true, kept, IndexFailed))
+```
+
+### History keeps at most a hundred results per scope; keeping more journals the oldest for removal, never a retained one
+
+```quint
+pure val historyLimit = 100
+pure def evictsOldest(kept: int, added: int): bool = added > 0 and kept + added > historyLimit
+pure def keptAfter(kept: int, added: int): int = if (evictsOldest(kept, added)) historyLimit else kept + added
+pure def lawHistoryNeverExceedsItsLimit(kept: int, added: int): bool =
+  (kept >= 0 and kept <= historyLimit and added >= 0 and added <= 2) implies keptAfter(kept, added) <= historyLimit
+```

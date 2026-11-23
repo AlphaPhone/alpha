@@ -13,7 +13,7 @@ import { Viewfinder } from "../../camera/viewfinder.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { CameraView } from "./CameraView.tsx";
 import { ScanReview } from "./ScanReview.tsx";
-import { act, buildInfo, runtime } from "../shell/services.ts";
+import { act, buildInfo, readNow, runtime } from "../shell/services.ts";
 
 const camera = (use: (v: Viewfinder.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Viewfinder), use));
 const scanner = (use: (s: Scanner.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Scanner), use));
@@ -45,7 +45,7 @@ export function CameraScreen({ onClose }: CameraScreenProps) {
   const { state: dialogs, can: canDialog } = useDialogs(runtime);
   const { state: scan, can: canScan } = useScan(runtime);
   const [browser] = useState(() => buildInfo().variant === "browser");
-  const searchLines = dialogs?.searchable.ready === true ? runtime.runSync(Effect.flatMap(Effect.service(Scanner), (s) => s.searchablePages())) : [];
+  const searchLines = dialogs?.searchable.ready === true ? readNow(Effect.flatMap(Effect.service(Scanner), (s) => s.searchablePages())) : [];
   return (
     <>
       <CameraView

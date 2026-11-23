@@ -29,7 +29,7 @@ import { cn, focusRing } from "../lib/cn.ts";
 import { PhotoEditor } from "./PhotoEditor.tsx";
 import { VideoEditor } from "./VideoEditor.tsx";
 import { PhotoGrid } from "./PhotoGrid.tsx";
-import { act, buildInfo, runtime } from "../shell/services.ts";
+import { act, buildInfo, readNow, runtime } from "../shell/services.ts";
 
 const library = (use: (l: PhotoLibrary.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(PhotoLibrary), use));
 const agent = (use: (a: AgentPhotos.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(AgentPhotos), use));
@@ -94,7 +94,7 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
   const { state: videoEdit, can: canVideo } = useVideo(runtime);
   const { state: dialogs, can: canDialog } = useDialogs(runtime);
   const { state: scan, can: canScan } = useScan(runtime);
-  const searchLines = dialogs?.searchable.ready === true ? runtime.runSync(Effect.flatMap(Effect.service(Scanner), (s) => s.searchablePages())) : [];
+  const searchLines = dialogs?.searchable.ready === true ? readNow(Effect.flatMap(Effect.service(Scanner), (s) => s.searchablePages())) : [];
   const [name, setName] = useState("");
   const offer = scopeOffer(catalog.scope, false, true, false);
   const viewer = rows.find((row) => row.id === browse.viewer);

@@ -1,6 +1,6 @@
-// spec/assistant/send.md, "A composer send holds its text and clears the composer; a handed-over prompt leaves the composer alone"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/context.md, "A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"
+// spec/assistant/send.md, "A composer send holds its text and clears the composer; a handed-over prompt leaves the composer alone"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/assistant/draft.md, "A held send found by a restart is offered for review and never sent again on its own"; spec/assistant/context.md, "A hosted provider is disclosed wherever the owner can send, and on-device inference is never claimed for it"; spec/assistant/attachments.md, "At most four attachments, each within its cap, and a batch within 19 MiB of base64"
 import { ArrowUp, Mic, Paperclip, Square, X } from "lucide-react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import type { Target } from "../../assistant/composer.vibe";
 import type { ChatFile } from "../../assistant/transcript.vibe";
 import { copy } from "../../assistant/presentation.vibe";
@@ -29,6 +29,14 @@ export type ComposerBarProps = {
   locationShared?: boolean;
   /** Placeholder of the editor. */
   placeholder?: string;
+  /** The dictation control the voice area mounts beside the editor, filling this draft. */
+  dictation?: ReactNode;
+  /** Restart Alpha is offered for an agent the service holds for review. */
+  restartOffered?: boolean;
+  /** A restart is running. */
+  restartBusy?: boolean;
+  /** The owner tapped Restart Alpha. */
+  onRestart?: () => void;
   /** The owner typed. */
   onText: (text: string) => void;
   /** The owner pressed Send or Enter. */
@@ -48,7 +56,7 @@ export type ComposerBarProps = {
 };
 
 /**
- * The composer: a multiline editor that grows from 44 px to its cap, Send or Talk, Stop while a reply is written, waiting files and the target line.
+ * The composer: a multiline editor that grows from 44 px to its cap, Send or Talk, Stop while a reply is written, waiting files, the target line and Restart Alpha.
  * @model spec/assistant/send.md
  */
 export function ComposerBar(props: ComposerBarProps) {
@@ -68,6 +76,12 @@ export function ComposerBar(props: ComposerBarProps) {
             <Button size="sm" variant="secondary" onClick={() => props.onReviewUnsettled(true)}>Put it back</Button>
             <Button size="sm" variant="ghost" onClick={() => props.onReviewUnsettled(false)}>It was sent</Button>
           </div>
+        </div>
+      )}
+      {props.restartOffered && (
+        <div role="status" className="flex flex-col gap-2 rounded-md bg-secondary p-3 text-sm">
+          <p><span className="font-medium">{copy.restartNeeded}.</span> {copy.restartExplained}</p>
+          <div><Button size="sm" disabled={props.restartBusy} onClick={props.onRestart}>{copy.restartAction}</Button></div>
         </div>
       )}
       {props.target && (
@@ -99,6 +113,7 @@ export function ComposerBar(props: ComposerBarProps) {
           onKeyDown={onKey}
           className={cn("field-sizing-content max-h-[min(168px,28dvh)] min-h-11 flex-1 resize-none font-legible")}
         />
+        {!typing && props.dictation}
         {typing
           ? <Button size="icon" variant="secondary" aria-label="Stop reply" onClick={props.onStop}><Square className="size-4" /></Button>
           : sendShown

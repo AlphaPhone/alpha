@@ -14,8 +14,8 @@ import { planReading, planReply, refusalMessage, type SpokenRefusal } from "./sp
 export error SpeechRefused { reason: SpokenRefusal; message: string }
 /** No route could speak the passage, nor the phone. */
 export error SpeechUnavailable { route: Route; cause: unknown }
-/** Speech stopped before the passage finished: the owner's stop, a call, or a failure after some audio. */
-export error SpeechInterrupted { reason: string; started: boolean }
+/** Speech stopped before the passage finished: the owner's stop, a call, or a failure after some audio; `failed` when playback itself failed. */
+export error SpeechInterrupted { reason: string; started: boolean; failed?: boolean }
 /** The channel's last stop was never confirmed; Alpha must restart before it speaks again. */
 export error SpeechNotStopped
 
@@ -176,7 +176,7 @@ export const speechService = Layer.effect(Speech, effect {
         effect { return playing catch effect (error) => { throw new SpeechUnavailable({ route: error.route, cause: error.cause }) } },
         stopped,
       ]
-      if (outcome.event !== "playbackEnded") throw new SpeechInterrupted({ reason: outcome.reason ?? outcome.event, started: playbackId !== undefined })
+      if (outcome.event !== "playbackEnded") throw new SpeechInterrupted({ reason: outcome.reason ?? outcome.event, started: playbackId !== undefined, failed: outcome.event === "playbackFailed" })
     }, effect { retire(channel, requestId, playbackId) catch () => undefined })
   }
 
@@ -228,7 +228,7 @@ export const speechService = Layer.effect(Speech, effect {
     }
     try ensuring(effect {
       const outcome = try.race [playing, stopped]
-      if (outcome.event !== "playbackEnded") throw new SpeechInterrupted({ reason: outcome.reason ?? outcome.event, started: playbackId !== undefined })
+      if (outcome.event !== "playbackEnded") throw new SpeechInterrupted({ reason: outcome.reason ?? outcome.event, started: playbackId !== undefined, failed: outcome.event === "playbackFailed" })
     }, effect { retire(channel, requestId, playbackId) catch () => undefined })
   }
 

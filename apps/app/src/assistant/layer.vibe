@@ -24,14 +24,15 @@ import { flowsLayer } from "./flows.vibe"
 import { suggestionsLayer } from "./suggestion.vibe"
 import { withdrawableLayer } from "./withdrawable.vibe"
 import { networkLocationLayer } from "./network-location.vibe"
-import { cameraCallFactsLive } from "./call-facts.vibe"
+import { browserCallFactsLive, cameraCallFactsLive } from "./call-facts.vibe"
 import { restartLayer } from "./restart.vibe"
 
 export { Assistant } from "./assistant.vibe"
 export { AssistantDraft, cameraHandoffsFromAssistant } from "./draft.vibe"
 export { askAlphaTarget, filesCapabilities } from "./files-bridge.vibe"
 export { AssistantHost } from "./host.vibe"
-export { AssistantEmail, CameraComposer, MapsChatCards, MapsRelay, OwnNotices, ReplyChanges, TurnSources, WorkflowStepDecisions } from "./ports.vibe"
+export { AssistantEmail, BrowserPages, CameraComposer, MapsChatCards, MapsRelay, OwnNotices, ReplyChanges, TurnSources, WorkflowStepDecisions, type BrowserPage, type ObservedTab } from "./ports.vibe"
+export { spokenCue, type SpokenCue } from "./cue.vibe"
 export { NetworkLocation, type NetworkPosition } from "./network-location.vibe"
 export { PhoneLocation } from "./location.vibe"
 export { telephonyCallsFromAssistant } from "./call-facts.vibe"
@@ -59,8 +60,8 @@ const services = Layer.provideMerge(
 
 const conversation = Layer.provideMerge(searchLayer, Layer.provideMerge(composerLayer, services))
 
-/** The assistant's services and machines, and Camera's per-call facts, needing Native, Resident, ResidentControl, ResidentRecovery, KeyValueStore, Preferences (settings), Navigation (shell core), AssistantHost and DeviceExecutors (shell); the ports in ports.vibe answer with their defaults until Inbox, Clock, Workflows, Maps, Camera, Notes and Calendar fill them. */
+/** The assistant's services and machines, and Camera's and Browser's per-call facts, needing Native, Resident, ResidentControl, ResidentRecovery, KeyValueStore, Preferences (settings), Latency (voice), Navigation (shell core), AssistantHost and DeviceExecutors (shell); the ports in ports.vibe answer with their defaults until Inbox, Clock, Workflows, Maps, Camera, Notes, Calendar, Browser and Settings fill them. */
 export const layer = Layer.provideMerge(
-  Layer.mergeAll(flowsLayer, draftLayer, cameraCallFactsLive),
+  Layer.mergeAll(flowsLayer, draftLayer, cameraCallFactsLive, browserCallFactsLive),
   Layer.provideMerge(assistantLayer, conversation),
 )

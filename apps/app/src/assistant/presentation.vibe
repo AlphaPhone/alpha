@@ -1,6 +1,6 @@
-// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
+// spec/assistant/receipts.md, "A receipt's title says what the journal proves"; spec/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval"
 import type { CutOff, ReceiptTitle } from "../../gen/assistant__receipts.ts"
-import type { FailureKind, PlanAction } from "../../gen/assistant__reply.ts"
+import { showsWait, waitSeconds, type FailureKind, type PlanAction } from "../../gen/assistant__reply.ts"
 import { hostOf } from "./grounding.vibe"
 
 /** Alpha's words for what the owner sees; shared code's raw error text never reaches a toast. */
@@ -71,6 +71,7 @@ export const copy = {
   restartNeeded: "Restart needed",
   restartExplained: "Your agent stopped and is held for review. Restart it to keep chatting; nothing it kept is replayed.",
   restartFailed: "Your agent couldn’t restart. Try again.",
+  restartAction: "Restart Alpha",
   notesChanged: "Notes changed",
   calendarChanged: "Calendar changed",
   openWorkflows: "Change this in Workflows",
@@ -101,14 +102,17 @@ export function cutOffText(cut: CutOff): string {
   }
 }
 
-/** A failure kind, from the reply's `failureKind` or `terminalFailure.kind`. */
+/** A failure kind, from the reply's `failureKind` or an older agent's `terminalFailure.kind`. */
 export function failureKindOf(code: string | undefined): FailureKind {
   switch (code) {
+    case "credential_invalid": return "CredentialInvalid"
     case "insufficient_credits": return "InsufficientCredits"
+    case "limit_reached":
+    case "rate_limited": return "LimitReached"
+    case "provider_issue": return "ProviderIssue"
+    case "timeout": return "TimedOut"
     case "missing_capability": return "MissingCapability"
     case "no_provider": return "NoProvider"
-    case "provider_issue": return "ProviderIssue"
-    case "rate_limited": return "RateLimited"
     case "billing-refused":
     case "subscription-required":
     case "allowance-exhausted": return "PlanLimit"
@@ -116,14 +120,30 @@ export function failureKindOf(code: string | undefined): FailureKind {
   }
 }
 
-/** Alpha's sentence for a failed reply. */
-export function failureText(kind: FailureKind): string {
+/** A wait in Alpha's words: "about 3 seconds", "about 4 minutes", "about 2 hours". */
+export function retryDuration(waitMs: number): string {
+  const seconds = waitSeconds(waitMs)
+  if (seconds < 90) return `about ${seconds} second${seconds === 1 ? "" : "s"}`
+  const minutes = Math.ceil(seconds / 60)
+  if (minutes < 90) return `about ${minutes} minutes`
+  return `about ${Math.ceil(minutes / 60)} hours`
+}
+
+/** The live wait a failed reply carries, in milliseconds, or -1 for none. */
+export function liveWaitOf(raw: unknown): number {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : -1
+}
+
+/** Alpha's sentence for a failed reply; a rate limit answered live says how long to wait. */
+export function failureText(kind: FailureKind, waitMs = -1): string {
   switch (kind) {
+    case "CredentialInvalid": return "Your AI provider refused the sign-in. Sign in again to keep chatting."
     case "InsufficientCredits": return "Your plan is out of credits. Manage your plan to keep chatting."
+    case "LimitReached": return `The AI request rate limit was reached. ${showsWait(kind, waitMs) ? `Try again in ${retryDuration(waitMs)}.` : "Wait a moment before sending again."} Alpha did not retry your message.`
+    case "ProviderIssue": return "The AI provider isn’t answering. Try again in a moment."
+    case "TimedOut": return "Your agent took too long to finish this reply."
     case "MissingCapability": return "Your agent can’t do that on this phone yet."
     case "NoProvider": return "No AI provider is set up. Choose one in Settings."
-    case "ProviderIssue": return "The AI provider isn’t answering. Try again in a moment."
-    case "RateLimited": return "Too many requests right now. Try again in a moment."
     case "PlanLimit": return "Your plan’s allowance is used up. Manage your plan to keep chatting."
     case "OtherFailure": return copy.replyFailed
   }
@@ -134,13 +154,24 @@ export function planCardTitle(action: PlanAction, cloud: string): string {
   switch (action) {
     case "ChoosePlan": return "Choose plan"
     case "SignIn": return `Sign in with ${cloud}`
-    case "RetryCloud":
+    case "RetryCloud": return "Try again"
     case "RecheckProvider": return `Check ${cloud} again`
     case "Funding": return "Manage plan"
   }
 }
 
-/** A plan action of the wire, or none. */
+/** Where a plan card takes the owner: an app and route, or the composer for Try again, which puts the message back for the owner to send. */
+export function planDestination(action: PlanAction): { readonly kind: "open"; readonly app: "account"; readonly route?: string } | { readonly kind: "composer" } {
+  switch (action) {
+    case "ChoosePlan":
+    case "Funding": return { kind: "open", app: "account", route: "plans" }
+    case "SignIn": return { kind: "open", app: "account" }
+    case "RecheckProvider": return { kind: "open", app: "account", route: "provider" }
+    case "RetryCloud": return { kind: "composer" }
+  }
+}
+
+/** A plan action of the wire (`planAction` of a reply: sign-in, funding or retry, and an older agent's plan or provider), or none. */
 export function planActionOf(raw: unknown): PlanAction | undefined {
   switch (raw) {
     case "plan": return "ChoosePlan"

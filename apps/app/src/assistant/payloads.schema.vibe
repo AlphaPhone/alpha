@@ -39,21 +39,57 @@ export schema SearchHit {
 /** A page of search hits. */
 export schema SearchPage { readonly messages: readonly SearchHit[] }
 
-/** A device action the agent proposed, as the pending listing gives it. */
-export schema PendingProposal {
+/** What a device proposal asks the phone to do, as the agent's review routes give it. */
+export schema ProposalPayload {
+  readonly operation: Schema.Unknown
+  readonly requestMessageId?: string
+  readonly workflow?: Schema.Unknown
+  readonly calendarAgendaSource?: Schema.Unknown
+}
+
+/** The execution of a claimed proposal: the agent's own attempt id, which every receipt and review names. */
+export schema ProposalExecution { readonly attemptId: Schema.NonEmptyString }
+
+/** A device proposal as the agent's `/api/client-devices/proposals` routes give it. */
+export schema WireProposal {
   readonly id: Schema.NonEmptyString
   readonly digest: string
   readonly state: string
   readonly expiresAt: string
-  readonly title?: string
-  readonly description?: string
-  readonly operation: Schema.Unknown
-  readonly requestMessageId?: string
-  readonly workflow?: Schema.Unknown
+  readonly payload: ProposalPayload
+  readonly execution?: ProposalExecution
 }
 
-/** The pending device actions of this device. */
-export schema PendingListing { readonly proposals: readonly PendingProposal[] }
+/** The proposals of this device the agent lists. */
+export schema PendingListing { readonly proposals: readonly WireProposal[] }
+
+/** What a proposal route answers: the proposal as it now stands. */
+export schema ProposalAnswer { readonly digest: string; readonly proposal: Schema.Unknown }
+
+/** A proposal the claim committed: executing under the agent's attempt id. */
+export schema ClaimedProposal { readonly state: "executing"; readonly execution: ProposalExecution }
+
+/** The claim route's answer: the proposal now executing under the agent's attempt id. */
+export schema ClaimAnswer { readonly digest: string; readonly proposal: ClaimedProposal }
+
+/** A Browser open, read only for its address. */
+export schema BrowserOpen { readonly type: "browser_navigate"; readonly url: string }
+
+/** One public link of an open Browser page. */
+export schema PageLink { readonly url: string; readonly text: string }
+
+/** The page of a Browser tab as Browser read it for a turn: address, one-line title, visible text, selection and links, or only the address and title when withheld. */
+export schema BrowserPageObservation {
+  readonly tabId: Schema.NonEmptyString
+  readonly revision: Schema.NonEmptyString
+  readonly url: string
+  readonly title: string
+  readonly capturedAt: Schema.Int
+  readonly text?: string
+  readonly selection?: string
+  readonly links?: readonly PageLink[]
+  readonly withheld?: string
+}
 
 /** What Android says about an assist invocation it handed to the renderer. */
 export schema AssistInvocation {
@@ -76,12 +112,6 @@ export schema Coordinates { readonly latitude: number; readonly longitude: numbe
 
 /** A position fix of `ElizaLocation.getCurrentPosition`. */
 export schema PositionFix { readonly coords: Coordinates; readonly timestamp: number }
-
-/** A Wi-Fi and cell position of `AlphaNetworkLocation.locate`, with the fingerprint of the networks it was resolved from. */
-export schema NetworkFix { readonly latitude: number; readonly longitude: number; readonly accuracy: number; readonly timestamp: number; readonly fingerprint: string }
-
-/** `AlphaNetworkLocation.locate` found the visible networks unchanged since `unchangedFrom`. */
-export schema NetworkUnchanged { readonly unchanged: true; readonly fingerprint: string }
 
 /** One file saved beside a sent message, its bytes as base64. */
 export schema SavedFile { readonly id: string; readonly name: string; readonly mimeType: string; readonly data: string }

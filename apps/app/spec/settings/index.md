@@ -25,19 +25,23 @@ test mocks.
 
 ### Settings has a root, four categories and the pages each category opens
 
+General's Notifications opens the notifications page Clock's mirror keeps. The root's Account row
+shows the account's email or sign-in state and its AI provider row Own key or Cloud, as the account
+reports them.
+
 ```quint
-type Page = Root | General | Display | Network | Privacy | Permissions | Apps | Passwords
+type Page = Root | General | Display | Notifications | Network | Privacy | Permissions | Apps | Passwords
   | AppInbox | AppCamera | AppMaps | AppNotes | AppPhotos | About | Problems | Licenses | LicenseDetail | Developer
 type Settings = { page: Page, licence: int, developer: bool, opened: int }
 pure val initial: Settings = { page: Root, licence: -1, developer: false, opened: 0 }
 pure def parent(p: Page): Page =
-  if (p == Display or p == Network) General
+  if (p == Display or p == Notifications or p == Network) General
   else if (p == Permissions) Privacy
   else if (p == Passwords or p == AppInbox or p == AppCamera or p == AppMaps or p == AppNotes or p == AppPhotos) Apps
   else if (p == Problems or p == Licenses) About
   else if (p == LicenseDetail) Licenses
   else Root
-pure val pageValues = Set(Root, General, Display, Network, Privacy, Permissions, Apps, Passwords, AppInbox, AppPhotos, About, Problems, Licenses, Developer)
+pure val pageValues = Set(Root, General, Display, Notifications, Network, Privacy, Permissions, Apps, Passwords, AppInbox, AppPhotos, About, Problems, Licenses, Developer)
 pure val sValues = Set(initial).union(Set({ ...initial, developer: true }))
 ```
 
@@ -70,14 +74,16 @@ pure def sometimesDeveloperOpen(s: Settings): bool = s.page == Developer
 
 ### Another surface may open only a listed section, never Developer or Passwords
 
-The assistant or a notice can open General, Display, Privacy, Permissions, Apps, Inbox's page or
-About. The account, Google and the AI provider live in the Account app: the root's Account, Google &
+The assistant or a notice can open General, Display, Notifications, Privacy, Permissions, Apps,
+Inbox's page or About. The account, Google and the AI provider live in the Account app: the root's Account, Google &
 email and AI provider rows open it, and a request for Settings' `plans`, `google` or `provider`
-route opens that section of the Account app instead; `calendar` and `workflows` open those apps.
+route opens that section of the Account app instead; `calendar` opens Calendar's Calendars sheet and
+`workflows` opens Workflows.
 
 ```quint
 pure def listedSection(page: Page): bool =
-  page == General or page == Display or page == Privacy or page == Permissions or page == Apps or page == AppInbox or page == About
+  page == General or page == Display or page == Notifications or page == Privacy or page == Permissions or page == Apps
+  or page == AppInbox or page == About
 pure def canOpenSection(s: Settings, page: Page): bool = listedSection(page)
 pure def openSection(s: Settings, page: Page): Settings = { ...s, page: page, opened: s.opened + 1 }
 pure def stepNoSurfaceOpensDeveloperOrPasswords(before: Settings, via: str, after: Settings): bool =
@@ -86,7 +92,8 @@ pure def stepNoSurfaceOpensDeveloperOrPasswords(before: Settings, via: str, afte
 
 ### A route names a listed section, or another app it is forwarded to
 
-The legacy section names still open their page: `sound` and `notifications` open General.
+The legacy section names still open their page: `sound` opens General and `notifications` opens
+Notifications.
 
 ```quint
 type Forward = ToSettings | ToPlans | ToProvider | ToGoogle | ToCalendar | ToWorkflows
@@ -95,7 +102,8 @@ pure def forwardOf(route: str): Forward =
   else if (route == "google") ToGoogle else if (route == "calendar") ToCalendar
   else if (route == "workflows") ToWorkflows else ToSettings
 pure def sectionOf(route: str): Page =
-  if (route == "general" or route == "sound" or route == "notifications") General else if (route == "display") Display
+  if (route == "general" or route == "sound") General else if (route == "notifications") Notifications
+  else if (route == "display") Display
   else if (route == "privacy") Privacy else if (route == "permissions") Permissions else if (route == "apps") Apps
   else if (route == "inbox") AppInbox else if (route == "about") About else Root
 pure def lawNoRouteOpensDeveloperOrPasswords(route: str): bool = sectionOf(route) != Developer and sectionOf(route) != Passwords
@@ -117,6 +125,30 @@ pure def appPage(app: AppRow, onPhone: bool): Page =
 pure def appListed(app: AppRow, aosp: bool): bool = app != RowMessages or aosp
 pure def lawAnAppPageOpensFromApps(app: AppRow, onPhone: bool): bool =
   appPage(app, onPhone) == Root or parent(appPage(app, onPhone)) == Apps
+```
+
+### Calendar's row opens Calendar at its Calendars sheet, where its sources and Google sync are set
+
+Settings mounts no Calendar settings of its own; the `calendar` route opens the same sheet.
+
+```quint
+pure val calendarSettingsRoute: str = "settings"
+pure def appRoute(app: AppRow): str = if (app == RowCalendar) calendarSettingsRoute else ""
+pure def lawOnlyCalendarOpensAtARoute(app: AppRow): bool = appRoute(app) != "" implies app == RowCalendar
+```
+
+### General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone
+
+The Phone row hands off to the Phone app's information (SIM, carrier, roles and the identifiers
+Android shows); Agent activity hands off to the assistant's activity, which needs the on-device
+agent. Neither row exists where its app cannot answer.
+
+```quint
+type Elsewhere = PhoneInfo | AgentActivity
+pure def elsewhereShown(e: Elsewhere, aosp: bool, onPhone: bool): bool = if (e == PhoneInfo) aosp else onPhone
+pure def elsewhereRoute(e: Elsewhere): str = if (e == PhoneInfo) "info" else "activity"
+pure def lawThePhoneRowOnlyOnTheImage(onPhone: bool): bool = not(elsewhereShown(PhoneInfo, false, onPhone))
+pure def lawNoAgentActivityInABrowser(aosp: bool): bool = not(elsewhereShown(AgentActivity, aosp, false))
 ```
 
 ### Privacy's Access setup reopens the first-run access walkthrough at its first step

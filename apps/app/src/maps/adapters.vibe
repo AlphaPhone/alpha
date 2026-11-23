@@ -2,22 +2,29 @@
 import { type Nav, running } from "../../gen/shell__navigation.effect.vibe"
 import { Machine as CallBarMachine, type CallBar } from "../../gen/telephony__callBar.effect.vibe"
 import { AccountSheet } from "../account/sheet.vibe"
+import { SignInScreen } from "../account/signIn.vibe"
 import { Composer } from "../assistant/composer.vibe"
 import { AppLifecycle } from "../platform/lifecycle.vibe"
 import { Build } from "../platform/build.vibe"
-import { foregroundOf } from "../shell/foreground.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Navigation as ShellNavigation } from "../shell/navigation.vibe"
 import { pageEvents } from "../shell/page.ts"
 import type { AppId } from "../web/app-screen.ts"
 import { MapsHandoff } from "./handoff.vibe"
 import { MapsAccount, MapsShell, type ShellState } from "./ports.vibe"
 
-/** The launcher as Maps reads it, from the shell's navigation, Telecom's calls, whether Android has the app in front, whether the account sheet is open, and the build. */
-export function shellStateOf(nav: Nav, calls: CallBar, foreground: boolean, accountOpen: boolean, native: boolean): ShellState {
-  const front = foregroundOf(nav)
+/** What the launcher shows beyond its navigation: the foreground with Android's keyguard, whether Android has the app in front, and whether the account sheet or sign-in is open. */
+export interface ShellFacts {
+  readonly front: ForegroundState
+  readonly appForeground: boolean
+  readonly connectionOpen: boolean
+}
+
+/** The launcher as Maps reads it, from the shell's navigation, Telecom's calls, the shell's foreground and account's connection sheet, and the build. */
+export function shellStateOf(nav: Nav, calls: CallBar, facts: ShellFacts, native: boolean): ShellState {
   return {
-    live: running(nav), hidden: nav.hidden, suspended: !foreground, assistantWindow: nav.host === "AssistantSurface",
-    connectionOpen: accountOpen || nav.layers.some((layer) => layer.id.startsWith("account")), home: front.screen === "home", secure: front.locked,
+    live: running(nav), hidden: nav.hidden, suspended: !facts.appForeground, assistantWindow: facts.front.assistantSurface === true,
+    connectionOpen: facts.connectionOpen, home: facts.front.screen === "home", secure: facts.front.locked,
     shaded: nav.shade, ringing: calls.calls.some((call) => call.phase === "Ringing"), native,
     view: nav.app === "" ? "home" : nav.app, stack: nav.stack,
   }
@@ -25,17 +32,26 @@ export function shellStateOf(nav: Nav, calls: CallBar, foreground: boolean, acco
 
 const shellLive = Layer.effect(MapsShell, effect {
   const navigation = try ShellNavigation
+  const foreground = try Foreground
   const calls = try CallBarMachine
   const lifecycle = try AppLifecycle
   const sheet = try AccountSheet
+  const signIn = try SignInScreen
   const native = (try Build).info.variant !== "browser"
   let agentOpen = ""
-  const foreground = Stream.changes(Stream.map(lifecycle.changes, (app) => app.foreground))
-  const accountOpen = Stream.changes(Stream.map(sheet.changes, (s) => s.open))
-  const outside = Stream.zipLatest(foreground, accountOpen)
+  const appForeground = Stream.changes(Stream.map(lifecycle.changes, (app) => app.foreground))
+  const connectionOpen = Stream.changes(Stream.map(Stream.zipLatest(sheet.changes, signIn.changes), ([s, i]) => s.open || i.screen !== "ScreenClosed"))
+  const facts = Stream.map(Stream.zipLatest(Stream.zipLatest(foreground.changes, appForeground), connectionOpen),
+    ([[front, app], open]): ShellFacts => ({ front, appForeground: app, connectionOpen: open }))
+
+  effect function factsNow() {
+    const open = (try sheet.current()).open || (try signIn.current()).screen !== "ScreenClosed"
+    return { front: try foreground.get(), appForeground: (try lifecycle.get()).foreground, connectionOpen: open } satisfies ShellFacts
+  }
+
   return {
-    states: Stream.map(Stream.zipLatest(Stream.zipLatest(navigation.changes, calls.changes), outside), ([[nav, bar], [front, open]]) => shellStateOf(nav, bar, front, open, native)),
-    effect current() { return shellStateOf(try navigation.get(), try calls.get(), (try lifecycle.get()).foreground, (try sheet.current()).open, native) },
+    states: Stream.map(Stream.zipLatest(Stream.zipLatest(navigation.changes, calls.changes), facts), ([[nav, bar], f]) => shellStateOf(nav, bar, f, native)),
+    effect current() { return shellStateOf(try navigation.get(), try calls.get(), try factsNow(), native) },
     effect open(app: string, route?: string) {
       const forAgent = agentOpen === app
       agentOpen = ""
@@ -47,7 +63,7 @@ const shellLive = Layer.effect(MapsShell, effect {
   }
 })
 
-/** What Maps needs from the telephony and shell areas, built over their own services; GuidanceSpeaker is voice's and MapsAccount is account's. */
+/** What Maps needs from the shell, telephony and account areas, built over their own services; GuidanceSpeaker is voice's and MapsAccount is account's. */
 export const portsLive = shellLive
 
 /** The chat Maps counts messages in: a new account session or another open conversation retires the messages counted before. */

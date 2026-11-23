@@ -1,7 +1,7 @@
 // spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"; spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"
 import { createCloudClient } from "@elizaos/cloud/client"
 import { initial as connectionStart, type Resident as ResidentConnection } from "../../gen/platform__resident.ts"
-import { adviceOf, cloudOutcomeOf, pathAdmitted } from "../../gen/platform.effect.vibe"
+import { adviceOf, cloudOutcomeOf, pathAdmitted, resetCarried } from "../../gen/platform.effect.vibe"
 import { Build, type BuildInfo } from "./build.vibe"
 import { buildLive } from "./build-live.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "./cloud.vibe"
@@ -95,8 +95,8 @@ export function fakeResident(routes: { readonly [route: string]: FakeRoute }, st
   return Layer.mergeAll(Layer.succeed(Resident, resident), Layer.succeed(ResidentControl, control), Layer.succeed(ResidentRecovery, recovery))
 }
 
-/** A Cloud and CloudServices layer for tests and stories: `routes` keyed `"METHOD /path"` give each answer's data, `status` its HTTP status and `retryAfter` a 429's wait in seconds; signed out, every route is refused. */
-export function fakeCloud(routes: { readonly [route: string]: unknown }, options: { readonly signedIn?: boolean; readonly status?: { readonly [route: string]: number }; readonly retryAfter?: { readonly [route: string]: number } } = {}) {
+/** A Cloud and CloudServices layer for tests and stories: `routes` keyed `"METHOD /path"` give each answer's data, `status` its HTTP status, `retryAfter` a 429's wait in seconds and `resetAt` the epoch milliseconds a refusal names its allowance reset; signed out, every route is refused. */
+export function fakeCloud(routes: { readonly [route: string]: unknown }, options: { readonly signedIn?: boolean; readonly status?: { readonly [route: string]: number }; readonly retryAfter?: { readonly [route: string]: number }; readonly resetAt?: { readonly [route: string]: number } } = {}) {
   const base = "https://cloud.test"
   const signedIn = options.signedIn ?? true
   const said = (method: string, path: string, body: unknown) => answerRoute(routes, options.status, signedIn, method, path, body)
@@ -107,9 +107,17 @@ export function fakeCloud(routes: { readonly [route: string]: unknown }, options
       const outcome = cloudOutcomeOf(reply.status)
       if (outcome === "CloudSignedOutNow") throw new CloudSignedOut()
       if (outcome === "CloudDown") {
-        const wait = options.retryAfter?.[`${method} ${path.split("?")[0]}`]
+        const route = `${method} ${path.split("?")[0]}`
+        const wait = options.retryAfter?.[route]
         const advice = adviceOf(reply.status, wait !== undefined && Number.isSafeInteger(wait), wait ?? 0)
-        throw new CloudUnavailable({ status: reply.status, message: `Cloud request failed (HTTP ${reply.status}).`, ...(advice.tag === "WaitSeconds" ? { retryAfter: advice.seconds } : {}) })
+        const reset = options.resetAt?.[route]
+        const now = try Clock.currentTimeMillis
+        throw new CloudUnavailable({
+          status: reply.status,
+          message: `Cloud request failed (HTTP ${reply.status}).`,
+          ...(advice.tag === "WaitSeconds" ? { retryAfter: advice.seconds } : {}),
+          ...(resetCarried(reset !== undefined && Number.isSafeInteger(reset), reset ?? 0, now) ? { resetAt: reset } : {}),
+        })
       }
       return reply.data
     },

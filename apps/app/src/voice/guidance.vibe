@@ -10,7 +10,7 @@ export const guidanceSpeaker = Layer.effect(GuidanceSpeaker, effect {
     effect speak(text: string) {
       try (onInterrupt(speech.speak(text, "AppSpeech"), () => speech.stop("AppSpeech")) catch effect (error) => match (error) {
         when SpeechNotStopped: throw new GuidanceSpeechStopped({ reason: "cleanup-unconfirmed" });
-        when SpeechInterrupted: throw new GuidanceSpeechStopped({ reason: error.reason === "playbackFailed" ? "failed" : "interrupted" });
+        when SpeechInterrupted: throw new GuidanceSpeechStopped({ reason: error.failed === true || error.reason === "playbackFailed" ? "failed" : "interrupted" });
         default: throw new GuidanceSpeechStopped({ reason: "failed" });
       })
     },

@@ -1,0 +1,117 @@
+// spec/browser/pageContext.md, "Story: Let Alpha see the page I have open"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"; spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"; spec/browser/pageContext.md, "A withheld page tells the agent only its address and title, and a sensitive page's address loses its query"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
+import { type Event, type PageRead, type Withheld, Machine, machine, mayRead, waitMs } from "../../gen/browser__pageContext.effect.vibe"
+import { curTab, isPrivateTab } from "../../gen/browser__session.effect.vibe"
+import { settledSecurely } from "../../gen/browser__page.effect.vibe"
+import { PageContextReply } from "../platform/native.schema.vibe"
+import { Preferences } from "../settings/preferences.vibe"
+import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
+import { type BrowserPageObservation, type PageReadAnswer, type PageWithheld, boundPage, pageAddress } from "./page-context.ts"
+import { publicPageText } from "./page-text.ts"
+import { BrowserTabs } from "./session.vibe"
+import { TabHost } from "./tabHost.vibe"
+
+/** The screen a message was sent from, as the turn context's observation names it. */
+export interface PageTurnObservation {
+  readonly view?: string
+  readonly sensitive?: boolean
+  readonly selectedObject?: { readonly kind: string; readonly id: string; readonly revision?: string }
+}
+
+/** The page Browser shows, for one chat message at a time. */
+export service BrowserPageContext {
+  readonly changes: Stream.Stream<PageRead>
+  /** The page of the observed tab for one message to a peer that does or does not take it: read at most once, waited for at most 1.2 seconds, and undefined whenever it may not go. */
+  forTurn(observation: PageTurnObservation, peerTakesIt: boolean): (BrowserPageObservation | undefined)!!
+  /** Whether `url` is exactly a link of the page the latest message carried. */
+  carried(url: string): boolean!!
+}
+
+const withheldOf: Readonly<Record<PageWithheld, Withheld>> = { "sensitive-page": "SensitivePage", unreadable: "Unreadable" }
+
+function onBrowser(state: ForegroundState): boolean {
+  return state.visible && !state.locked && state.screen === "home" && state.view === "browser"
+}
+
+/** BrowserPageContext over the page-read machine in memory: the native tab host's isolated read on a device, the public address fetched again without credentials on the browser build. */
+export const pageContextLayer = Layer.provide(Layer.effect(BrowserPageContext, effect {
+  const reads = try Machine
+  const tabs = try BrowserTabs
+  const host = try TabHost
+  const foreground = try Foreground
+  const preferences = try Preferences
+  const links = try Ref.make<readonly string[]>([])
+  const step = (event: Event) => reads.send(event) catch () => undefined
+
+  effect function read(tab: string, url: string, navigation: string) {
+    if (host.onDevice) {
+      const raw = host.call("pageContext", { id: tab, url, navigation }) catch () => undefined
+      if (raw === undefined) return undefined
+      const reply = Schema.decodeUnknownEffect(PageContextReply)(raw) catch () => undefined
+      const answer: PageReadAnswer = reply ?? { withheld: "unreadable" }
+      return answer
+    }
+    const source = tryPromise((signal) => publicPageText(url, signal)) catch () => undefined
+    const answer: PageReadAnswer = source === undefined ? { withheld: "unreadable" }
+      : "blocked" in source ? { withheld: "sensitive-page" }
+      : { text: source.text, truncated: source.truncated }
+    return answer
+  }
+
+  effect function still(tab: string, revision: number, navigation: string) {
+    const state = try tabs.get()
+    const now = curTab(state)
+    return state.cur === tab && now.revision === revision && now.page.navigation === navigation && !isPrivateTab(state, tab) && onBrowser(try foreground.get())
+  }
+
+  effect function serve(turn: number, observation: PageTurnObservation, peerTakesIt: boolean) {
+    try Ref.set(links, [])
+    const state = try tabs.get()
+    const selected = observation.selectedObject
+    const prefix = `${host.session}:`
+    const observedTab = selected !== undefined && selected.kind === "browser-tab" && selected.id.startsWith(prefix) ? selected.id.slice(prefix.length) : ""
+    const tab = curTab(state)
+    const address = pageAddress(tab.page.url)
+    const allowed = mayRead({
+      browserView: observation.view === "browser",
+      sensitive: observation.sensitive === true,
+      shown: onBrowser(try foreground.get()),
+      sameTab: observedTab !== "" && observedTab === state.cur,
+      sameRevision: selected?.revision === String(tab.revision),
+      priv: isPrivateTab(state, state.cur),
+      settled: tab.stage === "Live" && settledSecurely(tab.page),
+      publicHttps: address !== undefined,
+      enabled: try preferences.sharesBrowserPage(),
+      peerTakesIt,
+    })
+    const begun = try step({ type: "begin", turn, tab: state.cur, revision: tab.revision, allowed })
+    if (begun?.stage !== "Reading" || address === undefined || selected === undefined || selected.revision === undefined) return undefined
+    const answer = timeout(read(state.cur, tab.page.url, tab.page.navigation), waitMs) catch () => "late" as const
+    if (answer === "late") {
+      try step({ type: "timedOut", turn })
+      return undefined
+    }
+    const after = try tabs.get()
+    const capturedAt = try Clock.currentTimeMillis
+    const page = answer === undefined ? undefined : boundPage(answer, { tabId: selected.id, revision: selected.revision, capturedAt, address, title: tab.page.title })
+    const withheld: Withheld = page?.withheld === undefined ? "NotWithheld" : withheldOf[page.withheld]
+    const settledRead = try step({ type: "answered", turn, tab: after.cur, revision: curTab(after).revision, valid: page !== undefined, withheld })
+    if (settledRead?.stage !== "Answered" || page === undefined) return undefined
+    const checked = try step({ type: "rechecked", turn, enabled: try preferences.sharesBrowserPage(), current: try still(state.cur, tab.revision, tab.page.navigation) })
+    if (checked?.stage !== "Answered") return undefined
+    const handed = try step({ type: "delivered", turn })
+    if (handed?.stage !== "Delivered") return undefined
+    try Ref.set(links, page.links === undefined ? [] : page.links.map((link) => link.url))
+    return page
+  }
+
+  return {
+    changes: reads.changes,
+    effect forTurn(observation: PageTurnObservation, peerTakesIt: boolean) {
+      const turn = (try reads.get()).turn + 1
+      return try Effect.onInterrupt(serve(turn, observation, peerTakesIt), () => step({ type: "cancelled", turn }))
+    },
+    effect carried(url: string) {
+      return (try Ref.get(links)).includes(url)
+    },
+  }
+}), machine())

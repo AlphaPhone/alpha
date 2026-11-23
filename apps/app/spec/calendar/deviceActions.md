@@ -130,3 +130,25 @@ pure def lawNoNeverDeletes(firstReply: bool, plannerConfirmed: bool, targetMatch
   not(deleteConfirmed(firstReply, AnsweredNo, plannerConfirmed, targetMatches)) and
   not(deleteConfirmed(firstReply, AnsweredQuestion, plannerConfirmed, targetMatches))
 ```
+
+## Story: Offer the agent only the Calendar actions this phone runs
+
+> As the owner, I want the agent to ask only for the Calendar actions my phone can review and run,
+> so it never offers one that would fail.
+
+### The local event is always advertised; agenda reads only in the browser build; every other Calendar action only when the agent offered it
+
+On the phone the agent reads the phone's own calendar through the next-event and range reads, so
+the agenda read is the browser build's alone. Calendar's foreground review is always present, so
+the named read needs only the agent's offer.
+
+```quint
+type CalendarCapability = CapLocalEvent | CapAgendaRead | CapCreate | CapNextRead | CapAvailabilityRead | CapNamedRead
+pure def calendarAdvertised(capability: CalendarCapability, offered: bool, browser: bool): bool =
+  if (capability == CapLocalEvent) true
+  else if (capability == CapAgendaRead) offered and browser
+  else offered
+pure def lawAgendaReadOnlyInBrowser(offered: bool): bool = not(calendarAdvertised(CapAgendaRead, offered, false))
+pure def lawUnofferedNotAdvertised(browser: bool): bool =
+  not(calendarAdvertised(CapCreate, false, browser)) and not(calendarAdvertised(CapNamedRead, false, browser))
+```

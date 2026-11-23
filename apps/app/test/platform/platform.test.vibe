@@ -1,4 +1,4 @@
-// spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"; spec/platform/index.md, "Story: Ship only what this build allows"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"; spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"; spec/platform/lifecycle.md, "Story: Come back to my phone where I left it"; spec/platform/lifecycle.md, "Story: Send while my phone has a network"; spec/platform/lifecycle.md, "Story: Find my phone as I left it after Android stops Alpha"; spec/platform/rendererRecovery.md, "Story: Never be stuck behind a crashing Home screen"; spec/platform/storage.md, "Story: Keep my phone's state as I left it"; spec/platform/storage.md, "Story: Reset Alpha's data"; spec/platform/crashJournal.md, "Story: Tell support what went wrong without telling them what I wrote"
+// spec/platform/index.md, "Story: Reach the phone's native capabilities"; spec/platform/index.md, "Story: Talk to the resident agent"; spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "Story: Keep my phone's state across restarts"; spec/platform/index.md, "Story: Ship only what this build allows"; spec/platform/resident.md, "Story: Start my agent and keep it running"; spec/platform/resident.md, "Story: Keep my agent with my current Cloud account"; spec/platform/resident.md, "Story: Wait for a feature that is still starting"; spec/platform/resident.md, "Story: Stop waiting for a request I no longer need"; spec/platform/nativeStream.md, "Story: Watch a reply arrive on the phone"; spec/platform/viewEvents.md, "Story: Follow what my agent does on my screen"; spec/platform/lifecycle.md, "Story: Come back to my phone where I left it"; spec/platform/lifecycle.md, "Story: Send while my phone has a network"; spec/platform/lifecycle.md, "Story: Find my phone as I left it after Android stops Alpha"; spec/platform/rendererRecovery.md, "Story: Never be stuck behind a crashing Home screen"; spec/platform/storage.md, "Story: Keep my phone's state as I left it"; spec/platform/storage.md, "Story: Reset Alpha's data"; spec/platform/storage.md, "Story: Keep what the earlier Alpha kept in its encrypted slots"; spec/platform/crashJournal.md, "Story: Tell support what went wrong without telling them what I wrote"
 import { assert, it } from "@effect/vitest"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/native.vibe"
@@ -10,7 +10,9 @@ import { subscription } from "../../src/platform/view-events.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { cloudOver } from "../../src/platform/cloud-live.vibe"
 import { CrashJournal, crashJournalLive } from "../../src/platform/crash-journal.vibe"
-import { DeviceStorage, deviceStorageLive } from "../../src/platform/device-storage.vibe"
+import { DeviceStorage, deviceStorageLive, storedOrHeld } from "../../src/platform/device-storage.vibe"
+import { adoptLegacySlots } from "../../src/platform/legacy-slots.vibe"
+import { Machine as StorageMachine, decodeState as decodeStorage, machine as storageMachine, stored as storedStorage } from "../../gen/platform__storage.effect.vibe"
 import { AppLifecycle, lifecycleLive, lifecycleOver } from "../../src/platform/lifecycle.vibe"
 import { admitMockMode, buildInfoOf, cloudAuthorityOf } from "../../src/platform/build-live.vibe"
 import { buildInfo, fakeNative } from "../../src/platform/layers.vibe"
@@ -676,7 +678,7 @@ it.effect("keep a damaged value apart for review while new drafts are saved, and
   }
 })
 
-it.effect("reset everything Alpha kept for me, and start again with no owner bound", () => effect {
+it.effect("reset everything Alpha kept for me, and start again with no owner bound (spec/platform/storage.md, \"Story: Reset Alpha's data\")", () => effect {
   provide memoryStore {
     const store = try KeyValueStore.KeyValueStore
     try store.set(ownerKey("ann", "maps"), "{}")
@@ -715,5 +717,91 @@ it.effect("log which part of a Cloud AI request failed, once, and never what was
         [["inference", "action-planner · rate-limit · HTTP 429"]],
       ))
     }
+  }
+})
+
+// spec/platform/index.md, "A refusal carries the allowance reset Cloud named, only while it lies ahead"
+it.effect("say when my allowance resets, only when Cloud named a time still ahead", () => effect {
+  provide cloudOver(cloud((request) => request.path === "/api/v1/user"
+    ? { status: 429, data: { error: { code: "allowance_exhausted", resetAt: "2030-01-01T00:00:00Z" } } }
+    : { status: 429, data: { error: "allowance_exhausted", resetAt: 0 } }), cloudAuthorityOf("Production")) {
+    const cloudService = try Cloud
+    const named = try Effect.flip(cloudService.json("GET", "/api/v1/user"))
+    const unnamed = try Effect.flip(cloudService.json("GET", "/api/v1/billing/limits"))
+    try Effect.try(() => assert.deepStrictEqual(
+      [named instanceof CloudUnavailable ? named.resetAt : "signed out", unnamed instanceof CloudUnavailable ? [unnamed.code, unnamed.resetAt] : "signed out"],
+      [Date.parse("2030-01-01T00:00:00Z"), ["allowance_exhausted", undefined]],
+    ))
+  }
+})
+
+// spec/platform/storage.md, "A stored value that is not a state is held for review and never written over"
+it.effect("start fresh beside a damaged value kept apart for review, and save what I change since", () => effect {
+  provide memoryStore {
+    const store = try KeyValueStore.KeyValueStore
+    const key = ownerKey("ann", "maps/state")
+    try store.set(key, "{not json")
+    provide deviceStorageLive {
+      const storage = try DeviceStorage
+      try storage.admitStartup()
+      try storage.bindOwner("ann")
+      provide storedOrHeld(key, decodeStorage, storedStorage(key), storageMachine()) {
+        try (try StorageMachine).send({ type: "admitStartup" })
+      }
+      const copy = try storage.held(key)
+      const saved = try store.get(key)
+      const review = try Stream.runHead(storage.changes)
+      try Effect.try(() => assert.deepStrictEqual({
+        copy,
+        saved: typeof saved === "string" ? (JSON.parse(saved) as { startupAdmitted: boolean }).startupAdmitted : undefined,
+        review: review._tag === "Some" ? [...review.value.review] : undefined,
+      }, { copy: "{not json", saved: true, review: [key] }))
+    }
+  }
+})
+
+// spec/platform/storage.md, "Story: Keep what the earlier Alpha kept in its encrypted slots"
+it.effect("move what the earlier Alpha kept into the secure store, and never over a newer draft", () => effect {
+  const legacy = new Map<string, string>([["inbox-drafts:v1:ann", "old drafts"], ["inbox-operation:v1:aa", "old operation"]])
+  const secure = new Map<string, string>([["device:operations", "newer operation"]])
+  const legacyPlugin = {
+    secureRead: (args: unknown) => ({ value: legacy.get((args as { slot: string }).slot) ?? null }),
+    secureCompareExchange: (args: unknown) => {
+      const asked = args as { slot: string; expectedValue: string | null; value: string | null }
+      if ((legacy.get(asked.slot) ?? null) !== asked.expectedValue) return { status: "conflict" }
+      if (asked.value === null) {
+        legacy.delete(asked.slot)
+      } else {
+        legacy.set(asked.slot, asked.value)
+      }
+      return { status: "saved" }
+    },
+  }
+  const securePlugin = {
+    get: (args: unknown) => ({ value: secure.get((args as { key: string }).key) ?? null }),
+    compareAndExchange: (args: unknown) => {
+      const asked = args as { key: string; expected: string | null; value: string | null }
+      const exchanged = (secure.get(asked.key) ?? null) === asked.expected
+      if (exchanged && asked.value !== null) secure.set(asked.key, asked.value)
+      return { exchanged }
+    },
+  }
+  provide fakeNative({ AlphaConnection: legacyPlugin, ElizaSecureStore: securePlugin }) {
+    const outcomes = try adoptLegacySlots([
+      ["inbox-drafts:v1:ann", "device:drafts"],
+      ["inbox-operation:v1:aa", "device:operations"],
+      ["inbox-drafts:v1:ben", "device:ben-drafts"],
+    ])
+    try Effect.try(() => assert.deepStrictEqual({ outcomes, legacy: [...legacy.keys()], secure: Object.fromEntries(secure) }, {
+      outcomes: ["Adopted", "AlreadyKept", "NothingToAdopt"],
+      legacy: [],
+      secure: { "device:operations": "newer operation", "device:drafts": "old drafts" },
+    }))
+  }
+  // spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
+  legacy.set("inbox-drafts:v1:ann", "old drafts")
+  provide fakeNative({ AlphaConnection: legacyPlugin, ElizaSecureStore: { get: () => ({ value: null }), compareAndExchange: () => { throw new Error("Secure storage is unavailable") } } }) {
+    const outcomes = try adoptLegacySlots([["inbox-drafts:v1:ann", "device:other-drafts"]])
+    try Effect.try(() => assert.deepStrictEqual([outcomes, legacy.get("inbox-drafts:v1:ann")], [["NotAdopted"], "old drafts"]))
   }
 })

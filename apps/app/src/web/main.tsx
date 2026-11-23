@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { land } from "../shell/landing.vibe";
 import { pageQuery, scrubAddress } from "../shell/page.ts";
 import { Recovery } from "../shell/recovery.vibe";
-import { runtime } from "./runtime.ts";
+import { act } from "./shell/services.ts";
 import { CallbackLanding } from "./shell/CallbackLanding.tsx";
 import { ShellBoundary } from "./shell/ErrorBoundary.tsx";
 import { RecoveryScreen } from "./shell/RecoveryScreen.tsx";
@@ -18,9 +18,9 @@ if (location.pathname.endsWith("/delegation-return") || location.pathname.endsWi
   const { landing, href } = Effect.runSync(land(pageQuery(), scrubAddress));
   root.render(<StrictMode><CallbackLanding message={landing.message} href={href} /></StrictMode>);
 } else {
-  runtime.runFork(Effect.void);
-  const reload = () => runtime.runFork(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.reload()));
-  const switchHome = () => runtime.runFork(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.switchHome()));
+  act(Effect.void);
+  const reload = () => act(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.reload()));
+  const switchHome = () => act(Effect.flatMap(Effect.service(Recovery), (recovery) => recovery.switchHome()));
   root.render(
     <StrictMode>
       <ShellBoundary fallback={<RecoveryScreen diagnostics="failure: render" onReload={reload} onSwitchHome={switchHome} />}>

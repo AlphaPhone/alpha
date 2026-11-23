@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {runJvm,nativeSource,upstreamConnection} from './fixtures/jvm-tools.mjs';
+import {runJvm,nativeSource,upstreamSecureStore} from './fixtures/jvm-tools.mjs';
 
 test('renderer slots cannot address the Cloud deployment storage namespace',()=>{
  const temporary=mkdtempSync(join(tmpdir(),'renderer-slot-namespace-'));
@@ -27,6 +27,6 @@ public final class Harness {
   System.out.println("PASS deployment namespace");
  }
 }`);
-  assert.match(runJvm([upstreamConnection('SecureSlotPolicy.java'),nativeSource('RendererCredentialSlots.java'),nativeSource('CloudDeployment.java'),harness],'ai.alphacompute.alphaphone.Harness'),/PASS deployment namespace/);
+  assert.match(runJvm([upstreamSecureStore('SecureSlotPolicy.java'),nativeSource('RendererCredentialSlots.java'),nativeSource('CloudDeployment.java'),harness],'ai.alphacompute.alphaphone.Harness',{release:'17'}),/PASS deployment namespace/);
  }finally{rmSync(temporary,{recursive:true,force:true});}
 });

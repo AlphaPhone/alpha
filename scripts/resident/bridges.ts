@@ -5,6 +5,7 @@ import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
 import {connect} from 'node:net';
 import path from 'node:path';
 import {Effect} from 'effect';
+import {workflowDeviceOffer, type WorkflowDeviceOffer, type WorkflowStep, type WorkflowStepTarget} from '@elizaos/agent';
 import type {AgentCli, ResidentHost} from '@elizaos/agent/cli';
 import {MapsFailure} from '@elizaos/plugin-maps/client/contracts';
 import type {AgentSavedPlaceStore, StoredSaves} from '@elizaos/plugin-maps';
@@ -112,12 +113,14 @@ export async function bridgeRead(selection: unknown, at: number, ask = askBridge
 	return text;
 }
 
-function hostService(serviceType: string, description: string, members: Readonly<Record<string, (...args: never[]) => Promise<unknown>>>): ServiceClass {
+type Members = Readonly<Record<string, (...args: never[]) => Promise<unknown>>>;
+
+function hostService(serviceType: string, description: string, members: (runtime: Runtime) => Members): ServiceClass {
 	const service = class {
 		static serviceType = serviceType;
 		readonly capabilityDescription = description;
 		constructor(readonly runtime: Runtime) {
-			Object.assign(this, members);
+			Object.assign(this, members(runtime));
 		}
 		static start(runtime: Runtime) {
 			return Promise.resolve(new service(runtime));
@@ -129,17 +132,40 @@ function hostService(serviceType: string, description: string, members: Readonly
 	return service as unknown as ServiceClass;
 }
 
-/** The `workflow-device` runtime service: the enrolled phone and one bound device step, over the app process's bridge. */
-export const workflowDeviceService: ServiceClass = hostService(WORKFLOW_DEVICE_SERVICE, "The enrolled phone's reviewed workflow device steps", {
-	enrollment: () => bridgeEnrollment(),
-	perform: (binding: unknown, target: unknown, operation: unknown) => askBridge({op: 'perform', binding, target, operation}),
-});
+/** The device operations the phone performs inside its own process, without a review on screen: an exact reviewed Calendar range. */
+export const NATIVE_DEVICE_OPERATIONS: ReadonlySet<string> = new Set(['read_calendar_range']);
+
+function operationType(operation: unknown): string {
+	return typeof operation === 'object' && operation !== null && typeof (operation as {type?: unknown}).type === 'string' ? (operation as {type: string}).type : '';
+}
+
+/**
+ * The workflow device bridge: the enrolled phone as the agent's own device requests know it, an exact reviewed Calendar
+ * range read by the app process over its bridge, and every other step offered to the phone for review (`offer`), which
+ * answers with the result it applied.
+ * @throws {never}
+ */
+export function workflowDevice(offer: WorkflowDeviceOffer, ask = askBridge): {
+	enrollment(): Promise<{installationId: string; enrollmentId: string; protocol: number} | undefined>;
+	perform(binding: WorkflowStep, target: WorkflowStepTarget, operation: unknown, signal?: AbortSignal): Promise<unknown>;
+} {
+	return {
+		enrollment: () => offer.enrollment(),
+		perform: (binding, target, operation, signal) => NATIVE_DEVICE_OPERATIONS.has(operationType(operation))
+			? ask({op: 'perform', binding, target, operation})
+			: offer.perform(binding, target, operation, signal),
+	};
+}
+
+/** The `workflow-device` runtime service: the enrolled phone and one bound device step, natively or offered for review. */
+export const workflowDeviceService: ServiceClass = hostService(WORKFLOW_DEVICE_SERVICE, "The enrolled phone's reviewed workflow device steps", (runtime) =>
+	workflowDevice(workflowDeviceOffer(runtime)));
 
 /** The `workflow-native-digests` runtime service: reviewed native digest sources, over the app process's bridge. */
-export const workflowNativeDigestService: ServiceClass = hostService(WORKFLOW_NATIVE_DIGEST_SERVICE, "The phone's reviewed native digest sources", {
+export const workflowNativeDigestService: ServiceClass = hostService(WORKFLOW_NATIVE_DIGEST_SERVICE, "The phone's reviewed native digest sources", () => ({
 	grant: (selection: unknown, expiresAt: number) => bridgeGrant(selection, expiresAt),
 	read: (selection: unknown, at: number) => bridgeRead(selection, at),
-});
+}));
 
 let residentState: string | undefined;
 

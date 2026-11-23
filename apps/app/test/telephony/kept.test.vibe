@@ -185,13 +185,13 @@ it.live("See my SIM, carrier and number, read while the page is open and forgott
       {
         unread: Option.map(unread, (f) => [f.phoneState, f.lines.length]),
         read: [read.phase, read.phoneState, read.lines.map((l) => [l.carrier, l.simName, l.number, l.network, l.signal]), read.holders.phoneAlpha, read.voicemail],
-        opened, settings: fake.calls.filter((c) => c.startsWith("AlphaDevice.openSettings")),
+        opened, settings: fake.calls.filter((c) => c.startsWith("ElizaSystem.openSettingsPage")),
         locked: Option.map(locked, (f) => [f.phase, f.lines.length]),
       },
       {
         unread: Option.some([false, 0]),
         read: ["InfoShown", true, [["Carrier", "Personal", "+14155550100", "Network5g", 3]], true, "VoicemailOn"],
-        opened: true, settings: ["AlphaDevice.openSettings:about"],
+        opened: true, settings: ["ElizaSystem.openSettingsPage:about"],
         locked: Option.some(["InfoClosed", 0]),
       },
     ))

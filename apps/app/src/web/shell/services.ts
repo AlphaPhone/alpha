@@ -48,6 +48,11 @@ export function now<A>(program: Effect.Effect<A, unknown, AppServices>, fallback
   }
 }
 
+/** A value read now from the app's runtime by an effect that neither fails nor waits, such as a service's current state. */
+export function readNow<A>(program: Effect.Effect<A, never, AppServices>): A {
+  return runtime.runSync(program);
+}
+
 /** Which build is running: its variant (launcher, AOSP image or browser) and whether test mocks are allowed. */
 export function buildInfo(): BuildInfo {
   return runtime.runSync(Effect.map(Effect.service(Build), (build) => build.info));

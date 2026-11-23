@@ -8,6 +8,11 @@ the calendar), automations (workflows, reminders, scheduled tasks and triggers),
 reply draft) and approvals. Domain validation and mutation authority stay in the agent's services;
 the table only decides whether a request may cross the bridge.
 
+Notes' records are exactly these routes, each with no query: `GET /api/notes/state`,
+`POST /api/notes/interact`, `POST /api/notes/trash/erase`, `GET /api/notes/trash/recordings`,
+`POST /api/notes/trash/recordings/complete` and `POST /api/views/notes/interact`. Any other method,
+path or query under those prefixes stays on the phone.
+
 ```quint
 type RouteCheck = { owner: bool, unsafe: bool, claimed: bool, method: bool, path: bool, query: bool, id: bool }
 ```

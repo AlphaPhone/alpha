@@ -5,7 +5,10 @@ digest panel, and the one sheet or review open over it. Android's Back closes wh
 it returns to the list, and only Back at the bare list leaves Workflows (legacy `alpha-back`
 handlers of the Workflows screen and its Clock draft, d73500a). A route the shell or a notice
 opens replaces the place, and every refresh or reset of the run view moves its generation, so that
-a notice read under the old view is read again (the clock area's workflow notices; #39954).
+a notice read under the old view is read again (the clock area's workflow notices; #39954). A
+route is applied once and then handed back to the shell as the bare route, so the same route
+opened again, such as Account's `google-removal/<grantId>` for the same grant, opens its review
+again.
 
 ## Domain
 

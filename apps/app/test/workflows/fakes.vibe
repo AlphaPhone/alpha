@@ -62,13 +62,14 @@ export function buildOf(variant: "launcher" | "aosp" | "browser", testMocks = fa
   return Layer.succeed(Build, { info: { version: "test", variant, testMocks } })
 }
 
-/** Navigation that records each app and route it opened, and shows Workflows at each route of `routes` in turn. */
-export function navigationOf(opened: Array<{ app: string; route?: string }>, routes: ReadonlyArray<string> = []) {
+/** Navigation that records each app and route it opened and each route Workflows handed back, and shows Workflows at each route of `routes` in turn. */
+export function navigationOf(opened: Array<{ app: string; route?: string }>, routes: ReadonlyArray<string> = [], handedBack: string[] = []) {
   const at = (route: string) => ({ app: "workflows", places: [{ app: "workflows", route, inner: false }] })
   return Layer.succeed(Navigation, {
     changes: Stream.fromIterable(routes.map(at)),
     get: () => succeed(at(routes.at(-1) ?? "")),
     open: (app: string, route?: string) => sync(() => { opened.push(route === undefined ? { app } : { app, route }); return true }),
+    send: (event: { readonly type: string; readonly route?: string }) => sync(() => { if (event.type === "setRoute") handedBack.push(event.route ?? ""); return true }),
   } as unknown as Navigation.Shape)
 }
 

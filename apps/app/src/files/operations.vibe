@@ -42,9 +42,10 @@ export const operationPorts = effect {
     },
     classOf: (operation) => {
       const op = decoded(operation)
-      return op !== undefined && (op.type === "files_open" || op.type === "files_filter") ? "FilesOpen" : "NotesRead"
+      return op !== undefined && (op.type === "files_open" || op.type === "files_filter") ? "FilesOpen" : "FilesChange"
     },
     target: () => ({ tag: "NoTarget" }),
+    handoff: () => false,
     summarize: (_operation, result) => result === "Applied" ? "Done in Files." : copy.unconfirmed,
   }
   return ports

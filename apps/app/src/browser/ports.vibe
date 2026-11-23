@@ -1,4 +1,5 @@
-// spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"; spec/browser/egress.md, "Share by email opens a draft with the page's address and name, and Copy link copies its address, each only from a shown settled page"
+// spec/browser/reading.md, "Story: Read only the page I am looking at"; spec/browser/reading.md, "Story: Read a page aloud on the browser build"; spec/browser/egress.md, "Share by email opens a draft with the page's address and name, and Copy link copies its address, each only from a shown settled page"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
+import type { ExecutorCall } from "@elizaos/agent/client"
 
 /** A page reading's speech did not run or ended early. */
 export error ReadingSpeechFailed { reason: string }
@@ -29,4 +30,18 @@ export service PageMail {
   /** Opens a new draft; the answer is why nothing opened, or undefined when Inbox shows the draft. */
   compose(subject: string, body: string): string | undefined!!
   static readonly defaultValue = () => ({ compose: () => succeed("Email isn’t available on this phone.") })
+}
+
+/** What the assistant knows of one executor call: whether the owner approved its card, and the words of the message it answers. */
+export interface BrowserCall {
+  readonly reviewed: boolean
+  readonly ownerText: string
+}
+
+/** The assistant's facts about each Browser executor call; unprovided, every call counts as unreviewed and without the owner's words, so an open of a page's link needs its card. */
+export service BrowserCallFacts {
+  of(call: ExecutorCall): BrowserCall!!
+  static readonly defaultValue = () => ({
+    of: () => succeed({ reviewed: false, ownerText: "" }),
+  })
 }

@@ -21,7 +21,6 @@ import { ClockActions } from "../../clock/clock.vibe";
 import { Deletions } from "../../clock/deletions.vibe";
 import { Notifications } from "../../clock/notifications.vibe";
 import { ReminderTaps } from "../../clock/reminder-taps.vibe";
-import { WorkflowNotices } from "../../clock/workflow-notices.vibe";
 import { ClockRecovery } from "../../clock/recovery.vibe";
 import { saveText } from "../../clock/page.ts";
 import type { AppId } from "../app-screen.ts";
@@ -32,7 +31,7 @@ import { QuestionSheet } from "./QuestionSheet.tsx";
 import { RetainedDataNotice } from "./RetainedDataNotice.tsx";
 import { RingingCard } from "./RingingCard.tsx";
 import { runtime } from "../runtime.ts";
-import { act, buildInfo } from "../shell/services.ts";
+import { act, buildInfo, now } from "../shell/services.ts";
 
 const clock = (use: (a: ClockActions.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ClockActions), use));
 const deletions = (use: (d: Deletions.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Deletions), use));
@@ -46,11 +45,11 @@ export type NoticesSurfaceProps = {
   readonly open: (app: AppId, route?: string) => void;
 };
 
-const WORKFLOW_REPORT: Readonly<Record<string, string>> = { OtherAccount: "This notice belongs to another account.", RunUnavailable: "That run isn’t available.", NotKept: "Not kept" };
+const WORKFLOW_REPORT: Readonly<Record<string, string>> = { OtherAccount: "This notice belongs to another account.", RunUnavailable: "That run isn’t available.", NotKept: "Not kept", QuestionChanged: "This notification changed or is gone." };
 
 /**
  * Every notice Clock keeps over the screens: ringing alarms and timers, deletion Undo, notification questions, workflow
- * notices and retained data. The browser build also offers its notification shade here.
+ * notice reports and retained data; a workflow notice's question opens in the assistant's question review. The browser build also offers its notification shade here.
  * @model spec/clock/notices.md
  */
 export function NoticesSurface(_props: NoticesSurfaceProps) {
@@ -65,11 +64,10 @@ export function NoticesSurface(_props: NoticesSurfaceProps) {
   const retained = notices.state?.retained ?? noticesInitial.retained;
   const recovery = notices.state?.recovery ?? noticesInitial.recovery;
   const download = () => {
-    const kept = runtime.runSync(Effect.flatMap(Effect.service(ClockRecovery), (r) => r.download()));
+    const kept = now(Effect.flatMap(Effect.service(ClockRecovery), (r) => r.download()), undefined);
     if (kept !== undefined && typeof retained === "object" && retained.tag === "Retained") saveText(`alpha-${retained.heading.toLowerCase().replaceAll(" ", "-")}.json`, kept);
   };
-  const reminderQuestion = tap.stage === "TapQuestion" ? runtime.runSync(Effect.flatMap(Effect.service(ReminderTaps), (t) => t.question())) : undefined;
-  const workflowQuestion = workflow.stage === "WQuestionTap" ? runtime.runSync(Effect.flatMap(Effect.service(WorkflowNotices), (w) => w.question())) : undefined;
+  const reminderQuestion = tap.stage === "TapQuestion" ? now(Effect.flatMap(Effect.service(ReminderTaps), (t) => t.question()), undefined) : undefined;
   const shadeQuestion = typeof shade.question === "object" && shade.question.tag === "QuestionReview" ? shade.question : undefined;
   const shadeRow = shadeQuestion ? shade.rows.find((r) => r.id === shadeQuestion.id && r.revision === shadeQuestion.revision) : undefined;
   const browser = buildInfo().variant === "browser";
@@ -106,10 +104,6 @@ export function NoticesSurface(_props: NoticesSurfaceProps) {
       {reminderQuestion && (
         <QuestionSheet name="Alpha Phone notification" excerpt={[reminderQuestion.title, reminderQuestion.text].filter(Boolean).join("\n")}
           onAnswer={(draft) => act(Effect.flatMap(Effect.service(ReminderTaps), (t) => t.closeQuestion(draft)))} />
-      )}
-      {workflowQuestion && (
-        <QuestionSheet name="Workflows notification" excerpt={[workflowQuestion.title, workflowQuestion.text].filter(Boolean).join("\n")}
-          onAnswer={(draft) => act(Effect.flatMap(Effect.service(WorkflowNotices), (w) => w.answer(draft)))} />
       )}
       {shadeRow && (
         <QuestionSheet name={`${shadeRow.appLabel || "Alpha Phone"} notification`} excerpt={[shadeRow.title, shadeRow.text].filter(Boolean).join("\n")}

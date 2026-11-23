@@ -25,9 +25,9 @@ import { HostedResults } from "../../src/workflows/results.vibe"
 import { WorkflowRuns } from "../../src/workflows/runs.vibe"
 import { SimulatedTriggers, SimulatedWorkflows } from "../../src/workflows/simulator.vibe"
 import { DigestSourcesService } from "../../src/workflows/sources.vibe"
-import { WorkflowsPlace } from "../../src/workflows/place.vibe"
+import { WorkflowsPlace, followRoute } from "../../src/workflows/place.vibe"
 import { Machine as PlaceMachine } from "../../gen/workflows__place.effect.vibe"
-import { type Handler, type NativeCall, type Sent, statusRoute, workflowsOf } from "./fakes.vibe"
+import { type Handler, type NativeCall, type Sent, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
 
 const alarm: AlarmRequest = { hour: 7, minute: 30, label: "Wake", days: [] }
 const definition = { id: "w1", name: "Morning", active: true, versionId: "v1", steps: [] }
@@ -655,6 +655,22 @@ describe("Google access removal from Account (spec/workflows/digestSources.md, \
       try Effect.try(() => assert.deepStrictEqual(
         { open, grant: sheet.removalGrant, impact: sheet.impact, revoked, after, bodies },
         { open: "RemovalOverlay", grant: "grant-7", impact: [], revoked: "revoked", after: "SourcesOverlay", bodies: [{ grantId: "grant-7", confirmed: true }] },
+      ))
+    }
+  })
+
+  it.effect("the same google-removal route opened twice opens the review twice, because each applied route is handed back to the shell bare (spec/workflows/place.md, \"Story: Move inside Workflows and come back with Back\")", () => effect {
+    const handedBack: string[] = []
+    provide workflowsOf([revokeRoute, ...digestRoutes([])], [], { variant: "browser" }) {
+      const place = try WorkflowsPlace
+      provide navigationOf([], ["google-removal/grant-7", "google-removal/grant-7"], handedBack) {
+        try followRoute()
+      }
+      const open = (try (try PlaceMachine).get()).overlay
+      const sheet = try place.sheet()
+      try Effect.try(() => assert.deepStrictEqual(
+        { open, grant: sheet.removalGrant, handedBack },
+        { open: "RemovalOverlay", grant: "grant-7", handedBack: ["", ""] },
       ))
     }
   })

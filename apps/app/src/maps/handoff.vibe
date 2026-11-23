@@ -120,7 +120,7 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
     if (origin.version === 2) {
       const view = try calendar.view()
       if (origin.binding !== `${view.state.portOwner}:${view.state.portSession}`) return "OwnerChanged" as const
-      const verdict = try calendar.verifyReturn(origin.eventKey, origin.revision, origin.begin)
+      const verdict = try calendar.verifyReturn(origin.eventKey, origin.revision, origin.begin, origin.sourceRevision)
       return verdict === "ReturnFound" ? "EventFound" as const : verdict === "ReturnMissing" ? "EventMissing" as const
         : verdict === "ReturnOwnerChanged" ? "OwnerChanged" as const : "ReadUnknown" as const
     }

@@ -1,13 +1,13 @@
-// spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "A 401 ends the session; every other refusal is Cloud unavailable with its status"; spec/platform/index.md, "Only a route the Cloud client lists is requested"; spec/platform/index.md, "The phone's key stays with native, and a leaving screen cancels only its own call"; spec/platform/index.md, "A request that needs the session is sent only while the owner is signed in"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"
+// spec/platform/index.md, "Story: Use Eliza Cloud's managed services when signed in"; spec/platform/index.md, "A 401 ends the session; every other refusal is Cloud unavailable with its status"; spec/platform/index.md, "Only a route the Cloud client lists is requested"; spec/platform/index.md, "The phone's key stays with native, and a leaving screen cancels only its own call"; spec/platform/index.md, "A request that needs the session is sent only while the owner is signed in"; spec/platform/index.md, "A refusal carries a wait only when the resident answered 429 with a whole number of seconds"; spec/platform/index.md, "A refusal carries the allowance reset Cloud named, only while it lies ahead"
 import { createCloudClient, lookupPath, type HttpMethod } from "@elizaos/cloud/client"
 import { cloudClient as nativeCloudClient, cloudPlugin } from "@elizaos/os/bridges/cloud"
 import type { CloudClient as NativeCloud, CloudPath, EnvironmentName } from "@elizaos/os/bridges/definitions/cloud"
-import { adviceOf, cloudOutcomeOf, routeAdmitted } from "../../gen/platform.effect.vibe"
+import { adviceOf, cloudOutcomeOf, resetCarried, routeAdmitted } from "../../gen/platform.effect.vibe"
 import { Build } from "./build.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "./cloud.vibe"
 import { CloudServices } from "./cloud-services.vibe"
 import { buildCloudEnvironment, cloudAuthorityOf, environmentName } from "./build-live.vibe"
-import { nativeCloudFetch, retryAfterSecondsOf, textOf } from "./cloud-fetch.ts"
+import { nativeCloudFetch, resetAtOf, retryAfterSecondsOf, textOf } from "./cloud-fetch.ts"
 import { parsedJson } from "./native-capacitor.ts"
 import { ResidentRefusal } from "./native.schema.vibe"
 import type { CloudAuthority } from "./build-flags.ts"
@@ -54,11 +54,13 @@ export function cloudOver(native: NativeCloud, authority: CloudAuthority, enviro
         const now = try Clock.currentTimeMillis
         const wait = retryAfterSecondsOf(reply.retryAfter, now)
         const advice = adviceOf(reply.status, wait !== undefined, wait ?? 0)
+        const reset = resetAtOf(data)
         throw new CloudUnavailable({
           status: reply.status,
           message: said?.message ?? said?.error ?? `Cloud request failed (HTTP ${reply.status}).`,
           ...(said?.error === undefined ? {} : { code: said.error }),
           ...(advice.tag === "WaitSeconds" ? { retryAfter: advice.seconds } : {}),
+          ...(resetCarried(reset !== undefined, reset ?? 0, now) ? { resetAt: reset } : {}),
         })
       }
       return data

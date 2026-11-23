@@ -17,33 +17,31 @@ import { DraftBubble } from "./DraftBubble.tsx";
 import { MessageBubble } from "./MessageBubble.tsx";
 import { deleteNoticeText, isAskSentence, phoneNoticeText, queryOf, sendProblemText, threadTitle } from "./present.ts";
 import { ThreadList } from "./ThreadList.tsx";
-import { ListAsk } from "../../telephony/list-ask.vibe";
-import { runtime, type TelephonyRuntime } from "./runtime.ts";
+import { act, perform, start } from "../shell/services.ts";
+import { runtime } from "./runtime.ts";
 import { backIn } from "./back.ts";
 import { useComms } from "./useComms.ts";
 
-export interface MessagesScreenProps extends ScreenProps {
-  /** The runtime the screen runs on. */
-  runtime?: TelephonyRuntime;
-}
+/** Messages' screen props: the shell's route and close. */
+export type MessagesScreenProps = ScreenProps;
 
 /**
  * Messages on the Alpha image: the list, a conversation with its draft, or a new message, and the one bar.
  * @model spec/telephony/messages.md
  * @design design.md
  */
-export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenProps) {
-  const { state: m = messagesInitial, send, can } = useMessagesMachine(on);
-  const stage = useComms(on);
+export function MessagesScreen({ route }: MessagesScreenProps) {
+  const { state: m = messagesInitial, send, can } = useMessagesMachine(runtime);
+  const stage = useComms();
   const [notice, setNotice] = useState("");
   const [answer, setAnswer] = useState("");
   const [query, setQuery] = useState("");
   const visit = useCallback((node: HTMLElement | null) => {
     if (!node) return;
-    const running = on.runFork(MessagesView.use((v) => v.visit(route)));
+    const stop = start(MessagesView.use((v) => v.visit(route)));
     stage.show("MessagesApp", "ListSubject", "messages:list:");
-    return () => running.interruptUnsafe();
-  }, [on, route]);
+    return stop;
+  }, [route]);
 
   const open = m.view.tag === "InThread" ? m.view : null;
   const thread = open ? open.threadId : "new";
@@ -55,21 +53,21 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
   const recipients = open ? open.addresses.map(normalizePhoneNumber).filter((n): n is NonNullable<typeof n> => n !== null) : slot.recipients;
   const canSend = slot.outcome !== "Sending" && recipients.length > 0 && (slot.text.trim() !== "" || slot.pictures.length > 0);
   const listQuery = queryOf(m.listQuery);
-  const now = m.readAt || Date.now();
+  const readAt = m.readAt || Date.now();
 
   const sendDraft = async () => {
-    const problem: SendProblem | undefined = await on.runPromise(DraftSends.use((d) => d.send(thread)));
+    const problem: SendProblem | undefined = await perform(DraftSends.use((d) => d.send(thread)));
     setNotice(problem ? sendProblemText(problem) : "");
   };
   const typeToPerson = (text: string) => stage.sendDrafts({ type: "ownerTyped", thread, recipients, text }, "Owner");
   const openThread = (threadId: string) => {
-    on.runFork(MessagesView.use((v) => v.openThread(threadId)));
+    act(MessagesView.use((v) => v.openThread(threadId)));
     stage.show("MessagesApp", "ThreadSubject", `messages:thread:${threadId}`);
   };
-  const back = () => void backIn("messages", on);
+  const back = () => void backIn("messages");
   const sole = threadCallNumber(m.view) !== "";
   const attach = async () => {
-    const answer = await on.runPromise(PictureAttach.use((p) => p.attach(thread)));
+    const answer = await perform(PictureAttach.use((p) => p.attach(thread)));
     setNotice(answer === "refused" ? "Only JPEG, PNG and GIF pictures up to 1 MB, five at most, can be sent." : "");
   };
 
@@ -81,7 +79,7 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
         <h1 className="min-w-0 flex-1 truncate font-serif text-2xl">{open ? title : m.view.tag === "Composing" ? "New message" : "Messages"}</h1>
         {sole && (
           <Button variant="ghost" size="icon" aria-label={`Call ${title}`} onClick={async () => {
-            const outcome = await on.runPromise(MessagesView.use((v) => v.callThread()));
+            const outcome = await perform(MessagesView.use((v) => v.callThread()));
             setNotice(outcome === undefined ? "" : phoneNoticeText({ tag: "Placement", outcome }));
           }}>
             <PhoneIcon aria-hidden />
@@ -103,11 +101,11 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
         {m.view.tag === "ThreadList" && (
           <ThreadList
             messages={m}
-            now={now}
+            now={readAt}
             onOpen={openThread}
-            onAllow={() => on.runFork(MessagesView.use((v) => v.allow("sms")))}
-            onRefresh={() => on.runFork(MessagesView.use((v) => v.refresh(false)))}
-            onMore={() => on.runFork(MessagesView.use((v) => v.refresh(true)))}
+            onAllow={() => act(MessagesView.use((v) => v.allow("sms")))}
+            onRefresh={() => act(MessagesView.use((v) => v.refresh(false)))}
+            onMore={() => act(MessagesView.use((v) => v.refresh(true)))}
             onClearQuery={() => send({ type: "queryCleared" })}
           />
         )}
@@ -119,13 +117,13 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
-                on.runFork(MessagesView.use((v) => v.pickerQuery(event.target.value)));
+                act(MessagesView.use((v) => v.pickerQuery(event.target.value)));
               }}
               onKeyDown={(event) => {
                 const number = normalizePhoneNumber(query);
                 if (event.key !== "Enter" || !number) return;
                 event.preventDefault();
-                on.runFork(DraftSends.use((d) => d.addRecipient(number)));
+                act(DraftSends.use((d) => d.addRecipient(number)));
                 setQuery("");
               }}
             />
@@ -142,12 +140,12 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
             )}
             {m.picker.tag === "PickerOpen" && (
               <ul aria-label="Contacts" className="divide-y divide-border">
-                {m.picker.needsAccess && <li><Button variant="secondary" onClick={() => on.runFork(MessagesView.use((v) => v.allow("sms")))}>Allow Contacts</Button></li>}
+                {m.picker.needsAccess && <li><Button variant="secondary" onClick={() => act(MessagesView.use((v) => v.allow("sms")))}>Allow Contacts</Button></li>}
                 {m.picker.choices.filter((c) => !slot.recipients.includes(c.number)).map((c) => (
                   <li key={c.key}>
                     <ListRow title={c.title} detail={c.number} leading={<Avatar name={c.title} />} aria-label={`${c.title}, ${c.number}`} onClick={() => {
                       setQuery("");
-                      on.runFork(MessagesView.use((v) => v.pick(c.key)));
+                      act(MessagesView.use((v) => v.pick(c.key)));
                     }} />
                   </li>
                 ))}
@@ -157,7 +155,7 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
         )}
         {open && (
           <div data-alpha-messages-thread className="flex flex-1 flex-col justify-end gap-2 px-4 py-2">
-            {m.more && <Button variant="ghost" onClick={() => on.runFork(MessagesView.use((v) => v.refresh(true)))}>Load earlier</Button>}
+            {m.more && <Button variant="ghost" onClick={() => act(MessagesView.use((v) => v.refresh(true)))}>Load earlier</Button>}
             {[...m.rows].sort((a, b) => a.date - b.date).map((row) => (
               <MessageBubble
                 key={row.id}
@@ -168,7 +166,7 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
                 onMenu={() => can({ type: "menuOpened", rowId: row.id }) && send({ type: "menuOpened", rowId: row.id })}
                 onDeleteAsked={() => can({ type: "deleteAsked" }) && send({ type: "deleteAsked" })}
                 onDeleteCancelled={() => can({ type: "menuClosed" }) && send({ type: "menuClosed" })}
-                onDeleteConfirmed={() => on.runFork(MessagesView.use((v) => v.deleteConfirmed()))}
+                onDeleteConfirmed={() => act(MessagesView.use((v) => v.deleteConfirmed()))}
                 onLink={(href) => openApp("browser", href)}
               />
             ))}
@@ -197,7 +195,7 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
         <ul aria-label="Pictures" className="flex gap-1 px-4 py-1">
           {slot.pictures.map((p) => (
             <li key={p.pictureName}>
-              <Button variant="secondary" size="sm" aria-label={`Remove ${p.pictureName}`} onClick={() => on.runFork(DraftSends.use((d) => d.removePicture(thread, p.pictureName)))}>{p.pictureName}<X aria-hidden /></Button>
+              <Button variant="secondary" size="sm" aria-label={`Remove ${p.pictureName}`} onClick={() => act(DraftSends.use((d) => d.removePicture(thread, p.pictureName)))}>{p.pictureName}<X aria-hidden /></Button>
             </li>
           ))}
         </ul>
@@ -213,9 +211,7 @@ export function MessagesScreen({ route, runtime: on = runtime }: MessagesScreenP
           if (chatOpen) stage.submitRequest();
           else if (person) void sendDraft();
           else {
-            const asked = listQuery.text;
-            send({ type: "queryTyped", typed: "" });
-            void on.runPromise(ListAsk.use((l) => l.ask("messages", asked))).then((line) => (line === null ? stage.ask(asked) : setAnswer(line)));
+            stage.askList("messages", listQuery.text, setAnswer);
           }
         }}
         onAlpha={stage.openAlpha}

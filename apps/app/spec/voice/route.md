@@ -44,7 +44,10 @@ pure def lawASignedInAccountSpeaksUnderItsCredential(credential: int): bool =
 
 The catalog's per-minute limits answer 429 with a wait; a wait below zero or above 86,400 seconds
 is no wait, a reset more than 400 days away is no reset, and only a short lower-case limit code is
-read, from a body of at most 16 KiB. The limit goes to the route as the account reports it; the
+read, from a body of at most 16 KiB. The code is read as the account area reads a Cloud limit
+(`spec/account/limits.md`): a required subscription asks for a plan, a billing refusal or too few
+credits is a billing refusal, a used allowance is the allowance, and anything else is a rate limit.
+The limit goes to the route as the account reports it; the
 message names the plan and when to try again, and a recording is kept for an explicit retry.
 
 ```quint

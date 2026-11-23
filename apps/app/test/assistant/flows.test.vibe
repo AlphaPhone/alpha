@@ -10,7 +10,7 @@ import { Suggestions } from "../../src/assistant/suggestion.vibe"
 import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import { textOf, unitsOf } from "../../src/assistant/units.vibe"
 import { WithdrawableRequests } from "../../src/assistant/withdrawable.vibe"
-import { assistantOver, countingExecutors, fakeHost, fakeResident, homeScreen, silentResident, type Seen } from "./fakes.vibe"
+import { assistantOver, countingExecutors, fakeHost, fakeResident, homeScreen, silentResident, wireProposal, type Seen } from "./fakes.vibe"
 
 const quietResident = (proposals: readonly unknown[] = []) => fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals })
 
@@ -79,7 +79,7 @@ it.effect("Send an email my agent drafted, from the chat (spec/assistant/emailCa
 })
 
 it.effect("Decline or let a card expire (spec/assistant/approvals.md, \"A card whose review time passed reads \\\"Review expired\\\" and can only be asked for again\")", () => effect {
-  const proposal = { id: "p9", digest: "e".repeat(64), state: "pending", expiresAt: "1970-01-01T00:01:00.000Z", title: "Create note", operation: { type: "create_note" } }
+  const proposal = wireProposal("p9", "e".repeat(64), { type: "create_note" }, undefined, "1970-01-01T00:01:00.000Z")
   provide assistantOver(quietResident([proposal]), fakeHost([]), countingExecutors({ count: 0 })) {
     const composer = try Composer
     try composer.open("c1", false)
@@ -95,7 +95,7 @@ it.effect("Decline or let a card expire (spec/assistant/approvals.md, \"A card w
 })
 
 it.effect("A proposal this phone cannot review is named, not carded (spec/assistant/review.md, \"Story: Let my agent act only with my say-so\")", () => effect {
-  const proposal = { id: "p7", digest: "f".repeat(64), state: "pending", expiresAt: "2099-01-01T00:00:00.000Z", title: "Send fax", operation: { type: "fax" }, requestMessageId: "u1" }
+  const proposal = wireProposal("p7", "f".repeat(64), { type: "fax" }, "u1")
   const seen: Seen = { calls: [] }
   provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Trying." }, proposals: [proposal] }), fakeHost([]), countingExecutors({ count: 0 }, "CreateNote", false)) {
     const composer = try Composer
@@ -105,7 +105,7 @@ it.effect("A proposal this phone cannot review is named, not carded (spec/assist
     const notices = rows.flatMap((row) => row.kind === "notice" ? [row.text] : [])
     try Effect.try(() => assert.deepStrictEqual(
       { notices, cards: rows.filter((row) => row.kind === "card").length },
-      { notices: [`${copy.notShownHere}: Send fax`], cards: 0 },
+      { notices: [`${copy.notShownHere}: ${copy.notAvailableHere}`], cards: 0 },
     ))
   }
 })

@@ -1,0 +1,74 @@
+// spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/assistant/context.md, "A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s"
+import { asksForPage, browserPageWaitMs, sendsBrowserPage, type PageRead } from "../../gen/assistant__context.effect.vibe"
+import { BrowserPageObservation } from "./payloads.schema.vibe"
+import type { BrowserPages, BrowserPage, ObservedTab } from "./ports.vibe"
+
+/** What one turn's read of the open Browser page gave: how it ended, the page when it is bound to the observed tab, and whether the setting allowed the read. */
+export interface PageForTurn {
+  readonly read: PageRead
+  readonly allowedBefore: boolean
+  readonly page?: BrowserPage
+}
+
+const pageTextMax = 6000
+const pageTitleMax = 300
+const pageUrlMax = 2048
+const pageLinksMax = 20
+const pageBytesMax = 16384
+
+/** The address the agent may see: HTTPS with a host, no credentials and no fragment. */
+export function pageAddress(value: string): string | undefined {
+  if (!URL.canParse(value)) return undefined
+  const url = new URL(value)
+  if (url.protocol !== "https:" || url.hostname === "" || url.username !== "" || url.password !== "") return undefined
+  url.hash = ""
+  return url.href.length <= pageUrlMax ? url.href : undefined
+}
+
+/** A page title as one bounded line. */
+export function pageTitle(value: string): string {
+  return value.replace(/[\u0000-\u001f\u007f-\u009f  ]/g, " ").replace(/\s+/g, " ").trim().slice(0, pageTitleMax).replace(/[\uD800-\uDBFF]$/, "")
+}
+
+/** The page Browser read, kept only when it is the observed tab at the observed revision, its address is public HTTPS and it fits the contract's bounds. */
+export function boundPage(raw: unknown, tab: ObservedTab): BrowserPage | undefined {
+  const decoded = Schema.decodeUnknownOption(BrowserPageObservation)(raw)
+  if (Option.isNone(decoded)) return undefined
+  const page = decoded.value
+  if (page.tabId !== tab.id || page.revision !== tab.revision) return undefined
+  const url = pageAddress(page.url)
+  if (url === undefined) return undefined
+  const links = (page.links ?? []).flatMap((link) => {
+    const address = pageAddress(link.url)
+    return address === undefined ? [] : [{ url: address, text: pageTitle(link.text) }]
+  }).slice(0, pageLinksMax)
+  const kept: BrowserPage = {
+    tabId: page.tabId, revision: page.revision, url, title: pageTitle(page.title), capturedAt: page.capturedAt,
+    ...(page.withheld === undefined ? {
+      ...(page.text === undefined ? {} : { text: page.text.slice(0, pageTextMax) }),
+      ...(page.selection === undefined ? {} : { selection: page.selection.slice(0, pageTextMax) }),
+      ...(links.length === 0 ? {} : { links }),
+    } : { withheld: page.withheld }),
+  }
+  return new TextEncoder().encode(JSON.stringify(kept)).length <= pageBytesMax ? kept : undefined
+}
+
+/** Read the observed tab's page for a turn, waiting at most 1.2 s; a refused, slow, changed or invalid read sends the turn without it. */
+export effect function pageForTurn(pages: BrowserPages.Shape, observed: boolean, tab: ObservedTab | undefined) {
+  if (tab === undefined) return { read: { tag: "NoPage" }, allowedBefore: false } satisfies PageForTurn
+  const allowedBefore = try pages.allowed()
+  if (!asksForPage(observed, true, allowedBefore)) return { read: { tag: "NoPage" }, allowedBefore } satisfies PageForTurn
+  const answer = try timeoutOption(pages.read(tab), browserPageWaitMs)
+  if (Option.isNone(answer)) return { read: { tag: "PageLate" }, allowedBefore } satisfies PageForTurn
+  if (answer.value === undefined) return { read: { tag: "NoPage" }, allowedBefore } satisfies PageForTurn
+  const page = boundPage(answer.value, tab)
+  if (page === undefined) return { read: { tag: "PageFor", sameTab: false }, allowedBefore } satisfies PageForTurn
+  return { read: { tag: "PageFor", sameTab: true }, allowedBefore, page } satisfies PageForTurn
+}
+
+/** The page a turn sends: only the bound page, with the setting on before the read and at the send, to a peer that declares `browserPage`. */
+export effect function pageToSend(pages: BrowserPages.Shape, observed: boolean, found: PageForTurn, peerDeclares: boolean) {
+  if (found.page === undefined) return undefined
+  const allowedAtSend = try pages.allowed()
+  return sendsBrowserPage(observed, true, found.allowedBefore, allowedAtSend, found.read, peerDeclares) ? found.page : undefined
+}

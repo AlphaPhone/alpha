@@ -19,6 +19,8 @@ them.
 - [Dictation](./dictation.md): recording into another area's draft, transcription and insertion.
 - [Conversation](./conversation.md): starting, disclosure, interruption, review, retries, calls,
   retirement and a screen the agent opens.
+- [Acknowledgement](./acknowledgement.md): the one short line a voice turn may say while its reply
+  is prepared, held briefly and never spoken over the reply.
 - [Speech output](./speech.md): cleanup of each speaking channel, warm-up, what may be spoken, and
   what is spoken or transcribed only on the phone (page readings, voicemail).
 - [Microphone](./capture.md): one owner of the renderer's capture, permission and calls.

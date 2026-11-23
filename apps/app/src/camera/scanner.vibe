@@ -7,6 +7,7 @@ import { CameraBridge } from "./bridge.vibe"
 import { CameraHandoffs } from "./ports.vibe"
 import { photosText, scanExportTitle } from "./messages.vibe"
 import { CameraNotices } from "./notices.vibe"
+import { newId } from "../platform/ids.ts"
 import { PhotoStore } from "./photos.vibe"
 import { scannedLinks, suggestScanEvent, textLayerValid, type TextLine } from "./scanText.ts"
 import { base64Of, blobFromBase64, buildPdf, copyText, correctPage, detectEdges, fullPage, imageSize, jpegBlob, objectUrl, recognizeText, revokeUrl, type Corners } from "./scanWork.ts"
@@ -113,7 +114,7 @@ export const scanner = Layer.effect(Scanner, effect {
     if (frameUrl !== "") revokeUrl(frameUrl)
     frame = image
     frameUrl = objectUrl(image)
-    noteId = `scan-${globalThis.crypto.randomUUID()}`
+    noteId = `scan-${newId()}`
     try dialog({ type: "textClose" })
     const opened = try dialog({ type: "openText", image: frameUrl })
     if (opened === undefined) return
@@ -285,7 +286,7 @@ export const scanner = Layer.effect(Scanner, effect {
       const now = try scan.get()
       if (frame === undefined || (try doc({ type: "requestKeep" })) === undefined) return
       try dialog({ type: "keepPhoto" })
-      const operationId = keepIds.get(now.keep.operation) ?? globalThis.crypto.randomUUID()
+      const operationId = keepIds.get(now.keep.operation) ?? newId()
       keepIds.set(now.keep.operation, operationId)
       const data = tryPromise(() => base64Of(frame!)) catch () => ""
       const answer = store.keepCapture(operationId, data) catch () => undefined
@@ -308,7 +309,7 @@ export const scanner = Layer.effect(Scanner, effect {
       const suggestion = suggestScanEvent(now.text.body, new Date())
       if (suggestion === undefined) return try say("No event found")
       const accepted = try handoffs.reviewScannedEvent({
-        creationId: globalThis.crypto.randomUUID(), title: suggestion.title, date: suggestion.date, time: suggestion.time, minutes: suggestion.minutes,
+        creationId: newId(), title: suggestion.title, date: suggestion.date, time: suggestion.time, minutes: suggestion.minutes,
         allDay: suggestion.allDay, location: suggestion.location, notes: now.text.body.slice(0, 2000), repeat: now.text.repeatTicked ? suggestion.repeat : "none",
       })
       if (accepted) try dialog({ type: "offerEvent", revision: now.text.textRevision })

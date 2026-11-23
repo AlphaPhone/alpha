@@ -62,3 +62,50 @@ pure def retireOwner(r: AgentReview): AgentReview =
   { ...r, live: false, phase: if (r.phase == AgentReviewing or r.phase == AgentIdle) AgentCancelled else r.phase }
 pure def sometimesCancelledByRetirement(r: AgentReview): bool = r.phase == AgentCancelled and not(r.live) and r.confirms == 0
 ```
+
+## Story: Be offered only the Clock and reminder requests this phone can carry out
+
+> As the owner, I want the agent to propose an alarm or a reminder change only where this phone can
+> review and carry it out, so that it never offers me a request that can only fail.
+
+### Clock advertises a Clock handoff only with a Clock handler, repeat days only where Clock carries them, and one reminder version only where the phone keeps reminders
+
+Each capability is advertised only when the agent offered it. The Clock handoff (`clock.handoff.v1`)
+needs the phone's Clock handler, which the browser build has none of; its repeat-days form
+(`clock.handoff.v2`) also needs Clock to carry repeat days (`clockRepeatDaysVersion` 1). Reminder
+records (`reminders.local-record.v2`, else `reminders.local-record.v1`, never both) and reminder
+creation (`reminders.create.v1`) need the phone's reminder store. Clock never advertises
+`clock.alarms.v1`: an alarm is always Android Clock's.
+
+```quint
+type ClockOffer = OfferHandoff | OfferRepeatDays | OfferRecordV1 | OfferRecordV2 | OfferCreate
+type ClockSupport = { handler: bool, repeatDays: bool, store: bool, recordV2Offered: bool }
+pure def advertises(s: ClockSupport, c: ClockOffer, offered: bool): bool =
+  offered and (
+    if (c == OfferHandoff) s.handler
+    else if (c == OfferRepeatDays) s.handler and s.repeatDays
+    else if (c == OfferRecordV1) s.store and not(s.recordV2Offered)
+    else s.store)
+pure def lawNeverBothReminderVersions(s: ClockSupport): bool =
+  not(advertises(s, OfferRecordV1, true) and advertises(s, OfferRecordV2, s.recordV2Offered))
+pure def lawNoHandlerNoHandoff(s: ClockSupport, offered: bool): bool =
+  not(s.handler) implies not(advertises(s, OfferHandoff, offered) or advertises(s, OfferRepeatDays, offered))
+pure def lawNoStoreNoReminders(s: ClockSupport, offered: bool): bool =
+  not(s.store) implies not(advertises(s, OfferRecordV1, offered) or advertises(s, OfferRecordV2, offered) or advertises(s, OfferCreate, offered))
+```
+
+### A Clock request is a handoff whose outcome may stay unresolved; a reminder change, a named reminder and a day read are not
+
+A Clock request proves only that Clock opened, so the owner may leave its outcome unresolved in the
+history. A reminder change is bound to its journal entry and read back, and a day read is settled by
+what it shared, so each is settled as applied or not applied. In the assistant's review a Clock
+request and every reminder change are reminder-class writes; reading a reminder or a day's
+reminders is a read; all of them always need the owner's review.
+
+```quint
+type ClockOperationKind = ClockRequest | ReminderChange | NamedReminder | ReminderRead | DayRead
+type ReviewClass = ReminderWrite | ScheduleRead
+pure def isHandoff(k: ClockOperationKind): bool = k == ClockRequest
+pure def reviewClassOf(k: ClockOperationKind): ReviewClass = if (k == ReminderRead or k == DayRead) ScheduleRead else ReminderWrite
+pure def lawAReadIsNeverAHandoff(k: ClockOperationKind): bool = reviewClassOf(k) == ScheduleRead implies not(isHandoff(k))
+```

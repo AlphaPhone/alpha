@@ -30,7 +30,8 @@ export { TelephonyBack, type TelephonyApp } from "./back.vibe"
 export { CommsStage, type CardWords, type OpenCard } from "./comms.vibe"
 export { PhoneInfoView } from "./phone-info.vibe"
 export { messagePictureHandoff, messagesShareTarget } from "./share.vibe"
-export { operationPorts } from "./operations.vibe"
+export { operationPorts, telephonyCapabilities } from "./operations.vibe"
+export { askAlpha, askFromContacts, askFromList, sendRequest } from "./list-ask.vibe"
 export { TelephonyCalls, VoicemailTranscriber } from "./ports.vibe"
 
 /** The owner's drafts and requests, read and written under whoever is signed in now, and republished when that changes. */
@@ -103,7 +104,8 @@ export function telephonyLayer<E, R>(bridges: Layer.Layer<TelephonyBridges, E, R
 /**
  * Phone, Messages, Contacts, voicemail, Settings → Phone, the call bar, the comms stage, Home's cards, in-app Back and the approved actions,
  * over the platform's Native, Build and KeyValueStore, the shell's Foreground and Navigation, the account's CloudSession and voice's VoiceConversation and Microphone
- * (Files' FilePicker is needed only when attaching). `operationPorts`, `messagesShareTarget` and `messagePictureHandoff` are
- * built over it by the shell; the TelephonyCalls and VoicemailTranscriber ports fall back to refusing defaults until provided.
+ * (Files' FilePicker is needed only when attaching, and the assistant only when a bar question goes to Alpha). `operationPorts`,
+ * `telephonyCapabilities`, `messagesShareTarget` and `messagePictureHandoff` are built over it by the shell; the TelephonyCalls and
+ * VoicemailTranscriber ports fall back to refusing defaults until provided.
  */
 export const layer = telephonyLayer(bridgesLayer)

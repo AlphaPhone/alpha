@@ -1,4 +1,4 @@
-// spec/browser/session.md, "Story: Browse in tabs"; spec/browser/session.md, "A link the owner taps outside Browser opens in a new tab and is never searched"; spec/browser/session.md, "Story: Keep my place with the Browser's layers and Back"; spec/browser/presentation.md, "Story: See the page only when nothing covers it"
+// spec/browser/session.md, "Story: Browse in tabs"; spec/browser/session.md, "A link the owner taps outside Browser opens in a new tab and is never searched"; spec/browser/session.md, "Story: Keep my place with the Browser's layers and Back"; spec/browser/presentation.md, "Story: See the page only when nothing covers it"; spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
 import { Effect } from "effect";
 import { ChevronDown } from "lucide-react";
 import { useState } from "react";
@@ -9,10 +9,12 @@ import { initial as noReading } from "../../../gen/browser__reading.ts";
 import { useMachine as useReviews } from "../../../gen/browser__reviews.react.ts";
 import { initial as noReviews } from "../../../gen/browser__reviews.ts";
 import { useMachine as useSession } from "../../../gen/browser__session.react.ts";
-import { useMachine as useNavigation } from "../../../gen/shell__navigation.react.ts";
-import { covered, curTab, initial as noSession } from "../../../gen/browser__session.ts";
+import { covered, curTab, initial as noSession, isPrivateTab } from "../../../gen/browser__session.ts";
+import { settledSecurely } from "../../../gen/browser__page.ts";
+import { pageShareable } from "../../../gen/browser__pageContext.ts";
 import { newTabId } from "../../browser/address.ts";
-import { type ForegroundState, foregroundOf } from "../../shell/foreground.vibe";
+import { pageAddress } from "../../browser/page-context.ts";
+import { Foreground, type ForegroundState } from "../../shell/foreground.vibe";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button } from "../components/ui/index.ts";
 import { AddressEditor } from "./AddressEditor.tsx";
@@ -26,6 +28,7 @@ import { PageViewport } from "./PageViewport.tsx";
 import { ReadingReview } from "./ReadingReview.tsx";
 import { runtime } from "./runtime.ts";
 import { run } from "./services.ts";
+import { useServiceStream } from "../shell/services.ts";
 import { ShareSheet } from "./ShareSheet.tsx";
 import { TabSwitcher } from "./TabSwitcher.tsx";
 
@@ -59,8 +62,7 @@ const hidden: ForegroundState = { visible: false, locked: false, screen: "off", 
  */
 export function BrowserScreen({ route, onClose }: BrowserScreenProps) {
   const { state: session = noSession } = useSession(runtime);
-  const { state: nav } = useNavigation(runtime);
-  const foreground = nav === undefined ? hidden : foregroundOf(nav);
+  const foreground = useServiceStream("browser/foreground", Effect.map(Effect.service(Foreground), (f) => f.changes), hidden);
   const [arrived] = useState(() => (node: HTMLElement | null) => {
     if (node !== null && route !== undefined && route !== "") run(({ tabs }) => tabs.openLink(route));
   });
@@ -71,6 +73,7 @@ export function BrowserScreen({ route, onClose }: BrowserScreenProps) {
   const tab = curTab(session);
   const marked = bookmarks.marks.some((m) => m.url === tab.page.url);
   const finding = session.find.tab !== "" && session.find.tab === session.cur;
+  const shareable = pageShareable(foreground.visible && !foreground.locked && foreground.view === "browser", isPrivateTab(session, session.cur), tab.stage === "Live" && settledSecurely(tab.page), pageAddress(tab.page.url) !== undefined);
   const measure = (viewport: HTMLElement) => watchViewport(viewport, () => {
     const facts = {
       inBrowser: foreground.visible && foreground.view === "browser", home: foreground.screen === "home" && !foreground.locked,
@@ -81,7 +84,7 @@ export function BrowserScreen({ route, onClose }: BrowserScreenProps) {
     run(({ presenter, tabs }) => tab.restoreUrl !== "" && !covered(session) ? tabs.dispatch({ type: "showRestored" }) : presenter.offer(facts, placementOf(session.cur, viewport)));
   }, () => run(({ presenter }) => presenter.chromeChanged()));
   return (
-    <section ref={arrived} aria-label="Browser" className="relative flex h-full flex-col bg-transparent">
+    <section ref={arrived} aria-label="Browser" data-page-shareable={shareable ? "true" : "false"} className="relative flex h-full flex-col bg-transparent">
       <div {...{ [HOST_CHROME]: "" }} className="flex items-center bg-background">
         <Button variant="ghost" size="icon" aria-label="Home" onClick={onClose}><ChevronDown aria-hidden /></Button>
         {finding && <div className="flex-1"><FindBar session={session} onQuery={(q) => run(({ tabs }) => tabs.typeFind(q))} onMove={(forward) => run(({ tabs }) => tabs.dispatch({ type: "moveFind", forward }))} onClose={() => run(({ tabs }) => tabs.dispatch({ type: "closeFind" }))} /></div>}

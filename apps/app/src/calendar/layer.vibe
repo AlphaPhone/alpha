@@ -31,7 +31,7 @@ import { CalendarSync, syncLayer } from "./sync.vibe"
 
 export { AgentCalendar } from "./agent.vibe"
 export { CalendarHandoff, type CalendarScan } from "./handoffs.vibe"
-export { operationPorts } from "./operations.vibe"
+export { calendarCapabilities, operationPorts } from "./operations.vibe"
 export { CalendarMaps, type CalendarEventOrigin } from "./ports.vibe"
 export { calendarDayObservation, type CalendarDayObservation } from "./observation.vibe"
 export { nativeLinkedPort } from "./linkedLocal.vibe"

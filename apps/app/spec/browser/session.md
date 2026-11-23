@@ -739,7 +739,9 @@ pure def stepAViewCommandNeedsTheShownUncoveredPage(before: Session, via: str, a
     | _ => true })
 ```
 
-### The agent sees only the selected tab's identity and revision, never its address or content
+### The observation names only the selected tab's identity and revision, never its address or content, which go only as the Browser page beside it
+
+The page itself is sent only as [the Browser page with a message](./pageContext.md) allows.
 
 ```quint
 type TabSelection = { tab: str, revision: int }

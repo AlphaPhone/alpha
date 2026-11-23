@@ -1,9 +1,10 @@
-// spec/maps/index.md: the Maps layer over a fake Cloud, phone, resident and launcher, faked only at their boundary.
+// spec/maps/index.md: the Maps layer over a fake Cloud, phone, resident and launcher, faked only at their boundary, with the assistant's shared network client over the fake phone.
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { Build } from "../../src/platform/build.vibe"
 import { Native, NativeFailed } from "../../src/platform/native.vibe"
 import { Resident, ResidentUnavailable } from "../../src/platform/resident.vibe"
 import { memoryStore } from "../../src/platform/storage.vibe"
+import { networkLocationLayer } from "../../src/assistant/network-location.vibe"
 import { AgentCalendar } from "../../src/calendar/agent.vibe"
 import { mapsCore } from "../../src/maps/layer.vibe"
 import { type AccountBinding, GuidanceSpeaker, MapsAccount, MapsShell, type ShellState } from "../../src/maps/ports.vibe"
@@ -49,6 +50,7 @@ export effect function harness(provider: { id: string; data: string }, options: 
   const residentCalls: string[] = []
   const opened: string[] = []
   const spoken: string[] = []
+  const returnChecks: Array<{ readonly eventKey: string; readonly revision: string; readonly begin: number; readonly sourceRevision?: string }> = []
   const fixes = try Queue.unbounded<unknown>()
   const stops = try Queue.unbounded<unknown>()
   const accounts = try SubscriptionRef.make<AccountBinding | undefined>({ sessionId: "s1", credentialId: "c1" })
@@ -125,12 +127,15 @@ export effect function harness(provider: { id: string; data: string }, options: 
     Layer.succeed(Build, { info: { version: "test", variant: options.variant ?? "launcher", testMocks: true } }),
     Layer.succeed(AgentCalendar, {
       view: () => succeed({ state: { portOwner: "owner", portSession: 1 } }),
-      verifyReturn: () => succeed("ReturnFound"),
+      verifyReturn: (eventKey: string, revision: string, begin: number, sourceRevision?: string) => sync(() => {
+        returnChecks.push({ eventKey, revision, begin, sourceRevision })
+        return "ReturnFound" as const
+      }),
     } as unknown as AgentCalendar.Shape),
   )
   return {
-    layer: Layer.provide(mapsCore, Layer.mergeAll(cloud, native, resident, ports, memoryStore)),
-    cloudCalls, nativeCalls, residentCalls, opened, spoken, fixes, stops, accounts, shell, refuseNext, retryAfter, events,
+    layer: Layer.provideMerge(mapsCore, Layer.provideMerge(networkLocationLayer, Layer.mergeAll(cloud, native, resident, ports, memoryStore))),
+    cloudCalls, nativeCalls, residentCalls, opened, spoken, returnChecks, fixes, stops, accounts, shell, refuseNext, retryAfter, events,
   }
 }
 

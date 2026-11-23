@@ -17,9 +17,9 @@ export const nativePlugins = {
     methods: [
       "residentAttachment", "setGoogleAgentAccess", "configureProvider", "prepareProviderConfiguration",
       "cancelProviderConfiguration", "clearProvider", "configureCloudProvider", "providerStatus", "selectProvider",
-      "removeProviderKey", "revealProviderKey", "launchSurface", "takeInvocation",
+      "removeProviderKey", "revealProviderKey", "launchSurface", "takeInvocation", "keyguard",
     ],
-    events: [],
+    events: ["keyguardChanged"],
   },
   ElizaAgent: {
     reach: "AnyNative",
@@ -51,7 +51,7 @@ export const nativePlugins = {
     methods: [
       "create", "find", "findNext", "clearFind", "navigate", "command", "present", "bookmarks", "setBookmark",
       "browsingState", "saveBrowsingState", "clearBrowsingData", "clearSiteData", "readingSupport", "reviewQuestion",
-      "reviewReading", "cancelReading", "share", "openExternalBrowser", "downloads", "loginFillStatus", "close",
+      "reviewReading", "cancelReading", "pageContext", "share", "openExternalBrowser", "downloads", "loginFillStatus", "close",
     ],
     events: ["findResult", "fullscreen", "notice", "showDownloads", "stateChanged", "tabClosed", "tabOpened"],
   },
@@ -79,7 +79,7 @@ export const nativePlugins = {
     reach: "AnyNative",
     methods: [
       "readDelegationCallback", "clearDelegationCallback", "prepareGoogleWorkspaceReturn", "consumeGoogleWorkspaceReturn",
-      "cancelGoogleWorkspaceReturn", "pauseNotificationCollection", "secureRead", "secureCompareExchange", "openExternal",
+      "cancelGoogleWorkspaceReturn", "pauseNotificationCollection", "secureRead", "secureCompareExchange",
     ],
     events: ["cloudDelegationCallback", "googleWorkspaceReturn"],
   },
@@ -149,7 +149,7 @@ export const nativePlugins = {
     methods: [
       "status", "list", "open", "dismiss", "clear", "canonicalPending", "acknowledgeCanonical", "crossAppStatus",
       "notificationApps", "setNotificationPolicy", "resumeCrossApp", "openNotificationAccess", "notificationHistory",
-      "clearNotificationHistory",
+      "clearNotificationHistory", "consumeOwnNotice", "postWorkflow",
     ],
     events: ["canonicalNotificationTap"],
   },
@@ -220,12 +220,18 @@ export const nativePlugins = {
   },
   ElizaPasswords: {
     reach: "AnyNative",
-    methods: ["status", "unlock", "lock", "list", "openEditor", "remove", "reset", "reveal", "copy", "openAutofillSettings"],
+    methods: [
+      "status", "unlock", "lock", "list", "openEditor", "remove", "reset", "reveal", "copy", "openAutofillSettings",
+      "sharedBackupReadiness", "approveSharedBackup",
+    ],
     events: [],
   },
   ElizaSense: {
     reach: "AospImage",
-    methods: ["status", "pause", "turnOff", "openSettings", "bindInvocationSession", "discardProtectedPowerInvocation", "takeInvocation"],
+    methods: [
+      "status", "pause", "turnOff", "openSettings", "bindInvocationSession", "discardProtectedPowerInvocation", "takeInvocation",
+      "claimProtectedPowerLaunch", "discardProtectedPowerLaunch",
+    ],
     events: [],
   },
   ElizaWiFi: {

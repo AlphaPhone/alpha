@@ -7,13 +7,19 @@ import { AiProvider } from "../account/provider.vibe"
 import { CloudSession } from "../account/session.vibe"
 import { browserDeviceCapabilities } from "../browser/operations.vibe"
 import { PLUGIN as BROWSER_TAB_HOST } from "../browser/tabHost.vibe"
+import { calendarCapabilities } from "../calendar/operations.vibe"
 import { cameraCapabilities } from "../camera/agentContext.vibe"
+import { clockCapabilities } from "../clock/operations.vibe"
 import { FilesAgent } from "../files/agent.vibe"
+import { inboxCapabilities } from "../inbox/handoffs.vibe"
+import { mapsDeviceCapabilities } from "../maps/agent.vibe"
 import { NotesOrganize } from "../notes/organize.vibe"
 import { Build } from "../platform/build.vibe"
 import { Native } from "../platform/native.vibe"
 import { Resident } from "../platform/resident.vibe"
 import { CallWatch } from "../telephony/call-bar.vibe"
+import { TelephonyActions } from "../telephony/actions.vibe"
+import { advertisedOf as telephonyAdvertised } from "../telephony/operations.vibe"
 import { VoiceConversation } from "../voice/conversation.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { appOfKey } from "./apps.vibe"
@@ -112,8 +118,9 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       const view = nav.app === "" ? (nav.library ? "library" : "home") : nav.app
       const privateView = PRIVATE_APPS.has(nav.app)
       const route = nav.places.find((place) => place.app === nav.app)?.route ?? ""
+      const connectionDialog = (try bindings.idle()).signInOpen || nav.layers.some((layer) => layer.id.startsWith("account"))
       return {
-        exposure: { privateView, locked: front.locked, hidden: nav.hidden, connectionDialog: nav.layers.some((layer) => layer.id.startsWith("account")) },
+        exposure: { privateView, locked: front.locked, hidden: nav.hidden, connectionDialog },
         observation: { view, revision: nav.revision, sensitive: privateView || front.locked },
         onCalendar: nav.app === "calendar",
         contextKey: `${view}:${route}`,
@@ -160,17 +167,19 @@ export function composeExecutors(families: readonly OperationPorts[]): Operation
 
 /** The capabilities this phone advertises in `x-eliza-device-capabilities`; unprovided, it advertises none, so the agent offers only ordinary turns. */
 export service DeviceCapabilities {
-  /** Of the capabilities the agent `offered`, those this phone advertises: Files', Notes', Browser's and Camera's and Photos' own selections. */
+  /** Of the capabilities the agent `offered`, those this phone advertises: each area's own selection. */
   advertise(offered: readonly string[]): readonly string[]!!
   static readonly defaultValue = () => ({
     advertise: (_offered: readonly string[]) => succeed([] as readonly string[]),
   })
 }
 
-/** The phone's device capabilities over Files, Notes, Browser and Camera, for the shell's fills once the last of those areas is built. */
+/** The phone's device capabilities over every area that advertises its own, for the shell's fills once the last of those areas is built. */
 export const deviceCapabilities = effect {
   const files = try FilesAgent
   const notes = try NotesOrganize
+  const telephony = try TelephonyActions
+  const clock = try clockCapabilities
   const build = try Build
   const native = try Native
   const tabHost = build.info.variant !== "browser" && (try (native.available(BROWSER_TAB_HOST) catch () => false))
@@ -179,8 +188,13 @@ export const deviceCapabilities = effect {
       const advertised = [
         ...(try files.advertise(offered)),
         ...(try notes.capabilities()).filter((capability) => offered.includes(capability)),
+        ...calendarCapabilities(offered, build.info.variant),
+        ...telephonyAdvertised(try (telephony.capabilities() catch () => [] as readonly string[]), offered),
         ...browserDeviceCapabilities(offered, tabHost),
+        ...inboxCapabilities(offered),
+        ...mapsDeviceCapabilities(offered),
         ...cameraCapabilities.filter((capability) => offered.includes(capability)),
+        ...(try (clock.advertise(offered) catch () => [] as readonly string[])),
       ]
       return [...new Set(advertised)] as readonly string[]
     },

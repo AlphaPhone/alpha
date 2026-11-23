@@ -8,6 +8,7 @@ import { DedicatedSetup, DevBridgeSignIn } from "../../src/account/devBridge.vib
 import { Entitlement } from "../../src/account/entitlement.vibe"
 import { GoogleAccounts } from "../../src/account/google.vibe"
 import { AiProvider } from "../../src/account/provider.vibe"
+import { AccountPresentation } from "../../src/account/presentation.vibe"
 import { CloudSession } from "../../src/account/session.vibe"
 import { AccountSheet } from "../../src/account/sheet.vibe"
 import { SignInScreen } from "../../src/account/signIn.vibe"
@@ -199,6 +200,31 @@ it.live(`Back from the code step cancels the attempt and keeps the address (spec
       try Effect.try(() => assert.deepStrictEqual(
         { left: [left.screen, left.prefill, left.attempt], cancelled: names(calls).includes("AlphaCloudSignIn.cancel"), kept: [kept.screen, entryOf(kept)] },
         { left: ["Choose", true, 0], cancelled: true, kept: ["Choose", "RequiredEntry"] }
+      ))
+    })
+  }
+})
+
+// spec/account/signIn.md, "Story: Leave sign-in"
+it.live(`Back from the chooser the owner opened while signed out closes sign-in and leaves Account (spec/account/signIn.md, "Story: Leave sign-in")`, () => effect {
+  const calls: Calls = []
+  provide account(calls, signedOutNative({ key: false }), cloudAnswers, { variant: "browser" }) {
+    try scoped(effect {
+      const session = try CloudSession
+      const signIn = try SignInScreen
+      const presentation = try AccountPresentation
+      fork.scoped session.run()
+      fork.scoped signIn.run()
+      try until(session.changes, (s) => s.startupResolved)
+      try signIn.open()
+      const opened = try found(try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known))
+      // spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"
+      const leaves = try presentation.back()
+      const closed = try signIn.current()
+      const rested = try presentation.back()
+      try Effect.try(() => assert.deepStrictEqual(
+        { opened: entryOf(opened), leaves, closed: [closed.screen, entryOf(closed)], rested },
+        { opened: "OpenedEntry", leaves: false, closed: ["ScreenClosed", "NoEntry"], rested: false }
       ))
     })
   }
@@ -493,7 +519,7 @@ it.live(`Authorizing keeps the pending record in the account's slot and opens Cl
       const saved = calls.find((c) => c.name === "ElizaSecureStore.compareAndExchange")?.args as { key: string; value: string } | undefined
       try Effect.try(() => assert.deepStrictEqual({
         kinds: (calls.find((c) => c.name === "POST /api/workflow/hosted/cloud-delegation/start")?.args as { kinds?: Array<string> } | undefined)?.kinds,
-        slot: saved?.key.startsWith("cloud-delegation:v1:"), never: names(calls).some((n) => n.startsWith("AlphaConnection.secure")), phase: saved === undefined ? undefined : (JSON.parse(saved.value) as { phase: string }).phase,
+        slot: saved?.key.startsWith("account-delegation:v1:"), never: names(calls).some((n) => n.startsWith("AlphaConnection.secure")), phase: saved === undefined ? undefined : (JSON.parse(saved.value) as { phase: string }).phase,
         opened: calls.filter((c) => c.name === "CloudServices.openExternal").map((c) => (c.args as { url: string }).url),
         grant: waiting.grant, cloud: waiting.cloud
       }, { kinds: ["email"], slot: true, never: false, phase: "waiting", opened: [authUrl], grant: false, cloud: "CloudWaiting" }))

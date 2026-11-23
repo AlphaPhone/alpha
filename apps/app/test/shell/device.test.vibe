@@ -1,4 +1,4 @@
-// spec/shell/permissions.md, "Back leaves a review and finishes the Ready card; on a first-run step it does nothing"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"; spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/navigation.md, "Booting brings back the app and its history without the old page's layers"; spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/shell/routes.md, "Story: Let only my own app reach my agent's records"
+// spec/shell/permissions.md, "Back leaves a review and finishes the Ready card; on a first-run step it does nothing"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"; spec/shell/navigation.md, "Back closes the topmost layer first, then Home's launcher layers, then the assistant, then the app"; spec/shell/navigation.md, "Booting brings back the app and its history without the old page's layers"; spec/assistant/index.md, "The assistant observes the screen only while it is visible, unlocked and not private"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/shell/routes.md, "Story: Let only my own app reach my agent's records"; spec/shell/navigation.md, "Hiding the page retires what the owner was in the middle of"
 // @vitest-environment happy-dom
 import { assert, describe, it } from "@effect/vitest"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
@@ -30,7 +30,7 @@ let closedAssistant = 0
 function phone(locked: boolean, assistant = false) {
   return fakeNative({
     ...(assistant ? { ElizaSystem: { getLaunchInfo: () => ({ assistant: true }) } } : {}),
-    Agent: { takeInvocation: () => ({ assistant, invocation: assistant ? "assist" : null, locked }) },
+    Agent: { launchSurface: () => ({ assistant }), takeInvocation: () => ({ assistant, invocation: assistant ? "assist" : null, locked }) },
     DailyApps: {
       closeAssistant: () => { closedAssistant = closedAssistant + 1; return { closed: true } },
       checkPermissions: () => ({ camera: "granted" }),
@@ -128,6 +128,37 @@ describe("The keyguard and the assistant surface (spec/assistant/index.md, \"The
       }
     }
   })
+
+  it.effect("only Alpha's own assistant activity is the assistant surface, whatever action a caller set (spec/shell/navigation.md, \"Hiding the page retires what the owner was in the middle of\")", () => effect {
+    const hostWith = (table: Parameters<typeof fakeNative>[0]) => effect {
+      provide memoryStore, Layer.mergeAll(fakeNative(table), buildInfo({ variant: "launcher" }), resident, journal) {
+        provide shell { return (try (try NavigationMachine).get()).host }
+      }
+    }
+    const callerAssist = try hostWith({ ElizaSystem: { getLaunchInfo: () => ({ assistant: true }) }, Agent: { launchSurface: () => ({ assistant: false }) } })
+    const ownSurface = try hostWith({ ElizaSystem: { getLaunchInfo: () => ({ assistant: false }) }, Agent: { launchSurface: () => ({ assistant: true }) } })
+    const withoutAgent = try hostWith({ ElizaSystem: { getLaunchInfo: () => ({ assistant: true }) } })
+    try Effect.try(() => assert.deepStrictEqual([callerAssist === "AssistantSurface", ownSurface, withoutAgent], [false, "AssistantSurface", "AssistantSurface"]))
+  })
+
+  it.effect("the keyguard is read without taking the invocation, and follows each change Android posts (spec/shell/navigation.md, \"Hiding the page retires what the owner was in the middle of\")", () => effect {
+    let taken = 0
+    const agent = { keyguard: () => ({ locked: false }), takeInvocation: () => { taken = taken + 1; return { assistant: false, locked: true } } }
+    const read = try effect {
+      provide memoryStore, Layer.mergeAll(fakeNative({ Agent: agent }), buildInfo({ variant: "launcher" }), resident, journal) {
+        provide shell { return (try (try Foreground).get()).locked }
+      }
+    }
+    const posted = try effect {
+      provide memoryStore, Layer.mergeAll(fakeNative({ Agent: agent }, { "Agent:keyguardChanged": [{ locked: true }] }), buildInfo({ variant: "launcher" }), resident, journal) {
+        provide shell {
+          try TestClock.adjust("1 millis")
+          return (try (try Foreground).get()).locked
+        }
+      }
+    }
+    try Effect.try(() => assert.deepStrictEqual([read, posted, taken], [false, true, 0]))
+  })
 })
 
 describe("A kept navigation that is not a state (spec/shell/navigation.md, \"Booting brings back the app and its history without the old page's layers\")", () => {
@@ -152,6 +183,7 @@ describe("A kept navigation that is not a state (spec/shell/navigation.md, \"Boo
 
 describe("Optional context fields (spec/assistant/context.md, \"A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn\")", () => {
   it.effect("the instance learned once is the only one that takes optional fields, and a failed learn may be tried again", () => effect {
+    // spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"
     const first = learnPeer({ tag: "NotLearned" }, statusReadOf({ serverInstanceId: "process-1" }))
     const same = comparePeer(first, statusReadOf({ serverInstanceId: "process-1" }))
     const moved = comparePeer(first, statusReadOf({ serverInstanceId: "process-2" }))

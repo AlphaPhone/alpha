@@ -6,6 +6,7 @@ import { Navigation } from "../../src/shell/navigation.vibe"
 import { Toasts } from "../../src/shell/toasts.vibe"
 import { Foreground, type ForegroundState } from "../../src/shell/foreground.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
+import { Preferences } from "../../src/settings/preferences.vibe"
 import { PageMail, ReadingSpeechFailed, ReadingVoice } from "../../src/browser/ports.vibe"
 import { layer } from "../../src/browser/layer.vibe"
 import type { BrowserTabs } from "../../src/browser/session.vibe"
@@ -22,8 +23,10 @@ export const shownBrowser: ForegroundState = { visible: true, locked: false, scr
 
 /** How a fake behaves where a test needs more than the defaults. */
 export interface FakeOptions {
-  /** The tab host's answer to a method; an Error is a native refusal with its message. */
+  /** The tab host's answer to a method; an Error is a native refusal with its message, and an Effect is run for the answer. */
   readonly answers?: Record<string, (args: Record<string, unknown>) => unknown>
+  /** Settings › Privacy › Browser page for Alpha; on when not given. */
+  readonly sharing?: Ref.Ref<boolean>
   /** Cloud's answer to one request. */
   readonly cloud?: (method: string, path: string, body?: unknown) => Effect.Effect<unknown>
   /** Whether this device has an on-device reading voice, and whether its speech ends cleanly. */
@@ -51,6 +54,7 @@ export effect function fakeHost(options: FakeOptions = {}) {
   const cloudCalls = try Ref.make<string[]>([])
   const foreground = try SubscriptionRef.make(shownBrowser)
   const voice = options.voice ?? { binding: false, ready: false, speaks: true }
+  const sharing = options.sharing ?? (try Ref.make(true))
   const native = Layer.succeed(Native, {
     available: () => succeed(true),
     effect invoke(_plugin: string, method: string, args?: unknown) {
@@ -58,7 +62,8 @@ export effect function fakeHost(options: FakeOptions = {}) {
       try Ref.update(calls, (all) => [...all, { method, args: given }])
       const answer = answers[method]
       if (answer === undefined) return defaultAnswer(method)
-      const result = answer(given)
+      const answered = answer(given)
+      const result = Effect.isEffect(answered) ? try (answered as Effect.Effect<unknown>) : answered
       if (result instanceof Error) throw new NativeFailed({ plugin: "AlphaBrowser", method, message: result.message })
       return result
     },
@@ -83,6 +88,10 @@ export effect function fakeHost(options: FakeOptions = {}) {
     } as unknown as Navigation.Shape),
     Layer.succeed(Toasts, { show: (text: string) => Ref.update(toasts, (all) => [...all, text]) } as unknown as Toasts.Shape),
     Layer.succeed(Foreground, { changes: SubscriptionRef.changes(foreground), get: () => SubscriptionRef.get(foreground) }),
+    Layer.succeed(Preferences, {
+      sharesBrowserPage: () => Ref.get(sharing),
+      asksBeforeActions: () => succeed(false),
+    } as unknown as Preferences.Shape),
     Layer.succeed(Assistant, { openWith: (draft: string) => Ref.update(drafts, (all) => [...all, draft]) } as unknown as Assistant.Shape),
     Layer.succeed(ReadingVoice, {
       binding: () => succeed(voice.binding ? { route: "on-device" } : undefined),
@@ -98,7 +107,7 @@ export effect function fakeHost(options: FakeOptions = {}) {
       },
     }),
   )
-  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, live: Layer.provide(layer, platform) }
+  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, live: Layer.provide(layer, platform) }
 }
 
 /** The calls the fake host received for `method`. */

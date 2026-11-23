@@ -238,8 +238,10 @@ uncovered viewfinder; the request is at most 512 characters with no
 question mark in its first 80. An ungrounded Browser proposal of the
 current message gets the notice "I only open a site or search you ask for
 yourself" with an example, and no card; a grounded one that is not a
-direct command keeps its review card. A Browser tab switch that matches
-several tabs never runs directly.
+direct command keeps its review card. A Browser open of a link of the
+page my message carried ([Turn context](./context.md)), exactly as the page
+gave it, also keeps its review card and never opens on its own (#1444). A
+Browser tab switch that matches several tabs never runs directly.
 
 ```quint
 pure val photoRequestLimit = 512
@@ -251,6 +253,9 @@ pure def browserNoticeInstead(grounded: bool): bool = not(grounded)
 pure def lawAnUntypedNumberNeverDials(typed: bool): bool = typed or not(keypadDirect(true, typed))
 pure def lawOnePhotoPerMessage(own: bool, length: int): bool = not(photoDirect(own, length, true))
 pure def lawAnAmbiguousTabNeedsTheOwner(grounded: bool, command: bool): bool = not(browserDirect(grounded, command, true))
+pure def browserCarded(grounded: bool, pageLink: bool): bool = grounded or pageLink
+pure def lawAPageLinkKeepsItsCardAndNeverRunsDirectly(command: bool): bool = browserCarded(false, true) and not(browserDirect(false, command, false))
+pure def lawAnUngroundedOpenGetsTheNotice(pageLink: bool): bool = not(browserCarded(false, pageLink)) implies browserNoticeInstead(false)
 pure val lengthValues = Set(0, 1, 512, 513)
 ```
 

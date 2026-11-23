@@ -143,7 +143,40 @@ private static final class ResidentAttachDiagnostic {
  private final java.util.Map<String,ElizaAgentService.LocalStreamHandle> streams=new java.util.HashMap<>();
  private final java.util.Map<String,Runnable> streamInvalidators=new java.util.HashMap<>();
  private static final java.util.Set<AlphaLocalAgentPlugin> instances=new java.util.HashSet<>();
- @Override public void load(){super.load();synchronized(lifecycleLock){if(!disposed)instances.add(this);}}
+ @Override public void load(){super.load();synchronized(lifecycleLock){if(!disposed)instances.add(this);}watchKeyguard();}
+ private android.content.BroadcastReceiver keyguardWatch;
+ private Boolean keyguardPosted;
+ /** Whether Android's keyguard shows over this surface now; an unknown keyguard counts as locked. */
+ private boolean keyguardShown(){
+  android.app.KeyguardManager keyguard=getContext().getSystemService(android.app.KeyguardManager.class);
+  return keyguard==null||keyguard.isKeyguardLocked();
+ }
+ private void postKeyguard(){
+  boolean locked=keyguardShown();
+  synchronized(this){if(disposed||Boolean.valueOf(locked).equals(keyguardPosted))return;keyguardPosted=locked;}
+  notifyListeners("keyguardChanged",new JSObject().put("locked",locked));
+ }
+ private void watchKeyguard(){
+  android.content.IntentFilter filter=new android.content.IntentFilter();
+  filter.addAction(android.content.Intent.ACTION_SCREEN_OFF);
+  filter.addAction(android.content.Intent.ACTION_SCREEN_ON);
+  filter.addAction(android.content.Intent.ACTION_USER_PRESENT);
+  keyguardWatch=new android.content.BroadcastReceiver(){@Override public void onReceive(Context context,android.content.Intent intent){postKeyguard();}};
+  androidx.core.content.ContextCompat.registerReceiver(getContext(),keyguardWatch,filter,androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
+  synchronized(this){keyguardPosted=keyguardShown();}
+ }
+ private void unwatchKeyguard(){
+  android.content.BroadcastReceiver held=keyguardWatch;keyguardWatch=null;
+  if(held!=null)try{getContext().unregisterReceiver(held);}catch(IllegalArgumentException alreadyGone){/* Not registered. */}
+ }
+ @Override protected void handleOnResume(){super.handleOnResume();postKeyguard();}
+ /** Android's keyguard now, consuming nothing: `locked` is true while the keyguard shows or cannot be read.
+  * `keyguardChanged` posts the same fact when the screen turns off or on and when the owner unlocks. */
+ @PluginMethod public void keyguard(PluginCall call) {
+  boolean locked=keyguardShown();
+  synchronized(this){keyguardPosted=locked;}
+  call.resolve(new JSObject().put("locked",locked));
+ }
  /** This instance only: used when its own bridge is destroyed. Caller holds lifecycleLock. */
  private void invalidateOwnCalls(){
   recoveryReview.clear();
@@ -354,8 +387,7 @@ private static final class ResidentAttachDiagnostic {
   boolean assistant=activity instanceof AlphaAssistActivity&&activity.getIntent()!=null&&activity.getIntent().getBooleanExtra(AlphaAssistActivity.EXTRA_ASSISTANT,false);
   String invocation=assistant?((AlphaAssistActivity)activity).takeInvocation():null;
   // The renderer never opens the microphone behind the keyguard; unknown keyguard state counts as locked.
-  android.app.KeyguardManager keyguard=getContext().getSystemService(android.app.KeyguardManager.class);
-  boolean locked=keyguard==null||keyguard.isKeyguardLocked();
+  boolean locked=keyguardShown();
   call.resolve(new JSObject().put("assistant",invocation!=null).put("invocation",invocation).put("locked",locked));
  }
  /** Read-only: checks the stored Cloud admission and the current runtime independently. A matching
@@ -1223,5 +1255,5 @@ private static final class ResidentAttachDiagnostic {
   * calls and streams. The shared runtime, its epoch and the owner enrollment stay valid for
   * other surfaces. When the last surface goes away (the app is closed or recreated) the epoch
   * advances and the enrollment is cleared, as before; the next surface enrolls again. */
- @Override protected void handleOnDestroy(){providerSurfaceGeneration++;closeProviderReveal();synchronized(lifecycleLock){disposed=true;invalidateOwnCalls();instances.remove(this);if(instances.isEmpty()&&!AlphaCanonicalNotifications.ownsSession()){++lifecycleEpoch;clearEnrollment();}}workers.shutdownNow();voiceWorkers.shutdownNow();rendererWorkers.shutdownNow();super.handleOnDestroy();}
+ @Override protected void handleOnDestroy(){unwatchKeyguard();providerSurfaceGeneration++;closeProviderReveal();synchronized(lifecycleLock){disposed=true;invalidateOwnCalls();instances.remove(this);if(instances.isEmpty()&&!AlphaCanonicalNotifications.ownsSession()){++lifecycleEpoch;clearEnrollment();}}workers.shutdownNow();voiceWorkers.shutdownNow();rendererWorkers.shutdownNow();super.handleOnDestroy();}
 }

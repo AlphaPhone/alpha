@@ -231,7 +231,7 @@ export const place = Layer.provideMerge(Layer.effect(WorkflowsPlace, effect {
   }
 }), machine())
 
-/** Applies each route the shell opens Workflows at, once per change, for as long as the layer lives. */
+/** Applies each route the shell opens Workflows at once, then hands the shell back the bare route so the same route opened again is applied again, for as long as the layer lives. */
 export effect function followRoute() {
   const navigation = try Navigation
   const at = try WorkflowsPlace
@@ -244,5 +244,8 @@ export effect function followRoute() {
     last = route
     if (first && route === "") continue
     try at.go(route)
+    if (route === "") continue
+    last = ""
+    if ((try navigation.get()).app === "workflows") navigation.send({ type: "setRoute", route: "" }) catch () => false
   }
 }

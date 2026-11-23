@@ -20,6 +20,22 @@ export function retryAfterSecondsOf(value: string | undefined, now: number): num
   return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - now) / 1000));
 }
 
+const isoInstant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+function fieldsOf(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+/** The epoch milliseconds a refusal body names as `resetAt`, under its `error` or at its top, as an ISO instant or a whole number; undefined when it names none. @throws {never} */
+export function resetAtOf(body: unknown): number | undefined {
+  const top = fieldsOf(body);
+  const named = fieldsOf(top?.error)?.resetAt ?? top?.resetAt;
+  if (typeof named === "number") return Number.isSafeInteger(named) && named > 0 ? named : undefined;
+  if (typeof named !== "string" || named.length > 64 || !isoInstant.test(named.trim())) return undefined;
+  const at = Date.parse(named.trim());
+  return Number.isFinite(at) ? at : undefined;
+}
+
 /**
  * A `fetch` for `@elizaos/cloud/client` over the native Cloud plugin: only requests to `base` go out, as
  * the plugin's own calls in `environment`, so the key it holds is attached by native and never by the page.

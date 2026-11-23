@@ -42,13 +42,15 @@ export service Foreground {
 }
 
 /**
- * Android's keyguard as `Agent.takeInvocation` reports it (`locked`), a read that consumes nothing. A host without that
- * bridge (the browser, a build that does not list it) has no keyguard over the page; a failed or unreadable answer counts as locked.
+ * Android's keyguard as `Agent.keyguard` reports it, a read that consumes nothing; a build whose Agent lacks it answers through
+ * `Agent.takeInvocation`'s `locked`. A host without that bridge (the browser, a build that does not list it) has no keyguard over
+ * the page; a failed or unreadable answer counts as locked.
  */
 export effect function keyguardLocked() {
   const native = try Native
   if (!(try native.available("Agent"))) return false
-  const answer = native.invoke("Agent", "takeInvocation") catch (error) => error
+  let answer = native.invoke("Agent", "keyguard") catch (error) => error
+  if (answer instanceof NativeUnavailable) answer = native.invoke("Agent", "takeInvocation") catch (error) => error
   if (answer instanceof NativeUnavailable) return false
   if (answer instanceof NativeFailed) return true
   const facts = Schema.decodeUnknownEffect(KeyguardFacts)(answer) catch () => undefined
@@ -60,10 +62,11 @@ function same(a: ForegroundState, b: ForegroundState): boolean {
     a.chat === b.chat && a.modal === b.modal && a.assistantSurface === b.assistantSurface
 }
 
-/** The foreground service over the navigation machine and the keyguard, read again whenever the page returns, takes focus or is invoked again. */
+/** The foreground service over the navigation machine and the keyguard, read again whenever the page returns, takes focus or is invoked again, and as Android posts each change of it. */
 export const foregroundLive = Layer.effect(Foreground, effect {
   const machine = try NavigationMachine
   const build = try Build
+  const native = try Native
   const locked = try SubscriptionRef.make(try keyguardLocked())
 
   effect function reread() {
@@ -74,6 +77,15 @@ export const foregroundLive = Layer.effect(Foreground, effect {
   fork.scoped (effect { for try (const _ of pageEvents("visibilitychange", "document")) try reread() })
   fork.scoped (effect { for try (const _ of pageEvents("focus")) try reread() })
   fork.scoped (effect { for try (const _ of pageEvents("alpha:assist-invocation")) try reread() })
+  if (try native.available("Agent")) {
+    fork.scoped (effect {
+      const posted = Stream.ignore(native.listen("Agent", "keyguardChanged"))
+      for try (const raw of posted) {
+        const facts = Schema.decodeUnknownEffect(KeyguardFacts)(raw) catch () => undefined
+        try SubscriptionRef.set(locked, facts === undefined ? true : facts.locked)
+      }
+    })
+  }
   if (build.info.testMocks) {
     fork.scoped (effect {
       for try (const detail of pageEvents("alpha:dev-command")) {

@@ -2,7 +2,7 @@
 import { assert, it } from "@effect/vitest"
 import { BrowserTabs } from "../../src/browser/session.vibe"
 import { BrowserAgent } from "../../src/browser/agent.vibe"
-import { BROWSER_TABS_CLOSE_ALL_CAPABILITY, browserDeviceCapabilities, groundedIn, operationPorts, parseBrowserCloseAll } from "../../src/browser/operations.vibe"
+import { BROWSER_TABS_CLOSE_ALL_CAPABILITY, NO_TABS_TO_CLOSE_NOTICE, TABS_UNLISTED_NOTICE, browserDeviceCapabilities, closingCard, groundedIn, operationPorts, parseBrowserCloseAll } from "../../src/browser/operations.vibe"
 import { AGENT_REFUSALS } from "../../src/browser/messages.ts"
 import { callsTo, fakeHost, loadPage, settledTabs, shownBrowser } from "./fakes.vibe"
 
@@ -33,16 +33,18 @@ it.live("closing every tab closes exactly the tabs its card listed, and nothing 
       const refused = agent.closeAll("first") catch (error) => error.message
       const untouched = (try tabs.get()).tabs.map((t) => t.id)
 
-      const card = try promise(() => ports.itemize(all, "second"))
-      const listed = try promise(() => ports.stillListed(all, "second"))
+      const card = ports.itemize(all, "second")
+      const listed = ports.stillListed(all, "second")
       const applied = try promise(() => ports.execute(all, call("second")))
+      const shownBeforeReceipt = (try Ref.get(fake.opened)).includes("browser")
+      ports.present(all, call("second"))
       try sleep("30 millis")
       const after = try tabs.get()
       const again = try promise(() => ports.execute(all, call("second")))
       try Effect.try(() => assert.deepStrictEqual({
         first, unlisted, withdrawn, refused, untouched,
-        card: card.listing === "Listed" ? [card.title, card.detail.split("\n").slice(0, 3)] : card.listing,
-        listed, applied,
+        card: typeof card === "object" ? [card.lines, card.unnamed] : card,
+        listed, applied, shownBeforeReceipt,
         closed: (try callsTo(fake.calls, "close")).map((c) => c.args.id).sort(),
         left: [after.tabs.length, [news, docs, shop].includes(after.cur)],
         shown: (try Ref.get(fake.opened)).includes("browser"),
@@ -53,9 +55,10 @@ it.live("closing every tab closes exactly the tabs its card listed, and nothing 
         withdrawn: null,
         refused: AGENT_REFUSALS.RefusedListChanged,
         untouched: [started.cur, "bdocs", "bshop"],
-        card: ["Close 3 tabs", ["• news.example", "• docs.example.org", "• shop.example"]],
+        card: [["news.example", "docs.example.org", "shop.example"], 0],
         listed: true,
         applied: { kind: "applied" },
+        shownBeforeReceipt: false,
         closed: [news, docs, shop].sort(),
         left: [1, false],
         shown: true,
@@ -115,6 +118,19 @@ it.live("closing every tab from Browser closes the showing tab only when present
         fromPrivate: [true, false],
       }))
     }
+  })
+})
+
+// spec/browser/session.md, "A close-every-tab card lists the tabs it would close once per proposal, and a listing that no longer matches Browser's tabs is withdrawn"
+it("a close-every-tab card names normal tabs with their host where it differs, counts private tabs, and is a notice when nothing was listed", () => {
+  assert.deepStrictEqual({
+    listed: closingCard([{ title: "News", host: "news.example" }, { title: "docs.example.org", host: "docs.example.org" }, { title: "Bank", host: "bank.example", private: true }]),
+    unlisted: closingCard(null),
+    empty: closingCard([]),
+  }, {
+    listed: { lines: ["News (news.example)", "docs.example.org"], unnamed: 1, unnamedLabel: "private tab" },
+    unlisted: `Close all tabs: ${TABS_UNLISTED_NOTICE}`,
+    empty: `Close all tabs: ${NO_TABS_TO_CLOSE_NOTICE}`,
   })
 })
 

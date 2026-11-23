@@ -1,4 +1,4 @@
-// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"
+// spec/telephony/actions.md, "Story: Call or text only the person I approved"; spec/telephony/actions.md, "A view change that shows the outcome waits for the reply that carries it"; spec/telephony/actions.md, "An action starts once per operation ID, and a number the owner did not write is refused"; spec/telephony/actions.md, "A dispatched effect settles with what the phone answered, and a lost answer is unconfirmed, never nothing"; spec/telephony/actions.md, "A read, a keypad, a filtered list or a draft settles without any effect"; spec/telephony/actions.md, "An unconfirmed text is settled only by the phone's own send record for its operation ID"; spec/assistant/review.md, "A direct effect needs an allow-listed operation of the current message that is not a workflow step, with review-first off"; spec/assistant/receipts.md, "An action is reconciled as applied only with its exact saved receipt, and only a handoff may stay unresolved"
 import type { ExecutorCall } from "@elizaos/agent/client"
 import type { Op, Target } from "../../gen/assistant__review.effect.vibe"
 import type { Result } from "../../gen/assistant__receipts.effect.vibe"
@@ -37,10 +37,32 @@ const SAID: Record<Exclude<Settled, "Applied">, string> = {
   NoneSelected: "Nothing is open to act on.", Stale: "The contact changed, so it was left as is.",
 }
 
-/** The direct-pass class of a telephony operation: only a bare keypad and a filtered Contacts list are views; everything else waits for its card. */
+/** The direct-pass class of a telephony operation: only a bare keypad and a filtered Contacts list are views; every call, text, read and contact change is a reviewed comms act. */
 export function classOf(op: TelephonyOperation | undefined): Op {
   if (op?.type === "contact_show" || (op?.type === "phone_keypad" && op.number === undefined)) return "OpenView"
-  return "NotesRead"
+  return "CommsAct"
+}
+
+const READS: ReadonlySet<string> = new Set(["messages_read_selected", "voicemail_read_selected", "contact_read_selected", "sms_latest_sender"])
+
+/** Whether an unknown outcome of the operation may stay unresolved in action history: every telephony action that is not a read. */
+export function handoffOf(op: TelephonyOperation | undefined): boolean {
+  return op === undefined || !READS.has(op.type)
+}
+
+/**
+ * Of the capabilities the agent `offered`, those this phone advertises in `x-eliza-device-capabilities`: only what the device
+ * runs (`own`, none off the image) and the agent offered, and the latest-sender v2 form only with v1 itself.
+ */
+export function advertisedOf(own: readonly string[], offered: readonly string[]): readonly string[] {
+  const kept = own.filter((capability) => offered.includes(capability))
+  return kept.includes("sms.latest-sender.v1") ? kept : kept.filter((capability) => capability !== "sms.latest-sender.v2")
+}
+
+/** Telephony's part of the device capability header, read when a turn is sent, for the shell's DeviceCapabilities. */
+export effect function telephonyCapabilities(offered: readonly string[]) {
+  const actions = try TelephonyActions
+  return advertisedOf(try (actions.capabilities() catch () => [] as readonly string[]), offered)
 }
 
 /** What a telephony operation targets against the owner's words: a written number, a contact name, or nothing. */
@@ -85,7 +107,8 @@ const KEPT = 32
 
 /**
  * The telephony family of the assistant's device executors: each approved operation runs once through TelephonyActions under
- * its operation ID, grounded by the owner's own words, and a view change that shows the outcome follows once the reply carrying it settled.
+ * its operation ID, grounded by the owner's own words, and a view change that shows the outcome follows once its journal entry and
+ * receipt settled and the reply carrying it ended.
  */
 export const operationPorts = effect {
   const actions = try TelephonyActions
@@ -93,12 +116,19 @@ export const operationPorts = effect {
   const calls = try TelephonyCalls
   const navigation = try Navigation
   const settled = new Map<string, Settled>()
+  const shows = new Map<string, Present>()
 
   function remember(operation: unknown, outcome: Settled) {
     const key = JSON.stringify(operation)
     settled.delete(key)
     settled.set(key, outcome)
     if (settled.size > KEPT) settled.delete(settled.keys().next().value!)
+  }
+
+  function hold(operationId: string, present: Present) {
+    shows.delete(operationId)
+    shows.set(operationId, present)
+    if (shows.size > KEPT) shows.delete(shows.keys().next().value!)
   }
 
   effect function showAfterReply(call: ExecutorCall, present: Present) {
@@ -113,7 +143,7 @@ export const operationPorts = effect {
     if (done instanceof NotATelephonyOperation) return { kind: "refused" as const, code: "unsupported" }
     remember(operation, done.settled)
     if (done.settled === "Unconfirmed") return undefined
-    if (done.present !== undefined) fork.detached showAfterReply(call, done.present)
+    if (done.present !== undefined) hold(call.operationId, done.present)
     return APPLIED.has(done.settled)
       ? { kind: "applied" as const, result: done.result }
       : { kind: "refused" as const, code: CODES[done.settled], result: done.result }
@@ -141,6 +171,13 @@ export const operationPorts = effect {
     summarize: (operation, result) => {
       const op = telephonyOperationOf(operation)
       return op === undefined ? "" : sentenceOf(op.type, settled.get(JSON.stringify(operation)), result)
+    },
+    handoff: (operation) => handoffOf(telephonyOperationOf(operation)),
+    present: (_operation, call) => {
+      const present = shows.get(call.operationId)
+      if (present === undefined) return
+      shows.delete(call.operationId)
+      runFork(showAfterReply(call, present))
     },
   }
   return ports

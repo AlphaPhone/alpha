@@ -96,7 +96,7 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
     const raw = cloud.json(method, path, body) catch effect (error) => {
       const pause = pauseOf(error)
       if (pause !== undefined) connection.send({ type: "rateLimited", captured: s.generation, retryAfter: pause }) catch () => undefined
-      throw cloudFailure(error)
+      throw cloudFailure(error, try Clock.currentTimeMillis)
     }
     if (!mayReturn(try connection.get(), s.generation, s.account, false))
       throw failure("unauthorized", "The Maps account changed. Search again after signing in.")
@@ -167,7 +167,7 @@ export const providerLayer = Layer.effect(MapsProvider, effect {
         try content.update((c) => ({ ...c, coverage: undefined, message }))
       }
       const raw = cloud.json("GET", "/api/v1/maps/capabilities") catch effect (error) => {
-        const reason = cloudFailure(error)
+        const reason = cloudFailure(error, try Clock.currentTimeMillis)
         try refused(replyOf(reason), reason.message)
         return undefined
       }

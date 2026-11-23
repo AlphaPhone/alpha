@@ -1,4 +1,5 @@
-// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"
+// spec/voice/conversation.md, "Story: Start talking only when Alpha can listen safely"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "An open microphone ends a turn at the first pause and a 400 ms hold interrupts; Cloud streaming waits 400 ms after its final; Stop sends no heard report"; spec/voice/speech.md, "An email draft is said as one line, by whether its card was validated or the action failed; other action replies drop IDs and asides unless I asked for them word for word"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/conversation.md, "Voice closed by hiding the page says once, when the page returns, that a call paused it if a call was live then or since; a plain app switch says nothing"; spec/voice/speech.md, "A reading the owner starts first retires a running voice conversation and waits for its replies to stop"; spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"
+import { readReplyStream } from "@elizaos/agent/client"
 import { VOICE_TRANSCRIPT_STREAM, createLiveVoiceSession, defaultVoiceProfile, type CaptureEvents, type LiveVoiceSession, type SpeakerEvents, type VoiceProfile, type VoiceReply, type VoiceSessionPorts } from "@elizaos/agent/voice"
 import { Cloud } from "../platform/cloud.vibe"
 import { Native } from "../platform/native.vibe"
@@ -8,6 +9,7 @@ import { ResidentFeeds } from "../platform/view-events.vibe"
 import { Machine, active, endpointerOf, openMicHangoverMs, profileOf, running, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { readingMayStart } from "../../gen/voice__speech.effect.vibe"
+import { acknowledgement, type Acknowledgement } from "./acknowledgement.vibe"
 import { Microphone } from "./capture.vibe"
 import { Dictation } from "./dictation.vibe"
 import { callCaused, cancelledByPhone, pausedByPhone, refusalOf } from "./failure.vibe"
@@ -82,6 +84,14 @@ const QUIET_RETRY_WAIT_MS = 2000
 const LONG_WAIT_SECONDS = 30
 const decode = <A>(schema: Schema.Decoder<A>, raw: unknown) => Option.getOrUndefined(Schema.decodeUnknownOption(schema)(raw))
 
+/** What a voice turn sends to the resident, streamed or not. */
+interface TurnBody {
+  readonly text: string
+  readonly channelType: string
+  readonly metadata: unknown
+  readonly clientMessageId: string
+}
+
 function envelope(sessionId: string, turnId: string, phase: "speech-start" | "speech-end" | "partial" | "final" | "error", text?: string, seq?: number) {
   return { type: "event", event: { type: "agent_event", stream: VOICE_TRANSCRIPT_STREAM,
     payload: { type: VOICE_TRANSCRIPT_STREAM, sessionId, turnId, phase, ...(text === undefined ? {} : { text }), ...(seq === undefined ? {} : { seq }) } } }
@@ -115,6 +125,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   let capturing = false
   let pendingTyped: (() => void!!) | undefined
   let pendingChat: (() => boolean) | undefined
+  let cue: Acknowledgement | undefined
   const listeners = new Set<(envelope: unknown) => void>()
 
   effect function send(event: Event) {
@@ -280,10 +291,44 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   }
 
   function speakingNow(): boolean {
-    return runSync(held.get()).shown === "Speaking"
+    const playing = cue
+    return runSync(held.get()).shown === "Speaking" || (playing !== undefined && runSync(playing.audible()))
   }
 
-  function ports(start: VoiceStart, route: Route, sessionId: string): VoiceSessionPorts {
+  effect function answerOf(conversationId: string, body: TurnBody, ack: Acknowledgement, microphoneClear: () => boolean, signal: AbortSignal) {
+    const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`
+    let firstText = true
+    const outcome = tryPromise(() => readReplyStream(Stream.toAsyncIterable(resident.stream(`${path}/stream`, body)), {
+      onStatus: (activity: string, label?: string) => { runFork(ack.progress(label === undefined ? { activity } : { activity, label }, microphoneClear)) },
+      onPreview: (text: string, provisional: boolean) => {
+        if (provisional || text === "" || !firstText) return
+        firstText = false
+        runFork(effect { try latency.mark("FirstToken"); try ack.preempt() })
+      },
+      onReady: () => { runFork(ack.preempt()) },
+    }, signal)) catch effect (error) => {
+      lastCause = error
+      throw error
+    }
+    if (outcome.kind === "Failed") {
+      lastCause = { code: outcome.code }
+      throw new Error("The agent's voice reply failed.")
+    }
+    if (outcome.kind === "Done") {
+      const awaitingReview = "awaitingReview" in outcome && outcome.awaitingReview === true
+      const done: VoiceTurnReply = { messageId: outcome.messageId, text: outcome.text, ...(outcome.action === undefined ? {} : { action: outcome.action }), ...(awaitingReview ? { awaitingReview } : {}) }
+      return done
+    }
+    const answer = resident.json("POST", path, body) catch effect (error) => {
+      lastCause = error
+      throw error
+    }
+    const resent = decode(VoiceTurnReply, answer.data)
+    if (resent === undefined) throw new Error("The agent's voice reply was not usable.")
+    return resent
+  }
+
+  function ports(start: VoiceStart, route: Route, sessionId: string, liveCapture: boolean): VoiceSessionPorts {
     let captureId = newId()
     let opened: CaptureEvents | undefined
     const capture = {
@@ -344,24 +389,39 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       return score.complete ? "ScoredComplete" as const : "ScoredIncomplete" as const
     })
     const turns = {
-      send: (turn: { readonly text: string; readonly channelType: string; readonly metadata: unknown; readonly clientMessageId: string }, signal: AbortSignal) => runPromise(effect {
+      send: (turn: TurnBody, signal: AbortSignal) => runPromise(effect {
         try latency.endpointed("LongGap")
         try latency.mark("Request")
         if (route === "Device") try speech.warmDevice()
-        const answer = resident.json("POST", `/api/conversations/${encodeURIComponent(start.conversationId)}/messages`,
-          { text: turn.text, channelType: turn.channelType, metadata: turn.metadata, clientMessageId: turn.clientMessageId }) catch effect (error) => {
-          lastCause = error
+        const ack = try acknowledgement()
+        cue = ack
+        const microphoneClear = () => liveCapture || !runSync(microphone.get()).open
+        const retireCue = () => { runFork(ack.cancel()) }
+        signal.addEventListener("abort", retireCue, { once: true })
+        if (signal.aborted) try ack.cancel()
+        const body: TurnBody = { text: turn.text, channelType: turn.channelType, metadata: turn.metadata, clientMessageId: turn.clientMessageId }
+        const reply = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
+          try ack.cancel()
+          if (cue === ack) cue = undefined
           throw error
         }
-        const reply = decode(VoiceTurnReply, answer.data)
-        if (reply === undefined || signal.aborted) throw new Error("The agent's voice reply was not usable.")
+        if (signal.aborted) {
+          try ack.cancel()
+          if (cue === ack) cue = undefined
+          throw new Error("The agent's voice reply was not usable.")
+        }
         try latency.mark("FirstToken")
         if (reply.awaitingReview === true) {
+          try ack.cancel()
+          if (cue === ack) cue = undefined
           try send({ type: "reviewNeeded" })
           live?.stop()
           const waiting: VoiceReply = { messageId: reply.messageId, text: "" }
           return waiting
         }
+        try ack.idle()
+        if (cue === ack) cue = undefined
+        if (signal.aborted) throw new Error("The agent's voice reply was not usable.")
         const answered: VoiceReply = { messageId: reply.messageId, text: spokenLineOf(reply.text, replyActionOf(reply.action)), ...(reply.action === undefined ? {} : { action: reply.action }) }
         return answered
       }),
@@ -401,7 +461,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     const liveRoute = route === "Device" ? decode(LiveCaptureStatus, native.invoke("AlphaVoiceCloud", "liveCaptureStatus", {}) catch () => undefined)?.available === true
       : route === "Cloud" && (try native.available("AlphaCloudSpeechStream"))
     const session = createLiveVoiceSession({
-      ...ports(start, route, sessionId),
+      ...ports(start, route, sessionId, liveRoute),
       sessionId,
       subscribe: (listen) => {
         listeners.add(listen)
@@ -435,7 +495,10 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   effect function retire(media: boolean) {
     const session = live
+    const playing = cue
     live = undefined
+    cue = undefined
+    if (playing !== undefined) try playing.cancel()
     session?.stop()
     if (!media) return
     const confirmed = try mediaStopped()
@@ -477,7 +540,11 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
       const media = live !== undefined
       if (try send({ type: "stop", media })) try retire(media)
     },
-    effect stopSpeaking() { try speech.stop("Replies") },
+    effect stopSpeaking() {
+      const playing = cue
+      if (playing !== undefined) try playing.cancel()
+      try speech.stop("Replies")
+    },
     effect mute(muted: boolean) {
       if (try speech.setMuted(muted)) try send({ type: "muteSpeaker", muted })
     },

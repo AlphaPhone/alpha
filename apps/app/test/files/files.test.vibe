@@ -11,6 +11,8 @@ import { FilePicker } from "../../src/files/picker.vibe"
 import { FilesPreview } from "../../src/files/preview.vibe"
 import { rowKey } from "../../src/files/paths.vibe"
 import type { Browser } from "../../gen/files__browser.ts"
+import { Navigation } from "../../src/shell/navigation.vibe"
+import { filesWithNavigation } from "./harness.vibe"
 
 const build = (testMocks: boolean) => Layer.succeed(Build, { info: { version: "test", variant: "launcher", testMocks } })
 
@@ -183,6 +185,50 @@ it.live("another area chooses a file, which is read again when attached (spec/fi
         { chosen: chosen.map((f) => [f.name, f.mimeType, f.size]), opened: opened.kind, content: [shown.content, shown.body] },
         { chosen: [["notes.txt", "text/plain", 40]], opened: "shown", content: ["ContentText", "Lease renewal: the term starts in March."] },
       ))
+    })
+  }
+})
+
+it.live("Back over the picker dismisses it, and its caller gets no files (spec/files/picker.md, \"Story: Choose a file from my phone for another app on Alpha\")", () => effect {
+  provide filesWithNavigation(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const picker = try FilePicker
+      const navigation = try Navigation
+      const waiting = try Effect.forkScoped(picker.choose(1, () => true))
+      try timeout(Stream.runHead(Stream.filter(navigation.changes, (n) => n.layers.some((l) => l.id === "files-picker"))), "5 seconds")
+      const listed = (try navigation.get()).layers.map((l) => [l.id, l.kind, l.covers])
+      try navigation.back()
+      const chosen = join waiting
+      try timeout(Stream.runHead(Stream.filter(picker.changes, (p) => !p.open)), "5 seconds")
+      const after = try navigation.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { listed, chosen: chosen.length, layers: after.layers.length },
+        { listed: [["files-picker", "SheetLayer", true]], chosen: 0, layers: 0 },
+      ))
+    })
+  }
+})
+
+it.live("an attached picker closes its own layer (spec/files/picker.md, \"Attaching reads the chosen files again and answers the caller once\")", () => effect {
+  provide filesWithNavigation(noNative) {
+    try scoped(effect {
+      const browser = try FilesBrowser
+      try Effect.forkScoped(browser.visit())
+      try until((s) => s.access === "AccessGranted")
+      const picker = try FilePicker
+      const navigation = try Navigation
+      const waiting = try Effect.forkScoped(picker.choose(1, () => true))
+      try timeout(Stream.runHead(Stream.filter(navigation.changes, (n) => n.layers.some((l) => l.id === "files-picker"))), "5 seconds")
+      try picker.browse("Download")
+      try timeout(Stream.runHead(Stream.filter(picker.changes, (p) => p.path === "Download" && !p.loading)), "5 seconds")
+      try picker.review(rowKey("", "Download/notes.txt"))
+      try picker.attach()
+      const chosen = join waiting
+      try timeout(Stream.runHead(Stream.filter(navigation.changes, (n) => n.layers.length === 0)), "5 seconds")
+      try Effect.try(() => assert.deepStrictEqual(chosen.map((f) => f.name), ["notes.txt"]))
     })
   }
 })

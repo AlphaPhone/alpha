@@ -1,15 +1,16 @@
-// spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/organize.md, "A recording receipt says what the recorder did"; spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"; spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"; spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"; spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"; spec/notes/organize.md, "A workflow read shares the selected notes only while each still holds the text the owner reviewed"
+// spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/organize.md, "A recording receipt says what the recorder did"; spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"; spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"; spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"; spec/notes/listFilter.md, "The filter is shown only on the list the turn named, checked again at commit"; spec/notes/organize.md, "A workflow read shares the selected notes only while each still holds the text the owner reviewed"; spec/notes/organize.md, "A workflow's note is saved once, into the agent's collection, only from the open run in front"
 import {
   decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeOffered, type NotesDeviceContext, type NotesOrganizeOperation,
 } from "@elizaos/plugin-notes/organize"
-import { NOT_DISPATCHED } from "@elizaos/agent/client"
+import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
 import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
 import { projectNoteForModel } from "@elizaos/plugin-notes/types"
-import { notesReadResult } from "../../gen/notes__organize.effect.vibe"
+import { noteSaveResult, notesReadResult } from "../../gen/notes__organize.effect.vibe"
 import { AssistantHost } from "../assistant/host.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { NotesCollection } from "./collection.vibe"
 import { NotesFolders } from "./folders.vibe"
+import { contentOf } from "./list.vibe"
 import { NotesOrganize, type OrganizeReceipt } from "./organize.vibe"
 import { pageVisible, sha256Hex } from "./platform.ts"
 
@@ -17,6 +18,7 @@ const refused = (code: string, result?: unknown) => (result === undefined ? { ki
 const unresolved = { kind: "unresolved" }
 
 type SelectedRead = Extract<DeviceOperation, { type: "read_selected_notes" }>
+type NoteSave = Extract<DeviceOperation, { type: "create_note" }>
 
 /** A workflow's reviewed read of selected notes, or undefined for every other operation. */
 export function selectedRead(operation: unknown): SelectedRead | undefined {
@@ -24,11 +26,27 @@ export function selectedRead(operation: unknown): SelectedRead | undefined {
   return op?.type === "read_selected_notes" ? op as SelectedRead : undefined
 }
 
+/** A workflow's reviewed note to save, or undefined for every other operation. */
+export function noteSave(operation: unknown): NoteSave | undefined {
+  const op = readOperation(operation)?.operation
+  return op?.type === "create_note" ? op as NoteSave : undefined
+}
+
+/** The creation id of a workflow's note, the same on every attempt of one operation. */
+export function noteSaveCreationId(operationId: string): string {
+  return `workflow-note-${operationId}`
+}
+
+function savedTitle(op: NoteSave): string {
+  const title = op.title.trim()
+  return title === "" ? "Saved the note." : `Saved note “${title}”.`
+}
+
 function notesCount(op: SelectedRead): string {
   return `${op.notes.length} selected note${op.notes.length === 1 ? "" : "s"}`
 }
 
-/** The executors of the agent's Notes organisation operations, for the shell to compose into DeviceExecutors. */
+/** The executors of the agent's Notes organisation operations and a workflow's note reads and saves, for the shell to compose into DeviceExecutors. */
 export const operationPorts = effect {
   const organize = try NotesOrganize
   const collection = try NotesCollection
@@ -81,6 +99,29 @@ export const operationPorts = effect {
     }
   }
 
+  effect function saveNote(op: NoteSave, call: ExecutorCall): unknown!! {
+    const fromRun = (try host.screen()).observation.view === "workflows"
+    const screen = try screenAllows()
+    const before = try collection.current()
+    const attempt = fromRun && screen && before !== undefined
+      ? try (effect {
+          const reply = try collection.interact("create-note", {
+            content: contentOf(op.title, op.body === "" ? "" : "\n", op.body), forceNew: true, creationId: noteSaveCreationId(call.operationId),
+          })
+          return { busy: false, confirmed: reply.note !== undefined }
+        } catch (error) => ({ busy: error._tag === "NotesBusy", confirmed: false }))
+      : { busy: false, confirmed: false }
+    const after = try collection.current()
+    const sameOwner = before !== undefined && after !== undefined && after.owner === before.owner
+    switch (noteSaveResult(fromRun, screen, before !== undefined, attempt.busy, attempt.confirmed, sameOwner)) {
+      case "NoteSaveSaved": return { kind: "applied" }
+      case "NoteSaveNotHere": return refused(NOT_DISPATCHED)
+      case "NoteSaveNotReady": return refused("notes_not_ready")
+      case "NoteSaveBusy": return refused("notes_busy")
+      default: return { kind: "lost" }
+    }
+  }
+
   effect function run(op: NotesOrganizeOperation): unknown!! {
     const admitted = try organize.admit(op, try contextNow(), false, false, true)
     if (admitted === undefined) return refused("not_here")
@@ -112,21 +153,25 @@ export const operationPorts = effect {
   }
 
   const ports: OperationPorts = {
-    validate: (operation) => owned(operation) ?? selectedRead(operation),
-    execute: (operation) => {
+    validate: (operation) => owned(operation) ?? selectedRead(operation) ?? noteSave(operation),
+    execute: (operation, call) => {
       const read = selectedRead(operation)
       if (read !== undefined) return runPromise(readSelected(read))
+      const save = noteSave(operation)
+      if (save !== undefined) return runPromise(saveNote(save, call))
       const op = owned(operation)
       return op === undefined ? Promise.resolve(refused("unsupported")) : runPromise(run(op))
     },
     readBack: (operation) => {
-      if (selectedRead(operation) !== undefined) return Promise.resolve(unresolved)
+      if (selectedRead(operation) !== undefined || noteSave(operation) !== undefined) return Promise.resolve(unresolved)
       const op = owned(operation)
       return op === undefined ? Promise.resolve(refused("unsupported")) : runPromise(readBack(op))
     },
     describe: (operation) => {
       const read = selectedRead(operation)
       if (read !== undefined) return { title: "Share selected notes", detail: `${notesCount(read)}: their titles and text only, as you reviewed them.`, destination: "notes" as const }
+      const save = noteSave(operation)
+      if (save !== undefined) return { title: "Save a note", detail: `Save one note “${save.title}” on this phone:\n${save.body}`, destination: "notes" as const }
       const op = owned(operation)
       if (op === undefined) return { title: "Action", detail: "" }
       const card = describeNotesOrganizeOperation(op)
@@ -134,6 +179,7 @@ export const operationPorts = effect {
     },
     classOf: (operation) => {
       if (selectedRead(operation) !== undefined) return "NotesRead"
+      if (noteSave(operation) !== undefined) return "CreateNote"
       const op = owned(operation)
       if (op === undefined) return "NotesRead"
       return op.type === "notes_record" ? "CreateNote" : op.type === "notes_filter" || op.type === "notes_list_filter" ? "OpenView" : "NotesRead"
@@ -144,6 +190,11 @@ export const operationPorts = effect {
       if (read !== undefined) {
         return result === "Applied" ? `Shared ${notesCount(read)}.` : result === "Failed" ? "No notes were shared."
           : result === "NotStarted" ? "Nothing was shared." : "Alpha can’t tell whether the notes were shared."
+      }
+      const save = noteSave(operation)
+      if (save !== undefined) {
+        return result === "Applied" ? savedTitle(save) : result === "Failed" ? "Nothing was saved because Notes isn’t ready."
+          : result === "NotStarted" ? "Nothing was saved." : "The note save is unconfirmed."
       }
       const op = owned(operation)
       if (op === undefined) return ""

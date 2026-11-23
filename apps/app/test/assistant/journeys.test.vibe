@@ -18,7 +18,7 @@ import { textOf } from "../../src/assistant/units.vibe"
 import { Navigation } from "../../src/shell/navigation.vibe"
 import {
   assistNative, assistantOver, assistantWith, countingExecutors, fakeHost, fakePreferences, fakeResident, fakeResidentControl, itemizingExecutors, journalNative,
-  locationNative, networkNative, noNative, privateScreen, type Seen,
+  locationNative, networkNative, noNative, privateScreen, wireProposal, type Seen,
 } from "./fakes.vibe"
 
 const futureExpiry = "2099-01-01T00:00:00.000Z"
@@ -109,7 +109,7 @@ it.effect("Keep what I typed (spec/assistant/draft.md, \"Each binding keeps its 
 })
 
 it.effect("Talk to my agent and approve what it proposes (spec/assistant/conversation.md, \"A changed screen context bumps the revision and drops every proposal; a private screen stops everything\")", () => effect {
-  const proposal = { id: "p5", digest: "c".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Create reminder", operation: { type: "create_reminder" }, requestMessageId: "u1" }
+  const proposal = wireProposal("p5", "c".repeat(64), { type: "create_reminder" }, "u1", futureExpiry)
   const runs = { count: 0 }
   provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Review it." }, proposals: [proposal] }), fakeHost([]), countingExecutors(runs, "CreateReminder"), journalNative(new Map())) {
     const composer = try Composer
@@ -217,7 +217,7 @@ it.effect("Hear a brief acknowledgment and still get the whole answer (spec/assi
 })
 
 it.effect("Approve an action card once, from wherever it is shown (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {
-  const proposal = { id: "p3", digest: "b".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Create note", operation: { type: "create_note", title: "Milk" } }
+  const proposal = wireProposal("p3", "b".repeat(64), { type: "create_note", title: "Milk" }, undefined, futureExpiry)
   const runs = { count: 0 }
   provide assistantOver(quietResident([proposal]), fakeHost([]), countingExecutors(runs), journalNative(new Map())) {
     const composer = try Composer
@@ -315,7 +315,7 @@ it.effect("Tell my agent what my screen shows, and nothing more (spec/assistant/
 })
 
 it.effect("Ask my assistant from anywhere (spec/assistant/index.md, \"The assistant observes the screen only while it is visible, unlocked and not private\")", () => effect {
-  const proposal = { id: "p8", digest: "a".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Create note", operation: { type: "create_note" } }
+  const proposal = wireProposal("p8", "a".repeat(64), { type: "create_note" }, undefined, futureExpiry)
   provide assistantOver(quietResident([proposal]), fakeHost([], privateScreen), countingExecutors({ count: 0 })) {
     const review = try DeviceReview
     const listed = try review.pending()
@@ -373,7 +373,7 @@ it.effect("See what still waits for me without the phone polling my agent (spec/
 })
 
 it.effect("Act only on what I asked for (spec/assistant/review.md, \"A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it\")", () => effect {
-  const proposal = { id: "p9", digest: "c".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Close all tabs", operation: { type: "browser_tab_close", all: true } }
+  const proposal = wireProposal("p9", "c".repeat(64), { type: "browser_tab_close", all: true }, undefined, futureExpiry)
   const runs = { count: 0 }
   const listed = { lines: ["Weather · weather.com"], unnamed: 1, unnamedLabel: "private tab" }
   provide assistantOver(quietResident([proposal]), fakeHost([]), itemizingExecutors(runs, listed), journalNative(new Map())) {
@@ -388,7 +388,7 @@ it.effect("Act only on what I asked for (spec/assistant/review.md, \"A card that
 })
 
 it.effect("Act only on what I asked for, when the set cannot be listed (spec/assistant/review.md, \"A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it\")", () => effect {
-  const proposal = { id: "p10", digest: "d".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Close all tabs", operation: { type: "browser_tab_close", all: true } }
+  const proposal = wireProposal("p10", "d".repeat(64), { type: "browser_tab_close", all: true }, undefined, futureExpiry)
   const runs = { count: 0 }
   const notice = "Close all tabs: Browser couldn't list its open tabs for this request. Nothing was closed. Ask again."
   provide assistantOver(quietResident([proposal]), fakeHost([]), itemizingExecutors(runs, notice), journalNative(new Map())) {
@@ -406,6 +406,7 @@ it.effect("Restart my agent when it stopped for review (spec/assistant/recovery.
   const held = { reviewable: true, restarts: 0 }
   provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), noNative, fakePreferences({ asks: false, shares: false }), fakeResidentControl(true, held)) {
     const restart = try AgentRestart
+    try settle()
     const offered = try Stream.runHead(restart.offered)
     const first = try restart.restart()
     const second = try restart.restart()

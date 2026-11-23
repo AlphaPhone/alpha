@@ -1,4 +1,4 @@
-// spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/route.md, "Story: Stay within my plan's voice limits"; spec/voice/route.md, "Story: Know what leaves my phone when I talk"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/capture.md, "Story: One voice surface at a time hears me"; spec/voice/capture.md, "Story: Recover from a refused microphone"; spec/voice/capture.md, "Story: See my voice as I speak"; spec/voice/vad.md, "Story: End my spoken turn when I stop speaking"; spec/voice/vad.md, "Story: Segment live speech on the phone"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"; spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice"; spec/voice/keyboard.md, "Story: Dictate into any text field"
+// spec/voice/route.md, "Story: Use Cloud speech when I have it, and my phone otherwise"; spec/voice/route.md, "Story: Stay within my plan's voice limits"; spec/voice/route.md, "Story: Know what leaves my phone when I talk"; spec/voice/conversation.md, "Story: Hear my turn end at the right moment"; spec/voice/conversation.md, "Story: Keep voice going through a passing failure"; spec/voice/conversation.md, "Story: Review what voice is about to do"; spec/voice/conversation.md, "Story: Mute the speaker without ending voice"; spec/voice/conversation.md, "Story: End voice cleanly, and never lose what I type"; spec/voice/conversation.md, "Story: Keep talking on a screen the agent opens for me"; spec/voice/speech.md, "Story: Never hear two things at once, or anything after I stopped it"; spec/voice/speech.md, "Story: Hear the reply start at once"; spec/voice/capture.md, "Story: One voice surface at a time hears me"; spec/voice/capture.md, "Story: Recover from a refused microphone"; spec/voice/capture.md, "Story: See my voice as I speak"; spec/voice/vad.md, "Story: End my spoken turn when I stop speaking"; spec/voice/vad.md, "Story: Segment live speech on the phone"; spec/voice/listener.md, "Story: See and stop what the listener is doing"; spec/voice/listener.md, "Story: Start voice from my listener or the power button, once"; spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"; spec/voice/keyboard.md, "Story: Dictate into any text field"
 import { assert, it } from "@effect/vitest"
 import { Build } from "../../src/platform/build.vibe"
 import { Cloud, CloudUnavailable } from "../../src/platform/cloud.vibe"
@@ -10,7 +10,7 @@ import { ResidentFeeds } from "../../src/platform/view-events.vibe"
 import { Microphone } from "../../src/voice/capture.vibe"
 import { VoiceConversation } from "../../src/voice/conversation.vibe"
 import { Dictation, speechGateOf } from "../../src/voice/dictation.vibe"
-import { callCaused, cancelledByPhone, failureMessage, pausedByPhone, refusalOf } from "../../src/voice/failure.vibe"
+import { callCaused, cancelledByPhone, failureMessage, limitKindOf, pausedByPhone, refusalOf } from "../../src/voice/failure.vibe"
 import { Latency, VOICE_TIMING_FORMAT } from "../../src/voice/latency.vibe"
 import { layer } from "../../src/voice/layer.vibe"
 import { Listener } from "../../src/voice/listener.vibe"
@@ -111,15 +111,19 @@ it.effect(`Stay within my plan's voice limits (spec/voice/route.md, "Story: Stay
   // spec/voice/route.md, "A Cloud refusal's limit is a rate limit, a used allowance, a missing plan or a billing refusal, with a wait of one second to a day"
   const now = 1_000_000
   const rate = refusalOf({ code: "voice-http-429", data: { retryAfterSeconds: 12, limitCode: "voice_rate" } }, now)
-  const allowance = refusalOf({ code: "voice-http-429", data: { limitCode: "voice_allowance", resetAt: now + 1000 } }, now)
+  const allowance = refusalOf({ code: "voice-http-429", data: { limitCode: "allowance_exhausted", resetAt: now + 1000 } }, now)
+  const plan = refusalOf({ code: "voice-http-429", data: { limitCode: "subscription_required" } }, now)
+  const credits = refusalOf({ code: "voice-http-429", data: { limitCode: "insufficient_credits" } }, now)
   const unbounded = refusalOf({ code: "voice-http-429", data: { retryAfterSeconds: 86401, limitCode: "NOT A CODE" } }, now)
   try Effect.try(() => assert.deepStrictEqual({
     rate: failureMessage(rate, "Cloud", { recording: true, conversation: false }),
     allowance: failureMessage(allowance, "Cloud", { recording: false, conversation: true }),
+    kinds: [limitKindOf(rate), limitKindOf(allowance), limitKindOf(plan), limitKindOf(credits)],
     unboundedWait: unbounded.retryAfterSeconds, unreadCode: unbounded.limitCode, bounded: boundedWaitSeconds(-1),
   }, {
     rate: "Eliza Cloud voice reached your plan's request limit. Try again in 12 seconds. Your recording is kept.",
     allowance: "Your Eliza Cloud plan's voice allowance is used up.",
+    kinds: ["RateLimit", "AllowanceUsed", "PlanRequired", "BillingRefused"],
     unboundedWait: undefined, unreadCode: undefined, bounded: 0,
   }))
 })
@@ -377,6 +381,18 @@ it.live(`Start voice from my listener or the power button, once (spec/voice/list
     try Effect.try(() => assert.deepStrictEqual({ first, second, sense },
       { first: true, second: true, sense: ["ElizaSense.claimProtectedPowerLaunch", "ElizaSense.takeInvocation"] }))
   }
+  // spec/voice/listener.md, "A pending power press is discarded, never kept, while the screen cannot start voice"
+  const unsigned: Calls = []
+  provide voice(unsigned, coldLaunch, "aosp") {
+    const listener = try Listener
+    try listener.boot()
+    try timeout(Stream.runHead(Stream.filter(listener.changes, (state) => state.bound)), "5 seconds")
+    const free = { unlocked: true, visible: true, dialogOpen: false, connectionPrompt: false, voiceActive: false }
+    try listener.takeInvocation(free)
+    try listener.takeInvocation({ ...free, powerAccountRef: "account-1" })
+    const claims = names(unsigned).filter((n) => n === "ElizaSense.claimProtectedPowerLaunch" || n === "ElizaSense.discardProtectedPowerLaunch")
+    try Effect.try(() => assert.deepStrictEqual({ claims }, { claims: [] }))
+  }
 })
 
 it.live(`Know how long I wait for Alpha's voice (spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice")`, () => effect {
@@ -396,6 +412,35 @@ it.live(`Know how long I wait for Alpha's voice (spec/voice/latency.md, "Story: 
       wait: entries[0]?.lastInputToAudibleMs, outcome: entries[0]?.outcome, text: entries.some((entry) => "text" in entry),
       bound, unbound: entries[1]?.lastInputToAudibleMs, offset: entries[0]?.clockOffsetMs,
     }, { count: 2, format: VOICE_TIMING_FORMAT, ids: [true, true], wait: 400, outcome: "Answered", text: false, bound: "phone-turn-1", unbound: null, offset: null }))
+  }
+})
+
+it.live(`Know how long a dictated message waits for its answer (spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer")`, () => effect {
+  // spec/voice/latency.md, "A dictated draft sent unchanged is timed from the recording's end through the send and the first token to the final reply, and its reply is never spoken"
+  const calls: Calls = []
+  provide voice(calls, onPhone) {
+    const latency = try Latency
+    try latency.beginDraft()
+    try latency.noteDraft(" hello there ")
+    try latency.draftSent("hello there")
+    try latency.draftReplied("FirstToken")
+    try latency.draftReplied("FinalReply")
+    try latency.beginDraft()
+    try latency.noteDraft("hello there")
+    try latency.draftSent("hello there, edited")
+    try latency.draftReplied("FinalReply")
+    try latency.beginDraft()
+    try latency.noteDraft(undefined)
+    const entries = try latency.entries()
+    try Effect.try(() => assert.deepStrictEqual({
+      kinds: entries.map((entry) => entry.kind), outcomes: entries.map((entry) => entry.outcome),
+      marks: entries[0]?.marks.map((mark) => mark.mark), timed: typeof entries[0]?.lastInputToAudibleMs === "number",
+      spoken: entries.some((entry) => entry.marks.some((mark) => mark.mark === "Audible" || mark.mark === "TtsStart")),
+      phone: names(calls).includes("AlphaVoiceCloud.markVoiceTurn"), text: entries.some((entry) => "text" in entry),
+    }, {
+      kinds: ["DictatedDraft", "DictatedDraft", "DictatedDraft"], outcomes: ["Answered", "Abandoned", "Abandoned"],
+      marks: ["LastUserAudio", "AsrFinal", "Request", "FirstToken", "FinalReply"], timed: true, spoken: false, phone: false, text: false,
+    }))
   }
 })
 

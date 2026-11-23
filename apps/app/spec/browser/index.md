@@ -18,5 +18,5 @@ them.
 | Leaving the page | [Confirmations](./reviews.md), [another browser and app links](./handoff.md), [share, copy and email](./egress.md), [downloads](./downloads.md) |
 | Reading | [Read aloud and Ask about page](./reading.md) |
 | Sites | [Site prompts and site data](./site.md), [eligible autofill](./autofill.md) |
-| Agent | [Agent opens and reviewed controls](./agent.md) |
+| Agent | [Agent opens and reviewed controls](./agent.md), [the page with a message](./pageContext.md) |
 | Sign-in and Cloud | [Google browser return](./googleReturn.md), [Cloud request custody](./cloudCustody.md) |

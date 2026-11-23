@@ -20,13 +20,13 @@ import { repeatOf } from "../../clock/schedule.ts";
 import type { ScreenProps } from "../app-screen.ts";
 import { RemindersView } from "./RemindersView.tsx";
 import { runtime } from "../runtime.ts";
-import { act } from "../shell/services.ts";
+import { act, now } from "../shell/services.ts";
 
 const remind = (use: (r: Reminders.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Reminders), use));
 const taps = (use: (t: ReminderTaps.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ReminderTaps), use));
 const drafts = (use: (d: ReminderDrafts.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(ReminderDrafts), use));
 const pageDo = (use: (p: RemindersPage.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(RemindersPage), use));
-const keptOf = (form: DraftForm) => runtime.runSync(Effect.flatMap(Effect.service(ReminderDrafts), (d) => d.kept(form)));
+const keptOf = (form: DraftForm) => now(Effect.flatMap(Effect.service(ReminderDrafts), (d) => d.kept(form)), undefined);
 
 /** What the shell gives the Reminders app: the reminder a route names (Reminders follows it as the shell shows it), and how to leave. */
 export type RemindersScreenProps = ScreenProps;

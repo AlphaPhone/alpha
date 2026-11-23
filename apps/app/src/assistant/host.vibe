@@ -21,8 +21,8 @@ export interface ScreenFacts {
   readonly contextKey: string
 }
 
-/** What the turn's peer understands, learned once per verified connection. */
-export interface PeerFacts { readonly optionalFields: boolean; readonly takesLocation: boolean }
+/** What the turn's peer understands, learned once per verified connection; `browserPage` when its fresh status declares the Browser page field. */
+export interface PeerFacts { readonly optionalFields: boolean; readonly takesLocation: boolean; readonly browserPage?: boolean }
 
 /** The shell's side of the assistant: who is signed in, what the screen shows, and the views it can open. */
 export service AssistantHost {

@@ -1,5 +1,6 @@
 // spec/platform/index.md, "Mocks, fixtures and developer surfaces exist only when the build allows test mocks"; spec/platform/index.md, "Eliza Cloud stays the live host until the Alpha Cloud cutover flag is set"
 import appConfigText from "../../../../app.config.json?raw";
+import deploymentText from "../../../../cloud/deployment.json?raw";
 
 declare const __ALPHA_TEST_MOCKS__: boolean | undefined;
 
@@ -41,25 +42,59 @@ export function toolsAsked(): boolean {
   return typeof location !== "undefined" && new URLSearchParams(location.search).get("tools") === "1";
 }
 
-/** The public authorities of one Cloud environment. */
+/** The public authorities of one Cloud environment: its API and web origins, the origin of its hosted services and the audience its entitlements name. */
 export interface CloudAuthority {
   readonly name: string;
   readonly api: string;
   readonly web: string;
+  readonly services: string;
   readonly entitlementAudience: string;
 }
 
-/** The Cloud every distributed build uses until the cutover: Eliza Cloud. */
-export const elizaCloud = {
-  production: { name: "Eliza Cloud", api: "https://api.eliza.app", web: "https://eliza.app", entitlementAudience: "eliza-alpha-phone" },
-  staging: { name: "Eliza Cloud", api: "https://api-staging.eliza.app", web: "https://staging.eliza.app", entitlementAudience: "eliza-alpha-phone" },
-} as const satisfies Record<"production" | "staging", CloudAuthority>;
+type Environments = Record<"production" | "staging", CloudAuthority>;
 
-/** Alpha's own Cloud, dormant until the cutover flag is set. */
-export const alphaCloud = {
-  production: { name: "Alpha Cloud", api: "https://api.alphacompute.ai", web: "https://cloud.alphacompute.ai", entitlementAudience: "ai.alphacompute.alphaphone" },
-  staging: { name: "Alpha Cloud", api: "https://api-staging.alphacompute.ai", web: "https://cloud-staging.alphacompute.ai", entitlementAudience: "ai.alphacompute.alphaphone" },
-} as const satisfies Record<"production" | "staging", CloudAuthority>;
+const deployment: unknown = JSON.parse(deploymentText);
+
+function section(value: unknown, name: string): Record<string, unknown> {
+  const found = typeof value === "object" && value !== null ? (value as Record<string, unknown>)[name] : undefined;
+  if (typeof found !== "object" || found === null || Array.isArray(found)) throw new Error(`cloud/deployment.json has no ${name}`);
+  return found as Record<string, unknown>;
+}
+
+function origin(value: unknown, name: string): string {
+  if (typeof value !== "string" || !URL.canParse(value)) throw new Error(`cloud/deployment.json has no ${name} origin`);
+  const url = new URL(value);
+  if (url.protocol !== "https:" || url.origin !== value) throw new Error(`cloud/deployment.json names ${name} as ${value}, not an HTTPS origin`);
+  return url.origin;
+}
+
+function text(value: unknown, name: string): string {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`cloud/deployment.json has no ${name}`);
+  return value;
+}
+
+function shipped(environment: "production" | "staging"): CloudAuthority {
+  const row = section(section(deployment, "shipped"), environment);
+  return {
+    name: text(row.name, `shipped.${environment}.name`),
+    api: origin(row.api, `shipped.${environment}.api`),
+    web: origin(row.web, `shipped.${environment}.web`),
+    services: origin(row.services, `shipped.${environment}.services`),
+    entitlementAudience: text(row.entitlementAudience, `shipped.${environment}.entitlementAudience`),
+  };
+}
+
+function alphaHosts(environment: "production" | "staging"): CloudAuthority {
+  const row = section(section(deployment, "alphaCloudHosts"), environment);
+  const web = origin(row.web, `alphaCloudHosts.${environment}.web`);
+  return { name: "Alpha Cloud", api: origin(row.api, `alphaCloudHosts.${environment}.api`), web, services: web, entitlementAudience: appId };
+}
+
+/** The Cloud every distributed build uses until the cutover: Eliza Cloud, as cloud/deployment.json ships it. */
+export const elizaCloud: Environments = { production: shipped("production"), staging: shipped("staging") };
+
+/** Alpha's own Cloud on the hosts cloud/deployment.json names, dormant until the cutover flag is set; its entitlements name Alpha's app id. */
+export const alphaCloud: Environments = { production: alphaHosts("production"), staging: alphaHosts("staging") };
 
 /** The development host's agent origin (`VITE_LOCAL_AGENT_URL`), only in a test-mocks build served off the phone. @throws {never} */
 export function developmentAgentBase(onDevice: boolean): URL | undefined {

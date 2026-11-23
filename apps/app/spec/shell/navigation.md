@@ -343,7 +343,9 @@ pure def sometimesCommsBarOwnsInput(s: Nav): bool = BarApps.contains(s.app) and 
 The phone under any layer is inert; a covering layer also makes the assistant inert. Another
 surface (an update in progress, startup recovery) may hold the phone without a layer of its own;
 each holder releases once, and the phone returns only after the last. A press on the assistant
-closes a sheet that leaves it usable.
+closes a sheet that leaves it usable. An always-mounted surface has no Back of its own: a sheet it
+draws over another app (a picker, an approval or request sheet, a notice's question) is listed as a
+layer while it is open, so Back closes it before anything under it.
 
 ```quint
 pure def appInert(s: Nav): bool = s.layers.length() > 0 or s.holds.size() > 0
@@ -381,7 +383,10 @@ pure def alwaysShadeOverHome(s: Nav): bool = s.shade implies (s.app == "" and no
 ### Hiding the page retires what the owner was in the middle of
 
 Leaving Alpha (another app, the screen off) retires an agent's claim. A render failure of the open
-app closes it and returns to Home.
+app closes it and returns to Home. Android's keyguard is read, without consuming the assistant's
+invocation, when the page returns, takes focus or is invoked again, and whenever Android posts a
+change of it; a keyguard that cannot be read counts as locked. Only Alpha's own assistant activity
+is the assistant surface, never a page a caller opened with an assist action.
 
 ```quint
 pure def canHide(s: Nav): bool = not(s.hidden)

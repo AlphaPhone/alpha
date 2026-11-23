@@ -6,7 +6,8 @@ identity and a revision that changes only when what is shown changes. The
 viewport is never sent. A transit route is published as its destination
 place. The agent reads the exact place or route only after the owner approves
 a read card, and only while the screen still shows the selection the card was
-for; a search is never readable.
+for; a search is never readable. The phone advertises the selected read
+(`maps.selected-read.v1`) on every build whenever the agent offers it.
 
 ## Domain
 
@@ -55,6 +56,11 @@ pure def alwaysNothingShownOutsideMaps(s: SelectedRead): bool = not(s.inMaps) im
 ### A read is approved only for the selection the card showed, and its result is uploaded only while that selection is still shown
 
 A read whose selection changed before it ran is journaled as not started.
+The agent's `maps_read_selected` names its target by the identity Maps gives
+the shown place (a route keeps its destination's) and the context revision;
+it runs only while both still match what Maps shows, and otherwise is not
+dispatched. Android's keyguard over Maps counts as a sensitive screen, so no
+context is offered and no read runs while the phone is locked.
 
 ```quint
 pure def canReview(s: SelectedRead): bool = (s.phase == NoRead or s.phase == ReadDone) and readableKind(s.kind) and s.inMaps and not(s.sensitive)

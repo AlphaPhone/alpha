@@ -125,3 +125,29 @@ it.effect("Let only my own app reach my agent's records (spec/shell/routes.md, \
     preparedViewNavigation("/api/views/calendar/navigate", { clientId: "c1", delivery: "completed-action", prepareOnly: false, viewType: "gui", completedActionHandoffId: "h1" }),
   ], [true, false, true, false, true, false, true, false]))
 })
+
+it.effect("Notes' records cross only by their own routes (spec/shell/routes.md, \"A claimed route crosses only with a verified owner, an allowed method and path, its own query keys and a well-formed id\")", () => effect {
+  const allowed: readonly (readonly [string, string])[] = [
+    ["GET", "/api/notes/state"],
+    ["POST", "/api/notes/interact"],
+    ["POST", "/api/notes/trash/erase"],
+    ["GET", "/api/notes/trash/recordings"],
+    ["POST", "/api/notes/trash/recordings/complete"],
+    ["POST", "/api/views/notes/interact"],
+  ]
+  const refused: readonly (readonly [string, string])[] = [
+    ["GET", "/api/notes/interact"],
+    ["POST", "/api/notes/state"],
+    ["DELETE", "/api/notes/trash/erase"],
+    ["POST", "/api/notes/trash"],
+    ["POST", "/api/notes/trash/recordings"],
+    ["GET", "/api/notes/trash/recordings?all=1"],
+    ["POST", "/api/notes/interact?as=other"],
+    ["POST", "/api/notes/trash/erase/extra"],
+    ["POST", "/api/notes/interact#x"],
+  ]
+  try Effect.try(() => assert.deepStrictEqual(
+    [allowed.map(([method, url]) => routeCrosses(method, url, true)), allowed.map(([method, url]) => routeCrosses(method, url, false)), refused.map(([method, url]) => routeCrosses(method, url, true))],
+    [allowed.map(() => true), allowed.map(() => false), refused.map(() => false)],
+  ))
+})

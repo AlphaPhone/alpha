@@ -1,7 +1,7 @@
 // spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
 import { networkReuseS, networkRetryS, networkUnchangedS } from "../../gen/assistant__context.effect.vibe"
 import { Native } from "../platform/native.vibe"
-import { NetworkFix, NetworkUnchanged } from "./payloads.schema.vibe"
+import { NetworkFix, NetworkLocationReply } from "../platform/native.schema.vibe"
 
 /** A position resolved from the visible Wi-Fi access points and cell towers. */
 export interface NetworkPosition {
@@ -24,7 +24,7 @@ export service NetworkLocation {
   clear(): void!!
 }
 
-function usable(fix: NetworkFix, now: number): boolean {
+function usable(fix: typeof NetworkFix.Type, now: number): boolean {
   return [fix.latitude, fix.longitude, fix.accuracy, fix.timestamp].every(Number.isFinite) && Math.abs(fix.latitude) <= 90 && Math.abs(fix.longitude) <= 180
     && fix.accuracy > 0 && fix.timestamp <= now && now - fix.timestamp <= networkUnchangedS * 1000
 }
@@ -53,20 +53,25 @@ export const networkLocationLayer = Layer.effect(NetworkLocation, effect {
     const at = try Clock.currentTimeMillis
     if (asked !== generation) return undefined
     checkedAt = at
-    const same = Schema.decodeUnknownOption(NetworkUnchanged)(answer)
-    if (Option.isSome(same)) {
-      const confirmed = standing(at)
-      if (confirmed !== undefined && same.value.fingerprint === fingerprint) last = { ...confirmed, timestamp: at }
-      return standing(at)
-    }
-    const fix = Schema.decodeUnknownOption(NetworkFix)(answer)
-    if (Option.isNone(fix) || !usable(fix.value, at)) {
+    const reply = Schema.decodeUnknownOption(NetworkLocationReply)(answer)
+    if (Option.isNone(reply)) {
       retryAfter = at + networkRetryS * 1000
       return standing(at)
     }
-    last = { latitude: fix.value.latitude, longitude: fix.value.longitude, accuracyMeters: fix.value.accuracy, timestamp: fix.value.timestamp }
-    fingerprint = fix.value.fingerprint
-    resolvedAt = fix.value.timestamp
+    const said = reply.value
+    if ("unchanged" in said) {
+      const confirmed = standing(at)
+      if (confirmed !== undefined && said.fingerprint === fingerprint) last = { ...confirmed, timestamp: at }
+      return standing(at)
+    }
+    const fix = said
+    if (!usable(fix, at)) {
+      retryAfter = at + networkRetryS * 1000
+      return standing(at)
+    }
+    last = { latitude: fix.latitude, longitude: fix.longitude, accuracyMeters: fix.accuracy, timestamp: fix.timestamp }
+    fingerprint = fix.fingerprint
+    resolvedAt = fix.timestamp
     return last
   }
   return {

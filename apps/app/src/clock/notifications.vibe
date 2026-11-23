@@ -1,4 +1,4 @@
-// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"
+// spec/clock/notifications.md, "Story: Act on exactly the notification I see"; spec/clock/notifications.md, "Story: Ask Alpha about one of its notifications"; spec/clock/workflowNotices.md, "A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it"; spec/clock/notices.md, "Story: Stay where I am when I leave a notice"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"
 import type { AskKind } from "../../gen/assistant__noticeQuestion.ts"
 import { AssistantFlows } from "../assistant/flows.vibe"
 import { OwnNotices, type OwnNotice } from "../assistant/ports.vibe"
@@ -6,6 +6,7 @@ import { Machine as ShadeMachine, type NoticeKind, type NoticeRow, type NoticeSo
 import { Machine as NoticesMachine } from "../../gen/clock__notices.effect.vibe"
 import { ClearOutcomes, NoticeListing, NoticeRecord } from "./native.schema.vibe"
 import { NOTIFICATIONS, call, command } from "./plugins.vibe"
+import { WorkflowNotices, asksAboutTap } from "./workflow-notices.vibe"
 import { opaqueId, pageVisible } from "./page.ts"
 
 type Listed = typeof NoticeRecord.Type
@@ -162,12 +163,13 @@ export const notificationsLayer = Layer.effect(Notifications, effect {
   }
 })
 
-/** Clock's own notices for the assistant's notice question, over Notifications; the shell integration fills the assistant's OwnNotices with it. */
+/** Clock's own notices for the assistant's notice question, over Notifications and the tapped workflow notice under question; the shell integration fills the assistant's OwnNotices with it. */
 export const ownNotices = effect {
   const notifications = try Notifications
+  const workflow = try WorkflowNotices
   const port: OwnNotices.Shape = {
-    current: (id: string) => notifications.current(id),
-    consume: (id: string) => notifications.consume(id),
+    current: (id: string) => (asksAboutTap(id) ? workflow.current(id) : notifications.current(id)),
+    consume: (id: string) => (asksAboutTap(id) ? workflow.consume(id) : notifications.consume(id)),
   }
   return port
 }

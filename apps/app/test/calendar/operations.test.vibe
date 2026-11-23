@@ -1,8 +1,8 @@
-// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "Story: Let the agent change an event I named only when it is the one I have open"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"
+// spec/calendar/rangeRead.md, "Story: Let a reviewed step read my phone's calendars for the range I approved"; spec/calendar/namedRead.md, "Story: Let the agent change an event I named only when it is the one I have open"; spec/calendar/sync.md, "Story: Sync only with my consent for what I reviewed"; spec/calendar/deviceActions.md, "Story: Offer the agent only the Calendar actions this phone runs"
 import { assert, describe, it } from "@effect/vitest"
 import type { DeviceEventRecord } from "../../src/calendar/device.schema.vibe"
 import type { CalendarRecord } from "../../src/calendar/feed.schema.vibe"
-import { inReviewedRange, sameTitle, sharedFields } from "../../src/calendar/operations.vibe"
+import { calendarCapabilities, inReviewedRange, sameTitle, sharedFields } from "../../src/calendar/operations.vibe"
 import { googleSyncOffer } from "../../src/calendar/sync.vibe"
 
 const range = { type: "read_calendar_range", calendarIds: ["1"], start: "2026-11-20T08:00:00.000Z", end: "2026-11-21T08:00:00.000Z", timeZone: "America/Los_Angeles", maximumEvents: 10 } as const
@@ -37,5 +37,15 @@ describe("Calendar's agent operations (spec/calendar/rangeRead.md, spec/calendar
     const readOnly = googleSyncOffer([calendar({ accessRole: "reader" })])
     assert.deepStrictEqual([writable.grant, writable.destinations.map((d) => d.providerCalendarId), readOnly.grant, googleSyncOffer([]).grant],
       ["WriteGrant", ["work"], "ReadOnlyGrant", "NoGoogleGrant"])
+  })
+
+  it("Calendar advertises the local event always, agenda reads only in the browser build, and the rest only when offered (spec/calendar/deviceActions.md, \"Story: Offer the agent only the Calendar actions this phone runs\")", () => {
+    // spec/calendar/deviceActions.md, "The local event is always advertised; agenda reads only in the browser build; every other Calendar action only when the agent offered it"
+    const offered = ["calendar.agenda-read.v1", "calendar.create.v1", "calendar.next-read.v1", "calendar.availability-read.v1", "calendar.named-read.v1", "sms.send.v1"]
+    assert.deepStrictEqual(calendarCapabilities(offered, "aosp"),
+      ["calendar.local-event.v1", "calendar.create.v1", "calendar.next-read.v1", "calendar.availability-read.v1", "calendar.named-read.v1"])
+    assert.deepStrictEqual(calendarCapabilities(offered, "browser"),
+      ["calendar.local-event.v1", "calendar.agenda-read.v1", "calendar.create.v1", "calendar.next-read.v1", "calendar.availability-read.v1", "calendar.named-read.v1"])
+    assert.deepStrictEqual(calendarCapabilities([], "launcher"), ["calendar.local-event.v1"])
   })
 })

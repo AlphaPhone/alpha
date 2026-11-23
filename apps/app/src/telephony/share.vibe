@@ -62,13 +62,15 @@ export effect function pictureDrafter() {
 /**
  * Messages' part of Files' share destinations: a shared picture starts a new MMS draft that is never sent without a tap,
  * on the Alpha image only, and only while the new-message composer is idle and empty. Messages is listed wherever the image
- * offers it; whether this phone can send pictures is read when a file is given to it, not when the destinations were built.
+ * offers it, read each time the destinations are shown; whether this phone can send pictures is read when a file is given to it.
  */
 export const messagesShareTarget = effect {
   const bridges = try TelephonyBridges
   const draft = try pictureDrafter()
   return {
-    messages: bridges.offered,
+    get messages() {
+      return bridges.offered
+    },
     effect message(file: SharedFile) {
       if (!bridges.offered || !pictureFits(file.mimeType, file.size)) return false
       const status = try (bridgeCall("status", (c) => c.messages.status()) catch () => undefined)

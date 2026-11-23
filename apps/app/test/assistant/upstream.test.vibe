@@ -1,0 +1,213 @@
+// spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/context.md, "Story: Let my agent read the page I have open in Browser"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/send.md, "Story: Send what I dictated and have it timed like a voice turn"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"
+import { assert, it } from "@effect/vitest"
+import { Composer } from "../../src/assistant/composer.vibe"
+import { spokenCue } from "../../src/assistant/cue.vibe"
+import { copy, failureKindOf, failureText, planCardTitle, retryDuration } from "../../src/assistant/presentation.vibe"
+import { DeviceExecutors, DeviceReview, type OperationPorts } from "../../src/assistant/review.vibe"
+import { emptyTranscript } from "../../src/assistant/transcript.vibe"
+import {
+  assistantOver, browserScreen, countingExecutors, fakeBrowserPages, fakeHost, fakeLatency, fakePreferences, fakeResident, fakeResidentControl, journalNative, noNative,
+  wireProposal, type Seen,
+} from "./fakes.vibe"
+
+const page = {
+  tabId: "t1", revision: "r1", url: "https://news.example.com/today#top", title: "Today\nin brief", capturedAt: 1,
+  text: "Top stories", links: [{ url: "https://news.example.com/story-2", text: "Second story" }, { url: "http://plain.example.com/", text: "Insecure" }],
+}
+
+effect function transcriptNow() {
+  const composer = try Composer
+  const head = try Stream.runHead(composer.transcript)
+  return Option.isSome(head) ? head.value : emptyTranscript
+}
+
+effect function settle() {
+  for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+  try TestClock.adjust("10 millis")
+}
+
+function turnBodies(seen: Seen): readonly unknown[] {
+  return seen.calls.filter((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages"))).map((call) => call.body)
+}
+
+function pageOf(body: unknown): unknown {
+  return (body as { readonly metadata?: { readonly clientDevice?: { readonly browserPage?: unknown } } } | undefined)?.metadata?.clientDevice?.browserPage
+}
+
+/** Executors whose every operation is a Browser open the owner did not type. */
+function browserOpens(runs: { count: number }) {
+  const ports: OperationPorts = {
+    validate: (operation) => operation,
+    execute: async () => { runs.count += 1; return { kind: "applied" } },
+    readBack: async () => ({ kind: "found" }),
+    describe: () => ({ title: "Open the second story", detail: "news.example.com", destination: "browser" }),
+    classOf: () => "BrowserNavigate",
+    target: () => ({ tag: "NoTarget" }),
+    summarize: () => "Opened the story.",
+  }
+  return Layer.succeed(DeviceExecutors, { ports })
+}
+
+it.effect("Understand why a reply did not finish (spec/assistant/reply.md, \"A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message\")", () => effect {
+  const live = failureText(failureKindOf("limit_reached"), 2400)
+  const replayed = failureText(failureKindOf("limit_reached"))
+  try Effect.try(() => assert.deepStrictEqual(
+    {
+      kinds: ["credential_invalid", "insufficient_credits", "limit_reached", "rate_limited", "provider_issue", "timeout", "aborted"].map(failureKindOf),
+      live, replayed, minutes: retryDuration(120000), hours: retryDuration(3 * 3600 * 1000), retry: planCardTitle("RetryCloud", "Eliza Cloud"),
+    },
+    {
+      kinds: ["CredentialInvalid", "InsufficientCredits", "LimitReached", "LimitReached", "ProviderIssue", "TimedOut", "OtherFailure"],
+      live: "The AI request rate limit was reached. Try again in about 3 seconds. Alpha did not retry your message.",
+      replayed: "The AI request rate limit was reached. Wait a moment before sending again. Alpha did not retry your message.",
+      minutes: "about 2 minutes", hours: "about 3 hours", retry: "Try again",
+    },
+  ))
+})
+
+it.effect("A failed reply shows the agent's fix and its live wait, and nothing is sent again (spec/assistant/reply.md, \"A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message\")", () => effect {
+  const turn = effect function (failureKind: string, planAction?: "sign-in" | "funding" | "retry", retryAfterMs?: number) {
+    const seen: Seen = { calls: [] }
+    const script = { kind: "fail" as const, failureKind, ...(planAction === undefined ? {} : { planAction }), ...(retryAfterMs === undefined ? {} : { retryAfterMs }) }
+    provide assistantOver(fakeResident(seen, { turn: script, proposals: [] }), fakeHost([]), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("Plan my week")
+      try composer.send()
+      const row = (try transcriptNow()).rows.find((each) => each.kind === "agent")
+      return { text: row?.kind === "agent" ? row.text : "", plan: row?.kind === "agent" ? row.plan : undefined, posted: turnBodies(seen).length }
+    }
+  }
+  const limited = try turn("limit_reached", undefined, 2400)
+  const signIn = try turn("credential_invalid", "sign-in")
+  const retry = try turn("provider_issue", "retry")
+  const credits = try turn("insufficient_credits")
+  try Effect.try(() => assert.deepStrictEqual(
+    { limited, signIn: signIn.plan, retry: retry.plan, credits: credits.plan },
+    { limited: { text: failureText("LimitReached", 2400), plan: undefined, posted: 1 }, signIn: "SignIn", retry: "RetryCloud", credits: "Funding" },
+  ))
+})
+
+it.effect("Approve an action card once, over the agent's own review routes (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const digest = "b".repeat(64)
+  const runs = { count: 0 }
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [wireProposal("p3", digest, { type: "create_note", title: "Milk" })] }), fakeHost([]), countingExecutors(runs), journalNative(new Map())) {
+    const composer = try Composer
+    const review = try DeviceReview
+    try composer.open("c1", false)
+    const listed = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    const done = listed?.kind === "card" ? try review.approve(listed.card) : undefined
+    const bodies = Object.fromEntries(seen.calls.filter((call) => call.path.startsWith("/api/client-devices/proposals/p3/")).map((call) => [call.path.slice("/api/client-devices/proposals/p3/".length), call.body]))
+    try Effect.try(() => assert.deepStrictEqual(
+      { state: done?.card.state, runs: runs.count, decision: bodies["decision"], claim: bodies["claim"], receipt: bodies["receipt"] },
+      {
+        state: "DoneCard", runs: 1, decision: { digest, decision: "approve" }, claim: { digest },
+        receipt: { digest, attemptId: "attempt-p3", receipt: { outcome: "applied", operationId: "p3" } },
+      },
+    ))
+  }
+})
+
+it.effect("Decline a card with the agent's own decision body (spec/assistant/approvals.md, \"Story: Decline or let a card expire\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const digest = "e".repeat(64)
+  provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "ok" }, proposals: [wireProposal("p4", digest, { type: "create_note" })] }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    const review = try DeviceReview
+    try composer.open("c1", false)
+    const listed = (try transcriptNow()).rows.find((row) => row.kind === "card")
+    const declined = listed?.kind === "card" ? try review.decline(listed.card) : undefined
+    const decision = seen.calls.find((call) => call.path === "/api/client-devices/proposals/p4/decision")?.body
+    try Effect.try(() => assert.deepStrictEqual({ summary: declined?.summary, decision }, { summary: copy.declined, decision: { digest, decision: "reject" } }))
+  }
+})
+
+it.effect("Let my agent read the page I have open in Browser (spec/assistant/context.md, \"A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s\")", () => effect {
+  const sent = effect function (on: boolean, declares: boolean, read: typeof page | undefined) {
+    const seen: Seen = { calls: [] }
+    provide assistantOver(fakeResident(seen, { turn: { kind: "reply", text: "Here is the summary." }, proposals: [] }), Layer.merge(fakeHost([], browserScreen, [], declares), fakeBrowserPages({ on }, { id: "t1", revision: "r1" }, read)), countingExecutors({ count: 0 })) {
+      const composer = try Composer
+      try composer.edit("Summarize this page")
+      try composer.send()
+      const body = turnBodies(seen)[0]
+      return { page: pageOf(body), observed: JSON.stringify(body ?? {}).includes("\"browser-tab\"") }
+    }
+  }
+  const shared = try sent(true, true, page)
+  const off = try sent(false, true, page)
+  const older = try sent(true, false, page)
+  const otherTab = try sent(true, true, { ...page, tabId: "t2" })
+  try Effect.try(() => assert.deepStrictEqual(
+    { shared, off: off.page, older: older.page, otherTab: otherTab.page },
+    {
+      shared: {
+        page: { tabId: "t1", revision: "r1", url: "https://news.example.com/today", title: "Today in brief", capturedAt: 1, text: "Top stories", links: [{ url: "https://news.example.com/story-2", text: "Second story" }] },
+        observed: true,
+      },
+      off: undefined, older: undefined, otherTab: undefined,
+    },
+  ))
+})
+
+it.effect("An open of a link from the page my message carried keeps its card (spec/assistant/review.md, \"The keypad opens directly only for a number I typed, a photo only for my own photo request, and Browser only for an address or search I wrote\")", () => effect {
+  const runs = { count: 0 }
+  const story = wireProposal("p11", "f".repeat(64), { type: "browser_navigate", url: "https://news.example.com/story-2" }, "u1")
+  const stranger = wireProposal("p12", "a".repeat(64), { type: "browser_navigate", url: "https://elsewhere.example.com/" }, "u1")
+  provide assistantOver(
+    fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Opening it." }, proposals: [story, stranger] }),
+    Layer.merge(fakeHost([], browserScreen, [], true), fakeBrowserPages({ on: true }, { id: "t1", revision: "r1" }, page)),
+    browserOpens(runs), journalNative(new Map()),
+  ) {
+    const composer = try Composer
+    try composer.edit("Open the second story")
+    try composer.send()
+    const rows = (try transcriptNow()).rows
+    try Effect.try(() => assert.deepStrictEqual(
+      { cards: rows.flatMap((row) => row.kind === "card" ? [row.card.proposalId] : []), notices: rows.flatMap((row) => row.kind === "notice" ? [row.text] : []), runs: runs.count },
+      { cards: ["p11"], notices: [copy.browserUngrounded], runs: 0 },
+    ))
+  }
+})
+
+it.effect("Send what I dictated and have it timed like a voice turn (spec/assistant/send.md, \"A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken\")", () => effect {
+  const timed = effect function (edited: boolean) {
+    const marks: string[] = []
+    provide assistantOver(fakeResident({ calls: [] }, { turn: { kind: "reply", text: "Calling." }, proposals: [] }), fakeHost([]), countingExecutors({ count: 0 }), noNative,
+      fakePreferences({ asks: false, shares: false }), fakeResidentControl(), fakeLatency(marks)) {
+      const composer = try Composer
+      const target = try composer.dictationTarget()
+      try target.insert("Call mom", true)
+      if (edited) try composer.edit("Call mom now")
+      try composer.send()
+      return marks
+    }
+  }
+  const sentAsDictated = try timed(false)
+  const edited = try timed(true)
+  try Effect.try(() => assert.deepStrictEqual({ sentAsDictated, edited }, { sentAsDictated: ["begin", "Request", "FirstToken", "Answered"], edited: [] }))
+})
+
+it.effect("Hear a brief acknowledgment and still get the whole answer (spec/assistant/reply.md, \"A spoken cue waits 300 ms and is dropped when the reply is ready first; an audible cue finishes before the reply, within 2.5 s\")", () => effect {
+  const heard: string[] = []
+  const speak = (text: string, started: Effect.Effect<void>) => effect {
+    try sleep(100)
+    try started
+    heard.push(`start:${text}`)
+    try sleep(1000)
+    heard.push(`end:${text}`)
+  }
+  const early = try spokenCue(speak)
+  try early.say("On it.")
+  try settle()
+  try early.replyReady()
+  try TestClock.adjust("2 seconds")
+  const quick = [...heard]
+  heard.length = 0
+  const late = try spokenCue(speak)
+  try late.say("Checking.")
+  try TestClock.adjust("450 millis")
+  const waiting = fork late.replyReady()
+  try TestClock.adjust("1 second")
+  join waiting
+  try Effect.try(() => assert.deepStrictEqual({ quick, finished: heard }, { quick: [], finished: ["start:Checking.", "end:Checking."] }))
+})

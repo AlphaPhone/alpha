@@ -117,7 +117,7 @@ export const contactDetail: Extract<Detail, { tag: "DetailRead" }> = {
 export const contactOpen: Contacts = {
   shown: true, epoch: 3, loading: false, explicitRead: false, readable: true, writable: true, failed: false,
   rows: [{ id: "7", title: "Maya Chen", phones: ["4155550100"], emails: ["maya@example.com"], complete: true, lookup: "k7", revision: "r1" }],
-  rowsQuery: "", query: "", more: false, limit: 50, openId: "7", detail: contactDetail, detailTicket: 2, editor: { tag: "EditorClosed" },
+  rowsQuery: "", query: "", searching: false, more: false, limit: 50, openId: "7", detail: contactDetail, detailTicket: 2, editor: { tag: "EditorClosed" },
   confirming: false, gate: "WriteIdle", writeKind: "NoWrite", lastWrite: { tag: "NothingWritten" }, chip: "", notice: { tag: "NoContactsNotice" },
 };
 /** The open contact's removal waiting for confirmation. */

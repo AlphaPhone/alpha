@@ -236,6 +236,24 @@ pure def lawOnly401SignsOut(httpStatus: int): bool = cloudOutcomeOf(httpStatus) 
 pure def lawNoAnswerIsUnavailable(httpStatus: int): bool = httpStatus == 0 implies cloudOutcomeOf(httpStatus) == CloudDown
 ```
 
+### A refusal carries the allowance reset Cloud named, only while it lies ahead
+
+Cloud names when an exhausted allowance resets as `resetAt`, an ISO instant or epoch milliseconds, at
+the top of its refusal body or under its `error`. The refusal keeps it, in epoch milliseconds, only
+when it lies after now, so a caller can say when the allowance is back even when Cloud gave no wait.
+
+```quint
+pure def resetCarried(named: bool, resetAt: int, now: int): bool = named and resetAt > now
+
+pure val resetAtValues = Set(0, 1000, 5000)
+pure val nowValues = Set(0, 1000)
+
+pure def lawAResetIsNeverInThePast(named: bool, resetAt: int, now: int): bool =
+  resetCarried(named, resetAt, now) implies resetAt > now
+
+pure def lawAnUnnamedResetIsNeverCarried(resetAt: int, now: int): bool = not(resetCarried(false, resetAt, now))
+```
+
 ### The phone's key stays with native, and a leaving screen cancels only its own call
 
 Cloud requests go through the agent service's `ElizaCloud` plugin, which holds the device key and

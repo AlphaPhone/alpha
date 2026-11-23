@@ -88,7 +88,7 @@ describe("Clock Back (spec/clock/handoff.md, \"Story: Ask Clock for an alarm aft
 })
 
 describe("Workflow notice questions (spec/clock/workflowNotices.md, \"Story: Return to the run a notice names\")", () => {
-  it.effect("settle a cancelled question, draft nothing for a changed notice, and draft once after consuming at the notice's revision (spec/clock/workflowNotices.md, \"A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it\")", () => effect {
+  it.effect("settle a cancelled review, draft nothing for a changed notice, keep an interrupted tap, and consume once at the notice's revision on Add to chat (spec/clock/workflowNotices.md, \"A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it\")", () => effect {
     let notice = { title: "Approve the weekly digest", text: "Step 2 waits for you", revision: "n1" }
     let token: string | undefined = "w1"
     const phone = fakePhone({
@@ -105,24 +105,35 @@ describe("Workflow notice questions (spec/clock/workflowNotices.md, \"Story: Ret
       const notices = try WorkflowNotices
       const machine = try WorkflowNoticesMachine
       try notices.check()
-      try notices.answer(undefined)
+      const first = assistant.reviews.at(-1)
+      try notices.reviewShown(undefined)
+      try notices.reviewShown("workflow-tap:w1")
+      try notices.reviewShown(undefined)
       const cancelled = phone.calls.filter((c) => c.method === "consumeWorkflowTap").map((c) => c.args)
       token = "w2"
       try notices.check()
       notice = { ...notice, text: "Step 2 was withdrawn", revision: "n2" }
-      try notices.answer("What does it send?")
+      const stale = try notices.current("workflow-tap:w2")
       const changed = (try machine.get()).report
       try notices.check()
       try notices.interrupt()
       const kept = token
       try notices.check()
-      try notices.answer("What does it send?")
+      const other = try notices.current("workflow-tap:w1")
+      const fresh = try notices.current("workflow-tap:w2")
+      const consumed = try notices.consume("workflow-tap:w2")
+      const again = try notices.consume("workflow-tap:w2")
       const last = phone.calls.filter((c) => c.method === "consumeWorkflowTap").at(-1)?.args
       try Effect.try(() => assert.deepStrictEqual(
-        { cancelled, changed, kept, last, drafted: assistant.asked, opened: runs.opened, state: (try machine.get()).discards },
         {
-          cancelled: [{ token: "w1", discard: true }], changed: "QuestionChanged", kept: "w2",
-          last: { token: "w2", noticeRevision: "n2" }, drafted: ["What does it send?"], opened: [], state: 1,
+          first: first === undefined ? undefined : { name: first.name, text: first.text, notice: first.notice }, cancelled, stale, changed, kept,
+          other, fresh, consumed, again, last, reviews: assistant.reviews.length, opened: runs.opened, state: [(try machine.get()).discards, (try machine.get()).composed],
+        },
+        {
+          first: { name: "Alpha Phone notification", text: "Approve the weekly digest\nStep 2 waits for you", notice: { id: "workflow-tap:w1", revision: "n1" } },
+          cancelled: [{ token: "w1", discard: true }], stale: undefined, changed: "QuestionChanged", kept: "w2",
+          other: undefined, fresh: { id: "workflow-tap:w2", revision: "n2" }, consumed: true, again: false,
+          last: { token: "w2", noticeRevision: "n2" }, reviews: 4, opened: [], state: [1, 1],
         },
       ))
     }

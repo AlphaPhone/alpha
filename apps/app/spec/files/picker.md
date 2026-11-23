@@ -5,7 +5,9 @@ from the folders of the phone's storage, or from the system document picker. A f
 storage is checked when it is tapped: its identity is read twice around a fresh listing of its folder,
 and it is chosen only when all of them agree. Its bytes are read again when the owner attaches, and
 must still be that file. The picker answers its caller once, with the files attached or with none, and a
-read or listing that answers after it closed changes nothing.
+read or listing that answers after it closed changes nothing. While it is open the picker is a sheet
+layer in the shell's navigation, over whichever app opened it, so Back or HOME dismisses it and its
+caller gets no files.
 
 ## Domain
 

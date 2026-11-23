@@ -65,6 +65,8 @@ pure def offered(s: EventReturn): bool = returnable(s.origin, s)
 
 A tap while a check is pending, or when return is not offered, does nothing.
 A reply of an earlier visit, or one after Maps left, changes nothing.
+A Calendar event is checked for the owner, revision, start and calendar source revision it was opened with,
+so a changed calendar selection is not taken for the same event.
 
 ```quint
 pure def canTapReturn(s: EventReturn, origin: int): bool = returnable(origin, s) and s.active == 0

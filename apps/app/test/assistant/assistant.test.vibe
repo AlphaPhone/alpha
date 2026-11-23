@@ -7,10 +7,10 @@ import { copy } from "../../src/assistant/presentation.vibe"
 import { emptyTranscript } from "../../src/assistant/transcript.vibe"
 import { classify, plainText } from "../../src/assistant/reply-lines.vibe"
 import { textOf } from "../../src/assistant/units.vibe"
-import { assistantOver, countingExecutors, fakeHost, fakePreferences, fakeResident, journalNative, type Seen } from "./fakes.vibe"
+import { assistantOver, countingExecutors, fakeHost, fakePreferences, fakeResident, journalNative, wireProposal, type Seen } from "./fakes.vibe"
 
 const futureExpiry = "2099-01-01T00:00:00.000Z"
-const noteProposal = { id: "p1", digest: "d".repeat(64), state: "pending", expiresAt: futureExpiry, title: "Create note", operation: { type: "create_note", title: "Milk", body: "" }, requestMessageId: "u1" }
+const noteProposal = wireProposal("p1", "d".repeat(64), { type: "create_note", title: "Milk", body: "" }, "u1", futureExpiry)
 
 effect function transcriptNow() {
   const composer = try Composer

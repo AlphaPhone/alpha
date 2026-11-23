@@ -131,6 +131,11 @@ pure def sometimesRecoveredAfterFailure(s: MapPlane): bool = s.copyrightShown an
 
 ### The credits panel opens from the badge or the information button of a built plane
 
+On a portrait screen the credits, My location and the sheets beneath them end
+above the assistant dock's measured footprint (`--alpha-dock-clearance`), so a
+taller composer never covers them; in guidance, Recenter sits in the guidance
+bar at the top.
+
 ```quint
 pure def canOpenInfo(s: MapPlane): bool = s.built and not(s.infoOpen)
 pure def openInfo(s: MapPlane): MapPlane = { ...s, infoOpen: true }

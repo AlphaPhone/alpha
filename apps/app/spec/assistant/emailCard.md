@@ -8,7 +8,12 @@ and session, and kept on the chat's draft shelf
 Cloud environment, user and organization), so it stays with the
 conversation after a reload or a decline. Every edit is coalesced and saved;
 each edited version gets its own Gmail request id, so an edited draft stays
-sendable, and Send dispatches once through Inbox's `sendAgentEmail` (#1412).
+sendable, and Send dispatches once through Inbox's `sendAgentEmail` (#1412):
+an unedited card is sent under the request identity of the owner turn that
+asked for it, each later version under one derived from the card, its
+account and that content, so a retry of the same version reaches the same
+receipt instead of a second send. The card is marked sending before the
+request is made, and only a card waiting to be sent can change.
 A To entry of "self", "me" or "myself" shows the selected account's address
 until the owner edits it. Every recipient is listed before Send.
 

@@ -1,7 +1,7 @@
-// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
+// spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/draft.md, "Story: Get my message back when it was not sent"; spec/assistant/stoppedReply.md, "Story: Know what became of a reply I stopped"; spec/assistant/reply.md, "Story: Hear a brief acknowledgment and still get the whole answer"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/conversation.md, "Story: Talk to my agent and approve what it proposes"; spec/assistant/conversation.md, "A changed screen context bumps the revision and drops every proposal; a private screen stops everything"; spec/assistant/recovery.md, "Story: See what still waits for me without the phone polling my agent"; spec/assistant/receipts.md, "A receipt that could not reach the agent keeps its result and says it is not synced yet"; spec/assistant/receipts.md, "A reply's changes are shown once, only for what its action results prove, and each opens its own view"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"; spec/assistant/context.md, "A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"
 import { TurnController, encodeTurnContext, findStoppedUserTurn, type ClientMessageId, type ConversationRecord, type TurnResult } from "@elizaos/agent/client"
 import { Machine as DraftsMachine, shown, slotOf } from "../../gen/assistant__draft.effect.vibe"
-import { Machine as SendsMachine, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
+import { Machine as SendsMachine, timedAsVoice, type Event as SendsEvent } from "../../gen/assistant__send.effect.vibe"
 import { Machine as ReplyMachine, machine as replyMachine, refusedBeforeOutput, offersManagePlan, type ReplyView } from "../../gen/assistant__reply.effect.vibe"
 import { Machine as StoppedMachine, recentTurnMs, type ReadKind } from "../../gen/assistant__stoppedReply.effect.vibe"
 import { Machine as ClientMachine, canReplyWith } from "../../gen/assistant__conversation.effect.vibe"
@@ -10,12 +10,15 @@ import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
 import { sendsDay } from "../../gen/assistant__context.effect.vibe"
 import { Preferences } from "../settings/preferences.vibe"
+import { Latency } from "../voice/latency.vibe"
+import type { DictationTarget } from "../voice/dictation.vibe"
+import { pageForTurn, pageToSend } from "./browser-page.vibe"
 import { ChatAttachments } from "./attachments.vibe"
 import { Conversations } from "./conversations.vibe"
 import { AssistantHost, type AgentIdentity } from "./host.vibe"
 import { PhoneLocation } from "./location.vibe"
-import { CameraComposer, MapsChatCards, MapsRelay, ReplyChanges, TurnSources } from "./ports.vibe"
-import { changeWords, copy, failureKindOf, failureText, planActionOf } from "./presentation.vibe"
+import { BrowserPages, CameraComposer, MapsChatCards, MapsRelay, ReplyChanges, TurnSources } from "./ports.vibe"
+import { changeWords, copy, failureKindOf, failureText, liveWaitOf, planActionOf } from "./presentation.vibe"
 import { DeviceReview, type Approval } from "./review.vibe"
 import { collapseSystemNotices, emailDraftOf, emptyTranscript, historyRows, pendingReply, replyNotices, withReply, type ProposalCard, type Quote, type Row, type Transcript } from "./transcript.vibe"
 import { moveFirstDraft } from "./first-send.vibe"
@@ -49,6 +52,8 @@ export service Composer {
   screenChanged(contextKey: string, sensitive: boolean): void!!
   /** Back while a reply or an edit is aimed: drop the aim; false when nothing was aimed. */
   back(): boolean!!
+  /** The open draft as voice dictation fills it: dictated words are appended, and words dictated into an empty draft and sent unchanged time the turn as a voice turn. */
+  dictationTarget(): DictationTarget!!
   static readonly key = "alpha/assistant/Composer"
 }
 
@@ -78,6 +83,8 @@ export const composerLayer = Layer.effect(Composer, effect {
   const changes = try ReplyChanges
   const sources = try TurnSources
   const preferences = try Preferences
+  const latency = try Latency
+  const pages = try BrowserPages
   const transport = try turnTransport()
   const transcript = try SubscriptionRef.make<Transcript>(emptyTranscript)
   const target = try SubscriptionRef.make<Target | undefined>(undefined)
@@ -85,6 +92,7 @@ export const composerLayer = Layer.effect(Composer, effect {
   let ordinal = 0
   let acting = 0
   let ownKey: string | undefined
+  let dictated: { readonly text: string; readonly binding: string } | undefined
   const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
 
   effect function rows(change: (rows: readonly Row[]) => readonly Row[]) {
@@ -239,9 +247,9 @@ export const composerLayer = Layer.effect(Composer, effect {
         return "restored" as const
     }
   }
-  effect function directly(messageId: string, text: string) {
+  effect function directly(messageId: string, text: string, pageLinks: readonly string[]) {
     acting += 1
-    const pass = try ensuring(review.directPass(messageId, text), sync(() => { acting -= 1 }))
+    const pass = try ensuring(review.directPass(messageId, text, pageLinks), sync(() => { acting -= 1 }))
     ownKey = (try host.screen()).contextKey
     return pass
   }
@@ -277,6 +285,10 @@ export const composerLayer = Layer.effect(Composer, effect {
     const unbind = () => effect { if (bound) try quiet(client.send({ type: "sendFailed" })) }
     try typing()
     const heldBinding = draftState.active
+    const spoken = dictated
+    if (handed === undefined) dictated = undefined
+    const timed = timedAsVoice(spoken !== undefined, spoken?.text === composed.trim(), spoken?.binding === JSON.stringify(heldBinding), handed !== undefined)
+    const timedEnd = (answered: boolean) => timed ? latency.finish(answered ? "Answered" : "Abandoned") : succeed(undefined)
     const durable = handed === undefined && (try quiet(drafts.send({ type: "hold" })))
     try quiet(stopped.send({ type: "sendStart" }))
     try stoppedNotice()
@@ -309,15 +321,20 @@ export const composerLayer = Layer.effect(Composer, effect {
     try sources.preferReview(try preferences.asksBeforeActions())
     const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
+    const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
+    const browserRead = try pageForTurn(pages, observed, browserTab)
     const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
     const observation = observed ? {
       ...screen.observation,
       ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
       ...(notesList === undefined ? {} : { selectedObject: notesList }),
+      ...(browserTab === undefined ? {} : { selectedObject: { kind: "browser-tab", id: browserTab.id, revision: browserTab.revision } }),
       ...(day === undefined ? {} : { calendarDay: day }),
       ...(place === undefined ? {} : { location: place }),
     } : undefined
     const context = encodeTurnContext(observation === undefined ? {} : { observation }, { optionalFields: peer.optionalFields })
+    const browserPage = try pageToSend(pages, observed, browserRead, peer.browserPage === true)
+    const pageLinks = (browserPage?.links ?? []).map((link) => link.url)
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
     const quote = aimed?.kind === "reply" ? aimed.quote : undefined
@@ -332,14 +349,22 @@ export const composerLayer = Layer.effect(Composer, effect {
       shownText = text
       try settleView(replyId, try view.get(), text)
     })
+    if (timed) {
+      try latency.begin()
+      try latency.mark("Request")
+    }
     try quiet(sends.send({ type: "transportCall", id: attempt }))
     const result = try relay.withRelay(conversation ?? current.controller.conversation?.id ?? "", promise(() => current.controller.send(
-      { text: composed, metadata: { ...context }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
+      { text: composed, metadata: { ...context, ...(browserPage === undefined ? {} : { clientDevice: { browserPage } }) }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
       { stream: {
         onPreview: (text, provisional) => {
           if (!streamed) {
             streamed = true
-            runFork(effect { try quiet(sends.send({ type: "serverReceives", id: attempt })); try quiet(sends.send({ type: "streamChunk", id: attempt })) })
+            runFork(effect {
+              try quiet(sends.send({ type: "serverReceives", id: attempt }))
+              try quiet(sends.send({ type: "streamChunk", id: attempt }))
+              if (timed) try latency.mark("FirstToken")
+            })
           }
           runFork(effect { try quiet(view.send({ type: "token", units: Math.max(1, text.length), provisional })) })
           pushView(text)
@@ -366,6 +391,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       try host.toast(handed !== undefined ? "Not sent." : restoredHere ? copy.backInComposer : copy.notRestored)
       try quiet(stopped.send({ type: "sendSettled", dispatched: false }))
       try stoppedNotice()
+      try timedEnd(false)
       return false
     }
     if (durable) try quiet(drafts.send({ type: "commit", binding: heldBinding }))
@@ -383,6 +409,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       try quiet(stopped.send({ type: "cancelOutcome", aborted: answer.kind === "Stopped" }))
       const open = (try SubscriptionRef.get(transcript)).conversation ?? current.controller.conversation?.id ?? null
       if (open !== null) fork.detached check(open, result.clientMessageId)
+      try timedEnd(false)
       return true
     }
     try quiet(stopped.send({ type: "sendSettled", dispatched: true }))
@@ -392,21 +419,25 @@ export const composerLayer = Layer.effect(Composer, effect {
       try quiet(view.send({ type: "failReply", kind: "OtherFailure" }))
       try settleView(replyId, try view.get(), `${shownText}${shownText === "" ? "" : "\n\n"}${copy.replyFailed} ${copy.maybeSent}`)
       try rows((list) => list.map((row) => row.id === userId && row.kind === "user" ? { ...row, status: "unconfirmed" } : row))
+      try timedEnd(false)
       return true
     }
     const reply = result.kind === "Replied" ? result.reply : result.kind === "AgentFailed" ? result.reply : undefined
     if (result.kind === "AgentFailed") {
       const kind = failureKindOf(result.code)
+      const wait = liveWaitOf(reply?.retryAfterMs)
       try quiet(view.send({ type: "failReply", kind }))
-      const said = refusedBeforeOutput(kind) ? failureText(kind) : `${reply?.text ?? shownText}\n\n${failureText(kind)}`
+      const said = refusedBeforeOutput(kind) ? failureText(kind, wait) : `${reply?.text ?? shownText}\n\n${failureText(kind, wait)}`
       try settleView(replyId, try view.get(), said)
-      try rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" && offersManagePlan(kind) ? { ...row, plan: "Funding" } : row))
+      const fix = planActionOf(reply?.planAction) ?? (offersManagePlan(kind) ? "Funding" as const : undefined)
+      if (fix !== undefined) try rows((list) => list.map((row) => row.id === replyId && row.kind === "agent" ? { ...row, plan: fix } : row))
     } else if (reply !== undefined) {
       try quiet(view.send({ type: "done", units: reply.text.length }))
       try settleView(replyId, try view.get(), reply.text)
     }
     if (reply === undefined) {
       try unbind()
+      try timedEnd(false)
       return true
     }
     const live = current.controller.conversation
@@ -421,11 +452,11 @@ export const composerLayer = Layer.effect(Composer, effect {
     const replyOrdinal = ordinal
     const settledRow = (try SubscriptionRef.get(transcript)).rows.find((row) => row.id === replyId)
     try mapsChat.agentReply(settledRow?.kind === "agent" && settledRow.segments.some((segment) => segment.payload.kind === "choice"))
-    const plan = planActionOf((reply as { readonly planAction?: unknown }).planAction)
+    const plan = result.kind === "AgentFailed" ? undefined : planActionOf(reply.planAction)
     const notices = replyNotices((reply as { readonly notices?: unknown }).notices)
     const replyLive = bound && canReplyWith(try client.get(), false)
     const skipped: { readonly receipts: readonly Approval[]; readonly cards: readonly ProposalCard[]; readonly notices: readonly string[] } = { receipts: [], cards: [], notices: [] }
-    const pass = replyLive ? try directly(reply.userMessageId, composed) : skipped
+    const pass = replyLive ? try directly(reply.userMessageId, composed, pageLinks) : skipped
     const delivered = replyLive && (try quiet(client.send({ type: "replyWith", withProposal: pass.cards.length > 0 })))
     if (bound && !delivered) try quiet(client.send({ type: "sendFailed" }))
     const cardsShown = delivered ? pass.cards : []
@@ -454,6 +485,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...changeRows,
     ])
     try watch(cardsShown)
+    try timedEnd(result.kind === "Replied")
     return true
   }
   return {
@@ -507,6 +539,24 @@ export const composerLayer = Layer.effect(Composer, effect {
       if (next?.kind === "edit") try quiet(drafts.send({ type: "handOver", text: unitsOf(next.text) }))
     },
     replaceRow: (row: Row) => rows((list) => list.map((each) => each.id === row.id ? row : each)),
+    dictationTarget: () => effect {
+      const identity = try host.identity()
+      const binding = JSON.stringify((try drafts.get()).active)
+      const target: DictationTarget = {
+        id: `assistant:${binding}`,
+        account: identity?.owner ?? "",
+        draftLength: () => map(drafts.get(), (now) => JSON.stringify(now.active) === binding ? shown(now).length : 0),
+        insert: (text: string, voiceOriginated: boolean) => effect {
+          const now = try drafts.get()
+          if (JSON.stringify(now.active) !== binding) return
+          const next = `${textOf(shown(now))}${text}`
+          try quiet(drafts.send({ type: "edit", text: unitsOf(next) }))
+          try quiet(sends.send({ type: "typeText", text: unitsOf(next) }))
+          dictated = voiceOriginated && next.trim() !== "" ? { text: next.trim(), binding } : undefined
+        },
+      }
+      return target
+    },
     back: () => effect {
       if ((try SubscriptionRef.get(target)) === undefined) return false
       try SubscriptionRef.set(target, undefined)

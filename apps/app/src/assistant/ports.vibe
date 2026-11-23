@@ -1,7 +1,8 @@
-// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
+// spec/assistant/emailCard.md, "Story: Send an email my agent drafted, from the chat"; spec/assistant/context.md, "A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s"; spec/assistant/context.md, "A private screen sends the message with no observation; an optional field goes only to the peer compared for this turn"; spec/assistant/receipts.md, "Story: Know what my agent changed"; spec/assistant/reply.md, "A recognized tool block outside a fence becomes its card; inside a fence it stays code"; spec/assistant/noticeQuestion.md, "Story: Ask Alpha about a notification"; spec/assistant/decision.md, "Story: Approve or deny a workflow step once"
 import type { SendAnswer } from "../../gen/assistant__emailCard.ts"
 import type { ChatMessage, ChatTaken } from "../camera/chat.vibe"
 import type { ChangeSummary } from "../workflows/changes.vibe"
+import type { BrowserPageObservation } from "./payloads.schema.vibe"
 
 /** An email the owner reviewed in the chat, under the request id its version sends once. */
 export interface ReviewedEmail {
@@ -119,3 +120,28 @@ export service TurnSources {
     preferReview: () => succeed(undefined),
   })
 }
+
+/** The tab a turn observes in Browser: its id and revision, as the observation's selected `browser-tab` names it. */
+export interface ObservedTab {
+  readonly id: string
+  readonly revision: string
+}
+
+/** The open page a turn carries beside its observation as `clientDevice.browserPage`, bound to the observed tab and revision. */
+export type BrowserPage = BrowserPageObservation
+
+/** Browser's open page for a chat turn, and the owner's Browser page for Alpha setting, filled from Browser and Settings; unprovided, no page is shared. */
+export service BrowserPages {
+  /** Settings › Privacy › Browser page for Alpha, read now; unreadable preferences share nothing. */
+  allowed(): boolean!!
+  /** The tab Browser shows in front now, or undefined for a private tab, no tab, or Browser not in front. */
+  selected(): ObservedTab | undefined!!
+  /** The page of `tab` read on this phone, or undefined when Browser no longer shows that tab, it is private, or it has no loaded public page. */
+  read(tab: ObservedTab): BrowserPage | undefined!!
+  static readonly defaultValue = () => ({
+    allowed: () => succeed(false),
+    selected: () => succeed(undefined),
+    read: (_tab: ObservedTab) => succeed(undefined),
+  })
+}
+

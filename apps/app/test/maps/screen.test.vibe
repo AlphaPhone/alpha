@@ -5,7 +5,9 @@ import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe
 import { Machine as PlaneMachine } from "../../gen/maps__plane.effect.vibe"
 import { Machine as SavedMachine } from "../../gen/maps__savedPlaces.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
+import { CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { MapsContent } from "../../src/maps/content.vibe"
+import { cloudFailure } from "../../src/maps/failure.vibe"
 import { MapsHandoff } from "../../src/maps/handoff.vibe"
 import { MapsSession } from "../../src/maps/layer.vibe"
 import { MapsNavigation } from "../../src/maps/navigation.vibe"
@@ -208,6 +210,21 @@ it.live("A named wait is shown and kept (spec/maps/connection.md, \"A wait Cloud
       { said: "Maps request limit reached. Try again in 5 minutes.", pause: 300000 },
     ))
   }
+})
+
+it.effect("An allowance reset is counted to the instant Cloud names, else to its wait (spec/maps/connection.md, \"A wait Cloud names is shown and kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute\")", () => effect {
+  const now = 1700000000000
+  const refusal = (fields: { retryAfter?: number; resetAt?: number }) =>
+    cloudFailure(new CloudUnavailable({ status: 429, code: "maps_allowance_exhausted", message: "provider text", ...fields }), now).message
+  try Effect.try(() => assert.deepStrictEqual(
+    { at: refusal({ resetAt: now + 3 * 86400000 }), wait: refusal({ retryAfter: 7200 }), past: refusal({ resetAt: now - 1000 }), none: refusal({}) },
+    {
+      at: "You have used your Maps allowance for this period. It resets in 3 days.",
+      wait: "You have used your Maps allowance for this period. It resets in 2 hours.",
+      past: "You have used your Maps allowance for this period.",
+      none: "You have used your Maps allowance for this period.",
+    },
+  ))
 })
 
 it.live("A saved place of another provider is restricted and never a starting point (spec/maps/savedPlaces.md, \"A saved provider place is used only with the open-data provider that served it\")", () => effect {

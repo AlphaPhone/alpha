@@ -101,11 +101,15 @@ pure def sometimesDeclined(s: ApprovalReview): bool = s.resolution == ResolvedRe
 
 ### A changed conversation, a hidden page or Back retires the review
 
+Close and Back close a review that is reading, shown, rechecking or showing its answer; a review
+whose decision is being sent stays until the agent answers.
+
 ```quint
 pure def canRetire(s: ApprovalReview): bool = true
 pure def retire(s: ApprovalReview): ApprovalReview =
   { ...s, epoch: s.epoch + 1, phase: if (s.phase == Deciding or s.phase == ReviewResolved) s.phase else ReviewIdle }
-pure def canClose(s: ApprovalReview): bool = s.phase == ReviewShown or s.phase == ReadingRequest or s.phase == Rechecking
+pure def canClose(s: ApprovalReview): bool =
+  s.phase == ReviewShown or s.phase == ReadingRequest or s.phase == Rechecking or s.phase == ReviewResolved
 pure def close(s: ApprovalReview): ApprovalReview = { ...s, aborted: true, phase: ReviewIdle }
 ```
 

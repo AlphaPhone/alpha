@@ -5,34 +5,33 @@ import { initial } from "../../../gen/telephony__callBar.ts";
 import { CallWatch } from "../../telephony/call-bar.vibe";
 import { CommsStage } from "../../telephony/comms.vibe";
 import { CallBarView } from "./CallBarView.tsx";
-import { runtime, type TelephonyRuntime } from "./runtime.ts";
+import { act, start } from "../shell/services.ts";
+import { runtime } from "./runtime.ts";
 
-export interface CallBarProps {
-  /** The runtime the bar runs on. */
-  runtime?: TelephonyRuntime;
-}
+/** The call bar takes nothing from the shell: it reads the app's runtime. */
+export type CallBarProps = Record<string, never>;
 
 /**
  * The top surface the shell keeps mounted over every view on the Alpha image.
  * @model spec/telephony/callBar.md
  */
-export function CallBar({ runtime: on = runtime }: CallBarProps) {
-  const { state = initial } = useMachine(on);
+export function CallBar(_props: CallBarProps) {
+  const { state = initial } = useMachine(runtime);
   const watch = useCallback((node: HTMLElement | null) => {
     if (!node) return;
-    const watching = on.runFork(CallWatch.use((w) => w.watch()));
-    const following = on.runFork(CommsStage.use((stage) => stage.follow()));
+    const watching = start(CallWatch.use((w) => w.watch()));
+    const following = start(CommsStage.use((stage) => stage.follow()));
     return () => {
-      watching.interruptUnsafe();
-      following.interruptUnsafe();
+      watching();
+      following();
     };
-  }, [on]);
+  }, []);
   return (
     <div ref={watch} className="contents">
       <CallBarView
         bar={state}
-        onReturn={(callId) => on.runFork(CallWatch.use((w) => w.returnToCall(callId)))}
-        onEnd={(callId) => on.runFork(CallWatch.use((w) => w.end(callId)))}
+        onReturn={(callId) => act(CallWatch.use((w) => w.returnToCall(callId)))}
+        onEnd={(callId) => act(CallWatch.use((w) => w.end(callId)))}
       />
     </div>
   );

@@ -1,13 +1,13 @@
 // spec/browser/session.md, "Story: Browse in tabs"; spec/browser/bookmarks.md, "Opening Browser, resuming the app, a visible return and a changed bookmark document each ask for one refresh"; spec/browser/presentation.md, "A request is sent only when it differs from the last one, and only the answer to the latest request counts"
 import { Foreground } from "../shell/foreground.vibe"
-import { Toasts } from "../shell/toasts.vibe"
-import { BrowserAgent, agentLayer } from "./agent.vibe"
+import { agentLayer } from "./agent.vibe"
 import { autofillLayer } from "./autofill.vibe"
 import { BrowserBookmarks, bookmarksLayer } from "./bookmarks.vibe"
 import { cloudRequestsLayer } from "./cloudCustody.vibe"
 import { egressLayer } from "./egress.vibe"
 import { googleLinkLayer } from "./googleReturn.vibe"
 import { BrowserHandoff, handoffLayer } from "./handoff.vibe"
+import { pageContextLayer } from "./pageContext.vibe"
 import { BrowserPresenter, presenterLayer } from "./presentation.vibe"
 import { BrowserReading, readingLayer } from "./reading.vibe"
 import { BrowserReviews, reviewsLayer } from "./reviews.vibe"
@@ -47,18 +47,8 @@ const running = Layer.effectDiscard(effect {
 })
 
 const base = Layer.provideMerge(tabsLayer, Layer.mergeAll(reviewsLayer, bookmarksLayer, presenterLayer))
-const features = Layer.provideMerge(Layer.mergeAll(egressLayer, handoffLayer, readingLayer, agentLayer, autofillLayer), base)
+const features = Layer.provideMerge(Layer.mergeAll(egressLayer, handoffLayer, readingLayer, agentLayer, autofillLayer, pageContextLayer), base)
 
-/** Every Browser service, over the platform's Native, Cloud and Build, the shell's Navigation, Toasts and Foreground, the assistant's Assistant, and the ReadingVoice and PageMail ports of src/browser/ports.vibe. */
+/** Every Browser service, over the platform's Native, Cloud and Build, Settings' Preferences, the shell's Navigation, Toasts and Foreground, the assistant's Assistant, and the ReadingVoice and PageMail ports of src/browser/ports.vibe. */
 export const layer = Layer.provideMerge(running, Layer.mergeAll(features, cloudRequestsLayer, googleLinkLayer)).pipe(Layer.provide(tabHostLayer))
 
-/** Opens a note's web source in Browser as an approved HTTPS open the owner asked for, saying why when Browser refuses; the shell runs it for Notes' `open-web-source` request. */
-export effect function openWebSource(url: string) {
-  const agent = try BrowserAgent
-  const toasts = try Toasts
-  const opened = agent.openApproved(url, false) catch effect (error) => {
-    try toasts.show(error.message)
-    return undefined
-  }
-  if (opened !== undefined) try opened.present
-}

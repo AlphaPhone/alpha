@@ -1,88 +1,31 @@
-// spec/maps/networkFix.md, "An answer is reused for 15 minutes, then confirmed without a request while the same networks are visible, for up to an hour"; spec/maps/networkFix.md, "An answer is kept only when it is at most an hour old, not ahead of the phone, and carries a positive accuracy"
-import { Machine as NetworkMachine, type NetworkFixes } from "../../gen/maps__networkFix.effect.vibe"
-import { standing, usableAnswer } from "../../gen/maps__networkFix.ts"
-import { Native } from "../platform/native.vibe"
+// spec/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
+import { NetworkLocation, type NetworkPosition } from "../assistant/network-location.vibe"
 import type { Position } from "./geometry.vibe"
-import { NetworkAnswer } from "./maps.schema.vibe"
-
-const PLUGIN = "AlphaNetworkLocation"
-const FORGETS = new Set(["permission-denied", "location-off"])
 
 /** A network position as Maps shows it: approximate, with the accuracy the service gave. */
 export type NetworkFix = Position
 
-/** The phone's position from its visible Wi-Fi and cell towers, looked up only when asked and kept as spec/maps/networkFix.md says. */
+/** The phone's position from its visible Wi-Fi and cell towers, read from the one network client the assistant's chat location also uses. */
 export service MapsNetworkLocation {
   /** The kept answer while it may still stand for the phone's position; never a lookup. */
   cached(): NetworkFix | undefined!!
   /** A position now: the kept one while recent, else one lookup shared with every caller waiting on it; undefined when none is known. */
   locate(): NetworkFix | undefined!!
-  readonly states: Stream.Stream<NetworkFixes>
 }
 
-/** Network positions over `AlphaNetworkLocation` and the network fix machine. */
+/** The shared network answer as a Maps position. */
+export function networkFixOf(answer: NetworkPosition | undefined): NetworkFix | undefined {
+  return answer === undefined ? undefined : {
+    coordinate: { latitude: answer.latitude, longitude: answer.longitude }, accuracyMeters: answer.accuracyMeters,
+    timestamp: answer.timestamp, precision: "approximate",
+  }
+}
+
+/** Maps' network position over the assistant's `NetworkLocation`, so Maps and chat share one cache, one lookup in flight and one back-off. */
 export const networkLayer = Layer.effect(MapsNetworkLocation, effect {
-  const native = try Native
-  const fixes = try NetworkMachine
-  let kept: { readonly latitude: number; readonly longitude: number; readonly accuracy: number; readonly fingerprint: string } | undefined
-  let inflight: Deferred.Deferred<NetworkFix | undefined> | undefined
-
-  effect function cached() {
-    const now = try Clock.currentTimeMillis
-    const s = try fixes.get()
-    if (!kept || !standing(s, now)) return undefined
-    return { coordinate: { latitude: kept.latitude, longitude: kept.longitude }, accuracyMeters: kept.accuracy, timestamp: s.fixAt, precision: "approximate" as const }
-  }
-
-  effect function lookup(id: number, unchangedFrom: string | undefined) {
-    let failed = false
-    const raw = native.invoke(PLUGIN, "locate", unchangedFrom === undefined ? {} : { unchangedFrom }) catch effect (error) => {
-      failed = true
-      if (error._tag === "NativeFailed" && FORGETS.has(error.code ?? "")) {
-        kept = undefined
-        fixes.send({ type: "forget" }) catch () => undefined
-      } else fixes.send({ type: "refused", lookup: id, now: try Clock.currentTimeMillis }) catch () => undefined
-      return undefined
-    }
-    if (failed) return try cached()
-    const answer = Schema.decodeUnknownEffect(NetworkAnswer)(raw) catch () => undefined
-    const now = try Clock.currentTimeMillis
-    if (answer === undefined) {
-      fixes.send({ type: "refused", lookup: id, now }) catch () => undefined
-      return try cached()
-    }
-    if ("unchanged" in answer) {
-      fixes.send({ type: "confirmed", lookup: id, now, same: kept !== undefined && answer.fingerprint === kept.fingerprint }) catch () => undefined
-      return try cached()
-    }
-    const at = Math.round(answer.timestamp)
-    const accuracyM = Math.ceil(answer.accuracy)
-    const after = fixes.send({ type: "resolved", lookup: id, now, at, accuracyM }) catch () => undefined
-    if (after !== undefined && usableAnswer(at, now, accuracyM)) {
-      kept = { latitude: answer.latitude, longitude: answer.longitude, accuracy: answer.accuracy, fingerprint: answer.fingerprint }
-    }
-    return try cached()
-  }
-
+  const network = try NetworkLocation
   return {
-    cached,
-    effect locate() {
-      if (!(try native.available(PLUGIN))) return undefined
-      const now = try Clock.currentTimeMillis
-      const before = try fixes.get()
-      if (before.pending && inflight) return try Deferred.await(inflight)
-      const begun = fixes.send({ type: "beginLookup", now }) catch () => undefined
-      if (!begun) return try cached()
-      const done = try Deferred.make<NetworkFix | undefined>()
-      inflight = done
-      const from = kept !== undefined && standing(before, now) ? kept.fingerprint : undefined
-      fork.detached effect {
-        const found = lookup(begun.lookup, from) catch () => undefined
-        if (inflight === done) inflight = undefined
-        try Deferred.succeed(done, found)
-      }
-      return try Deferred.await(done)
-    },
-    states: fixes.changes,
+    effect cached() { return networkFixOf(try network.cached()) },
+    effect locate() { return networkFixOf(try network.locate()) },
   }
 })

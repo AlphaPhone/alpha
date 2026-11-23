@@ -3,7 +3,7 @@ import { Machine as NavigationMachine, backTaken, type Event as NavigationEvent,
 import type { Detent } from "../../gen/assistant__detents.ts"
 import type { AppId } from "../web/app-screen.ts"
 import { Build } from "../platform/build.vibe"
-import { Native } from "../platform/native.vibe"
+import { Native, NativeFailed, NativeUnavailable } from "../platform/native.vibe"
 import { admittedApps } from "./apps.vibe"
 import { BuildFacts, LaunchFacts, StatusFacts } from "./native.schema.vibe"
 import { pageEvents, pageHidden, setRootData } from "./page.ts"
@@ -32,12 +32,19 @@ export service Navigation {
   switchForAgent(app: AppId, route: string): boolean!!
 }
 
-/** Which surface this activity is, as Android reports it. */
+/**
+ * Which surface this activity is, as Android reports it: the assistant surface only by Alpha's own flag on `AlphaAssistActivity`
+ * (`Agent.launchSurface`), never by an action a caller set; `ElizaSystem.getLaunchInfo` answers only where Agent is not on the bridge.
+ */
 export effect function hostOf() {
   const native = try Native
   const build = try Build
   if (build.info.variant === "browser" || !(try native.available("ElizaSystem"))) return "Standalone" as Host
-  const launch = effect { return try Schema.decodeUnknownEffect(LaunchFacts)(try native.invoke("ElizaSystem", "getLaunchInfo")) } catch () => ({ assistant: false })
+  let said: unknown = new NativeUnavailable({ plugin: "Agent", method: "launchSurface" })
+  if (try native.available("Agent")) said = native.invoke("Agent", "launchSurface") catch (error) => error
+  if (said instanceof NativeUnavailable) said = native.invoke("ElizaSystem", "getLaunchInfo") catch () => undefined
+  if (said instanceof NativeFailed) said = undefined
+  const launch = Schema.decodeUnknownEffect(LaunchFacts)(said) catch () => ({ assistant: false })
   if (launch.assistant) return "AssistantSurface" as Host
   const facts = effect { return try Schema.decodeUnknownEffect(BuildFacts)(try native.invoke("ElizaSystem", "getBuildInfo")) } catch () => ({ launcher: false })
   if (!facts.launcher) return "Standalone" as Host

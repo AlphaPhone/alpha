@@ -9,7 +9,7 @@ const none = () => undefined;
 
 export const meta: ComponentMeta<AboutPagesProps> = {
   args: {
-    nav: { ...nav, page: "About" }, facts: general.facts, native: true, diagnostics: problems, onOpen: none, onOpenLicence: none, onAppInfo: none,
+    nav: { ...nav, page: "About" }, facts: general.facts, native: true, diagnostics: problems, onOpen: none, onOpenLicence: none, onAppInfo: none, onActivity: none,
     aboutActs: { readLog: none, askClear: none, cancelClear: none, clear: none, exportReport: none, loadLicences: none },
   },
   states: {
@@ -20,5 +20,6 @@ export const meta: ComponentMeta<AboutPagesProps> = {
     Licences: { nav: { ...nav, page: "Licenses" }, diagnostics: notices },
     FlaggedLicence: { nav: { ...nav, page: "LicenseDetail", licence: 1 }, diagnostics: notices },
     LicencesUnavailable: { nav: { ...nav, page: "Licenses" }, diagnostics: { ...diagnostics, licences: "NoticesUnavailable" } },
+    Browser: { native: false, onActivity: undefined },
   },
 };

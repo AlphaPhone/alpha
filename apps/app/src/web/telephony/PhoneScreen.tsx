@@ -15,8 +15,8 @@ import { RestoredProposal } from "./RestoredProposal.tsx";
 import { Keypad } from "./Keypad.tsx";
 import { isAskSentence, queryOf } from "./present.ts";
 import { RecentsList } from "./RecentsList.tsx";
-import { ListAsk } from "../../telephony/list-ask.vibe";
-import { runtime, type TelephonyRuntime } from "./runtime.ts";
+import { act, now, start } from "../shell/services.ts";
+import { runtime } from "./runtime.ts";
 import { useComms } from "./useComms.ts";
 import { VoicemailPanel } from "./VoicemailPanel.tsx";
 
@@ -24,10 +24,8 @@ const TABS: { tab: PhoneTab | "contacts"; label: string }[] = [
   { tab: "RecentsTab", label: "Recents" }, { tab: "KeypadTab", label: "Keypad" }, { tab: "VoicemailTab", label: "Voicemail" }, { tab: "contacts", label: "Contacts" },
 ];
 
-export interface PhoneScreenProps extends ScreenProps {
-  /** The runtime the screen runs on. */
-  runtime?: TelephonyRuntime;
-}
+/** Phone's screen props: the shell's route and close. */
+export type PhoneScreenProps = ScreenProps;
 
 /**
  * Phone on the Alpha image: Recents, Keypad and Voicemail, Contacts beside them, and the one bar; at `info`, Settings → Phone's details.
@@ -35,38 +33,38 @@ export interface PhoneScreenProps extends ScreenProps {
  * @design design.md
  */
 export function PhoneScreen(props: PhoneScreenProps) {
-  return props.route === "info" ? <PhoneInfoPanel runtime={props.runtime ?? runtime} /> : <PhoneApp {...props} />;
+  return props.route === "info" ? <PhoneInfoPanel /> : <PhoneApp {...props} />;
 }
 
-function PhoneApp({ route, runtime: on = runtime }: PhoneScreenProps) {
-  const { state: phone = phoneInitial, send, can } = usePhoneMachine(on);
-  const { state: voicemail = voicemailInitial, send: sendVoicemail } = useVoicemailMachine(on);
-  const stage = useComms(on);
+function PhoneApp({ route }: PhoneScreenProps) {
+  const { state: phone = phoneInitial, send, can } = usePhoneMachine(runtime);
+  const { state: voicemail = voicemailInitial, send: sendVoicemail } = useVoicemailMachine(runtime);
+  const stage = useComms();
   const urls = useRef<{ ticket: number; url: string } | undefined>(undefined);
   const [answer, setAnswer] = useState("");
   const visit = useCallback((node: HTMLElement | null) => {
     if (!node) return;
-    const visits = [on.runFork(PhoneView.use((v) => v.visit(route))), on.runFork(VoicemailView.use((v) => v.visit()))];
+    const visits = [start(PhoneView.use((v) => v.visit(route))), start(VoicemailView.use((v) => v.visit()))];
     stage.show("PhoneApp", route?.startsWith("keypad:") ? "KeypadSubject" : "RecentsSubject", "phone:recents:");
     return () => {
-      for (const running of visits) running.interruptUnsafe();
+      for (const stop of visits) stop();
     };
-  }, [on, route]);
+  }, [route]);
   const ticket = voicemail.opened.ticket;
   const audioUrl = useMemo(() => {
     if (voicemail.opened.audio !== "AudioReady") return undefined;
     if (urls.current?.ticket === ticket) return urls.current.url;
     if (urls.current) URL.revokeObjectURL(urls.current.url);
-    const wav = on.runSync(VoicemailView.use((v) => v.wav()));
+    const wav = now(VoicemailView.use((v) => v.wav()), undefined);
     if (!wav) return undefined;
     urls.current = { ticket, url: URL.createObjectURL(new Blob([wav as BlobPart], { type: "audio/wav" })) };
     return urls.current.url;
-  }, [on, ticket, voicemail.opened.audio]);
-  const now = phone.readAt || Date.now();
+  }, [ticket, voicemail.opened.audio]);
+  const readAt = phone.readAt || Date.now();
   const query = queryOf(phone.listQuery);
   const digits = phone.number.replace(/\D/g, "");
   const known = digits.length >= 3 ? phone.recents.find((r) => r.title && r.number.replace(/\D/g, "").includes(digits)) : undefined;
-  const dial = (number: string) => on.runFork(PhoneView.use((v) => v.dial(number)));
+  const dial = (number: string) => act(PhoneView.use((v) => v.dial(number)));
   const chatOpen = stage.comms.height !== "SheetClosed";
   return (
     <section ref={visit} aria-label="Phone" className="flex h-full flex-col bg-background text-foreground">
@@ -92,10 +90,10 @@ function PhoneApp({ route, runtime: on = runtime }: PhoneScreenProps) {
         {phone.tab === "RecentsTab" && (
           <RecentsList
             phone={phone}
-            now={now}
+            now={readAt}
             onCall={dial}
-            onAllow={() => on.runFork(PhoneView.use((v) => v.refresh(true)))}
-            onRefresh={() => on.runFork(PhoneView.use((v) => v.refresh(false)))}
+            onAllow={() => act(PhoneView.use((v) => v.refresh(true)))}
+            onRefresh={() => act(PhoneView.use((v) => v.refresh(false)))}
             onClearQuery={() => send({ type: "queryCleared" })}
           />
         )}
@@ -103,25 +101,25 @@ function PhoneApp({ route, runtime: on = runtime }: PhoneScreenProps) {
           <Keypad
             phone={phone}
             match={known ? { title: known.title, number: known.number } : undefined}
-            onPress={(key) => on.runFork(PhoneView.use((v) => v.press(key)))}
-            onErase={() => on.runFork(PhoneView.use((v) => v.erase()))}
+            onPress={(key) => act(PhoneView.use((v) => v.press(key)))}
+            onErase={() => act(PhoneView.use((v) => v.erase()))}
             onDial={dial}
           />
         )}
         {phone.tab === "VoicemailTab" && (
           <VoicemailPanel
             voicemail={voicemail}
-            now={now}
+            now={readAt}
             audioUrl={audioUrl}
-            onOpen={(id) => on.runFork(VoicemailView.use((v) => v.open(id)))}
-            onPlay={() => on.runFork(VoicemailView.use((v) => v.play()))}
+            onOpen={(id) => act(VoicemailView.use((v) => v.open(id)))}
+            onPlay={() => act(VoicemailView.use((v) => v.play()))}
             onStopped={(ended) => sendVoicemail(ended ? { type: "playbackEnded" } : { type: "paused" })}
-            onRetry={() => on.runFork(VoicemailView.use((v) => v.retryAudio()))}
+            onRetry={() => act(VoicemailView.use((v) => v.retryAudio()))}
             onCallBack={(number) => send({ type: "keypadAsked", number })}
             onMessage={(number) => openApp("messages", `compose:${number}`)}
             onDeleteAsked={() => sendVoicemail({ type: "deleteAsked" })}
             onDeleteDeclined={() => sendVoicemail({ type: "deleteDeclined" })}
-            onDeleteConfirmed={() => on.runFork(VoicemailView.use((v) => v.confirmDelete()))}
+            onDeleteConfirmed={() => act(VoicemailView.use((v) => v.confirmDelete()))}
           />
         )}
       </div>
@@ -134,9 +132,7 @@ function PhoneApp({ route, runtime: on = runtime }: PhoneScreenProps) {
         onSubmit={() => {
           if (chatOpen) stage.submitRequest();
           else {
-            const asked = query.text;
-            send({ type: "queryTyped", typed: "" });
-            void on.runPromise(ListAsk.use((l) => l.ask("phone", asked))).then((line) => (line === null ? stage.ask(asked) : setAnswer(line)));
+            stage.askList("phone", query.text, setAnswer);
           }
         }}
         onAlpha={stage.openAlpha}

@@ -1,6 +1,6 @@
-// spec/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"; spec/maps/networkFix.md, "Story: Find me by Wi-Fi and cell towers when GPS has no fix"
+// spec/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"; spec/assistant/context.md, "The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again"
 import { assert, it } from "@effect/vitest"
-import { Machine as NetworkMachine } from "../../gen/maps__networkFix.effect.vibe"
+import { NetworkLocation } from "../../src/assistant/network-location.vibe"
 import { MapsLocation } from "../../src/maps/location.vibe"
 import { MapsNetworkLocation } from "../../src/maps/networkLocation.vibe"
 import { ferry, fixTakenAt, harness, pier } from "./fakes.vibe"
@@ -12,7 +12,7 @@ effect function seconds(n: number) {
   for (let i = 0; i < n; i++) try TestClock.adjust("1 second")
 }
 
-it.effect("Without a GPS fix for 4 seconds a locate finishes with an approximate network position, and the next one reuses it at once (spec/maps/location.md, \"When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers\"; spec/maps/networkFix.md, \"An answer is reused for 15 minutes, then confirmed without a request while the same networks are visible, for up to an hour\")", () => effect {
+it.effect("Without a GPS fix for 4 seconds a locate finishes with an approximate network position, and the next one reuses it at once (spec/maps/location.md, \"When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers\"; spec/assistant/context.md, \"The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again\")", () => effect {
   const h = try harness(open, { network: beacon })
   provide h.layer {
     const location = try MapsLocation
@@ -52,7 +52,7 @@ it.effect("A GPS fix inside the grace period means no lookup (spec/maps/location
   }
 })
 
-it.effect("A refused lookup waits two minutes before the next, and the same networks are confirmed without a new answer (spec/maps/networkFix.md, \"An answer is kept only when it is at most an hour old, not ahead of the phone, and carries a positive accuracy\"; spec/maps/networkFix.md, \"An answer is reused for 15 minutes, then confirmed without a request while the same networks are visible, for up to an hour\")", () => effect {
+it.effect("Maps shares the chat's network client: a refused lookup waits two minutes before the next, and the same networks are confirmed without a new answer (spec/maps/location.md, \"When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers\"; spec/assistant/context.md, \"The network answer is looked up only off the messaging path, when GPS has nothing, and is reused before it is asked again\")", () => effect {
   const refusing = try harness(open)
   const backedOff = try Effect.provide(effect {
     const network = try MapsNetworkLocation
@@ -66,18 +66,22 @@ it.effect("A refused lookup waits two minutes before the next, and the same netw
   const kept = try harness(open, { network: beacon })
   const confirmed = try Effect.provide(effect {
     const network = try MapsNetworkLocation
-    const fixes = try NetworkMachine
+    const shared = try NetworkLocation
     const first = try network.locate()
+    const reused = try network.locate()
     try TestClock.adjust("16 minutes")
     const second = try network.locate()
-    const state = try fixes.get()
-    return { first: first?.timestamp, second: second?.timestamp, fixAt: state.fixAt, resolvedAt: state.resolvedAt }
+    const chat = try shared.cached()
+    return {
+      first: first?.timestamp, reused: reused?.timestamp, second: second?.timestamp, precision: second?.precision, chat: chat?.timestamp,
+      lookups: kept.nativeCalls.filter((c) => c === "AlphaNetworkLocation.locate").length,
+    }
   }, kept.layer)
   try Effect.try(() => assert.deepStrictEqual(
     { backedOff, confirmed },
     {
       backedOff: { first: undefined, soon: undefined, later: undefined, lookups: 2 },
-      confirmed: { first: 0, second: 960000, fixAt: 960000, resolvedAt: 0 },
+      confirmed: { first: 0, reused: 0, second: 960000, precision: "approximate", chat: 960000, lookups: 2 },
     },
   ))
 })

@@ -34,7 +34,9 @@ import { Preferences } from "../../settings/preferences.vibe";
 import { PrivacyRow } from "../../settings/privacy.vibe";
 import { Reset } from "../../settings/reset.vibe";
 import { Updates } from "../../settings/updates.vibe";
+import { useAccountRows } from "../account/index.tsx";
 import type { AppScreen, AppSurface, ScreenProps } from "../app-screen.ts";
+import { NotificationsSettings } from "../shell/NotificationsPage.tsx";
 import type { DevCommand } from "./DeveloperPage.tsx";
 import { backDialog, closeDialog, openDialog, useDialog } from "./dialogs.ts";
 import { PasswordsScreen } from "./PasswordsScreen.tsx";
@@ -79,12 +81,13 @@ function SettingsApp({ onClose }: ScreenProps) {
   const variant = now(Effect.map(Effect.service(Build), (b) => b.info.variant), "browser");
   const readable = now(Effect.flatMap(Effect.service(Preferences), (p) => Effect.map(p.current(), (c) => c.readable)), false);
   const route = now(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.route()), "RouteUnavailable");
+  const account = useAccountRows();
   const dialog = useDialog(nav);
   if (nav.page === "Passwords") return <PasswordsApp onClose={() => void pages((p) => p.back())} />;
   return (
     <SettingsScreen
       model={{
-        nav, facts, appearance, network, updates, reset, variant,
+        nav, facts, appearance, network, updates, reset, variant, account,
         preferences: { value: preferences.state ?? preferencesStart, readable: preferences.cause === undefined && readable },
       }}
       act={{
@@ -93,6 +96,7 @@ function SettingsApp({ onClose }: ScreenProps) {
         openLicence: (index) => void pages((p) => p.openLicence(index)),
         openApp: (app) => void pages((p) => p.openApp(app)),
         openAccount: (section) => void pages((p) => p.openAccount(section)),
+        openElsewhere: (elsewhere) => void pages((p) => p.openElsewhere(elsewhere)),
         accessSetup: () => void pages((p) => p.accessSetup()),
         openPage: (page) => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openPage(page))),
         openShade: () => void perform(Effect.flatMap(Effect.service(DeviceFacts), (f) => f.openShade())),
@@ -113,6 +117,7 @@ function SettingsApp({ onClose }: ScreenProps) {
       onClose={onClose}
       dialog={dialog}
       onDialog={(next) => (next === undefined ? closeDialog() : openDialog(nav, next))}
+      notifications={<NotificationsSettings />}
       privacy={{ route, listener: privacyMachine.state ?? privacyStart, aosp: variant === "aosp" }}
       privacyActs={{
         stop: (stop) => void perform(Effect.flatMap(Effect.service(PrivacyRow), (p) => p.stop(stop))),

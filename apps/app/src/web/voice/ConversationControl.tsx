@@ -7,7 +7,7 @@ import { sendsOf, type Route } from "../../../gen/voice__route.ts";
 import { VoiceConversation, type VoiceStart } from "../../voice/conversation.vibe";
 import { ConversationPanel } from "./ConversationPanel.tsx";
 import { SpeechDisclosure } from "./SpeechDisclosure.tsx";
-import { act } from "../shell/services.ts";
+import { act, readNow } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 
 /** What the screen admits when voice starts and the conversation its turns go to. */
@@ -23,7 +23,7 @@ export function ConversationControl(start: ConversationControlProps) {
   const conversation = Effect.service(VoiceConversation);
   const run = (work: (c: VoiceConversation.Shape) => Effect.Effect<unknown>) => { act(Effect.flatMap(conversation, work)); };
   const talk = () => {
-    const route = runtime.runSync(Effect.flatMap(conversation, (c) => c.route()));
+    const route = readNow(Effect.flatMap(conversation, (c) => c.route()));
     if (!disclosedFor(state, route)) setAsking(route);
     else run((c) => c.start(start));
   };

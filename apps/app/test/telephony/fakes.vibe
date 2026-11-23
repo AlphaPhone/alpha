@@ -54,6 +54,8 @@ export interface World {
   saveAnswer: () => Promise<{ status: string }>
   notice: unknown
   transcript: string
+  /** The app in front and its route, as the shell's Navigation reports them. */
+  place: { app: string; route: string }
 }
 
 /** The native boundary of the image, scripted per journey: every call is recorded, and nothing reaches a real phone. */
@@ -80,6 +82,7 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
     saveAnswer: () => Promise.reject(new Error("lost")),
     notice: undefined,
     transcript: "Call me back",
+    place: { app: "", route: "" },
   }
   const log = (name: string) => calls.push(name)
   const listing = () => ({ carrier: world.carrier, gate: "WriteIdle", voicemails: world.carrier === "CarrierReady" ? world.voicemails : [] })
@@ -163,7 +166,7 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
     invoke: (plugin: string, method: string, args?: { page?: string }) => sync(() => {
       log(args?.page === undefined ? `${plugin}.${method}` : `${plugin}.${method}:${args.page}`)
       return method === "ongoingCall" ? world.ongoing : method === "callState" ? world.callState : method === "endCall" ? true
-        : method === "smsNoticePending" ? world.notice : method === "openSettings" ? { status: "opened" } : undefined
+        : method === "smsNoticePending" ? world.notice : method === "openSettingsPage" ? { status: "opened", page: args?.page, specific: true } : undefined
     }),
     listen: () => Stream.never,
   }
@@ -181,7 +184,10 @@ export function fakePhone(variant: "aosp" | "launcher" | "browser" = "aosp") {
     Layer.succeed(VoiceConversation, { callStarted: () => sync(() => log("voice.callStarted")) } as unknown as VoiceConversation.Shape),
     Layer.succeed(Microphone, { callChanged: (active: boolean) => sync(() => log(`microphone.callChanged:${active}`)) } as unknown as Microphone.Shape),
     Layer.succeed(VoicemailTranscriber, { ready: () => succeed(true), transcribe: () => sync(() => (log("transcribe"), world.transcript)) }),
-    Layer.succeed(Navigation, { open: (app: string, route?: string) => sync(() => (log(`navigation.open:${app}:${route ?? ""}`), true)) } as unknown as Navigation.Shape),
+    Layer.succeed(Navigation, {
+      open: (app: string, route?: string) => sync(() => (log(`navigation.open:${app}:${route ?? ""}`), true)),
+      get: () => sync(() => ({ app: world.place.app, places: world.place.app === "" ? [] : [{ ...world.place, inner: false }] })),
+    } as unknown as Navigation.Shape),
   )
   return {
     calls, world, sent: () => sent, platform,

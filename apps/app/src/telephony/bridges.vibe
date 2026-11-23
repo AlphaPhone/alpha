@@ -12,7 +12,7 @@ import { Native } from "../platform/native.vibe"
 export const TELEPHONY_PLUGIN = "AlphaTelephony"
 /** The image's address book plugin, which also resolves display-only names for numbers on screen. */
 export const CONTACTS_PLUGIN = "AlphaContacts"
-/** The upstream journal that holds reviewed sends and the deletion window. */
+/** The upstream reserve/finish journal (`ElizaActionJournal`) that holds reviewed sends and the deletion window; not `AlphaActionJournal`, the agent device-execution journal. */
 export const JOURNAL_PLUGIN = "ElizaActionJournal"
 /** Telecom's call-state reading for the emergency gate. */
 export const CALL_STATE_PLUGIN = "AlphaCallState"

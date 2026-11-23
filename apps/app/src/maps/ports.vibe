@@ -48,8 +48,3 @@ export service MapsShell {
   /** Leave the view in front, as Back does. */
   back(): void!!
 }
-
-/** The owner's Location for Alpha switch under Settings → Privacy, which Settings fills; Maps reads no chat location of its own. */
-export service MapsPreferences {
-  readonly locationForAlpha: Stream.Stream<boolean>
-}

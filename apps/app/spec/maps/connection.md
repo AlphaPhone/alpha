@@ -184,8 +184,9 @@ pure def sometimesResumedAfterPause(s: MapsConnection): bool = s.phase == Instal
 
 The owner reads "Maps request limit reached. Try again in 5 minutes." or "You
 have used your Maps allowance for this period. It resets in 3 days."; with no
-usable wait the text says "Try again later." and names no reset. The wait is
-data; the sentence around it is Alpha's, never the provider's.
+usable wait the text says "Try again later." and names no reset. An allowance
+reset is counted to the instant Cloud names for it, else to the wait it names.
+The wait is data; the sentence around it is Alpha's, never the provider's.
 
 ```quint
 pure val defaultPauseSeconds = 60

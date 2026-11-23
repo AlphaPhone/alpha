@@ -1,6 +1,7 @@
 // spec/calendar/drafts.md, "Story: Turn a note or a scan into an event I review"; spec/calendar/drafts.md, "A note or scan opens a draft only when no editor is open and the owner's slot is empty"
 import type { NoteScheduleDraft } from "@elizaos/plugin-notes/client"
 import { NotesHandoff } from "../notes/origins.vibe"
+import { newId } from "../platform/ids.ts"
 import { Navigation } from "../shell/navigation.vibe"
 import { Notices } from "../shell/notices.vibe"
 import { CalendarDrafts } from "./drafts.vibe"
@@ -85,7 +86,7 @@ export const handoffLayer = Layer.effect(CalendarHandoff, effect {
 
   effect function reviewNote(draft: NoteScheduleDraft) {
     if (draft.kind !== "event") return false
-    const creationId = creationKey(try sync(() => crypto.randomUUID()))
+    const creationId = creationKey(try sync(() => newId()))
     const fields = try newFields(0, creationId)
     const link = draft.origin
     const noteLink = link.version === 2 && link.noteId !== "" && link.noteId.length <= 512 && link.revision.length <= 512
@@ -99,7 +100,7 @@ export const handoffLayer = Layer.effect(CalendarHandoff, effect {
   return {
     reviewNote,
     effect reviewScan(scan: CalendarScan) {
-      const fresh = creationKey(try sync(() => crypto.randomUUID()))
+      const fresh = creationKey(try sync(() => newId()))
       const creationId = creationKey(scan.creationId) || fresh
       const fields = scanFields(scan, deviceZone(), creationId)
       if (fields === undefined) {

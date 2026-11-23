@@ -1,5 +1,6 @@
 // spec/voice/route.md, "A Cloud refusal's limit is a rate limit, a used allowance, a missing plan or a billing refusal, with a wait of one second to a day"; spec/voice/conversation.md, "A busy Cloud is retried quietly at most twice in a row; a long wait pauses voice; own keys and other failures are shown"
 import { boundedWaitSeconds, type LimitKind, type Route } from "../../gen/voice__route.effect.vibe"
+import { limitOf } from "../account/limits.vibe"
 import { NativeRefusal, RefusalData } from "./native.schema.vibe"
 
 /** What a refusal says, by code only: never a provider's text. */
@@ -41,12 +42,16 @@ export function refusalOf(cause: unknown, now: number): RefusalFacts {
   }
 }
 
-/** Which Cloud limit a 429 names, from its short code. */
+/** Which Cloud limit a 429 names, by the account area's reading of its limit code, wait and reset. */
 export function limitKindOf(facts: RefusalFacts): LimitKind {
-  const code = facts.limitCode ?? ""
-  if (code.includes("allowance")) return "AllowanceUsed"
-  if (code.includes("subscription") || code.includes("plan")) return "PlanRequired"
-  if (code.includes("billing") || code.includes("payment")) return "BillingRefused"
+  const limit = limitOf({
+    ...(facts.retryAfterSeconds === undefined ? {} : { retryAfterSeconds: facts.retryAfterSeconds }),
+    ...(facts.limitCode === undefined ? {} : { limitCode: facts.limitCode }),
+    ...(facts.resetAt === undefined ? {} : { resetAt: facts.resetAt }),
+  }, 0)
+  if (limit.tag === "SubscriptionRequired") return "PlanRequired"
+  if (limit.tag === "BillingRefused") return "BillingRefused"
+  if (limit.tag === "AllowanceExhausted" || facts.limitCode === "allowance_exhausted") return "AllowanceUsed"
   return "RateLimit"
 }
 

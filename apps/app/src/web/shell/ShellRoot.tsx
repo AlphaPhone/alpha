@@ -38,7 +38,7 @@ import { StandInShade } from "./StandInShade.tsx";
 import { StartupPermissions } from "./StartupPermissions.tsx";
 import { NoticesSlot, ToastRegion } from "./ToastRegion.tsx";
 import type { GestureControls } from "./TileGrid.tsx";
-import { admittedScreens, allScreens, homeMounts, onImage, screenOf, surfacesIn } from "./registry.ts";
+import { admittedScreens, allScreens, homeMounts, onImage, screenOf, surfacesIn, walkthroughMounts } from "./registry.ts";
 import { act } from "./services.ts";
 
 const launcher = (f: (l: Launcher.Shape) => Effect.Effect<void>) => act(Effect.flatMap(Effect.service(Launcher), f));
@@ -117,6 +117,7 @@ export function ShellRoot() {
   const topDialog = nav.layers.filter((layer) => layer.kind === "DialogLayer" || layer.kind === "SheetLayer").length > 0;
 
   const { agenda: Agenda, attention: Attention } = homeMounts;
+  const { account: ReadyAccount } = walkthroughMounts;
 
   return (
     <div
@@ -206,6 +207,7 @@ export function ShellRoot() {
         onNext={(skip) => act(Effect.flatMap(Effect.service(Permissions), (p) => p.next(skip)))}
         onFinish={() => act(Effect.flatMap(Effect.service(Permissions), (p) => p.finish()))}
         onClose={() => act(Effect.flatMap(Effect.service(Permissions), (p) => p.close()))}
+        account={walkthrough.phase === "PhaseReady" ? <ReadyAccount /> : undefined}
       />
       <Surfaces slot="overlay" admitted={admitted} />
     </div>

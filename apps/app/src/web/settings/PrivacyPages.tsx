@@ -1,8 +1,8 @@
-// spec/settings/privacy.md, "Story: Know where my voice goes"; spec/settings/privacy.md, "Story: Pause or turn off listening and see what the listener did"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"
+// spec/settings/privacy.md, "Story: Know where my voice goes"; spec/settings/privacy.md, "Story: Pause or turn off listening and see what the listener did"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/preferences.md, "The open Browser page goes with a chat turn only while Browser page for Alpha is on"
 import { ListChecks } from "lucide-react";
 import type { Facts, SettingsPage } from "../../../gen/settings__facts.ts";
 import type { Preference, Preferences } from "../../../gen/settings__preferences.ts";
-import { asksBefore, sharesLocation } from "../../../gen/settings__preferences.ts";
+import { asksBefore, sharesBrowserPage, sharesLocation } from "../../../gen/settings__preferences.ts";
 import type { ListenerRow, Route, Stop } from "../../../gen/settings__privacy.ts";
 import { micMayBeOn, micOn, voiceRow } from "../../../gen/settings__privacy.ts";
 import { Button, Dialog, DialogContent, DialogTitle } from "../components/ui/index.ts";
@@ -11,6 +11,7 @@ import { ACCESS, LISTENING } from "./words.ts";
 
 const ROUTE: Record<Route, string> = { OnPhone: "On this phone", ViaCloud: "Eliza Cloud", Direct: "Cartesia", RouteUnavailable: "Unavailable" };
 const ASKS_ABOUT = "Web · Camera · Photos · Texter’s number · Text drafts";
+const BROWSER_PAGE = "When you chat with Browser open, Alpha gets the page’s address, title, visible text and links. Never private tabs or sign-in pages. Hosted models can receive it.";
 
 /** The listener row and where speech goes, as Voice reports them. */
 export interface PrivacyState { readonly route: Route; readonly listener: ListenerRow; readonly aosp: boolean }
@@ -67,6 +68,7 @@ export function PrivacyPages({ page, facts, preferences, native, privacy, privac
         <SettingRow label="Permissions" ariaLabel="App permissions" onOpen={onPermissions} />
         <ToggleRow label="Ask before Alpha acts" detail={readable ? ASKS_ABOUT : undefined} on={asksBefore(value, readable)} locked={!readable} onChange={(on) => onPreference("AskBeforeActions", on)} />
         {native && <ToggleRow label="Location for Alpha" detail="Hosted models can receive it." on={sharesLocation(value, readable)} locked={!readable} onChange={(on) => onPreference("AgentLocation", on)} />}
+        <ToggleRow label="Browser page for Alpha" detail={BROWSER_PAGE} on={sharesBrowserPage(value, readable)} locked={!readable} onChange={(on) => onPreference("BrowserPage", on)} />
         {!readable && <SettingRow label="Reset device preferences" destructive onOpen={() => onAskReset(true)} />}
       </Section>
       <Section caption="Voice">

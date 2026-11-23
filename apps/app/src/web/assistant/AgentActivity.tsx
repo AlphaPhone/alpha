@@ -10,7 +10,7 @@ import { DeviceReview, type HistoryItem, type HistoryOutcome } from "../../assis
 import type { ProposalCard } from "../../assistant/transcript.vibe";
 import { Alert, Button, Card, CardFooter, CardTitle, EmptyState, ListRow, ScrollArea, Separator } from "../components/ui/index.ts";
 import { ActionCardView } from "./ActionCardView.tsx";
-import { emergencyNow, restartStream } from "./services.ts";
+import { emergencyNow, restartBusyStream, restartStream } from "./services.ts";
 import { act, perform, useServiceStream } from "../shell/services.ts";
 
 /** Where Agent activity leaves to. */
@@ -45,6 +45,7 @@ export function AgentActivity({ onBack }: AgentActivityProps) {
   const pending = useServiceStream(`assistant/activity/pending/${round}`,
     once(Effect.flatMap(Effect.service(DeviceReview), (review) => Effect.map(review.pending(), (found) => found.ok ? found.cards : undefined))), loading);
   const restartOffered = useServiceStream("assistant/restart", restartStream, false);
+  const restartBusy = useServiceStream("assistant/restart-busy", restartBusyStream, false);
   const again = () => setRound((n) => n + 1);
   const openConversation = (id: string | null) => {
     act(Effect.flatMap(Effect.service(Composer), (composer) => composer.open(id, false)));
@@ -65,7 +66,7 @@ export function AgentActivity({ onBack }: AgentActivityProps) {
           {restartOffered && (
             <Alert className="flex items-center justify-between gap-2" role="status">
               <span><span className="font-medium">{copy.restartNeeded}.</span> {copy.restartExplained}</span>
-              <Button size="sm" onClick={() => perform(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart())).finally(again)}>Restart</Button>
+              <Button size="sm" disabled={restartBusy} onClick={() => perform(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart())).finally(again)}>{copy.restartAction}</Button>
             </Alert>
           )}
           <Button variant="outline" className="justify-start" onClick={() => openConversation(null)}><MessageSquarePlus aria-hidden className="size-4" />New conversation</Button>

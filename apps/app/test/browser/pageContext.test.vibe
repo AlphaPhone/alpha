@@ -1,0 +1,292 @@
+// spec/browser/pageContext.md, "Story: Let Alpha see the page I have open"; spec/browser/pageContext.md, "Story: Open a link of the page I asked about"; spec/browser/pageContext.md, "Story: Know how my agent reads the page"
+import { assert, it } from "@effect/vitest"
+import { BrowserAgent } from "../../src/browser/agent.vibe"
+import { NO_PAGE_READ, NO_VIEW_COMMAND, PAGE_LINK_UNREVIEWED, refusalText } from "../../src/browser/messages.ts"
+import { operationPorts } from "../../src/browser/operations.vibe"
+import { admittedPage, agentPageTitle, bareAddress, boundPage, pageAddress } from "../../src/browser/page-context.ts"
+import { BrowserPageContext } from "../../src/browser/pageContext.vibe"
+import { BrowserCallFacts } from "../../src/browser/ports.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { callsTo, fakeHost, loadPage, report, sessionOf, settledTabs, shownBrowser } from "./fakes.vibe"
+
+const story = {
+  url: "https://news.example/story?id=1",
+  title: "A story",
+  text: "A story\nIt happened.",
+  truncated: false,
+  links: [{ text: "The second story of the day", url: "https://news.example/second" }],
+}
+const call = (proposalId: string) => ({ proposalId, operationId: `${proposalId}-op`, attemptId: 1 })
+
+effect function observing(agent: BrowserAgent.Shape) {
+  const selected = try agent.selection()
+  return { view: "browser", sensitive: false, ...(selected === undefined ? {} : { selectedObject: selected }) }
+}
+
+// spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
+it.live("a message sent on the page Browser shows carries that page, bound to the observed tab and revision", () => effect {
+  const fake = try fakeHost({ answers: { pageContext: () => story } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      const id = try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story?id=1#top", "4", 1)
+      const observation = try observing(agent)
+      const sent = try context.forTurn(observation, true)
+      try Effect.try(() => assert.deepStrictEqual({
+        asked: (try callsTo(fake.calls, "pageContext")).map((c) => [c.args.id, c.args.url, c.args.navigation]),
+        sent: sent === undefined ? undefined : { ...sent, capturedAt: typeof sent.capturedAt === "number" },
+        frozen: sent !== undefined && Object.isFrozen(sent),
+      }, {
+        asked: [[id, "https://news.example/story?id=1#top", "4"]],
+        sent: {
+          tabId: observation.selectedObject?.id, revision: observation.selectedObject?.revision, capturedAt: true,
+          url: "https://news.example/story?id=1", title: "A story", text: "A story\nIt happened.", truncated: false,
+          links: [{ text: "The second story of the day", url: "https://news.example/second" }],
+        },
+        frozen: true,
+      }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "A page is read only for a message observed on the page Browser shows now, a settled public HTTPS page of a normal tab, with Browser page for Alpha on and a peer that takes it"
+it.live("nothing is read with the setting off, for a peer that does not take it, off Browser, for another revision or a private tab", () => effect {
+  const fake = try fakeHost({ answers: { pageContext: () => story } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      const session = try sessionOf(fake.calls)
+      try loadPage(tabs, fake.events, session, "https://news.example/story", "1", 1)
+      const observation = try observing(agent)
+      const selected = observation.selectedObject
+      const results: unknown[] = []
+      try Ref.set(fake.sharing, false)
+      results.push(try context.forTurn(observation, true))
+      try Ref.set(fake.sharing, true)
+      results.push(try context.forTurn(observation, false))
+      results.push(try context.forTurn({ ...observation, view: "notes" }, true))
+      results.push(try context.forTurn({ ...observation, sensitive: true }, true))
+      results.push(try context.forTurn({ view: "browser", sensitive: false }, true))
+      if (selected !== undefined) results.push(try context.forTurn({ ...observation, selectedObject: { ...selected, revision: "99" } }, true))
+      if (selected !== undefined) results.push(try context.forTurn({ ...observation, selectedObject: { ...selected, id: `another-session:${selected.id.split(":")[1]}` } }, true))
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
+      results.push(try context.forTurn(observation, true))
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
+      results.push(try context.forTurn(observation, true))
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+      try tabs.dispatch({ type: "openTab", id: "bprivate", profile: "Private" })
+      try loadPage(tabs, fake.events, session, "https://secret.example/", "1", 1)
+      results.push(try context.forTurn(try observing(agent), true))
+      try tabs.dispatch({ type: "openTab", id: "bplain", profile: "Normal" })
+      try loadPage(tabs, fake.events, session, "http://plain.example/", "1", 1)
+      results.push(try context.forTurn(try observing(agent), true))
+      try Effect.try(() => assert.deepStrictEqual({
+        results: results.map((r) => r === undefined),
+        reads: (try callsTo(fake.calls, "pageContext")).length,
+      }, { results: results.map(() => true), reads: 0 }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "A withheld page tells the agent only its address and title, and a sensitive page's address loses its query"
+it.live("a withheld page sends only its address and title, a sensitive one without its query, and a malformed read counts as unreadable", () => effect {
+  let reply: unknown = undefined
+  const fake = try fakeHost({ answers: { pageContext: () => reply } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://bank.example/statements?account=12345678", "1", 1)
+      const observation = try observing(agent)
+      const strip = (page: { readonly capturedAt: number } | undefined) => page === undefined ? undefined : { ...page, capturedAt: 0, tabId: "", revision: "" }
+      reply = { url: "https://bank.example/", title: "Bank", withheld: "sensitive-page" }
+      const sensitive = strip(try context.forTurn(observation, true))
+      reply = { url: "https://bank.example/statements?account=12345678", title: "Statements", withheld: "unreadable" }
+      const unreadable = strip(try context.forTurn(observation, true))
+      reply = { text: "no address", truncated: "yes" }
+      const malformed = strip(try context.forTurn(observation, true))
+      reply = { ...story, url: "https://bank.example/statements?account=12345678", text: "bell\u0007 inside" }
+      const refusedByContract = strip(try context.forTurn(observation, true))
+      reply = new Error("Private tabs are never shared")
+      const refused = try context.forTurn(observation, true)
+      const base = { tabId: "", revision: "", capturedAt: 0 }
+      try Effect.try(() => assert.deepStrictEqual({ sensitive, unreadable, malformed, refusedByContract, refused, worded: refusalText("Private tabs are never shared") }, {
+        sensitive: { ...base, url: "https://bank.example/statements", title: "Bank", withheld: "sensitive-page" },
+        unreadable: { ...base, url: "https://bank.example/statements?account=12345678", title: "Statements", withheld: "unreadable" },
+        malformed: { ...base, url: "https://bank.example/statements?account=12345678", title: "bank.example", withheld: "unreadable" },
+        refusedByContract: { ...base, url: "https://bank.example/statements?account=12345678", title: "A story", withheld: "unreadable" },
+        refused: undefined,
+        worded: "Private tabs aren’t shared with Alpha.",
+      }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "A message waits at most 1.2 seconds for its page, a refused, slow, changed or invalid read sends it without the page, and only the latest message's read counts"
+it.live("a slow read never holds the message past its wait, and a page that changed or a setting turned off during the read is dropped", () => effect {
+  let mode = "slow"
+  const sharing = try Ref.make(true)
+  const fake = try fakeHost({
+    sharing,
+    answers: {
+      pageContext: (args) => mode === "slow" ? Effect.never
+        : mode === "off" ? Effect.as(Ref.set(sharing, false), story)
+        : Effect.as(report(fake.events, String(args.session), { id: args.id, sequence: 2, navigation: "2", url: "https://news.example/next", title: "Next", committed: true }), story),
+    },
+  })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story", "1", 1)
+      const observation = try observing(agent)
+      const started = try Clock.currentTimeMillis
+      const slow = try context.forTurn(observation, true)
+      const waited = (try Clock.currentTimeMillis) - started
+      const afterSlow = (try Stream.runHead(context.changes))
+      mode = "off"
+      const turnedOff = try context.forTurn(observation, true)
+      try Ref.set(sharing, true)
+      mode = "moved"
+      const moved = try context.forTurn(observation, true)
+      try Effect.try(() => assert.deepStrictEqual({
+        slow, withinWait: waited < 2000, stage: afterSlow._tag === "Some" ? afterSlow.value.stage : "none", turnedOff, moved,
+        carriedAfterDrop: try context.carried("https://news.example/second"),
+      }, { slow: undefined, withinWait: true, stage: "Withdrawn", turnedOff: undefined, moved: undefined, carriedAfterDrop: false }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
+it.live("an exact link of the page the message carried gets a card, never opens unreviewed, and opens once approved", () => effect {
+  const fake = try fakeHost({ answers: { pageContext: () => story } })
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const context = try BrowserPageContext
+      const ports = try operationPorts
+      try settledTabs(tabs)
+      try loadPage(tabs, fake.events, try sessionOf(fake.calls), "https://news.example/story", "1", 1)
+      const words = "Open the second story."
+      const link = { type: "browser_navigate", url: "https://news.example/second" }
+      const elsewhere = { type: "browser_navigate", url: "https://evil.example/" }
+      const before = ports.target(link, words).tag
+      try context.forTurn(try observing(agent), true)
+      const targets = [ports.target(link, words).tag, ports.target(elsewhere, words).tag]
+      const unreviewed = try promise(() => ports.execute(link, call("unreviewed")))
+      const navigatedBefore = (try callsTo(fake.calls, "navigate")).map((c) => c.args.url)
+      const reviewedPorts = try Effect.provideService(operationPorts, BrowserCallFacts, { of: () => succeed({ reviewed: true, ownerText: words }) })
+      const reviewed = try promise(() => reviewedPorts.execute(link, call("reviewed")))
+      try Effect.try(() => assert.deepStrictEqual({
+        before, targets, unreviewed, reviewed,
+        openedUnreviewed: navigatedBefore.includes("https://news.example/second"),
+        openedReviewed: (try callsTo(fake.calls, "navigate")).map((c) => c.args.url).includes("https://news.example/second"),
+      }, {
+        before: "NoTarget",
+        targets: ["ContactTarget", "NoTarget"],
+        unreviewed: { kind: "refused", code: "not_started", result: { message: PAGE_LINK_UNREVIEWED } },
+        reviewed: { kind: "applied" },
+        openedUnreviewed: false,
+        openedReviewed: true,
+      }))
+    }
+  })
+})
+
+// spec/browser/agent.md, "The open creates its tab without selecting it, the journal's receipt names that tab, and the tab is shown only after the receipt was attempted and only while the same foreground is current"
+it.live("an approved open loads its tab at once and brings Browser forward only when the receipt presents it", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const ports = try operationPorts
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
+      try settledTabs(tabs)
+      const open = { type: "browser_navigate", url: "https://example.test/", newTab: true }
+      const applied = try promise(() => ports.execute(open, call("open")))
+      try sleep("30 millis")
+      const shownBefore = (try Ref.get(fake.opened)).filter((app) => app === "browser").length
+      ports.present(open, call("open"))
+      try sleep("30 millis")
+      const shownAfter = (try Ref.get(fake.opened)).filter((app) => app === "browser").length
+      ports.present(open, call("open"))
+      try sleep("30 millis")
+      try Effect.try(() => assert.deepStrictEqual({
+        applied,
+        loaded: (try callsTo(fake.calls, "navigate")).map((c) => c.args.url),
+        shownBefore,
+        shownOnce: [shownAfter, (try Ref.get(fake.opened)).filter((app) => app === "browser").length],
+      }, { applied: { kind: "applied" }, loaded: ["https://example.test/"], shownBefore: 0, shownOnce: [1, 1] }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"
+it.live("a page-text request from the agent is refused with where the page comes from, and another interaction names Browser's commands", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      try settledTabs(tabs)
+      try Effect.try(() => assert.deepStrictEqual({
+        text: try agent.interact("get-text", {}, undefined),
+        click: try agent.interact("click", {}, undefined),
+        reads: (try callsTo(fake.calls, "pageContext")).length,
+      }, {
+        text: { ok: false, code: "UNSUPPORTED", message: NO_PAGE_READ },
+        click: { ok: false, code: "UNSUPPORTED", message: NO_VIEW_COMMAND },
+        reads: 0,
+      }))
+    }
+  })
+})
+
+// spec/browser/pageContext.md, "The page is bounded and plain: HTTPS addresses without credentials or fragment, one-line title and link words, at most 6,000 characters of text and 16 KB in all"
+it("the page the agent sees is HTTPS without credentials or fragment, with a one-line title and bounded plain text", () => {
+  const head = { tabId: "s:b1", revision: "2", url: "https://example.com/a", title: "A", capturedAt: 1 }
+  assert.deepStrictEqual({
+    address: pageAddress("https://example.com/a?b=1#c"),
+    refused: ["http://example.com/", "https://u:p@example.com/", "javascript:alert(1)", "about:blank", "", undefined, `https://example.com/${"a".repeat(2100)}`].map(pageAddress),
+    bare: bareAddress("https://example.com/login?token=x"),
+    title: agentPageTitle("  Two\nlines\u0007 here "),
+    longTitle: agentPageTitle("t".repeat(400)).length,
+    noTitle: agentPageTitle(undefined),
+    fits: admittedPage({ ...head, text: "a".repeat(6000), truncated: true }) !== undefined,
+    tooLong: admittedPage({ ...head, text: "a".repeat(6001), truncated: true }),
+    tooManyLinks: admittedPage({ ...head, text: "", truncated: false, links: Array.from({ length: 21 }, (_, i) => ({ text: `Link ${i}`, url: `https://example.com/${i}` })) }),
+    emptyLinkWords: admittedPage({ ...head, text: "", truncated: false, links: [{ text: " ", url: "https://example.com/x" }] }),
+    insecureLink: admittedPage({ ...head, text: "", truncated: false, links: [{ text: "Link", url: "http://example.com/x" }] }),
+    withheldWithText: admittedPage({ ...head, withheld: "unreadable", text: "leak" }),
+    badTab: admittedPage({ ...head, tabId: " spaced", text: "", truncated: false }),
+    tooBig: admittedPage({ ...head, text: "\u{1F600}".repeat(3000), truncated: false, selection: "\u{1F600}".repeat(500), links: Array.from({ length: 20 }, (_, i) => ({ text: "\u{1F600}".repeat(60), url: `https://example.com/${i}` })) }),
+    fallback: boundPage({ text: "x\u0000y", truncated: false }, { tabId: "s:b1", revision: "2", capturedAt: 1, address: "https://example.com/a", title: "A" }),
+  }, {
+    address: "https://example.com/a?b=1",
+    refused: [undefined, undefined, undefined, undefined, undefined, undefined, undefined],
+    bare: "https://example.com/login",
+    title: "Two lines here",
+    longTitle: 300,
+    noTitle: "",
+    fits: true,
+    tooLong: undefined,
+    tooManyLinks: undefined,
+    emptyLinkWords: undefined,
+    insecureLink: undefined,
+    withheldWithText: undefined,
+    badTab: undefined,
+    tooBig: undefined,
+    fallback: { ...head, withheld: "unreadable" },
+  })
+})

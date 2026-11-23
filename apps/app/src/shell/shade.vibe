@@ -10,6 +10,8 @@ import { Notices } from "./notices.vibe"
 export service Shade {
   /** Home's notifications control or a pull on empty Home. */
   pull(): void!!
+  /** Android's notification settings for Alpha's own notices; a build without Android has none to open. */
+  settings(): void!!
 }
 
 const REPLIES: Readonly<Record<string, ShadeReply>> = {
@@ -70,6 +72,10 @@ export const shadeLive = Layer.effect(Shade, effect {
       if (after === undefined || !after.asking || after.ticket === before.ticket) return
       fork.in(scope) ask(after.ticket)
       fork.in(scope) waitFor(after.ticket)
+    },
+    effect settings() {
+      if (build.info.variant === "browser") return
+      native.invoke("AlphaDevice", "openSettings", { page: "notifications" }) catch () => undefined
     },
   }
 })

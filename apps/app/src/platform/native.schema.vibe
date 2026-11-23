@@ -126,3 +126,40 @@ export schema AssistantInvocation { readonly assistant: boolean; readonly invoca
 
 /** `DailyApps.closeAssistant`: whether the assistant surface was the page's host and is now closing. */
 export schema AssistantClosed { readonly closed: boolean }
+
+/** One visible link of the open Browser page: its words and its public HTTPS address. */
+export schema PageLink { readonly text: string; readonly url: string }
+
+/** `AlphaBrowser.pageContext` with the page read: its address, one-line title, visible text, whether text was cut, the owner's selection and up to 20 links. */
+export const PageContextRead = Schema.Struct({
+  url: Schema.String,
+  title: Schema.String,
+  text: Schema.String.check(Schema.isMaxLength(6000)),
+  truncated: Schema.Boolean,
+  selection: Schema.optionalKey(Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1000))),
+  links: Schema.optionalKey(Schema.Array(PageLink).check(Schema.isMaxLength(20))),
+})
+
+/** `AlphaBrowser.pageContext` with the text withheld: the address (no query for a sensitive page) and title only. */
+export schema PageContextWithheld { readonly url: string; readonly title: string; readonly withheld: "sensitive-page" | "unreadable" }
+
+/** `AlphaBrowser.pageContext`: the open page for one chat turn, read or withheld. */
+export const PageContextReply = Schema.Union([PageContextRead, PageContextWithheld])
+
+/** Why `AlphaBrowser.pageContext` gave no page, as the code of its refusal; the turn then goes without it. */
+export schema PageContextRefusal = "page-changed" | "private-tab" | "not-public"
+
+/** `Agent.keyguard` and its `keyguardChanged` event: whether Android's keyguard shows now, consuming nothing; Android counts an unknown keyguard as locked. */
+export schema Keyguard { readonly locked: boolean }
+
+/** `ElizaSecureStore.get`: the slot's value, absent or null when the slot is empty. */
+export schema SecureSlotRead { readonly value?: Schema.NullOr(Schema.String) }
+
+/** `ElizaSecureStore.compareAndExchange`: whether the slot still held the expected value and now holds the new one. */
+export schema SecureSlotExchange { readonly exchanged: boolean }
+
+/** `AlphaConnection.secureRead`: what the earlier Alpha kept in one of its encrypted slots, null when it kept nothing there. */
+export schema LegacySlotRead { readonly value?: Schema.NullOr(Schema.String) }
+
+/** `AlphaConnection.secureCompareExchange`: whether the earlier Alpha's slot held the expected value and was replaced. */
+export schema LegacySlotExchange { readonly status: "saved" | "conflict" }

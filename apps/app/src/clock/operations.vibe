@@ -1,10 +1,13 @@
-// spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/reminderReads.md, "Story: Let a workflow read today's reminders only as I reviewed"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderJournal.md, "Story: Never create or change a reminder twice"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/reminderPage.md, "Story: Let the agent change a reminder I name only once I have it open"
+// spec/clock/agentReview.md, "Story: Let the agent ask Clock only with my approval on the phone"; spec/clock/agentReview.md, "Story: Be offered only the Clock and reminder requests this phone can carry out"; spec/clock/reminderReads.md, "Story: Let a workflow read today's reminders only as I reviewed"; spec/clock/reminders.md, "Story: Change a reminder exactly once"; spec/clock/reminderJournal.md, "Story: Never create or change a reminder twice"; spec/clock/deletions.md, "Story: Undo a reviewed deletion in time"; spec/clock/reminderPage.md, "Story: Let the agent change a reminder I name only once I have it open"
 import { NOT_DISPATCHED, type ExecutorCall } from "@elizaos/agent/client"
 import { readOperation, readResult, type DeviceOperation } from "@elizaos/agent/operations"
 import type { HandoffStatus } from "../../gen/clock__vocabulary.ts"
+import { advertises, isHandoff, reviewClassOf, type ClockOffer, type ClockOperationKind, type ClockSupport } from "../../gen/clock__agentReview.ts"
+import type { Op } from "../../gen/assistant__review.effect.vibe"
 import { AssistantHost, type AgentIdentity } from "../assistant/host.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { Native } from "../platform/native.vibe"
+import { Build } from "../platform/build.vibe"
 import { describeDays, wall } from "../web/clock/text.ts"
 import { ClockReview } from "./agent-review.vibe"
 import { AgentReminderReceipt, DeletionReviewAnswer, JournalEntryReply, ReminderListing, ReminderTarget, SurfaceInfo } from "./native.schema.vibe"
@@ -47,6 +50,53 @@ export function ownedOperation(operation: unknown): Owned | undefined {
   const op = readOperation(operation)?.operation
   if (op === undefined) return undefined
   return op.type === "clock_handoff" || op.type === DAY_READ || op.type === NAMED || (REMINDER_TYPES as readonly string[]).includes(op.type) ? op as Owned : undefined
+}
+
+/** What kind of Clock operation `op` is, as the review and the history reason about it. */
+export function operationKindOf(op: Owned): ClockOperationKind {
+  if (op.type === "clock_handoff") return "ClockRequest"
+  if (op.type === DAY_READ) return "DayRead"
+  if (op.type === NAMED) return "NamedReminder"
+  return op.type === "reminder_read_selected" ? "ReminderRead" : "ReminderChange"
+}
+
+const REVIEW_OP: Readonly<Record<ReturnType<typeof reviewClassOf>, Op>> = { ReminderWrite: "CreateReminder", ScheduleRead: "CalendarRead" }
+
+/** The assistant's review class of a Clock operation: every Clock request and reminder change a reminder write, every read a schedule read. */
+export function reviewOpOf(op: Owned): Op {
+  return REVIEW_OP[reviewClassOf(operationKindOf(op))]
+}
+
+const OFFERS: ReadonlyArray<readonly [ClockOffer, string]> = [
+  ["OfferHandoff", "clock.handoff.v1"],
+  ["OfferRepeatDays", "clock.handoff.v2"],
+  ["OfferRecordV2", "reminders.local-record.v2"],
+  ["OfferRecordV1", "reminders.local-record.v1"],
+  ["OfferCreate", "reminders.create.v1"],
+]
+
+/** Of the capabilities the agent `offered`, those Clock advertises under `support`. */
+export function advertisedBy(support: Omit<ClockSupport, "recordV2Offered">, offered: readonly string[]): string[] {
+  const full: ClockSupport = { ...support, recordV2Offered: offered.includes("reminders.local-record.v2") }
+  return OFFERS.filter(([offer, name]) => advertises(full, offer, offered.includes(name))).map(([, name]) => name)
+}
+
+/** What Clock advertises to the agent in `x-eliza-device-capabilities`, for the shell to merge into DeviceCapabilities: the Clock handoff where Android Clock is, its repeat days where Clock carries them, and one reminder version and reminder creation where the phone keeps reminders. */
+export const clockCapabilities = effect {
+  const native = try Native
+  const build = (try Build).info
+  return {
+    effect advertise(offered: readonly string[]) {
+      const store = build.variant !== "browser" && (try native.available(DAILY))
+      let repeatDays = false
+      if (store && offered.includes("clock.handoff.v2")) {
+        const info = Effect.provideService(call(DAILY, "surfaceInfo", SurfaceInfo), Native, native) catch () => undefined
+        const version = info?.clockRepeatDaysVersion
+        repeatDays = typeof version === "number" && Number.isInteger(version) && version >= 1
+      }
+      return advertisedBy({ handler: store, store, repeatDays }, offered) as readonly string[]
+    },
+  }
 }
 
 function sameTarget(current: Target, approved: Target): boolean {
@@ -255,7 +305,14 @@ export const operationPorts = effect {
       const op = ownedOperation(operation)
       return op === undefined ? { title: "Action", detail: "" } : describeOwned(op)
     },
-    classOf: (operation) => ownedOperation(operation)?.type === DAY_READ ? "NotesRead" : "CreateReminder",
+    classOf: (operation) => {
+      const op = ownedOperation(operation)
+      return op === undefined ? "CreateReminder" : reviewOpOf(op)
+    },
+    handoff: (operation) => {
+      const op = ownedOperation(operation)
+      return op === undefined || isHandoff(operationKindOf(op))
+    },
     target: () => ({ tag: "NoTarget" }),
     summarize: (operation, result) => {
       const op = ownedOperation(operation)

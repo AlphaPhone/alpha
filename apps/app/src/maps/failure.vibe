@@ -30,13 +30,19 @@ function limitText(error: CloudUnavailable): string {
   return waitNamed(seconds) ? `Maps request limit reached. Try again in ${waitText(seconds)}.` : "Maps request limit reached. Try again later."
 }
 
-function allowanceText(error: CloudUnavailable): string {
-  const seconds = Math.ceil(error.retryAfter ?? 0)
+/** Seconds until the allowance resets: the reset instant Cloud named, else the wait it named; 0 when it named neither. */
+export function resetSeconds(error: CloudUnavailable, now: number): number {
+  if (error.resetAt !== undefined && Number.isFinite(error.resetAt) && error.resetAt > now) return Math.ceil((error.resetAt - now) / 1000)
+  return Math.ceil(error.retryAfter ?? 0)
+}
+
+function allowanceText(error: CloudUnavailable, now: number): string {
+  const seconds = resetSeconds(error, now)
   return resetNamed(seconds) ? `You have used your Maps allowance for this period. It resets in ${waitText(seconds)}.` : "You have used your Maps allowance for this period."
 }
 
-/** A Cloud refusal as the owner reads it: sign-in, plan and outages kept apart, never the provider's own text, no automatic retry. */
-export function cloudFailure(error: CloudUnavailable | CloudSignedOut): MapsFailure {
+/** A Cloud refusal as the owner reads it at `now` (epoch milliseconds): sign-in, plan and outages kept apart, never the provider's own text, no automatic retry. */
+export function cloudFailure(error: CloudUnavailable | CloudSignedOut, now: number): MapsFailure {
   if (error._tag === "CloudSignedOut") return failure("unauthorized", "Sign in to Cloud to use Maps.")
   const code = error.code ?? ""
   if (code === "maps_request_cancelled") return failure("cancelled", "Maps request cancelled.")
@@ -54,7 +60,7 @@ export function cloudFailure(error: CloudUnavailable | CloudSignedOut): MapsFail
     case 422: return failure("unsupported", code === "no_route" ? "No route is available between these places."
       : code === "unsupported_mode" ? "This travel mode is not available from Cloud Maps." : "This location is outside Cloud Maps coverage.")
     case 429: return code === "allowance_exhausted" || code === "maps_allowance_exhausted"
-      ? failure("rate-limited", allowanceText(error))
+      ? failure("rate-limited", allowanceText(error, now))
       : failure("rate-limited", limitText(error))
     case 502: return failure("invalid-response", "Cloud Maps could not complete this request.")
     case 503: return code === "maps_not_configured" ? failure("unconfigured", "Cloud Maps is not available yet.")

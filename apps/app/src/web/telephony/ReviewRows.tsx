@@ -4,11 +4,10 @@ import { initial, runIdOf } from "../../../gen/telephony__actions.ts";
 import type { ReviewDetails } from "../../telephony/actions.vibe";
 import { TelephonyActions } from "../../telephony/actions.vibe";
 import { ReviewRowsView } from "./ReviewRowsView.tsx";
-import { runtime, type TelephonyRuntime } from "./runtime.ts";
+import { now } from "../shell/services.ts";
+import { runtime } from "./runtime.ts";
 
 export interface ReviewRowsProps {
-  /** The runtime the review runs on. */
-  runtime?: TelephonyRuntime;
   /** The review details the card read when the run started choosing. */
   details?: ReviewDetails;
 }
@@ -17,13 +16,13 @@ export interface ReviewRowsProps {
  * The review rows the assistant's approval card embeds for a telephony action.
  * @model spec/telephony/actions.md
  */
-export function ReviewRows({ runtime: on = runtime, details }: ReviewRowsProps) {
-  const { state = initial, send } = useMachine(on);
+export function ReviewRows({ details }: ReviewRowsProps) {
+  const { state = initial, send } = useMachine(runtime);
   const runId = runIdOf(state.run);
   return (
     <ReviewRowsView
       actions={state}
-      details={details ?? on.runSync(TelephonyActions.use((a) => a.review()))}
+      details={details ?? now(TelephonyActions.use((a) => a.review()), {})}
       onChoose={(candidateId) => send({ type: "candidateChosen", runId, candidateId }, "Owner")}
       onDismiss={() => send({ type: "reviewDismissed", runId }, "Owner")}
     />

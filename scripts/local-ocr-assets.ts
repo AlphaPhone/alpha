@@ -3,9 +3,9 @@ import {createRequire} from 'node:module';
 import {dirname,join} from 'node:path';
 import type {Plugin} from 'vite';
 
-/** Ship every supported LSTM core locally: no worker, model or WASM CDN fallback. */
+/** Ship every supported LSTM core locally under /ocr/, resolved from the app package's own dependencies: no worker, model or WASM CDN fallback. */
 export function localOcrAssets():Plugin {
-  const require=createRequire(import.meta.url);
+  const require=createRequire(new URL('../apps/app/package.json',import.meta.url));
   const files=new Map<string,{source:Buffer;type:string}>();
   const add=(name:string,pkg:string,path:string,type:string)=>files.set(name,{source:readFileSync(join(dirname(require.resolve(pkg+'/package.json')),path)),type});
   const initialize=()=>{

@@ -31,13 +31,13 @@ type ContactsAnswer = ContactsPage({ contacts: List[ContactRow], hasMore: bool, 
 type ContactsNotice = NoContactsNotice | ChangedSinceShown | ContactGone | NotWritten | OutcomeUnknown | DraftRefused | SystemEditorFailed
 type Contacts = {
   shown: bool, epoch: int, loading: bool, explicitRead: bool, readable: bool, writable: bool, failed: bool,
-  rows: List[ContactRow], rowsQuery: str, query: str, more: bool, limit: int,
+  rows: List[ContactRow], rowsQuery: str, query: str, searching: bool, more: bool, limit: int,
   openId: str, detail: Detail, detailTicket: int, editor: Editor, confirming: bool,
   gate: Gate, writeKind: WriteKind, lastWrite: LastWrite, chip: str, notice: ContactsNotice
 }
 pure val initial: Contacts = {
   shown: false, epoch: 0, loading: false, explicitRead: false, readable: false, writable: false, failed: false,
-  rows: List(), rowsQuery: "", query: "", more: false, limit: 50,
+  rows: List(), rowsQuery: "", query: "", searching: false, more: false, limit: 50,
   openId: "", detail: NoDetail, detailTicket: 0, editor: EditorClosed, confirming: false,
   gate: WriteIdle, writeKind: NoWrite, lastWrite: NothingWritten, chip: "", notice: NoContactsNotice
 }
@@ -250,8 +250,9 @@ pure def sometimesAlphaFilteredContacts(c: Contacts): bool = c.chip != "" and vi
 
 After the comms stage and the open chat, Back closes the editor (an unsaved edit is dropped, as
 Cancel does), then a delete confirmation, then the open contact, then Alpha's chip, then the
-owner's own search. While a save or a delete is in flight Back is held. Only the unfiltered list
-leaves Contacts.
+owner's own search, which empties the query and closes the header's search field together, so no
+empty field is left open. While a save or a delete is in flight Back is held. Only the unfiltered
+list with its search field closed leaves Contacts.
 
 ```quint
 type ContactsBack = ContactsWriteHolds | EditorCloses | DeleteDeclines | ContactCloses | ChipClears | SearchClears | LeavesContacts
@@ -261,10 +262,16 @@ pure def contactsBack(c: Contacts): ContactsBack =
   else if (c.confirming) DeleteDeclines
   else if (c.openId != "") ContactCloses
   else if (c.chip != "") ChipClears
-  else if (c.query != "") SearchClears
+  else if (c.query != "" or c.searching) SearchClears
   else LeavesContacts
+pure def canSearchOpened(c: Contacts): bool = c.shown and c.openId == "" and not(editorOpen(c.editor)) and not(c.searching)
+pure def searchOpened(c: Contacts): Contacts = { ...c, searching: true }
+pure def canSearchClosed(c: Contacts): bool = c.searching
+pure def searchClosed(c: Contacts): Contacts = { ...c, searching: false }
 pure def lawBackLeavesContactsOnlyFromTheWholeList(c: Contacts): bool =
   contactsBack(c) == LeavesContacts implies
-    (c.writeKind == NoWrite and not(editorOpen(c.editor)) and not(c.confirming) and c.openId == "" and c.chip == "" and c.query == "")
+    (c.writeKind == NoWrite and not(editorOpen(c.editor)) and not(c.confirming) and c.openId == "" and c.chip == ""
+      and c.query == "" and not(c.searching))
+pure def lawAClosedSearchLeavesNoEmptyField(c: Contacts): bool = (c.query == "" and c.searching) implies contactsBack(c) == SearchClears
 pure def lawBackNeverInterruptsAWrite(c: Contacts): bool = c.writeKind != NoWrite implies contactsBack(c) == ContactsWriteHolds
 ```

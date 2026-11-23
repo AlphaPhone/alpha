@@ -1,4 +1,4 @@
-// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"
+// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"
 import { Effect } from "effect";
 import { History, MessageSquarePlus, Plus, Search } from "lucide-react";
 import { useState } from "react";
@@ -11,7 +11,7 @@ import { initial as searchStart } from "../../../gen/assistant__search.ts";
 import { useMachine as useSearch } from "../../../gen/assistant__search.react.ts";
 import { ChatAttachments } from "../../assistant/attachments.vibe";
 import { Composer, draftText, draftUnsettled } from "../../assistant/composer.vibe";
-import { copy } from "../../assistant/presentation.vibe";
+import { copy, planDestination } from "../../assistant/presentation.vibe";
 import { DeviceReview } from "../../assistant/review.vibe";
 import { ChatSearch } from "../../assistant/search.vibe";
 import { AssistantFlows } from "../../assistant/flows.vibe";
@@ -22,12 +22,14 @@ import { AgentRestart } from "../../assistant/restart.vibe";
 import { VoiceConversation } from "../../voice/conversation.vibe";
 import { unitsOf } from "../../assistant/units.vibe";
 import { MapsHandoff } from "../../maps/handoff.vibe";
-import { Alert, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Button, ScrollArea } from "../components/ui/index.ts";
+import { newId } from "../../platform/ids.ts";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Button, ScrollArea } from "../components/ui/index.ts";
+import { DictationControl } from "../voice/DictationControl.tsx";
 import { ReviewRows } from "../telephony/ReviewRows.tsx";
 import { ChatSearchPanel } from "./ChatSearchPanel.tsx";
 import { ComposerBar } from "./ComposerBar.tsx";
 import { Transcript } from "./Transcript.tsx";
-import { emergencyNow, filesStream, inferenceOf, ownAddressNow, restartStream, targetStream, transcriptStream } from "./services.ts";
+import { dictationTargetNow, emergencyNow, filesStream, inferenceOf, ownAddressNow, restartBusyStream, restartStream, targetStream, transcriptStream } from "./services.ts";
 import { act, perform, useServiceStream } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 
@@ -56,6 +58,7 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
   const { state: sends = sendsStart } = useSends(runtime);
   const { state: searchState = searchStart } = useSearch(runtime);
   const restartOffered = useServiceStream("assistant/restart", restartStream, false);
+  const restartBusy = useServiceStream("assistant/restart-busy", restartBusyStream, false);
   const searching = searchState.open;
   const text = draftText(drafts);
   const inference = inferenceOf();
@@ -80,9 +83,17 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
   const composer = (use: (c: Composer.Shape) => Effect.Effect<unknown>) => act(Effect.flatMap(Effect.service(Composer), use));
   const mapsComposer = (draft: boolean, editing: boolean) => act(Effect.flatMap(Effect.service(MapsHandoff), (maps) =>
     maps.setComposer({ busy: sends.typing, typing: false, recording: false, draft, editing, hidden: false, sheetOpen: false })));
-  const offerOf = (ordinal: number) => ({ message: ordinal, session: 1, conversation: 1, revision: 0 });
+  const offerOf = (ordinal: number) => ({ message: ordinal, revision: 0 });
   const choose = (value: string, ordinal: number | undefined) => act(Effect.flatMap(Effect.service(Composer), (c) =>
     ordinal === undefined ? c.send(value) : Effect.flatMap(Effect.service(MapsHandoff), (maps) => maps.answerChoice(offerOf(ordinal), c.send(value)))));
+  const plan = (row: Extract<Row, { kind: "agent" }>) => {
+    if (row.plan === undefined) return;
+    const destination = planDestination(row.plan);
+    if (destination.kind === "open") { open(destination.app, destination.route); return; }
+    const at = transcript.rows.findIndex((each) => each.id === row.id);
+    const asked = transcript.rows.slice(0, Math.max(0, at)).reverse().find((each) => each.kind === "user");
+    if (asked?.kind === "user" && text.trim() === "") composer((c) => c.edit(asked.text));
+  };
   const listen = (row: Extract<Row, { kind: "agent" }>) => {
     const text = plainText(row.segments);
     if (text !== "") act(Effect.flatMap(Effect.service(VoiceConversation), (voice) => voice.readAloud(text)));
@@ -100,12 +111,6 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
-      {restartOffered && (
-        <Alert className="mx-3 flex items-center justify-between gap-2" role="status">
-          <span><span className="font-medium">{copy.restartNeeded}.</span> {copy.restartExplained}</span>
-          <Button size="sm" onClick={() => act(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart()))}>Restart</Button>
-        </Alert>
-      )}
       {searching
         ? <ChatSearchPanel />
         : (
@@ -114,13 +119,13 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
               rows={transcript.rows} typing={sends.typing} draftEmpty={text.trim() === ""} canFork={transcript.conversation !== null} cloud={inference.provider}
               emergency={emergencyNow()} ownAddress={ownAddressNow()} busyCard={busyCard} now={now} emptyText={copy.emptyChat}
               onQuote={(quote) => composer((c) => c.aim({ kind: "reply", quote }))}
-              onEdit={(row) => { mapsComposer(text.trim() !== "", true); composer((c) => c.aim({ kind: "edit", messageId: row.id, text: row.text, requestId: crypto.randomUUID() })); }}
+              onEdit={(row) => { mapsComposer(text.trim() !== "", true); composer((c) => c.aim({ kind: "edit", messageId: row.id, text: row.text, requestId: newId() })); }}
               onApprove={approve} onDecline={decline}
               onOpenCard={(card) => open(card.destination ?? "home")}
               onChoose={choose}
               onListen={listen}
               onOpenChange={(row) => open(row.app, row.route)}
-              onPlan={() => open("account")}
+              onPlan={plan}
               onOpenRun={(workflowId, runId) => open("workflows", `${workflowId}/${runId}`)}
               onOpenMap={(card, ordinal) => act(Effect.flatMap(Effect.service(MapsHandoff), (maps) => maps.openCard(card, offerOf(ordinal))))}
               onEmail={onEmail}
@@ -140,6 +145,10 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
         onRemoveFile={(id) => act(Effect.flatMap(Effect.service(ChatAttachments), (attachments) => attachments.remove(id)))}
         onClearTarget={() => { mapsComposer(text.trim() !== "", false); composer((c) => c.aim(undefined)); }}
         onReviewUnsettled={(restore) => { void sendDraft({ type: "reviewUnsettled", restore }); }}
+        dictation={<DictationControl target={dictationTargetNow()} />}
+        restartOffered={restartOffered}
+        restartBusy={restartBusy}
+        onRestart={() => act(Effect.flatMap(Effect.service(AgentRestart), (restart) => restart.restart()))}
       />
     </section>
   );

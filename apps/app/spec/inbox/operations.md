@@ -257,6 +257,20 @@ pure val eValues = Set(
   { recipients: List(), literal: false, subjectOneLine: false, bodyChars: 0 })
 ```
 
+### The phone advertises the agent's local email draft only when the agent offers it
+
+Inbox's part of the phone's device capabilities is the local email draft the agent hands to the
+chat for review (`gmail.local-compose.v1`). It is advertised exactly when the agent offered it,
+and nothing else of the mailbox is advertised.
+
+```quint
+pure val localComposeCapability: str = "gmail.local-compose.v1"
+pure def inboxAdvertised(offered: List[str]): List[str] = if (offered.includes(localComposeCapability)) List(localComposeCapability) else List()
+pure def lawInboxAdvertisesOnlyWhatIsOffered(offered: List[str]): bool = inboxAdvertised(offered).every(c => offered.includes(c))
+pure def lawInboxAdvertisesTheOfferedDraft(offered: List[str]): bool = offered.includes(localComposeCapability) iff inboxAdvertised(offered) != List()
+pure val offeredValues = Set(List(), List("gmail.local-compose.v1"), List("calendar.create.v1"))
+```
+
 ### An answer is adopted only for the same request, kind and review, and an outcome never goes back
 
 A dispatch or receipt answer must name the request, its kind and its review digest; a success of a

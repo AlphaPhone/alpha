@@ -1,6 +1,13 @@
-// spec/telephony/common.md, "Typing filters locally; Alpha's filter shows a chip and survives an emptied field"; spec/telephony/phone.md, "The bar's query filters Recents on the phone, and Alpha's filter returns to Recents"; spec/telephony/messages.md, "The list filters over each conversation's title and snippet with no request"
+// spec/telephony/common.md, "Typing filters locally; Alpha's filter shows a chip and survives an emptied field"; spec/telephony/common.md, "A question for Alpha leaves the bar only once a turn took it"; spec/telephony/drafts.md, "Each subject keeps one request to Alpha, separate from its draft slot"; spec/telephony/phone.md, "The bar's query filters Recents on the phone, and Alpha's filter returns to Recents"; spec/telephony/messages.md, "The list filters over each conversation's title and snippet with no request"
+import { askLeavesField, type AskAnswer, type ListQuery } from "../../gen/telephony__common.effect.vibe"
+import { Machine as CommsMachine } from "../../gen/telephony__comms.effect.vibe"
+import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
+import { Machine as DraftsMachine } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as MessagesMachine, type ThreadRow } from "../../gen/telephony__messages.effect.vibe"
 import { Machine as PhoneMachine, type Recent } from "../../gen/telephony__phone.effect.vibe"
+import { Assistant } from "../assistant/assistant.vibe"
+import { Navigation } from "../shell/navigation.vibe"
+import { ContactsView } from "./contacts.vibe"
 
 /** A question about one person's calls: "calls from Maya", "did Maya call", "has Maya called". */
 const CALLS_WITH = /\b(calls? (from|with|to)|did .+ (call|ring)|ha(s|ve) .+ called)\b/i
@@ -55,3 +62,85 @@ export const listAskLayer = Layer.effect(ListAsk, effect {
     },
   }
 })
+
+/** How long a question waits for the assistant to say whether a turn took it; no answer by then keeps it where it was typed. */
+export const ASK_WAIT_MS = 15000
+
+/** The route that hands `text` to Alpha in the chat on subject `key`. */
+export function askRoute(key: string, text: string): string {
+  return `comms:${key}:ask:${encodeURIComponent(text)}`
+}
+
+/** Whether a list field still holds exactly what the owner typed and asked. */
+export function stillTyped(query: ListQuery, text: string): boolean {
+  return query.tag === "OwnerQuery" && query.typed === text
+}
+
+/**
+ * Opens the chat on subject `key`, addressing Alpha, with `text` for it, and answers whether a turn took it, refused it, or said
+ * nothing in time. Needs the assistant and the shell's Navigation when it runs, on the app's runtime.
+ */
+export effect function askAlpha(key: string, text: string) {
+  const assistant = try Assistant
+  const navigation = try Navigation
+  const comms = try CommsMachine
+  try (comms.send({ type: "alphaOpened" }, "Owner") catch () => undefined)
+  const heard = fork Stream.runHead(Stream.filter(assistant.commsAsks, (ask) => ask.key === key))
+  for (let round = 0; round < 3; round += 1) try Effect.yieldNow
+  const opened = try (navigation.open("assistant", askRoute(key, text)) catch () => false)
+  if (!opened) {
+    try Fiber.interrupt(heard)
+    return "AskNotTaken" as AskAnswer
+  }
+  const said = try timeoutOption(Fiber.join(heard), Duration.millis(ASK_WAIT_MS))
+  try Fiber.interrupt(heard)
+  const ask = Option.getOrUndefined(Option.flatten(said))
+  const answer: AskAnswer = ask === undefined ? "AskUnanswered" : ask.taken ? "AskTaken" : "AskNotTaken"
+  return answer
+}
+
+/**
+ * Enter on a Phone or Messages list sentence: Alpha's own filter answers where it can, with its line; otherwise the question goes
+ * to Alpha in the chat on `key` and leaves the field only once a turn took it and the owner typed nothing else (null then).
+ */
+export effect function askFromList(app: "phone" | "messages", key: string, text: string) {
+  const lists = try ListAsk
+  const phone = try PhoneMachine
+  const messages = try MessagesMachine
+  effect function typedNow() {
+    return app === "phone" ? (try phone.get()).listQuery : (try messages.get()).listQuery
+  }
+  effect function clear() {
+    if (!stillTyped(try typedNow(), text)) return
+    if (app === "phone") try (phone.send({ type: "queryTyped", typed: "" }) catch () => undefined)
+    else try (messages.send({ type: "queryTyped", typed: "" }) catch () => undefined)
+  }
+  const line = try lists.ask(app, text)
+  if (line !== null) {
+    try clear()
+    return line
+  }
+  const answer = try askAlpha(key, text)
+  if (askLeavesField(answer, stillTyped(try typedNow(), text))) try clear()
+  return null
+}
+
+/** Enter on a Contacts list sentence: it goes to Alpha in the chat on `key`, and the query leaves the field only once a turn took it and is unchanged. */
+export effect function askFromContacts(key: string, text: string) {
+  const contacts = try ContactsMachine
+  const view = try ContactsView
+  const answer = try askAlpha(key, text)
+  if (askLeavesField(answer, (try contacts.get()).query === text)) try view.read("", false)
+  return answer
+}
+
+/** Send on the request to Alpha for subject `key`: it leaves the request field only once a turn took it and is still what was sent. */
+export effect function sendRequest(key: string) {
+  const drafts = try DraftsMachine
+  const request = (try drafts.get()).requests.find((r) => r.subject === key)?.request ?? ""
+  if (request.trim() === "") return "AskNotTaken" as AskAnswer
+  const answer = try askAlpha(key, request)
+  const unchanged = (try drafts.get()).requests.find((r) => r.subject === key)?.request === request
+  if (askLeavesField(answer, unchanged)) try (drafts.send({ type: "requestSent", subject: key }, "Owner") catch () => undefined)
+  return answer
+}

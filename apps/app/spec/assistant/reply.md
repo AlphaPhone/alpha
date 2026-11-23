@@ -108,25 +108,52 @@ pure def sometimesAcknowledgedThenAnsweredInFull(r: ReplyView): bool = r.status 
 pure val unitsValues = Set(0, 1, 120, 121, 400)
 ```
 
+### A spoken cue waits 300 ms and is dropped when the reply is ready first; an audible cue finishes before the reply, within 2.5 s
+
+In a voice turn the cue is held for 300 ms before it is spoken, so a reply
+ready within the hold means the cue is never spoken, and a cue still being
+synthesised or fetched when the reply is ready is dropped at once. A cue
+already audible finishes before reply speech starts, but never holds a
+ready reply longer than 2.5 s. Stop, barge-in and leaving the turn cancel
+it at once (#1450).
+
+```quint
+type Cue = CueHeld | CuePreparing | CueAudible | CueEnded | CueDropped
+pure val cueHoldMs = 300
+pure val cueReplyBoundMs = 2500
+pure def cueOnReply(cue: Cue): Cue = if (cue == CueAudible or cue == CueEnded) cue else CueDropped
+pure def replyWaitMs(cue: Cue, audibleLeftMs: int): int =
+  if (cue != CueAudible) 0 else if (audibleLeftMs < 0) 0 else if (audibleLeftMs < cueReplyBoundMs) audibleLeftMs else cueReplyBoundMs
+pure def lawACueNotYetAudibleIsDroppedForAReadyReply(cue: Cue): bool = (cue == CueHeld or cue == CuePreparing) implies cueOnReply(cue) == CueDropped
+pure def lawAnAudibleCueFinishes(cue: Cue): bool = cue == CueAudible implies cueOnReply(cue) == CueAudible
+pure def lawAReadyReplyWaitsAtMostTheBound(cue: Cue, audibleLeftMs: int): bool = replyWaitMs(cue, audibleLeftMs) >= 0 and replyWaitMs(cue, audibleLeftMs) <= cueReplyBoundMs
+pure val audibleLeftMsValues = Set(-1, 0, 800, 2500, 6000)
+```
+
 ## Story: Understand why a reply did not finish
 
-> As the owner, when a reply fails I want Alpha's own words for why, and
-> what it had already said kept unless the failure means nothing was
-> produced, so that I know whether to try again.
+> As the owner, when a reply fails I want Alpha's own words for why, the
+> one thing I can do about it, and how long to wait when the provider said,
+> and what it had already said kept unless the failure means nothing was
+> produced, so that I know whether to try again (elizaOS/eliza#40214, #533).
 
 ### A failure refused before any output replaces the streamed text; any other failure is added after it
 
-The kinds refused before output are insufficient credits, a missing
-capability, no provider, a provider issue, a rate limit and a plan limit
-(billing refused, subscription required, allowance exhausted), which also
-add a Manage plan card. A reply the agent chose not to give removes its
-bubble ("Your agent chose not to reply."). Stop appends "Stopped." and the
-stopped-reply check owns the only notice.
+The reply's `failureKind` names the failure: a refused credential
+(`credential_invalid`), spent credits (`insufficient_credits`), a rate
+limit (`limit_reached`), a provider issue (`provider_issue`), a timeout
+(`timeout`) or a stop (`aborted`), and, from older agents, a missing
+capability, no provider, a rate limit (`rate_limited`) and a plan limit
+(billing refused, subscription required, allowance exhausted). A stop
+reads as an unknown failure. Every kind but a timeout and an unknown one is
+refused before output. A reply the agent chose not to give removes its bubble ("Your agent
+chose not to reply."). Stop appends "Stopped." and the stopped-reply check
+owns the only notice.
 
 ```quint
-type FailureKind = InsufficientCredits | MissingCapability | NoProvider | ProviderIssue | RateLimited | PlanLimit | OtherFailure
-pure def refusedBeforeOutput(kind: FailureKind): bool = kind != OtherFailure
-pure def offersManagePlan(kind: FailureKind): bool = kind == PlanLimit
+type FailureKind = CredentialInvalid | InsufficientCredits | LimitReached | ProviderIssue | TimedOut | MissingCapability | NoProvider | PlanLimit | OtherFailure
+pure def refusedBeforeOutput(kind: FailureKind): bool = kind != OtherFailure and kind != TimedOut
+pure def offersManagePlan(kind: FailureKind): bool = kind == PlanLimit or kind == InsufficientCredits
 pure def canFailReply(r: ReplyView, kind: FailureKind): bool = live(r)
 pure def failReply(r: ReplyView, kind: FailureKind): ReplyView =
   { ...r, status: Interrupted, shown: if (refusedBeforeOutput(kind)) 0 else r.shown, provisional: false }
@@ -136,9 +163,33 @@ pure def canStop(r: ReplyView): bool = live(r)
 pure def stop(r: ReplyView): ReplyView = { ...r, status: Interrupted, stopped: true, provisional: false }
 pure def stepStopKeepsWhatWasShown(before: ReplyView, via: str, after: ReplyView): bool =
   via == "stop" implies after.shown == before.shown
-pure def lawOnlyAPlanLimitOffersManagePlan(kind: FailureKind): bool = offersManagePlan(kind) implies refusedBeforeOutput(kind)
+pure def lawOnlyARefusalOffersManagePlan(kind: FailureKind): bool = offersManagePlan(kind) implies refusedBeforeOutput(kind)
 pure def sometimesStoppedMidReply(r: ReplyView): bool = r.stopped and r.shown >= 1
 pure def sometimesIgnored(r: ReplyView): bool = r.status == Ignored
+```
+
+### A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message
+
+The fix is the reply's `planAction`: `sign-in` offers Sign in, `funding`
+offers Manage plan, and `retry` offers Try again, which puts the message
+back in the composer for the owner to send. A reply that names no fix
+offers Manage plan only for spent credits or a plan limit. A rate-limited
+reply answered live carries `retryAfterMs`, and its notice says "Try again
+in about …" (seconds under 90, then minutes under 90, then hours); a replay
+or the history carries none and says to wait a moment. Nothing is retried,
+purchased or upgraded automatically.
+
+```quint
+type OwnerFix = NoOwnerFix | SignInFix | FundingFix | RetryFix
+pure def fixShown(fix: OwnerFix, kind: FailureKind): bool = fix != NoOwnerFix or offersManagePlan(kind)
+pure def showsWait(kind: FailureKind, waitMs: int): bool = (kind == LimitReached) and waitMs >= 0
+pure def waitSeconds(waitMs: int): int = if (waitMs <= 1000) 1 else (waitMs + 999) / 1000
+pure def resendsOnItsOwn(fix: OwnerFix): bool = false
+pure def lawOnlyARateLimitShowsAWait(kind: FailureKind, waitMs: int): bool = showsWait(kind, waitMs) implies kind == LimitReached
+pure def lawAReplayShowsNoWait(kind: FailureKind): bool = not(showsWait(kind, -1))
+pure def lawAWaitIsAtLeastASecond(waitMs: int): bool = waitMs >= 0 implies waitSeconds(waitMs) >= 1
+pure def lawAFixNeverResendsTheMessage(fix: OwnerFix): bool = not(resendsOnItsOwn(fix))
+pure val waitMsValues = Set(-1, 0, 999, 2400, 120000)
 ```
 
 ### A settled reply carries a plan card only for plan, retry, sign-in or provider, and the billing card is Manage plan

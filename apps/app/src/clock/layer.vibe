@@ -77,7 +77,7 @@ const services = Layer.mergeAll(
   recoveryLayer,
 )
 
-/** Follows the page and the shell's navigation: hiding retires notices and holds taps back; hiding or another app ends a workflow notice's question; coming back reads them again; a moved Workflows view rechecks its notice. Never returns. */
+/** Follows the page and the shell's navigation: hiding retires notices and holds taps back; hiding or another app ends a workflow notice's question; coming back reads them again. Never returns. */
 effect function followAttention() {
   const notices = try NoticesMachine
   const taps = try ReminderTaps
@@ -86,7 +86,6 @@ effect function followAttention() {
   const recovery = try ClockRecovery
   const navigator = try navigationPeer()
   let blocked: boolean | undefined = undefined
-  let workflowsAt: string | undefined = undefined
   let front: string | undefined = undefined
   for try (const view of navigator.changes()) {
     const visible = !view.hidden
@@ -95,9 +94,6 @@ effect function followAttention() {
     blocked = hold
     if (!visible || (front !== undefined && view.app !== front)) try workflow.interrupt()
     front = view.app
-    const place = view.app === "workflows" ? view.route ?? "" : undefined
-    if (place !== workflowsAt && workflowsAt !== undefined) try workflow.viewMoved()
-    workflowsAt = place
     if (visible !== (try notices.get()).visible) {
       notices.send({ type: "setVisible", visible }) catch () => undefined
       if (visible) {
@@ -133,8 +129,9 @@ const background = Layer.effectDiscard(effect {
  * Clock's machines and services: ClockActions, ClockHandoff, ClockReview, Reminders, ReminderTaps, ReminderDrafts,
  * RemindersPage, Notifications, CanonicalTaps, WorkflowNotices, Deletions, Mirror, ClockRecovery and Workflows'
  * WorkflowClockPort. It needs Native, Build and KeyValueStore from the platform, Navigation (shell), CloudSession
- * (account), Composer, Assistant and AssistantFlows (assistant), WorkflowRuns (workflows), NotesOrigins (notes) and
- * DeviceFacts (settings). Its agent device operations are `operationPorts` of ./operations.vibe, and the assistant's
- * OwnNotices is `ownNotices` of ./notifications.vibe; the shell integration composes both.
+ * (account), Composer, Assistant, AssistantDraft and AssistantFlows (assistant), WorkflowRuns and WorkflowsPlace
+ * (workflows), NotesOrigins (notes) and DeviceFacts (settings). Its agent device operations are `operationPorts` and
+ * its advertised capabilities `clockCapabilities` of ./operations.vibe, and the assistant's OwnNotices is `ownNotices`
+ * of ./notifications.vibe; the shell integration composes all three.
  */
 export const layer = Layer.provideMerge(background, Layer.provideMerge(services, machines))

@@ -379,6 +379,48 @@ pure val copyValues = Set(pickedFields).union(Set({ ...pickedFields, body: "Hi, 
 pure def sometimesEarlierVersionMarked(s: Drafts): bool = s.accounts.some(a => a.shelf.some(d => d.earlier))
 ```
 
+## Story: Keep the drafts I wrote before this version
+
+> As the owner, I want the emails I was writing and the drafts I had set aside before the update to
+> be in Drafts afterwards, with the account I wrote them from, so that the update loses none of them.
+
+### A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept
+
+The previous version kept, per account, a saved draft, a shelf of set-aside drafts and a recovery
+copy of the email being edited, in the phone's secure slots (in the browser build, its private
+storage), under the same account key of environment, user, organization and Gmail grant. When the
+composer binds to an account, each of those drafts that holds anything the owner wrote is put on
+that account's shelf under its own id, with its recipients, half-typed address, subject, body,
+attachments checked again as files, forwarded originals, reply, Gmail draft reference and its mark
+as an earlier version of a sent email. The recovery copy is newer than the saved draft with the same
+id and replaces it. A draft already open or shelved is kept, so a second pass adds nothing. Only
+the account bound now receives drafts, a full shelf takes none, and the previous slots are cleared
+only once every meaningful draft is kept, so an interrupted pass resumes on the next binding; an
+unreadable slot is never cleared.
+
+```quint
+pure def canKeepPrevious(s: Drafts, owner: str, draft: Draft, shelfBytes: int): bool = {
+  val a = accountOf(owner, s)
+  owner != "" and owner == s.owner and meaningful(draft) and fieldsBounded(draft.fields) and draft.id != a.open.id
+  and not(onShelf(a.shelf, draft.id)) and a.shelf.length() < shelfLimit and shelfBytes >= 0 and shelfBytes <= draftBytesLimit
+}
+pure def keepPrevious(s: Drafts, owner: str, draft: Draft, shelfBytes: int): Drafts = {
+  val a = accountOf(owner, s)
+  withAccount({ ...a, shelf: a.shelf.append(draft) }, s)
+}
+pure def previousKept(a: AccountDrafts, id: str): bool = a.open.id == id or onShelf(a.shelf, id)
+pure def previousSlotsClear(kept: int, total: int): bool = total >= 0 and kept == total
+pure def stepKeepingAPreviousDraftOnlyAddsToTheShelf(before: Drafts, via: str, after: Drafts): bool =
+  via == "keepPrevious" implies (accountOf(before.owner, after).open == accountOf(before.owner, before).open
+    and accountOf(before.owner, before).shelf.every(d => accountOf(before.owner, after).shelf.includes(d)))
+pure def stepAKeptPreviousDraftIsOnTheShelf(before: Drafts, via: str, after: Drafts): bool =
+  via == "keepPrevious" implies accountOf(before.owner, after).shelf.length() == accountOf(before.owner, before).shelf.length() + 1
+pure def lawPreviousSlotsWaitForEveryDraft(kept: int, total: int): bool = kept < total implies not(previousSlotsClear(kept, total))
+pure val keptValues = Set(0, 1, 2)
+pure val totalValues = Set(0, 1, 2)
+pure def sometimesAPreviousDraftKept(s: Drafts): bool = s.accounts.some(a => a.shelf.some(d => d.id == "d1") and not(a.composing))
+```
+
 ## Story: Type without waiting for storage
 
 > As the owner, I want typing to stay smooth while my draft is still kept as I type.

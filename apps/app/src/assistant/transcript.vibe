@@ -22,6 +22,11 @@ export interface ItemizedSet {
   readonly unnamedLabel?: string
 }
 
+/** The app an action card opens: the view the operation acts in, Reminders and Clock included. */
+export type CardDestination =
+  | "home" | "notes" | "calendar" | "reminders" | "clock" | "files" | "photos" | "camera" | "browser" | "maps" | "inbox"
+  | "phone" | "messages" | "contacts" | "settings" | "workflows"
+
 /** An action card in the transcript. */
 export interface ProposalCard {
   readonly proposalId: string
@@ -32,7 +37,7 @@ export interface ProposalCard {
   readonly state: CardState
   readonly recovered: boolean
   readonly session: string
-  readonly destination?: "home" | "notes" | "calendar"
+  readonly destination?: CardDestination
   readonly summary?: string
   readonly items?: ItemizedSet
 }

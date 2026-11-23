@@ -2,8 +2,8 @@
 
 The phone's executor of the agent's Notes device actions: `notes_record` to start or stop a voice note,
 `notes_filter` to show part of the list, `notes_move`, `notes_folder_create` and `notes_restore` to change
-saved notes once the owner reviewed them, and a workflow's `read_selected_notes` to share the notes the
-owner selected for it. The canonical list filter has its own
+saved notes once the owner reviewed them, a workflow's `read_selected_notes` to share the notes the
+owner selected for it, and a workflow's `create_note` to save the note its step wrote. The canonical list filter has its own
 [machine](./listFilter.md). Each operation is offered only under the capabilities the phone negotiated, runs
 only on the screen it is bound to, and returns a receipt that never claims more than happened.
 
@@ -87,7 +87,7 @@ pure def lawUnconfirmedRestoreIsUnknown(result: RestoreResult): bool = result ==
 Notes saved before this version are in the agent's collection after its import. The phone advertises no
 `notes.local-record.v1` and no `notes.query.v1`: the agent reads and changes notes with its own Notes
 action. A phone record operation that still arrives refuses and says nothing was changed, saved or
-shared.
+shared. A workflow's reviewed steps below are the workflow's own operations, not phone records.
 
 ```quint
 type DeviceNoteOp = CreateNoteOp | QueryOp | ReadSelectedOp | UpdateOp | DeleteOp
@@ -119,4 +119,34 @@ pure def lawChangedNoteIsNeverShared(screenAllows: bool, allPresent: bool, colle
   notesReadResult(screenAllows, allPresent, false, collectionSteady, resultChecks) != NotesReadShared
 pure def lawHiddenScreenSharesNothing(allPresent: bool, allReviewed: bool, collectionSteady: bool, resultChecks: bool): bool =
   notesReadResult(false, allPresent, allReviewed, collectionSteady, resultChecks) == NotesReadNotHere
+```
+
+## Story: Let a workflow save the note its step wrote
+
+> As the owner, I want a workflow I approved to save the note its step wrote into my Notes, once, and
+> only while I am looking at the run.
+
+### A workflow's note is saved once, into the agent's collection, only from the open run in front
+
+A workflow's `create_note` carries the title and text the owner reviewed on the run. It runs only while
+Workflows is in front on a visible screen that is neither locked nor private, and only while the
+collection of the signed-in owner is read; otherwise nothing is saved. The note is created in the agent's
+collection under a creation id derived from the operation, so a repeated attempt never makes a second
+note. A save the agent confirmed for the same owner is a success; a collection busy with another change
+saves nothing; any other answer, or an owner change while it saved, is unconfirmed. The receipt carries
+no record result.
+
+```quint
+type NoteSaveResult = NoteSaveSaved | NoteSaveNotHere | NoteSaveNotReady | NoteSaveBusy | NoteSaveUnconfirmed
+pure def noteSaveResult(fromRun: bool, screenAllows: bool, ready: bool, busy: bool, confirmed: bool, sameOwner: bool): NoteSaveResult =
+  if (not(fromRun) or not(screenAllows)) NoteSaveNotHere
+  else if (not(ready)) NoteSaveNotReady
+  else if (busy) NoteSaveBusy
+  else if (confirmed and sameOwner) NoteSaveSaved else NoteSaveUnconfirmed
+pure def noteSaveReceipt(result: NoteSaveResult): ReceiptStatus =
+  if (result == NoteSaveSaved) ReceiptSucceeded else if (result == NoteSaveUnconfirmed) ReceiptUnknown else ReceiptFailed
+pure def lawNoteSavedOnlyFromRun(screenAllows: bool, ready: bool, busy: bool, confirmed: bool, sameOwner: bool): bool =
+  noteSaveResult(false, screenAllows, ready, busy, confirmed, sameOwner) == NoteSaveNotHere
+pure def lawOwnerChangeIsUnconfirmed(confirmed: bool): bool =
+  noteSaveResult(true, true, true, false, confirmed, false) == NoteSaveUnconfirmed
 ```

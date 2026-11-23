@@ -1,4 +1,4 @@
-// spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/messages.md, "Back closes Messages' own layers one at a time, innermost first, before it leaves Messages"; spec/telephony/contacts.md, "Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/phone.md, "Back clears Alpha's filter before it leaves Phone"
+// spec/telephony/comms.md, "A view change while the chat is open keeps the sheet's height and remembers the view it left"; spec/telephony/messages.md, "Back closes Messages' own layers one at a time, innermost first, before it leaves Messages"; spec/telephony/contacts.md, "Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts"; spec/telephony/voicemail.md, "Opening a voicemail asks for its audio once, and a carrier transcript is shown as it is"; spec/telephony/phone.md, "Back clears Alpha's filter before it leaves Phone"; spec/telephony/phoneInfo.md, "Story: See my SIM, carrier and number on the image"
 import { assert, it } from "@effect/vitest"
 import { Machine as CommsMachine } from "../../gen/telephony__comms.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/telephony__contacts.effect.vibe"
@@ -153,6 +153,53 @@ it.live("Back on Phone closes the open voicemail and Alpha's filter, never a tab
         chip, query: afterChip.listQuery.tag, tab: afterChip.tab, leaves, deleted: fake.calls.includes("deleteVoicemail"),
       },
       { confirm: true, confirming: false, stillOpen: "v1", open: true, closed: "", chip: true, query: "NoQuery", tab: "RecentsTab", leaves: false, deleted: false },
+    ))
+  }
+})
+
+it.live("Back in Contacts empties the owner's search and closes its field before it leaves (spec/telephony/contacts.md, \"Back closes Contacts' own layers one at a time, innermost first, before it leaves Contacts\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const back = try TelephonyBack
+    const view = try ContactsView
+    const contacts = try ContactsMachine
+    const visit = fork view.visit()
+    try until(contacts.changes, (c) => c.rows.length === 1 && !c.loading)
+    try contacts.send({ type: "searchOpened" })
+    try view.read("maya", false)
+    const typed = try back.back("contacts")
+    const afterTyped = try contacts.get()
+    try contacts.send({ type: "searchOpened" })
+    const empty = try back.back("contacts")
+    const afterEmpty = try contacts.get()
+    const leaves = try back.back("contacts")
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { typed, query: afterTyped.query, searching: afterTyped.searching, empty, stillSearching: afterEmpty.searching, leaves },
+      { typed: true, query: "", searching: false, empty: true, stillSearching: false, leaves: false },
+    ))
+  }
+})
+
+it.live("Back on Settings → Phone is the shell's, whatever Phone itself holds (spec/telephony/phoneInfo.md, \"Story: See my SIM, carrier and number on the image\")", () => effect {
+  const fake = fakePhone()
+  provide fake.layer {
+    const back = try TelephonyBack
+    const phone = try PhoneMachine
+    const phoneView = try PhoneView
+    const visit = fork phoneView.visit()
+    try until(phone.changes, (p) => p.shown)
+    try phone.send({ type: "alphaFiltered", query: "Maya", label: "Maya" })
+    try sync(() => { fake.world.place = { app: "phone", route: "info" } })
+    const onInfo = try back.back("phone")
+    const kept = (try phone.get()).listQuery.tag
+    try sync(() => { fake.world.place = { app: "phone", route: "recents" } })
+    const onRecents = try back.back("phone")
+    const cleared = (try phone.get()).listQuery.tag
+    try Fiber.interrupt(visit)
+    try Effect.try(() => assert.deepStrictEqual(
+      { onInfo, kept, onRecents, cleared },
+      { onInfo: false, kept: "AlphaQuery", onRecents: true, cleared: "NoQuery" },
     ))
   }
 })

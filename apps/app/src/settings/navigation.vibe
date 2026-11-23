@@ -1,5 +1,5 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/passwords.md, "Leaving the page or the app going to the background locks the vault and forgets the visit"
-import { type AppRow, type Page, type Settings, Machine, accessSetupStep, appPage, forwardOf, initial, machine, sectionOf } from "../../gen/settings.effect.vibe"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources and Google sync are set"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"; spec/settings/passwords.md, "Leaving the page or the app going to the background locks the vault and forgets the visit"
+import { type AppRow, type Elsewhere, type Page, type Settings, Machine, accessSetupStep, appPage, appRoute, calendarSettingsRoute, elsewhereRoute, elsewhereShown, forwardOf, initial, machine, sectionOf } from "../../gen/settings.effect.vibe"
 import type { AppId } from "../web/app-screen.ts"
 import { Build } from "../platform/build.vibe"
 import { Navigation } from "../shell/navigation.vibe"
@@ -15,6 +15,7 @@ const APPS: Record<AppRow, AppId> = {
   RowBrowser: "browser", RowCalendar: "calendar", RowCamera: "camera", RowFiles: "files", RowInbox: "inbox", RowMaps: "maps",
   RowMessages: "messages", RowNotes: "notes", RowPasswords: "passwords", RowPhotos: "photos", RowWorkflows: "workflows",
 }
+const ELSEWHERE: Record<Elsewhere, AppId> = { PhoneInfo: "phone", AgentActivity: "assistant" }
 
 /** Settings' pages: what opens from where, what each reads when it opens, Back, and the routes other surfaces send. */
 export service SettingsPages {
@@ -32,6 +33,8 @@ export service SettingsPages {
   openApp(app: AppRow): void!!
   /** Open a section of the Account app. */
   openAccount(section: "plans" | "google" | "provider"): void!!
+  /** General's Phone row or About's Agent activity: the app that answers it, where the build has one; false where it has none. */
+  openElsewhere(elsewhere: Elsewhere): boolean!!
   /** Settings left the front: return to the root and lock a vault the page held. */
   leave(): void!!
   /** Privacy's Access setup: the first-run access walkthrough at its first step. */
@@ -55,7 +58,9 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
   const updates = try Updates
   const vault = try Vault
   const diagnostics = try Diagnostics
-  const onPhone = (try Build).info.variant !== "browser"
+  const variant = (try Build).info.variant
+  const onPhone = variant !== "browser"
+  const aosp = variant === "aosp"
 
   effect function entered(page: Page) {
     if (page === "Network") {
@@ -82,7 +87,7 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
       if (forward === "ToPlans") { try navigation.open("account", "plans"); return }
       if (forward === "ToProvider") { try navigation.open("account", "provider"); return }
       if (forward === "ToGoogle") { try navigation.open("account", "google"); return }
-      if (forward === "ToCalendar") { try navigation.open("calendar"); return }
+      if (forward === "ToCalendar") { try navigation.open("calendar", calendarSettingsRoute); return }
       if (forward === "ToWorkflows") { try navigation.open("workflows"); return }
       const section = sectionOf(route.toLowerCase())
       if (section === "Root") return
@@ -105,11 +110,17 @@ export const settingsPages = Layer.effect(SettingsPages, effect {
     },
     effect openApp(app: AppRow) {
       const page = appPage(app, onPhone)
+      const route = appRoute(app)
+      if (page === "Root" && route !== "") { try navigation.open(APPS[app], route); return }
       if (page === "Root") { try navigation.open(APPS[app]); return }
       try open(page)
     },
     effect openAccount(section: "plans" | "google" | "provider") {
       try navigation.open("account", section)
+    },
+    effect openElsewhere(elsewhere: Elsewhere) {
+      if (!elsewhereShown(elsewhere, aosp, onPhone)) return false
+      return try navigation.open(ELSEWHERE[elsewhere], elsewhereRoute(elsewhere))
     },
     effect leave() {
       const before = try held.get()

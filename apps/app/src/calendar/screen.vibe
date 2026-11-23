@@ -1,10 +1,11 @@
-// spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/agent.md, "A write runs only between reads, from a ready feed, for the current binding"; spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"
+// spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"; spec/calendar/presentation.md, "The Calendars sheet is a modal over the view, opened only with no form or delete sheet open"; spec/notes/origins.md, "Story: Go from a saved event or reminder back to its note"; spec/calendar/deletions.md, "Story: Undo a deletion before it is sent"; spec/calendar/agent.md, "A write runs only between reads, from a ready feed, for the current binding"; spec/calendar/editor.md, "A missing or repeated wall time is refused, and nothing is saved"
 import { Machine as PresentationMachine, type EventSource, canBack } from "../../gen/calendar__presentation.effect.vibe"
 import { agentCalendarAccepts, defaultStart, recurrenceEditAllowed, timingChangeAllowed, timingLocked, wallTimeSavable, type WallTime } from "../../gen/calendar__editor.effect.vibe"
 import { NotesOrigins, type OriginView } from "../notes/origins.vibe"
 import { Native } from "../platform/native.vibe"
 import { Notices } from "../shell/notices.vibe"
 import { AgentCalendar, eventSourceRevision } from "./agent.vibe"
+import { ApprovalReviews } from "./approvals.vibe"
 import { enterCalendar, readCalendar } from "./binding.vibe"
 import { type CalendarWriteScope, HeldDeletions } from "./deletions.vibe"
 import { DeviceCalendar } from "./device.vibe"
@@ -15,6 +16,7 @@ import { type CalendarRow, DAY, agentEventKey, agentOwnCalendar, rruleFor } from
 import { calendarWall, civil, civilDay, deviceZone, isoInstant, midnightAfter, resolveWall } from "./time.ts"
 import { sha256Hex } from "./digest.ts"
 import { CalendarMaps } from "./ports.vibe"
+import { AgentRequests } from "./requests.vibe"
 import { sourceKeyId } from "@elizaos/plugin-calendar"
 
 /** The source of a row as the presentation names it. */
@@ -85,6 +87,33 @@ export effect function calendarBack() {
     try (try DeviceCalendar).close()
   }
   return true
+}
+
+/** Back over Calendar's always-mounted review sheets: the availability review cancels its step, then the approval review closes; a review sending its decision keeps Back; false when no sheet is open and Back goes on. */
+export effect function calendarSurfacesBack() {
+  const requests = try AgentRequests
+  const request = try Stream.runHead(requests.sheets)
+  const sheet = request._tag === "Some" ? request.value : { kind: "none" as const }
+  if (sheet.kind === "choose-calendars") {
+    try requests.chooseCalendars(null)
+    return true
+  }
+  if (sheet.kind === "confirm-result") {
+    try requests.confirmResult(false)
+    return true
+  }
+  const reviews = try ApprovalReviews
+  const review = try Stream.runHead(reviews.changes)
+  const phase = review._tag === "Some" ? review.value.state.phase : "ReviewIdle"
+  if (phase === "ReviewIdle") return false
+  if (phase !== "Deciding") try reviews.close()
+  return true
+}
+
+/** Back while Calendar is in front: its open review sheet first, then its own layers. */
+export effect function calendarScreenBack() {
+  if (try calendarSurfacesBack()) return true
+  return try calendarBack()
 }
 
 /** Open the Calendars sheet with the source switches and Google Calendar sync. */

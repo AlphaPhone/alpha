@@ -5,6 +5,9 @@ import { Native } from "../platform/native.vibe"
 import { callerOf, TelephonyBridges } from "./bridges.vibe"
 import { frontChanges, whileInFront } from "./front.vibe"
 
+/** The upstream system plugin whose `openSettingsPage` opens Android's own settings screens. */
+export const SYSTEM_PLUGIN = "ElizaSystem"
+
 /** The Android settings screens the page hands off to: device status (IMEI), mobile network and default apps. */
 export type StatusPage = "about" | "mobile" | "default-apps"
 
@@ -101,8 +104,10 @@ export const phoneInfoViewLayer = Layer.effect(PhoneInfoView, effect {
       if ((try tell({ type: "infoAsked", request: true })) !== undefined) try read()
     },
     effect openStatus(page: StatusPage) {
-      const opened = try (native.invoke("AlphaDevice", "openSettings", { page }) catch () => undefined)
-      return typeof opened === "object" && opened !== null && (opened as { status?: unknown }).status === "opened"
+      const opened = try (native.invoke(SYSTEM_PLUGIN, "openSettingsPage", { page }) catch () => undefined)
+      if (typeof opened !== "object" || opened === null) return false
+      const reply = opened as { status?: unknown; page?: unknown }
+      return reply.status === "opened" && reply.page === page
     },
   }
 })

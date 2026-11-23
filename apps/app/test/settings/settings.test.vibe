@@ -110,14 +110,54 @@ it.effect("Find a setting in a few taps (spec/settings/index.md, \"Story: Find a
     // spec/settings/index.md, "Leaving Settings returns to its root"
     try pages.leave()
     const left = (try held.get()).page
+    // spec/settings/index.md, "A route names a listed section, or another app it is forwarded to"
+    try pages.route("notifications")
+    const notifications = (try held.get()).page
+    const notificationsUp = try pages.back()
+    const general = (try held.get()).page
+    try pages.leave()
+    // spec/settings/index.md, "Calendar's row opens Calendar at its Calendars sheet, where its sources and Google sync are set"
+    try pages.route("calendar")
     try Effect.try(() => assert.deepStrictEqual(
-      { refused, section, up, atRoot, vaultPage, inboxPage, left, calls },
+      { refused, section, up, atRoot, vaultPage, inboxPage, left, notifications, notificationsUp, general, calls },
       {
         refused: "Root", section: "Privacy", up: true, atRoot: false, vaultPage: "Passwords", inboxPage: "AppInbox", left: "Root",
-        calls: ["Navigation.open [\"account\",\"provider\"]", "PrivacyRow.readListener", "Navigation.open [\"calendar\"]", "Vault.open", "Vault.back", "Vault.leave", "Permissions.reopen [0]"],
+        notifications: "Notifications", notificationsUp: true, general: "General",
+        calls: [
+          "Navigation.open [\"account\",\"provider\"]", "PrivacyRow.readListener", "Navigation.open [\"calendar\",\"settings\"]", "Vault.open", "Vault.back",
+          "Vault.leave", "Permissions.reopen [0]", "Navigation.open [\"calendar\",\"settings\"]",
+        ],
       },
     ))
   }
+})
+
+it.effect("General's Phone row and About's Agent activity open the app that answers them (spec/settings/index.md, \"General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone\")", () => effect {
+  const opened = (variant: "launcher" | "aosp" | "browser") => effect {
+    const calls: string[] = []
+    const fakes = Layer.mergeAll(
+      Layer.succeed(Navigation, recorder("Navigation", calls)), Layer.succeed(Permissions, recorder("Permissions", calls)),
+      Layer.succeed(DeviceFacts, recorder("DeviceFacts", calls)), Layer.succeed(Wifi, recorder("Wifi", calls)),
+      Layer.succeed(PrivacyRow, recorder("PrivacyRow", calls)), Layer.succeed(Updates, recorder("Updates", calls)),
+      Layer.succeed(Vault, recorder("Vault", calls, { back: false })), Layer.succeed(Diagnostics, recorder("Diagnostics", calls, { back: false })),
+    )
+    provide Layer.provideMerge(settingsPages, Layer.mergeAll(settingsMachine(), fakes, build(variant))) {
+      const pages = try SettingsPages
+      const answers = [try pages.openElsewhere("PhoneInfo"), try pages.openElsewhere("AgentActivity")]
+      return { answers, calls }
+    }
+  }
+  const image = try opened("aosp")
+  const launcher = try opened("launcher")
+  const browser = try opened("browser")
+  try Effect.try(() => assert.deepStrictEqual(
+    { image, launcher, browser },
+    {
+      image: { answers: [true, true], calls: ["Navigation.open [\"phone\",\"info\"]", "Navigation.open [\"assistant\",\"activity\"]"] },
+      launcher: { answers: [false, true], calls: ["Navigation.open [\"assistant\",\"activity\"]"] },
+      browser: { answers: [false, false], calls: [] },
+    },
+  ))
 })
 
 it.effect("Back closes what a page holds open before the page (spec/settings/index.md, \"A page opens from its parent, and Back returns to that parent\")", () => effect {
@@ -252,9 +292,26 @@ it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md
   const fresh = try effect {
     provide Layer.provideMerge(preferences, Layer.mergeAll(memoryStore, build())) {
       const p = try Preferences
-      const before = [try p.sharesLocation(), try p.asksBeforeActions()]
+      const before = [try p.sharesLocation(), try p.asksBeforeActions(), try p.sharesBrowserPage()]
       try p.set("AgentLocation", false)
-      return [...before, try p.sharesLocation()]
+      // spec/settings/preferences.md, "The open Browser page goes with a chat turn only while Browser page for Alpha is on"
+      try p.set("BrowserPage", false)
+      return [...before, try p.sharesLocation(), try p.sharesBrowserPage()]
+    }
+  }
+  // spec/settings/preferences.md, "A preference an update added starts at its new-phone value, and the owner's saved choices stay"
+  const older = { askBeforeActions: true, agentLocation: false, gmailChanges: true, calendarEdits: true, mailImages: false, browserMicrophone: true, browserLocation: true, edits: 3 }
+  const upgraded = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, JSON.stringify(older)) }), memoryStore), build())) {
+      const p = try Preferences
+      const saved = JSON.parse((try (try KeyValueStore.KeyValueStore).get(PREFERENCES_KEY)) ?? "null")
+      return [(try p.current()).readable, try p.sharesBrowserPage(), try p.sharesLocation(), try p.asksBeforeActions(), try p.loadsMailImages(), saved?.browserPage, saved?.agentLocation]
+    }
+  }
+  const misshapen = try effect {
+    provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, JSON.stringify({ ...older, agentLocation: "no" })) }), memoryStore), build())) {
+      const p = try Preferences
+      return [(try p.current()).readable, try p.sharesBrowserPage()]
     }
   }
   // spec/settings/preferences.md, "Preferences that cannot be read ask before every action and share nothing"
@@ -262,12 +319,18 @@ it.effect("Decide what Alpha may do without asking (spec/settings/preferences.md
     provide Layer.provideMerge(preferences, Layer.mergeAll(Layer.provideMerge(Layer.effectDiscard(effect { try (try KeyValueStore.KeyValueStore).set(PREFERENCES_KEY, "{not json") }), memoryStore), build())) {
       const p = try Preferences
       const locked = try (p.set("MailImages", false) catch (e) => e._tag)
-      const before = [try p.asksBeforeActions(), try p.sharesLocation(), locked]
+      const before = [try p.asksBeforeActions(), try p.sharesLocation(), try p.sharesBrowserPage(), locked]
       try p.reset()
-      return [...before, try p.sharesLocation(), (try p.current()).readable]
+      return [...before, try p.sharesLocation(), try p.sharesBrowserPage(), (try p.current()).readable]
     }
   }
-  try Effect.try(() => assert.deepStrictEqual({ fresh, damaged }, { fresh: [true, false, false], damaged: [true, false, "PreferencesUnreadable", true, true] }))
+  try Effect.try(() => assert.deepStrictEqual(
+    { fresh, damaged, upgraded, misshapen },
+    {
+      fresh: [true, false, true, false, false], damaged: [true, false, false, "PreferencesUnreadable", true, true, true],
+      upgraded: [true, true, false, true, false, true, false], misshapen: [false, false],
+    },
+  ))
 })
 
 it.effect("Choose how Alpha looks (spec/settings/appearance.md, \"Story: Choose how Alpha looks\")", () => effect {

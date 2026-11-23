@@ -1,6 +1,6 @@
-// spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice"; spec/voice/latency.md, "The offset between the phone's clock and the renderer's is read once, when the trial is bound"; spec/voice/latency.md, "A trial records its endpoint path and outcome, never what was said"
+// spec/voice/latency.md, "Story: Know how long I wait for Alpha's voice"; spec/voice/latency.md, "The offset between the phone's clock and the renderer's is read once, when the trial is bound"; spec/voice/latency.md, "A trial records its endpoint path and outcome, never what was said"; spec/voice/latency.md, "Story: Know how long a dictated message waits for its answer"
 import { Native } from "../platform/native.vibe"
-import { Machine, type Event, type Mark, type MarkClock, type Outcome, type Path, type Trial } from "../../gen/voice__latency.effect.vibe"
+import { Machine, type Event, type Mark, type MarkClock, type Outcome, type Path, type Trial, type TrialKind } from "../../gen/voice__latency.effect.vibe"
 import { newId } from "../platform/ids.ts"
 import { NativeTimingExport, NativeTurnMarked } from "./native.schema.vibe"
 
@@ -18,9 +18,11 @@ export interface VoiceTimingMark {
 export interface VoiceTimingEntry {
   readonly format: typeof VOICE_TIMING_FORMAT
   readonly turnId: string
+  /** A conversation turn, or a dictated draft sent as it was transcribed. */
+  readonly kind: TrialKind
   readonly path: Path
   readonly outcome: Outcome
-  /** The last input to the first audible sound, or null when the turn had no audible reply or no input mark. */
+  /** The last input to the first audible sound, or for a dictated draft to its final reply; null when there was none or no input mark. */
   readonly lastInputToAudibleMs: number | null
   /** The renderer's clock minus the phone's monotonic clock, read once when the trial was bound; null when the phone did not answer. */
   readonly clockOffsetMs: number | null
@@ -41,6 +43,14 @@ export service Latency {
   endpointed(path: Path): void!!
   /** Record the turn, adding the phone's own marks on its clock. */
   finish(outcome: Outcome): void!!
+  /** A dictation's recording stopped: start the trial of the draft it may become, from the recording's end. */
+  beginDraft(): void!!
+  /** The transcript went into an empty draft as `text`, or undefined when it joined other text or failed: the draft's trial is then abandoned. */
+  noteDraft(text: string | undefined): void!!
+  /** The composer sent `text`: the draft's trial goes on only when it is the transcript unchanged. */
+  draftSent(text: string): void!!
+  /** The sent draft's reply showed its first token, ended with its final text, or went stale, was interrupted or was empty. */
+  draftReplied(reply: "FirstToken" | "FinalReply" | "Abandoned"): void!!
   /** Every recorded turn, oldest first, for the diagnostics export. */
   entries(): readonly VoiceTimingEntry[]!!
 }
@@ -63,6 +73,9 @@ export const latencyService = Layer.effect(Latency, effect {
   let turnId = ""
   let phoneTurn: string | undefined
   let turns = 0
+  let kind: TrialKind = "SpokenTurn"
+  let draft: string | undefined
+  let draftSentAlready = false
   let marks: VoiceTimingMark[] = []
 
   effect function send(event: Event) {
@@ -74,46 +87,91 @@ export const latencyService = Layer.effect(Latency, effect {
     if (try send({ type: "mark", which, at: atMs, clock })) marks = [...marks, { mark: which, clock, atMs }]
   }
 
+  effect function markNow(which: Mark) {
+    try markAt(which, Math.round(try Clock.currentTimeMillis), "OnRenderer")
+  }
+
+  effect function finish(outcome: Outcome) {
+    if (!(try held.get()).open) return
+    const bound = phoneTurn
+    const raw = bound === undefined ? undefined : native.invoke("AlphaVoiceCloud", "nativeVoiceTiming", {}) catch () => undefined
+    const timing = raw === undefined ? undefined : Option.getOrUndefined(decodeTiming(raw))
+    const record = timing?.records.find((entry) => entry.turnId === bound)
+    if (record !== undefined) {
+      for (const [name, which] of PHONE_MARKS) {
+        const atMs = wholeMs(record.marks[name])
+        if (atMs !== undefined) try markAt(which, atMs, "OnPhone")
+      }
+    }
+    const trialNow = try held.get()
+    const answered = trialNow.kind === "DictatedDraft" ? trialNow.replied : trialNow.audible
+    const final: Outcome = outcome === "Answered" && answered ? "Answered" : "Abandoned"
+    try send({ type: "finish", outcome: final })
+    const trial = try held.get()
+    draft = undefined
+    draftSentAlready = false
+    recorded.push({ format: VOICE_TIMING_FORMAT, turnId, kind: trial.kind, path: trial.path, outcome: final,
+      lastInputToAudibleMs: trial.waitMs >= 0 ? trial.waitMs : null, clockOffsetMs: trial.offsetKnown ? trial.offset : null, marks })
+    if (recorded.length > MAX_ENTRIES) recorded.splice(0, recorded.length - MAX_ENTRIES)
+  }
+
+  effect function draftOpen() {
+    const trial = try held.get()
+    return trial.open && trial.kind === "DictatedDraft"
+  }
+
+  effect function open(next: TrialKind) {
+    if ((try held.get()).open) try finish("Abandoned")
+    turns += 1
+    turnId = newId()
+    phoneTurn = undefined
+    marks = []
+    kind = next
+    draft = undefined
+    draftSentAlready = false
+    try send(next === "DictatedDraft" ? { type: "beginDraft", turn: turns } : { type: "begin", turn: turns })
+  }
+
   return {
     changes: held.changes,
     effect begin() {
-      if ((try held.get()).open) try send({ type: "finish", outcome: "Abandoned" })
-      turns += 1
-      turnId = newId()
-      phoneTurn = undefined
-      marks = []
-      try send({ type: "begin", turn: turns })
+      try open("SpokenTurn")
       return turnId
     },
     effect mark(which: Mark) {
       if (!(try held.get()).open) return
-      try markAt(which, Math.round(try Clock.currentTimeMillis), "OnRenderer")
+      try markNow(which)
       const stage = PHONE_STAGES[which]
-      if (stage === undefined) return
+      if (stage === undefined || kind !== "SpokenTurn") return
       const raw = native.invoke("AlphaVoiceCloud", "markVoiceTurn", { stage, ...(phoneTurn === undefined ? {} : { voiceTurnId: phoneTurn }) }) catch () => undefined
       const bound = raw === undefined ? undefined : Option.getOrUndefined(decodeMarked(raw))
       if (phoneTurn === undefined && bound?.voiceTurnId !== undefined && bound.voiceTurnId !== "") phoneTurn = bound.voiceTurnId
     },
     effect nativeTurn() { return phoneTurn },
     effect endpointed(path: Path) { try send({ type: "endpointed", path }) },
-    effect finish(outcome: Outcome) {
-      if (!(try held.get()).open) return
-      const bound = phoneTurn
-      const raw = bound === undefined ? undefined : native.invoke("AlphaVoiceCloud", "nativeVoiceTiming", {}) catch () => undefined
-      const timing = raw === undefined ? undefined : Option.getOrUndefined(decodeTiming(raw))
-      const record = timing?.records.find((entry) => entry.turnId === bound)
-      if (record !== undefined) {
-        for (const [name, which] of PHONE_MARKS) {
-          const atMs = wholeMs(record.marks[name])
-          if (atMs !== undefined) try markAt(which, atMs, "OnPhone")
-        }
-      }
-      const final: Outcome = outcome === "Answered" && (try held.get()).audible ? "Answered" : "Abandoned"
-      try send({ type: "finish", outcome: final })
-      const trial = try held.get()
-      recorded.push({ format: VOICE_TIMING_FORMAT, turnId, path: trial.path, outcome: final,
-        lastInputToAudibleMs: trial.waitMs >= 0 ? trial.waitMs : null, clockOffsetMs: trial.offsetKnown ? trial.offset : null, marks })
-      if (recorded.length > MAX_ENTRIES) recorded.splice(0, recorded.length - MAX_ENTRIES)
+    finish,
+    effect beginDraft() {
+      try open("DictatedDraft")
+      try markNow("LastUserAudio")
+    },
+    effect noteDraft(text: string | undefined) {
+      if (!(try draftOpen()) || draft !== undefined) return
+      const words = text?.trim() ?? ""
+      if (words === "") return try finish("Abandoned")
+      try markNow("AsrFinal")
+      draft = words
+    },
+    effect draftSent(text: string) {
+      if (!(try draftOpen()) || draft === undefined || draftSentAlready) return
+      if (text.trim() !== draft) return try finish("Abandoned")
+      draftSentAlready = true
+      try markNow("Request")
+    },
+    effect draftReplied(reply: "FirstToken" | "FinalReply" | "Abandoned") {
+      if (!(try draftOpen()) || !draftSentAlready) return
+      if (reply === "Abandoned") return try finish("Abandoned")
+      try markNow(reply)
+      if (reply === "FinalReply") try finish("Answered")
     },
     effect entries() { return [...recorded] },
   }

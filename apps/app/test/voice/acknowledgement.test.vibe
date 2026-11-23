@@ -1,0 +1,225 @@
+// spec/voice/acknowledgement.md, "Story: Hear that Alpha is working on it, never over its answer"
+import { assert, it } from "@effect/vitest"
+import { acknowledgement, activityOf } from "../../src/voice/acknowledgement.vibe"
+import { Speech, SpeechInterrupted, type SpeakOptions } from "../../src/voice/speech.vibe"
+import { initial as speechInitial } from "../../gen/voice__speech.ts"
+import { audible, boundElapsed, cancel, cueEnded, holdElapsed, initial, progress, replyMayStart, replyReady } from "../../gen/voice__acknowledgement.ts"
+
+/** One line the fake speaker was asked to say: whether it was stopped, and its start report. */
+interface Said {
+  readonly line: string
+  stopped: boolean
+  finished: boolean
+  readonly start: () => void!!
+  readonly end: Deferred.Deferred<void>
+}
+
+/** A reply-channel speaker that records each line and plays until it is stopped or told to finish; `startsAtOnce` false is a line still being synthesised. */
+function speaker(said: Said[], startsAtOnce: boolean) {
+  const fake = {
+    changes: Stream.never,
+    get: () => Effect.succeed(speechInitial),
+    effect speak(text: string, _channel: "Replies" | "Reading" | "AppSpeech" | "CloudReading", options?: SpeakOptions) {
+      const end = try Deferred.make<void>()
+      const entry: Said = { line: text, stopped: false, finished: false, start: options?.onStarted ?? (() => sync(() => undefined)), end }
+      said.push(entry)
+      if (startsAtOnce) try entry.start()
+      try Deferred.await(end)
+      if (entry.stopped) throw new SpeechInterrupted({ reason: "stopped", started: startsAtOnce })
+    },
+    speakPieces: () => Effect.void,
+    speakReviewed: () => Effect.void,
+    speakOnPhone: () => Effect.void,
+    effect stop(_channel: "Replies" | "Reading" | "AppSpeech" | "CloudReading") {
+      for (const entry of said) {
+        if (entry.finished) continue
+        entry.stopped = true
+        entry.finished = true
+        try Deferred.succeed(entry.end, undefined)
+      }
+    },
+    entry: () => Effect.succeed("EntryAllowed" as const),
+    warmDevice: () => Effect.void,
+    warmCloud: () => Effect.void,
+    setMuted: () => Effect.succeed(true),
+  }
+  return Layer.succeed(Speech, fake)
+}
+
+effect function finishLine(entry: Said | undefined) {
+  if (entry === undefined || entry.finished) return
+  entry.finished = true
+  try Deferred.succeed(entry.end, undefined)
+}
+
+effect function settle() {
+  for (let round = 0; round < 20; round += 1) try Effect.yieldNow
+}
+
+const clear = () => true
+
+it.effect(`a cue speaks only the planner's own thinking line, once a turn (spec/voice/acknowledgement.md, "Only the planner's own thinking line, of 1 to 160 characters, is spoken, and only once a turn")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const cue = try acknowledgement()
+    try cue.progress({ activity: "running_tool" }, clear)
+    try cue.progress({ activity: "running_action", label: "Synthetic system status" }, clear)
+    try cue.progress({ activity: "thinking", label: "   " }, clear)
+    try cue.progress({ activity: "thinking", label: "x".repeat(161) }, clear)
+    try cue.progress({ activity: "thinking", label: "Checking your calendar." }, clear)
+    try cue.progress({ activity: "thinking", label: "A second line" }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    try finishLine(said[0])
+    try settle()
+    try cue.idle()
+    try cue.progress({ activity: "thinking", label: "Too late" }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    try Effect.try(() => assert.deepStrictEqual({ lines: said.map((entry) => entry.line), kinds: [activityOf("thinking"), activityOf("running_tool"), activityOf("waking")] },
+      { lines: ["Checking your calendar."], kinds: ["Thinking", "RunningTool", "OtherActivity"] }))
+  }
+})
+
+it.effect(`a reply within the hold means the cue is never spoken (spec/voice/acknowledgement.md, "A reply ready within the hold means the cue is never spoken, and a cue still being prepared is dropped at once")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const cue = try acknowledgement()
+    try cue.progress({ activity: "thinking", label: "Checking your calendar." }, clear)
+    try TestClock.adjust("299 millis")
+    try settle()
+    const beforeTheHold = said.length
+    try cue.preempt()
+    try TestClock.adjust("1 second")
+    try settle()
+    try cue.idle()
+    try Effect.try(() => assert.deepStrictEqual({ beforeTheHold, spoken: said.length }, { beforeTheHold: 0, spoken: 0 }))
+  }
+})
+
+it.effect(`a cue still being synthesised is dropped at once, and a late start cannot hold the reply (spec/voice/acknowledgement.md, "A reply ready within the hold means the cue is never spoken, and a cue still being prepared is dropped at once")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, false) {
+    const cue = try acknowledgement()
+    try cue.progress({ activity: "thinking", label: "Looking that up." }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    const asked = said.length
+    try cue.idle()
+    const droppedAtOnce = said[0]?.stopped
+    try said[0]!.start()
+    try settle()
+    const heard = try cue.audible()
+    try cue.idle()
+    try Effect.try(() => assert.deepStrictEqual({ asked, droppedAtOnce, heard }, { asked: 1, droppedAtOnce: true, heard: false }))
+  }
+})
+
+it.effect(`an audible cue finishes before the reply speaks (spec/voice/acknowledgement.md, "An audible cue finishes before the reply speaks, but never holds a ready reply more than 2.5 seconds")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const cue = try acknowledgement()
+    try cue.progress({ activity: "thinking", label: "Checking your notes." }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    const heard = try cue.audible()
+    let replied = false
+    const reply = fork effect {
+      try cue.idle()
+      replied = true
+    }
+    try settle()
+    const waited = !replied && said[0]?.stopped === false
+    try finishLine(said[0])
+    try settle()
+    try join reply
+    try TestClock.adjust("3 seconds")
+    try settle()
+    try Effect.try(() => assert.deepStrictEqual({ heard, waited, replied, cut: said[0]?.stopped }, { heard: true, waited: true, replied: true, cut: false }))
+  }
+})
+
+it.effect(`a cue still playing at the bound is cut and the reply goes on (spec/voice/acknowledgement.md, "An audible cue finishes before the reply speaks, but never holds a ready reply more than 2.5 seconds")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const cue = try acknowledgement()
+    try cue.progress({ activity: "thinking", label: "Let me check your calendar." }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    let replied = false
+    const reply = fork effect {
+      try cue.idle()
+      replied = true
+    }
+    try settle()
+    try TestClock.adjust("2499 millis")
+    try settle()
+    const beforeTheBound = { replied, cut: said[0]?.stopped }
+    try TestClock.adjust("1 millis")
+    try settle()
+    try join reply
+    try Effect.try(() => assert.deepStrictEqual({ beforeTheBound, replied, cut: said[0]?.stopped }, { beforeTheBound: { replied: false, cut: false }, replied: true, cut: true }))
+  }
+})
+
+it.effect(`Stop cuts a playing cue at once and nothing restarts it (spec/voice/acknowledgement.md, "A turn abort, Stop, speaking over it or voice retiring stops the cue at once, and nothing restarts it")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const cue = try acknowledgement()
+    try cue.progress({ activity: "thinking", label: "Checking your calendar." }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    try cue.cancel()
+    const stopped = said[0]?.stopped
+    try cue.progress({ activity: "thinking", label: "Checking again." }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    try cue.idle()
+    try Effect.try(() => assert.deepStrictEqual({ stopped, lines: said.length }, { stopped: true, lines: 1 }))
+  }
+})
+
+it.effect(`a recorded clip's microphone must be closed before the cue (spec/voice/acknowledgement.md, "The cue waits 300 ms before it speaks, and only with the microphone retired or held open for barge-in")`, () => effect {
+  const said: Said[] = []
+  provide speaker(said, true) {
+    const open = try acknowledgement()
+    try open.progress({ activity: "thinking", label: "Checking your calendar." }, () => false)
+    try TestClock.adjust("300 millis")
+    try settle()
+    const whileOpen = said.length
+    let closed = true
+    try open.progress({ activity: "thinking", label: "Checking your calendar." }, () => closed)
+    closed = false
+    try TestClock.adjust("300 millis")
+    try settle()
+    const reopenedDuringTheHold = said.length
+    const retired = try acknowledgement()
+    try retired.progress({ activity: "thinking", label: "Checking your calendar." }, clear)
+    try TestClock.adjust("300 millis")
+    try settle()
+    try finishLine(said[0])
+    try settle()
+    try retired.idle()
+    try Effect.try(() => assert.deepStrictEqual({ whileOpen, reopenedDuringTheHold, spoken: said.length }, { whileOpen: 0, reopenedDuringTheHold: 0, spoken: 1 }))
+  }
+})
+
+it.effect(`the cue model never lets a reply start over an audible cue (spec/voice/acknowledgement.md, "An audible cue finishes before the reply speaks, but never holds a ready reply more than 2.5 seconds")`, () => effect {
+  const held = progress(initial, "Thinking", 22, true)
+  const playing = audible(holdElapsed(held, true))
+  const waiting = replyReady(playing)
+  const silenced = replyReady(held)
+  const dropped = replyReady(holdElapsed(held, true))
+  try Effect.try(() => assert.deepStrictEqual({
+    waiting: [waiting.stage, replyMayStart(waiting)],
+    afterItsEnd: replyMayStart(cueEnded(waiting)),
+    afterItsBound: [boundElapsed(waiting).clipped, replyMayStart(boundElapsed(waiting))],
+    silenced: [silenced.stage, silenced.spoken],
+    dropped: [dropped.stage, dropped.dropped],
+    stopped: [cancel(playing).stage, replyMayStart(cancel(playing))],
+    unclear: progress(initial, "Thinking", 22, false).stage,
+  }, {
+    waiting: ["Audible", false], afterItsEnd: true, afterItsBound: [1, true], silenced: ["Ended", 0], dropped: ["Ended", 1],
+    stopped: ["Ended", true], unclear: "NoCue",
+  }))
+})

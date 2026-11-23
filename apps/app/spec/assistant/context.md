@@ -17,7 +17,9 @@ points and cell towers instead, only when asked (#1441). Coordinates are
 rounded to 0.00001° (about a meter) and the accuracy to whole meters, and
 travel as the observation's `location` field
 `{latitude, longitude, accuracyMeters, capturedAt}` with `capturedAt` in
-epoch milliseconds (#1418).
+epoch milliseconds (#1418). While Browser is in front, the page of the
+observed tab travels beside the observation as `clientDevice.browserPage`
+(#1444).
 
 ## Story: Let my agent know where I am when I allow it
 
@@ -137,6 +139,43 @@ pure def lawAnUnobservedScreenSendsNoOptionalField(onCalendar: bool, peer: PeerF
   not(sendsDay(false, onCalendar, peer)) and not(sendsLocationField(false, peer))
 pure def lawAnUncomparedPeerGetsNoDay(observed: bool, onCalendar: bool): bool =
   not(sendsDay(observed, onCalendar, { compared: false, declaresLocation: true }))
+```
+
+## Story: Let my agent read the page I have open in Browser
+
+> As the owner, when I ask about the page I have open in Browser, I want my
+> agent to see its address, title and visible text, never a private tab and
+> never once I turned Browser page for Alpha off, so that "summarize this
+> page" or "open the second story" just works (#1444).
+
+### A turn carries the open Browser page only for the observed tab and revision, with the setting on, to a peer that declares it, waiting at most 1.2 s
+
+When an ordinary turn's observation selects a `browser-tab`, the turn asks
+Browser for that tab's page (its HTTPS address without credentials or
+fragment, its title as one line, up to 6,000 characters of visible text,
+the selection and public links, or only the address and title when the
+page is withheld) and waits at most 1.2 s; without an answer the turn goes
+without the page, and the owner's own cancellation still stops the send.
+The page travels only when its tab id and revision are the observed ones,
+Settings › Privacy › Browser page for Alpha is on (on by default;
+unreadable preferences share nothing) both before the read and when the
+turn is sent, and the peer's fresh status declares `browserPage`. A private
+screen or a private tab sends no page, and nothing of it is ever stored on
+the phone.
+
+```quint
+type PageRead = NoPage | PageFor({ sameTab: bool }) | PageLate
+pure val browserPageWaitMs = 1200
+pure def asksForPage(observed: bool, onBrowserTab: bool, allowed: bool): bool = observed and onBrowserTab and allowed
+pure def pageBound(read: PageRead): bool = match read { | PageFor(x) => x.sameTab | _ => false }
+pure def sendsBrowserPage(observed: bool, onBrowserTab: bool, allowedBefore: bool, allowedAtSend: bool, read: PageRead, peerDeclares: bool): bool =
+  asksForPage(observed, onBrowserTab, allowedBefore) and allowedAtSend and peerDeclares and pageBound(read)
+pure def lawAPrivateScreenSendsNoPage(read: PageRead, peer: bool): bool = not(sendsBrowserPage(false, true, true, true, read, peer))
+pure def lawAnotherTabsPageIsNeverSent(peer: bool): bool = not(sendsBrowserPage(true, true, true, true, PageFor({ sameTab: false }), peer))
+pure def lawTurningItOffBeforeTheSendSendsNothing(read: PageRead): bool = not(sendsBrowserPage(true, true, true, false, read, true))
+pure def lawALateReadSendsNothing(peer: bool): bool = not(sendsBrowserPage(true, true, true, true, PageLate, peer))
+pure def lawAnUndeclaredPeerGetsNoPage(read: PageRead): bool = not(sendsBrowserPage(true, true, true, true, read, false))
+pure val readValues = Set(NoPage).union(Set(PageLate)).union(Set(PageFor({ sameTab: true }))).union(Set(PageFor({ sameTab: false })))
 ```
 
 ## Story: Know when my words leave the phone

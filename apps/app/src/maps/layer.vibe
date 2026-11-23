@@ -6,7 +6,6 @@ import { machine as deliveryMachine } from "../../gen/maps__delivery.effect.vibe
 import { machine as eventReturnMachine } from "../../gen/maps__eventReturn.effect.vibe"
 import { machine as guidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { machine as locatorMachine } from "../../gen/maps__location.effect.vibe"
-import { machine as networkFixMachine } from "../../gen/maps__networkFix.effect.vibe"
 import { machine as notificationOpenMachine } from "../../gen/maps__notificationOpen.effect.vibe"
 import { machine as planeMachine } from "../../gen/maps__plane.effect.vibe"
 import { machine as screenMachine } from "../../gen/maps__screen.effect.vibe"
@@ -26,7 +25,7 @@ import { savedLayer, savedMachine } from "./saved.vibe"
 import { MapsScreen, screenLayer } from "./screen.vibe"
 import { NavigationVoice, voiceLayer } from "./voice.vibe"
 
-export { mapsRelayPort } from "./agent.vibe"
+export { MAPS_SELECTED_READ_CAPABILITY, mapsDeviceCapabilities, mapsRelayPort, type MapsContext } from "./agent.vibe"
 
 /** The Cloud Maps session: account binding, coverage reads and what an account change retires. */
 export service MapsSession {
@@ -105,14 +104,14 @@ const sessionLayer = Layer.effect(MapsSession, effect {
 })
 
 const machines = Layer.mergeAll(
-  connectionMachine(), locatorMachine(), networkFixMachine(), screenMachine(), guidanceMachine(), planeMachine(), eventReturnMachine(),
+  connectionMachine(), locatorMachine(), screenMachine(), guidanceMachine(), planeMachine(), eventReturnMachine(),
   notificationOpenMachine(), agentSurfaceMachine(), selectedReadMachine(), deliveryMachine(), cardsMachine(), savedMachine, contentLayer,
 )
 
 /**
  * Every Maps service over the ports of src/maps/ports.vibe: the session, provider, location and network position, screen, guidance, voice, plane, saved
  * places, agent glue and hand-offs, over their machines. Requires Native, Resident, Cloud, KeyValueStore,
- * AgentCalendar and the four ports.
+ * AgentCalendar, the assistant's NetworkLocation and the three ports.
  */
 export const mapsCore = sessionLayer.pipe(
   Layer.provideMerge(Layer.mergeAll(agentLayer, handoffLayer, planeLayer)),
@@ -126,7 +125,7 @@ export const mapsCore = sessionLayer.pipe(
 
 /**
  * Every Maps service with its ports filled from the areas before it, the page's links and the chat it counts: requires the platform's
- * Native, Resident, Cloud, Build, AppLifecycle and KeyValueStore, account's MapsAccount and AccountSheet, voice's Speech, telephony's call bar, the
- * shell's Navigation, calendar's AgentCalendar and the assistant's Composer.
+ * Native, Resident, Cloud, Build, AppLifecycle and KeyValueStore, account's MapsAccount, AccountSheet and SignInScreen, voice's GuidanceSpeaker,
+ * telephony's call bar, the shell's Navigation and Foreground, calendar's AgentCalendar and the assistant's Composer and NetworkLocation.
  */
 export const layer = Layer.provideMerge(Layer.mergeAll(pageLinksLive, chatLive), Layer.provideMerge(mapsCore, portsLive))

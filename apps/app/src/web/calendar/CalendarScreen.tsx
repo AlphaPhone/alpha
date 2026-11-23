@@ -15,6 +15,7 @@ import {
 } from "../../calendar/screen.vibe";
 import { googleSyncOffer } from "../../calendar/sync.vibe";
 import type { OriginView } from "../../notes/origins.vibe";
+import { newId } from "../../platform/ids.ts";
 import { deviceZone, formatLongDate, midnightAfter } from "../../calendar/time.ts";
 import { Navigation } from "../../shell/navigation.vibe";
 import type { ScreenProps } from "../app-screen.ts";
@@ -114,7 +115,7 @@ export function CalendarScreen({ route, onClose }: CalendarScreenProps) {
   const startEditor = (row: CalendarRow | undefined) => {
     setProblem("");
     void perform(Effect.gen(function* () {
-      const creationId = crypto.randomUUID().replace(/[^-a-zA-Z0-9_]/g, "");
+      const creationId = newId().replace(/[^-a-zA-Z0-9_]/g, "");
       const opened = yield* openEditor(row);
       if (!opened) return;
       const retained = yield* CalendarDrafts.use((drafts) => drafts.retained(row?.id ?? ""));

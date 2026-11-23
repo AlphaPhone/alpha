@@ -1,4 +1,4 @@
-// spec/inbox/drafts.md, "A reply goes to the reply address and, for reply all, the other recipients, without my own address"; spec/inbox/reader.md, "A sender image is a bundled brand icon, decorative and never a proof of identity"
+// spec/inbox/drafts.md, "A reply goes to the reply address and, for reply all, the other recipients, without my own address"; spec/inbox/reader.md, "A sender image is a bundled brand icon, decorative and never a proof of identity"; spec/inbox/drafts.md, "A draft the previous version kept comes into its account's Drafts once, and the previous slots clear only after every draft is kept"
 
 const ADDRESS = /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/;
 const REFERENCE = /&(?:#[0-9]{1,7}|#x[0-9a-f]{1,6}|[a-z][a-z0-9]{1,31});/gi;
@@ -98,4 +98,23 @@ export async function versionRequestId(parts: readonly unknown[]): Promise<strin
 /** The canonical JSON of a draft's content, which a review binds and a confirmation compares. */
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
+}
+
+/** The lowercase hex SHA-256 of `text` as UTF-8. */
+export async function sha256Hex(text: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** The parts of an account key (environment, user, organization, grant); undefined for anything else. */
+export function ownerParts(owner: string): { environment: string; userId: string; organizationId: string; grant: string } | undefined {
+  let parts: unknown;
+  try {
+    parts = JSON.parse(owner);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(parts) || parts.length !== 4 || !parts.every((part) => typeof part === "string")) return undefined;
+  const [environment, userId, organizationId, grant] = parts as string[];
+  return environment === "" || userId === "" || grant === "" ? undefined : { environment, userId, organizationId, grant };
 }

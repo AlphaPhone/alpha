@@ -1,12 +1,12 @@
-// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/appearance.md, "Story: Choose how Alpha looks"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/network.md, "Story: Join a nearby network"; spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/reset.md, "Story: Erase Alpha's data on purpose"
+// spec/settings/index.md, "Story: Find a setting in a few taps"; spec/settings/facts.md, "Story: Read my phone's state truthfully"; spec/settings/facts.md, "Story: Make Alpha my Home app"; spec/settings/facts.md, "Story: Go to Android's own page"; spec/settings/appearance.md, "Story: Choose how Alpha looks"; spec/settings/preferences.md, "Story: Decide what Alpha may do without asking"; spec/settings/network.md, "Story: Join a nearby network"; spec/settings/updates.md, "Story: Update Alpha when I choose"; spec/settings/reset.md, "Story: Erase Alpha's data on purpose"; spec/settings/index.md, "General's Phone row opens Phone's line details on the Alpha image only, and About's Agent activity opens the assistant's activity on the phone"
 import {
   AppWindow, ArrowLeft, Bell, Bot, Camera, Download, Globe, Info, LayoutGrid, Link, Mail, MapPin, MessageSquare, Mic, MicOff,
-  Monitor, NotebookText, Calendar, Folder, Images, KeyRound, RotateCw, Settings as Gear, Shield, Trash2, UserRound, Workflow,
+  Monitor, NotebookText, Calendar, Folder, Images, KeyRound, Phone, RotateCw, Settings as Gear, Shield, Trash2, UserRound, Workflow,
   Wifi as WifiIcon,
 } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
-import type { AppRow, Page, Settings } from "../../../gen/settings.ts";
-import { appListed } from "../../../gen/settings.ts";
+import type { AppRow, Elsewhere, Page, Settings } from "../../../gen/settings.ts";
+import { appListed, elsewhereShown } from "../../../gen/settings.ts";
 import type { Appearance, Choice } from "../../../gen/settings__appearance.ts";
 import { dark, notSaved } from "../../../gen/settings__appearance.ts";
 import type { Facts, SettingsPage } from "../../../gen/settings__facts.ts";
@@ -18,6 +18,7 @@ import { micMayBeOn } from "../../../gen/settings__privacy.ts";
 import type { ResetReview } from "../../../gen/settings__reset.ts";
 import type { Updates } from "../../../gen/settings__updates.ts";
 import { Alert, Button, Dialog, DialogContent, DialogTitle, Input, RadioGroup, RadioGroupItem, ScrollArea } from "../components/ui/index.ts";
+import type { AccountRows } from "../../account/bindings.vibe";
 import { cn } from "../lib/cn.ts";
 import { AboutPages, type AboutPagesProps } from "./AboutPages.tsx";
 import type { PageDialog } from "./dialogs.ts";
@@ -30,7 +31,7 @@ import {
 } from "./words.ts";
 
 const TITLES: Record<Page, string> = {
-  Root: "Settings", General: "General", Display: "Display", Network: "Wi-Fi", Privacy: "Privacy", Permissions: "App permissions",
+  Root: "Settings", General: "General", Display: "Display", Notifications: "Notifications", Network: "Wi-Fi", Privacy: "Privacy", Permissions: "App permissions",
   Apps: "Apps", Passwords: "Passwords", AppInbox: "Inbox", AppCamera: "Camera", AppMaps: "Maps", AppNotes: "Notes", AppPhotos: "Photos",
   About: "About", Problems: "Problem log", Licenses: "Licenses", LicenseDetail: "License", Developer: "Developer",
 };
@@ -54,6 +55,8 @@ export interface SettingsModel {
   readonly updates: Updates;
   readonly reset: ResetReview;
   readonly variant: "launcher" | "aosp" | "browser";
+  /** The account's words for the root's Account and AI provider rows. */
+  readonly account: AccountRows;
 }
 
 /** What the owner can do on the Settings pages. */
@@ -66,6 +69,8 @@ export interface SettingsActions {
   readonly openApp: (app: AppRow) => void;
   /** Open the Account app at its plan, Google or AI provider section. */
   readonly openAccount: (section: "plans" | "google" | "provider") => void;
+  /** General's Phone row or About's Agent activity: the app that answers it. */
+  readonly openElsewhere: (elsewhere: Elsewhere) => void;
   /** Android's own page, Alpha's App info, or an Android access dialog. */
   readonly openPage: (page: SettingsPage) => void;
   readonly openShade: () => void;
@@ -93,6 +98,8 @@ export type SettingsScreenProps = {
   readonly dialog: PageDialog | undefined;
   /** Open a dialog on the page shown, or close it with undefined. */
   readonly onDialog: (dialog: PageDialog | undefined) => void;
+  /** The notifications page the app mounts for General's Notifications. */
+  readonly notifications: ReactNode;
 }
   & Pick<PrivacyPagesProps, "privacy" | "privacyActs"> & Pick<AboutPagesProps, "diagnostics" | "aboutActs"> & Pick<DeveloperPageProps, "developerActs">;
 
@@ -107,7 +114,7 @@ function handoffWord(facts: Facts): string {
  * @model spec/settings/index.md
  * @design design.md
  */
-export function SettingsScreen({ model, act, onClose, dialog, onDialog, privacy, privacyActs, diagnostics, aboutActs, developerActs }: SettingsScreenProps) {
+export function SettingsScreen({ model, act, onClose, dialog, onDialog, notifications, privacy, privacyActs, diagnostics, aboutActs, developerActs }: SettingsScreenProps) {
   const { nav, facts } = model;
   const native = model.variant !== "browser";
   const notices = [handoffWord(facts), SHADE[facts.shade], facts.roleRefused ? ROLE_NOT_CHANGED : ""].filter((n) => n !== "");
@@ -122,9 +129,10 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, privacy,
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-6 px-3 pb-8">
           {notices.map((notice) => <p key={notice} role="status" aria-live="polite" className="px-4 text-sm text-muted-foreground">{notice}</p>)}
-          {nav.page === "Root" && <Root nav={nav} native={native} act={act} micMayBeOn={micMayBeOn(privacy.listener)} />}
+          {nav.page === "Root" && <Root nav={nav} native={native} account={model.account} act={act} micMayBeOn={micMayBeOn(privacy.listener)} />}
           {nav.page === "General" && <General model={model} act={act} native={native} erasing={dialog?.kind === "erase"} onDialog={onDialog} />}
           {nav.page === "Display" && <Display model={model} act={act} native={native} />}
+          {nav.page === "Notifications" && notifications}
           {nav.page === "Network" && <WifiPage network={model.network} act={act} chosen={dialog?.kind === "join" ? dialog.network : undefined} onDialog={onDialog} />}
           {nav.page === "Apps" && <AppsPage aosp={model.variant === "aosp"} act={act} />}
           {(nav.page === "AppInbox" || nav.page === "AppCamera" || nav.page === "AppMaps" || nav.page === "AppNotes" || nav.page === "AppPhotos") && (
@@ -138,7 +146,8 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, privacy,
           )}
           {(nav.page === "About" || nav.page === "Problems" || nav.page === "Licenses" || nav.page === "LicenseDetail") && (
             <AboutPages nav={nav} facts={facts} native={native} diagnostics={diagnostics} aboutActs={aboutActs}
-              onOpen={act.open} onOpenLicence={act.openLicence} onAppInfo={() => act.openPage("PageAppInfo")} />
+              onOpen={act.open} onOpenLicence={act.openLicence} onAppInfo={() => act.openPage("PageAppInfo")}
+              onActivity={elsewhereShown("AgentActivity", model.variant === "aosp", native) ? () => act.openElsewhere("AgentActivity") : undefined} />
           )}
           {nav.page === "Developer" && nav.developer && (
             <DeveloperPage developerActs={developerActs} version={facts.read.version} native={native} onHandoff={act.openPage} />
@@ -149,7 +158,9 @@ export function SettingsScreen({ model, act, onClose, dialog, onDialog, privacy,
   );
 }
 
-function Root({ nav, native, act, micMayBeOn: micOpen }: { readonly nav: Settings; readonly native: boolean; readonly act: SettingsActions; readonly micMayBeOn: boolean }) {
+function Root({ nav, native, account, act, micMayBeOn: micOpen }: {
+  readonly nav: Settings; readonly native: boolean; readonly account: AccountRows; readonly act: SettingsActions; readonly micMayBeOn: boolean;
+}) {
   return (
     <>
       {micOpen && (
@@ -165,9 +176,9 @@ function Root({ nav, native, act, micMayBeOn: micOpen }: { readonly nav: Setting
         <SettingRow label="About" icon={<Info aria-hidden className="size-5" />} onOpen={() => act.open("About")} />
       </Section>
       <Section caption="Account">
-        <SettingRow label="Account" icon={<UserRound aria-hidden className="size-5" />} onOpen={() => act.openAccount("plans")} />
+        <SettingRow label="Account" icon={<UserRound aria-hidden className="size-5" />} state={{ word: account.account }} onOpen={() => act.openAccount("plans")} />
         <SettingRow label="Google & email" icon={<Link aria-hidden className="size-5" />} onOpen={() => act.openAccount("google")} />
-        <SettingRow label="AI provider" icon={<Bot aria-hidden className="size-5" />} onOpen={() => act.openAccount("provider")} />
+        <SettingRow label="AI provider" icon={<Bot aria-hidden className="size-5" />} state={{ word: account.provider }} onOpen={() => act.openAccount("provider")} />
       </Section>
       {native && <Section><SettingRow label="Android settings" icon={<AppWindow aria-hidden className="size-5" />} ariaLabel="Open Android settings" onHandoff={() => act.openPage("PageHome")} /></Section>}
       {nav.developer && <Section><SettingRow label="Developer" onOpen={() => act.open("Developer")} /></Section>}
@@ -187,8 +198,11 @@ function General({ model, act, native, erasing, onDialog }: {
     <>
       <Section caption="Preferences">
         <SettingRow label="Display" icon={<Monitor aria-hidden className="size-5" />} onOpen={() => act.open("Display")} />
-        {native && <SettingRow label="Notifications" icon={<Bell aria-hidden className="size-5" />} state={ACCESS[read.notifications]} onHandoff={() => act.openPage("PageNotifications")} ariaLabel="Manage Alpha notifications in Android" />}
+        <SettingRow label="Notifications" icon={<Bell aria-hidden className="size-5" />} state={native ? ACCESS[read.notifications] : undefined} onOpen={() => act.open("Notifications")} />
       </Section>
+      {elsewhereShown("PhoneInfo", model.variant === "aosp", native) && (
+        <Section><SettingRow label="Phone" icon={<Phone aria-hidden className="size-5" />} ariaLabel="Phone, SIM and carrier" onOpen={() => act.openElsewhere("PhoneInfo")} /></Section>
+      )}
       {native && (
         <Section caption="Device">
           <SettingRow label="Wi-Fi" icon={<WifiIcon aria-hidden className="size-5" />} state={SWITCH[read.wifi]} onOpen={() => act.open("Network")} />

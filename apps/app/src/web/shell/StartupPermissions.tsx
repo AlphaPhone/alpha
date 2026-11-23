@@ -1,5 +1,6 @@
 // spec/shell/permissions.md, "Story: Grant Alpha what it needs, when I choose"; spec/shell/permissions.md, "An allowed step says how much Android allowed, and a browser request left off says so"
 import { Bell, CalendarDays, Camera, Check, Folder, Images, MapPin, Mic, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import type { Access, CheckNotice, Grant, Perm, Permissions } from "../../../gen/shell__permissions.ts";
 import { accessOf, grantOf, keyAt, offersSettings, panelShown, selected, skippable, stepCount } from "../../../gen/shell__permissions.ts";
 import { Button, Dialog, DialogContent, DialogTitle, Spinner } from "../components/ui/index.ts";
@@ -44,13 +45,15 @@ export interface StartupPermissionsProps {
   onFinish: () => void;
   /** Leaves a review opened from Settings. */
   onClose: () => void;
+  /** What the account has to say on the Ready card (a missing plan, AI off, a stopped agent, a new account), drawn above Done. */
+  account?: ReactNode;
 }
 
 /**
  * The access walkthrough: each permission's real state, Allow on the current step, and Ready at the end.
  * @model spec/shell/permissions.md
  */
-export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onClose }: StartupPermissionsProps) {
+export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onClose, account }: StartupPermissionsProps) {
   const open = panelShown(walkthrough);
   const busy = walkthrough.pending >= 0;
   if (walkthrough.phase === "PhaseReady") {
@@ -59,6 +62,7 @@ export function StartupPermissions({ walkthrough, onAllow, onNext, onFinish, onC
         <DialogContent closeLabel="Done">
           <span className="flex size-12 items-center justify-center rounded-full bg-secondary"><Check aria-hidden className="size-6" /></span>
           <DialogTitle className="font-serif text-3xl">All set</DialogTitle>
+          {account}
           {walkthrough.progressError && <p className="text-sm text-warn">Progress couldn’t be saved on this phone.</p>}
           <Button onClick={onFinish}>Done</Button>
         </DialogContent>

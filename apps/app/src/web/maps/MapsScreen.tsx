@@ -1,4 +1,4 @@
-// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/screen.md, "A place outside every region the provider covers keeps its coordinates and says so"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/guidance.md, "Story: Guide me along the route I started"; spec/maps/plane.md, "Story: See the map for what I am looking at"; spec/maps/eventReturn.md, "Story: Go back to the event whose place I opened"
+// spec/maps/screen.md, "Story: Find a place"; spec/maps/screen.md, "Call is offered only for a dialable number on the build that has Phone, and Copy number only for a place that is not Google's"; spec/maps/screen.md, "A place outside every region the provider covers keeps its coordinates and says so"; spec/maps/screen.md, "Story: Plan directions and choose a route"; spec/maps/guidance.md, "Story: Guide me along the route I started"; spec/maps/plane.md, "Story: See the map for what I am looking at"; spec/maps/eventReturn.md, "Story: Go back to the event whose place I opened"; spec/maps/plane.md, "The credits panel opens from the badge or the information button of a built plane"
 import { Effect } from "effect";
 import { CalendarDays, LocateFixed, RotateCw } from "lucide-react";
 import { useCallback, useState } from "react";
@@ -93,7 +93,7 @@ export function MapsScreen({ route, onClose }: ScreenProps) {
         {!coverage && c.message && <Button variant="secondary" size="sm" className="self-start" onClick={() => act((s) => s.session.retry())}>Retry</Button>}
       </div>
 
-      <div className="pointer-events-none relative z-10 mt-auto flex flex-col gap-2 p-3 *:pointer-events-auto">
+      <div data-alpha-maps-controls className="pointer-events-none relative z-10 mt-auto flex flex-col gap-2 p-3 pb-[min(max(7.75rem,calc(var(--alpha-dock-clearance,6.375rem)+1.375rem)),calc(100dvh-11rem))] *:pointer-events-auto [html.alpha-landscape_&]:pb-3">
         <div className="flex items-end justify-between">
           {plane && (
             <MapCredits credits={creditsFor(basemap)} copyright={c.copyright} attribution={coverage?.attribution ?? "OpenFreeMap · © OpenMapTiles · Data from OpenStreetMap"}

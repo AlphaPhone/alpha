@@ -1,4 +1,4 @@
-// spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"; spec/browser/egress.md, "Share waits for the menu to close, then hands Android only the same document, one share at a time"; spec/browser/reading.md, "Read aloud asks the native host for one reading of the shown settled HTTPS page, and speaks only the token it returns, once"
+// spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"; spec/browser/egress.md, "Share waits for the menu to close, then hands Android only the same document, one share at a time"; spec/browser/reading.md, "Read aloud asks the native host for one reading of the shown settled HTTPS page, and speaks only the token it returns, once"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"
 import type { AgentOutcome, BrowserNotice } from "../../gen/browser__session.ts";
 import type { EgressProblem } from "../../gen/browser__egress.ts";
 import type { HandoffProblem } from "../../gen/browser__handoff.ts";
@@ -13,6 +13,13 @@ export const READING_UNSUPPORTED =
   "Read aloud and Ask about page are unavailable on this device: its Android System WebView cannot read a page privately. Update Android System WebView.";
 /** The refusal for a page or excerpt that reads as credentials or a code. */
 export const SENSITIVE_READING = "This page may contain credentials or verification codes. Open a different page.";
+/** What the agent is told when it asks to read page text: the open page comes with each message, or through Ask about page. */
+export const NO_PAGE_READ =
+  "There is no separate page read. While Browser is on screen, the open page comes with each message as browserPage, unless the owner turned off Browser page for Alpha in Settings, Privacy. Without it, the owner can choose \"Ask about page\" in the Browser menu to share a reviewed excerpt.";
+/** What the agent is told for a view interaction Browser has no command for. */
+export const NO_VIEW_COMMAND = "Browser supports back, forward and reload from chat.";
+/** Why an open of an address the page wrote, not the owner, did not run without its card. */
+export const PAGE_LINK_UNREVIEWED = "That link came from the page, not from you, so Alpha opens it only after you approve its card.";
 /** The native refusal for a page the reader treats as sensitive or cannot verify. */
 export const SENSITIVE_PAGE = "Alpha doesn’t read pages that may be sensitive or that it can’t verify. Open a different page.";
 
@@ -45,6 +52,9 @@ const REFUSALS: ReadonlyMap<string, string> = new Map([
   ["This Android WebView cannot clear site data.", "This phone’s WebView can’t clear a site’s data."],
   ["Site data could not be cleared.", "This site’s data couldn’t be cleared."],
   ["Load a visible HTTPS page before reading", "Load an HTTPS page before reading."],
+  ["Browser page changed", "The page changed. Alpha didn’t get it with this message."],
+  ["Private tabs are never shared", "Private tabs aren’t shared with Alpha."],
+  ["Only public HTTPS pages are shared", "Only public HTTPS pages are shared with Alpha."],
   ["The visible HTTPS page changed. Review it again before leaving Alpha.", "The page changed. Review it again before leaving Alpha."],
   ["No other installed browser can open this page. Use a password or another sign-in method.", "No other browser on this phone can open this page. Use a password or another way to sign in."],
   ["The other browser could not be opened. Your page remains in Alpha.", "The other browser didn’t open. Your page is still open in Alpha."],

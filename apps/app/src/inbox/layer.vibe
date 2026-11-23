@@ -1,4 +1,4 @@
-// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"
+// spec/inbox/accounts.md, "Story: Choose which Gmail account my Inbox shows"; spec/inbox/drafts.md, "Story: Keep the drafts I wrote before this version"; spec/inbox/operations.md, "Story: Change or send from my mailbox once, as I reviewed it"
 import { machine as accountsMachine } from "../../gen/inbox__accounts.effect.vibe"
 import { machine as mailboxMachine } from "../../gen/inbox__mailbox.effect.vibe"
 import { machine as readerMachine } from "../../gen/inbox__reader.effect.vibe"
@@ -19,6 +19,7 @@ import { layer as selection } from "./selection.vibe"
 import { layer as notices } from "./notices.vibe"
 import { mailSenderFill } from "./handoffs.vibe"
 import { layer as suggestions } from "./suggestions.vibe"
+import { previousDrafts } from "./previous.vibe"
 
 export { Gmail } from "./gmail.vibe"
 export { SavedMail } from "./saved.vibe"
@@ -33,6 +34,8 @@ export { MailSuggestions } from "./suggestions.vibe"
 export { emailShareTarget } from "./shareTarget.vibe"
 export { assistantEmail, assistantEmailSender, cameraEmailTarget, mailSenderFill } from "./handoffs.vibe"
 export { inboxBack } from "./back.vibe"
+export { inboxCapabilities } from "./handoffs.vibe"
+export { keepPreviousDrafts } from "./previous.vibe"
 export type { ComposerBack } from "./composer.vibe"
 
 /** The Inbox's machines: memory for what is read, the phone's mail store for drafts and operations. */
@@ -43,10 +46,10 @@ export const machines = Layer.mergeAll(
 
 /**
  * Every Inbox service, over the platform's Native, Resident, Cloud, Build and KeyValueStore, the account area's
- * CloudSession and GoogleAccounts, the shell's Navigation, Overview and ShellMail (which the layer fills with Inbox's send of chat-reviewed email), the assistant's Assistant, the browser's BrowserAgent, files' FilePicker and settings' Preferences.
+ * CloudSession and GoogleAccounts, the shell's Navigation, Overview and ShellMail (which the layer fills with Inbox's send of chat-reviewed email), the assistant's Assistant, the browser's BrowserAgent, files' FilePicker and settings' Preferences; it also brings the previous version's drafts into each account's Drafts.
  */
 export const layer = Layer.provideMerge(
-  Layer.mergeAll(selection, notices, suggestions, mailSenderFill),
+  Layer.mergeAll(selection, notices, suggestions, mailSenderFill, previousDrafts),
   Layer.provideMerge(composer,
     Layer.provideMerge(operations,
       Layer.provideMerge(mailbox,

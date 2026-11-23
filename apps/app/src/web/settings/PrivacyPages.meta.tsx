@@ -17,6 +17,7 @@ export const meta: ComponentMeta<PrivacyPagesProps> = {
     ViaCloud: { privacy: { route: "ViaCloud", listener: listenerOn, aosp: true } },
     StopUnconfirmed: { privacy: { route: "OnPhone", listener: stopUnconfirmed, aosp: true } },
     Unreadable: { preferences: { value: preferences, readable: false } },
+    BrowserPageOff: { preferences: { value: { ...preferences, browserPage: false, edits: 1 }, readable: true } },
     ResetAsked: { preferences: { value: preferences, readable: false }, resetAsked: true },
     Permissions: { page: "Permissions" },
     Browser: { native: false, privacy: { route: "OnPhone", listener: listenerOn, aosp: false } },

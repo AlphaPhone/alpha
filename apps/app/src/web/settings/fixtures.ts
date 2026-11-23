@@ -18,12 +18,18 @@ const read = { ...unread, wifi: "On", bluetooth: "Off", dnd: "Unknown", camera: 
 /** A launcher phone on the General page with an update offered. */
 export const general: SettingsModel = {
   nav: { ...nav, page: "General" }, facts: { ...facts, read, shown: 1, generation: 1, visible: true }, appearance,
-  preferences: { value: preferences, readable: true }, network, reset, variant: "launcher",
+  preferences: { value: preferences, readable: true }, network, reset, variant: "launcher", account: { account: "ann@example.test", provider: "Cloud" },
   updates: { ...updates, installed: 140, offer: 150, offerName: "1.5.0", bound: true, permission: "PermissionRequired", outcome: "UpdateReady" },
 };
 
 /** The root of an Alpha image build. */
 export const root: SettingsModel = { ...general, nav, variant: "aosp" };
+
+/** The root of a signed-out phone that uses its own provider key. */
+export const signedOutRoot: SettingsModel = { ...general, nav, account: { account: "Signed out", provider: "Own key" } };
+
+/** General on the Alpha image, with the Phone row. */
+export const imageGeneral: SettingsModel = { ...general, variant: "aosp" };
 
 /** Apps on the Alpha image, with Messages listed. */
 export const apps: SettingsModel = { ...general, nav: { ...nav, page: "Apps" }, variant: "aosp" };

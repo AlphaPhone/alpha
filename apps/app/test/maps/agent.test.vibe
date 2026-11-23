@@ -1,16 +1,18 @@
 // spec/maps/guidance.md, "Story: Reroute the guidance I started only when my agent asks, from a fresh fix"; spec/maps/agentSurface.md, "Story: Let my agent bring Maps forward only when I can see it"; spec/maps/selectedRead.md, "Story: Let the agent see only what the Maps screen shows now"; spec/maps/delivery.md, "Story: Carry my agent's Maps requests to the phone once"; spec/maps/cards.md, "Story: Answer my agent's Maps question with one tap"
 import { assert, it } from "@effect/vitest"
+import type { ExecutorCall } from "@elizaos/agent/client"
 import { Machine as CardsMachine } from "../../gen/maps__cards.effect.vibe"
 import { Machine as ConnectionMachine } from "../../gen/maps__connection.effect.vibe"
 import { Machine as DeliveryMachine } from "../../gen/maps__delivery.effect.vibe"
 import { Machine as GuidanceMachine } from "../../gen/maps__guidance.effect.vibe"
 import { Machine as ScreenMachine } from "../../gen/maps__screen.effect.vibe"
 import { Machine as SurfaceMachine } from "../../gen/maps__agentSurface.effect.vibe"
-import { MapsAgent } from "../../src/maps/agent.vibe"
+import { MapsAgent, mapsDeviceCapabilities } from "../../src/maps/agent.vibe"
 import { MapsContent } from "../../src/maps/content.vibe"
 import { MapsHandoff } from "../../src/maps/handoff.vibe"
 import { MapsSession } from "../../src/maps/layer.vibe"
 import { MapsNavigation } from "../../src/maps/navigation.vibe"
+import { operationPorts } from "../../src/maps/operations.vibe"
 import { MapsPlane } from "../../src/maps/plane.vibe"
 import { MapsScreen } from "../../src/maps/screen.vibe"
 import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
@@ -115,6 +117,38 @@ it.live("The agent reads only the selection its approved card showed (spec/maps/
   }
 })
 
+it.live("The agent's reviewed Maps read runs once for the place its card named, and not after the selection moved (spec/maps/selectedRead.md, \"A read is approved only for the selection the card showed, and its result is uploaded only while that selection is still shown\"; spec/maps/selectedRead.md, \"The context revision changes exactly when what is shown changes, and clears when Maps is not in front\")", () => effect {
+  const h = try harness(open)
+  provide h.layer {
+    const agent = try MapsAgent
+    const screen = try MapsScreen
+    const machine = try ScreenMachine
+    const ports = try operationPorts
+    const call = undefined as unknown as ExecutorCall
+    try shownPier()
+    try sleep("20 millis")
+    const shown = try agent.context()
+    const op = { type: "maps_read_selected", target: shown }
+    const valid = ports.validate(op) !== undefined
+    const done = (try promise(() => ports.execute(op, call))) as { kind: string; result?: { fields?: { kind?: string; label?: string; providerRevision?: string } } }
+    try screen.pickResult(1)
+    try until(machine.changes, (s) => s.details === "Ready")
+    try sleep("20 millis")
+    const moved = try agent.context()
+    const stale = (try promise(() => ports.execute(op, call))) as { kind: string; code?: string }
+    try Effect.try(() => assert.deepStrictEqual(
+      {
+        id: shown?.id.startsWith("maps_"), kind: shown?.kind, valid, done: [done.kind, done.result?.fields?.kind, done.result?.fields?.label, done.result?.fields?.providerRevision],
+        sameId: moved?.id === shown?.id, stale: [stale.kind, stale.code], card: ports.describe(op).title, receipt: ports.summarize(op, "Applied"),
+      },
+      {
+        id: true, kind: "map-place", valid: true, done: ["applied", "map-place", "Pier 39", "r1"],
+        sameId: false, stale: ["refused", "not_dispatched"], card: "Share the place shown in Maps", receipt: "Shared the place shown in Maps.",
+      },
+    ))
+  }
+})
+
 it.live("A redelivered navigation applies its effect once, and a lost claim applies nothing (spec/maps/delivery.md, \"Story: Carry my agent's Maps requests to the phone once\"; spec/maps/delivery.md, \"A navigation effect runs only under a returned claim, and a redelivery never runs it twice\")", () => effect {
   const claimed = try harness(open, { claim: { claimId: "claim-1" } })
   const applied = try Ref.make(0)
@@ -214,4 +248,11 @@ it.live("Back closes the credits sheet, then the rename field, then the place an
       { credits: true, infoClosed: true, rename: true, renaming: undefined, place: true, choice: "NoChoice", search: true, leaves: false },
     ))
   }
+})
+
+it.effect("The selected read is advertised only when the agent offers it (spec/maps/selectedRead.md, \"Story: Let the agent see only what the Maps screen shows now\")", () => effect {
+  try Effect.try(() => assert.deepStrictEqual(
+    { offered: mapsDeviceCapabilities(["files.browser.v1", "maps.selected-read.v1"]), absent: mapsDeviceCapabilities(["files.browser.v1"]) },
+    { offered: ["maps.selected-read.v1"], absent: [] },
+  ))
 })

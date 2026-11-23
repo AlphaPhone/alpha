@@ -5,6 +5,7 @@ import { Navigation } from "../shell/navigation.vibe"
 import { CloudSession, ownerOf } from "../account/layer.vibe"
 import { Composer } from "../assistant/composer.vibe"
 import { Assistant } from "../assistant/assistant.vibe"
+import { AssistantDraft, type AskSource, type QuestionReview } from "../assistant/draft.vibe"
 import { WorkflowRuns } from "../workflows/runs.vibe"
 import { NotesOrigins } from "../notes/origins.vibe"
 import { shownOf, viewOf, type ClockView } from "./screen.ts"
@@ -63,6 +64,19 @@ export effect function assistantPeer() {
     },
     releases: (): Stream.Stream<void> => Stream.map(Stream.filter(assistant.holdingDraftChanges, (held) => !held), () => undefined),
     draft: (question: string) => assistant.openWith(question),
+  }
+}
+
+/** The assistant's question review: a question about one of Alpha's notices opens there, what it shows now, closing it, and the notice each review it shows is about. */
+export effect function questionPeer() {
+  const draft = try AssistantDraft
+  return {
+    ask: (source: AskSource) => draft.askAbout(source),
+    effect shown() {
+      return Option.getOrUndefined(try Stream.runHead(draft.review)) as QuestionReview | undefined
+    },
+    dismiss: (id: number) => draft.dismiss(id),
+    changes: (): Stream.Stream<string | undefined> => Stream.changes(Stream.map(draft.review, (review) => review?.about?.id)),
   }
 }
 

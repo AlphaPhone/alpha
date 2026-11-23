@@ -11,6 +11,7 @@ import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { observeLandscape, observeRecorder, onPreviewEnded } from "./browserCamera.ts"
 import { cameraText } from "./messages.vibe"
 import { CameraNotices } from "./notices.vibe"
+import { newId } from "../platform/ids.ts"
 import { PhotoStore } from "./photos.vibe"
 
 /** What a borrowed shutter answered: its value, or why it did not run. */
@@ -187,7 +188,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
       const preview = photo.thumbnail ?? photo.base64
       if (photo.format !== "jpeg" || preview === undefined || photo.width <= 0 || photo.height <= 0) throw new CameraFailed({ method: "capturePhoto", code: "INCOMPLETE", message: "" })
       if (bridge.browser) {
-        const kept = try mapError(store.keepCapture(globalThis.crypto.randomUUID(), photo.base64 ?? preview), (failure) => new CameraFailed({ method: "keepCapture", code: failure.code, message: failure.message }))
+        const kept = try mapError(store.keepCapture(newId(), photo.base64 ?? preview), (failure) => new CameraFailed({ method: "keepCapture", code: failure.code, message: failure.message }))
         return { ok: kept.status === "saved", id: kept.id ?? "", image: kept.id === undefined ? "" : `data:image/jpeg;base64,${preview}` }
       }
       const id = photoReceiptId(photo.path, false)

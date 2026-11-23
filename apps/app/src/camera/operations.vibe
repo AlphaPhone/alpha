@@ -68,11 +68,11 @@ export function describeOperation(op: CameraFamilyOperation): { readonly title: 
   }
 }
 
-/** The class the assistant's direct pass reasons about: a photo, a Photos view change, or a reviewed read or change. */
+/** The class the assistant's direct pass reasons about: a photo, a Photos view change, or a reviewed library read or change. */
 export function classOfOperation(op: CameraFamilyOperation): Op {
   if (op.type === "camera_capture_photo") return "CameraCapture"
   if (op.type === "photos_filter" || op.type === "photos_open" || op.type === "photo_library_select") return "OpenView"
-  return "NotesRead"
+  return "PhotosChange"
 }
 
 /** The receipt sentence for a settled Camera or Photos result. */

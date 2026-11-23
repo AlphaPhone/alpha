@@ -116,6 +116,22 @@ pure def lawEmptyingTheFieldKeepsAlphasFilter(q: ListQuery): bool =
   (isAlphaQuery(q) implies typedQuery(q, "") == q) and (not(isAlphaQuery(q)) implies typedQuery(q, "") == NoQuery)
 ```
 
+### A question for Alpha leaves the bar only once a turn took it
+
+Enter on a sentence, or Send on a request to Alpha, opens the chat on the subject with the question.
+The field keeps it until the assistant says a turn took it, and then only where the owner has not
+typed something else meanwhile. A question the assistant could not take, or did not answer for in
+time, stays where it was typed, so the owner never retypes it (#1268, #1314).
+
+```quint
+type AskAnswer = AskTaken | AskNotTaken | AskUnanswered
+pure def askLeavesField(answer: AskAnswer, unchanged: bool): bool = answer == AskTaken and unchanged
+pure def lawAQuestionAlphaDidNotTakeStays(answer: AskAnswer, unchanged: bool): bool =
+  askLeavesField(answer, unchanged) implies (answer == AskTaken and unchanged)
+pure def lawAnUntakenQuestionIsNeverCleared(unchanged: bool): bool =
+  not(askLeavesField(AskNotTaken, unchanged)) and not(askLeavesField(AskUnanswered, unchanged))
+```
+
 ## Story: Be told what became of a call I asked for
 
 > As the owner, I want to be told whether Android took my call, opened the dial screen instead, or

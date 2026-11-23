@@ -6,6 +6,7 @@ import { PhotosFailed, PhotoStore, type AlbumChange, type PhotoEditRequest, type
 import { renderPhotoEdit } from "./imageEdit.ts"
 import { renderVideoEdit, shareFiles, videoEditingAvailable } from "./browserMedia.ts"
 import { PreparedDeletion, StoredLibrary } from "./storage.schema.vibe"
+import { newId } from "../platform/ids.ts"
 
 const KEY = "alpha/browser/photos/v1"
 const PAGE = 24
@@ -246,7 +247,7 @@ export const browserPhotoStore = Layer.effect(PhotoStore, effect {
       return answer as never
     },
     effect beginEdit(item: Reviewed) {
-      const operationId = globalThis.crypto.randomUUID()
+      const operationId = newId()
       const row = try edit("beginEdit", (library) => {
         const source = current(library, item)
         if (source === undefined || source.trashedAt !== undefined) return { next: library, answer: undefined }
@@ -306,7 +307,7 @@ export const browserPhotoStore = Layer.effect(PhotoStore, effect {
     })),
     effect beginVideoEdit(item: Reviewed) {
       if (!videoEditingAvailable()) throw failed("beginVideoEdit", "Video editor is unavailable. Original unchanged.")
-      const operationId = globalThis.crypto.randomUUID()
+      const operationId = newId()
       const row = try edit("beginVideoEdit", (library) => {
         const source = current(library, item)
         if (source === undefined || source.kind !== "video" || source.trashedAt !== undefined) return { next: library, answer: undefined }

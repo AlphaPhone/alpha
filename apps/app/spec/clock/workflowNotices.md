@@ -8,7 +8,9 @@ runs, only for the account the notice belongs to. A tap of the notice's Ask acti
 about it instead (#461, #472: a step's notice and an approval notice both offer it); a question is
 drafted only after the tap is read again unchanged and consumed at the notice's revision. Asking
 never approves, denies or sends anything: an approval stays pending for the owner's own decision.
-A tap read while the workflows view was refreshing or resetting is read again when that ends.
+A tap read while the workflows view was refreshing or resetting is read again when that ends (the
+Workflows place counts each refresh or reset); a question already under review is not a read and
+stays open, since Add to chat reads its tap again anyway.
 
 ## Story: Return to the run a notice names
 
@@ -29,7 +31,9 @@ pure def back(again: bool, w: WorkflowNotices): WorkflowNotices = { ...w, stage:
 pure def canTapAnnounced(w: WorkflowNotices): bool = not(w.recheck)
 pure def tapAnnounced(w: WorkflowNotices): WorkflowNotices = { ...w, recheck: true }
 pure def canViewMoved(w: WorkflowNotices): bool = true
-pure def viewMoved(w: WorkflowNotices): WorkflowNotices = { ...w, generation: w.generation + 1, stage: if (w.stage == WQuestionTap) WIdleTap else w.stage }
+pure def viewMoved(w: WorkflowNotices): WorkflowNotices = { ...w, generation: w.generation + 1 }
+pure def stepAMovedViewKeepsAnOpenQuestion(before: WorkflowNotices, via: str, after: WorkflowNotices): bool =
+  (via == "viewMoved" and before.stage == WQuestionTap) implies after.stage == WQuestionTap
 pure def canBeginCheck(w: WorkflowNotices, source: NoticeTapSource): bool = w.stage == WIdleTap and w.recheck
 pure def beginCheck(w: WorkflowNotices, source: NoticeTapSource): WorkflowNotices =
   { ...w, stage: WReadingTap, source: source, readGeneration: w.generation, recheck: false, report: NoWorkflowReport }
@@ -65,11 +69,14 @@ pure def sometimesReadAgain(w: WorkflowNotices): bool = w.recheck and w.generati
 
 ### A question about a notice is drafted only after its tap is read again unchanged and consumed; Cancel settles it, an interruption keeps it
 
-Continue reads the pending tap again: the same token, still a question, with the same notice title,
+The question is reviewed in the assistant's question review (see
+[notice question](../assistant/noticeQuestion.md)), as Alpha's own notice named by its tap; its Add to
+chat is Continue, and closing it unadded is Cancel. Continue reads the pending tap again: the same token, still a question, with the same notice title,
 text and revision; anything else reports that the notice changed and drafts nothing. Cancel on a
 workflow notice consumes its tap as discarded, so the review never reopens by itself; a hosted
 result's question is released. Leaving the review by going Home, to another app or hiding the page
-interrupts it and keeps the tap for the next return.
+interrupts it and keeps the tap for the next return; so does a newer review replacing it. A tap that
+carries no notice text has nothing to review and reports that the notice changed.
 
 ```quint
 type QuestionEnd = ComposeQuestion | CancelQuestion | InterruptQuestion

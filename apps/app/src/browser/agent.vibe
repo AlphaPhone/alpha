@@ -1,13 +1,14 @@
-// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"
+// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"
 import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
 import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
 import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, curTab, isPrivateTab, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
 import { type Preference, Machine, machine } from "../../gen/browser__agent.effect.vibe"
 import type { PageCommand } from "../../gen/browser__page.ts"
+import { type Interaction, interactionAnswer } from "../../gen/browser__pageContext.ts"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { matchingTabs, newTabId, searchAddress } from "./address.ts"
 import { newId } from "../platform/ids.ts"
-import { AGENT_REFUSALS } from "./messages.ts"
+import { AGENT_REFUSALS, NO_PAGE_READ, NO_VIEW_COMMAND } from "./messages.ts"
 import { BrowserReviews } from "./reviews.vibe"
 import { BrowserTabs } from "./session.vibe"
 import { TabHost } from "./tabHost.vibe"
@@ -57,6 +58,8 @@ export service BrowserAgent {
   control(operation: unknown, observed: BrowserTabSelection | undefined, choose: (choice: BrowserTabChoice) => Effect.Effect<number | null>): Effect.Effect<Effect.Effect<void>, BrowserOpenRefused>
   /** A view command from the assistant's Browser view, claimed once and never repeated. */
   command(raw: unknown, selection: unknown): ViewCommandAnswer!!
+  /** An agent view interaction in Browser: `browser-command` is a view command, and `get-text` is refused with where the page comes from. */
+  interact(capability: string, raw: unknown, selection: unknown): ViewCommandAnswer!!
   /** The owner's "review phone actions first" preference. */
   prefer(preference: Preference): void!!
   /** The selected tab's identity for a proposal. */
@@ -138,6 +141,39 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
     return settled
   }
 
+  effect function viewCommand(raw: unknown, selection: unknown) {
+    const parsed = parseNativeHistoryCommand(raw, selection)
+    if (!parsed.ok) return { ok: false, code: "UNSUPPORTED", message: parsed.message } as const
+    const state = try tabs.get()
+    const shownState = try foreground.get()
+    const tab = curTab(state)
+    const claimed = agent.send({ type: "claim", revision: tab.revision, inBrowser: inBrowser(shownState) }) catch () => undefined
+    if (claimed === undefined) return { ok: false, code: "UNAVAILABLE", message: AGENT_REFUSALS.RefusedNotShowing } as const
+    if (!observedTabCurrent(parsed.command.selection, { id: `${host.session}:${state.cur}`, revision: String(tab.revision) })) {
+      agent.send({ type: "claimSettled", revision: -1, nativeHost: host.onDevice, shown: false, covered: true }) catch () => undefined
+      agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
+      return { ok: false, code: "STALE_REF", message: AGENT_REFUSALS.RefusedChanged } as const
+    }
+    const shown = inBrowser(shownState) && !shownState.shade && !shownState.locked
+    const bound = agent.send({ type: "claimSettled", revision: tab.revision, nativeHost: host.onDevice, shown, covered: false }) catch () => undefined
+    if (bound?.command !== "Bound") {
+      agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
+      return { ok: false, code: "UNAVAILABLE", message: (try agent.get()).preference === "ReviewOff" ? AGENT_REFUSALS.RefusedNotShowing : "Review phone actions first is on. Approve this in chat." } as const
+    }
+    const request = newId()
+    const result = try tabs.dispatch({ type: "viewCommand", request, command: historyOf[parsed.command.subaction], tab: state.cur, navigation: tab.page.navigation, shown })
+    const settled = result.settled.find((s) => s.request === request)
+    if (settled?.outcome !== "Dispatched") {
+      agent.send({ type: "commandSent", revision: -1 }) catch () => undefined
+      agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
+      return { ok: false, code: settled?.outcome === "RefusedChanged" ? "STALE_REF" : "UNAVAILABLE", message: AGENT_REFUSALS[settled?.outcome ?? "RefusedChanged"] } as const
+    }
+    agent.send({ type: "commandSent", revision: tab.revision }) catch () => undefined
+    agent.send({ type: "acknowledged", delivered: !result.failed }) catch () => undefined
+    if (result.failed) return { ok: false, code: "UNAVAILABLE", message: "Native browser result belongs to another tab or session" } as const
+    return { ok: true, data: { dispatched: true, completed: false, requiresReadback: true } } as const
+  }
+
   return {
     effect openApproved(url: string, newTab: boolean) {
       const parsed = parseBrowserNavigate({ type: "browser_navigate", url, ...(newTab ? { newTab: true } : {}) })
@@ -189,37 +225,14 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
         }
       }
     },
-    effect command(raw: unknown, selection: unknown) {
-      const parsed = parseNativeHistoryCommand(raw, selection)
-      if (!parsed.ok) return { ok: false, code: "UNSUPPORTED", message: parsed.message } as const
-      const state = try tabs.get()
-      const shownState = try foreground.get()
-      const tab = curTab(state)
-      const claimed = agent.send({ type: "claim", revision: tab.revision, inBrowser: inBrowser(shownState) }) catch () => undefined
-      if (claimed === undefined) return { ok: false, code: "UNAVAILABLE", message: AGENT_REFUSALS.RefusedNotShowing } as const
-      if (!observedTabCurrent(parsed.command.selection, { id: `${host.session}:${state.cur}`, revision: String(tab.revision) })) {
-        agent.send({ type: "claimSettled", revision: -1, nativeHost: host.onDevice, shown: false, covered: true }) catch () => undefined
-        agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
-        return { ok: false, code: "STALE_REF", message: AGENT_REFUSALS.RefusedChanged } as const
+    command: viewCommand,
+    effect interact(capability: string, raw: unknown, selection: unknown) {
+      const kind: Interaction = capability === "get-text" ? "GetText" : capability === "browser-command" ? "BrowserCommand" : "OtherInteraction"
+      switch (interactionAnswer(kind)) {
+        case "PageComesWithMessages": return { ok: false, code: "UNSUPPORTED", message: NO_PAGE_READ } as const
+        case "NoCommandForView": return { ok: false, code: "UNSUPPORTED", message: NO_VIEW_COMMAND } as const
+        case "CommandHandled": return try viewCommand(raw, selection)
       }
-      const shown = inBrowser(shownState) && !shownState.shade && !shownState.locked
-      const bound = agent.send({ type: "claimSettled", revision: tab.revision, nativeHost: host.onDevice, shown, covered: false }) catch () => undefined
-      if (bound?.command !== "Bound") {
-        agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
-        return { ok: false, code: "UNAVAILABLE", message: (try agent.get()).preference === "ReviewOff" ? AGENT_REFUSALS.RefusedNotShowing : "Review phone actions first is on. Approve this in chat." } as const
-      }
-      const request = newId()
-      const result = try tabs.dispatch({ type: "viewCommand", request, command: historyOf[parsed.command.subaction], tab: state.cur, navigation: tab.page.navigation, shown })
-      const settled = result.settled.find((s) => s.request === request)
-      if (settled?.outcome !== "Dispatched") {
-        agent.send({ type: "commandSent", revision: -1 }) catch () => undefined
-        agent.send({ type: "acknowledged", delivered: true }) catch () => undefined
-        return { ok: false, code: settled?.outcome === "RefusedChanged" ? "STALE_REF" : "UNAVAILABLE", message: AGENT_REFUSALS[settled?.outcome ?? "RefusedChanged"] } as const
-      }
-      agent.send({ type: "commandSent", revision: tab.revision }) catch () => undefined
-      agent.send({ type: "acknowledged", delivered: !result.failed }) catch () => undefined
-      if (result.failed) return { ok: false, code: "UNAVAILABLE", message: "Native browser result belongs to another tab or session" } as const
-      return { ok: true, data: { dispatched: true, completed: false, requiresReadback: true } } as const
     },
     prefer: (preference: Preference) => agent.send({ type: "prefer", preference }) catch () => undefined,
     effect selection() {

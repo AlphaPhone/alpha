@@ -8,8 +8,12 @@ a start, the permission check, the prompt, the wait for the screen to be in
 front and the watch itself, belongs to the generation that started it, so a
 late answer of a retired session changes nothing. Only the owner's own locate
 and the guidance watch the owner started may show the permission prompt.
-When GPS has no fix, a [network position](./networkFix.md) stands in as an
-approximate one.
+When GPS has no fix, a network position stands in as an approximate one. It
+comes from the phone's `AlphaNetworkLocation` bridge through the one network
+client the assistant's chat location also reads
+([turn context](../assistant/context.md)): one cache, one lookup in flight and
+one back-off for both, looked up only when Maps or the chat needs a position
+now, so a phone that stays put asks at most a few times an hour.
 
 The chat's view of the phone's position, sent with ordinary turns when the
 owner allows Location for Alpha, is the assistant's

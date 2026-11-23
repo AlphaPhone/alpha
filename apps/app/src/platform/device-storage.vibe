@@ -86,3 +86,25 @@ export const deviceStorageLive = Layer.effect(DeviceStorage, effect {
     },
   }
 })
+
+/**
+ * The machine `stored` keeps under `key`, unless what is stored there is not a state that `decode` reads: the value is then held for the
+ * owner's review and, once its copy is kept apart, removed, so the area starts fresh and saves its new drafts; where it cannot be kept
+ * apart, or the store cannot be read, the area runs on `fresh` in memory and the value is never written over.
+ */
+export function storedOrHeld<A, E, R>(key: string, decode: (input: unknown) => unknown!unknown, stored: Layer.Layer<A, E, R>, fresh: Layer.Layer<A>) {
+  return Layer.unwrap(effect {
+    const store = try KeyValueStore.KeyValueStore
+    const found = store.get(key) catch () => null
+    if (found === null) return fresh
+    const text = Option.isOption(found) ? Option.getOrUndefined(found) : found
+    if (typeof text !== "string") return stored
+    const valid = effect { try decode(try Effect.try(() => JSON.parse(text) as unknown)); return true } catch () => false
+    if (valid) return stored
+    const storage = try Effect.serviceOption(DeviceStorage)
+    if (Option.isNone(storage)) return fresh
+    if (!(try storage.value.hold(key))) return fresh
+    const cleared = effect { try store.remove(key); return true } catch () => false
+    return cleared ? stored : fresh
+  })
+}

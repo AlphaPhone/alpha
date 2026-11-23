@@ -1,4 +1,4 @@
-// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/selection.md, "Story: Let the assistant know which day I am looking at"
+// spec/calendar/presentation.md, "Story: Move between days, weeks, months and my schedule"; spec/calendar/presentation.md, "Back closes one layer at a time: the form, the delete sheet, the event, the Calendars sheet, the date picker, then search"; spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"; spec/calendar/presentation.md, "Story: Search my events and list what is coming"; spec/calendar/presentation.md, "Story: Open an event and come back"; spec/calendar/presentation.md, "Story: Create or edit an event in a form"; spec/calendar/presentation.md, "Story: See only what the current read found, for the current account"; spec/calendar/presentation.md, "Story: Choose which calendars I see"; spec/calendar/presentation.md, "Story: Read the presentation of times"; spec/calendar/selection.md, "Story: Let the assistant know which day I am looking at"
 import { assert, describe, it } from "@effect/vitest"
 import { Machine as PresentationMachine } from "../../gen/calendar__presentation.effect.vibe"
 import { bindCalendar, hideCalendar, leaveCalendar, readCalendar } from "../../src/calendar/binding.vibe"
@@ -6,7 +6,8 @@ import { HeldDeletions } from "../../src/calendar/deletions.vibe"
 import { HomeAgenda } from "../../src/calendar/home.vibe"
 import type { CalendarRow } from "../../src/calendar/model.vibe"
 import { calendarDayObservation } from "../../src/calendar/observation.vibe"
-import { calendarBack, eventRoute, openEditor, openSources, rowFields } from "../../src/calendar/screen.vibe"
+import { ApprovalReviews } from "../../src/calendar/approvals.vibe"
+import { calendarBack, calendarScreenBack, calendarSurfacesBack, eventRoute, openEditor, openSources, rowFields } from "../../src/calendar/screen.vibe"
 import { repeatText } from "../../src/calendar/model.vibe"
 import { intervalDetail, listGroups, monthGrid, rowMatches, timeline, visibleDays } from "../../src/web/calendar/layout.ts"
 import { binding, calendarOver, check, foregroundAt, otherBinding, same } from "./harness.vibe"
@@ -67,6 +68,29 @@ describe("Calendar views (spec/calendar/presentation.md)", () => {
       const nothingLeft = try calendarBack()
       try same([formClosed, afterForm.form, sheet, sheetClosed, afterSheet.sourcesSheet, searchClosed, afterSearch.searching, nothingLeft],
         [true, "NoForm", true, true, false, true, false, false])
+    }
+  })
+
+  it.effect("Back closes an open approval review before Calendar's own layers, then leaves Back to the shell (spec/calendar/approvals.md, \"Story: Approve or decline a Calendar change the agent asked for\")", () => effect {
+    // spec/calendar/approvals.md, "A changed conversation, a hidden page or Back retires the review"
+    provide calendarOver(new CalendarAgentFake(), new DeviceCalendarFake()) {
+      const presentation = try PresentationMachine
+      const reviews = try ApprovalReviews
+      effect function phase() {
+        const shown = try Stream.runHead(reviews.changes)
+        return shown._tag === "Some" ? shown.value.state.phase : "ReviewIdle"
+      }
+      try openSources()
+      try reviews.open("00000000-0000-4000-8000-000000000001")
+      const opened = try phase()
+      const reviewClosed = try calendarScreenBack()
+      const afterReview = try phase()
+      const sheetStill = (try presentation.get()).sourcesSheet
+      const sheetClosed = try calendarScreenBack()
+      const overlaysLeft = try calendarSurfacesBack()
+      const nothingLeft = try calendarScreenBack()
+      try same([opened, reviewClosed, afterReview, sheetStill, sheetClosed, overlaysLeft, nothingLeft],
+        ["ReviewShown", true, "ReviewIdle", true, true, false, false])
     }
   })
 

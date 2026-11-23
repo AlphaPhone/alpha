@@ -49,7 +49,7 @@ export function TrashView({ trash, now, volumeName, busy = false, onShow, onTogg
           <Button variant="ghost" size="sm" onClick={onReviewEmpty} disabled={busy}>Empty</Button>
         </div>
       )}
-      {trash.listing === "Failed" && <Alert role="alert" className="m-4">Trash could not be read.</Alert>}
+      {trash.listing === "Failed" && <Alert role="alert" className="m-4">Trash couldn’t be read.</Alert>}
       {trash.listing === "Partial" && <p role="status" className="px-4 py-2 text-sm text-muted-foreground">Some Trash locations could not be read.</p>}
       {trash.loading && trash.items.length === 0 && <div className="flex flex-col gap-2 p-4" aria-busy><Skeleton className="h-14" /><Skeleton className="h-14" /></div>}
       {showsEmptyTrash(trash) && <EmptyState title="Trash is empty. Items in Trash are deleted after 30 days." icon={<Trash2 className="size-10" />} />}

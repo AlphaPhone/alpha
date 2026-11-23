@@ -24,7 +24,7 @@ chose, and acts only on the exact row the owner sees.
 - [World clock](./worldClock.md): the time zones the owner follows.
 - [Clock handoff](./handoff.md): a reviewed request to Android Clock from the Clock screen.
 - [Handoff history](./handoffHistory.md): the latest handoff and what Clock answered.
-- [Agent Clock review](./agentReview.md): an alarm the agent proposes, reviewed on the phone.
+- [Agent Clock review](./agentReview.md): an alarm the agent proposes, reviewed on the phone, and what Clock advertises to the agent.
 - [Reminders](./reminders.md): the listing, its refreshes and the one reminder write at a time.
 - [Reminder journal](./reminderJournal.md): creations and changes kept until the phone confirms them.
 - [Reminder drafts](./reminderDrafts.md): unsaved reminder forms kept across reloads until saved or discarded.

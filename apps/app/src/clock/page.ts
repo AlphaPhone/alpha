@@ -1,5 +1,5 @@
 // spec/clock/ringer.md, "Story: Hear an alarm once, from the page in front"; spec/clock/alarms.md, "Story: Set an alarm in the browser build"
-// Page glue VibeLang keeps out of `.vibe`: visibility, the Web Locks alarm lock, the alarm tone and the phone's calendar.
+// Page glue VibeLang keeps out of `.vibe`: whether the page is visible, the Web Locks alarm lock, the alarm tone and the phone's calendar.
 
 const LOCK = "alpha.browser.alarm-owner";
 const OPAQUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -9,23 +9,6 @@ const OPAQUE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
  */
 export function pageVisible(): boolean {
   return typeof document === "undefined" ? false : !document.hidden;
-}
-
-/** Calls `listener` with the page's visibility whenever it changes, or the page hides or shows; returns the unsubscribe.
- * @throws {never}
- */
-export function watchVisibility(listener: (visible: boolean) => void): () => void {
-  if (typeof document === "undefined") return () => undefined;
-  const changed = () => listener(!document.hidden);
-  const hidden = () => listener(false);
-  document.addEventListener("visibilitychange", changed);
-  window.addEventListener("pagehide", hidden);
-  window.addEventListener("pageshow", changed);
-  return () => {
-    document.removeEventListener("visibilitychange", changed);
-    window.removeEventListener("pagehide", hidden);
-    window.removeEventListener("pageshow", changed);
-  };
 }
 
 /** Asks for the alarm lock only if it is free: `granted` receives the release, `busy` runs when another page holds it.
