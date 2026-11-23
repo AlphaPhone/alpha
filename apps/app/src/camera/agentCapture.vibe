@@ -117,7 +117,10 @@ export const agentCamera = Layer.effect(AgentCamera, effect {
         return { status: "unknown", summary: "Saved" } as CaptureAttempt
       }
       const after = try send({ type: "written", result: "SavedWithId", wrote: true })
-      const libraryId = after?.libraryIdShared === true ? (store.read(mediaId, false) catch () => undefined)?.id : undefined
+      const gallery = /^m:(?!(?:internal|external):)[A-Za-z0-9_-]{1,80}:i:([1-9][0-9]{0,18})$/.exec(photo.libraryId ?? "")
+      const savedId = !bridge.browser && gallery?.[0] === photo.libraryId && gallery?.[1] === mediaId ? photo.libraryId : undefined
+      const verified = after?.libraryIdShared === true && savedId !== undefined ? (store.read(savedId, false) catch () => undefined) : undefined
+      const libraryId = verified?.kind === "image" && verified.id === savedId ? savedId : undefined
       const receipt: CameraReceipt = {
         version: 1, kind: "camera_capture_photo", operationId: request.operationId, mediaId, width: Math.round(photo.width), height: Math.round(photo.height), mime: "image/jpeg",
         ...(libraryId === undefined ? {} : { libraryId }),

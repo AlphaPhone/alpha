@@ -92,7 +92,12 @@ it.live("record a video without sound after the microphone is refused, then one 
 
 // spec/camera/agentCapture.md, "Story: Let the assistant take the photo I asked for"
 it.live("the assistant's photo needs the visible Camera, flips to the named camera and names the library id only when offered (spec/camera/agentCapture.md, \"Story: Let the assistant take the photo I asked for\")", () => effect {
-  const device = camera()
+  const libraryId = "m:external_primary:i:41"
+  let gallery = libraryId
+  const device = camera({
+    "ElizaCamera.capturePhoto": () => ({ format: "jpeg", thumbnail: "AA", width: 4000, height: 3000, path: "content://media/external/images/media/41", libraryId: gallery }),
+    "AlphaPhotos.read": (args) => ({ id: (args as { id: string }).id, kind: "image", width: 4000, height: 3000, date: 1, size: 1000, revision: "r1", image: "data:image/jpeg;base64,AA" }),
+  })
   provide cameraOver(device) {
     const view = try Viewfinder
     const actions = try CameraActions
@@ -103,11 +108,14 @@ it.live("the assistant's photo needs the visible Camera, flips to the named came
     const unasked = actions.execute({ type: "camera_capture_photo" }, { operationId: "op-2", reviewed: false, ownerWords: false }) catch (refused) => refused.message
     const front = try actions.execute({ type: "camera_capture_photo", lens: "front" }, { operationId: "op-3", reviewed: true, ownerWords: false, capabilities: "camera.capture-photo.v1, camera.capture-library-id.v1" })
     const plain = try actions.execute({ type: "camera_capture_photo" }, { operationId: "op-4", reviewed: true, ownerWords: false, capabilities: "camera.capture-photo.v1" })
+    gallery = "m:external_primary:i:42"
+    const mismatched = try actions.execute({ type: "camera_capture_photo" }, { operationId: "op-5", reviewed: true, ownerWords: false, capabilities: "camera.capture-photo.v1, camera.capture-library-id.v1" })
     const lens = (try view.get()).lens
-    try Effect.try(() => assert.deepStrictEqual({ closed, unasked, front, plain, lens }, {
+    try Effect.try(() => assert.deepStrictEqual({ closed, unasked, front, plain, mismatched, lens }, {
       closed: "Open Camera first", unasked: "Camera busy",
-      front: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-3", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg", libraryId: "41" } },
+      front: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-3", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg", libraryId } },
       plain: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-4", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg" } },
+      mismatched: { status: "succeeded", summary: "Saved", receipt: { version: 1, kind: "camera_capture_photo", operationId: "op-5", mediaId: "41", width: 4000, height: 3000, mime: "image/jpeg" } },
       lens: "FrontLens",
     }))
   }

@@ -27,6 +27,7 @@ export schema PhotoReply {
   width: number
   height: number
   path?: string
+  libraryId?: string
 }
 
 /** A recording `ElizaCamera.stopRecording` answered with. */

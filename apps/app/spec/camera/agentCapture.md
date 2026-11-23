@@ -182,7 +182,10 @@ pure def sometimesNamedLensShot(c: Capture): bool = c.shutters == 1 and c.flippe
 ### A saved photo with its library identity succeeds; a write without one, or a lost answer, is unknown and never repeated
 
 The receipt carries the photo's library id only to an assistant that offered
-`camera.capture-library-id.v1`.
+`camera.capture-library-id.v1`. The phone uses the volume-qualified id returned
+by the native capture, checks that it names the saved row, and reads the same
+image through Photos before sending it. If no id can be verified, the capture
+receipt leaves out the optional field.
 
 ```quint
 pure def canWritten(c: Capture, result: WriteResult, wrote: bool): bool = c.request == Writing
