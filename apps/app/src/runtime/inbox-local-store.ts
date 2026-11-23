@@ -6,7 +6,7 @@ import {sha256Hex} from '../lib/hash';
 /** Mail drafts and operation receipts use browser documents on web and encrypted secure slots on Android.
  * The owner includes Cloud environment, user, organization and the exact Gmail grant. */
 async function browserMailDocument(slot:string) {
-  if(/^(?:inbox-drafts:v1:shelf|inbox-operation:v1):[a-f0-9]{64}$/.test(slot))return new BrowserJsonDomainDocument('alpha.browser.'+slot);
+  if(/^(?:inbox-drafts:v1:(?:shelf|chat)|inbox-operation:v1):[a-f0-9]{64}$/.test(slot))return new BrowserJsonDomainDocument('alpha.browser.'+slot);
   if(!slot.startsWith('inbox-drafts:v1:'))throw Error('Invalid Inbox draft slot');
   const owner=JSON.parse(slot.slice('inbox-drafts:v1:'.length));
   if(!Array.isArray(owner)||owner.length!==4||owner.some(value=>typeof value!=='string'||value.length>256)||!owner[0]||!owner[1]||!owner[3])throw Error('Invalid Inbox draft owner');

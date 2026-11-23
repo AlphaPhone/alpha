@@ -10,7 +10,8 @@ final class SourceRenewalNotices {
  static final class RenewalUnverifiable extends java.io.IOException {RenewalUnverifiable(Throwable cause){super("Renewal source unverifiable",cause);}}
  interface Store {String read()throws Exception;void write(String value)throws Exception;}
  interface Guard {JSONObject describe(JSONObject selection)throws Exception;}
- interface Poster {void post(String key,long expiry,long now);void cancel(String key);}
+ /** access names what the grant reads (see {@link #access}), or is null; never a source label or content. */
+ interface Poster {void post(String key,long expiry,long now,String access);void cancel(String key);}
  private final Store store;private final Guard guard;private final Poster poster;
  SourceRenewalNotices(Store store,Guard guard,Poster poster){this.store=store;this.guard=guard;this.poster=poster;}
  private JSONObject rows()throws Exception{String raw=store.read();return raw==null?new JSONObject():new JSONObject(raw);}
@@ -22,10 +23,14 @@ final class SourceRenewalNotices {
  static JSONObject selection(JSONObject input)throws Exception{
   String[] fields={"provider","ownerId","agentId","installationId","enrollmentId","sourceId","revision"};if(input.length()!=fields.length||!"native".equals(input.getString("provider")))throw new SecurityException("Invalid renewal selection");JSONObject copy=new JSONObject();for(String field:fields){String value=input.getString(field);if(value.isBlank()||value.length()>256)throw new SecurityException("Invalid renewal identity");copy.put(field,value);}return copy;
  }
- private void valid(JSONObject row,long now)throws Exception{
+ /** What a grant lets the brief read, for the notice title: "calendar", "reminders", "calendar-reminders", or null when its scope names neither. */
+ static String access(JSONObject grant){JSONObject scope=grant.optJSONObject("scope");if(scope==null)return null;JSONArray calendars=scope.optJSONArray("calendars");boolean calendar=calendars!=null&&calendars.length()>0,reminders=Boolean.TRUE.equals(scope.opt("reminders"));return calendar&&reminders?"calendar-reminders":calendar?"calendar":reminders?"reminders":null;}
+ /** The current grant, after checking it still matches the row. */
+ private JSONObject valid(JSONObject row,long now)throws Exception{
   if(row.getLong("expiresAt")<=now)throw new RenewalStale("Renewal source expired");
   JSONObject grant;try{grant=guard.describe(row.getJSONObject("selection"));}catch(RenewalStale stale){throw stale;}catch(Exception unavailable){throw new RenewalUnverifiable(unavailable);}
   if(grant.optBoolean("revoked")||!grant.getString("revision").equals(row.getJSONObject("selection").getString("revision"))||java.time.Instant.parse(grant.getString("expiresAt")).toEpochMilli()!=row.getLong("expiresAt"))throw new RenewalStale("Renewal source changed");
+  return grant;
  }
  synchronized String arm(JSONObject input,long expiresAt,long now)throws Exception{JSONObject chosen=selection(input),row=new JSONObject().put("selection",chosen).put("expiresAt",expiresAt);valid(row,now);String key=HostedResultNotices.hash(new JSONArray().put(chosen.getString("ownerId")).put(chosen.getString("agentId")).put(chosen.getString("installationId")).put(chosen.getString("enrollmentId")).put(chosen.getString("sourceId")).put(chosen.getString("revision")).put(expiresAt).toString());JSONObject rows=rows();for(String old:keys(rows)){JSONObject previous=rows.getJSONObject(old);if(old.equals(key))continue;boolean stale=false;try{valid(previous,now);}catch(RenewalStale changed){stale=true;}catch(RenewalUnverifiable unknown){/* Keep it until it can be checked. */}if(stale||chosen.getString("sourceId").equals(previous.getJSONObject("selection").getString("sourceId"))){rows.remove(old);poster.cancel(old);}}if(!rows.has(key)){if(rows.length()>=200)throw new IllegalStateException("Too many renewal notices");rows.put(key,row.put("phase","armed"));}else if("dispatching".equals(rows.getJSONObject(key).optString("phase")))rows.getJSONObject(key).put("phase","armed");save(rows);return key;}
  // A row left in dispatching was interrupted mid-post; posting by tag is idempotent, so it posts again.
@@ -35,8 +40,8 @@ final class SourceRenewalNotices {
   String phase=row.optString("phase");if(!"armed".equals(phase)&&!"dispatching".equals(phase))return;
   row.put("phase","dispatching");save(rows);
   try {
-   valid(row,now);
-   poster.post(key,row.getLong("expiresAt"),now);
+   JSONObject grant=valid(row,now);
+   poster.post(key,row.getLong("expiresAt"),now,access(grant));
   }catch(RenewalStale stale){
    drop(rows,key);return;
   }catch(Exception failed){

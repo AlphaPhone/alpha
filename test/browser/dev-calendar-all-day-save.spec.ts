@@ -6,7 +6,7 @@ test.use({timezoneId:'America/Los_Angeles'});
 // The browser-provider source remains separate from Home's Agent Calendar agenda.
 async function openSavedDay(page:any){
  await openBrowserCalendar(page);
- await page.getByRole('button',{name:'Month view',exact:true}).click();
+ await page.getByRole('button',{name:'Choose date',exact:true}).click();
  await page.getByRole('dialog',{name:'Choose calendar date',exact:true}).getByRole('button',{name:'Saturday March 13',exact:true}).click();
  await expect(page.getByRole('button',{name:'All-day boundary, All day',exact:true})).toBeVisible();
 }

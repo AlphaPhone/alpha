@@ -85,7 +85,7 @@ test('a Calendar event draft keeps its text, caret and field through resizing, i
 
 test('the Calendar month picker is a bounded sheet on a wide screen and scrolls on a short one', async ({ page }) => {
   await open(page, 'Calendar');
-  await page.getByRole('button', { name: 'Month view', exact: true }).click();
+  await page.getByRole('button', { name: 'Choose date', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Choose calendar date', exact: true });
   await expect(dialog).toBeVisible();
   await resize(page, TABLET_LANDSCAPE);

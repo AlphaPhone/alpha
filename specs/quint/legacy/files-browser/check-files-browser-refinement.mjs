@@ -181,6 +181,12 @@ async function collisionAndTrash(page) {
   await select(page, 'shared.bin');
   await t.point('Visible selection identifies the canonical image', action('Toggle', 'photo'));
   await toolbar(page).getByRole('button', {name: 'Move', exact: true}).click();
+  // The chooser opens in the folder being browsed (DCIM/Camera); Parent folder climbs to the root.
+  await expect(dialog(page, 'Move to')).toContainText('DCIM › Camera');
+  for (const shown of ['Open Camera', 'Open DCIM']) {
+    await dialog(page, 'Move to').getByRole('button', {name: 'Parent folder', exact: true}).click();
+    await expect(dialog(page, 'Move to').getByRole('button', {name: shown, exact: true})).toBeVisible();
+  }
   await dialog(page, 'Move to').getByRole('button', {name: 'Open Download', exact: true}).click();
   await t.point('Opening and navigating the destination chooser leaves both canonical rows unchanged', null);
   await dialog(page, 'Move to').getByRole('button', {name: 'Move here', exact: true}).click();

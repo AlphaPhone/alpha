@@ -138,8 +138,12 @@ async function driver(code, available) {
       await settle();
     },
     async nativeFix(session, valid) {
-      const now = Date.now();
-      native.listeners.get(session).locationChange({cached: false, coords: {latitude: 1, longitude: 2, accuracy: 5, timestamp: valid ? now : now - 60000}});
+      native.listeners.get(session).locationChange({cached: false, coords: {latitude: 1, longitude: 2, accuracy: valid ? 5 : -1, timestamp: Date.now()}});
+      await settle();
+    },
+    async staleNativeFix(session, future) {
+      const timestamp = Date.now() + (future ? 60000 : -60000);
+      native.listeners.get(session).locationChange({cached: false, coords: {latitude: 1, longitude: 2, accuracy: 5, timestamp}});
       await settle();
     },
     async nativeError(session) { native.listeners.get(session).error({code: 'UNAVAILABLE'}); await settle(); },
@@ -174,11 +178,11 @@ async function replayNativeMapsLocation({scenarios, witnesses, random = 60, step
 
 test('the Maps location owner follows every NativeMapsLocation model trace step by step', {timeout: scaledTimeout(300000)}, async () => {
   const {scenarios, witnesses} = modelNames('specs/quint/native/NativeMapsLocation.qnt');
-  assert.equal(scenarios.length, 11);
+  assert.equal(scenarios.length, 12);
   assert.equal(witnesses.length, 8);
   const result = await replayNativeMapsLocation({scenarios, witnesses});
   console.log(JSON.stringify(result));
   assert.equal(result.traces, scenarios.length + witnesses.length + 60);
   assert.ok(result.checkpoints > result.traces * 5);
-  for (const action of ['start', 'stop', 'cleanupSettles', 'permissionChecked', 'permissionAnswered', 'hide', 'show', 'listenersAdded', 'watchSettles', 'nativeFix', 'nativeError']) assert.ok(result.actions[action] > 0, action);
+  for (const action of ['start', 'stop', 'cleanupSettles', 'permissionChecked', 'permissionAnswered', 'hide', 'show', 'listenersAdded', 'watchSettles', 'nativeFix', 'staleNativeFix', 'nativeError']) assert.ok(result.actions[action] > 0, action);
 });

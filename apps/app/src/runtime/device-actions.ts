@@ -40,6 +40,8 @@ import {
   replyDeviceProposalIds,
   requestedCameraNeedsCameraView,
 } from '../ui/device-actions/client-coordinator';
+import {smsSimLabel} from '../ui/telephony/sms-card-facts';
+import type {BrowserTabLine} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/browser-contract.ts';
 import {isCalendarOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/calendar-contract.ts';
 import {isNotesOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/notes-contract.ts';
 import {isReminderOperation} from '../../../../.eliza/client-features/plugins/plugin-assistant/src/services/device-actions/reminder-contract.ts';
@@ -54,7 +56,7 @@ import {ALPHA_PRODUCT,alphaViewLabel} from '../product/alpha-product';
 import {assertWorkflowOperation,parseWorkflowBinding,parseWorkflowRead,validateWorkflowResult,type WorkflowPhoneReview} from './workflow-device-contract';
 import type {AlphaClient,ContextEnvelope,OperationReceipt,VerifiedSession} from './alpha-client';
 
-export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,replyDeviceProposalIds,requestedCameraNeedsCameraView};
+export {deviceJournalContext,actionScope,CAMERA_CONTEXT_NOTICE,ContextNotice,DeviceActionNotStarted,replyDeviceProposalIds,requestedCameraNeedsCameraView};
 export type {CurrentDeviceActionRequest,DeviceCredential,DeviceJournalIdentity,DeviceOperation,DeviceRecovery,ReviewableDeviceOperation,WorkflowNoticeRoute,WorkflowPresentationOperation};
 /** Foreground reviews (free/busy, Notes search, name-targeted edits) and their validators are
  * the shared device-review contract bound to the shared Notes, Calendar and reminder contracts. */
@@ -81,6 +83,8 @@ export const alphaDeviceActionProfile: DeviceActionClientProfile<ContextEnvelope
   mapsSelectionCurrent:validateMapsSelectedObject,
   namedCalendarReadTarget,
   foregroundHidden:()=>typeof document!=='undefined'&&document.hidden,
+  // An SMS card names the SIM it goes from; Approve sends it with no dialog after.
+  simLabel:smsSimLabel,
 };
 /** Runs an approved Browser open or control for the device executor. One that Browser refused
  * before any effect closes the attempt as not started, with Browser's reason; any other failure
@@ -110,6 +114,13 @@ let browserTabNeedsChoice: ((target:string)=>boolean)|undefined;
 export function setBrowserTabNeedsChoice(read: (target:string)=>boolean) {
   browserTabNeedsChoice=read;
 }
+/** The tabs a proposal's close-every-tab card lists: read from Browser when the card is first
+ * drawn and bound to that proposal, the only tabs its executor will close (it refuses when
+ * Browser's tabs changed since). null, or unset, no such card is offered. */
+let browserTabsClosing: ((proposalId:string)=>BrowserTabLine[]|null)|undefined;
+export function setBrowserTabsClosing(read: (proposalId:string)=>BrowserTabLine[]|null) {
+  browserTabsClosing=read;
+}
 /** The names of the phone contacts a contact change or deletion would be offered for, looked up
  * as its executor will; null when Contacts cannot be read. Unset, no such card is offered. */
 let contactReviewMatches: ((query:string,signal:AbortSignal)=>Promise<string[]|null>)|undefined;
@@ -120,6 +131,6 @@ export class DeviceActions extends DeviceActionCoordinator<ContextEnvelope,Workf
   constructor(session: VerifiedSession, credential: DeviceCredential, scope: string,
     request: (path: string, body: unknown | undefined, signal: AbortSignal) => Promise<unknown>,
     journal: ActionJournal, execute: DeviceExecutor, recover?:DeviceRecovery, reminderTimingV2=false, reminderCreate=false, executeForeground?:ForegroundReviewExecutor) {
-    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
+    super({session,credential,scope,request,journal,execute,recover,reminderTimingV2,reminderCreate,executeForeground,filesIdentity:async(paths,signal)=>{if(!filesReviewIdentity)throw Error('Files is unavailable');return filesReviewIdentity(paths,signal);},profile:alphaDeviceActionProfile},{currentRequestBrowserPolicy:true,currentRequestTelephonyPolicy:true,browserTabNeedsChoice:target=>!!browserTabNeedsChoice?.(target),browserTabsClosing:proposalId=>browserTabsClosing?.(proposalId)??null,contactMatches:async(query,signal)=>contactReviewMatches?contactReviewMatches(query,signal):null});
   }
 }

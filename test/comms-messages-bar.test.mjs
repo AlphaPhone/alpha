@@ -137,7 +137,7 @@ test('on the Alpha image the thread bar, the draft slot and the bubble send only
     render().filterChip.clear();
     assert.equal(render().threads.length, 2);
     assert.equal(bar().briefing, null);
-    // The thread: the bar is the composer; Alpha's draft replaces the owner's text with one Undo.
+    // The addressed draft offers Don’t send, which restores the owner’s text.
     render().threads[0].open(); await settle();
     const spec = bar();
     assert.deepEqual([spec.target.kind, spec.closed.kind, spec.closed.maxLength, spec.contextKey], ['thread', 'person', 1600, 'messages:thread:thread:1']);
@@ -148,17 +148,18 @@ test('on the Alpha image the thread bar, the draft slot and the bubble send only
     assert.deepEqual(A.readSmsDraft(), {by: 'alpha', text: 'Ten minutes away', canUndo: true, threadId: 'thread:1'});
     assert.equal(render().draftBubble, null, 'no bubble while the chat is closed');
     viewApi.S.chat = 'sheet';
-    assert.deepEqual({by: render().draftBubble.by, aria: render().draftBubble.aria, canUndo: render().draftBubble.canUndo}, {by: 'alpha', aria: "Alpha's draft, not sent", canUndo: true});
+    assert.deepEqual({by: render().draftBubble.by, aria: render().draftBubble.aria, canUndo: render().draftBubble.canUndo}, {by: 'alpha', aria: 'Message draft to (555) 010-0101 · +15550100101', canUndo: false});
     assert.equal(bar().strip.subtitle, 'Messages · draft waiting');
-    render().draftBubble.undo();
+    render().draftBubble.discard();
     assert.deepEqual(A.readSmsDraft(), {by: 'owner', text: 'My own words', canUndo: false, threadId: 'thread:1'});
     assert.equal(A.undoSmsDraft(), false, 'one Undo');
     assert.equal(render().draftBubble.aria, 'Your draft, not sent');
-    // Edit makes Alpha's text the owner's and returns to the person target.
+    // Editing in the addressed card keeps the message in review until Send.
     A.placeAskedSmsDraft('Running late');
-    render().draftBubble.edit();
-    assert.equal(A.readSmsDraft().by, 'owner');
-    assert.deepEqual(notes, ['toPerson']);
+    render().draftBubble.onText({target: {value: 'Running ten minutes late'}});
+    assert.equal(A.readSmsDraft().text, 'Running ten minutes late');
+    assert.equal(A.readSmsDraft().by, 'alpha');
+    assert.deepEqual(notes, []);
     assert.deepEqual(sends, [], 'nothing is sent without the owner tap on Send');
     // Send on the bubble goes through the same review and journal, once, and is noted quietly.
     A.placeAskedSmsDraft('On my way');
@@ -166,7 +167,9 @@ test('on the Alpha image the thread bar, the draft slot and the bubble send only
     assert.equal(sends.length, 1);
     assert.equal(sends[0].review.body, 'On my way');
     assert.equal(bar().closed.value, '', 'an accepted send clears the slot');
-    assert.match(notes.at(-1), /^Sent to /);
+    assert.equal(notes.length, 2);
+    assert.match(notes[0], /^Sent to /);
+    assert.equal(notes[1], 'toPerson');
     owner.componentWillUnmount();
   } finally { globalThis.document = priorDocument; globalThis.window = priorWindow; globalThis.HTMLButtonElement = priorButton; delete globalThis.__smsBarPort; rmSync(dir, {recursive: true, force: true}); }
 });

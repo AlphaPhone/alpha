@@ -150,7 +150,10 @@ function screen(maps: MapsProvider, options: { present?: boolean; granted?: bool
 // Start: plans from a fresh device fix and stops at the reviewed route sheet; the user starts guidance.
 {
  const maps = provider(), phone = screen(maps), nav = new DeviceMapsNavigation(phone.surface, owner);
- assert.deepEqual(await nav.start({ destination: portRef, travelMode: 'walk' }), { state: 'awaiting-confirmation', placeName: 'Port Hercule', travelMode: 'walk' });
+ assert.deepEqual(await nav.start({ destination: portRef, travelMode: 'walk' }), {
+  state: 'awaiting-confirmation', placeName: 'Port Hercule', travelMode: 'walk',
+  route: { distanceMeters: 640, durationSeconds: 480, traffic: 'none' },
+ });
  assert.deepEqual(maps.calls.at(-1), ['route', CASINO, PORT, 'walk']);
  assert.equal(phone.surface.sheet(), 'directions');
  assert.equal(phone.surface.guidance(), null, 'an agent request never begins guidance');

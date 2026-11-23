@@ -46,12 +46,13 @@ export function jvmSkip(...names){
 /** Skip reason when org.json is missing. On CI a missing jar is a failure, never a skip. */
 export const jsonJarSkip=jvmSkip('json');
 
-/** Compiles the sources (plus org.json when needed) and returns the main class's stdout for the given stdin. */
-export function runJvm(sources,mainClass,{json=false,args=[],input,timeout=jvmTimeout}={}){
+/** Compiles the sources (plus org.json when needed) and returns the main class's stdout for the given stdin.
+ * `release` is the Java language level (21 for sources with text blocks, as the app compiles). */
+export function runJvm(sources,mainClass,{json=false,args=[],input,timeout=jvmTimeout,release='11'}={}){
  const temporary=mkdtempSync(join(tmpdir(),'alpha-jvm-'));
  try{
   const classpath=json?['-cp',jsonJar]:[];
-  execFileSync(javaBinary('javac'),['--release','11',...classpath,'-d',temporary,...sources],{timeout:jvmTimeout});
+  execFileSync(javaBinary('javac'),['--release',release,...classpath,'-d',temporary,...sources],{timeout:jvmTimeout});
   return execFileSync(javaBinary('java'),['-cp',json?temporary+':'+jsonJar:temporary,mainClass,...args],{encoding:'utf8',timeout,input});
  }finally{rmSync(temporary,{recursive:true,force:true});}
 }

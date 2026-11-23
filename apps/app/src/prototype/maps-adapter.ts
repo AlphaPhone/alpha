@@ -1,4 +1,5 @@
 import {createMapsNotificationOpen} from '../runtime/maps-notification-open';
+import {agentMapsShowable} from '../maps/agent-present';
 import {mapsChatText} from '../runtime/action-message-presentation';
 import {BackgroundNavigation} from '../maps/background-navigation';
 import {registerPlugin} from '../platform-plugins';
@@ -33,9 +34,14 @@ import {errorNotice,ERROR_TOAST} from '../runtime/error-notice';
 import type { AlphaDevicePlugin } from '../native/alpha-device';
 import type { AlphaMapsTransportPlugin } from '../native/alpha-maps-transport';
 import type { AlphaCalendarPlugin } from '../native/alpha-calendar';
+import {copySelectedText} from '../runtime/text-share';
+import {isMvpView} from './mvp-features';
 
 type Bag = Record<string, any>;
 const PIN = 'M20 10c0 6-8 11-8 11S4 16 4 10a8 8 0 1 1 16 0zM15 10a3 3 0 1 1-6 0a3 3 0 1 1 6 0z';
+const SWAP = 'M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4';
+const NORTH = 'M12 3l6 18-6-4-6 4z';
+const CLOCK = 'M21 12a9 9 0 1 1-18 0a9 9 0 1 1 18 0zM12 7v5l3 2';
 const locationText = (text: string) => text === 'Your location' ? 'My location' : /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(text.trim()) ? 'Selected location' : text;
 const mapsConnected = () => mapsConnection().config.status === 'configured';
 /** Compact recipients at search; the information panel retains their full roles. */
@@ -60,6 +66,17 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   let planeBasemap:MapBasemap|undefined, plane: MapPlane | undefined, planeElement: HTMLElement | undefined;
   let mapGeneration=0,mapFailed=false,mapObserver:MutationObserver|undefined;
   let mapCopyright='';
+  // The map is turned or tilted away from north up; the compass shows only then.
+  let mapRotated=false,compassElement:HTMLElement|undefined,mapBearing=0;
+  const turnCompass=()=>{compassElement?.style.setProperty('--alpha-map-bearing',`${-mapBearing}deg`);};
+  // The owner's own recent searches, newest first. They stay in memory for this session only:
+  // nothing is stored on the phone or sent anywhere, and a Maps account change drops them.
+  let recentSearches:string[]=[];
+  const rememberSearch=(text:string)=>{
+    const value=text.trim();
+    if(!value||value.length>300||/^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/.test(value))return;
+    recentSearches=[value,...recentSearches.filter(item=>item.toLowerCase()!==value.toLowerCase())].slice(0,5);
+  };
   let pendingHandoff: {query:string}|undefined, mapsController:MapsController|undefined;
   let queryTimer:ReturnType<typeof setTimeout>|undefined,originTimer:ReturnType<typeof setTimeout>|undefined;
   let queryDraft:string|undefined,originDraft:string|undefined,searchEpoch=0,submittedQueryEpoch=-1;
@@ -95,7 +112,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   };
   const mapsDiagnostics=()=>regionalMapsConfigured?regionalDiagnostics():cloudMapsDiagnostics();
   const active=()=>!disposed&&!document.hidden&&!!api?.isActive();
-  const dropPlane=()=>{++mapGeneration;mapObserver?.disconnect();mapObserver=undefined;mapFailed=false;mapCopyright='';plane?.destroy();plane=undefined;planeElement=undefined;planeBasemap=undefined;};
+  const dropPlane=()=>{++mapGeneration;mapObserver?.disconnect();mapObserver=undefined;mapFailed=false;mapCopyright='';mapRotated=false;mapBearing=0;turnCompass();plane?.destroy();plane=undefined;planeElement=undefined;planeBasemap=undefined;};
   const googleProviders = new Set<string>();
   const isGoogleProvider = (id?: string) => !!id && (googleProviders.has(id) || isGoogleMapsProvider(id, cloudMapsCoverage()));
   const googleContent = () => {
@@ -127,6 +144,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     start:(title:string,text:string,onStopped:(reason:string)=>void)=>background.start(title,offRouteCopy(text),onStopped),
     update:(title:string,text:string)=>background.update(title,offRouteCopy(text)),
     stop:()=>background.stop(),
+    // Arrival with Maps off screen: the owner is told where guidance ended before the ongoing
+    // notification goes. Native posts it only for the session this renderer owns.
+    arrive:async(destination:string)=>{
+      // The notice is best effort; the session ends either way.
+      if(background.active()&&!active())
+        try{await navigationTransport.navigationArrived({title:destination?`Arrived at ${locationText(destination)}`:'Arrived',text:'Navigation ended.'});}catch{}
+      await background.stop();
+    },
   };
   // A Cloud read already made or under way for this account is not repeated: a second read would
   // uninstall the provider an open Maps search is using. An account change retires it first (cloud-maps.ts).
@@ -164,7 +189,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     active,
     invalidate: () => { if (!disposed && !document.hidden && (active() || screen.isNavigating())) api?.set({ nativeMapsRevision: ++renders }); },
     toast: text => api?.toast(text),
-    discardHandoff: () => { retireSearch(); pendingHandoff=undefined; const maps=api?.get('maps'); if(maps&&(maps.query!=null||maps.nearMe||maps.fromHere))api!.set({query:null,nearMe:null,fromHere:null}); },
+    discardHandoff: () => { retireSearch(); pendingHandoff=undefined; const maps=api?.get('maps'); if(maps&&(maps.query!=null||maps.nearMe||maps.fromHere||maps.searchNear))api!.set({query:null,nearMe:null,fromHere:null,searchNear:null}); },
     handoffReturn: () => !!mapsEventReturnOffered(api?.get('maps').fromEvent,api?.S.stack,screen.isNavigating()),
     released: dropPlane,
     // With no Maps provider on Android, an event's location can be handed to an installed map
@@ -236,12 +261,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     // "Directions to X from here": the hand-off below searches the destination; the stages after the view finish it.
     if(st.fromHere&&!st.nearMe&&typeof st.query==='string'&&st.query.trim()&&!pendingHandoff)fromHere={query:st.query.trim(),stage:'search',epoch:-1,closest:false};
     if(typeof st.query==='string'&&st.query.trim()&&!st.nearMe&&!pendingHandoff){
+      // A chat card for "pharmacy near the Ferry Building" names the point its places were found around.
+      const near=st.searchNear&&Number.isFinite(st.searchNear.latitude)&&Number.isFinite(st.searchNear.longitude)?{latitude:Number(st.searchNear.latitude),longitude:Number(st.searchNear.longitude)}:undefined;
       const handoff=pendingHandoff={query:st.query};
       queueMicrotask(()=>{
         if(pendingHandoff!==handoff)return;pendingHandoff=undefined;
         if(disposed||!currentApi.isActive()||currentApi.get('maps').query!==handoff.query)return;
         const fromEvent=!!currentApi.get('maps').fromEvent;
-        currentApi.set({query:null,fromHere:null});screen.handoff(handoff.query,fromEvent);if(fromHere)fromHere.epoch=searchEpoch;
+        currentApi.set({query:null,fromHere:null,searchNear:null});screen.handoff(handoff.query,fromEvent,near);if(fromHere)fromHere.epoch=searchEpoch;
       });
     }
     // A chat card's "near you" search: the user's tap asks this phone for its position (the platform may
@@ -317,6 +344,10 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       queueMicrotask(()=>{if(!disposed&&currentApi.isActive()){screen.openDirections();screen.locate();}});
      }
     }
+    // Opening Maps to nothing in particular: with location already allowed, the screen shows
+    // where the phone is (once per visit, never a prompt). A hand-off or card keeps its own flow.
+    if(!st.query&&!st.nearMe&&!st.agentPlace&&!st.agentRoute&&!st.fromHere&&!pendingHandoff&&!pendingPlace&&!pendingRoute&&!nearSearch&&!fromHere)
+      queueMicrotask(()=>{if(active())screen.showPositionOnOpen();});
     placeShown = !!view.place;
     // Calling the original with neutral state retains visual tokens without
     // generating sample place cards, address guesses, routes or timers.
@@ -402,7 +433,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       ? 'Maps unavailable' : offRouteCopy(status.text);
     const directionsOpen = view.mode === 'directions' || view.mode === 'origin' || view.mode === 'navigation';
     const isPlace = view.mode === 'place', isResults = view.mode === 'results' || view.mode === 'origin', isNav = view.mode === 'navigation';
-    const sheetHeight = directionsOpen ? 300+(view.directions?.routes.length??0)*50 : isPlace ? 400 : 520;
+    const sheetHeight = directionsOpen ? 300+(view.directions?.routes.length??0)*50 : isPlace ? (view.place?.phone ? 452 : 400) : 520;
     // The ⓘ and recenter buttons share one baseline: just above an open sheet, else above the dock.
     const recBottom = isPlace || isResults || (directionsOpen && !isNav) ? sheetHeight + 14 : 124;
     Object.assign(data, {
@@ -432,7 +463,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
           mapObserver?.disconnect();plane?.destroy();mapFailed=false;mapCopyright='';planeElement=element;planeBasemap=basemap;const generation=++mapGeneration;delete element.dataset.mapReady;delete element.dataset.mapError;
           const current=()=>generation===mapGeneration&&planeElement===element&&!disposed&&!!api?.isActive();
           try{
-            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>{retireSearch();screen.pin(id);},text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>{retireSearch();screen.stopFollowing();},(center,zoom)=>{if(current())screen.setViewport(center,zoom);});
+            plane=new MapPlane(element,basemap,()=>{if(!current())return;mapFailed=true;screen.setMapState('error');},data.C,id=>{retireSearch();screen.pin(id);},text=>{if(current()&&text!==mapCopyright){mapCopyright=text;screen.refresh();}},()=>{retireSearch();screen.stopFollowing();},(center,zoom)=>{if(current())screen.setViewport(center,zoom);},point=>{if(current()){retireSearch();screen.dropPin(point);}},(rotated,bearing)=>{if(!current())return;mapBearing=bearing;turnCompass();if(rotated!==mapRotated){mapRotated=rotated;currentApi.set({nativeMapsRevision:++renders});}});
             mapObserver=new MutationObserver(()=>{if(current())screen.setMapState(element.dataset.mapError ? 'error' : element.dataset.mapReady === 'true' ? 'ready' : 'loading');});
             mapObserver.observe(element,{attributes:true,attributeFilter:['data-map-ready','data-map-error']});
           }catch{mapFailed=true;element.replaceChildren();queueMicrotask(()=>{if(current())screen.setMapState('error');});}
@@ -459,7 +490,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
       searchLead: () => {retireSearch();screen.searchLead();},
       onQ: (event: Event) => schedule(view.mode==='origin',(event.target as HTMLInputElement).value),
       focusQ: () => {},
-      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin')submitOrigin();else submitQuery();(event.target as HTMLInputElement).blur(); } },
+      qKey: (event: KeyboardEvent) => { if (event.key === 'Enter') { event.preventDefault();if(view.mode==='origin')submitOrigin();else{rememberSearch(queryDraft??screen.view().query);submitQuery();}(event.target as HTMLInputElement).blur(); } },
       clearQ: () => {retireSearch();screen.clearQuery();},
       chips: view.saved.map(item => ({ id: 'saved:' + item.id, label: item.label, d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
       // "Nearest X" from the map itself: around this phone's fix, located first when there is none yet.
@@ -469,7 +500,22 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
         else locateThenSearch({query:category.query,located:true,epoch:-1});
       } })),
       savedRows: view.saved.map(item => ({ id: 'saved:' + item.id, name: locationText(item.label), sub: '', d: PIN, go: () => {retireSearch();screen.chooseSaved(item.id);} })),
-      results: (queryDraft!==undefined||originDraft!==undefined?[]:results).map(row => ({ id: row.key, name: locationText(row.name), sub: locationText(row.detail), d: PIN, go: () => {retireSearch();screen.choose(row.key);} })),
+      results: (queryDraft!==undefined||originDraft!==undefined?[]:results).map(row => ({ id: row.key, name: locationText(row.name), sub: locationText(row.detail), d: PIN, go: () => {if(view.mode==='results')rememberSearch(view.query);retireSearch();screen.choose(row.key);} })),
+      // Recent searches, offered with the saved places while the search field is empty.
+      hasRecent: savedListVisible && recentSearches.length > 0 && queryDraft===undefined,
+      recentRows: savedListVisible ? recentSearches.map(text => ({ id: 'recent:' + text, text, d: CLOCK, go: () => {if(!active())return;retireSearch();rememberSearch(text);screen.searchFor(text);} })) : [],
+      // Clear removes the Recent list it sits in; focus moves on to the sheet's first control.
+      clearRecent: () => {
+        const focused=!!(document.activeElement as HTMLElement|null)?.closest?.('[data-alpha-maps-recent]');
+        recentSearches=[];currentApi.set({nativeMapsRevision:++renders});
+        if(focused)requestAnimationFrame(()=>{if(active())document.querySelector<HTMLElement>('[data-alpha-maps-sheet="results"] button')?.focus();});
+      },
+      // North up: shown while the map is turned or tilted, except while guidance turns it with the heading.
+      compass: mapRotated && !(isNav && view.map.overlay.follow), compassD: NORTH,
+      compassRef: (element: HTMLElement) => {compassElement=element||undefined;turnCompass();},
+      // The compass leaves once the map is north up; focus moves to the map it turned.
+      northUp: () => {if(!active())return;if(compassElement&&document.activeElement===compassElement)planeElement?.querySelector<HTMLElement>('canvas')?.focus({preventScroll:true});plane?.resetNorth();},
+      compassBottom: isNav ? 198 : recBottom + 60,
       hasResults: queryDraft===undefined&&originDraft===undefined&&results.length > 0, noResults: queryDraft===undefined&&originDraft===undefined&&(view.noResults || view.hasResults && results.length === 0), emptyQ: view.emptyQuery,
       recenter: () => {retireSearch();screen.recenter();}, recBottom, recCss: '',
       sheetH: sheetHeight,
@@ -477,10 +523,15 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     const place = view.place;
     if (place) {
       // Provider detail for this exact place: opening hours, phone and website when the
-      // source has them. Phone is shown as text; calling stays deferred with Phone.
+      // source has them. Call opens Phone with the number filled in where Phone exists;
+      // nothing dials until the owner does it there.
+      const phone = place.phone, dial = place.phoneHref?.slice('tel:'.length);
       data.pc = {
         name: locationText(place.name), meta: place.meta==='Coordinates'?'Selected location':place.meta, addr: locationText(place.address),
         hasHours: !!place.hours, openTxt: 'Hours', openCss: '', hoursTxt: place.hours || '',
+        hasPhone: !!phone, phone: phone || '',
+        call: dial && isMvpView('phone') ? () => {if(active())currentApi.open('phone',{prefill:dial});} : undefined,
+        copyPhone: phone && !restrictedPlace ? () => {if(active())void copySelectedText(phone).then(()=>currentApi.toast('Number copied'),()=>currentApi.toast('Couldn’t copy',ERROR_TOAST));} : undefined,
         hasWeb: !!place.website, web: () => screen.openWebsite(),
         canDir: place.canDirections && placeSourceVerified, min: 'Directions', saved: place.saved,
         saveLabel: place.saved ? 'Remove from saved' : 'Save', starCss: place.saved ? 'color:var(--acct)' : '', starFill: place.saved ? 'fill:currentColor' : '',
@@ -509,6 +560,9 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
        // The provider's ordered route choice (recommended first); choosing requests nothing.
        hasRoutes:directions.routes.length>0,
        routes:directions.routes.map(choice=>({label:`${choice.label}, ${choice.duration}, ${choice.meta}`,t:choice.label,sub:`${choice.duration} · ${choice.meta}`,on:choice.selected,css:choice.selected?'background:var(--acc);color:#fff':'background:var(--s2);color:var(--fg)',go:()=>{retireSearch();screen.chooseRoute(choice.id);}})),
+       hasSteps:directions.steps.length>0,steps:directions.steps.map(step=>({text:step.instruction,distance:step.distance})),
+       // Shown on the route sheet and unavailable while a route is planned, so focus stays on it.
+       swapShown:!view.navigation,swapOff:!directions.canSwap,swapOpacity:directions.canSwap?1:.4,canSwap:directions.canSwap,swapD:SWAP,swap:()=>{if(!active())return;retireSearch();screen.swapEnds();},
        start:()=>{retireSearch();screen.start();},
        nav:{going:!nav?.arrived,arrived:!!nav?.arrived,dist:nav?.distance||'Locating…',street:nav?.instruction||'Waiting for location',icon:nav?.maneuverIcon||PIN,hasThen:!!nav?.following,thenD:nav?.following?.icon||'',thenText:nav?.following?.text||'',
         left:nav?.remainingTime||'Guidance',meta:nav?.remaining&&nav.remaining===nav.meta?'':nav?.meta||'',remaining:nav?.remaining||'',
@@ -538,12 +592,14 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   const renderVals=Component.prototype.renderVals;
   // Later adapters wrap renderVals too, so disposal leaves this wrapper in place as a pass-through.
   Component.prototype.renderVals=function(this: Bag,...args: unknown[]){if(!disposed){shell=this;queueMicrotask(()=>void notificationOpen.flush());}return renderVals.apply(this,args);};
-  // Maps opens only over Home or itself, on an unlocked, visible, non-sensitive launcher screen.
-  // Any other app keeps the screen; the agent hears that the phone cannot show Maps now.
+  // The owner's chat request opens Maps over Home or any open app (Phone, Browser) on an unlocked,
+  // visible, non-sensitive launcher screen; agent-present.ts names the screens it keeps.
   const surface = screen.surface(async () => {
     const showable=()=>{
-      const value=idleLauncher();
-      return !!value&&(!value.view||value.view==='home'||value.view==='maps');
+      const value=shell?.S?.();
+      return !disposed&&!!value&&agentMapsShowable({live:!!shell?.live,hidden:document.hidden,suspended:!!shell?.pageSuspended,
+        assistantSurface:!!shell?.props?.assistantSurface,connectionOpen:!!connectionController.getSnapshot().open,
+        screen:value.screen,secure:value.secure,shade:value.shade,view:value.view,incomingCall:!!shell?.vget?.('phone')?.incoming});
     };
     if(!showable())return false;
     if(!api?.isActive()){
@@ -568,7 +624,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
   });
   // Coverage is read once the account is bound and the resident is ready, so the agent can navigate
   // before Maps is opened. A new account gets coverage only; its routes still need a new search.
-  const stopSearchConnection=onMapsConnectionChange(()=>{retireSearch();});
+  const stopSearchConnection=onMapsConnectionChange(()=>{retireSearch();recentSearches=[];});
   const stopCoverage=keepCloudMapsCoverage({
     enabled:launcherCloudMaps,
     ready:()=>!!connectionController.getSnapshot().session,
@@ -634,7 +690,7 @@ export function installMapsChatAdapter(Component:Bag){
    return {...message,displayText:parsed.displayText,hasCalendarText:message.hasCalendarText!==false&&!!parsed.displayText,
     messageActionsLabel:message.messageActionsLabel?'Message actions: '+(parsed.displayText||parsed.cards[0]?.title||'Maps'):message.messageActionsLabel,
     mapsCards:parsed.cards.map(card=>({...card,lines:card.lines.map(text=>({text})),hasAttribution:!!card.attribution,canOpenMap:current(),
-      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.route?{agentRoute:card.route}:card.place?{agentPlace:{place:card.place,fromHere:!!card.directionsFromHere,...(card.travelMode?{travelMode:card.travelMode}:{})}}:card.mapQuery?{query:card.mapQuery,nearMe:!!card.nearMe,fromHere:!!card.directionsFromHere,routeMode:card.travelMode??null}:{keepState:true});}})),
+      openMap:()=>{if(!current()||!this.live||document.hidden||connectionController.getSnapshot().open)return;this.openView('maps',card.route?{agentRoute:card.route}:card.place?{agentPlace:{place:card.place,fromHere:!!card.directionsFromHere,...(card.travelMode?{travelMode:card.travelMode}:{})}}:card.mapQuery?{query:card.mapQuery,nearMe:!!card.nearMe,fromHere:!!card.directionsFromHere,routeMode:card.travelMode??null,searchNear:card.searchNear??null}:{keepState:true});}})),
     hasMapsChoice:open,mapsChoices:open?choice!.options.map(option=>({label:option.label,choose:()=>void answer(this,id,option.value,current)})):[]};
   });return out;
  };

@@ -13,7 +13,9 @@ module FilesTree {
     locations: int -> int, origins: int -> int, names: int -> int,
     revisions: int -> int, selected: Set[int], folder: int, stale: bool,
     access: bool, review: Review, permanentReview: int, budget: int,
-    lastAppliedRevision: int, lastReviewedRevision: int, lost: bool
+    lastAppliedRevision: int, lastReviewedRevision: int, lost: bool,
+    // Trash's own selection and the rows a "Delete permanently?" confirmation showed.
+    trashSelected: Set[int], chosenReview: Set[int]
   }
   var s: State
   action init = s' = {
@@ -22,7 +24,8 @@ module FilesTree {
     names: Files.mapBy(_ => 1), revisions: Files.mapBy(_ => 0),
     selected: Set(), folder: 10, stale: false, access: false,
     review: NoReview, permanentReview: 0, budget: 3,
-    lastAppliedRevision: 0, lastReviewedRevision: 0, lost: false
+    lastAppliedRevision: 0, lastReviewedRevision: 0, lost: false,
+    trashSelected: Set(), chosenReview: Set()
   }
   val present = Files.filter(file => Folders.contains(s.locations.get(file)))
   def listing(folder: int): Set[int] = present.filter(file => s.locations.get(file) == folder)
@@ -38,16 +41,20 @@ module FilesTree {
     ...value, locations: value.locations.set(file, folder),
     origins: value.origins.set(file, folder), names: value.names.set(file, name),
     selected: value.selected.exclude(Set(file)),
+    trashSelected: value.trashSelected.exclude(Set(file)),
     lost: value.lost or Files.exists(other => other != file and
       value.locations.get(other) == folder and value.names.get(other) == name)
   }
-  action grantAccess = s' = { ...s, access: true, selected: Set(), review: NoReview }
+  action grantAccess = s' = {
+    ...s, access: true, selected: Set(), review: NoReview, trashSelected: Set(), chosenReview: Set()
+  }
   action revokeAccess = s' = {
-    ...s, access: false, selected: Set(), review: NoReview, permanentReview: 0
+    ...s, access: false, selected: Set(), review: NoReview, permanentReview: 0,
+    trashSelected: Set(), chosenReview: Set()
   }
   action navigate(folder: int): bool = all {
     s.access, Folders.contains(folder),
-    s' = { ...s, folder: folder, selected: Set() }
+    s' = { ...s, folder: folder, selected: Set(), trashSelected: Set(), chosenReview: Set() }
   }
   action toggle(file: int): bool = all {
     s.access, listing(s.folder).contains(file),
@@ -83,13 +90,35 @@ module FilesTree {
       s' = moved(s, file, s.origins.get(file), name)
     }
   }
+  // Trash multi-select: toggle rows, restore the chosen rows one by one (each to its origin with
+  // a free name), or confirm and permanently delete exactly the rows the confirmation showed.
+  action toggleTrash(file: int): bool = all {
+    s.access, Files.contains(file), s.locations.get(file) == Trash,
+    s' = { ...s, trashSelected: if (s.trashSelected.contains(file))
+      s.trashSelected.exclude(Set(file)) else s.trashSelected.union(Set(file)) }
+  }
+  action restoreChosen(file: int): bool = all {
+    s.trashSelected.contains(file), restore(file)
+  }
+  action reviewChosenPermanent = all {
+    s.access, s.trashSelected != Set(),
+    s' = { ...s, chosenReview: s.trashSelected }
+  }
+  action confirmChosenPermanent = all {
+    s.access, s.chosenReview != Set(),
+    s' = { ...s, locations: Files.mapBy(file =>
+      if (s.chosenReview.contains(file) and s.locations.get(file) == Trash) Gone
+      else s.locations.get(file)),
+      trashSelected: Set(), chosenReview: Set() }
+  }
   action reviewPermanent(file: int): bool = all {
     s.access, Files.contains(file), s.locations.get(file) == Trash,
     s' = { ...s, permanentReview: file }
   }
   action confirmPermanent = all {
     s.access, Files.contains(s.permanentReview), s.locations.get(s.permanentReview) == Trash,
-    s' = { ...s, locations: s.locations.set(s.permanentReview, Gone), permanentReview: 0 }
+    s' = { ...s, locations: s.locations.set(s.permanentReview, Gone), permanentReview: 0,
+      trashSelected: s.trashSelected.exclude(Set(s.permanentReview)) }
   }
   action externalCreate(file: int, folder: int): bool = all {
     Files.contains(file), Folders.contains(folder), s.locations.get(file) == Gone, s.budget > 0,
@@ -140,11 +169,14 @@ module FilesTree {
   action rejectMove = all { s.review != NoReview, s' = { ...s, review: NoReview } }
   action step = any {
     grantAccess, revokeAccess, trashSelection, confirmPermanent, refresh,
+    reviewChosenPermanent, confirmChosenPermanent,
     applyMove, refuseMove, rejectMove,
     { nondet folder = Folders.oneOf(); navigate(folder) },
     { nondet folder = Folders.oneOf(); moveSelection(folder) },
     { nondet file = Files.oneOf(); toggle(file) },
     { nondet file = Files.oneOf(); restore(file) },
+    { nondet file = Files.oneOf(); toggleTrash(file) },
+    { nondet file = Files.oneOf(); restoreChosen(file) },
     { nondet file = Files.oneOf(); reviewPermanent(file) },
     { nondet file = Files.oneOf(); externalRemove(file) },
     { nondet file = Files.oneOf(); externalEdit(file) },
@@ -160,14 +192,19 @@ module FilesTree {
   val SelectionExists = not(s.stale) implies s.selected.subseteq(listing(s.folder))
   val TrashReversible = Files.forall(file => s.locations.get(file) == Trash implies Folders.contains(s.origins.get(file)))
   val AgentMoveOnlyReviewed = s.lastAppliedRevision == s.lastReviewedRevision
-  val RevokedSelectionEmpty = not(s.access) implies s.selected == Set() and s.review == NoReview
+  val RevokedSelectionEmpty = not(s.access) implies s.selected == Set() and s.review == NoReview and
+    s.trashSelected == Set() and s.chosenReview == Set()
+  // Every Trash row the owner has chosen is still in Trash.
+  val TrashSelectionInTrash = s.trashSelected.forall(file => s.locations.get(file) == Trash)
   val TypeOK = s.locations.keys() == Files and s.origins.keys() == Files and
     s.names.keys() == Files and s.revisions.keys() == Files and Folders.contains(s.folder) and
-    s.selected.subseteq(Files) and s.budget.in(0.to(3)) and
+    s.selected.subseteq(Files) and s.trashSelected.subseteq(Files) and
+    s.chosenReview.subseteq(Files) and s.budget.in(0.to(3)) and
     Files.forall(file => s.locations.get(file).in(Folders.union(Set(Gone, Trash))) and
       Names.contains(s.names.get(file)) and s.revisions.get(file).in(0.to(3)))
   val safety = CategoryIsQuery and NamesUniquePerFolder and NoOverwriteWithoutConfirm and
-    SelectionExists and TrashReversible and AgentMoveOnlyReviewed and RevokedSelectionEmpty and TypeOK
+    SelectionExists and TrashReversible and AgentMoveOnlyReviewed and RevokedSelectionEmpty and
+    TrashSelectionInTrash and TypeOK
   run categoriesTest = init.then(grantAccess)
     .expect(category("downloads") == Set(2) and category("images") == Set(1) and safety)
   run collisionKeepsBothTest = init.then(grantAccess).then(navigate(20)).then(toggle(1))
@@ -186,4 +223,16 @@ module FilesTree {
     .then(reviewPermanent(2)).then(confirmPermanent).expect(s.locations.get(2) == Gone and safety)
   run selectionRefreshTest = init.then(grantAccess).then(toggle(2)).then(externalRemove(2))
     .then(refresh).expect(s.selected == Set() and not(s.stale) and safety)
+  run trashChosenRestoreTest = init.then(grantAccess).then(toggle(2)).then(trashSelection)
+    .then(navigate(20)).then(toggle(1)).then(trashSelection)
+    .then(toggleTrash(1)).then(toggleTrash(2)).then(toggleTrash(1)).then(restoreChosen(2))
+    .expect(s.locations.get(2) == 10 and s.locations.get(1) == Trash and s.trashSelected == Set() and safety)
+  run trashChosenPermanentTest = init.then(grantAccess).then(toggle(2)).then(trashSelection)
+    .then(navigate(20)).then(toggle(1)).then(trashSelection).then(toggleTrash(2))
+    .then(reviewChosenPermanent).then(confirmChosenPermanent)
+    .expect(s.locations.get(2) == Gone and s.locations.get(1) == Trash and s.chosenReview == Set() and safety)
+  // A row restored after the confirmation was shown is not deleted by it.
+  run trashChosenRestoredAfterReviewTest = init.then(grantAccess).then(toggle(2)).then(trashSelection)
+    .then(toggleTrash(2)).then(reviewChosenPermanent).then(restore(2)).then(confirmChosenPermanent)
+    .expect(s.locations.get(2) == 10 and safety)
 }

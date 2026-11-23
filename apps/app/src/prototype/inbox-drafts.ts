@@ -3,6 +3,7 @@ import {inboxUnsaved} from './inbox-unsaved';
 import {reviewMailAttachment} from '../runtime/inbox-attachment';
 import { inboxLocalStore } from '../runtime/inbox-local-store';
 import { connectionController } from '../runtime/connection-ui';
+import { BrowserReviews } from '../browser/review';
 /** Content handed to a new composer: shared from another app or moved to another From account. */
 export type ComposePrefill=SharedComposePrefill;
 /** Source attachments a forward carries, bound to the selected message and its historyId. */
@@ -14,10 +15,11 @@ export type SuggestionTarget=SharedSuggestionTarget;
 export function inboxDrafts(publish:()=>void,toast:(text:string)=>void, provider:MailDraftsProvider,
  reviewActive:()=>boolean,chooseAttachment:(current:()=>boolean)=>Promise<File|undefined>) {
  const copies=new Set<ReturnType<typeof inboxUnsaved>>();
+ const reviews=new BrowserReviews();
  const drafts=createMailDraftsController({publish,toast,provider,store:inboxLocalStore,retained:(owner,changed,restore)=>{
   const copy=inboxUnsaved(owner,changed,restore);copies.add(copy);return copy;
  },reviewAttachment:reviewMailAttachment,
-  confirm:message=>window.confirm(message),
+  confirm:(message,review)=>reviews.confirm('inbox-draft',review.title,message,review.confirmLabel,{signal:review.signal,current:review.current}),
   identity:()=>({sessionId:connectionController.getCloudClient()?.sessionId,account:connectionController.getSnapshot().cloudAccount??null}),
   reviewActive,chooseAttachment});
  return Object.assign(drafts,{async flushForAppUpdate(current:()=>boolean){

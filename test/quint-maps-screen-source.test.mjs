@@ -64,7 +64,7 @@ function fixture(module,{background=true,granted=true,direct=false}={}){
   navigationLocation:{awaitingPermission:()=>false,async start(_once,accept,fail){location.starts++;location.watch=accept;location.failed=fail;},async stop(){location.stops++;location.watch=null;}},
   agentLocation:{awaitingPermission:()=>false,async start(_once,accept){agent.starts++;queueMicrotask(()=>accept(fix));},async stop(){agent.stops++;}},async locationGranted(){return granted;},
   voice:{enabled:true,update(key,text){events.push(['voice',key,text]);},pause(){events.push('voice-pause');},toggle(){}},
-  background:{active:()=>nativeRunning,async start(_title,_text,stopped){events.push('background-start');nativeStopped=stopped;if(backgroundGate)await backgroundGate.promise;nativeRunning=background;return background;},update(){events.push('background-update');},async stop(){events.push('background-stop');nativeRunning=false;}},
+  background:{active:()=>nativeRunning,async start(_title,_text,stopped){events.push('background-start');nativeStopped=stopped;if(backgroundGate)await backgroundGate.promise;nativeRunning=background;return background;},update(){events.push('background-update');},async stop(){events.push('background-stop');nativeRunning=false;},arrive(){return this.stop();}},
   async share(){return'closed';},openWebsite(){throw Error('No live website port');},active:()=>active,invalidate(){},toast(text){events.push(['toast',text]);},discardHandoff(){events.push('discard-handoff');},now:()=>fixedNow,
  };
  const screen=new module.MapsScreenController(host);screen.ensure();const surface=screen.surface(async()=>true);

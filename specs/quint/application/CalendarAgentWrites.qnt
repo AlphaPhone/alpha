@@ -33,9 +33,10 @@ module CalendarAgentWrites {
   action hide = s' = {...s, hidden: true}
   /// There is no direct path: the only way in is the owner's card on the bound screen.
   action approve = all {idle, bound, s' = {...s, authority: "review"}}
-  /// Create-on-phone and read-next ask for Calendar access first.
+  /// Create-on-phone and read-next ask for Calendar access first. Denied access, or a screen that
+  /// changed while it was asked, refuses as not started before the native calendar is called.
   action permissionRefused = all {running, s.native == "none", s.op.in(unbound),
-    s.permission != "granted" or not(bound), s' = {...s, outcome: "unknown"}}
+    s.permission != "granted" or not(bound), s' = {...s, outcome: "failed"}}
   action nativeReview = all {running, s.native == "none", bound,
     s.op.in(unbound) implies s.permission == "granted", s' = {...s, native: "reviewing"}}
   action nativeCancel = all {running, s.native == "reviewing", s' = {...s, native: "cancelled", outcome: "failed"}}
@@ -74,16 +75,13 @@ module CalendarAgentWrites {
   val UndoneDeleteDeletesNothing = s.deleted + s.undone + (if (s.queued) 1 else 0) == s.queues
   val CancelledReviewChangesNothing = s.native == "cancelled" implies s.outcome == "failed"
   val ProtectedScreenBlocksCalendar = (s.sensitive and not(idle)) implies s.native == "none"
+  /// The executor throws DeviceActionNotStarted for these refusals, so the coordinator journals
+  /// them as failed/not started (app review AGENT-06).
+  val UnknownOnlyAfterNativeCall = s.outcome == "unknown" implies s.native != "none"
   val safety = NoCalendarOperationIsDirect and CreateNeedsNativeConfirm and UpdateBoundToSelectedRevision and
     QueuedDeleteIsUnknownUntilSettled and UndoneDeleteDeletesNothing and CancelledReviewChangesNothing and
-    ProtectedScreenBlocksCalendar
-
-  /// KNOWN DIVERGENCE (app review AGENT-06, phone side): denied Calendar access, or a screen that
-  /// changed while access was asked, throws in the executor before the native calendar is
-  /// called. Nothing happened, yet the action is journaled and reported as "unknown".
-  /// Registered as an expected violation.
-  val UnknownOnlyAfterNativeCall = s.outcome == "unknown" implies s.native != "none"
-  val UnknownWithoutNativeCall = s.outcome == "unknown" and s.native == "none"
+    ProtectedScreenBlocksCalendar and UnknownOnlyAfterNativeCall
+  val FailedWithoutNativeCall = s.outcome == "failed" and s.native == "none"
 
   run createNeedsBothReviewsTest = init.then(approve).then(nativeReview)
     .expect(safety and s.events == 0).then(nativeApply).expect(safety and s.events == 1)
@@ -103,5 +101,5 @@ module CalendarAgentWrites {
     .then(approve).then(nativeReview).then(nativeQueueDelete).then(undo)
     .expect(safety and s.deleted == 0 and s.undone == 1)
   run deniedAccessTest = init.then(scene("home", false, false, "denied")).then(approve).then(permissionRefused)
-    .expect(safety and UnknownWithoutNativeCall and not(UnknownOnlyAfterNativeCall) and s.events == 0)
+    .expect(safety and FailedWithoutNativeCall and s.events == 0)
 }

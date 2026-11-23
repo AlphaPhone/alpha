@@ -91,7 +91,7 @@ async function openHandoffDayInCalendar(page:Page,titles:string){
  expect(event).toBeTruthy();
  const date=new Date(event.begin);
  const label=date.toLocaleDateString('en-US',{weekday:'long'})+' '+date.toLocaleDateString('en-US',{month:'long'})+' '+date.getDate();
- await page.getByRole('button',{name:'Month view',exact:true}).click();
+ await page.getByRole('button',{name:'Choose date',exact:true}).click();
  await page.getByRole('dialog',{name:'Choose calendar date',exact:true}).getByRole('button',{name:label,exact:true}).click();
  await expect(page.getByRole('region',{name:'Calendar timeline'})).toBeVisible();
 }

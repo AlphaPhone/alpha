@@ -458,7 +458,7 @@ test('Alpha inherits no shared UI path beyond the reviewed ones', () => {
 // each is called only from the Alpha file that owns the surrounding review or close.
 const GUARDED_CALLS = [
   {call: /\bAlphaTelephonyAccess\s*\.\s*(?:dispatch|dispatchMms|decide|decideMms)\s*\(/, owners: ['AlphaTelephonyBase.java', 'AlphaSmsComposeActivity.java'],
-    why: 'a journaled send or decision runs only behind Alpha\'s owner-confirmed native review'},
+    why: 'a journaled send or decision runs only for a send the owner confirmed: a card approved in the chat (AlphaApprovedSms) or the Messages composer\'s Send'},
   {call: /(?<!\bPasswordVaultGate\s*)\.\s*(?:lockAndClose|destroyVault)\s*\(/, owners: ['PasswordVaultGate.java'],
     why: 'PasswordVaultGate.lockAndClose and destroyVault also close Alpha\'s editor and revealed secret'},
   {call: /\bPasswordVaultAccess\s*\.\s*setAdmission\s*\(/, owners: ['PasswordVaultGate.java'], why: 'PasswordVaultGate.setAdmission is the one writer of the vault admission rule'},

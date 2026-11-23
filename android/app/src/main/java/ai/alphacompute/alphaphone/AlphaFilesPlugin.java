@@ -238,6 +238,8 @@ public class AlphaFilesPlugin extends Plugin {
   String id=SelectedDocumentAccess.authorize(getContext(),uri,0);
   String mime=StorageBrowser.mime(f.getName());
   JSObject out=result("selected","");out.put("action","files");out.put("selectionId",id);out.put("name",f.getName());out.put("mimeType",mime);out.put("canRename",false);
+  // The preview's subtitle and File details show these; a zero modified time means unknown.
+  out.put("size",f.length());long modified=f.lastModified();if(modified>0)out.put("modified",modified);
   if(mime.startsWith("image/")||mime.startsWith("audio/")||mime.startsWith("video/"))out.put("uri",uri.toString());
   return out;
  });}

@@ -1,10 +1,21 @@
-import {mkdtempSync,mkdirSync,writeFileSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+
+/** The recording notification's words, read from the app's own string resources. */
+export const noteRecordingStringsSource='android/app/src/main/res/values/alpha-note-recording.xml';
+function noteRecordingStrings(){
+  const xml=readFileSync(fileURLToPath(new URL('../../../../'+noteRecordingStringsSource,import.meta.url)),'utf8');
+  const entries=[...xml.matchAll(/<string name="([a-z_]+)">([^<]*)<\/string>/g)].map(([,name,text])=>[name,text.replace(/\\'/g,"'")]);
+  if(!entries.length)throw Error('No recording notification strings');
+  return entries;
+}
 
 /** Android primitives for actual recorder/service coordination. Audio bytes stay synthetic. */
 export function noteRecordingPlatform() {
   const directory=mkdtempSync(join(tmpdir(),'quint-note-recording-'));
+  const strings=noteRecordingStrings();
   const files={
     'com/getcapacitor/JSArray.java':'package com.getcapacitor;public class JSArray extends org.json.JSONArray {}',
     'androidx/annotation/Nullable.java':'package androidx.annotation; public @interface Nullable {}',
@@ -14,6 +25,7 @@ public class Context {
   public File getNoBackupFilesDir(){return ai.alphacompute.alphaphone.NoteRecordingPorts.root;}
   public File getCacheDir(){File cache=new File(ai.alphacompute.alphaphone.NoteRecordingPorts.root,"cache");cache.mkdirs();return cache;}
   public Context getApplicationContext(){return this;}
+  public String getString(int id){return ai.alphacompute.alphaphone.R.string.TEXT[id];}
   public <T>T getSystemService(Class<T> type){return type.cast(ai.alphacompute.alphaphone.NoteRecordingPorts.notifications);}
   public android.content.ComponentName startForegroundService(Intent intent){ai.alphacompute.alphaphone.NoteRecordingPorts.commands.add(intent);return null;}
   public android.content.ComponentName startService(Intent intent){if(ai.alphacompute.alphaphone.NoteRecordingPorts.failServiceLaunch)throw new IllegalStateException("background restricted");ai.alphacompute.alphaphone.NoteRecordingPorts.commands.add(intent);return null;}
@@ -227,7 +239,9 @@ public class PendingIntent {
   private static final java.util.Map<String,PendingIntent> services=new java.util.HashMap<>();
   private static final java.util.Map<Integer,PendingIntent> latest=new java.util.HashMap<>();
   private android.content.Intent intent;
-  public static PendingIntent getActivity(android.content.Context context,int request,android.content.Intent intent,int flags){return new PendingIntent();}
+  private static android.content.Intent latestActivity;
+  public static PendingIntent getActivity(android.content.Context context,int request,android.content.Intent intent,int flags){latestActivity=intent;PendingIntent value=new PendingIntent();value.intent=intent;return value;}
+  public static android.content.Intent latestActivity(){return latestActivity;}
   public static PendingIntent getService(android.content.Context context,int request,android.content.Intent intent,int flags){
     String key=request+"/"+intent.filterKey();PendingIntent value=services.get(key);
     if(value==null){value=new PendingIntent();value.intent=intent;services.put(key,value);}
@@ -238,7 +252,9 @@ public class PendingIntent {
   public android.content.Intent deliveryIntent(){return intent;}
 }`,
     'android/R.java':'package android;public class R {public static class drawable {public static final int ic_btn_speak_now=1;}}',
-    'ai/alphacompute/alphaphone/R.java':'package ai.alphacompute.alphaphone;public class R {public static class drawable {public static final int ic_note_recording=1;}}',
+    'ai/alphacompute/alphaphone/R.java':`package ai.alphacompute.alphaphone;public class R {public static class drawable {public static final int ic_note_recording=1;}
+  public static class string {${strings.map(([name],index)=>`public static final int ${name}=${index};`).join('')}
+    public static final String[] TEXT={${strings.map(([,text])=>JSON.stringify(text)).join(',')}};}}`,
     'ai/alphacompute/alphaphone/MainActivity.java':'package ai.alphacompute.alphaphone;public class MainActivity {}',
   };
   for(const [name,body] of Object.entries(files)){const file=join(directory,name);mkdirSync(dirname(file),{recursive:true});writeFileSync(file,body);}

@@ -20,9 +20,9 @@ test('a camera capture persists and Ask Alpha attaches it locally without the de
  await page.goto('/');await expect(page.locator('html')).toHaveAttribute('data-connection-mode','live');
  await page.getByRole('button',{name:'Camera',exact:true}).click();
  await expect.poll(()=>page.locator('[data-alpha-camera="viewfinder"] video').evaluate((v:HTMLVideoElement)=>v.readyState)).toBeGreaterThanOrEqual(2);
- // Document capture has a direct entry; Ask remains a camera mode.
- for(const name of ['Ask Alpha about this','Choose image','Scan mode'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
- await expect(page.getByRole('button',{name:'Scan document',exact:true})).toBeVisible();
+ // Camera is Video and Photo only: scanning and questions are asked in chat.
+ for(const name of ['Ask Alpha about this','Choose image','Scan mode','Scan document','Ask mode'])await expect(page.getByRole('button',{name,exact:true})).toHaveCount(0);
+ await expect(page.locator('[data-alpha-camera="modes"]').getByRole('button')).toHaveText(['Video','Photo']);
  await expect(page.locator('[data-alpha-camera-root] [data-alpha-app-title]')).toHaveCount(0);
  // Camera frame question (mainline #815's check, reached by asking in chat): an unsaved frame, reviewed text only.
  await page.getByRole('button',{name:'Type',exact:true}).click();
@@ -32,6 +32,9 @@ test('a camera capture persists and Ask Alpha attaches it locally without the de
  await expect(frame.getByRole('img',{name:'Image for question review'})).toBeVisible();
  await expect(frame.getByRole('button',{name:'Extract text locally'})).toBeEnabled();
  await frame.getByRole('button',{name:'Cancel',exact:true}).click();await expect(frame).toHaveCount(0);
+ // Cancel returns focus to the active compact composer. Tap the outside surface before taking a photo.
+ await page.locator('[data-alpha-dock-scrim="true"]').click({position:{x:20,y:20}});
+ await expect(page.locator('[data-alpha-dock-scrim="true"]')).toHaveCount(0);
  await page.getByRole('button',{name:'Take photo',exact:true}).click();
  await expect(page.getByRole('button',{name:'Open last photo',exact:true})).toBeVisible();
 

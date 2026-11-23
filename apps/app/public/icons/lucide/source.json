@@ -11,6 +11,8 @@
     "settings.mjs": "f9abccd1bfabaadda832eb53e41d958cdac0d12faae3a3c65a70d2c8f27dee17",
     "mic.mjs": "0f7ee875d0f171192df3d3f3a26a42a527ba94031798515d4fe7a8747eebf024",
     "arrow-up.mjs": "177f21f94aae4162af74d529046180ea92b32cdebf13958d606debe64abfa16c",
+    "arrow-left.mjs": "5da806bf4f84d3d7f5351ecd0d32ee6181a33fd7536df2b30d999e5ace66c535",
+    "arrow-right.mjs": "4565daf168402634b54b888e1d1175f00c2b49a606949214d8f4d2ee86ea8f44",
     "plus.mjs": "efd5d3d742e2006ac6c442c292522b6a835031951739f30c5c74119bd38ecbb5",
     "minus.mjs": "70dde88f7a19d7a8f420b183bdc0a2a457a9637222887a2da5b2453411b5e7b1",
     "chevron-left.mjs": "3bf816ca3c0513c9c66a62d2e9bd029e354e13006d208406f005b44555df07c3",
@@ -51,6 +53,7 @@
     "clock.mjs": "420874ee15698e2215695767aca90d2d054927f0d56f83b56d576eb48ded8841",
     "message-square.mjs": "89932efd8277f2c26d6913f64cbb47e119b1803e839c7860a1d851d33d942e8e",
     "mail.mjs": "d001160393bb25afe8a6cfcbae51ab56d067cc6a69f56b70c87bfb817f32ff2f",
+    "mail-open.mjs": "3b0275188b46ad9852350aa41f361ca0203434587b926527b63e1c4bb56eda6e",
     "video.mjs": "2c721d3b4c9eb49ee7043da315ce36b59bbf559f9812a66ee5b9aae2e20eb322",
     "fingerprint-pattern.mjs": "9b04c1f4734e5bee17c29306b924891b43e9ae91d082c119c20988bdb68a889e",
     "flashlight.mjs": "3f4f6ea742cfd5e30d1ea80ccd5a497dc1969c6c9bdba4927314074fff5e8671",
@@ -174,6 +177,14 @@
     "arrow-up.svg": {
       "source": "arrow-up.mjs",
       "sha256": "8f5dfd491d7ffc881884db1dae49bea1408b72daba5f31c7ef22e9366885c3bb"
+    },
+    "arrow-left.svg": {
+      "source": "arrow-left.mjs",
+      "sha256": "0a37842888fa1caf0c3c0911435554b30a1e68a244a1562b2fa682d65d87f9bf"
+    },
+    "arrow-right.svg": {
+      "source": "arrow-right.mjs",
+      "sha256": "c2dc14a256a4a9847b6e645b7c0aae643fa0c2984dfb63c7ab85e928dd113730"
     },
     "plus.svg": {
       "source": "plus.mjs",
@@ -349,6 +360,10 @@
     "mail.svg": {
       "source": "mail.mjs",
       "sha256": "92ea10e1f58c80654110ae99ced9ea43c68fec968158f61a3f37b879df63e54a"
+    },
+    "mail-open.svg": {
+      "source": "mail-open.mjs",
+      "sha256": "61efb70a41c80331ba30f6387dee9d2cd54bb198ed3d1dd683a749f45418ed6c"
     },
     "video.svg": {
       "source": "video.mjs",

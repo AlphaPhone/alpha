@@ -1,4 +1,4 @@
-export type SharePanelOptions={title:string;current:()=>boolean;external?:()=>unknown|Promise<unknown>;email?:()=>unknown|Promise<unknown>;copy?:()=>unknown|Promise<unknown>;copyLabel?:string;save?:()=>unknown|Promise<unknown>};
+export type SharePanelOptions={title:string;current:()=>boolean;external?:()=>unknown|Promise<unknown>;email?:()=>unknown|Promise<unknown>;messages?:()=>unknown|Promise<unknown>;copy?:()=>unknown|Promise<unknown>;copyLabel?:string;save?:()=>unknown|Promise<unknown>};
 /** Returns a check that the watched value still equals its content when this was called.
  * `token` is a cheap identity for the value (the object a store replaces on every write);
  * `content` is the full value. While the token is the one last seen nothing is serialised,
@@ -42,7 +42,7 @@ export function openSharePanel(options:SharePanelOptions):Promise<void>{
    const button=document.createElement('button');button.type='button';button.className='share-row';button.style.font='inherit';button.textContent=label;button.style.setProperty('--share-icon',`url('/icons/lucide/${icon}.svg')`);
    button.onclick=()=>{if(closed)return;if(document.hidden||!options.current()){status.textContent='The selection changed. Close and choose it again.';return;}finish();try{void Promise.resolve(run()).catch(destinationFailure);}catch(error){destinationFailure(error);}};dialog.append(button);
   };
-  close.onclick=finish;dialog.append(header);if(options.email)action('Email','mail',options.email);if(options.external)action('Share','share-2',options.external);
+  close.onclick=finish;dialog.append(header);if(options.email)action('Email','mail',options.email);if(options.messages)action('Messages','message-square',options.messages);if(options.external)action('Share','share-2',options.external);
   if(options.copy)action(options.copyLabel||'Copy text','copy',options.copy);
   if(options.save)action('Save file','download',options.save);
   dialog.append(status);dialog.addEventListener('click',event=>{if(event.target===dialog){const rect=dialog.getBoundingClientRect();if(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)finish();}});dialog.addEventListener('cancel',event=>{event.preventDefault();finish();});dialog.addEventListener('close',finish);

@@ -53,6 +53,15 @@ a Cartesia key is installed; local speech is used otherwise and as the fallback 
 Cloud speech fails (owner decision 2026-11-10, replacing "never an automatic fallback").
 Clef end-of-turn runs in Eliza Cloud (P-60). Production Maps uses Google Maps Platform through Eliza Cloud (P-64).
 Local speech does not imply an offline language model. Hosted inference receives disclosed selected context.
+Location for Alpha is on by default. When Android allows access, ordinary chats
+include the phone's last known location. Hosted inference can receive this
+location. The owner can turn off Location for Alpha under Settings → Privacy.
+Browser page for Alpha is on by default (owner request 2026-11-22). While
+Browser is on screen, an ordinary chat includes the open page's address, title,
+visible text (at most 6,000 characters), selection and up to 20 links. Private
+tabs never do; sign-in, account and one-time-code pages send only their address
+and title. Hosted inference can receive the page. The owner can turn it off under
+Settings → Privacy.
 Full photo access is local permission scope, not bulk Cloud upload authorization.
 
 Passkeys, Telegram, Discord and Wallet are outside MVP. The Alpha Compute
@@ -74,6 +83,9 @@ routing amendment supersedes its earlier Settings switches; qualification of the
 packaged models and device audio remains separate. The approval itself changes no
 runtime or qualification record. Track implementation gaps and execution results
 against the current source.
+The app is English only today: the renderer declares `lang="en"`, Android has no
+translated resources, right-to-left layout is off (`supportsRtl="false"`) and most
+native notice copy is still in Java. Which languages launch is not yet decided.
 APK builds, native emulator/HOME checks, full AOSP boot, real services, physical
 hardware and user acceptance remain distinct. No existing failure is retired by
 changing the prose.

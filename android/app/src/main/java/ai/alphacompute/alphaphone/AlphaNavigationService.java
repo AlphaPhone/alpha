@@ -29,6 +29,7 @@ public final class AlphaNavigationService extends Service {
  static final String ACTION_SHOW_MAPS="ai.alphacompute.alphaphone.action.SHOW_NAVIGATION";
  static final String CHANNEL = "alpha.maps.navigation";
  static final int NOTIFICATION_ID = 0x4d415053; // "MAPS"
+ static final int ARRIVAL_NOTIFICATION_ID = 0x4d415041; // "MAPA"
  static final String ACTION_START = "ai.alphacompute.alphaphone.navigation.START";
  static final String ACTION_UPDATE = "ai.alphacompute.alphaphone.navigation.UPDATE";
  static final String ACTION_STOP = "ai.alphacompute.alphaphone.navigation.STOP";
@@ -119,6 +120,30 @@ public final class AlphaNavigationService extends Service {
    session.text = lastText = bounded(text);
   }
   context.startService(intent(context, ACTION_UPDATE, session));
+  return true;
+ }
+
+ /**
+  * Guidance reached its destination while Maps was off screen: post one dismissable notice
+  * that says so. Only the bridge that owns the active session may post it; the app then
+  * stops that session, which removes the ongoing notification.
+  */
+ static boolean arrived(Context context, StopListener owner, String title, String text) {
+  synchronized (lock) {
+   if (active == null || active.owner != owner) return false;
+  }
+  NotificationManager manager = context.getSystemService(NotificationManager.class);
+  ensureChannel(manager);
+  Notification notice = new Notification.Builder(context, CHANNEL)
+   .setSmallIcon(R.drawable.ic_navigation)
+   .setContentTitle(bounded(title).isEmpty() ? "Arrived" : bounded(title))
+   .setContentText(bounded(text))
+   .setContentIntent(showMaps(context))
+   .setAutoCancel(true)
+   .setCategory(Notification.CATEGORY_NAVIGATION)
+   .setVisibility(Notification.VISIBILITY_PUBLIC)
+   .build();
+  manager.notify(ARRIVAL_NOTIFICATION_ID, notice);
   return true;
  }
 
@@ -240,22 +265,28 @@ public final class AlphaNavigationService extends Service {
   if (startId < 0) stopSelf(); else stopSelf(startId);
  }
 
+ private static void ensureChannel(NotificationManager manager) {
+  if (manager.getNotificationChannel(CHANNEL) != null) return;
+  NotificationChannel channel = new NotificationChannel(CHANNEL, "Maps navigation", NotificationManager.IMPORTANCE_LOW);
+  channel.setDescription("Shows the next turn while Maps navigation is running");
+  channel.setShowBadge(false);
+  channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+  manager.createNotificationChannel(channel);
+ }
+
+ /** Opens Maps in the launcher, as the ongoing notification's tap does. */
+ private static PendingIntent showMaps(Context context) {
+  Intent open = new Intent(context, MainActivity.class).setAction(ACTION_SHOW_MAPS).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+  return PendingIntent.getActivity(context, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+ }
+
  private Notification notification(Session session) {
-  NotificationManager manager = getSystemService(NotificationManager.class);
-  if (manager.getNotificationChannel(CHANNEL) == null) {
-   NotificationChannel channel = new NotificationChannel(CHANNEL, "Maps navigation", NotificationManager.IMPORTANCE_LOW);
-   channel.setDescription("Shows the next turn while Maps navigation is running");
-   channel.setShowBadge(false);
-   channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-   manager.createNotificationChannel(channel);
-  }
-  Intent open = new Intent(this, MainActivity.class).setAction(ACTION_SHOW_MAPS).setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-  PendingIntent content = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+  ensureChannel(getSystemService(NotificationManager.class));
   Notification.Builder notification = new Notification.Builder(this, CHANNEL)
    .setSmallIcon(R.drawable.ic_navigation)
    .setContentTitle(session == null || session.title.isEmpty() ? "Navigation" : session.title)
    .setContentText(session == null ? "" : session.text)
-   .setContentIntent(content)
+   .setContentIntent(showMaps(this))
    .setOngoing(true)
    .setOnlyAlertOnce(true)
    .setShowWhen(false)

@@ -1,6 +1,7 @@
 import { withMapsNavigationRelay } from '../../../../.eliza/client-features/plugins/plugin-maps/src/client/navigation-relay.ts';
 import {anyAbortSignal} from '../runtime/abort-signal';
 import { asRecord } from '../lib/parse';
+import {alphaClient} from '../runtime/alpha-client';
 import { residentMapsNavigationPort } from './agent-navigation.ts';
 import { deviceNavigationFailure, type AgentPlaceRef, type MapsDeviceNavigation } from './device-navigation.ts';
 import type { TravelMode } from './contracts.ts';
@@ -14,6 +15,10 @@ export function withResidentMapsNavigation<T>(request: Request | undefined, conv
   current:()=>residentMapsNavigationPort.current,
   async execute(navigation,value,signal){
    const operation=asRecord(value);
+   // Select and start bring Maps forward over the view the owner asked from. That move, and the
+   // route sheet settling in Maps afterwards, is this turn's own: it does not stop the reply the
+   // way the owner leaving the view would. The admission ends with the turn's request.
+   if(operation?.kind==='select'||operation?.kind==='start')alphaClient.admitOwnViewOpen('maps');
    if(operation?.kind==='select')return navigation.select(operation.place as AgentPlaceRef,signal);
    if(operation?.kind==='start')return navigation.start(operation.request as {destination:AgentPlaceRef;travelMode:TravelMode},signal);
    if(operation?.kind==='reroute')return navigation.reroute(signal);
@@ -21,6 +26,9 @@ export function withResidentMapsNavigation<T>(request: Request | undefined, conv
    throw Error('Invalid Maps navigation operation');
   },
   failure:error=>deviceNavigationFailure(error).code,
+  // The phone's own reason ("Open Maps on the phone to continue.") reaches the reply in place of
+  // the agent host's generic text for the code.
+  failureMessage:error=>deviceNavigationFailure(error).message,
   connected(value,id){if(value){activeOffer=id;residentMapsNavigationPort.relay=true;}else if(activeOffer===id){activeOffer=undefined;residentMapsNavigationPort.relay=false;}},
  },request,conversationId,signal,send);
 }

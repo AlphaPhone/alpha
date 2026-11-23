@@ -211,12 +211,47 @@ test('every Settings row is a control backed by real state, with no fixture valu
   await expect(current(page).getByRole('button',{name:'Developer',exact:true})).toHaveCount(0);
  }
  await openSettings(page,'Privacy');
+ // The product build names where speech goes (SET-17).
+ // The row's description sits inside its label, so the label reads as the two together.
+ const voiceRoute=current(page).locator('.settings-info-description',{hasText:'Recordings, replies →'});
+ await expect(voiceRoute).toBeVisible();await expect(voiceRoute).toHaveText('Recordings, replies → Eliza Cloud');
+ await expect(voiceRoute.locator('..')).toHaveText('VoiceRecordings, replies → Eliza Cloud');
  const review=()=>current(page).getByRole('switch',{name:'Ask before Alpha acts',exact:true});
  await expect(review()).toHaveAttribute('aria-checked','false');
+ // With asking off, the scope shows that Alpha may read the latest texter's number and draft texts.
+ await expect(review().locator('..').locator('.settings-tag')).toHaveText(['Web','Camera','Photos','Texter’s number','Text drafts']);
  await review().click();await expect(review()).toHaveAttribute('aria-checked','true');
  await openSettings(page,'Privacy');await expect(review()).toHaveAttribute('aria-checked','true');
  await review().click();await expect(review()).toHaveAttribute('aria-checked','false');
  expect((await callNames(page)).filter(name=>name!=='Agent.setGoogleAgentAccess'&&/\.set(?!Flashlight)|\.perform$/i.test(name))).toEqual([]);
+});
+
+test('Browser page for Alpha defaults on, says what it shares and keeps the owner’s choice',async({page})=>{
+ await nativeStub(page,{snapshot:{permissions:{Microphone:true,Location:true,Camera:false,Calendar:true},locationAccess:'precise'}});
+ await openSettings(page,'Privacy');
+ const browserPage=()=>current(page).getByRole('switch',{name:'Browser page for Alpha',exact:true});
+ await expect(browserPage()).toHaveAttribute('aria-checked','true');
+ await expect(current(page).getByText('When you chat with Browser open, Alpha gets the page’s address, title, visible text and links. Never private tabs or sign-in pages. Hosted models can receive it.',{exact:true})).toBeVisible();
+ await browserPage().click();
+ await expect(browserPage()).toHaveAttribute('aria-checked','false');
+ await openSettings(page,'Privacy');
+ await expect(browserPage()).toHaveAttribute('aria-checked','false');
+ await browserPage().click();
+ await expect(browserPage()).toHaveAttribute('aria-checked','true');
+});
+
+test('location for Alpha defaults on and keeps the owner’s choice',async({page})=>{
+ await nativeStub(page,{snapshot:{permissions:{Microphone:true,Location:true,Camera:false,Calendar:true},locationAccess:'precise'}});
+ await openSettings(page,'Privacy');
+ const location=()=>current(page).getByRole('switch',{name:'Location for Alpha',exact:true});
+ await expect(location()).toHaveAttribute('aria-checked','true');
+ await expect(current(page).getByText('Alpha uses your last known location in chats. Hosted models can receive it.',{exact:true})).toBeVisible();
+ await location().click();
+ await expect(location()).toHaveAttribute('aria-checked','false');
+ await openSettings(page,'Privacy');
+ await expect(location()).toHaveAttribute('aria-checked','false');
+ await location().click();
+ await expect(location()).toHaveAttribute('aria-checked','true');
 });
 
 test('Android settings opens the system Settings page from Alpha Settings',async({page})=>{
@@ -241,7 +276,7 @@ test('notification state is read back from Android, and local history stays avai
  await expect(state).not.toContainText('Some off');await resume(page);
  await expect(state).toContainText('Some off');
  await set(page,{status:{appEnabled:false}});await resume(page);await expect(state).toContainText('Off');
- await current(page).getByRole('button',{name:'View local metadata history',exact:true}).click();
+ await current(page).getByRole('button',{name:'View history',exact:true}).click();
  await expect(current(page)).toContainText(/Stub Mail\s*Arrived/);
  await page.evaluate(()=>{const truth=(window as any).truth,original=(window as any).Capacitor.nativePromise;(window as any).Capacitor.nativePromise=async(plugin:string,method:string,input:unknown)=>{if(plugin==='AlphaNotifications'&&method==='status'){truth.calls.push({plugin,method,input});throw Error('Notification delivery status unavailable');}return original(plugin,method,input);};});
  await resume(page);await expect(state).toContainText('Unavailable');

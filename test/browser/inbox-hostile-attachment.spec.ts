@@ -96,7 +96,7 @@ const openFile=async(page:Page,name:string)=>{
 };
 const storedBytes=(page:Page,name:string)=>page.evaluate(async name=>{const {registerPlugin}=await import('/src/platform-plugins.ts');const f=registerPlugin<any>('AlphaFiles'),row=(await f.list({})).entries.find((entry:any)=>entry.name===name),selected=await f.select({id:row.id});try{return (await f.attachment(selected)).dataBase64 as string;}finally{await f.forgetSelected(selected);}},name);
 
-for(const [label,name,mimeType,bytes] of [['an HTML attachment with script','invoice.html','text/html',html],['an SVG attachment with script','diagram.svg','image/svg+xml',svg]] as const)
+for(const [label,name,mimeType,bytes,kind] of [['an HTML attachment with script','invoice.html','text/html',html,'Text'],['an SVG attachment with script','diagram.svg','image/svg+xml',svg,'Image']] as const)
 test(`${label} is never rendered: the review is inert text, Save to Files keeps the exact bytes, and opening it in Files runs and loads nothing`,async({page})=>{
  test.setTimeout(120_000);
  const seen=await watch(page);
@@ -129,7 +129,9 @@ test(`${label} is never rendered: the review is inert text, Save to Files keeps 
 
  // Opening the saved copy in Files: the bytes are stored, never interpreted as a page.
  await openFile(page,name);
- await expect(page.getByText(new RegExp(`^${mimeType.replace(/[+/]/g,'\\$&')} · `)).first()).toBeVisible();
+ // Files names the kind of file the owner recognises, not its raw MIME type.
+ await expect(page.getByText(new RegExp(`^${kind} · ${Buffer.byteLength(bytes,'latin1')} B ·`)).first()).toBeVisible();
+ await expect(page.getByText(mimeType,{exact:false})).toHaveCount(0);
  await expectInert(page,seen);
 });
 

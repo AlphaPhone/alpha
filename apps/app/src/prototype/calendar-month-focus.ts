@@ -5,7 +5,7 @@ type MonthOutput=ViewOutput&{closeMonth:()=>void;monthOpen?:boolean};
 /** Month selection owns focus without allowing covered day controls to act. */
 export function installCalendarMonthFocus(Component:{prototype:ShellPrototype},views:ViewRegistry){
  const render=views.calendar.render;let close=()=>{},container:HTMLElement|null=null;
- const modal=createInlineModal(()=>close(),()=>document.querySelector<HTMLElement>('button[aria-label="Month view"]'));
+ const modal=createInlineModal(()=>close(),()=>document.querySelector<HTMLElement>('button[aria-label="Choose date"]'));
  const ref=(element:HTMLElement|null)=>{container=element;modal.ref(element);};
  views.calendar.render=(state:MonthState,api)=>{const out=render(state,api) as MonthOutput;close=out.closeMonth;
   if(out.monthOpen){

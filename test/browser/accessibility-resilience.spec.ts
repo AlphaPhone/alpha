@@ -138,6 +138,7 @@ test.describe('200% text keeps the way out on screen', () => {
 
   test('the Undo toast wraps a long file name and keeps Undo usable', async ({ page }) => {
     await page.goto('/?mode=mock&start=files:preview');
+    await page.getByRole('button', { name: 'File actions', exact: true }).click();
     await page.getByRole('button', { name: 'Delete file', exact: true }).click();
     const undo = page.getByRole('button', { name: 'Undo', exact: true });
     await expect(undo).toBeVisible();
@@ -168,8 +169,6 @@ test.describe('menus and sheets over a scrim own focus', () => {
     ['photos:viewer', ['Share'], 'Share', 'Close share', 'Photo actions'],
     ['notes:editor', ['More', 'Share note'], 'Share', 'Cancel', 'Share note'],
     ['files-storage', ['Files options'], 'Sort and more', 'Close menu', 'Files options'],
-    ['files:preview', ['Move file'], 'Move to', 'Close move', 'Move file'],
-    ['files:preview', ['Share file'], 'Share file', 'Close share', 'Share file'],
     ['workflows:new', ['Add Read step'], 'Step editor', 'Close', null],
     // Settings > Google (live: the panel is not mounted in mock mode). The Google accounts panel
     // has no scrim button; its Close button is the pointer dismissal, and Escape returns focus to
@@ -208,6 +207,7 @@ test.describe('toast status messages', () => {
     // Present and empty beforehand: a live region inserted together with its text is not announced reliably.
     await expect(region).toBeEmpty();
     expect(await region.evaluate(el => !!el.closest('[inert],[aria-hidden="true"]'))).toBe(false);
+    await page.getByRole('button', { name: 'File actions', exact: true }).click();
     await page.getByRole('button', { name: 'Delete file', exact: true }).click();
     await expect(region).toContainText('Northpoint_TermSheet_v3.pdf');
     await expect(region.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
@@ -238,7 +238,7 @@ test.describe('photo editor in landscape', () => {
     const editor = page.locator('[data-alpha-subview="photos-edit"]');
     await expect(editor).toBeVisible();
     expect(await editor.evaluate(el => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto')).toBe(true);
-    for (const name of ['Rotate', 'Center crop', 'Mono filter']) await reachable(page, page.getByRole('button', { name, exact: true }));
+    for (const name of ['Rotate', 'Crop', 'Mono filter']) await reachable(page, page.getByRole('button', { name, exact: true }));
     // Keyboard: a filter is operable without a pointer, and Save is still reachable afterwards.
     const mono = page.getByRole('button', { name: 'Mono filter', exact: true });
     await mono.focus(); await page.keyboard.press('Enter');
@@ -508,7 +508,10 @@ test.describe('screen titles with a large system font', () => {
         const header = el.closest('[data-alpha-app-header]')!, box = el.getBoundingClientRect(), frame = header.getBoundingClientRect();
         const range = document.createRange(); range.selectNodeContents(el);
         const ink = Array.from(range.getClientRects()).filter(rect => rect.width > 1);
-        const buttons = Array.from(header.querySelectorAll('button')).filter(button => button.getClientRects().length).map(button => button.getBoundingClientRect());
+        // Closed details can still return layout rectangles for their hidden menu rows.
+        const buttons = Array.from(header.querySelectorAll('button, summary'))
+          .filter(control => control.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true }))
+          .map(control => control.getBoundingClientRect());
         return {
           cut: el.scrollWidth - el.clientWidth, style: getComputedStyle(el).textOverflow, lines: new Set(ink.map(rect => Math.round(rect.top))).size,
           inside: ink.every(rect => rect.left >= frame.left - 1 && rect.right <= frame.right + 1 && rect.top >= frame.top - 1 && rect.bottom <= frame.bottom + 1 && rect.left >= box.left - 1 && rect.right <= box.right + 1),

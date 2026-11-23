@@ -70,7 +70,9 @@ test('128 live consumed proofs are not evicted, while definitively retired proof
 test('final shared grammar keeps host punctuation, literal path punctuation and apostrophes precise',async()=>{
  const host=fixture('https://example.com/');await host.run('Open example.com.');assert.deepEqual(host.calls,['browser']);
  const literal="https://example.com/o'hare?q=can't#part",apostrophe=fixture(literal);await apostrophe.run('Open "'+literal+'"');assert.deepEqual(apostrophe.calls,['browser']);
- const exact=fixture('https://example.com/dashboard.');await exact.run('Open https://example.com/dashboard.');assert.deepEqual(exact.calls,['browser']);
+ // A closing mark after a typed path may be the sentence's or the path's, so the owner reviews the open (eliza#39990).
+ const exact=fixture('https://example.com/dashboard.');await exact.run('Open https://example.com/dashboard.');assert.deepEqual(exact.calls,[]);
+ const quotedDot=fixture('https://example.com/dashboard.');await quotedDot.run('Open "https://example.com/dashboard."');assert.deepEqual(quotedDot.calls,['browser']);
  const invented=fixture('https://example.com/dashboard');await invented.run('Open https://example.com/dashboard.');assert.deepEqual(invented.calls,[]);
 });
 test('multiline or control-delimited source content never grants browser permission',async()=>{

@@ -36,7 +36,7 @@ export function imageDialHandoff<T>(number: string, dial: (number: string) => Pr
 	return guardedEffect(guard, () => dial(number));
 }
 
-/** A reviewed direct SMS send through the native review. */
+/** A direct SMS send of the text the owner approved on its card. */
 export function imageSmsSend<T>(send: () => Promise<T>, guard: ImageGuard): Promise<T | null> {
 	return guardedEffect(guard, send);
 }
@@ -67,10 +67,11 @@ const pauseFor = (ms: number, signal: AbortSignal) => new Promise<void>((resolve
 type SmsClient = Pick<AospTelephony, 'status' | 'sendSms' | 'smsSendResult' | 'cancelSmsReview'>;
 type SimContext = {view?: unknown; selectedObject?: {kind?: unknown; id?: unknown; revision?: unknown} | null};
 /**
- * The executor's `sendSms` port: the same native review and journalled send as a text to a number;
- * the review shows the resolved number and the text. It answers what was observed. Everything
- * before the native review opens is definite ("unavailable": nothing was sent); it throws only
- * when the review's own answer was lost.
+ * The executor's `sendSms` port: the same journalled native send as a text to a number. The card
+ * the owner approved is the confirmation (`client` names its journal entry, approvedCardTelephony),
+ * so no dialog follows. It answers what was observed. Every refusal before the send is definite
+ * ("unavailable": nothing was sent), including Android's refusal of a text that is not the
+ * card's; it throws only when the send's own answer was lost.
  */
 export function imageSmsPort(client: SmsClient, context: SimContext, current: () => void, pause: (ms: number, signal: AbortSignal) => Promise<void> = pauseFor): TelephonyPorts['sendSms'] {
 	return async (number, body, id, signal) => {
@@ -81,7 +82,7 @@ export function imageSmsPort(client: SmsClient, context: SimContext, current: ()
 			const selected = sim && status.subscriptions?.find(row => String(row.id) === sim.id && smsSubscriptionRevision(row) === sim.revision);
 			if (sim && !selected) return 'unavailable';
 			// Outside Messages no SIM is selected: a phone with several uses Android's default SMS
-			// SIM, which the native review names before anything is sent.
+			// SIM, as the card says.
 			checked = reviewSms({recipients: [number], body, subscriptionId: selected ? selected.id : status.defaultSmsSubscriptionId ?? undefined}, status, 'direct');
 		} catch { return 'unavailable'; }
 		if ('problem' in checked || checked.review.subscriptionId === null) return 'unavailable';
@@ -92,8 +93,8 @@ export function imageSmsPort(client: SmsClient, context: SimContext, current: ()
 			let native: Awaited<ReturnType<SmsClient['sendSms']>>;
 			try { native = await client.sendSms(review, id); }
 			catch (error) {
-				// A review that was never shown, a request the client refused and a coded native
-				// rejection all happen before the send: nothing was sent. Any other throw is a lost answer.
+				// A send that was never attempted, a request the client refused and a coded native
+				// rejection (such as "not-approved") all happen before the send: nothing was sent. Any other throw is a lost answer.
 				if (error instanceof SmsSendNotAttempted || error instanceof RangeError || typeof (error as {code?: unknown} | null)?.code === 'string') return 'unavailable';
 				throw error;
 			}

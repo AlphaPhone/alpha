@@ -23,8 +23,10 @@ export function reviewContentQuestion(input:{sourceDescription?:string;sourceLab
  const proceed=document.createElement('button');proceed.textContent='Add to chat';proceed.setAttribute('aria-label','Use in conversation');
  const cancel=document.createElement('button');cancel.textContent='Cancel';proceed.className='content-question-primary';
  for(const button of [proceed,cancel]){button.type='button';button.style.cssText='min-height:44px;font:inherit';}
- let closed=false,dismissed=false;const previous=document.activeElement;
- const close=()=>{if(closed)return;closed=true;controller.abort();if(previewUrl)URL.revokeObjectURL(previewUrl);dialog.remove();window.removeEventListener('pagehide',close);window.removeEventListener('alpha-back',back,true);document.removeEventListener('visibilitychange',visibility);input.signal?.removeEventListener('abort',close);input.closed?.(dismissed);if(previous instanceof HTMLElement&&previous.isConnected)previous.focus();};
+ let closed=false,dismissed=false;
+ // A row in an open popup unmounts with it; focus returns to the control that opened the popup.
+ const active=document.activeElement,previous=active instanceof HTMLElement&&active.closest('[data-alpha-popup]')?document.querySelector<HTMLElement>('[aria-haspopup][aria-expanded="true"]')??active:active;
+ const close=()=>{if(closed)return;closed=true;controller.abort();if(previewUrl)URL.revokeObjectURL(previewUrl);dialog.remove();window.removeEventListener('pagehide',close);window.removeEventListener('alpha-back',back,true);document.removeEventListener('visibilitychange',visibility);input.signal?.removeEventListener('abort',close);input.closed?.(dismissed);const focusTarget=[previous,active].find(element=>element instanceof HTMLElement&&element.isConnected&&!element.closest('[inert]'));if(focusTarget instanceof HTMLElement)focusTarget.focus();};
  // Explicit dismissal (Cancel, Escape, Back) is the user's decision; hiding or page exit is not.
  const dismiss=()=>{if(!closed)dismissed=true;close();};
  const back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();dismiss();};

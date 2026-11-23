@@ -153,15 +153,25 @@ test('a zoomed recording stops when its camera source ends',async({page})=>{
  expect(saved.count).toBe(1);expect(saved.kind).toBe('video');expect(saved.bytes).toBeGreaterThan(0);expect(saved.size).toBe(saved.bytes);expect(saved.streams).toBeGreaterThan(1);expect(saved.released).toBe(true);
  await expect(page.getByRole('alert',{name:'Can’t start camera',exact:true})).toBeVisible();
 });
-test('Ask mode reviews an unsaved frame and returns to Camera without adding a photo',async({page})=>{
- await page.getByRole('button',{name:'Ask mode',exact:true}).click();
- await page.getByRole('button',{name:'Ask about this',exact:true}).click();
- const review=page.getByRole('dialog',{name:'Ask about selected content',exact:true});
- await expect(review.getByRole('img',{name:'Image for question review'})).toBeVisible();
- expect(await page.evaluate(async()=>{const {browserPhotoLibrary}=await import('/src/prototype/browser-camera.ts');return (await browserPhotoLibrary.list()).items.length;})).toBe(0);
- await review.getByRole('button',{name:'Cancel',exact:true}).click();
- await expect(page.locator('html')).toHaveAttribute('data-active-view','camera');
- await expect(page.getByRole('button',{name:'Ask about this',exact:true})).toBeVisible();
+test('Camera offers only Video and Photo, puts Switch camera in the header and shows no focus box on a tapped mode',async({page})=>{
+ const root=page.locator('[data-alpha-camera-root]');
+ for(const name of ['Scan document','Ask mode','Ask about this'])await expect(root.getByRole('button',{name,exact:true})).toHaveCount(0);
+ await expect(root.locator('[data-alpha-camera="modes"]').getByRole('button')).toHaveText(['Video','Photo']);
+ // Photo is the default, so the shutter takes a photo.
+ await expect(root.getByRole('button',{name:'Take photo',exact:true})).toBeVisible();
+ const flip=root.locator('[data-alpha-app-header="main"]').getByRole('button',{name:'Switch camera',exact:true});
+ await expect(flip).toBeVisible();await expect(root.locator('[data-alpha-camera="capture"]').getByRole('button',{name:'Switch camera'})).toHaveCount(0);
+ const video=root.getByRole('button',{name:'Video mode',exact:true}),photo=root.getByRole('button',{name:'Photo mode',exact:true});
+ const look=(mode:typeof video)=>mode.evaluate(element=>{const style=getComputedStyle(element);return {outline:style.outlineStyle,underline:style.textDecorationLine,visible:element.matches(':focus-visible')};});
+ // A tap or click shows the chosen mode by colour and dot only.
+ await video.tap();await expect(root.getByRole('button',{name:'Start recording',exact:true})).toBeVisible();
+ expect(await look(video)).toEqual({outline:'none',underline:'none',visible:false});
+ await photo.click();await expect(root.getByRole('button',{name:'Take photo',exact:true})).toBeVisible();
+ expect(await look(photo)).toEqual({outline:'none',underline:'none',visible:false});
+ // Keyboard focus keeps a subtle cue (an underline), never the box outline.
+ await page.keyboard.press('Shift+Tab');
+ await expect.poll(()=>root.locator('[data-alpha-camera-mode]:focus-visible').count()).toBe(1);
+ expect(await look(root.locator('[data-alpha-camera-mode]:focus-visible'))).toEqual({outline:'none',underline:'underline',visible:true});
 });
 
 test('the last capture opens directly and Back returns to the Camera viewfinder',async({page})=>{
@@ -219,4 +229,54 @@ test('two-finger preview pinch changes the real zoom crop without firing tap foc
  await expect(page.locator('[data-alpha-camera-focus]')).toHaveCount(0);
  await expect(page.getByRole('button',{name:'Zoom 2x',exact:true})).toHaveCSS('width','40px');
  await cdp.detach();
+});
+test('the self-timer counts down before a photo and a second shutter press cancels it',async({page})=>{
+ const timer=page.getByRole('button',{name:'Timer off',exact:true});
+ await timer.click();await expect(page.getByRole('button',{name:'Timer 3 seconds',exact:true})).toHaveAttribute('aria-pressed','true');
+ const photos=()=>page.evaluate(async()=>{const {browserPhotoLibrary:p}=await import('/src/prototype/browser-camera.ts');return (await p.list()).items.length;});
+ const before=await photos();
+ await page.getByRole('button',{name:'Take photo',exact:true}).click();
+ await expect(page.getByRole('timer',{name:'Photo in 3 seconds',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Cancel timer',exact:true}).click();
+ await expect(page.locator('[data-alpha-camera="countdown"]')).toHaveCount(0);
+ await page.waitForTimeout(3500);expect(await photos()).toBe(before);
+ await page.getByRole('button',{name:'Take photo',exact:true}).click();
+ await expect(page.getByRole('timer',{name:'Photo in 1 second',exact:true})).toBeVisible({timeout:4000});
+ await expect.poll(photos,{timeout:6000}).toBe(before+1);
+ await page.getByRole('button',{name:'Timer 3 seconds',exact:true}).click();await expect(page.getByRole('button',{name:'Timer 10 seconds',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();await expect(page.locator('[data-alpha-camera="timer"]')).toHaveCount(0);
+});
+test('switching to Photo closes the microphone notice, so its buttons cannot record from Photo',async({page})=>{
+ await page.evaluate(()=>{const original=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);navigator.mediaDevices.getUserMedia=async constraints=>{if(constraints?.audio)throw new DOMException('Synthetic microphone denial','NotAllowedError');return original(constraints);};});
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();
+ await page.getByRole('button',{name:'Start recording',exact:true}).click();
+ const notice=page.getByRole('alert',{name:'Mic off',exact:true});await expect(notice).toBeVisible();
+ await page.getByRole('button',{name:'Photo mode',exact:true}).click();
+ await expect(notice).toHaveCount(0);await expect(page.getByRole('button',{name:'Take photo',exact:true})).toBeVisible();
+ await expect(page.getByRole('timer',{name:'Recording',exact:true})).toHaveCount(0);
+});
+test('the framing grid is drawn over the preview only while it is on',async({page})=>{
+ const toggle=page.getByRole('button',{name:'Framing grid',exact:true}),grid=page.locator('[data-alpha-camera="grid"]');
+ await expect(toggle).toHaveAttribute('aria-pressed','false');await expect(grid).toHaveCount(0);
+ await toggle.click();await expect(toggle).toHaveAttribute('aria-pressed','true');
+ // Two lines each way at thirds of the 3:4 frame, and taps still reach the viewfinder through it.
+ const lines=await grid.evaluate(element=>{const style=getComputedStyle(element),frame=element.parentElement!.getBoundingClientRect(),box=element.getBoundingClientRect();return {pointer:style.pointerEvents,image:style.backgroundImage,same:Math.abs(frame.width-box.width)<1&&Math.abs(frame.height-box.height)<1};});
+ expect(lines.pointer).toBe('none');expect(lines.same).toBe(true);expect(lines.image.match(/linear-gradient/g)).toHaveLength(2);
+ await page.getByRole('button',{name:'Video mode',exact:true}).click();await expect(grid).toBeVisible();
+ await toggle.click();await expect(grid).toHaveCount(0);
+});
+test('a volume key press from Android is one shutter press, and is ignored behind a dialog',async({page})=>{
+ const photos=()=>page.evaluate(async()=>{const {browserPhotoLibrary:p}=await import('/src/prototype/browser-camera.ts');return (await p.list()).items.length;});
+ const before=await photos();
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:volume-shutter')));
+ await expect.poll(photos).toBe(before+1);
+ await expect(page.getByRole('button',{name:'Open last photo',exact:true})).toBeVisible();
+ await page.evaluate(()=>{const dialog=document.createElement('dialog');dialog.dataset.volumeTest='';document.body.append(dialog);dialog.showModal();window.dispatchEvent(new Event('alpha:volume-shutter'));dialog.close();dialog.remove();});
+ await page.waitForTimeout(500);expect(await photos()).toBe(before+1);
+ // With the self-timer on, the key press starts the countdown just as the shutter does.
+ await page.getByRole('button',{name:'Timer off',exact:true}).click();
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:volume-shutter')));
+ await expect(page.getByRole('timer',{name:'Photo in 3 seconds',exact:true})).toBeVisible();
+ await page.evaluate(()=>window.dispatchEvent(new Event('alpha:volume-shutter')));
+ await expect(page.locator('[data-alpha-camera="countdown"]')).toHaveCount(0);
 });

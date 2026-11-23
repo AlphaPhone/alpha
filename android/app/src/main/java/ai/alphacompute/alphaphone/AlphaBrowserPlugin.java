@@ -1,6 +1,9 @@
 package ai.alphacompute.alphaphone;
 
 import ai.alphacompute.alphaphone.browser.AlphaBrowserCopy;
+import ai.alphacompute.alphaphone.browser.LinkHandoff;
+import ai.alphacompute.alphaphone.browser.AlphaPageContext;
+import ai.eliza.plugins.browsersurface.BrowserPageReading;
 import ai.alphacompute.alphaphone.browser.AlphaBrowserDownloads;
 import ai.alphacompute.alphaphone.browser.AlphaReviewedReading;
 import ai.alphacompute.alphaphone.browser.AlphaSignInFields;
@@ -844,13 +847,32 @@ public class AlphaBrowserPlugin extends Plugin {
   Tab opener=t.opener==null?null:tabs.get(t.opener);
   boolean fresh=opener!=null&&!t.handedOff&&!t.committed&&t.lastCommittedUrl.isEmpty();
   Tab report=fresh?opener:t;
-  if(fresh){t.handedOff=true;if(!Objects.equals(presentedId,t.id)&&!Objects.equals(presentedId,opener.id)){closePopup(t);return;}}
-  else{
-   if(!Objects.equals(presentedId,t.id))return;
-   if(!gesture){notice(t,"Blocked a link to another app that opened without a tap.");return;}
+  if(fresh)t.handedOff=true;
+  boolean shownSelf=Objects.equals(presentedId,t.id),shownOpener=fresh&&Objects.equals(presentedId,opener.id);
+  // Resolve the app link only for a tab that may hand off at all.
+  Intent intent=(fresh?(shownSelf||shownOpener):(shownSelf&&gesture))?BrowserExternalHandoff.intentFor(raw,getContext().getPackageName(),config().hostSchemes):null;
+  boolean supported=intent!=null&&(BrowserExternalLinkPolicy.systemLink(raw)||!ownsRoute(intent));
+  // A private tab leaves private browsing only after the owner says so, as the menu's
+  // "Open in another browser" does. The tap and pop-up rules hold first (LinkHandoff).
+  switch(LinkHandoff.decide(fresh,shownSelf,shownOpener,gesture,supported,t.priv||report.priv)){
+   case IGNORE:return;
+   case CLOSE_POPUP:closePopup(t);return;
+   case BLOCKED:notice(t,"Blocked a link to another app that opened without a tap.");return;
+   case UNSUPPORTED:notice(report,"This link type is not supported.");if(fresh)closePopup(t);return;
+   case ASK:{
+    long revision=report.navigation,shown=presentationRevision;
+    AlertDialog dialog=new AlertDialog.Builder(getActivity()).setTitle(AlphaBrowserCopy.LEAVE_PRIVATE_TITLE).setMessage(AlphaBrowserCopy.LEAVE_PRIVATE_LINK)
+     .setPositiveButton(AlphaBrowserCopy.OPEN_APP,(d,w)->{siteDialogCancel=null;
+      if(!LinkHandoff.answerStillValid(!paused&&!destroyed,!report.dead&&tabs.get(report.id)==report,revision,report.navigation,shown,presentationRevision,fresh,tabs.get(t.id)==t)){if(fresh)closePopup(t);return;}
+      launchHandoff(t,report,fresh,raw,intent);})
+     .setNegativeButton(AlphaBrowserCopy.CANCEL,null).create();
+    showSiteDialog(report,dialog,()->{if(fresh)closePopup(t);});
+    return;
+   }
+   default:launchHandoff(t,report,fresh,raw,intent);
   }
-  Intent intent=BrowserExternalHandoff.intentFor(raw,getContext().getPackageName(),config().hostSchemes);
-  if(intent==null||(!BrowserExternalLinkPolicy.systemLink(raw)&&ownsRoute(intent))){notice(report,"This link type is not supported.");if(fresh)closePopup(t);return;}
+ }
+ private void launchHandoff(Tab t,Tab report,boolean fresh,String raw,Intent intent) {
   for(Tab tab:tabs.values())disableAutofill(tab);
   try{getActivity().startActivity(intent);if(fresh)closePopup(t);}
   catch(android.content.ActivityNotFoundException missing){
@@ -1016,6 +1038,37 @@ public class AlphaBrowserPlugin extends Plugin {
   if(!current.getAsBoolean()){call.reject("Load a visible HTTPS page before reading");return;}
   if(question)reading.reviewQuestion(call,tab.id,tab.web,tab.readingWorld,current);else reading.review(call,tab.id,tab.web,tab.readingWorld,current);
  }); }
+ /**
+  * The open page for one chat turn, without a review: the owner turns this off under Settings,
+  * Privacy, Browser page for Alpha, and the renderer asks only while that is on. Only the tab
+  * Browser presents, with the committed HTTPS page the renderer observed; never a private tab.
+  * A sensitive address, a page without an isolated world, a slow read or a malformed result
+  * resolves as withheld, with the address (no query for a sensitive one) and title only.
+  */
+ @PluginMethod public void pageContext(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;
+  Tab tab=tabs.get(call.getString("id"));String owner=session,url=call.getString("url"),navigation=call.getString("navigation");
+  java.util.function.BooleanSupplier current=()->!destroyed&&!paused&&Objects.equals(owner,session)&&Objects.equals(session,call.getString("session"))&&tab!=null&&tabs.get(tab.id)==tab&&!tab.dead&&Objects.equals(presentedId,tab.id)&&tab.committed&&!tab.loading&&tab.error.isEmpty()&&Objects.equals(url,tab.url)&&Objects.equals(url,tab.web.getUrl())&&Objects.equals(navigation,String.valueOf(tab.navigation));
+  if(!current.getAsBoolean()){call.reject("Browser page changed","page-changed");return;}
+  if(tab.priv){call.reject("Private tabs are never shared","private-tab");return;}
+  String address=AlphaPageContext.address(url),title=AlphaPageContext.title(tab.web.getTitle());
+  if(address==null){call.reject("Only public HTTPS pages are shared","not-public");return;}
+  java.util.function.Consumer<String> withheld=reason->{JSObject out=new JSObject();out.put("url",AlphaPageContext.SENSITIVE_PAGE.equals(reason)?AlphaPageContext.origin(url):address);out.put("title",title);out.put("withheld",reason);call.resolve(out);};
+  if(BrowserPageReading.sensitiveUrl(url)){withheld.accept(AlphaPageContext.SENSITIVE_PAGE);return;}
+  BrowserReadingWorld world=tab.readingWorld;
+  if(world==null||!world.available()||!world.ready()){withheld.accept(AlphaPageContext.UNREADABLE);return;}
+  final boolean[] answered={false};
+  Runnable unreadable=()->{if(answered[0])return;answered[0]=true;withheld.accept(AlphaPageContext.UNREADABLE);};
+  new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(unreadable,1000);
+  world.evaluate(AlphaPageContext.SCRIPT,encoded->{
+   if(answered[0])return;
+   if(!current.getAsBoolean()){answered[0]=true;call.reject("Browser page changed","page-changed");return;}
+   org.json.JSONObject result;
+   try{result=AlphaPageContext.accept(new org.json.JSONTokener(encoded).nextValue());}catch(Exception error){result=null;}
+   if(result==null){unreadable.run();return;}
+   if(result.has("withheld")){answered[0]=true;withheld.accept(result.optString("withheld"));return;}
+   try{answered[0]=true;JSObject out=JSObject.fromJSONObject(result);out.put("url",address);out.put("title",title);call.resolve(out);}catch(Exception error){answered[0]=false;unreadable.run();}
+  },unreadable);
+ }); }
  @PluginMethod public void cancelReading(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;if(Objects.equals(session,call.getString("session")))reading.cancel();call.resolve();}); }
  /** Releases the approved excerpt once to the host's bound speech request. */
  public String consumeReading(PluginCall call)throws Exception{return reading.consume(call);}
@@ -1051,7 +1104,7 @@ public class AlphaBrowserPlugin extends Plugin {
   for(Tab tab:tabs.values())disableAutofill(tab);
   try{getActivity().startActivity(chooser);call.resolve();}catch(RuntimeException unavailable){call.reject("The other browser could not be opened. Your page remains in "+config().hostName+".");}
  }); }
- @PluginMethod public void downloads(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;String requested=call.getString("session");if(requested==null||(session!=null&&!Objects.equals(session,requested))){call.reject("Expired browser session");return;}session=requested;for(Tab tab:tabs.values())disableAutofill(tab);downloads.show();call.resolve();}); }
+ @PluginMethod public void downloads(PluginCall call) { getActivity().runOnUiThread(()->{if(closed(call))return;String requested=call.getString("session");if(requested==null||(session!=null&&!Objects.equals(session,requested))){call.reject("Expired browser session");return;}session=requested;for(Tab tab:tabs.values())disableAutofill(tab);String shown=requested;downloads.show(()->{if(destroyed||!Objects.equals(session,shown))return;JSObject event=new JSObject();event.put("session",shown);notifyListeners("showDownloads",event);});call.resolve();}); }
  /** Whether website password fill can work in this browser (no secrets, no tab state). */
  @PluginMethod public void loginFillStatus(PluginCall call) { JSObject result=new JSObject(); boolean available=BrowserLoginFields.supported(); result.put("available",available); if(!available)result.put("reason",BrowserFieldOrigin.UNSUPPORTED); call.resolve(result); }
  @PluginMethod public void close(PluginCall call) { getActivity().runOnUiThread(() -> {if(closed(call))return; if (!Objects.equals(session,call.getString("session"))) { call.reject("Expired browser session"); return; } Tab t=tabs.remove(call.getString("id")); if(t!=null) dispose(t); call.resolve(); }); }

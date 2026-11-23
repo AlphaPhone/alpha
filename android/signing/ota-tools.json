@@ -8,7 +8,8 @@
     "100ba673676ef20ac9bb4726bbf00f40dc7db223",
     "573bc2c25ec09e6bf40ca5b18a1ebb1e3afb4dc4",
     "ab862fcfab60c82b26ef3d7846bc864d727feae1",
-    "15841427daa5062650a7e662cd1d17bc0e5a0bd6"
+    "15841427daa5062650a7e662cd1d17bc0e5a0bd6",
+    "535e9f68ff57d3397da319a12b9a6fcdca7e6f70"
   ],
   "apkSignerMappingsSha256": "e5534e2830ad94343ee11cbc08857cf2435522fe1f3d0e560ec4f5610f80223e",
   "avbKeyConfigurationSha256": "f8ed78f8705d63a011a82a2655f7875a1d86033ee601a190f53aa9f6dacfdd5d",
@@ -61,6 +62,15 @@
       "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_canonical_20261117_19:userdebug/test-keys",
       "buildTimestamp": 1794960690,
       "otaPostTimestamp": 1794960690,
+      "apkSignerMappingsSha256": "f086d852f8a017ff7e910c2e4564509022c3f686129f3eacab21610fdf38566c"
+    },
+    {
+      "targetFilesSha256": "fc2320f3ec7eab7acb75f7e34afb4e400803f84d3d0cbbd8227e37b4236e014c",
+      "sourceCommit": "535e9f68ff57d3397da319a12b9a6fcdca7e6f70",
+      "sdkCommit": "1803ea88c9460f2e3cb779abe31cd77cfc6f64c5",
+      "targetFingerprint": "Alpha/alpha_stallion_phone/stallion:17/CP2A.260605.016/alpha_canonical_20261118_home:userdebug/test-keys",
+      "buildTimestamp": 1794974485,
+      "otaPostTimestamp": 1794974485,
       "apkSignerMappingsSha256": "f086d852f8a017ff7e910c2e4564509022c3f686129f3eacab21610fdf38566c"
     }
   ]

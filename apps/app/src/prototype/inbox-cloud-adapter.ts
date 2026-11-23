@@ -2,6 +2,7 @@ import React from 'react';
 import {aospImage} from '../runtime/aosp-image';
 import {createAddressBookClient,isIncompleteAddressBookContact,type AddressBookNativePlugin} from '../../../../.eliza/client-features/packages/contracts/src/native-address-book.ts';
 import {literalMailAddress} from '../ui/mailbox/drafts-controller';
+import {agentEmailSend} from '../ui/mailbox/agent-email-draft';
 import {MailFolderPicker} from '../ui/mailbox/MailFolderPicker.tsx';
 import {withGmailAccountLabel} from '../ui/mailbox/grants';
 import {serviceReadCache} from '../runtime/service-read-cache-store';
@@ -38,6 +39,7 @@ import { formatBytes } from '../browser/storage-usage';
 import { BrowserReviews } from '../browser/review';
 import type { EmailTarget } from '../ui/mailbox/use-in-email';
 import type { MailSelectionAction } from '../ui/mailbox/review-controller';
+import { errorNotice, ERROR_TOAST } from '../runtime/error-notice';
 
 type Bag = Record<string, any>;
 const MAIL_MENU_TOKENS=['--bg','--fg','--s2','--mut','--line','--acct'],MAIL_MENU_SELECTED={width:112,background:'var(--fg)',color:'var(--bg)'};
@@ -462,7 +464,36 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     await drafts.flushForAppUpdate(exact);
   };
   provider.setEditor((proposal,reference,review)=>drafts.editProvider(proposal,reference,review));
-  provider.setComposer(()=>api?.isActive() && drafts.render().composing ? drafts.email() : null);
+  let chatSend:{draftId:string;proposal:Bag;current:()=>boolean}|undefined;
+  provider.setComposer(()=>chatSend ? (chatSend.current()?chatSend:null) : api?.isActive() && drafts.render().composing ? drafts.email() : null);
+  view.readyAgentEmailAccount=async()=>{
+    const identity=homeOwnerKey();
+    if(!identity||document.hidden)return;
+    if(!api?.isActive()) await warmHomeMailbox();
+    if(identity!==homeOwnerKey()||document.hidden||accountsFromDisk||!accountsChecked)return;
+    const grant=selected||homePreview?.accountId;
+    const chosen=accounts.find(row=>row.connectionId===grant&&gmailReadable(row)&&gmailActionGrant(row,'send')==='granted');
+    if(!chosen?.connectionId)return;
+    if(!selected)selected=chosen.connectionId;
+    await provider.bind(selected);
+  };
+  view.agentEmailAccount=()=>{
+    const binding=connectionController.getCloudClient(),caps=provider.capabilities();
+    if(!binding||accountsFromDisk||!selected||!caps?.send||!literalMailAddress(caps.from||'')||
+       !gmailInboxAllows(caps,'send')||!accounts.some(a=>a.connectionId===selected&&gmailActionGrant(a,'send')==='granted'))return null;
+    return {from:caps.from,grant:selected,token:JSON.stringify([homeOwnerKey(),binding.sessionId,binding.credentialId,selected,caps.from])};
+  };
+  view.sendAgentEmail=async(id:string,mail:{to:string[];subject:string;body:string},accountToken:string,reviewCurrent:()=>boolean)=>{
+    const current=()=>reviewCurrent()&&view.agentEmailAccount()?.token===accountToken&&!document.hidden;
+    const account=view.agentEmailAccount();
+    if (chatSend || !account || !current()) return {state: 'unsent'};
+    // The request ID names this exact email, so an edit after an undispatched Send is prepared anew.
+    const {draftId,proposal,requestId}=agentEmailSend(id,account,mail);
+    chatSend={draftId,proposal,current};
+    try{
+      return await provider.prepare({kind:'send',...proposal},{draftId,requestId},'send-from-composer');
+    }finally{chatSend=undefined;}
+  };
   const readable = () => accounts.filter(gmailReadable);
   const currentQuery = () => String(api?.get('inbox')?.q || '').trim() || MAILBOX_FOLDER_QUERY[folder];
   /** Read-cache identity of the selected account now; null while nothing it read may be shown. */
@@ -559,11 +590,20 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   } });
   provider.setObservers({
     // A provider-confirmed send removes the local copies of exactly the draft it was sent from.
-    sent: (source, proposal, grant) => void drafts.settleSent(source.draftId, proposal, grant, (source as { savedRevision?: string }).savedRevision), sentNote: source => drafts.sentNote(source.draftId),
+    sent: (source, proposal, grant) => {
+      if (!source.draftId.startsWith('agent-email:'))
+        void drafts.settleSent(source.draftId, proposal, grant, (source as { savedRevision?: string }).savedRevision);
+    },
+    sentNote: source => drafts.sentNote(source.draftId),
     // A stale review was discarded without dispatch; reload the open message so the user sees its current state.
     stale: () => { if (!body) { void load(); return; } const key = bodyKey(body.message.id); messageBodies.delete(key); pendingBodies.get(key)?.controller.abort(); pendingBodies.delete(key); void open(body.message); },
     receipt: receipt => {
       const id = typeof receipt.providerResult?.messageId === 'string' ? receipt.providerResult.messageId : '';
+      if(id&&receipt.kind==='send'){
+        invalidateList();homePreview=null;inboxPreview=null;
+        if(api?.isActive()&&(currentQuery()==='in:sent'||currentQuery()==='in:inbox'))void load();
+        return;
+      }
       if (!id || !['archive', 'trash'].includes(receipt.kind) || !messages.some(m => m.id === id)) return;
       folderLists.clear();readAhead.invalidate();messageBodies.delete(bodyKey(id));
       messages = messages.filter(m => m.id !== id);
@@ -912,7 +952,7 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
         if(!current||!api?.isActive())throw new Error('Reopen this email before sending.');
         return validateMailContext(review,mailContext(),current);
       });
-    }catch(error){api?.toast((error as Error).message);}
+    }catch(error){api?.toast(errorNotice(error,'Couldn’t share this email with Alpha. Try again.'),ERROR_TOAST);}
   }
   const nativeAttachmentDestination=Capacitor.isNativePlatform();
   const attachmentSaveLabel=nativeAttachmentDestination?'Save as…':'Save to Files';
@@ -1053,9 +1093,8 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
   // The agent cannot read an open message: help with it goes through the explicit "Review email with agent".
   view.suggestions = (st: Bag) => drafts.render().composing ? ['Help me write this email'] : st.open != null ? [] : ['Help me write an email'];
   const openReply = () => { const st = api?.get('inbox'), current = body; return current && st?.open != null && current.message.id === st.open ? current : undefined; };
-  /** The exact destination a suggestion would use now: the selected account, and the open draft, the
-   * open message (a reply) or a new email. The assistant review shows it and passes its token back. */
-  view.emailTarget = (): EmailTarget => {
+  /** Why Inbox cannot take any destination right now, or null when the selected account can. */
+  const destinationBlocked = (): EmailTarget | null => {
     const binding = connectionController.getCloudClient();
     // A readable account, Home summary or saved choice means Gmail is connected; Inbox selects it when opened.
     const known = !!binding && (!!homePreview || readable().length > 0 || !accountsChecked && !!readGmailAccountChoice(connectionController.getSnapshot().cloudAccount));
@@ -1064,6 +1103,13 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     // A mail operation, attachment or sharing review already on screen is finished or closed first.
     if (attachmentView || provider.render().providerReview) return { ready: false, reason: 'Review open', token: '', accountId: selected, account: accountLabel() || undefined };
     if (selection) return { ready: false, reason: 'Finish selecting mail first', token: '', accountId: selected, account: accountLabel() || undefined };
+    return null;
+  };
+  /** The exact destination a suggestion would use now: the selected account, and the open draft, the
+   * open message (a reply) or a new email. The assistant review shows it and passes its token back. */
+  view.emailTarget = (): EmailTarget => {
+    const blocked = destinationBlocked(), binding = connectionController.getCloudClient();
+    if (blocked || !binding) return blocked as EmailTarget;
     const current = openReply(), target = drafts.suggestionTarget(current?.message);
     return { ...target, accountId: selected, account: accountLabel() || 'Selected Gmail account',
       token: JSON.stringify([binding.sessionId, selected, accountLabel(), target.token, current ? [current.message.id, current.historyId ?? null] : null]) };
@@ -1080,17 +1126,20 @@ export function installInboxCloudAdapter(Component: any, views: Record<string, B
     if (!now.ready || now.token !== expected.token) return false;
     return drafts.useSuggestion(text, reply, { token: drafts.suggestionTarget(reply).token, append: expected.append === true && now.append });
   };
-  /** Files uses an account-bound destination without implicitly replying to a hidden message. */
+  /** Files and Photos always start a new local email under the selected account, as an Android share
+   * starts a new compose: never the open or an unfinished draft, and never a reply to a hidden message. */
   view.fileEmailTarget = (): EmailTarget => {
-    const binding=connectionController.getCloudClient(),available=view.emailTarget() as EmailTarget;
-    if(!binding||!available.ready)return available;
-    const target=drafts.suggestionTarget();
+    const blocked=destinationBlocked(),binding=connectionController.getCloudClient();
+    if(blocked||!binding)return blocked as EmailTarget;
+    const target=drafts.newDraftTarget();
     return {...target,accountId:selected,account:accountLabel()||'Selected Gmail account',token:JSON.stringify([binding.sessionId,selected,target.token])};
   };
-  view.attachReviewedFile = (file: import('../runtime/inbox-attachment').MailAttachment,token:string):boolean => {
-    const target=view.fileEmailTarget() as EmailTarget;
-    if(!target.ready||target.token!==token)return false;
-    return drafts.attachReviewed(file,drafts.suggestionTarget().token);
+  /** Resolves to null once a new composer holds the file, or to the reason nothing was added. */
+  view.attachReviewedFile = (file: import('../runtime/inbox-attachment').MailAttachment,token:string,current:()=>boolean):Promise<string|null> => {
+    // Why the reviewed destination is gone: a blocked Inbox or drafts give their own reason; only a new token is another account.
+    const moved=():string|null=>{const now=view.fileEmailTarget() as EmailTarget;return !now.ready?now.reason:now.token!==token?'The email account changed. Nothing was added.':null;};
+    const refused=moved();if(refused)return Promise.resolve(refused);
+    return drafts.attachReviewed(file,drafts.newDraftTarget().token,current,moved);
   };
   view.voicePhrase = 'Help me write an email';
   /** Content shared from Notes, Photos or Files becomes a new local draft for review; nothing is sent. */

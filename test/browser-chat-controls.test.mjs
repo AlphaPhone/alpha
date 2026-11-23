@@ -9,8 +9,8 @@ import {selectDeviceCapabilities} from '../apps/app/src/runtime/phone-context.ts
 
 const signal=()=>new AbortController().signal;
 const refused=pattern=>error=>error.name==='BrowserOpenRefused'&&pattern.test(error.message);
-async function browser(run,{native=true}={}){
- const host=await browserAdapterHost({native,instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext']});
+async function browser(run,{native=true,results={}}={}){
+ const host=await browserAdapterHost({native,results,instant:['bookmarks','browsingState','saveBrowsingState','present','close','cancelReading','addListener','readingSupport','create','navigate','command','find','clearFind','findNext']});
  const sent=name=>host.calls.filter(call=>call.name===name).map(call=>call.input);
  const type=async address=>{host.rendered().onAddrKey({key:'Enter',preventDefault(){},target:{value:address}});await host.sync();return host.state().cur;};
  let sequence=0;
@@ -19,7 +19,7 @@ async function browser(run,{native=true}={}){
  const open=async(address,title,{priv=false,fresh=true,...more}={})=>{if(fresh){priv?host.rendered().openPrivate():host.rendered().newTab();await host.sync();}const id=await type(address);await page(id,address,title,more);return id;};
  const asked=[];
  // `pick` answers the in-card question: an index, or null for "Not now".
- const control=async(operation,{pick=null,observed}={})=>{const present=await host.component.browserControl(operation,{signal:signal(),observed,choose:async choice=>{asked.push(choice);return pick;}});await host.sync();return async()=>{present();await host.sync();};};
+ const control=async(operation,{pick=null,observed,proposalId}={})=>{const present=await host.component.browserControl(operation,{signal:signal(),observed,proposalId,choose:async choice=>{asked.push(choice);return pick;}});await host.sync();return async()=>{present();await host.sync();};};
  try{host.shellState.view='home';await host.sync();await run({host,sent,type,page,open,control,asked});}finally{await host.teardown();}
 }
 
@@ -70,10 +70,64 @@ test('switching finds one tab by a word of its title or its site and shows it af
   await present();assert.equal(host.state().cur,news);assert.equal(host.viewOpens.at(-1)[0],'browser');
   await (await control({type:'browser_tab_switch',target:'docs.example.org'}))();assert.equal(host.state().cur,docs);
   assert.deepEqual(asked,[]);
+  host.shellState.view='browser';await host.sync();
   await assert.rejects(control({type:'browser_tab_switch',target:'field guide'}),refused(/already showing/));
   await assert.rejects(control({type:'browser_tab_switch',target:'recipes'}),refused(/No open tab matches “recipes”/));
   assert.equal(host.state().cur,docs);
  });
+});
+// Review finding: from Home, the owner asked for the tab Browser last showed and was told it was
+// "already showing" while Home stayed on screen. Browser's selected tab is not showing from Home.
+test('from Home, switching to the tab Browser last showed opens Browser on that tab',async()=>{
+ await browser(async({host,open,control,asked})=>{
+  await open('https://owner.example/','Owner page',{fresh:false});
+  const news=await open('https://www.nytimes.com/','The New York Times');
+  host.shellState.view='home';await host.sync();
+  const opens=host.viewOpens.length;
+  await (await control({type:'browser_tab_switch',target:'nytimes'}))();
+  assert.equal(host.state().cur,news);assert.equal(host.viewOpens.length,opens+1);assert.equal(host.viewOpens.at(-1)[0],'browser');
+  assert.deepEqual(asked,[]);
+ });
+});
+// Review finding: after a restart the restored tabs load only when shown, and requests from Home
+// were refused as if no page were open.
+test('after a restart, the restored selected tab can be switched to and reloaded from Home; the rest say why they wait',async()=>{
+ const saved={browsingState:()=>({history:[],tabs:[{id:'t1',url:'https://en.wikipedia.org/wiki/Cat',title:'Cat - Wikipedia'},{id:'t2',url:'https://example.com/',title:'Example Domain'}],cur:'t1'})};
+ await browser(async({host,sent,control})=>{
+  await new Promise(resolve=>setTimeout(resolve,50));await host.sync();
+  assert.equal(host.state().cur,'t1');assert.equal(sent('create').length,0,'restored tabs are not loaded while Browser is hidden');
+  const opens=host.viewOpens.length;
+  await (await control({type:'browser_tab_switch',target:'wikipedia'}))();
+  assert.equal(host.state().cur,'t1');assert.equal(host.viewOpens.length,opens+1);assert.equal(host.viewOpens.at(-1)[0],'browser');
+  await (await control({type:'browser_history',action:'reload'}))();
+  assert.equal(host.viewOpens.length,opens+2,'reloading a restored tab shows Browser, which loads its saved address');
+  assert.deepEqual(sent('command'),[]);
+  await assert.rejects(control({type:'browser_history',action:'back'}),refused(/has not loaded since Alpha restarted/));
+  await assert.rejects(control({type:'browser_find',text:'cat'}),refused(/has not loaded since Alpha restarted/));
+  await (await control({type:'browser_tab_switch',target:'example'}))();assert.equal(host.state().cur,'t2');
+ },{results:saved});
+});
+// Review finding: the Browser-context "go back" refused a loading or failed page as "Current native
+// browser tab changed". Back follows the tab's own history; other refusals say what is in the way.
+test('the Browser-context history command goes back from a loading or failed page and names what blocks it',async()=>{
+ await browser(async({host,open,page,sent})=>{
+  host.shellState.view='browser';await host.sync();
+  const tab=await open('https://example.com/a','A',{fresh:false,canBack:true});
+  const run=subaction=>host.component.browserCommand({subaction},undefined,signal(),()=>{});
+  await page(tab,'https://example.com/slow','',{canBack:true,loading:true,committed:false});
+  assert.equal((await run('back')).ok,true);
+  await page(tab,'https://example.com/slow','',{canBack:true,loading:false,committed:false,error:'This site can’t be reached'});
+  assert.equal((await run('back')).ok,true);assert.equal((await run('reload')).ok,true);
+  assert.deepEqual(sent('command').map(input=>input.command),['back','back','reload']);
+  await page(tab,'https://example.com/slow','',{canBack:false,loading:false,committed:false,error:'This site can’t be reached'});
+  assert.deepEqual(await run('back'),{ok:false,code:'UNAVAILABLE',message:'There is no previous page in this tab.'});
+  host.component.vset('browser',{menu:true});await host.sync();
+  assert.equal((await run('reload')).message,'Close the Browser menu first.');
+  host.component.vset('browser',{menu:false});await host.sync();
+  host.shellState.view='home';await host.sync();
+  assert.equal((await run('reload')).message,'Browser is not showing.');
+  assert.equal(sent('command').length,3);
+ },{results:{command:input=>({session:input.session,id:input.id})}});
 });
 test('several matching tabs are listed for the owner to pick; picking none does nothing',async()=>{
  await browser(async({host,open,control,asked})=>{
@@ -98,6 +152,54 @@ test('closing a named tab closes that tab; closing without a name closes the sho
   assert.deepEqual(host.state().tabs.map(tab=>tab.id),[docs],'the showing tab stays until the action is presented');
   await present();assert.deepEqual(sent('close').map(input=>input.id),[news,docs]);
   assert.equal(host.state().tabs.length,1);assert.notEqual(host.state().cur,docs,'Browser is left with a New tab');
+ });
+});
+// v620 (Pixel, 8 tabs open): "close all the browser tabs" became one "Close tab" card for the tab
+// showing. Closing every tab lists the tabs on its own card, bound to that proposal, and closes
+// exactly those tabs or nothing.
+test('closing every tab closes exactly the tabs its card listed, and nothing once Browser changed',async()=>{
+ await browser(async({host,sent,open,page,control})=>{
+  const news=await open('https://news.example/','Morning news',{fresh:false}),docs=await open('https://docs.example.org/','Field guide');
+  const listed=id=>host.component.browserTabsClosing(id),all={type:'browser_tab_close',all:true};
+  assert.deepEqual(listed('first'),[{title:'Morning news',host:'news.example'},{title:'Field guide',host:'docs.example.org'}]);
+  // A card that was never listed, or an approval without its proposal, closes nothing.
+  await assert.rejects(control(all),refused(/changed after you reviewed/));
+  await assert.rejects(control(all,{proposalId:'never-listed'}),refused(/changed after you reviewed/));
+  // A tab opened after the card was listed withdraws that card: it is not redrawn over the new set.
+  const shop=await open('https://shop.example/','Hats');
+  assert.equal(listed('first'),null);
+  await assert.rejects(control(all,{proposalId:'first'}),refused(/changed after you reviewed/));
+  assert.deepEqual(host.state().tabs.map(tab=>tab.id),[news,docs,shop]);assert.deepEqual(sent('close'),[]);
+  // A listed tab that moved to another page is not the tab the owner reviewed either.
+  assert.equal(listed('moved').length,3);await page(news,'https://bank.example/','Bank account');
+  await assert.rejects(control(all,{proposalId:'moved'}),refused(/changed after you reviewed/));
+  assert.equal(host.state().tabs.length,3);
+  // From Home every listed tab closes now, and Browser is left with a new tab.
+  assert.deepEqual(listed('second').map(line=>line.title),['Bank account','Field guide','Hats']);
+  await (await control(all,{proposalId:'second'}))();
+  assert.deepEqual(sent('close').map(input=>input.id).sort(),[news,docs,shop].sort());
+  assert.equal(host.state().tabs.length,1);assert.ok(![news,docs,shop].includes(host.state().cur));
+  // One approval closes once: the same proposal cannot close the tabs open now.
+  await assert.rejects(control(all,{proposalId:'second'}),refused(/changed after you reviewed/));
+ });
+});
+test('closing every tab from Browser closes the showing tab when presented, and never a private tab from outside it',async()=>{
+ await browser(async({host,sent,open,control})=>{
+  const news=await open('https://news.example/','Morning news',{fresh:false}),docs=await open('https://docs.example.org/','Field guide');
+  host.shellState.view='browser';await host.sync();
+  host.component.browserTabsClosing('from-browser');
+  const present=await control({type:'browser_tab_close',all:true},{proposalId:'from-browser'});
+  assert.deepEqual(sent('close').map(input=>input.id),[news],'the showing tab stays until the action is presented');
+  await present();assert.deepEqual(sent('close').map(input=>input.id),[news,docs]);assert.equal(host.state().tabs.length,1);
+  // A private tab is counted on the card only for a request made from it; from Home it is not closed.
+  const bank=await open('https://bank.example/','Bank account',{fresh:false}),secret=await open('https://bank.example/private','Bank statement',{priv:true});
+  host.shellState.view='home';await host.sync();
+  assert.deepEqual(host.component.browserTabsClosing('home'),[{title:'Bank account',host:'bank.example'}]);
+  await (await control({type:'browser_tab_close',all:true},{proposalId:'home'}))();
+  assert.ok(!host.state().tabs.some(tab=>tab.id===bank));assert.ok(host.state().tabs.some(tab=>tab.id===secret));
+  assert.ok(!host.state().tabs.find(tab=>tab.id===host.state().cur).priv,'Browser shows a new tab, not the private one');
+  host.rendered().tabCards.find(card=>card.id===secret).pick();host.shellState.view='browser';await host.sync();
+  assert.deepEqual(host.component.browserTabsClosing('private').map(line=>line.private??false).sort(),[false,true],'from the private tab itself it is listed, as private');
  });
 });
 test('a private tab is never matched, listed or closed for a request made outside a private tab',async()=>{
@@ -191,6 +293,7 @@ test('a bound switch whose words match several tabs is left for its card, where 
 });
 test('closing a tab is never run without its card',async()=>{
  const f=bound({type:'browser_tab_close',target:'news'});assert.deepEqual(await f.run('close the news tab'),[]);assert.deepEqual(f.actions.calls,[]);
+ const all=bound({type:'browser_tab_close',all:true});assert.deepEqual(await all.run('close all the tabs'),[]);assert.deepEqual(all.actions.calls,[]);
 });
 test('a bound search runs without a card only when the whole message asked for those words',async()=>{
  for(const text of ['I wonder about weather in Paris','Do not search for weather in Paris','search the web for weather in Paris and open example.com',undefined]){
@@ -198,6 +301,54 @@ test('a bound search runs without a card only when the whole message asked for t
  }
  const f=bound({type:'browser_search',query:'weather in Paris'});await f.run('Search for Weather in Paris please');assert.deepEqual(f.actions.calls,['control']);
  assert.deepEqual(await f.run('Search for Weather in Paris please'),[],'one message runs one search');
+});
+// Review finding: quotes the model kept around the owner's words made the server treat the search
+// as direct while this coordinator left it on a card. Both now use the shared matcher.
+test('a quoted search the owner asked for runs directly, as the server reports',async()=>{
+ const text='search for "best pizza"';
+ for(const query of ['"best pizza"','best pizza','“best pizza”']){
+  const f=bound({type:'browser_search',query});assert.equal((await f.run(text)).length,1,query);assert.deepEqual(f.actions.calls,['control'],query);
+ }
+ const other=bound({type:'browser_search',query:'"cheap pizza"'});assert.deepEqual(await other.run(text),[]);assert.deepEqual(other.actions.calls,[]);
+});
+// Review finding: two direct Browser controls for one message each succeeded, but only the first
+// was presented; the second was checked against the page the first replaced and skipped silently.
+test('one message runs at most one direct Browser action; a second one keeps its review card',async()=>{
+ const pairs=[
+  [{type:'browser_tab_switch',target:'news'},{type:'browser_history',action:'reload'},'switch to the news tab and reload it'],
+  [{type:'browser_tab_switch',target:'news'},{type:'browser_find',text:'harbour'},'switch to the news tab and find harbour'],
+  [{type:'browser_tab_new'},{type:'browser_history',action:'back'},'open a new tab and go back'],
+ ];
+ for(const [first,second,text] of pairs){
+  const actions=policyFixture([['first','request',undefined,first.type],['second','request',undefined,second.type]]);
+  Object.assign(actions.proposals.get('first').proposal.operation,first);Object.assign(actions.proposals.get('second').proposal.operation,second);
+  const ran=await actions.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text,current:()=>{}});
+  assert.equal(ran.length,1,text);assert.deepEqual(actions.calls,['first'],text);assert.ok(actions.proposals.has('second'),'the second keeps its card');
+ }
+ // A switch left for the owner to pick a tab holds back what the message asked of that tab.
+ const held=policyFixture([['switch','request',undefined,'browser_tab_switch'],['reload','request',undefined,'browser_history']]);
+ Object.assign(held.proposals.get('switch').proposal.operation,{type:'browser_tab_switch',target:'shop'});Object.assign(held.proposals.get('reload').proposal.operation,{type:'browser_history',action:'reload'});
+ held.options.browserTabNeedsChoice=target=>target==='shop';
+ assert.deepEqual(await held.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'switch to the shop tab and reload it',current:()=>{}}),[]);
+ assert.deepEqual(held.calls,[]);assert.ok(held.proposals.has('switch')&&held.proposals.has('reload'),'both keep their cards');
+ // Any earlier Browser action of the message left on its card holds back the later ones: they
+ // were asked of the page that one leaves, not of the page showing now.
+ for(const [first,second,text] of [
+  [{type:'browser_tab_close',target:'news'},{type:'browser_find',text:'harbour'},'close the news tab and find harbour'],
+  [{type:'browser_navigate',url:'https://nytimes.com/section/world'},{type:'browser_find',text:'harbour'},'open nytimes.com/section/world. and find harbour'],
+ ]){
+  const waits=policyFixture([['first','request',undefined,first.type],['second','request',undefined,second.type]]);
+  Object.assign(waits.proposals.get('first').proposal.operation,first);Object.assign(waits.proposals.get('second').proposal.operation,second);
+  assert.deepEqual(await waits.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text,current:()=>{}}),[],text);
+  assert.deepEqual(waits.calls,[],text);assert.ok(waits.proposals.has('first')&&waits.proposals.has('second'),'both keep their cards');
+ }
+ // A Browser action of another message does not hold this message's one back.
+ const other=policyFixture([['earlier','an-earlier-message',undefined,'browser_tab_close'],['find','request',undefined,'browser_find']]);
+ Object.assign(other.proposals.get('earlier').proposal.operation,{type:'browser_tab_close',target:'news'});Object.assign(other.proposals.get('find').proposal.operation,{type:'browser_find',text:'harbour'});
+ assert.equal((await other.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'find harbour',current:()=>{}})).length,1);assert.deepEqual(other.calls,['find']);
+ // Other direct actions of the same message are not held back by a Browser action.
+ const mixed=policyFixture([['tab','request',undefined,'browser_tab_new'],['note','request',undefined,'create_note']]);
+ assert.equal((await mixed.performRequested('request',{},signal(),async()=>true,undefined,{messageId:'request',text:'open a new tab',current:()=>{}})).length,2);
 });
 
 test('Browser controls are advertised only where this phone carries them out',()=>{
@@ -210,4 +361,7 @@ test('Browser controls are advertised only where this phone carries them out',()
  // A typed address in a new tab, when the agent offers it, on every build that runs Browser tabs.
  assert.deepEqual(selectDeviceCapabilities([...offered,'browser.open-new-tab.v1'],{...profile,android:false,native:false}).slice(2),['browser.search.v1','browser.tabs.v1','browser.history.v1','browser.open-new-tab.v1']);
  assert.ok(!selectDeviceCapabilities(offered,profile).includes('browser.open-new-tab.v1'),'only when the agent offers it');
+ // Closing every tab from one listed card, with Browser tabs only.
+ assert.deepEqual(selectDeviceCapabilities([...offered,'browser.tabs.close-all.v1'],profile).slice(2),['browser.search.v1','browser.tabs.v1','browser.history.v1','browser.find.v1','browser.tabs.close-all.v1']);
+ assert.ok(!selectDeviceCapabilities(['browser.search.v1','browser.tabs.close-all.v1'],profile).includes('browser.tabs.close-all.v1'),'never without Browser tabs');
 });

@@ -34,7 +34,8 @@ module ApprovalRoutes {
       executions: if (s.server == "pending") s.executions + 1 else s.executions } }
   action receiptArrives = all { s.tap == "executing", s.server == "done",
     s' = { ...s, tap: "none", card: "done", completedShown: true } }
-  // A failed decision transport reports an unconfirmed outcome. Its earlier wire request is
+  // A dispatched effect whose answer is lost reports an unconfirmed outcome (a failure before
+  // dispatch closes as not started instead). Its earlier wire request is
   // accounted for, and the exact session keeps the result for subsequent recovered taps.
   action unconfirmedReceiptArrives = all { s.tap == "executing",
     s' = { ...s, tap: "none", card: "unconfirmed", unconfirmedAt: s.requests,

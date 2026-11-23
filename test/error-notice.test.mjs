@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync, readdirSync} from 'node:fs';
 import vm from 'node:vm';
 import {stripTypeScriptTypes} from './support/strip-types.mjs';
 
@@ -41,4 +41,34 @@ test('implementation vocabulary, code and long or multi-line text fall back', ()
 test('the toast option marks a failure', () => {
   assert.equal(ERROR_TOAST.kind, 'error');
   assert.ok(Object.isFrozen(ERROR_TOAST));
+});
+
+/** Each toast(...) argument list in `text`, with nested brackets kept whole. */
+function toastArguments(text) {
+  const found = [];
+  for (const match of text.matchAll(/\btoast\(/g)) {
+    let depth = 1, at = match.index + match[0].length;
+    const start = at;
+    for (; at < text.length && depth; at++) { if (text[at] === '(') depth++; else if (text[at] === ')') depth--; }
+    found.push({at: match.index, argument: text.slice(start, at - 1)});
+  }
+  return found;
+}
+
+test('no toast shows a caught error\'s raw message', () => {
+  const root = new URL('../apps/app/src/', import.meta.url);
+  // The simulated browser services are development surfaces, never in a production build.
+  const files = readdirSync(root, {recursive: true}).filter(name => /\.(ts|tsx|js)$/.test(name) && !/(^|\/)browser\/simulated-/.test(name));
+  const raw = /\(\s*\w+\s+as\s+Error\s*\)\.message|\b(error|err|e|failure|reason|caught)\.message\b/;
+  const offenders = [];
+  for (const name of files) {
+    const text = readFileSync(new URL(name, root), 'utf8');
+    for (const {at, argument} of toastArguments(text)) {
+      // errorNotice decides what may be shown. A message picked out by its own error code, or by an
+      // app error class that carries owner copy (not Error itself), is the app's own sentence.
+      if (!raw.test(argument) || argument.includes('errorNotice(') || /\.code\s*===/.test(argument) || /\binstanceof\s+(?!(?:\w*Error|DOMException)\b)\w+/.test(argument)) continue;
+      offenders.push(`${name}:${text.slice(0, at).split('\n').length}`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'wrap these in errorNotice(error, fallback) with ERROR_TOAST');
 });

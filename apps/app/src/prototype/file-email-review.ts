@@ -1,54 +1,60 @@
-import { holdPhoneInert } from '../runtime/modal-inert';
 import { reviewMailAttachment, type MailAttachment } from '../runtime/inbox-attachment';
 import { rethrowAttachmentRefusal } from '../ui/mailbox/drafts-controller';
-import { describeEmailTarget, type EmailTarget } from '../ui/mailbox/use-in-email';
-import type { SelectedFile } from '../native/alpha-mail-attachments';
+import type { EmailTarget } from '../ui/mailbox/use-in-email';
 
-/** Reads only after an explicit Files action. Selection/context alone never attaches bytes. */
+/**
+ * The explicit Email action in Files or Photos stages the attachment in a new local draft, as an
+ * Android share starts a new compose; an existing draft never takes it, and nothing is sent.
+ */
 export function reviewFileEmail(options: {
- sourceNote?: string;
- read: () => Promise<SelectedFile>; current: () => boolean; target: () => EmailTarget;
- insert: (file: MailAttachment, token: string) => boolean; inserted: () => void;
+  read: () => Promise<MailAttachment & { size: number; sha256: string }>;
+  current: () => boolean;
+  target: () => EmailTarget;
+  /** Starts the new draft with the file while `current` holds; resolves to null, or to the reason nothing was added. */
+  insert: (file: MailAttachment, token: string, current: () => boolean) => Promise<string | null>;
+  inserted: () => void;
+  notify: (message: string) => void;
 }): () => void {
- const previous=document.activeElement as HTMLElement|null,dialog=document.createElement('dialog');
- dialog.className='note-source-dialog';dialog.setAttribute('aria-label','Attach to email');
- const theme=document.querySelector('.os');if(theme){const style=getComputedStyle(theme);for(const token of ['bg','fg'])dialog.style.setProperty('--source-'+token,style.getPropertyValue('--'+token));}
- const content=document.createElement('div');content.className='note-source-content';
- const title=document.createElement('h2');title.textContent='Attach to email';
- const destination=document.createElement('p'),details=document.createElement('p'),policy=document.createElement('p'),status=document.createElement('p');status.setAttribute('role','status');
- policy.textContent='Adds to draft'+(options.sourceNote?' '+options.sourceNote:'');
- const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.disabled=true;label.style.cssText='display:flex;align-items:center;gap:8px;min-height:44px';label.append(check,document.createTextNode('Attach this file'));
- const footer=document.createElement('footer'),cancel=document.createElement('button'),confirm=document.createElement('button');cancel.textContent='Cancel';confirm.textContent='Attach';confirm.disabled=true;
- content.append(title,destination,details,label,policy,status);footer.append(cancel,confirm);dialog.append(content,footer);
- let ended=false,busy=false,file:SelectedFile|undefined,target:EmailTarget|undefined;
- const release=holdPhoneInert(document.querySelector<HTMLElement>('.os'));
- const close=()=>{if(ended)return;ended=true;file=undefined;target=undefined;document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',close);window.removeEventListener('launcher-home',close);window.removeEventListener('blur',close);window.removeEventListener('alpha-back',back,true);dialog.remove();release();if(previous?.isConnected)previous.focus();};
- const visibility=()=>{if(document.hidden)close();},back=(event:Event)=>{event.preventDefault();event.stopImmediatePropagation();close();};
- const current=()=>!ended&&!document.hidden&&options.current();
- cancel.onclick=close;dialog.oncancel=event=>{event.preventDefault();close();};dialog.onclose=close;
- document.addEventListener('visibilitychange',visibility);window.addEventListener('pagehide',close);window.addEventListener('launcher-home',close);window.addEventListener('blur',close);window.addEventListener('alpha-back',back,true);
- document.body.append(dialog);dialog.showModal();cancel.focus();{const spin=document.createElement('span'),label=document.createElement('span');spin.className='alpha-spinner';spin.setAttribute('aria-hidden','true');spin.style.cssText='width:18px;height:18px;border-width:2px';label.textContent='Checking';label.style.cssText='position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)';status.replaceChildren(spin,label);}
- const checked=async()=>{
-  const value=await options.read().catch(rethrowAttachmentRefusal);
-  const review=await reviewMailAttachment(value).catch(rethrowAttachmentRefusal);
-  if(!current())throw Error('The selection changed. Nothing was added.');
-  if(review.sha256!==value.sha256||review.size!==value.size)throw Error('The selected file changed. Select it again.');
-  return value;
- };
- void (async()=>{try{
-  file=await checked();target=options.target();const description=describeEmailTarget(target);
-  destination.textContent=[description.account,description.destination].filter(Boolean).join(' · ');
-  details.textContent=`${file.name} · ${file.mimeType} · ${file.size.toLocaleString()} bytes`;
-  status.textContent=target.ready?'':target.reason;check.disabled=!target.ready;
- }catch(error){if(!ended)status.textContent=error instanceof Error?error.message:'Unavailable';}})();
- check.onchange=()=>{confirm.disabled=!check.checked||busy||!target?.ready;status.textContent=check.checked?'1 selected':'Removed';};
- confirm.onclick=()=>{if(busy||!check.checked||!file||!target?.ready)return;busy=true;confirm.disabled=true;check.disabled=true;
-  void (async()=>{try{
-   const fresh=await checked();
-   if(fresh.sha256!==file!.sha256||fresh.size!==file!.size||fresh.name!==file!.name||fresh.mimeType!==file!.mimeType)throw Error('The file changed since review. Cancel and select it again. Nothing was added.');
-   if(!current()||!options.insert(file!,target!.token))throw Error('Not added. Something changed, or this file is already attached.');
-   close();options.inserted();
-  }catch(error){if(!ended)status.textContent=error instanceof Error?error.message:'Unavailable';}})();
- };
- return close;
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  const { signal } = controller;
+  for (const event of ['pagehide', 'launcher-home', 'alpha-back', 'blur']) {
+    window.addEventListener(event, cancel, { signal });
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); }, { signal });
+  const current = () => !signal.aborted && !document.hidden && options.current();
+  const read = () => options.read().catch(rethrowAttachmentRefusal);
+
+  void (async () => {
+    try {
+      if (!current()) return;
+      const target = options.target();
+      if (!target.ready) throw Error(target.reason);
+      const file = await read();
+      if (!current()) return;
+      // A destination that is blocked now gives its own reason; only another token is another account.
+      const now = options.target();
+      if (!now.ready) throw Error(now.reason);
+      if (now.token !== target.token) throw Error('The email account changed. Nothing was added.');
+      const review = await reviewMailAttachment(file).catch(rethrowAttachmentRefusal);
+      if (!current()) return;
+      if (review.sha256 !== file.sha256 || review.size !== file.size) {
+        throw Error('The selected file changed. Select it again.');
+      }
+      const fresh = await read();
+      if (!current()) return;
+      if (fresh.name !== file.name || fresh.mimeType !== file.mimeType || fresh.dataBase64 !== file.dataBase64) {
+        throw Error('The selected file changed. Select it again.');
+      }
+      // The draft side words its own refusal (the size policy, storage, a changed account): it is the one notice.
+      const refusal = await options.insert(file, target.token, current);
+      if (refusal !== null) throw Error(refusal);
+      options.inserted();
+    } catch (error) {
+      if (current()) options.notify(error instanceof Error ? error.message : 'Couldn’t attach the file.');
+    } finally {
+      cancel();
+    }
+  })();
+  return cancel;
 }

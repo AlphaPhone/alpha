@@ -18,7 +18,7 @@ export function installPrototypeDataAdapter(Component: any, views: Record<string
   };
   const empty: Record<string, Bag> = {
     photos: { list: [], trash: [], albums: [], open: null, album: null, edit: null, sheet: null, filter: null, seq: null, sel: null },
-    files: { files: [], folder: null, open: null, asked: {}, asking: null, sel: null, sheet: null },
+    files: { files: [], folder: null, open: null, asked: {}, asking: null, sel: null },
     phone: { recents: [], vms: [], vmOpen: null, playing: null, call: null, callWho: null, incoming: null, ring: null },
     messages: { threads: {}, unread: {}, extra: [], botI: {}, thread: null, compose: null, typing: null },
     inbox: { mails: [], sent: [], acct: 'all', open: null, compose: null },

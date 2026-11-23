@@ -23,7 +23,7 @@ const moduleFiles = ['runtime/voice-selection.ts',
  '../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts',
  'prototype/local-speech-playback.ts','runtime/voice-states.ts','runtime/local-agent-stream.ts',
  'prototype/note-recorder.ts','runtime/note-recorder-driver.ts','runtime/note-default-title.ts',
- 'prototype/voice-adapter.ts'];
+ 'runtime/voice-call-pause.ts','runtime/maps-notification-open.ts','prototype/voice-adapter.ts'];
 const modules = new Map(await Promise.all(moduleFiles.map(async file => {
  const entry=path.resolve('apps/app/src',file);
  const built=await build({entryPoints:[entry],bundle:true,write:false,format:'iife',globalName:'__alphaVoiceModule',platform:'browser',target:'es2022',logLevel:'silent',plugins:[{
@@ -43,14 +43,14 @@ export function cloudVoiceViewFixture(options={}){
  // The speech route is chosen at run time from the signed-in account (voice-selection.ts speechRoute).
  // `cloudProfile:true` keeps the fixture's Cloud account; other scenarios start signed out, on this phone.
  if(options.cloudProfile!==true&&!('account' in options))f.account=null;
- const subscriptions=new Set(),events=new Map();
+ const subscriptions=new Set(),events=new Map(),documentListeners=new Map();
  const driver={
   // Capacitor exposes the method and rejects the call when native speaker gain is unavailable.
   async setSpeechOutputMuted(){throw Error('Fixture has no native speaker gain.');},
   warmSpeechOutput:async()=>{f.speechWarmups=(f.speechWarmups||0)+1;},getRecordingMetrics:async input=>{if(f.metricsError)throw f.metricsError;if(input.recordingId!==f.activeRecording)throw Error('Recording changed');return {recordingId:input.recordingId,peak:f.peak};},startRecording:async()=>{const id='synthetic-clip-'+(++f.starts);const result=f.holdStart?await new Promise(resolve=>f.releaseStart=resolve):{recordingId:id,maxDurationMs:59000};if(f.startError)throw f.startError;f.activeRecording=result.recordingId;f.lastRecording=result.recordingId;return result;},stopRecording:async()=>{f.stops++;f.activeRecording=null;return {recordingId:f.lastRecording,durationMs:1000};},transcribeRecording:async input=>{f.uploads++;f.transcribeInput=input;if(f.error)throw f.error;if(f.holdTranscript)return new Promise(resolve=>f.releaseTranscript=resolve);return {text:f.transcript||'Synthetic Cloud transcript',local:false};},cancelRecording:async()=>{f.recordingCancels.push(f.activeRecording);if(f.holdCaptureCancel)await new Promise(resolve=>f.releaseCaptureCancel=resolve);if(f.captureCancelError)throw f.captureCancelError;f.activeRecording=null;},cancel:async()=>{},stop:async()=>{f.savedAudioStops=(f.savedAudioStops||0)+1;if(f.holdSavedStop)await new Promise(resolve=>f.releaseSavedStop=resolve);if(f.savedStopError)throw f.savedStopError;f.activeSavedAudio=null;},state:async()=>({playing:!!f.activeSavedAudio,audioId:f.activeSavedAudio,positionMs:0}),stopPlayback:async input=>{f.stopPlaybackInputs??=[];f.stopPlaybackInputs.push(input);if(f.holdPlaybackCleanup)await new Promise(resolve=>f.releasePlaybackCleanup=resolve);if(f.playbackCleanupError)throw f.playbackCleanupError;f.activePlayback=null;},synthesize:async input=>{(f.speechInputs??=[]).push(input);f.cloudSpeech++;if(f.error)throw f.error;return {playbackId:'synthetic-'+input.requestId};},play:async input=>{if(input.audioId){f.savedAudioStarts=(f.savedAudioStarts||0)+1;if(f.holdSavedStart)await new Promise(resolve=>f.releaseSavedStart=resolve);f.activeSavedAudio=input.audioId;return;}f.activePlayback=input.playbackId;f.finishPlayback=()=>{f.activePlayback=null;for(const callback of events.get('playbackEnded')||[])callback(input);};if(!f.holdPlayback)queueMicrotask(f.finishPlayback);},addListener:async(name,callback)=>{const callbacks=events.get(name)||new Set();events.set(name,callbacks);callbacks.add(callback);return {remove:async()=>{callbacks.delete(callback);}};},saveRecording:async input=>{f.audioSaves++;return {audioId:input.recordingId,noteId:input.noteId,durationMs:1000,transcript:input.transcript};}};
  const controller={warmInference:()=>{f.prewarms=(f.prewarms||0)+1;},getCloudEnvironment:()=>f.account?(f.environment||'production'):null,getCloudClient:()=>f.account?{sessionId:f.account,credentialId:f.credential}:null,getSnapshot:()=>({kind:f.kind,open:f.open,session:f.agent?{sessionId:f.agent,ownerId:'synthetic-owner',agentId:'synthetic-agent',origin:'https://owned-agent.invalid'}:null}),getBrowserSpeechAgent:()=>null,open:()=>{f.agentOpens=(f.agentOpens||0)+1;f.open=true;},openCloudAccount:()=>{f.accountOpens++;f.open=true;},subscribe:callback=>{subscriptions.add(callback);return()=>subscriptions.delete(callback);}};
  const local={ready:async()=>true,playbackReady:async()=>true,speak:async()=>{f.localSpeech++;}};
- const box={openMicrophoneAvailable:()=>f.openMic===true,createLocalReplySpeaker:()=>f.replySpeaker,developmentCloudRealtimeVoiceEnabled:false,developmentCloudVoiceEnabled:false,developmentCartesiaVoiceEnabled:false,testMocksEnabled:false,browserDevProfile:false,Capacitor:{getPlatform:()=>f.platform,isNativePlatform:()=>f.native,isPluginAvailable:()=>true},connectionController:controller,registerPlugin:()=>driver,createOnDeviceVoice:()=>{f.localFactories++;return local;},planLocalSpeech:()=>[],recordingLevels:()=>[],localStorage:{getItem:()=>JSON.stringify({kind:f.kind})},document:{hidden:false,documentElement:{dataset:{}},querySelector:selector=>selector==='dialog[open]'?f.reviewOpen||null:f.noteEditor||null,addEventListener(){},removeEventListener(){}},window:{addEventListener(){},removeEventListener(){},dispatchEvent(){},getSelection:()=>({isCollapsed:true})},queueMicrotask,setInterval:options.clock?.setInterval||setInterval,clearInterval:options.clock?.clearInterval||clearInterval,setTimeout:options.clock?.setTimeout||setTimeout,clearTimeout:options.clock?.clearTimeout||clearTimeout,Date:options.clock?.Date||Date,performance:options.clock?.performance,crypto,structuredClone,AbortController,AbortSignal,DOMException,Event,EventTarget,CustomEvent,URL,TextEncoder,console};
+ const box={openMicrophoneAvailable:()=>f.openMic===true,createLocalReplySpeaker:()=>f.replySpeaker,developmentCloudRealtimeVoiceEnabled:false,developmentCloudVoiceEnabled:false,developmentCartesiaVoiceEnabled:false,testMocksEnabled:false,browserDevProfile:false,Capacitor:{getPlatform:()=>f.platform,isNativePlatform:()=>f.native,isPluginAvailable:()=>true},connectionController:controller,registerPlugin:()=>driver,createOnDeviceVoice:()=>{f.localFactories++;return local;},planLocalSpeech:()=>[],recordingLevels:()=>[],localStorage:{getItem:()=>JSON.stringify({kind:f.kind})},document:{hidden:false,documentElement:{dataset:{}},querySelector:selector=>selector==='dialog[open]'?f.reviewOpen||null:f.noteEditor||null,addEventListener(name,listener){let held=documentListeners.get(name);if(!held)documentListeners.set(name,held=new Set());held.add(listener);},removeEventListener(name,listener){documentListeners.get(name)?.delete(listener);}},window:{addEventListener(){},removeEventListener(){},dispatchEvent(){},getSelection:()=>({isCollapsed:true})},queueMicrotask,setInterval:options.clock?.setInterval||setInterval,clearInterval:options.clock?.clearInterval||clearInterval,setTimeout:options.clock?.setTimeout||setTimeout,clearTimeout:options.clock?.clearTimeout||clearTimeout,Date:options.clock?.Date||Date,performance:options.clock?.performance,crypto,structuredClone,AbortController,AbortSignal,DOMException,Event,EventTarget,CustomEvent,URL,TextEncoder,console};
  loadPreparedBatchVoice(box);
  load('runtime/voice-selection.ts',box,['selectVoiceRoute','speechRoute','noteNetworkSpeechFailure','clearNetworkSpeechHold']);
  // voice-timing.ts configures the shared recorder projected from the pin; it is evaluated in the
@@ -77,6 +77,9 @@ export function cloudVoiceViewFixture(options={}){
  // Exercise Notes only when the scenario supplies an owned in-memory recording port.
  load('prototype/note-recorder.ts',box);
  box.createNoteRecorderDriver=()=>({status:async()=>({state:'idle'}),listen:async()=>({remove(){}}),start:async()=>{throw Error('No Notes recording in this fixture');}});
+ // No recording-notification tap is ever held natively in this fixture; the real hold-and-take rule is loaded.
+ box.noteRecordingNotificationOpen={consume:async()=>({open:false}),clear:async()=>{}};
+ load('runtime/maps-notification-open.ts',box);
  box.noteSegmentTranscriber=async()=>null;box.setNotesRecorderControl=()=>{};box.openNativeLiveStream=async()=>{throw Error('No live stream in this fixture');};
  if(options.noteRecording){
   Object.assign(driver,options.noteRecording(driver));
@@ -84,6 +87,11 @@ export function cloudVoiceViewFixture(options={}){
   box.setNotesRecorderControl=control=>{f.notesRecorderControl=control;};
  }
  load('runtime/note-default-title.ts',box,['nextDefaultNoteTitle']);
+ // Telecom's call reading is a port (runtime/call-state.ts on the Alpha image): `inCall` is the live
+ // reading and `callSeenAt` when a reading last showed a call. The call rules themselves are real.
+ box.currentCallState=()=>({inCall:f.inCall??null,emergency:null,emergencyLive:false,watching:f.inCall!==undefined});
+ box.callSeenSince=time=>f.callSeenAt!==undefined&&f.callSeenAt>=time;
+ load('runtime/voice-call-pause.ts',box);
  load('prototype/voice-adapter.ts',box);
  const icons={check:'check',mic:'official-mic-path',stop:'stop',play:'play',x:'close',cloud:'cloud',user:'account'};
  class Shell{
@@ -102,5 +110,7 @@ export function cloudVoiceViewFixture(options={}){
  if(options.noteRecording)Object.assign(api,{voiceNoteStorage:()=>null,storageReady:()=>true,saveVoiceNote:patch=>shell.vset('notes',patch)});
  const render=()=>views.notes.render(shell.notes,api);
  render();
- return Object.assign(f,{box,shell,driver,events,flushUpdates:()=>{const updates=f.updates||[];f.updates=[];for(const update of updates)update();},render,renderChat:()=>shell.renderVals().chatRecorder,changed:()=>{for(const callback of subscriptions)callback();},close:()=>{views.notes.onLeave();shell.componentWillUnmount();},tick:()=>new Promise(resolve=>setTimeout(resolve,0))});
+ return Object.assign(f,{box,shell,driver,events,flushUpdates:()=>{const updates=f.updates||[];f.updates=[];for(const update of updates)update();},render,renderChat:()=>shell.renderVals().chatRecorder,changed:()=>{for(const callback of subscriptions)callback();},
+  // The page hides (another activity covers Alpha) or shows again, as the WebView reports it.
+  setHidden:hidden=>{box.document.hidden=hidden;for(const listener of [...(documentListeners.get('visibilitychange')||[])])listener();},close:()=>{views.notes.onLeave();shell.componentWillUnmount();},tick:()=>new Promise(resolve=>setTimeout(resolve,0))});
 }

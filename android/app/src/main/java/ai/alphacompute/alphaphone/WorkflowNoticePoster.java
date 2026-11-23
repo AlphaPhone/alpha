@@ -24,7 +24,7 @@ import android.service.notification.StatusBarNotification;
  *
  * Copied from the shared ai.eliza.plugins.notifications.HostNoticePoster (elizaOS, MIT) so that Alpha
  * owns these notices; the posting, redaction, timeouts, quiet group and stale-tap revocation are
- * unchanged. Channel IDs, the tag prefix, actions, route prefix and request code 0 are installed
+ * unchanged, and Alpha adds one silent summary for the quiet group. Channel IDs, the tag prefix, actions, route prefix and request code 0 are installed
  * identities. {@link #CONFIG} hands the same identities to the shared NotificationsHostPlugin, which
  * routes taps and recognizes these channels; it never posts with them (AlphaNotificationsPlugin
  * builds its delivery with this poster).
@@ -35,6 +35,9 @@ final class WorkflowNoticePoster implements WorkflowNoticeDelivery.Poster {
  private static final String APPROVAL_CHANNEL_NAME="Workflow approvals",APPROVAL_CHANNEL_DESCRIPTION="A workflow step needs your approval";
  private static final String TAG_PREFIX="alpha-workflow-",QUIET_GROUP="alpha_quiet_approvals";
  private static final String STEP_PUBLIC_TITLE="Alpha Phone workflow",APPROVAL_PUBLIC_TITLE="Alpha Phone",LOCKED_TEXT="Unlock to review this notification.",ASK_LABEL="Ask Alpha";
+ /** The quiet group's one summary. Its tag is outside TAG_PREFIX and its ID is not 0, so no lookup of a notice by its ID sees it. */
+ private static final int QUIET_SUMMARY_ID=1;
+ private static final String QUIET_SUMMARY_TITLE="Workflow steps waiting for approval",QUIET_SUMMARY_TEXT="Open Alpha Phone to review them. Nothing runs until you approve it on this phone.";
  private static final int SMALL_ICON=R.drawable.notification_icon;
  /** Installed identities for the shared NotificationsHostPlugin's tap routing and channel recognition. */
  static final HostNoticePoster.Config CONFIG=new HostNoticePoster.Config(
@@ -101,14 +104,38 @@ final class WorkflowNoticePoster implements WorkflowNoticeDelivery.Poster {
  @Override public void postApproval(String id,String title,String body,long timeoutMs)throws Exception{
   if(!NoticeDelivery.approvalId(id)||!approvalsAllowed())throw new SecurityException("Approval notifications are disabled");
   manager().notify(tag(id),0,approval(title,body,timeoutMs,tap(id,false)).addAction(question(tap(id,true))).build());awaitListed(id);
+  // An approval posted again with sound has left the quiet group.
+  settleQuietSummary(tag(id));
  }
  @Override public void postApprovalQuiet(String id,String title,String body,long timeoutMs)throws Exception{
   if(!NoticeDelivery.approvalId(id)||!approvalsAllowed())throw new SecurityException("Approval notifications are disabled");
   // Group children with SUMMARY-only alert behavior cannot sound/vibrate, even on the high channel.
   manager().notify(tag(id),0,approval(title,body,timeoutMs,tap(id,false)).addAction(question(tap(id,true))).setGroup(QUIET_GROUP).setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY).build());awaitListed(id);
+  quietSummary(timeoutMs);
+ }
+ private StatusBarNotification activeQuietSummary(){for(StatusBarNotification row:manager().getActiveNotifications())if(row.getId()==QUIET_SUMMARY_ID&&QUIET_GROUP.equals(row.getTag()))return row;return null;}
+ /** Visible for builder tests. Android bundles the quiet approvals under this one summary. It is redacted
+  * like them and silent (CHILDREN alert behavior silences a summary, and the children alert only through
+  * the summary), so a quiet repost still makes no sound. It lasts as long as the longest-lived quiet approval. */
+ Notification.Builder quietSummaryNotice(long timeoutMs){
+  return new Notification.Builder(context,APPROVAL_CHANNEL).setSmallIcon(SMALL_ICON).setContentTitle(QUIET_SUMMARY_TITLE).setContentText(QUIET_SUMMARY_TEXT).setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(redacted(APPROVAL_CHANNEL,APPROVAL_PUBLIC_TITLE)).setGroup(QUIET_GROUP).setGroupSummary(true).setGroupAlertBehavior(Notification.GROUP_ALERT_CHILDREN).setOnlyAlertOnce(true).setAutoCancel(false).setTimeoutAfter(timeoutMs).setCategory(Notification.CATEGORY_REMINDER);
+ }
+ private void quietSummary(long timeoutMs){
+  long keep=timeoutMs;StatusBarNotification current=activeQuietSummary();
+  if(current!=null&&current.getNotification().getTimeoutAfter()>0)keep=Math.max(keep,current.getPostTime()+current.getNotification().getTimeoutAfter()-System.currentTimeMillis());
+  manager().notify(QUIET_GROUP,QUIET_SUMMARY_ID,quietSummaryNotice(keep).build());
+ }
+ /** The summary goes with the last quiet approval: Android does not remove an app's group summary when its children go. */
+ private void settleQuietSummary(String gone){
+  if(activeQuietSummary()==null)return;
+  for(StatusBarNotification row:manager().getActiveNotifications()){
+   Notification notice=row.getNotification();
+   if(row.getId()==0&&row.getTag()!=null&&row.getTag().startsWith(TAG_PREFIX)&&!row.getTag().equals(gone)&&QUIET_GROUP.equals(notice.getGroup())&&(notice.flags&Notification.FLAG_GROUP_SUMMARY)==0)return;
+  }
+  manager().cancel(QUIET_GROUP,QUIET_SUMMARY_ID);
  }
  @Override public void cancel(String id){
-  manager().cancel(tag(id),0);
+  manager().cancel(tag(id),0);settleQuietSummary(tag(id));
   try{String token=routes.token(id);if(token!=null&&context.getPackageManager().getLaunchIntentForPackage(context.getPackageName())!=null)for(String action:new String[]{WorkflowNoticeTaps.ACTION,WorkflowNoticeTaps.ASK_ACTION}){
    // Intent.filterEquals distinguishes actions, so the notice's Ask PendingIntent is revoked separately.
    PendingIntent pending=PendingIntent.getActivity(context,0,launch(action,token),PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_NO_CREATE);if(pending!=null)pending.cancel();

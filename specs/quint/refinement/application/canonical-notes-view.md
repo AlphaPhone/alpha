@@ -3,8 +3,8 @@
 `CanonicalNotesView` follows the current `CanonicalNotesUi` collection projection
 and navigation waiter list. The adapter executes that class with its actual
 editor, controller and wire codecs. Accepted transport replies, edits, create,
-leave, remove, retirement and held saves drive thirty source schedules and 291
-checkpoints. Ten observation paths cover all twenty-one declared state leaves.
+leave, remove, retirement and held saves drive thirty-four source schedules.
+Ten observation paths cover all twenty-one declared state leaves.
 
 The view's `baseRows`, `rowsValue`, `openValue`, `blankCreationValue`, `trashValue`
 and `idleWaiters` have direct projections. The existing `CanonicalNotesFeedback`
@@ -36,6 +36,15 @@ base row kind. Unknown rich metadata, date formatting, link-domain derivation
 and voice-array normalization need further payload checks. The bounded model
 uses two canonical IDs, five draft IDs, up to three queued waiters and explicit
 text/format classes.
+
+Each checkpoint also compares `PublicShown`, the order the Notes list shows,
+with the actual `sortNotes` from `runtime/notes-view.ts` over the public list.
+The model states that order independently: every row is shown once, pinned rows
+come first, dated rows are newest first, and a row with no time is never shown
+below a row of its group stored after it. Four schedules vary pins and update
+times, including a new draft and an edited note. An open note's format data
+cannot change its saved times, so editing never reorders the list. The Notes
+filter and folder narrowing applied before sorting are separate.
 
 The callback model observes admission and draining of `settle()` waiters. It does
 not prove the eight-attempt loop, every competing navigation outcome, DOM row

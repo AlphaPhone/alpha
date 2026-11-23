@@ -111,9 +111,12 @@ module ScheduledTaskControls {
         else {...stored, pending: Idle},
     },
   }
+  // The journal holds one slot per owner and task, so the owner's entry for this task is unique
+  // (OneRetainedSlotPerOwner). Release acknowledges that one slot and no other intent.
+  val retainedIntent = s.intents.filter(entry => entry.owner == s.owner).fold(Idle, (_, entry) => entry)
   action release(allowed: bool): bool = all {
     s.visible, not(busy), locked,
-    s' = if (allowed) {...s, intents: s.intents.filter(entry => entry.owner != s.owner), message: ""} else s,
+    s' = if (allowed) {...s, intents: s.intents.exclude(Set(retainedIntent)), message: ""} else s,
   }
   action switchOwner = all {
     s.visible, s.owner == "a",
@@ -136,7 +139,9 @@ module ScheduledTaskControls {
   val UnconfirmedStaysLocked = s.message == "unknown" implies ownerHasIntent(s)
   val TerminalHasReopenOnly = s.detail and Terminal.contains(s.shownStatus) implies menu == List() or menu == List("reopen")
   val FailedSourceDisablesControls = s.source != "available" and menu.length() > 0 implies menuDisabled
+  val OneRetainedSlotPerOwner = Set("a", "b").forall(owner => s.intents.filter(entry => entry.owner == owner).size() <= 1)
   val safety = SentWithExactIntent and PendingRemainsJournaled and UnconfirmedStaysLocked and TerminalHasReopenOnly and FailedSourceDisablesControls
+    and OneRetainedSlotPerOwner
 
   run editReviewBindsExactRequestTest = initFor("preset", "scheduled").then(open).then(pick("edit"))
     .then(enter("  New instructions.  ", "09:30")).then(save).expect(s.sends == List())
@@ -157,4 +162,8 @@ module ScheduledTaskControls {
     .expect(s.detail and s.sends == List() and menuDisabled and safety)
   run retiredReplyDoesNotReleaseTest = initFor("preset", "scheduled").then(open).then(pick("fire")).then(confirm)
     .then(switchOwner).then(answer("exact")).expect(s.intents.size() == 1 and s.message == "" and safety)
+  run releaseKeepsOtherRetainedIntentTest = initFor("preset", "scheduled").then(open).then(pick("fire")).then(confirm)
+    .then(answer("wrong-id")).then(switchOwner).then(open).then(pick("fire")).then(confirm).then(answer("wrong-id"))
+    .expect(locked and s.intents.size() == 2 and safety)
+    .then(release(true)).expect(not(locked) and s.intents == Set({owner: "a", request: {...Empty, verb: "fire"}}) and safety)
 }

@@ -24,7 +24,7 @@ async function compile(extraSources) {
       builder.onLoad({filter: /\/files-browser-adapter\.ts$/}, args => {
         const text = readFileSync(args.path, 'utf8'), marker = '  const repaint = () =>';
         assert.equal(text.split(marker).length, 2, 'One Files closure observation seam');
-        return {loader: 'ts', contents: text.replace(marker, `  __ports.inspect=()=>({bound:!!api,active,place,generation,stateGeneration,access,volumes,entries,loaded,busy,loading,error});\n${marker}`)};
+        return {loader: 'ts', contents: text.replace(marker, `  __ports.inspect=()=>({bound:!!api,active,place,generation,stateGeneration,access,volumes,entries,loaded,busy,loading,mutations,error});\n${marker}`)};
       });
     }}]});
   const sources = [...Object.keys(compiled.metafile.inputs).filter(path => !path.startsWith('<')),
@@ -34,7 +34,7 @@ async function compile(extraSources) {
 
 async function fixture(compiled) {
   const document = Object.assign(new EventTarget(), {hidden: false, querySelector: () => null});
-  const states = [], lists = [], shareCalls = [], toasts = [];
+  const states = [], lists = [], shareCalls = [], toasts = [], selects = [];
   let active = true, invokingAgent = false, completingState = 0;
   const port = {};
   const storage = {
@@ -52,6 +52,7 @@ async function fixture(compiled) {
     async storageWatch() {return {status: 'ready'};}, async storageUnwatch() {return {status: 'ready'};},
     async addListener() {return {async remove() {}};},
     async storageShare(input) {shareCalls.push(input); return {status: 'opened'};},
+    storageSelect(input) {const task = deferred(); selects.push({input, task, settled: false}); return task.promise;},
   };
   const module = {exports: {}};
   new Function('require', 'module', 'exports', '__ports', 'document', 'window', compiled.code)(createRequire(import.meta.url), module, module.exports, port, document, new EventTarget());
@@ -68,13 +69,12 @@ async function fixture(compiled) {
     const value = port.inspect();
     return {'s.bound': value.bound, 's.active': value.active, 's.place': paths[value.place.path], 's.generation': value.generation,
       's.stateGeneration': value.stateGeneration, 's.access': value.access, 's.volumes': value.volumes.map(item => item.primary ? 1 : 2),
-      // The model's read-in-progress flag is loading; busy owns unrelated mutations.
-      's.entries': value.entries.map(entryId), 's.loaded': value.loaded, 's.busy': value.loading, 's.error': !!value.error,
+      's.entries': value.entries.map(entryId), 's.loaded': value.loaded, 's.loading': value.loading, 's.error': !!value.error,
       's.states': qset(states.filter(request => !request.settled).map(request => request.id)),
       's.lists': qset(lists.filter(request => !request.settled).map(request => request.id)),
       's.requests': qmap(ids.map(id => {const request = states[id - 1]; return [id, request
         ? {generation: request.generation, place: request.place, agent: request.agent} : {generation: 0, place: 0, agent: false}];})),
-      's.shares': shareCalls.length};
+      's.shares': shareCalls.length, 's.mutations': value.mutations, 's.selecting': selects.some(request => !request.settled)};
   };
   const output = () => view.render(localState, api);
   async function enter() {active = true; output(); await tick(); await tick();}
@@ -99,15 +99,21 @@ async function fixture(compiled) {
     else request.task.reject(Error('Injected listing read failure'));
     await tick(); await tick();
   }
+  async function openTap(id) {output().fd.items.find(item => item.name === entry(id).name).tap(); await tick();}
+  async function openReply() {
+    const request = selects.find(request => !request.settled); assert.ok(request);
+    request.settled = true; request.task.resolve({status: 'cancelled'}); await tick(); await tick();
+  }
   function leave() {active = false; view.onLeave(api);}
-  async function close() {leave(); for (const request of [...states, ...lists]) if (!request.settled) {request.settled = true; request.task.reject(Error('Fixture teardown'));} await tick();}
-  return {observe, enter, refresh, navigate, agentRead, stateReply, listReply, leave, close, shareCalls, output, states, lists};
+  async function close() {leave(); for (const request of [...states, ...lists, ...selects]) if (!request.settled) {request.settled = true; request.task.reject(Error('Fixture teardown'));} await tick();}
+  return {observe, enter, refresh, navigate, agentRead, stateReply, listReply, openTap, openReply, leave, close, shareCalls, output, states, lists};
 }
 
 async function checkFilesBrowserController(extraSources = []) {
   const compiled = await compile(extraSources), traces = [];
   for (const name of ['primary-volume-order', 'current-denial', 'old-denial', 'old-grant', 'old-state-error', 'old-list', 'old-list-error',
-    'leave-state', 'leave-list', 'reenter-state', 'reenter-list', 'agent-overlap', 'agent-replaced-by-navigation', 'agent-replaced-by-leave']) {
+    'leave-state', 'leave-list', 'reenter-state', 'reenter-list', 'agent-overlap', 'agent-replaced-by-navigation', 'agent-replaced-by-leave',
+    'open-while-loading', 'reload-keeps-open']) {
     const f = await fixture(compiled), t = trace(name, f.observe());
     const step = (label, action) => checkpoint(t, label, action, f.observe());
     const replyState = async (id, access = 'granted', volumes = [1], success = true) => {
@@ -130,6 +136,17 @@ async function checkFilesBrowserController(extraSources = []) {
           await replyList(1, [1, 2]);
           if (name === 'primary-volume-order') {
             assert.deepEqual(f.observe()['s.volumes'], [1, 2]);
+          } else if (name === 'open-while-loading') {
+            await f.refresh(); step('visibility refresh starts a listing read', call('refresh'));
+            await f.openTap(1); step('owner opens a file while the listing loads', call('openTap', 1));
+            assert.equal(f.observe()['s.mutations'], 1);
+            await f.openReply(); step('the open is answered', call('openReply'));
+          } else if (name === 'reload-keeps-open') {
+            await f.openTap(1); step('owner opens a file', call('openTap', 1));
+            await f.refresh(); step('visibility refresh during the open', call('refresh'));
+            await replyState(2); await replyList(2, [1, 2]);
+            assert.equal(f.observe()['s.mutations'], 1, 'the reload left the open counted');
+            await f.openReply(); step('the open is answered', call('openReply'));
           } else if (name.startsWith('agent-')) {
             f.agentRead(); step('registered agent operation requests fresh state', call('agentRead'));
             if (name === 'agent-overlap') {
@@ -162,7 +179,7 @@ async function checkFilesBrowserController(extraSources = []) {
   return checkTraces(boundInputs({model: 'FilesBrowserController', sources: compiled.sources, traces, scope: 'bounded-component', assumptions: [
     'Actual installed Files browser, storage helpers and registered Files agent runner execute with deferred native storage ports. A read-only build-time closure observer exposes state without changing it.',
     'The campaign models current folder reads, shared access/volume readback and registered share admission. Two folders, three entries, two volumes and six read identities bound the model.',
-    'Storage state and listing completion are settled promise macrosteps. Direct open and late selection release use the shared FilesDirectAdmission model and the Alpha cold-start browser flows. Category/Trash aggregation, filters, mutations, dialogs, watch ownership and provider persistence remain explicit extensions. Native storage effects themselves are controlled ports.'] }));
+    'Storage state, listing and open completion are settled promise macrosteps; a cancelled open stands for the mutation counter. Direct open and late selection release use the shared FilesDirectAdmission model and the Alpha cold-start browser flows. Category/Trash aggregation, filters, other mutations, dialogs, watch ownership and provider persistence remain explicit extensions. Native storage effects themselves are controlled ports.'] }));
 }
 
 test('Files readback and listings retain the current request across late native completions', {timeout:scaledTimeout(120000)}, async () => {
@@ -170,5 +187,5 @@ test('Files readback and listings retain the current request across late native 
   assert.equal(receipt.passed, true);
   assert.equal(receipt.inputsUnchanged, true);
   assert.equal(receipt.driverInputsBound, true);
-  assert.equal(receipt.traces, 14);
+  assert.equal(receipt.traces, 16);
 });

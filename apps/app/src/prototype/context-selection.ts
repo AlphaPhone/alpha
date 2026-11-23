@@ -129,20 +129,29 @@ const CAPTURE_REVISIONS_KEPT = 256;
  * contract would refuse once the item was favorited, trashed or restored. The counter changes
  * exactly when that item's library revision or mutation revision changes, so an edited,
  * trashed, restored or replaced capture is never the identity that was shared before. An item
- * without an opaque id or a library revision has no identity. */
+ * without an opaque id or a library revision has no identity. The published id is the library's
+ * own id (the Photos view's 'native-camera-' row prefix removed), the id Photos operations name. */
 export function createCaptureRevisions() {
   const seen = new Map<string, { signature: string; revision: number }>();
   const session = sessionMarker();
   let counter = 0;
   return (row: { kind?: string; id?: unknown; revision?: unknown; mutationRevision?: unknown; contentRevision?: unknown } | undefined): CaptureSelection | null => {
-    if (!row || typeof row.id !== 'string' || !OPAQUE.test(row.id) || typeof row.revision !== 'string' || !row.revision) return null;
+    if (!row || typeof row.id !== 'string' || typeof row.revision !== 'string' || !row.revision) return null;
+    const id = row.id.slice(row.id.startsWith(CAPTURE_ROW) ? CAPTURE_ROW.length : 0);
+    if (!OPAQUE.test(id)) return null;
     const signature = JSON.stringify([row.revision, typeof row.mutationRevision === 'string' ? row.mutationRevision : null, typeof row.contentRevision === 'string' ? row.contentRevision : null]), previous = seen.get(row.id);
     const revision = previous?.signature === signature ? previous.revision : ++counter;
     // Most recently used last. A forgotten item simply gets a new revision when opened again.
     seen.delete(row.id); seen.set(row.id, { signature, revision });
     if (seen.size > CAPTURE_REVISIONS_KEPT) seen.delete(seen.keys().next().value as string);
-    return { kind: row.kind === 'video' ? 'video' : 'photo', id: row.id, revision: 'capture-' + session + '-' + revision };
+    return { kind: row.kind === 'video' ? 'video' : 'photo', id, revision: 'capture-' + session + '-' + revision };
   };
+}
+/** The Photos view's row id for a saved capture: its library id with this prefix. */
+const CAPTURE_ROW = 'native-camera-';
+/** Whether a published capture selection names the item open in the Photos viewer. */
+export function captureSelectionOpen(open: unknown, selection: CaptureSelection | null | undefined): boolean {
+  return !!selection && typeof open === 'string' && open === CAPTURE_ROW + selection.id;
 }
 
 /** A saved photo or video as the library reports it. contentRevision (Android: modified time,

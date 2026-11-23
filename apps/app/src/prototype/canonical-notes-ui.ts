@@ -17,6 +17,8 @@ type CanonicalTrashEntry={id:string;title:string;deletedAt:string;revision:numbe
 const UNAVAILABLE='Agent offline';
 /** Device-local handles (a recording, a picked document, a web source) belong to Older notes adapters, never to an agent record's view. */
 const LOCAL_HANDLES=['audio','documentSource','webSource'];
+/** An open note keeps its saved times while edited; its format data never reorders the list. */
+const SAVED_TIMES=['createdAt','updatedAt','modifiedAt'];
 /** View identity and presentation fields, never authored rich metadata. */
 const VIEW_FIELDS=new Set(['id','title','body','kind','canonicalRevision','createdAt','updatedAt','modifiedAt','when','color','bodySeparator','authored']);
 /** Older notes state (device recorder, playback, device Trash, recording deletions) is never read for agent Notes. */
@@ -104,7 +106,7 @@ export class CanonicalNotesUi {
   else if(draft.id&&draft.baseRevision===this.controller.revision){const saved=this.controller.viewNote(draft.id);if(saved)this.draftBase={token:draft.token,print:notePrint(saved)};}
   this.openValue=draft?draft.id??'draft-'+draft.token:null;this.blankCreationValue=draft&&!draft.id?this.openValue:null;
   if(draft){
-   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{}),audio=draft.format?.kind==='voice'?voiceAudio(data):undefined,kind=shownKind(draft.format?.kind??'text',data);for(const key of LOCAL_HANDLES)delete data[key];
+   const base=rows.find(row=>row.id===draft.id),data:Bag=structuredClone(draft.format?.data??{}),audio=draft.format?.kind==='voice'?voiceAudio(data):undefined,kind=shownKind(draft.format?.kind??'text',data);for(const key of [...LOCAL_HANDLES,...SAVED_TIMES])delete data[key];
    if(audio&&draft.id)data.audio={...audio,noteId:draft.id,transcript:draft.body};
    const record={...base,...data,id:this.openValue,kind:base?.kind??kind,title:draft.title,body:draft.body,canonicalRevision:draft.baseRevision};
    if(draft.format?.kind==='list'||draft.format?.kind==='text')record.kind=draft.format.kind;
@@ -386,14 +388,17 @@ export function installCanonicalNotesView(Component:any,views:Record<string,Bag>
  notes.render=(state:Bag,value:Bag)=>{
   const ui:CanonicalNotesUi|undefined=value.canonicalNotes,sources=value.notesSourceOptions??[],older=sources.find((source:Bag)=>source.id==='legacy'&&source.available!==false),main=sources.find((source:Bag)=>source.id==='canonical');
   if(value.notesSourceMode!=='canonical')return {...render(state,value),notesTitle:'Previous notes',primaryNotes:false,returnToNotesAction:main?.choose};
-  const withPreviousNotes=(view:Bag)=>{
-   if(!older||older.selected||view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
-   return {...view,previousNotesAction:older.chooseFromMenu,previousNotesMenu:!!state.previousNotesMenu,
-    openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:()=>value.set({previousNotesMenu:false})};
+  const withNotesMenu=(view:Bag)=>{
+   if(view.isEdit||view.isVoice||view.isLink||view.trashOpen||view.noteRecorder)return view;
+   if(!ui&&(!older||older.selected))return view;
+   const close=()=>value.set({previousNotesMenu:false});
+   return {...view,previousNotesAction:!older?.selected?older?.chooseFromMenu:undefined,previousNotesMenu:!!state.previousNotesMenu,
+    openPreviousNotesMenu:()=>value.set({previousNotesMenu:true}),closePreviousNotesMenu:close,
+    notesMenuTrash:ui?()=>{close();view.openTrash();}:undefined,notesMenuTrashDisabled:!view.hasDeleted};
   };
-  if(ui)return withPreviousNotes(ui.decorate(render(state,value),value,state));
+  if(ui)return withNotesMenu(ui.decorate(render(state,value),value,state));
   // A pending New note request waits for the binding instead of drafting into no collection.
   const waiting={...state,...DEVICE_ONLY_STATE,list:[],open:null,compose:false,trashOpen:false,storageStatus:state.storageStatus||agentAvailabilityNotice(undefined,UNAVAILABLE)};
-  return withPreviousNotes({...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false});
+  return withNotesMenu({...render(waiting,value),storageStatus:'',unavailable:true,unavailableMessage:waiting.storageStatus,connectNotes:()=>connectionController.open(),none:false,canCreate:false,browserRecovery:false,audioDeletionUnknown:false,trashAvailable:false,canRecord:false,canImportText:false});
  };
 }

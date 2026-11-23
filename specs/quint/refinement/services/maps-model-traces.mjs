@@ -128,9 +128,16 @@ export function scenarioActions(source, name, seen = new Set()) {
   return steps;
 }
 
+/** One Quint CLI run. A run the host runtime killed (a signal, no exit status, as a Bun segfault
+ * under load ends it) reached no verdict, so it is run once more; a second crash fails as a crash,
+ * never as a model result. */
 function quint(args) {
-  const result = spawnSync(process.execPath, [cli, ...args], {cwd: repositoryRoot, encoding: 'utf8', timeout: scaledTimeout(120000), maxBuffer: 64 * 1024 * 1024});
+  const run = () => spawnSync(process.execPath, [cli, ...args], {cwd: repositoryRoot, encoding: 'utf8', timeout: scaledTimeout(120000), maxBuffer: 64 * 1024 * 1024});
+  let result = run();
   assert.ifError(result.error);
+  if (result.status === null) result = run();
+  assert.ifError(result.error);
+  assert.notEqual(result.status, null, `quint ${args[0]} crashed (signal ${result.signal}) twice without a verdict:\n${result.stdout}\n${result.stderr}`);
   return result;
 }
 
@@ -179,7 +186,9 @@ export function modelTraces({path, module, scenarios = [], witnesses = [], rando
     for (const witness of witnesses) {
       const file = join(directory, `witness-${witness}.json`);
       const result = quint(['run', ...common, '--max-samples=2000', '--max-steps=60', '--mbt', `--invariant=not(${witness})`, `--out-itf=${file}`]);
-      assert.match(`${result.stdout}${result.stderr}`, /\[violation\]/, `${witness} is not reached: ${result.stdout}\n${result.stderr}`);
+      const output = `${result.stdout}${result.stderr}`;
+      assert.match(output, /\[(violation|ok)\]/, `quint found no verdict for ${witness} (exit ${result.status}):\n${result.stdout}\n${result.stderr}`);
+      assert.match(output, /\[violation\]/, `${witness} is not reached: ${result.stdout}\n${result.stderr}`);
       traces.push(walk(file, witness, parameters, state));
     }
     if (random) {

@@ -67,7 +67,8 @@ const press = async (page: Page, steps: string[]) => {
       await page.locator('.mail-message-menu').count() && !await page.locator('.mail-message-menu[open]').count()) {
       await page.getByLabel('Message actions', {exact: true}).click();
     }
-    await (step === 'Photos tools' || step === 'Message actions' ? page.getByLabel(step, {exact: true}) : page.getByRole('button', {name: step, exact: true}).first()).click();
+    // Share note and Delete are entries of the Note actions menu.
+    await (step === 'Photos tools' || step === 'Message actions' ? page.getByLabel(step, {exact: true}) : page.getByRole(step === 'Share note' || step === 'Delete' ? 'menuitem' : 'button', {name: step, exact: true}).first()).click();
   }
 };
 /** The named subview is on screen and exposed (not retired behind another subview). */
@@ -117,7 +118,7 @@ export const LIVE_STATES: State[] = [
   live('Calendar', ['Calendar']),
   // An admitted read-only source exposes the real form; no calendar event write runs.
   {name:'live Calendar new event',shows:'calendar-form',open:async(page,theme)=>{await openCanonicalCalendarForm(page,theme);await settle(page);await showing(page,'calendar-form');}},
-  live('Calendar month', ['Calendar', 'Month view']),
+  live('Calendar month', ['Calendar', 'Choose date']),
   live('Browser', ['Browser']),
   live('Browser tabs', ['Browser', 'Tabs']),
   live('Camera (unavailable)', ['Camera']),
@@ -149,8 +150,8 @@ export const LIVE_STATES: State[] = [
   live('Settings password manager', ['Settings', 'Apps', 'Passwords']),
   live('Browser menu', ['Browser', 'Menu']),
   live('Browser address', ['Browser', 'Edit address']),
-  live('Workflow alarms', ['Workflows', 'New automation', 'Clock alarms']),
-  live('Workflows new automation', ['Workflows', 'New automation'], 'automations-detail'),
+  live('Workflow alarms', ['Workflows', 'Add to Workflows', 'Clock alarms']),
+  live('Workflows new automation', ['Workflows', 'Add to Workflows'], 'automations-detail'),
 ];
 
 /** The simulated browser inventory exists only in test-mocks builds. */
@@ -192,6 +193,7 @@ export const MOCK_STATES: State[] = [
   mock('browser', ['Edit address']),
   mock('photos:albums', ['Favorites'], 'photos-album'),
   mock('photos:viewer', ['Edit photo'], 'photos-edit'),
+  mock('photos:viewer', ['Edit photo', 'Crop'], 'photos-edit'),
   mock('photos:viewer', ['Photo info']),
   mock('photos:viewer', ['Share photo']),
   mock('photos', ['Photos tools', 'Select photos']),
@@ -200,14 +202,12 @@ export const MOCK_STATES: State[] = [
   mock('notes:editor', ['More', 'Share note']),
   {name:'live Files sort',open:async(page,theme)=>{await openFilesStorage(page,theme);await press(page,['Files options']);await settle(page);}},
   mock('files:preview', ['Rename']),
-  mock('files:preview', ['Move file']),
-  mock('files:preview', ['Share file']),
   // Deleting a fixture file shows the toast with Undo over the folder.
-  mock('files:preview', ['Delete file']),
+  mock('files:preview', ['File actions', 'Delete file']),
   mock('workflows:flow', ['Change'], 'workflows-builder'),
   // The builder's trigger and step sheets. (Settings' Connections page and its per-service sheets
   // were removed; the Google accounts panel is swept live as 'Settings Google'.)
-  mock('workflows', ['New automation', 'Edit When step'], 'workflows-builder'),
+  mock('workflows', ['Add to Workflows', 'Edit When step'], 'workflows-builder'),
   mock('workflows:new', ['Add Read step'], 'workflows-builder'),
   mock('settings', ['About']),
   // Calendars exists only in the live Settings adapter. Its accessibility audits
@@ -432,7 +432,7 @@ export const LAUNCHER_STATES: State[] = [
   // Every retained app view in the launcher presentation (its headers and system bars differ).
   launcher('Inbox', ['Inbox']),
   launcher('Calendar', ['Calendar']),
-  launcher('Calendar month', ['Calendar', 'Month view']),
+  launcher('Calendar month', ['Calendar', 'Choose date']),
   launcher('Browser', ['Browser']),
   launcher('Camera', ['Camera']),
   launcher('Photos', ['Photos']),
