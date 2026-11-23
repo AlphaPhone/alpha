@@ -26,9 +26,9 @@ export const meta: ComponentMeta<InboxChangeReviewProps> = {
       const sheet = await screen.findByRole("dialog", { name: "Archive?" });
       await expect(sheet).toHaveAccessibleDescription("3 emails");
       await userEvent.click(within(sheet).getByRole("button", { name: "Archive" }));
-      await expect(onConfirm.mock.calls.length).toBe(1);
-      await userEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
-      await waitFor(() => expect(onCancel.mock.calls.length).toBe(1));
+      await expect(onConfirm).toHaveBeenCalledTimes(1);
+      await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(onCancel).toHaveBeenCalledTimes(1));
     },
     "Emails changed": async () => {
       const sheet = await screen.findByRole("dialog", { name: "Archive?" });

@@ -17,8 +17,9 @@ export const meta: ComponentMeta<InboxChangeToastProps> = {
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       onUndo.mockClear();
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Undo" }));
-      await expect(onUndo.mock.calls.length).toBe(1);
+      const undo = within(canvasElement).getByRole("button", { name: "Undo" });
+      await userEvent.click(undo);
+      await expect(onUndo).toHaveBeenCalledTimes(1);
     },
     "Archived, can restore": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Restore" })).toBeInTheDocument(),
     Refused: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button")).toBeNull(),
