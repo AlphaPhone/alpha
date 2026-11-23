@@ -28,7 +28,7 @@ import { SimulatedTriggers, SimulatedWorkflows } from "../../src/workflows/simul
 import { DigestSourcesService } from "../../src/workflows/sources.vibe"
 import { WorkflowsPlace, followRoute } from "../../src/workflows/place.vibe"
 import { Machine as PlaceMachine } from "../../gen/workflows__place.effect.vibe"
-import { type Handler, type NativeCall, type ReportedBrief, type Sent, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
+import { type Handler, type NativeCall, type ReportedBrief, type Sent, engineStatus, navigationOf, statusRoute, workflowsOf } from "./fakes.vibe"
 
 const alarm: AlarmRequest = { hour: 7, minute: 30, label: "Wake", days: [] }
 const definition = { id: "w1", name: "Morning", active: true, versionId: "v1", steps: [] }
@@ -176,6 +176,21 @@ describe("Scheduled items (spec/workflows/agentSchedules.md, \"Story: Answer a s
         },
       ))
     }
+  })
+})
+
+describe("Removed workflows (spec/workflows/automations.md, \"A change is held before it is sent, one per owner, and needs the row it names\")", () => {
+  it.effect("removed workflows are read apart, only from the agent's removed list, and a refused read says so (spec/workflows/automations.md, \"A change is held before it is sent, one per owner, and needs the row it names\")", () => effect {
+    const sent: Sent[] = []
+    const gone = { id: "w9", name: "Old brief", description: "", active: false, removed: true, triggerCleanup: "complete", versionId: "v3", steps: [] }
+    const lifecycleStatus: Handler = (m, p) => m === "GET" && p === "/api/workflow/status" ? { status: 200, data: { ...engineStatus, lifecycleMutationProtocol: 1 } } : undefined
+    const listed: Handler = (m, p) => m === "GET" && p === "/api/workflow/removed-workflows" ? { status: 200, data: { workflows: [gone] } } : undefined
+    const rows = try Effect.provide(Automations.use((a) => a.removed()), workflowsOf([lifecycleStatus, listed], sent))
+    const refused = try Effect.provide(Automations.use((a) => a.removed()), workflowsOf([lifecycleStatus], []))
+    try Effect.try(() => assert.deepStrictEqual(
+      { rows: rows?.map((r) => [r.key, r.kind, r.status, r.title, r.enabled]), refused, asked: sent.some((r) => r.path === "/api/workflow/removed-workflows") },
+      { rows: [["w9", "WorkflowRow", "removed", "Old brief", false]], refused: undefined, asked: true },
+    ))
   })
 })
 

@@ -84,6 +84,7 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
   const [textKept, setTextKept] = useState(true);
   const [clockOutcome, setClockOutcome] = useState<"opened" | "unknown" | "failed" | "refused" | undefined>(undefined);
   const [activation, setActivation] = useState<boolean | undefined>(undefined);
+  const [removedRows, setRemovedRows] = useState<ReadonlyArray<Row> | "unavailable" | undefined>(undefined);
   const [activeOutcome, setActiveOutcome] = useState<ChangeOutcome | undefined>(undefined);
   const list = automations.state;
   const held = list?.held.find((h) => h.owner === list.owner);
@@ -139,6 +140,22 @@ export function WorkflowsScreen({ onClose }: WorkflowsScreenProps) {
       {where.view === "ListView" && list !== undefined && (
         <AutomationList list={list} waiting={notices.state?.waiting ?? []} canAllowAnother={held !== undefined && automations.can({ type: "allowAnother", id: held.id })}
           onOpen={openRow} onAllowAnother={() => { if (held !== undefined) void perform(Automations.use((a) => a.allowAnother(held.id))); }} />
+      )}
+      {where.view === "ListView" && list !== undefined && (
+        // spec/workflows/automations.md: removed workflows are listed apart, only when asked for, and one opens for Restore.
+        <section aria-label="Removed workflows" className="flex flex-col gap-2 px-4">
+          <Button variant="ghost" size="lg" aria-expanded={removedRows !== undefined}
+            onClick={() => removedRows !== undefined ? setRemovedRows(undefined)
+              : void perform(Automations.use((a) => a.removed())).then((rows) => setRemovedRows(rows ?? "unavailable"))}>
+            {removedRows === undefined ? "Show removed" : "Hide removed"}
+          </Button>
+          {removedRows === "unavailable" && <Alert variant="warn" role="status" className="text-sm">Removed workflows couldn’t be read from your agent.</Alert>}
+          {removedRows !== undefined && removedRows !== "unavailable" && (removedRows.length === 0
+            ? <p className="text-sm text-muted-foreground">No removed workflows.</p>
+            : <ul className="flex flex-col">{removedRows.map((removed) => (
+              <li key={removed.key}><ListRow title={removed.title || "Workflow"} detail="Removed" onClick={() => openRow(removed)} /></li>
+            ))}</ul>)}
+        </section>
       )}
 
       {where.view === "AutomationView" && row === undefined && list !== undefined && <EmptyState title="This item is no longer listed" />}

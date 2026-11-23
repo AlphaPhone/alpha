@@ -63,6 +63,8 @@ export service Automations {
   promptRuns(id: string): ReadonlyArray<PromptRunLine>!(AgentRefused | AgentUnavailable | Unrecognized | NotSent)
   /** The prompt `id` as the agent keeps it, to change; undefined when its trigger is not one Alpha changes. */
   prompt(id: string): (PromptInput | undefined)!(AgentRefused | AgentUnavailable | Unrecognized | NotSent)
+  /** The owner's removed workflows, as the agent lists them apart from the list, to open one for Restore; undefined when they could not be read. */
+  removed(): (ReadonlyArray<Row> | undefined)!!
   /** Release the held change `id` the owner reviewed, after they confirmed it may still apply. */
   allowAnother(id: number): void!!
 }
@@ -366,6 +368,14 @@ export const automations = Layer.provideMerge(Layer.effect(Automations, effect {
       const path = `/api/triggers/${id}/runs`
       const { runs } = try decoded(TriggerRuns, path, try agent.request("GET", path))
       return runs.map((run) => ({ at: instant(run.startedAtIso), status: run.status ?? "", ...(run.error === undefined ? {} : { error: run.error }) }))
+    },
+    effect removed() {
+      const workflows = agent.workflow.removedWorkflows() catch () => undefined
+      if (workflows === undefined) return undefined
+      return workflows.filter((w) => w.removed).map((w): Row => ({
+        key: w.id, id: w.id, target: w.id, kind: "WorkflowRow", enabled: false, status: "removed",
+        title: w.name, description: w.description, schedule: "workflow", system: false,
+      }))
     },
     effect prompt(id: string) {
       const saved = try readTrigger(id)

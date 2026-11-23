@@ -35,7 +35,7 @@ export function familyOf(path: string): RouteFamily {
   if (/^\/api\/lifeops\/(reminders|definitions(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199})?|occurrences\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\/snooze)$/.test(path)) return "LifeOpsRoutes"
   if (/^\/api\/workflow\/hosted\/(sources(\/revoke)?|loops|dossier|live-accounts|live-calendars|results(\?clientId=[A-Za-z0-9_-]{1,128}|\/ack)?|cloud-delegation\/(start|complete|status|cancel|revoke|revocations))$/.test(path)) return "HostedRoutes"
   if (/^\/api\/workflow\/phone\/(catalog|generate|validate|workflows|mutations\/[a-f0-9-]{36})$/.test(path)) return "WorkflowRoutes"
-  if (/^\/api\/workflow\/(status|workflows(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/[a-z-]+(\/[A-Za-z0-9-]{1,64})?)?)?|executions\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(cancel|approvals|phone-review)(\/[A-Za-z0-9._:-]+\/\d+)?)?)$/.test(path)) return "WorkflowRoutes"
+  if (/^\/api\/workflow\/(status|removed-workflows|workflows(\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/[a-z-]+(\/[A-Za-z0-9-]{1,64})?)?)?|executions\/[A-Za-z0-9][A-Za-z0-9._:-]{0,199}(\/(cancel|approvals|phone-review)(\/[A-Za-z0-9._:-]+\/\d+)?)?)$/.test(path)) return "WorkflowRoutes"
   if (/^\/api\/auth\/me$/.test(path)) return "AutomationRoutes"
   return "OtherRoute"
 }

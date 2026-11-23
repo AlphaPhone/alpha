@@ -79,7 +79,8 @@ export effect function followWaiting() {
   const notices = try ApprovalNotices
   const digests = try Digests
   const returns = Stream.map(Stream.filter(Stream.changesWith(foreground.changes, (a, b) => front(a) === front(b)), front), () => undefined)
-  const ticks = Stream.merge(returns, Stream.tick(FOLLOW_MS))
+  // The first tick of Stream.tick comes at once; the return to the front (Foreground.changes starts with the current state) covers it.
+  const ticks = Stream.merge(returns, Stream.drop(Stream.tick(FOLLOW_MS), 1))
   for try (const _ of ticks) {
     if (!front(try foreground.get())) continue
     const listed = agent.workflow.list() catch () => undefined

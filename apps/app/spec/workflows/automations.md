@@ -111,7 +111,9 @@ pure def sometimesSecondOwnerListed(a: Automations): bool = a.owner == "ben" and
 
 Turning on needs a row that is off, turning off one that is on; a create names no row. The
 detail's on/off switch goes through the same review as every other change, and the list shows the
-owner's workflows and automations only, with no removed-workflows or digests rows (#1316).
+owner's workflows and automations only, with no removed-workflows or digests rows (#1316). Removed
+workflows are listed apart, only when the owner asks for them, from the agent's own removed list; opening
+one shows its Restore (#1403).
 
 ```quint
 pure def canChange(a: Automations, kind: ChangeKind, key: str, target: bool): bool =
