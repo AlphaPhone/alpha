@@ -4,7 +4,7 @@ import type { Effect as Out, Event, Reminders } from "../../gen/app__sample.effe
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { Agent } from "../../src/platform/agent.vibe"
 import { ask, attempted, listen } from "../../src/platform/remote.vibe"
-import { type Job, answer, due, following, reacting, stop, stream, untimed } from "../../src/runtime/reactor.vibe"
+import { type Job, answer, due, following, reacting, stop, stream, together, untimed } from "../../src/runtime/reactor.vibe"
 
 /** The agent's answer to GET /api/reminders, and each event of GET /api/reminders/feed. */
 schema ReminderList { readonly titles: ReadonlyArray<string> }
@@ -53,4 +53,4 @@ const kept = reacting(Sample, { keep: 1, open: [{ type: "reopen" }], carry, time
 const told = following(Shell, (shell) => showing(shell, "Notes"), Sample.Machine, (shown): Event => ({ type: "show", showing: shown }))
 
 /** Reminders: kept across restarts, carried out through the resident agent, and told by the shell whether its view is showing. */
-export const reminders = Layer.merge(kept, told)
+export const reminders = together(kept, told)

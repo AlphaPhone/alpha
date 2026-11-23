@@ -9,11 +9,7 @@ effect function applied(ticket: number, percent: number): Event!!Device {
   return { type: "applied", ticket, kept: try (try Device).setTextScale(percent) }
 }
 
-function carry(fx: Out): Job<Event, Device, [by: Sender]> {
-  return match (fx) {
-    when { tag: "Apply", let ticket, let percent }: answer("apply", applied(ticket, percent), { type: "applied", ticket, kept: false }, "Phone");
-  }
-}
+const carry = (fx: Out): Job<Event, Device, [by: Sender]> => answer("apply", applied(fx.ticket, fx.percent), { type: "applied", ticket: fx.ticket, kept: false }, "Phone")
 
 // spec/app/sample/size.md, "An asking the phone has not answered after ten seconds is given up, and the size stays"
 function timers(state: Size.Size) {
@@ -22,8 +18,7 @@ function timers(state: Size.Size) {
 
 // spec/app/sample/size.md, "When Alpha opens, the phone says the size it kept, once, and a size it does not offer counts as none": the opening carries what only the phone knows, so it is an effect that asks first.
 const opening = effect {
-  const kept = try (try Device).textScale()
-  const start: Event = { type: "start", was: Option.getOrElse(kept, () => 0) }
+  const start: Event = { type: "start", was: Option.getOrElse(try (try Device).textScale(), () => 0) }
   return [start, "Phone"] as const
 }
 
