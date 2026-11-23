@@ -1,53 +1,52 @@
 # Local cloud
 
-The same cloud on a developer's computer, built from the pinned upstream
-with the product's own identity: an identity service in memory whose mail
-goes to a sink on the computer, never to a mailbox; the API; and one TLS
-front door that the phone, or the Android emulator, reaches over loopback.
-Its check is the evidence that the product's contract is served without the
-cloud it ships against today (see [Cloud](./index.md)). A passing check is
-a local result only: not a deployed cloud, an APK, an emulator or a device
-result.
+eliza's own cloud server (`elizaos-cloud serve` from the pinned checkout)
+on this computer, under Alpha's staging profile and seed, over a PGlite
+database of the run, with the staging mailbox that keeps each sign-in code
+on the computer. Its check is the evidence that eliza's cloud serves what
+Alpha needs under Alpha's own profile. A passing check is a local result
+only: not a deployed cloud, an APK, an emulator or a device result.
 
-## Story: Check the product's contract on my computer
+## Story: Check Alpha's contract on my computer
 
-> As a developer, I want to start the whole cloud locally and run the
-> phone's contract against it, so that I know the product works without
-> borrowing anyone else's cloud.
+> As a developer, I want to start eliza's cloud locally under Alpha's own
+> profile and walk what the phone needs of it, so that I know Alpha works
+> with the cloud before anyone deploys it.
 
 ### The local cloud is stopped or running, and its check has passed some gates in order, or failed at one
 
-The gates, in order: the app's registration is read from the database;
-sign-in by an emailed code delivered to the sink, then the app's
-authorization, the key minted and acknowledged; the account, the service
-terms, the entitlement keys and route, the subscription and the referrals
-are read with that key; a billing route refuses the phone's key and
-accepts a proven session; the web host serves the asset links and forwards
-the sign-in return while refusing an unregistered path; the key is revoked
-and then refused; and no answer names a host of the cloud shipped today.
+The gates, in order: health; the public service document names Alpha; the
+sign-in methods offer the emailed code; the asset links name Alpha's package
+and signers (`./index.md`); a sign-in by the code mailed to the staging
+mailbox; a device key minted and acknowledged for Alpha's client; the
+account, the entitlement and the plans read with that key through eliza's
+own client; and a billing route refused to the key, which proves no
+session.
 
 ```quint
-type Gate = Registration | SignIn | Reads | BillingSession | WebHost | Revocation | Isolation
-type Local = { mocks: bool, running: bool, checking: bool, passed: int, failed: bool }
+type Gate = Health | ServiceDocument | SignInMethods | AssetLinks | EmailedCode | DeviceKey | KeyedReads | BillingRefused
+type Local = { loopback: bool, running: bool, checking: bool, passed: int, failed: bool }
 
 pure def gateAt(i: int): Gate =
-  if (i <= 0) Registration else if (i == 1) SignIn else if (i == 2) Reads else if (i == 3) BillingSession
-  else if (i == 4) WebHost else if (i == 5) Revocation else Isolation
+  if (i <= 0) Health else if (i == 1) ServiceDocument else if (i == 2) SignInMethods else if (i == 3) AssetLinks
+  else if (i == 4) EmailedCode else if (i == 5) DeviceKey else if (i == 6) KeyedReads else BillingRefused
 
-pure val gates = 7
+pure val gates = 8
 
-pure val initial: Local = { mocks: false, running: false, checking: false, passed: 0, failed: false }
+pure val initial: Local = { loopback: false, running: false, checking: false, passed: 0, failed: false }
 ```
 
-### The local cloud starts only in a development session that allows mocks, and stops with every part together
+### The local cloud starts only for a profile whose database, mail, text messages and providers are all on this computer, and stops with every part together
 
-Mocks, fixtures and developer surfaces exist only where development allows
-them, never in a production build.
+The database is PGlite in a directory of the run; mail and text messages
+are eliza's loopback adapters; every provider the profile names (payments,
+models, speech, maps, Google) is on a loopback address. A profile that names
+anything else is refused before any process starts.
 
 ```quint
-pure def canStart(s: Local, mocks: bool): bool = mocks and not(s.running)
+pure def canStart(s: Local, loopback: bool): bool = loopback and not(s.running)
 
-pure def start(s: Local, mocks: bool): Local = { mocks: mocks, running: true, checking: false, passed: 0, failed: false }
+pure def start(s: Local, loopback: bool): Local = { loopback: loopback, running: true, checking: false, passed: 0, failed: false }
 
 pure def canStop(s: Local): bool = s.running
 
@@ -74,10 +73,10 @@ pure def gate(s: Local, ok: bool): Local =
 pure def succeeded(s: Local): bool = s.passed == gates and not(s.failed)
 ```
 
-### The local cloud runs only where mocks are allowed
+### The local cloud runs only on this computer
 
 ```quint
-pure def alwaysRunsOnlyWithMocks(s: Local): bool = s.running implies s.mocks
+pure def alwaysRunsOnlyOnLoopback(s: Local): bool = s.running implies s.loopback
 ```
 
 ### A check runs only on a running cloud, and stops at its first failed gate
@@ -96,7 +95,8 @@ pure def stepGatesPassInOrder(before: Local, via: str, after: Local): bool =
 
 ### A check that starts always ends, passed or failed
 
-Each gate's answer is awaited; the check never hangs between gates.
+Each gate waits for what the cloud answers under a bounded deadline; the
+check never hangs between gates.
 
 ```quint
 pure val fair_gate = "weak"
