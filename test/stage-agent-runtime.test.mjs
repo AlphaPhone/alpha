@@ -35,6 +35,18 @@ test("the SDK's staged assets and both Node libraries land in Alpha's source set
   assert.throws(stage(2, [TARGET_ABIS[0]]), /ENOENT/);
   assert.equal(read(bundle), "bundle 1");
   for (const abi of TARGET_ABIS) assert.equal(read(node(abi)), `Node 1 ${abi}`);
+  const rename = fs.renameSync;
+  const refused = t.mock.method(fs, "renameSync", (source, destination) => {
+    if (destination === path.join(product, node("x86_64")) && source.includes(`${path.sep}payload${path.sep}`)) {
+      throw new Error("x86_64 publication refused");
+    }
+    return rename(source, destination);
+  });
+  assert.throws(stage(2), /x86_64 publication refused/);
+  refused.mock.restore();
+  assert.equal(read(bundle), "bundle 1");
+  assert.equal(read(embedding), "qualified embedding model");
+  for (const abi of TARGET_ABIS) assert.equal(read(node(abi)), `Node 1 ${abi}`);
   stage(2)();
   assert.equal(read(bundle), "bundle 2");
   assert.equal(read(embedding), "qualified embedding model");
