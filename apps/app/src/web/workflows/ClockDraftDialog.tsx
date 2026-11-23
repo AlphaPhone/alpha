@@ -47,7 +47,7 @@ export function ClockDraftDialog({ shown, review, canApprove, start, onPrepare, 
         <DialogTitle>{review ? "Set this alarm in Clock?" : "Alarm in Clock"}</DialogTitle>
         {review ? (
           <div className="flex flex-col gap-2">
-            <p className="font-serif text-3xl">{time}</p>
+            <p className="font-display text-3xl">{time}</p>
             <p className="text-sm">{label.trim() === "" ? "No label" : label.trim()} · {repeat === "" ? "Once" : repeat}</p>
             <p className="text-sm text-muted-foreground">Clock opens with the alarm you reviewed. Clock only tells Alpha that it opened.</p>
           </div>

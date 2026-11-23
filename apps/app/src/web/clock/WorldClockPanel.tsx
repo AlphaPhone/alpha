@@ -39,7 +39,7 @@ export function WorldClockPanel({ world, now, known, onAdd, onRemove }: WorldClo
         <ul className="flex flex-col divide-y divide-border">
           {world.zones.map((z) => (
             <li key={z} className="flex items-center">
-              <ListRow title={city(z)} detail={z} trailing={<span className="font-serif text-2xl text-foreground">{timeIn(z, now)}</span>} className="flex-1" />
+              <ListRow title={city(z)} detail={z} trailing={<span className="font-display text-2xl text-foreground">{timeIn(z, now)}</span>} className="flex-1" />
               <Button variant="ghost" size="icon" aria-label={`Remove ${city(z)}`} disabled={!canRemoveZone(world, z)} onClick={() => onRemove(z)}><X aria-hidden className="size-4" /></Button>
             </li>
           ))}

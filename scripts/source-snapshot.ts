@@ -25,7 +25,7 @@ roots.push('android/app/src/launcher','android/app/src/release',
 roots.push('android/voice-host','android/embedding-host','android/paradee-voice','android/local-speech/build.gradle',
  '.eliza/native-inputs/receipt.json',
  'scripts/native-build-inputs.ts','scripts/build-embedding-host.ts',
- 'scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts',
+ 'scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts','scripts/copy-file-clone.ts',
  '.eliza/paradee-voice/native',
  'scripts/stage-embedding-host.ts','scripts/prepare-embedding-host.ts',
  'scripts/android-stage-voice-models.ts','scripts/voice-host.ts','scripts/paradee-runtime.ts');

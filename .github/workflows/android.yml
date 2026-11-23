@@ -68,7 +68,8 @@ jobs:
         run: bash scripts/ci/prepare-host-test-json.sh
       - name: Prepare reviewed Kotlin compiler for native routing checks
         run: node test/fixtures/kotlin-tools.mjs --prepare
-      - run: pnpm exec vitest run --timeout=600000 vendor/eliza/packages/os/scripts/__tests__/stage-launcher-overlay.node.test.ts
+      - name: Verify launcher overlay staging from the pinned SDK
+        run: pnpm --dir vendor/eliza/packages/os run test test/image.test.vibe test/image-product.test.vibe test/cli.test.vibe
       # The normal chain builds and verifies its native source/model inputs.
       - name: Record tracked source frame before the Android build
         timeout-minutes: 1

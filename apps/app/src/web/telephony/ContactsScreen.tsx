@@ -49,7 +49,7 @@ export function ContactsScreen({ route }: ContactsScreenProps) {
         {c.searching && !open && !editor ? (
           <Input autoFocus aria-label="Search contacts" value={c.query} onChange={(event) => read(event.target.value)} className="flex-1" />
         ) : (
-          <h1 className="flex-1 font-serif text-2xl">{editor ? (editor.mode === "Creating" ? "New contact" : "Edit contact") : "Contacts"}</h1>
+          <h1 className="flex-1 font-display text-2xl">{editor ? (editor.mode === "Creating" ? "New contact" : "Edit contact") : "Contacts"}</h1>
         )}
         {!open && !editor && !c.searching && <Button variant="ghost" size="icon" aria-label="Search contacts" onClick={() => can({ type: "searchOpened" }) && send({ type: "searchOpened" })}><Search aria-hidden /></Button>}
         {!open && !editor && (

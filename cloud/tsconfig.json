@@ -3,6 +3,7 @@
     "target": "es2023",
     "module": "nodenext",
     "lib": ["es2024", "dom", "dom.iterable"],
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
@@ -12,7 +13,10 @@
     "customConditions": ["eliza-source"],
     "rootDir": ".",
     "rootDirs": [".", ".vibe/declarations"],
-    "plugins": [{ "name": "@effect/language-service" }]
+    "plugins": [{
+      "name": "@effect/language-service",
+      "diagnosticSeverity": { "unstableApiUsage": "suggestion" }
+    }]
   },
   "include": ["src", "test", "generated/*.ts", "*.config.ts"],
   "vibe": { "sidecarDir": ".vibe/declarations" }

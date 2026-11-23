@@ -1,7 +1,7 @@
 // spec/notes/collection.md, "Story: Read my notes under the account I am signed in as"; spec/notes/editor.md, "Story: Edit a note without losing a word"; spec/notes/list.md, "Story: Narrow the list to what I am looking for"; spec/notes/trash.md, "Story: Recover a deleted note"; spec/notes/recorder.md, "Story: Record a voice note"; spec/notes/share.md, "Story: Share the note I have open"; spec/notes/share.md, "One document operation runs at a time, and its receipt shows only in its own visible visit"; spec/notes/trash.md, "A restore needs the exact deletion and the current revision, and a delete's Undo the exact deletion"
 import { Effect, type Stream } from "effect";
 import { Ellipsis, Folder, Mic, Plus, Search, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ScreenProps } from "../app-screen.ts";
 import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Input, Sheet, SheetContent, Toast, ToastProvider, ToastViewport } from "../components/ui/index.ts";
 import { useMachine as useCollection } from "../../../gen/notes__collection.react.ts";
@@ -26,6 +26,7 @@ import { type DocumentReceipt, NotesShare, type ShareChannel } from "../../notes
 import { NotesSources } from "../../notes/sources.vibe";
 import { NotesTrash, type TrashNotice, type TrashRow } from "../../notes/trash.vibe";
 import { copyText } from "../../notes/platform.ts";
+import { Native } from "../../platform/native.vibe";
 import { testMocksBuilt } from "../../platform/build-flags.ts";
 import { useLayer } from "../shell/useLayer.ts";
 import { FoldersSheet } from "./FoldersSheet.tsx";
@@ -33,10 +34,11 @@ import { shareNoticeText, statusText, trashNoticeText } from "./messages.ts";
 import { NoteEditor } from "./NoteEditor.tsx";
 import { NoteRecorder } from "./NoteRecorder.tsx";
 import { NotesList } from "./NotesList.tsx";
+import { PreviousDeviceNotes } from "./PreviousDeviceNotes.tsx";
 import { NotesReviewBar } from "./NotesReviewBar.tsx";
 import { NotesTrash as TrashView } from "./NotesTrash.tsx";
 import { runtime } from "./runtime.ts";
-import { call, useServiceStream } from "../shell/services.ts";
+import { call, now, useServiceStream } from "../shell/services.ts";
 import { WebSourceDialog } from "./WebSourceDialog.tsx";
 
 const snapshots = (collection: NotesCollection.Shape) => collection.snapshots;
@@ -79,6 +81,7 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
   const requestedFilter = useServiceStream("notes.requestedFilters", Effect.map(Effect.service(NotesHandoff), requestedFilters), undefined);
   const receipt = useServiceStream("notes.documentReceipts", Effect.map(Effect.service(NotesShare), documentReceipts), undefined);
   const [seenReceipt, setSeenReceipt] = useState<DocumentReceipt>();
+  const [previousOwner, setPreviousOwner] = useState<number>();
   const [search, setSearch] = useState("");
   const [searching, setSearching] = useState(false);
   const [folder, setFolder] = useState<string>();
@@ -88,6 +91,10 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
   const [notice, setNotice] = useState<{ text: string; action?: { label: string; onAction: () => void }; onDismiss?: () => void }>();
 
   const state = collection.state ?? collectionInitial;
+  const earlierNotesAvailable = state.owner > 0 && now(Effect.flatMap(Effect.service(Native), (native) => native.available("AlphaConnection")), false);
+  useEffect(() => {
+    if (!earlierNotesAvailable || previousOwner !== state.owner) setPreviousOwner(undefined);
+  }, [earlierNotesAvailable, previousOwner, state.owner]);
   const editor = editorMachine.state ?? editorInitial;
   const trash = trashMachine.state ?? trashInitial;
   const recorder = recorderMachine.state ?? recorderInitial;
@@ -168,7 +175,7 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
     body = (
       <>
         <header className="flex items-center gap-2 px-4 pt-4">
-          <h1 className="flex-1 font-serif text-3xl">Notes</h1>
+          <h1 className="flex-1 font-display text-3xl">Notes</h1>
           <Button variant="ghost" size="icon" aria-label="Search notes" onClick={() => setSearching(!searching)}><Search aria-hidden /></Button>
           <Button variant="ghost" size="icon" aria-label="Folders" onClick={() => { foldersLayer.show(); void call(NotesFolders, (service) => service.list()); }}><Folder aria-hidden /></Button>
           <DropdownMenu>
@@ -176,6 +183,7 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled={!trashMachine.can({ type: "openTrash" })} onSelect={() => void call(NotesTrash, (service) => service.open())}>Recently deleted</DropdownMenuItem>
               {testMocksBuilt && <DropdownMenuItem onSelect={() => void call(NotesShare, (service) => service.importText()).then((said) => { if (said === "busy" || said === "unavailable") tell(shareNoticeText[said]); })}>Import text file</DropdownMenuItem>}
+              {earlierNotesAvailable && <DropdownMenuItem onSelect={() => setPreviousOwner(state.owner)}>Previous notes</DropdownMenuItem>}
               <DropdownMenuItem onSelect={onClose}>Close Notes</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -217,6 +225,7 @@ export function NotesScreen({ onClose }: NotesScreenProps) {
             onCopy={() => void copyText([kept.title, kept.body].filter(Boolean).join("\n")).then(() => tell("Draft copied."), () => tell("Draft could not be copied."))} />
         )}
         {body}
+        {earlierNotesAvailable && previousOwner === state.owner && <PreviousDeviceNotes key={state.owner} onClose={() => setPreviousOwner(undefined)} />}
         <FoldersSheet open={foldersLayer.open} folders={folders} {...(folder === undefined ? {} : { selected: folder })} onOpenChange={(open) => { if (!open) foldersLayer.hide(); }}
           onSelect={(id) => { setFolder(id); foldersLayer.hide(); }}
           onCreate={(name) => void call(NotesFolders, (service) => service.create(name)).catch(() => tell("Not created"))}

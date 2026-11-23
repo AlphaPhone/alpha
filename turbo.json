@@ -7,20 +7,20 @@
       "outputs": ["gen/**", "generated/**"]
     },
     "build": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen"],
       "env": ["ELIZA_DEV_ALLOW_TEST_MOCKS", "ALPHA_CLOUD_CUTOVER", "ALPHA_CLOUD_DEPLOYMENT_FILE", "VITE_*"],
       "outputs": ["dist/**", "generated/**", "storybook-static/**", "../../web-dist/**"]
     },
     "typecheck": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen"],
       "outputs": [".vibe/declarations/**"]
     },
     "test": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen"],
       "outputs": [".cache/test-result-*.json"]
     },
     "test:browser": {
-      "dependsOn": ["gen", "^build"],
+      "dependsOn": ["gen"],
       "outputs": []
     },
     "lint": {
@@ -32,7 +32,7 @@
       "cache": false
     },
     "dev": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["gen"],
       "cache": false,
       "persistent": true
     }

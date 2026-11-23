@@ -33,7 +33,7 @@ export function ContactDetailView({ contacts, onCall, onMessage, onEdit, onDelet
   return (
     <div className="flex flex-col items-center gap-4 px-4 py-4">
       <Avatar name={name} size="lg" />
-      <h2 className="font-serif text-2xl">{name}</h2>
+      <h2 className="font-display text-2xl">{name}</h2>
       <ul className="w-full divide-y divide-border">
         {phones.map((p) => (
           <li key={p.number} className="flex items-center gap-2 py-2">

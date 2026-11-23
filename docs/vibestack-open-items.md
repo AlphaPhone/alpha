@@ -29,7 +29,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - foreground alert catch-up (legacy `calendar-alerts.ts`), which would belong to Clock.
 
   The Calendar "Not connected" Settings button still opens account > google; confirm that target.
-- **Upgrade requirement:** Keep access to existing on-device Notes and unsaved drafts in the current Alpha package, as required by the PRD. The agent's earlier Notes importer reads its own state file. Verify a separate upgrade path from the encrypted `notes-records:v1:device` and `notes-draft:v1:device` slots, including an unreadable slot and an interrupted retry. Keep the earlier data until the upgrade or recovery is verified.
+- **Upgrade requirement:** Keep access to existing on-device Notes and unsaved drafts in the current Alpha package, as required by the PRD. The agent's earlier Notes importer reads its own state file. Verify the separate read-only recovery path from the encrypted `notes-records:v1:device` and `notes-draft:v1:device` slots, in a same-package Android upgrade, including an unreadable slot, an interrupted retry, and access to archived data and legacy recordings. Keep the earlier data until the upgrade or recovery is verified.
 - **OWNER:** Other legacy slots not carried over:
   - old inbox operation records (`inbox-operation:v1:<sha256>`), possibly including a send in flight during the update: move to `device:<key>` in MailOperations, or drop?
   - `inbox-drafts:v1:chat:<sha256>` is not adopted by Inbox. The assistant's email shelf now uses the same key shape; confirm the old slots may be read as shelves.

@@ -113,6 +113,13 @@ export const locationLayer = Layer.effect(PhoneLocation, effect {
       try tick()
       try adopt()
       fork.detached background()
+      if (!sendsLocation(try locator.get(), observedScreen, peerTakesIt)) return undefined
+      if (!(try permission())) {
+        try send({ type: "permissionChanges", granted: false })
+        try forget()
+        return undefined
+      }
+      if (!(try consent())) return undefined
       const state = try locator.get()
       if (!sendsLocation(state, observedScreen, peerTakesIt)) return undefined
       if (gpsCurrent(state)) return gps

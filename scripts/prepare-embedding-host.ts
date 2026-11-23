@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {embeddingProducerInputPaths as producerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,nativeCmakeOptions,verifyNativeJava,nativeRequiredSymbols,verifyNativeSymbols} from './embedding-native-contract.ts';
+import {embeddingProducerInputPaths as producerInputPaths,nativeInputPaths,nativeJavaPath,nativeModule,nativeJniSource,nativeEngineLockPath,readNativeEngineLock,nativeBinding,nativeInputs,nativeGenerated,nativeCmakeOptions,verifyNativeJava,nativeRequiredSymbols,verifyNativeSymbols} from './embedding-native-contract.ts';
 import type { EmbeddingInput, EmbeddingProducerInput, PreparedEmbeddingLibrary } from "./stage-embedding-host.ts";
 import {embeddingBuildRemap} from './embedding-build-remap.ts';
 import {isAndroidAbi} from './android-abis.ts';
@@ -24,9 +24,8 @@ if(fs.existsSync(output))throw Error('Output already exists; preserve prior arti
 const git=(directory: string,...command: string[])=>execFileSync('git',['-C',directory,...command],{encoding:'utf8'}).trim();
 const pin=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'),'utf8')).commit;
 if(git(upstream,'rev-parse','HEAD')!==pin)throw Error('Unexpected Eliza pin');
-const forkPath='packages/os/android/local-inference/llama.cpp';
-const forkPin=git(upstream,'ls-tree',pin,forkPath).match(/^160000 commit ([a-f0-9]{40})\t/)?.[1];
-if(!forkPin||git(fork,'rev-parse','HEAD')!==forkPin||git(fork,'status','--porcelain'))throw Error('Engine checkout must be clean at the exact Eliza gitlink');
+const forkPin=readNativeEngineLock(git(upstream,'show',`${pin}:${nativeEngineLockPath}`)).commit;
+if(git(fork,'rev-parse','HEAD')!==forkPin||git(fork,'status','--porcelain'))throw Error('Engine checkout must be clean at the exact SDK engine lock');
 if(git(fork,'submodule','status','--recursive').split('\n').some(line=>line&&/^[-+U]/.test(line)))throw Error('Engine nested submodules must already be initialized at their pins; no downloads are performed');
 for(const file of ['tools/omnivoice/CMakeLists.txt','tools/omnivoice/include/eliza-inference-ffi.h'])if(!fs.existsSync(path.join(fork,file)))throw Error('Pinned fused engine source is incomplete');
 const identity=androidIdentity(root).appId;
@@ -59,12 +58,12 @@ for(const relative of producerInputPaths){
  else if(createHash('sha256').update(fs.readFileSync(target)).digest('hex')!==digest)throw Error('Producer input overlaps a relocated native input');
  producerInputs.push({path:relative,sha256:digest});
 }
-fs.mkdirSync(path.dirname(path.join(staging,forkPath)),{recursive:true});fs.symlinkSync(fork,path.join(staging,forkPath),'dir');
-const nativeSource=path.join(staging,'packages/os/android/local-inference/elizavoice-jni');
+const nativeSource=path.join(staging,nativeJniSource);
+const stagedLibraries=path.join(staging,nativeModule,'src/main/jniLibs');
 const suppliedEngine=option('--engine');
-if(suppliedEngine){for(const name of ['libelizainference.so','libc++_shared.so']){const from=path.join(suppliedEngine,name),to=path.join(staging,'packages/os/android/local-inference/jniLibs',abi,name);if(!fs.statSync(from).isFile()||fs.lstatSync(from).isSymbolicLink())throw Error('Native engine input must be a regular file');fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}}
+if(suppliedEngine){for(const name of ['libelizainference.so','libc++_shared.so']){const from=path.join(suppliedEngine,name),to=path.join(stagedLibraries,abi,name);if(!fs.statSync(from).isFile()||fs.lstatSync(from).isSymbolicLink())throw Error('Native engine input must be a regular file');fs.mkdirSync(path.dirname(to),{recursive:true});fs.copyFileSync(from,to);}}
 const commands=[
- ...(!suppliedEngine?[[process.execPath,path.join(staging,'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts'),'--abi',abi,'--variant','cpu']]:[]),
+ ...(!suppliedEngine?[[process.execPath,path.join(staging,'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts'),'--abi',abi,'--out',path.join(stagedLibraries,abi),'--variant','cpu']]:[]),
  ['cmake','-S',nativeSource,'-B',path.join(output,'jni-build'),'-G','Ninja',`-DCMAKE_TOOLCHAIN_FILE=${toolchain}`,`-DANDROID_ABI=${abi}`,'-DANDROID_PLATFORM=android-23','-DCMAKE_BUILD_TYPE=Release',...nativeCmakeOptions(jniBinding),`-DELIZAVOICE_FFI_INCLUDE_DIR=${path.join(fork,'tools/omnivoice/include')}`],
  ['cmake','--build',path.join(output,'jni-build'),'--target','paradeevoicejni','-j','2'],
 ];
@@ -74,12 +73,12 @@ const commands=[
 // toolchain file ignores CFLAGS). Bytes built with and without it differ; a receipt records which.
 const remap=args.includes('--remap-build-path');
 const remapEnv=remap?embeddingBuildRemap(root,{sdk,staging,fork,build:path.join(output,'jni-build')}):{};
-const receipt={pin,forkPin,identity,abi,inputs,producerInputs,...(jniBinding.mode==='registered'?{jniBinding}:{}),commands,env:{ANDROID_HOME:sdk,ELIZA_NDK_VERSION:ndkVersion,CMAKE_BUILD_PARALLEL_LEVEL:'2',...remapEnv},buildPathRemapped:remap,built:false,packaged:false,runtimePolicyChanged:false,libraries:undefined as PreparedEmbeddingLibrary[] | undefined};
+const receipt={pin,forkPin,identity,abi,inputs,producerInputs,...(jniBinding.mode==='registered'?{jniBinding}:{}),commands,env:{ANDROID_HOME:sdk,ELIZA_NDK_VERSION:ndkVersion,CMAKE_BUILD_PARALLEL_LEVEL:'2',ELIZA_INFERENCE_ENGINE_DIR:fork,...remapEnv},buildPathRemapped:remap,built:false,packaged:false,runtimePolicyChanged:false,libraries:undefined as PreparedEmbeddingLibrary[] | undefined};
 fs.writeFileSync(path.join(output,'PREPARATION.json'),JSON.stringify(receipt,null,2)+'\n');
 if(args.includes('--build')){
  for(const [executable,...argv] of commands)execFileSync(executable,argv,{cwd:staging,env:{...process.env,...receipt.env},stdio:'inherit'});
  const tools=path.join(ndk,'toolchains/llvm/prebuilt',process.platform==='darwin'?'darwin-x86_64':'linux-x86_64','bin');
- const libraries=[path.join(staging,'packages/os/android/local-inference/jniLibs',abi,'libelizainference.so'),path.join(staging,'packages/os/android/local-inference/jniLibs',abi,'libc++_shared.so'),path.join(output,'jni-build/libparadeevoicejni.so')];
+ const libraries=[path.join(stagedLibraries,abi,'libelizainference.so'),path.join(stagedLibraries,abi,'libc++_shared.so'),path.join(output,'jni-build/libparadeevoicejni.so')];
  receipt.libraries=libraries.map(file=>{
   const symbols=execFileSync(path.join(tools,'llvm-nm'),['-D','--defined-only',file],{encoding:'utf8',maxBuffer:16*1024*1024});
   const elf=execFileSync(path.join(tools,'llvm-readelf'),['-W','-h','-l','-d',file],{encoding:'utf8'});

@@ -35,7 +35,7 @@ export function SheetContent({ className, side, title, hideTitle, children, ...p
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-scrim" />
       <DialogPrimitive.Content className={cn(sheetVariants({ side }), className)} {...props}>
         <div aria-hidden className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-border" />
-        <DialogPrimitive.Title className={cn("px-5 font-serif text-2xl", hideTitle && "sr-only")}>{title}</DialogPrimitive.Title>
+        <DialogPrimitive.Title className={cn("px-5 font-display text-2xl", hideTitle && "sr-only")}>{title}</DialogPrimitive.Title>
         {children}
         <DialogPrimitive.Close aria-label="Close" className={cn(focusRing, "sr-only focus:not-sr-only")} />
       </DialogPrimitive.Content>

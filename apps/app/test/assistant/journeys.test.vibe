@@ -321,7 +321,7 @@ it.effect("Know what became of a reply I stopped (spec/assistant/stoppedReply.md
 
 it.effect("Let my agent know where I am when I allow it (spec/assistant/context.md, \"A turn carries the location only with the setting on, the permission granted, a screen that is not private and a peer that takes it\")", () => effect {
   const said = { asks: false, shares: true }
-  const reads = { count: 0 }
+  const reads = { count: 0, granted: true }
   provide assistantOver(quietResident(), fakeHost([]), countingExecutors({ count: 0 }), locationNative({ latitude: 37.1234567, longitude: -122.7654321, accuracy: 4.6 }, reads), fakePreferences(said)) {
     const location = try PhoneLocation
     try location.warm()
@@ -329,11 +329,13 @@ it.effect("Let my agent know where I am when I allow it (spec/assistant/context.
     const reused = try location.forTurn(true, true)
     const unobserved = try location.forTurn(false, true)
     const olderPeer = try location.forTurn(true, false)
+    reads.granted = false
+    const revoked = try location.forTurn(true, true)
     said.shares = false
     const off = try location.forTurn(true, true)
     try Effect.try(() => assert.deepStrictEqual(
-      { first, reused: reused?.latitude, unobserved, olderPeer, off, reads: reads.count },
-      { first: { latitude: 37.12346, longitude: -122.76543, accuracyMeters: 5, capturedAt: 0 }, reused: 37.12346, unobserved: undefined, olderPeer: undefined, off: undefined, reads: 1 },
+      { first, reused: reused?.latitude, unobserved, olderPeer, revoked, off, reads: reads.count },
+      { first: { latitude: 37.12346, longitude: -122.76543, accuracyMeters: 5, capturedAt: 0 }, reused: 37.12346, unobserved: undefined, olderPeer: undefined, revoked: undefined, off: undefined, reads: 1 },
     ))
   }
 })

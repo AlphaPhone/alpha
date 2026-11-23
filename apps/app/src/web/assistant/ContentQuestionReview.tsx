@@ -31,7 +31,7 @@ function ReviewForm({ review }: FormProps) {
   return (
     <Dialog open onOpenChange={(open) => { if (!open) dismiss(); }}>
       <DialogContent aria-label="Ask about selected content" closeLabel="Cancel">
-        <DialogTitle className="font-serif text-2xl">{review.label}</DialogTitle>
+        <DialogTitle className="font-display text-2xl">{review.label}</DialogTitle>
         <p role="note" aria-label="Selected source" className="break-words text-sm text-muted-foreground">{review.name}</p>
         {preview !== undefined && <img src={preview} alt="Image for question review" className="max-h-28 w-full rounded-lg object-contain" />}
         <Label className="flex flex-col gap-1">Question
@@ -60,7 +60,6 @@ function ReviewForm({ review }: FormProps) {
 
 /**
  * The review of a question another area handed to the assistant: the owner edits the question and excerpt, then adds them to the chat as a draft.
- * @model spec/assistant/index.md
  */
 export function ContentQuestionReview(_props: ContentQuestionReviewProps) {
   const review = useServiceStream("assistant/question-review", reviewStream, undefined);

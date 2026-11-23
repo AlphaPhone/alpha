@@ -58,7 +58,7 @@ export function DirectionsSheet(p: DirectionsSheetProps) {
   return (
     <section aria-label={`Directions to ${p.destination}`} className="flex flex-col gap-3 p-4">
       <header className="flex items-center gap-2">
-        <h2 className="flex-1 truncate font-serif text-2xl">{p.destination}</h2>
+        <h2 className="flex-1 truncate font-display text-2xl">{p.destination}</h2>
         <Button variant="ghost" size="icon" aria-label="Close directions" onClick={p.onClose}><X aria-hidden /></Button>
       </header>
       <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); p.onSubmitOrigin(); }}>
@@ -93,7 +93,7 @@ export function DirectionsSheet(p: DirectionsSheetProps) {
             </div>
           )}
           <p className="flex items-baseline gap-2">
-            <span className="font-serif text-3xl tabular-nums">{guidanceDuration(route.durationSeconds)}</span>
+            <span className="font-display text-3xl tabular-nums">{guidanceDuration(route.durationSeconds)}</span>
             <span className="text-muted-foreground">{guidanceDistance(route.distanceMeters, "en-US")}{route.traffic === "live" ? "" : " · no live traffic"}</span>
           </p>
           <ScrollArea className="max-h-[30vh]">
