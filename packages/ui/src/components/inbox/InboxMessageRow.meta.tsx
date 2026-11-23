@@ -19,9 +19,9 @@ export const meta: ComponentMeta<InboxMessageRowProps> = {
       onChosenChange.mockClear();
       const canvas = within(canvasElement);
       await userEvent.click(canvas.getByRole("button", { name: /Lunch on Friday/ }));
-      await userEvent.click(canvas.getByRole("button", { name: "Choose message from Ana Lima" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Choose Ana Lima" }));
       await expect([onOpen.mock.calls.length, onChosenChange.mock.calls]).toEqual([1, [[true]]]);
     },
-    "Saved list": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: /Choose message/ })).toBeNull(),
+    "Saved list": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: /^Choose/ })).toBeNull(),
   },
 };

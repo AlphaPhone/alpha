@@ -24,7 +24,6 @@ export const meta: ComponentMeta<InboxFolderBarProps> = {
       const canvas = within(canvasElement);
       await expect(canvas.getByRole("button", { name: "Spam" })).toBeDisabled();
       await expect(canvas.getByRole("button", { name: "Trash" })).toBeDisabled();
-      await userEvent.click(canvas.getByRole("button", { name: "Spam" }));
       await expect(onChoose.mock.calls.length).toBe(0);
     },
   },

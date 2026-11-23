@@ -53,7 +53,8 @@ export function InboxMessageRow({ sender, subject, snippet, time, unread = false
   return (
     <div onPointerDown={start} onPointerUp={end} onPointerCancel={() => { swipeFromRef.current = undefined; }} className={cn("flex items-center gap-1 pr-2 pl-1 touch-pan-y", chosen && "bg-accent")}>
       {onChosenChange ? (
-        <button type="button" aria-pressed={chosen} aria-label={`Choose message from ${sender}`} onClick={() => onChosenChange(!chosen)} className={cn(focusRing, "flex size-12 shrink-0 items-center justify-center rounded-full")}>
+        <button type="button" aria-pressed={chosen} onClick={() => onChosenChange(!chosen)} className={cn(focusRing, "flex size-12 shrink-0 items-center justify-center rounded-full")}>
+          <span className="sr-only">Choose</span>
           {picture}
         </button>
       ) : (

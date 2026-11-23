@@ -1,3 +1,4 @@
+import { cn, focusRing } from "../../lib/cn.ts";
 import { Chip } from "../Chip.tsx";
 
 export const inboxFolders = { incoming: "Inbox", starred: "Starred", sent: "Sent", drafts: "Drafts", allMail: "All mail", archived: "Archive", spam: "Spam", trashed: "Trash" } as const;
@@ -19,7 +20,7 @@ export type InboxFolderBarProps = {
  */
 export function InboxFolderBar({ folder, unavailable = false, onChoose }: InboxFolderBarProps) {
   return (
-    <div role="group" aria-label="Folder" className="-mx-4 flex gap-2 overflow-x-auto px-4 py-1">
+    <div role="group" aria-label="Folder" tabIndex={0} className={cn(focusRing, "-mx-4 flex gap-2 overflow-x-auto px-4 py-1")}>
       {(Object.keys(inboxFolders) as InboxFolder[]).map((name) => (
         <Chip
           key={name}
