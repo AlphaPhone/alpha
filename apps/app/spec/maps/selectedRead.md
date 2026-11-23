@@ -59,7 +59,12 @@ A read whose selection changed before it ran is journaled as not started.
 The agent's `maps_read_selected` names its target by the identity Maps gives
 the shown place (a route keeps its destination's) and the context revision;
 it runs only while both still match what Maps shows, and otherwise is not
-dispatched. Android's keyguard over Maps counts as a sensitive screen, so no
+dispatched. That identity is an opaque handle, `maps_` and a random id, that
+names the selection on this phone only: it is never a provider place id, so
+the agent's Maps actions never send it to Cloud as one, and a request whose
+only place is that handle goes back to the planner to name the place
+(`vendor/eliza/spec/maps/routing.md`). Android's keyguard over Maps counts
+as a sensitive screen, so no
 context is offered and no read runs while the phone is locked.
 
 ```quint
