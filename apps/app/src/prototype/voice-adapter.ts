@@ -28,6 +28,7 @@ import { createOnDeviceVoice } from '../runtime/local-voice';
 import { screenConversationSpeech } from '../runtime/local-speech-text';
 import { voiceFailure, transcriptProvenance, deniedSettingsChoice, DENIED_SETTINGS_LABEL, MEDIA_UNCONFIRMED_NOTICE, speechCleanupNotice, type VoiceFailure, type TranscriptProvenance } from '../runtime/voice-states';
 import { createPairedVoice } from '../runtime/paired-voice';
+import {markTtsPlaybackStarted,markTtsPlaybackEnded} from '../ui/voice/tts-playback-activity.ts';
 import { createCloudVoice, cloudVoiceFailure, cloudVoiceServiceLimit, createCloudStreamingSpeech, nativeCloudStreamingAvailable, type VoiceRecordingStopped } from '../runtime/cloud-voice';
 import { speakCloudSpeechChunks } from '../../../../.eliza/client-features/packages/voice/src/cloud-speech-chunks.ts';
 import { clefEndpointStage, selectVoiceRoute, speechRoute, noteNetworkSpeechFailure, clearNetworkSpeechHold, voicePreferenceKeys, voiceSendPolicy, type VoicePreference } from '../runtime/voice-selection';
@@ -740,7 +741,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       // session first, as at Mute, unless the reply pauses for owner review: the session then drops
       // what it heard, and the held start with it.
       type CueTurn={signal:AbortSignal;settled?:boolean};
-      let cueSpeech:{captureRetired:(()=>boolean)|null;speak(text:string,signal:AbortSignal,turn:CueTurn):Promise<void>}|undefined;
+      let cueSpeech:{captureRetired:(()=>boolean)|null;speak(text:string,signal:AbortSignal,turn:CueTurn,onStarted:()=>void):Promise<void>}|undefined;
       let shortenedReplyId:string|undefined;
       const sendTurn=async(input:{turnId:string;text:string;voiceTurnSignal:any;signal:AbortSignal;onText?:(text:string,frame?:AssistantTextFrame)=>void;supersedes?:string})=>{
         const cueTurn:CueTurn={signal:input.signal};try{
@@ -750,7 +751,7 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
           current();
           if(local&&!streamingCloud)try{void Promise.resolve(deviceVoice.warmSpeechOutput()).catch(()=>{});}catch{/* Advisory warm-up never gates a turn. */}
           const turn={...conversationPrepared!};conversationReplyWatch=new Set((chat.shell.S().msgs||[]).map((m:Bag)=>String(m.id)));
-          const cue=cueSpeech;const ack=cue?createBatchProgressAcknowledgment({turnId:input.turnId,conversationId:turn.binding.conversationId,ownerId:turn.binding.session.ownerId,signal:input.signal,assertCurrent:current,captureRetired:cue.captureRetired,speak:async(label,signal)=>{const pending=Promise.resolve().then(()=>cue.speak(label,signal,cueTurn));const owned=pending.catch(failure=>{if((failure as {code?:string})?.code!=='speech-cleanup-unconfirmed')return;mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});throw failure;});conversationSpeech=owned;try{await owned;}finally{if(conversationSpeech===owned)conversationSpeech=undefined;}}}):undefined;
+          const cue=cueSpeech;const ack=cue?createBatchProgressAcknowledgment({turnId:input.turnId,conversationId:turn.binding.conversationId,ownerId:turn.binding.session.ownerId,signal:input.signal,assertCurrent:current,captureRetired:cue.captureRetired,speak:async(label,signal,onStarted)=>{const pending=Promise.resolve().then(()=>cue.speak(label,signal,cueTurn,onStarted));const owned=pending.catch(failure=>{if((failure as {code?:string})?.code!=='speech-cleanup-unconfirmed')return;mediaUnconfirmed=failure;stopping=Promise.reject(failure);void stopping.catch(()=>{});throw failure;});conversationSpeech=owned;try{await owned;}finally{if(conversationSpeech===owned)conversationSpeech=undefined;}}}):undefined;
           const retireAck=()=>{try{current();}catch{void ack?.stop().catch(()=>{});}};
           const unsubscribeAck=ack?connectionController.subscribe(retireAck):()=>{};
           if(ack)document.addEventListener('visibilitychange',retireAck);
@@ -850,10 +851,10 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
         let cueHeard:{text:string;settledAt?:number;turn:CueTurn}|undefined;
         const cueAge=(heard:{settledAt?:number})=>heard.settledAt===undefined?0:Math.max(0,Date.now()-heard.settledAt);
         const pending=(turn:CueTurn)=>!turn.settled&&!turn.signal.aborted;
-        cueSpeech={captureRetired:null,speak:async(text,signal,turn)=>{
+        cueSpeech={captureRetired:null,speak:async(text,signal,turn,onStarted)=>{
           if(liveCapture?.speaking)return;
           const heard:{text:string;settledAt?:number;turn:CueTurn}={text,turn};let audible=false;
-          const started=()=>{audible=true;cueHeard=heard;};
+          const started=()=>{audible=true;cueHeard=heard;onStarted();};
           try{await (streamingCloud?streamingCloud.speak(text,signal,started):local!.speak(text,signal,started,true,{conversation:true}));}
           finally{if(audible)heard.settledAt=Date.now();}
         }};
@@ -964,7 +965,8 @@ export function installPrototypeVoiceAdapter(Component: any, views: Record<strin
       }
       // The live assistant is not ready, or this is the owner's provider or a development route: the recorded-clip loop listens only between replies.
       // Its cue plays through the reply's own speaker (Cloud or provider speech, or on-device speech) on every platform.
-      cueSpeech={captureRetired:()=>batchCaptureRetired,speak:(text,signal)=>local?local.speak(text,signal,undefined,true,{conversation:true}):cloudDriver!.speak(text,signal)};
+      // A Cloud cue that reports its own start keeps the playback-activity mark Cloud speech sets without one.
+      cueSpeech={captureRetired:()=>batchCaptureRetired,speak:async(text,signal,_turn,onStarted)=>{if(local)return local.speak(text,signal,onStarted,true,{conversation:true});let marked=false;try{await cloudDriver!.speak(text,signal,()=>{marked=true;markTtsPlaybackStarted();onStarted();});}finally{if(marked)markTtsPlaybackEnded();}}};
       const conversation:BatchVoiceConversation<Clip>=new BatchVoiceConversation<Clip>({
         conversationId:prepared.binding.conversationId,assertCurrent:current,
         capture:async input=>{current();batchCaptureRetired=false;conversationPrepared={...conversationPrepared!,context:chat.shell.voiceConversationContext(prepared.binding)};current();const capture=await captureConversationAudio(selected,current,input);return {stop:async()=>{const value=await capture.stop();current();batchCaptureRetired=true;return value;},cancel:async()=>{await capture.cancel();batchCaptureRetired=true;}};},
