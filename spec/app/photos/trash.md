@@ -84,6 +84,13 @@ pure val staleValues = Set(Set(), Set(2))
 pure val revisionValues = Set(1, 2)
 pure val ticketValues = Set(1, 2, 3, 4)
 pure val attemptValues = Set(1, 2, 3)
+pure val weight_enter = 3
+pure val weight_listed = 4
+pure val weight_startSelect = 3
+pure val weight_selectAll = 3
+pure val weight_recoverSelected = 4
+pure val weight_sendNext = 4
+pure val weight_recovered = 4
 ```
 
 ## Story: See what I deleted

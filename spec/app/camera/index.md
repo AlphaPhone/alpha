@@ -156,6 +156,12 @@ pure val photoValues = Set(0, 8, 9)
 pure val videoValues = Set(0, 7)
 pure val newestValues = Set(0, 3)
 pure val weight_chunk = 3
+pure val weight_previewStarted = 4
+pure val weight_setMode = 3
+pure val weight_startRecording = 4
+pure val weight_recordingStarted = 4
+pure val weight_recordingEnded = 4
+pure val weight_recordingVerified = 4
 ```
 
 ## Story: Open the camera
