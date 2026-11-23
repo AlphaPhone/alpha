@@ -344,8 +344,8 @@ pure def stepTheMicrophoneIsToldFirst(before: Recorder, via: str, after: Recorde
 ### A recording being kept, or kept, or that an error stopped, holds some audio, and a kept voice note is one the store confirmed or was found to hold
 
 A keeping on its way is the recording's only state then. Discovered by the
-proof: a recording still being made has no keeping yet, one that failed has
-none that went through or is unaccounted for, and a lookup runs only over a
+proof: a recording still being made has no keeping yet, one that failed or
+is being discarded has none that went through or is unaccounted for, and a lookup runs only over a
 keeping whose outcome is unknown; without these a recording could be kept
 twice.
 
@@ -359,7 +359,7 @@ pure def alwaysAKeptRecordingHoldsAudio(r: Recorder): bool =
     and (r.keeping.outcome == A::Sent implies r.phase == Keeping)
     and (r.missing implies r.keeping.outcome == A::Unknown)
     and (live(r) implies r.keeping.outcome == A::Planned)
-    and (r.phase == Failed implies (r.keeping.outcome == A::Planned or r.keeping.outcome == A::Refused or r.missing))
+    and ((r.phase == Failed or r.phase == Discarding) implies (r.keeping.outcome == A::Planned or r.keeping.outcome == A::Refused or r.missing))
     and (r.look.status == R::Loading implies (r.phase == Keeping and r.keeping.outcome == A::Unknown))
 ```
 

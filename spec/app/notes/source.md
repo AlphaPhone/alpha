@@ -236,6 +236,18 @@ pure def alwaysOnlyTheNamedSourceIsKept(l: Linker): bool =
     and ((l.ref > 0) iff (l.link.tie == FileLink)) and (l.spare != 0 implies (l.spare != l.ref and l.stage == Saving))
 ```
 
+### The dialog shows only an owner's note, holds only files and references the phone gave it, and sends a save as soon as it is written down
+
+Discovered by the proof: without it, a file the picker never gave could
+seem held, a reference of no file could seem kept or freed, and a save
+written down and not sent could block the dialog.
+
+```quint
+pure def alwaysTheDialogHoldsWhatThePhoneGave(l: Linker): bool =
+  l.grant >= 0 and ((l.stage == Reading or l.stage == Retaining) implies l.grant > 0) and l.spare >= 0
+    and not(l.stale.includes(0)) and l.saving.outcome != A::Recorded and (l.showing implies isOwner(l.owner))
+```
+
 ### A link is saved only from the dialog open over the note as shown, and only with the file picked and read for it
 
 ```quint
