@@ -3286,7 +3286,7 @@ export const connectionController = {
     try{current();const conversationId=await ensureSelectedConversation(selected,session,controller.signal,current);current();return {conversationId,session:{...session},connectionEpoch:generation};}
     finally{signal.removeEventListener('abort',cancel);releaseOperation(controller);}
   },
-  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
+  async send(text: string, context: ContextEnvelope, requestId: string, signal: AbortSignal, onText?:import('./local-agent-stream').StreamTextListener,replyTo?:ConversationMessageTarget,onReplyReady?:(results:readonly unknown[]|undefined)=>void,channelType:ChatChannel='DM',expectedConversationId?:string,voiceTurnSignal?:VoiceTurnSignal,images?:Array<{data:string;mimeType:string;name:string}>,workflowStep=false): Promise<{ ignored?:true;messageId?:string;userMessageId?:string;messageBinding?:{conversationId:string;session:VerifiedSession};text: string; proposals?: ActionProposal[]; actionResults?:readonly unknown[]; planAction?: 'plan' | 'retry' | 'sign-in' }> {
     if(!ownProviderSelected()&&state.cloudAccount&&state.membershipBalance==='zero')throw fundingNeeded();
     // P-43: before the resident has a session, say it is starting (or recovering); nothing is sent.
     if (!active && residentAlwaysPresent) throw noSessionError('');
@@ -3334,9 +3334,9 @@ export const connectionController = {
       let browserPage:ClientBrowserPageObservation|undefined;
       if(selected.userTextFormatVersion===1&&observationSession){
         // The fresh status a turn's optional fields need is read beside the position and page, not after them.
-        const reading=isAndroid&&!context.sensitive;
-        const fresh=context.calendarDay||(reading&&phoneLocationEnabled())||observedBrowserTab(context)?observationSession.freshStatus(requestSignal):undefined;
-        const [location,page]=await Promise.all([reading?phoneLocationReader().read(requestSignal):undefined,browserPageForTurn(context,requestSignal)]);assertCurrent();
+        const reading=isAndroid&&!context.sensitive&&!workflowStep;
+        const fresh=context.calendarDay||(reading&&phoneLocationEnabled())||(!workflowStep&&observedBrowserTab(context))?observationSession.freshStatus(requestSignal):undefined;
+        const [location,page]=await Promise.all([reading?phoneLocationReader().read(requestSignal):undefined,workflowStep?undefined:browserPageForTurn(context,requestSignal)]);assertCurrent();
         const observed={...context,location};
         if(observed.calendarDay||observed.location||page){
           const admitted=await observationSession.turn(observed,page,requestSignal,fresh);assertCurrent();

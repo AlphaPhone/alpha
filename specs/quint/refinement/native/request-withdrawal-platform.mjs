@@ -105,7 +105,7 @@ final class WithdrawalHost {
  void requireProviderOwner(boolean foreground){throw new AssertionError("Telephony ownership outside withdrawal fixture");}
  void clearEnrollment(){throw new AssertionError("401 outside successful transport fixture");}
  void requireEnrollmentRoot(long epoch,String root){throw new AssertionError("Startup enrollment reads are outside the plain-request fixture");}
- static void logRequestFailure(String group,String method,int status,String reason){}
+ static void logRequestFailure(String group,String method,int status,String reason,String... hints){}
  String enroll(long epoch)throws Exception {
   Work item=work.get(current.get());item.enrollments.incrementAndGet();event("enrolling");item.enrolling=true;
   gate(item.enrollmentRelease);return "fixture-token";

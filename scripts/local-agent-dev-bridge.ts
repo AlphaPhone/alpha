@@ -93,7 +93,15 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
   if(origin.protocol!=='http:'||origin.hostname!=='127.0.0.1'||origin.pathname!=='/'||origin.search||origin.hash||origin.username||origin.password)
     throw new Error('The development agent must use an explicit 127.0.0.1 HTTP origin.');
   const request=options.request||fetch;
-  const tickets=new Map<string,{root:string;ownerId:string;expiresAt:number;claimed:boolean;clientId?:string;close?:()=>void}>();
+  const tickets=new Map<string,{root:string;ownerId:string;expiresAt:number;claimed:boolean;clientId?:string;leaseRenewal?:true;upstreamOwnsExpiry?:true;close?:()=>void}>();
+  function pruneTickets(root:string){
+    for(const [id,ticket] of tickets){
+      if(ticket.root!==root||(!ticket.upstreamOwnsExpiry&&ticket.expiresAt<=Date.now())){
+        ticket.close?.();
+        tickets.delete(id);
+      }
+    }
+  }
   let pairing:Promise<{root:string;token:string;ownerId:string;expiresAt:number}>|undefined;
   let unconfirmedOwnerInstance:string|undefined;
   async function session(root:string) {
@@ -202,7 +210,7 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       if(!stat.isFile()||(stat.mode&0o077)!==0)throw new Error('Private runtime credential required');
       const token=readFileSync(options.tokenFile,'utf8').trim();
       if(!/^[a-f0-9]{64}$/.test(token))throw new Error('Invalid runtime credential');
-      for(const [id,ticket]of tickets)if(ticket.root!==token||ticket.expiresAt<=Date.now()){ticket.close?.();tickets.delete(id);}
+      pruneTickets(token);
       const {credential,enrollment}=await session(token);
       if(input.ownerId!==undefined&&input.ownerId!==credential.ownerId){fail(409,'Local owner changed; reconnect before continuing');return;}
       if(rendererId){if(tickets.size>=32){fail(429,'Voice capacity reached');return;}const id=randomUUID(),expiresAt=Math.min(credential.expiresAt,Date.now()+120000);tickets.set(id,{root:token,ownerId:credential.ownerId,expiresAt,claimed:false,clientId:rendererId});res.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store'});res.end(JSON.stringify({status:200,body:JSON.stringify({wsUrl:`ws://${host}${LOCAL_RENDERER_WS_PATH}?sessionId=${id}`,expiresAt})}));return;}
@@ -276,7 +284,13 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       if(directAsr||cloudAsr){const transcript=JSON.parse(body);if(typeof transcript.text!=='string'||transcript.text.length>16000){fail(502,'Invalid Cloud transcript');return;}body=JSON.stringify({text:transcript.text,provider:'cartesia',route:directAsr?'direct':'cloud',requestId:input.requestId});}
       // The upstream machine session ID is its bearer token. Keep it on the host.
       if(voice){try{if(readFileSync(options.tokenFile,'utf8').trim()!==token||credential.expiresAt<=Date.now())throw Error('Voice owner changed');const projected=voiceControlResponse(voice,input,result.status,body,origin,options.cloudRealtimeEnabled===true,options.selectableProvider===true);
-        if(result.ok&&voice==='mint'){for(const [id,ticket]of tickets)if(ticket.expiresAt<=Date.now()){ticket.close?.();tickets.delete(id);}if(tickets.size>=32)throw Error('Voice capacity reached');tickets.set(projected.sessionId,{root:token,ownerId:credential.ownerId,expiresAt:projected.expiresAt,claimed:false});projected.wsUrl=`ws://${host}${LOCAL_VOICE_WS_PATH}?sessionId=${projected.sessionId}`;}
+        if(result.ok&&voice==='mint'){
+          pruneTickets(token);
+          if(tickets.size>=32)throw Error('Voice capacity reached');
+          tickets.set(projected.sessionId,{root:token,ownerId:credential.ownerId,expiresAt:projected.expiresAt,claimed:false,
+            ...(projected.leaseRenewal===true?{leaseRenewal:true as const}:{})});
+          projected.wsUrl=`ws://${host}${LOCAL_VOICE_WS_PATH}?sessionId=${projected.sessionId}`;
+        }
         if(result.ok&&voice==='revoke'){const id=input.path.split('/')[5];tickets.get(id)?.close?.();tickets.delete(id);}
         body=JSON.stringify(projected);}catch{throw Error('Invalid development voice response');}}
       if(input.path==='/api/auth/me'&&result.status===200){const who=JSON.parse(body);if(who.session)who.session.id='host-owned-session';body=JSON.stringify(who);}
@@ -298,7 +312,8 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
       const host=req.headers.host,url=new URL(req.url,'http://localhost'),id=url.searchParams.get('sessionId'),ticket=id?tickets.get(id):undefined;
       if((!realtimeEnabled&&!ticket?.clientId)||!host||!/^(?:127\.0\.0\.1|localhost):\d+$/.test(host)||req.headers.origin!==`http://${host}`||req.method!=='GET'||url.pathname!==(ticket?.clientId?LOCAL_RENDERER_WS_PATH:LOCAL_VOICE_WS_PATH)||url.search!==`?sessionId=${id}`||!id||!VOICE_UUID.test(id)||!ticket||ticket.claimed||ticket.expiresAt<=Date.now()||req.headers.upgrade?.toLowerCase()!=='websocket'||req.headers['sec-websocket-version']!=='13'||typeof req.headers['sec-websocket-key']!=='string'||!/^[A-Za-z0-9+/]{22}==$/.test(req.headers['sec-websocket-key'])){reject();return true;}
       const stat=statSync(options.tokenFile);if(!stat.isFile()||(stat.mode&0o077)!==0)throw Error('Private runtime credential required');
-      const currentRoot=readFileSync(options.tokenFile,'utf8').trim();for(const [key,entry]of tickets)if(entry.root!==currentRoot||entry.expiresAt<=Date.now()){entry.close?.();tickets.delete(key);}
+      const currentRoot=readFileSync(options.tokenFile,'utf8').trim();
+      pruneTickets(currentRoot);
       const {credential}=await session(currentRoot);
       if(ticket.root!==currentRoot||ticket.ownerId!==credential.ownerId||ticket.expiresAt<=Date.now()||tickets.get(id)!==ticket||ticket.claimed){reject();return true;}
       ticket.claimed=true;
@@ -308,7 +323,11 @@ export function createLocalAgentDevHandler(options:{origin:string;tokenFile:stri
         if(response.statusCode!==101||ticket.expiresAt<=Date.now()||tickets.get(id)!==ticket){upstream.destroy();close();return;}
         request.setTimeout(0);const accept=response.headers['sec-websocket-accept'],expected=createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');if(accept!==expected){upstream.destroy();close();return;}
         socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-        const timer=setTimeout(()=>{upstream.destroy();close();},Math.max(1,ticket.expiresAt-Date.now()));timer.unref();
+        // The ticket gates this one upgrade. The authenticated host enforces
+        // the live expiry and revocation of a renewal-capable Talk session.
+        if(ticket.leaseRenewal)ticket.upstreamOwnsExpiry=true;
+        const timer=ticket.upstreamOwnsExpiry?undefined:setTimeout(()=>{upstream.destroy();close();},Math.max(1,ticket.expiresAt-Date.now()));
+        timer?.unref();
         ticket.close=()=>{clearTimeout(timer);upstream.destroy();close();};
         socket.once('close',()=>{clearTimeout(timer);upstream.destroy();tickets.delete(id);});upstream.once('close',()=>{clearTimeout(timer);socket.destroy();tickets.delete(id);});
         socket.on('error',()=>upstream.destroy());upstream.on('error',()=>socket.destroy());

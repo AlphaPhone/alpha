@@ -5,6 +5,7 @@ import { speechCleanupNotice } from '../runtime/voice-states';
 import { speakLocalText } from '../local-speech-playback';
 import { markVoiceTiming, abandonVoiceTurn, finishVoiceTurn } from '../runtime/voice-timing';
 import { connectionController } from '../runtime/connection-ui';
+import { formatSpeechText } from '../ui/voice/speech-format';
 import { planLocalSpeech, screenSpeechText } from '../runtime/local-speech-text';
 import { createOnDeviceVoice } from '../runtime/local-voice';
 import { createCloudVoice, cloudVoiceFailure } from '../runtime/cloud-voice';
@@ -87,7 +88,7 @@ export async function readNoteAloud(text: string, owner: { noteId?: string } = {
     const assertCurrent=() => { if (noteReading !== reading) throw new DOMException('Speech cancelled', 'AbortError'); };
     if (cloud) {
       // Cloud reads in provider-sized pieces, one owned request at a time.
-      try { const pending=reading.pending=speakCloudSpeechChunks({ text: passage, signal, assertCurrent, onStarted: started, speak: (piece, pieceSignal, onStarted) => cloud.speak(piece, pieceSignal, onStarted) });await pending; return done(noteReading === reading && !signal.aborted ? 'finished' : 'stopped'); }
+      try { const pending=reading.pending=speakCloudSpeechChunks({ text: formatSpeechText(passage), signal, assertCurrent, onStarted: started, speak: (piece, pieceSignal, onStarted) => cloud.speak(piece, pieceSignal, onStarted) });await pending; return done(noteReading === reading && !signal.aborted ? 'finished' : 'stopped'); }
       catch (error) {
         // Nothing was heard and the network route failed: read on this phone instead.
         if (noteReading !== reading || signal.aborted || reading.state === 'reading' || !noteNetworkSpeechFailure(error)) throw error;
@@ -209,7 +210,7 @@ export function installLocalSpeechPlayback(Component: Shell) {
           if(!current())return;
           // Cloud reads in provider-sized pieces, one owned request at a time.
           const assertCurrent=()=>{if(!current())throw new DOMException('Speech cancelled','AbortError');};
-          const pending=state.pending=(network ? speakCloudSpeechChunks({ text: spokenText, signal: controller.signal, assertCurrent, onStarted: () => { audible = true; }, speak: (piece, signal, onStarted) => voice.speak(piece, signal, onStarted) }) : speakOnDevice(spokenText, controller.signal, () => { audible = true; }));await pending;
+          const pending=state.pending=(network ? speakCloudSpeechChunks({ text: formatSpeechText(spokenText), signal: controller.signal, assertCurrent, onStarted: () => { audible = true; }, speak: (piece, signal, onStarted) => voice.speak(piece, signal, onStarted) }) : speakOnDevice(spokenText, controller.signal, () => { audible = true; }));await pending;
           break;
         } catch (error) {
           if ((error as {code?:string})?.code==='speech-cleanup-unconfirmed' || !current()) throw error;
