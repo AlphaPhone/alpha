@@ -10,7 +10,8 @@ import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
 import { statesDirectRequests } from "../../gen/assistant__review.effect.vibe"
 import { interruptedAfterEffect, turnEffects } from "./turn-effects.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
-import { namesCalendarSelection, namesMaps, namesNotesSelection, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
+import { namesCalendarSelection, namesMaps, namesNotesSelection, sendsDay, sendsNoteFolders, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
+import { NOTE_FOLDERS_METADATA_KEY } from "@elizaos/plugin-notes/organize"
 import { Preferences } from "../settings/preferences.vibe"
 import { Latency } from "../voice/latency.vibe"
 import type { DictationTarget } from "../voice/dictation.vibe"
@@ -334,8 +335,11 @@ export const composerLayer = Layer.effect(Composer, effect {
     const observed = observes(screen.exposure)
     const calendarSelection = namesCalendarSelection(observed, screen.onCalendar, screen.observation.selectedObject !== undefined) ? try sources.calendarSelection() : undefined
     const peer = try host.peer()
-    const place = try location.forTurn(observed, peer.takesLocation)
-    const asksFirst = try preferences.asksBeforeActions()
+    const [noteFolders, place, asksFirst] = try.all [
+      sendsNoteFolders(observed, peer.optionalFields, Boolean(identity.enrollmentId)) ? sources.noteFolders() : succeed(undefined),
+      location.forTurn(observed, peer.takesLocation),
+      preferences.asksBeforeActions(),
+    ]
     try sources.preferReview(asksFirst)
     const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const noteSelection = namesNotesSelection(observed, screen.observation.view === "notes", screen.observation.selectedObject !== undefined) ? try sources.notesSelection() : undefined
@@ -417,6 +421,7 @@ export const composerLayer = Layer.effect(Composer, effect {
         ...context,
         ...(viewFields ?? {}),
         ...(quote === undefined ? {} : { replyToMessageId: quote.messageId }),
+        ...(noteFolders === undefined ? {} : { [NOTE_FOLDERS_METADATA_KEY]: noteFolders }),
       }, ...(files.length === 0 ? {} : { images: files.map(({ data, mimeType, name }) => ({ data, mimeType, name })) }) },
       { stream: hooks },
     )))
