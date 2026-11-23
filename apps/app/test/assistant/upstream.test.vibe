@@ -186,27 +186,70 @@ it.effect("Send what I dictated and have it timed like a voice turn (spec/assist
   try Effect.try(() => assert.deepStrictEqual({ sentAsDictated, edited }, { sentAsDictated: ["sent:Call mom", "FirstToken", "FinalReply"], edited: ["sent:"] }))
 })
 
-it.effect("Hear a brief acknowledgment and still get the whole answer (spec/assistant/reply.md, \"A spoken cue waits 300 ms and is dropped when the reply is ready first; an audible cue finishes before the reply, within 2.5 s\")", () => effect {
-  const heard: string[] = []
-  const speak = (text: string, started: Effect.Effect<void>) => effect {
-    try sleep(100)
+effect function yields() {
+  for (const _ of [1, 2, 3, 4, 5, 6, 7, 8]) try yieldNow
+}
+
+/** A speaker that is asked at once, is audible after `prepareMs` of synthesis and plays for `playMs`. */
+function cueSpeaker(heard: string[], prepareMs: number, playMs: number) {
+  return (text: string, started: Effect.Effect<void>) => effect {
+    heard.push(`asked:${text}`)
+    if (prepareMs > 0) try sleep(prepareMs)
     try started
     heard.push(`start:${text}`)
-    try sleep(1000)
+    try sleep(playMs)
     heard.push(`end:${text}`)
   }
-  const early = try spokenCue(speak)
-  try early.say("On it.")
+}
+
+it.effect(`a cue is asked of the speaker at once, with no hold (spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s")`, () => effect {
+  const heard: string[] = []
+  const cue = try spokenCue(cueSpeaker(heard, 0, 1000))
+  try cue.say("Sure.")
   try settle()
-  try early.replyReady()
+  const atOnce = [...heard]
+  try cue.say("A second cue.")
   try TestClock.adjust("2 seconds")
-  const quick = [...heard]
-  heard.length = 0
-  const late = try spokenCue(speak)
-  try late.say("Checking.")
+  try Effect.try(() => assert.deepStrictEqual({ atOnce, heard }, { atOnce: ["asked:Sure.", "start:Sure."], heard: ["asked:Sure.", "start:Sure.", "end:Sure."] }))
+})
+
+it.effect(`a reply ready before the cue is audible drops it (spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s")`, () => effect {
+  const heard: string[] = []
+  const cue = try spokenCue(cueSpeaker(heard, 100, 1000))
+  try cue.say("On it.")
+  try settle()
+  try cue.replyReady()
+  try TestClock.adjust("2 seconds")
+  try Effect.try(() => assert.deepStrictEqual(heard, ["asked:On it."]))
+})
+
+it.effect(`an audible cue finishes before the reply, and a long one is cut at 2.5 s (spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s")`, () => effect {
+  const heard: string[] = []
+  const short = try spokenCue(cueSpeaker(heard, 100, 1000))
+  try short.say("Checking.")
   try TestClock.adjust("450 millis")
-  const waiting = fork late.replyReady()
+  const waiting = fork short.replyReady()
   try TestClock.adjust("1 second")
   join waiting
-  try Effect.try(() => assert.deepStrictEqual({ quick, finished: heard }, { quick: [], finished: ["start:Checking.", "end:Checking."] }))
+  const finished = [...heard]
+  heard.length = 0
+  const long = try spokenCue(cueSpeaker(heard, 0, 6000))
+  try long.say("Let me check your calendar.")
+  try yields()
+  let released = false
+  const bounded = fork effect {
+    try long.replyReady()
+    released = true
+  }
+  try yields()
+  try TestClock.adjust("2499 millis")
+  try yields()
+  const beforeTheBound = released
+  try TestClock.adjust("1 millis")
+  join bounded
+  try TestClock.adjust("6 seconds")
+  try Effect.try(() => assert.deepStrictEqual(
+    { finished, beforeTheBound, released, cut: heard },
+    { finished: ["asked:Checking.", "start:Checking.", "end:Checking."], beforeTheBound: false, released: true, cut: ["asked:Let me check your calendar.", "start:Let me check your calendar."] },
+  ))
 })

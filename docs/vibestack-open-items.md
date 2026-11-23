@@ -132,7 +132,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - `TurnTransport`, `RuntimeJsonBridge.request`/`requestStream` and `client.request`/`client.stream` take no headers, so the development host off the phone drops device headers;
   - `encodeTurnContext` must accept the `selectedObject` kinds `map-place`, `map-route` and `map-search` and the metadata keys `viewClientId`, `viewDelivery` and `uiView` (assumed, not checked);
   - there is no `clientDevice.browserPage` (eliza#40067/#40193);
-  - `StatusFrame` has no label (at most 160 characters), and `onStatus` passes only the activity, so voice cues are wired but never speak;
+  - voice speaks the agent's `acknowledgment` frame, which only readers from elizaOS/eliza#40293 (`1ff497fc4f0`) pass on; at the pinned `c84e5d68e37` no acknowledgment arrives, so a voice turn says no cue and the chat acknowledges from the text before the first tool;
   - the strict DoneFrame refuses `awaitingReview`, and DoneFrame notices are never produced;
   - there is no shared-note read-reply lease (`readReply`/`completeReadReply`);
   - `./client` does not re-export `learnPeer`/`comparePeer`/`statusRead`.
@@ -146,7 +146,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **Generated names:** the gen names each area assumed from its quint have not been checked against generated output:
   - platform: resetCarried, adoptionOf, legacyCleared, SlotAdoption, `headerAdmitted`, `DeviceHeader`;
   - assistant: timedAsVoice, browserCarded, sendsBrowserPage, `ownerTyped`, `destinationOf`, `workflowStepRuns`, the views module and others;
-  - voice: `voice__acknowledgement` (CueTurn, progress, audible, replyReady, ended, cancel, replyMayStart), cross-module `R::cueHoldMs`, `R::ackLimit`, `R::Cue`, plus the extended `voice__latency`;
+  - voice: `voice__acknowledgement` (CueTurn, acknowledged, audible, replyReady, ended, cancel, replyMayStart), cross-module `R::cueReplyBoundMs`, `R::ackLimit`, `R::Cue`, plus the extended `voice__latency`;
   - account: `account__enrollment`, `paymentPageOpens`, `authorizePageOpens`;
   - browser: `browser__pageContext`;
   - calendar: `calendar__deviceSync`;

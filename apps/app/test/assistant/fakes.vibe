@@ -60,6 +60,8 @@ export interface ResidentScript {
   readonly hits?: readonly unknown[]
   readonly listingStatus?: number
   readonly actionResults?: readonly { readonly action: string; readonly data: unknown }[]
+  /** Frames the turn's stream sends before its reply: the cue as text, the agent's acknowledgment, a text restart and its tools. */
+  readonly before?: readonly unknown[]
 }
 
 /** The resident's local API as a scripted fake at its network boundary. */
@@ -96,9 +98,10 @@ export function fakeResident(seen: Seen, script: ResidentScript) {
       seen.calls.push({ method: "STREAM", path, body, ...(headers === undefined ? {} : { headers }) })
       if (script.turn.kind === "refuse") return Stream.fail(new ResidentRefused({ status: script.turn.status, message: "busy", code: "room_busy" }))
       const { text, ...reply } = replyOf(script.turn, script.actionResults)
+      const before = (script.before ?? []).map(frame)
       return text === ""
-        ? Stream.make(frame({ type: "done", fullText: text, ...reply }))
-        : Stream.make(frame({ type: "token", text }), frame({ type: "done", fullText: text, ...reply }))
+        ? Stream.make(...before, frame({ type: "done", fullText: text, ...reply }))
+        : Stream.make(...before, frame({ type: "token", text }), frame({ type: "done", fullText: text, ...reply }))
     },
   })
 }

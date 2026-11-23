@@ -10,7 +10,7 @@ import { ResidentFeeds } from "../platform/view-events.vibe"
 import { Machine, active, endpointerOf, openMicHangoverMs, profileOf, running, type Conversation, type Event, type Route, type SessionPhase } from "../../gen/voice__conversation.effect.vibe"
 import { busy, holdsClip } from "../../gen/voice__dictation.effect.vibe"
 import { readingMayStart } from "../../gen/voice__speech.effect.vibe"
-import { acknowledgement, type Acknowledgement } from "./acknowledgement.vibe"
+import { acknowledgement, voiceReplyHooks, type Acknowledgement } from "./acknowledgement.vibe"
 import { Microphone } from "./capture.vibe"
 import { voiceAbort } from "./cloud-stream.ts"
 import { Dictation } from "./dictation.vibe"
@@ -348,16 +348,8 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   effect function answerOf(conversationId: string, body: TurnBody, ack: Acknowledgement, microphoneClear: () => boolean, signal: AbortSignal) {
     const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`
-    let firstText = true
-    const outcome = tryPromise(() => readReplyStream(Stream.toAsyncIterable(resident.stream(`${path}/stream`, body)), {
-      onStatus: (activity: string, label?: string) => { runFork(ack.progress(label === undefined ? { activity } : { activity, label }, microphoneClear)) },
-      onPreview: (text: string, provisional: boolean) => {
-        if (provisional || text === "" || !firstText) return
-        firstText = false
-        runFork(effect { try latency.mark("FirstToken"); try ack.preempt() })
-      },
-      onReady: () => { runFork(ack.preempt()) },
-    }, signal)) catch effect (error) => {
+    const hooks = voiceReplyHooks(ack, microphoneClear, () => { runFork(latency.mark("FirstToken")) })
+    const outcome = tryPromise(() => readReplyStream(Stream.toAsyncIterable(resident.stream(`${path}/stream`, body)), hooks, signal)) catch effect (error) => {
       lastCause = error
       throw error
     }

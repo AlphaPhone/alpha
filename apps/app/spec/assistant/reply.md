@@ -1,7 +1,8 @@
 # Reply
 
 One reply as the assistant shows it. The upstream reply stream gives the
-text, the planning label, action results and a terminal frame; the shell
+text, the planning label, the agent's acknowledgment, each tool's label,
+action results and a terminal frame; the shell
 splits the text into lines and classifies each one (`src/assistant/reply-lines.ts`):
 ordinary prose, a Markdown fence mark (three or more backticks or tildes), a
 recognized tool block (Maps markup, `[CHOICE:maps-share …]`,
@@ -70,6 +71,12 @@ pure val countValues = Set(-1, 0, 5, 6)
 
 ### The planning label shows until the first text, and provisional text is shown but never spoken
 
+The label is the newest of the stream's status and the label of the tool it
+runs (`Using <App>` or `Working`), except that once the agent's
+acknowledgment frame is taken, it stays the label until text or the reply
+arrives: the agent writes the acknowledgment and its first tool together,
+and the owner should read what was said, not only "Working".
+
 ```quint
 type ReplyStatus = Planning | Streaming | Working | Settled | Interrupted | Ignored
 type ReplyView = { status: ReplyStatus, shown: int, provisional: bool, spoken: int, acks: int, ackUnits: int, final: int, stopped: bool }
@@ -87,19 +94,34 @@ pure def sometimesStreaming(r: ReplyView): bool = r.status == Streaming and r.pr
 
 ### One brief acknowledgment at most, only before work runs, and the final answer is delivered whole
 
-The agent streams a cue (at most 120 characters of its closed
-acknowledgment grammar, `spec/agent/conversation/planning.md` of Eliza)
-before its tools run, and the stream then restarts with the reply. The cue
-is shown and spoken once, never stored or shown as the answer, and the
-settled reply shows and speaks every unit of the final text.
+The agent's cue (at most 120 characters of its closed acknowledgment
+grammar, `spec/agent/conversation/planning.md` of Eliza) comes with its
+first tool calls, before any work runs, and the stream then restarts with
+the reply. The cue is the reply stream's `acknowledgment` frame
+(`spec/agent/conversation/replyStream.md`), which acknowledges the turn as
+it arrives. An agent that sends no such frame streams the cue as text, so
+at its first tool the text shown so far, if any, is the acknowledgment.
+Whichever comes first acknowledges; the other never acknowledges again. The
+cue is shown and spoken once, never stored or shown as the answer, and the
+settled reply shows and speaks every unit of the final text, never the cue.
 
 ```quint
-pure def canWorkStarts(r: ReplyView): bool = r.status == Planning or r.status == Streaming
-pure def workStarts(r: ReplyView): ReplyView = { ...r, status: Working }
 pure def canAcknowledge(r: ReplyView, units: int): bool = (r.status == Planning or r.status == Streaming) and r.acks == 0 and units >= 1 and units <= ackLimit
 pure def acknowledge(r: ReplyView, units: int): ReplyView = { ...r, status: Working, acks: 1, ackUnits: units, shown: 0, provisional: false }
+pure def fallbackUnits(r: ReplyView): int = if (r.shown > ackLimit) ackLimit else r.shown
+pure def canToolStarts(r: ReplyView): bool = live(r)
+pure def toolStarts(r: ReplyView): ReplyView =
+  if (canAcknowledge(r, fallbackUnits(r))) acknowledge(r, fallbackUnits(r)) else { ...r, status: Working }
+pure def lawAToolAfterAnAcknowledgmentNeverAcknowledgesAgain(r: ReplyView): bool =
+  r.acks == 1 implies (toolStarts(r).acks == 1 and toolStarts(r).ackUnits == r.ackUnits)
+pure def lawAnAcknowledgmentAfterTheToolFallbackIsRefused(r: ReplyView, units: int): bool =
+  toolStarts(r).acks == 1 implies not(canAcknowledge(toolStarts(r), units))
+pure def lawATextBeforeTheFirstToolIsTheFallbackAcknowledgment(units: int): bool =
+  (units >= 1 and units <= ackLimit) implies toolStarts(token(initial, units, false)).ackUnits == units
 pure def canDone(r: ReplyView, units: int): bool = live(r) and units >= 0
 pure def done(r: ReplyView, units: int): ReplyView = { ...r, status: Settled, shown: units, final: units, spoken: units, provisional: false }
+pure def lawTheAnswerNeverCarriesTheCue(units: int): bool =
+  units >= 0 implies (done(acknowledge(initial, ackLimit), units).final == units and done(acknowledge(initial, ackLimit), units).spoken == units)
 pure def alwaysAtMostOneBriefAcknowledgment(r: ReplyView): bool = r.acks <= 1 and r.ackUnits <= ackLimit and (r.acks == 0 implies r.ackUnits == 0)
 pure def alwaysASettledReplyIsWhole(r: ReplyView): bool = r.status == Settled implies (r.shown == r.final and r.spoken == r.final and not(r.provisional))
 pure def stepAnAcknowledgmentNeverEndsTheTurn(before: ReplyView, via: str, after: ReplyView): bool =
@@ -108,23 +130,22 @@ pure def sometimesAcknowledgedThenAnsweredInFull(r: ReplyView): bool = r.status 
 pure val unitsValues = Set(0, 1, 120, 121, 400)
 ```
 
-### A spoken cue waits 300 ms and is dropped when the reply is ready first; an audible cue finishes before the reply, within 2.5 s
+### A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s
 
-In a voice turn the cue is held for 300 ms before it is spoken, so a reply
-ready within the hold means the cue is never spoken, and a cue still being
-synthesised or fetched when the reply is ready is dropped at once. A cue
-already audible finishes before reply speech starts, but never holds a
-ready reply longer than 2.5 s. Stop, barge-in and leaving the turn cancel
-it at once (#1450).
+In a voice turn the cue starts being prepared as soon as it arrives, with no
+hold, so it plays as quickly as it can. A reply ready while the cue is still
+being synthesised or fetched drops it at once, so it is never heard. A cue
+already audible finishes before reply speech starts, but never holds a ready
+reply longer than 2.5 s. Stop, barge-in and leaving the turn cancel it at
+once (#1450, #1456).
 
 ```quint
-type Cue = CueHeld | CuePreparing | CueAudible | CueEnded | CueDropped
-pure val cueHoldMs = 300
+type Cue = CuePreparing | CueAudible | CueEnded | CueDropped
 pure val cueReplyBoundMs = 2500
 pure def cueOnReply(cue: Cue): Cue = if (cue == CueAudible or cue == CueEnded) cue else CueDropped
 pure def replyWaitMs(cue: Cue, audibleLeftMs: int): int =
   if (cue != CueAudible) 0 else if (audibleLeftMs < 0) 0 else if (audibleLeftMs < cueReplyBoundMs) audibleLeftMs else cueReplyBoundMs
-pure def lawACueNotYetAudibleIsDroppedForAReadyReply(cue: Cue): bool = (cue == CueHeld or cue == CuePreparing) implies cueOnReply(cue) == CueDropped
+pure def lawACueNotYetAudibleIsDroppedForAReadyReply(cue: Cue): bool = cue == CuePreparing implies cueOnReply(cue) == CueDropped
 pure def lawAnAudibleCueFinishes(cue: Cue): bool = cue == CueAudible implies cueOnReply(cue) == CueAudible
 pure def lawAReadyReplyWaitsAtMostTheBound(cue: Cue, audibleLeftMs: int): bool = replyWaitMs(cue, audibleLeftMs) >= 0 and replyWaitMs(cue, audibleLeftMs) <= cueReplyBoundMs
 pure val audibleLeftMsValues = Set(-1, 0, 800, 2500, 6000)

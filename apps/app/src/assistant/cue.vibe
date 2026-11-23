@@ -1,11 +1,23 @@
-// spec/assistant/reply.md, "A spoken cue waits 300 ms and is dropped when the reply is ready first; an audible cue finishes before the reply, within 2.5 s"; spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole"
-import { ackLimit, cueHoldMs, cueOnReply, cueReplyBoundMs, replyWaitMs, type Cue } from "../../gen/assistant__reply.effect.vibe"
+// spec/assistant/reply.md, "A spoken cue starts at once and a reply ready before it is audible drops it; an audible cue finishes before the reply, within 2.5 s"; spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole"
+import type { ReplyStreamHooks } from "@elizaos/agent/client"
+import { ackLimit, cueOnReply, cueReplyBoundMs, replyWaitMs, type Cue } from "../../gen/assistant__reply.effect.vibe"
 
-/** One voice turn's acknowledgement cue, spoken through the voice area's speech: held first, dropped for a reply ready before it is audible, and finished within the bound when it already is. */
+/**
+ * Reply-stream hooks that also hear the agent's `acknowledgment` frame and a tool frame's owner label (`Using <App>` or
+ * `Working`), both added by elizaOS/eliza#40293. A reader from before it never calls `onAcknowledgment` and passes no
+ * label, so a turn there acknowledges from its tool frame instead. The two are declared here, not taken from the
+ * reader's own hooks, so the app compiles against either reader.
+ */
+export type AcknowledgingHooks = ReplyStreamHooks & {
+  readonly onAcknowledgment?: (text: string) => void
+  readonly onTool?: (name: string, label?: string) => void
+}
+
+/** One voice turn's acknowledgement cue, spoken through the voice area's speech: started at once, dropped for a reply ready before it is audible, and finished within the bound when it already is. */
 export interface SpokenCue {
-  /** Speak the turn's one cue after the hold; a second cue, a blank one or one over 120 characters is ignored. */
+  /** Start speaking the turn's one cue at once; a second cue, a blank one or one over 120 characters is ignored. */
   say(text: string): void!!
-  /** The reply is ready: a held or preparing cue is dropped at once, an audible one may finish; succeeds when reply speech may start, at most 2.5 s later. */
+  /** The reply is ready: a cue still being prepared is dropped at once, an audible one may finish; succeeds when reply speech may start, at most 2.5 s later. */
   replyReady(): void!!
   /** Stop, barge-in or the turn left: the cue ends at once. */
   cancel(): void!!
@@ -13,14 +25,12 @@ export interface SpokenCue {
 
 /** A cue over `speak`, which plays `text` and runs `started` at its first audible playback, not at synthesis or fetch. */
 export effect function spokenCue(speak: (text: string, started: void!!) => void!!) {
-  let cue: Cue = "CueHeld"
+  let cue: Cue = "CuePreparing"
   let used = false
   let playing: Fiber.Fiber<void> | undefined
   const ended = try Deferred.make<void>()
   effect function play(text: string) {
-    try sleep(cueHoldMs)
-    if (cue !== "CueHeld") return
-    cue = "CuePreparing"
+    if (cue !== "CuePreparing") return
     try ensuring(speak(text, sync(() => { if (cue === "CuePreparing") cue = "CueAudible" })), effect {
       if (cue === "CueAudible") cue = "CueEnded"
       try Deferred.succeed(ended, undefined)
