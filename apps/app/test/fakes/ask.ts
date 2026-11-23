@@ -30,7 +30,6 @@ function reply(scene: AskScene, room: string, text: string): Response {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
       if (scene.stalled) {
         controller.enqueue(frame({ type: "token", text: "Thinking" }));
-        // A stopped turn's stream ends with no terminal frame: its reader has gone.
         scene.turns.set(room, () => controller.close());
         return;
       }
@@ -56,7 +55,6 @@ export function askRoutes(scene: AskScene): Route[] {
       const found = /^\/api\/conversations\/c(\d+)\/messages(\/stream)?$/.exec(url.pathname);
       if (request.method !== "POST" || !found) return;
       return request.json().then((body: { text: string }) => {
-        // eliza's client asks again without a stream, under the same message id, where a stream dropped before its end.
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         return reply(scene, `r${found[1]}`, body.text);
@@ -69,7 +67,6 @@ export function askRoutes(scene: AskScene): Route[] {
         const stop = scene.turns.get(room);
         scene.turns.delete(room);
         stop?.();
-        // The receipt eliza's client takes as a stop: the room, the reason it gave, and what the agent did (`turn-controller.vibe`, `StopAnswer`).
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
     },

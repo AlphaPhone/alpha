@@ -103,7 +103,6 @@ function httpBridge(direct: Wired): RuntimeJsonBridge {
     request: (input) => runPromise(effect {
       const { status: answered, text: whole } = try direct.open(input.method === "GET" ? HttpClientRequest.get(input.path) : posted(input))
       const text = try timeout(whole, patience)
-      // A refusal keeps its body: eliza's client reads the agent's own error and code from it.
       return { status: answered, data: parsed(text) catch () => null }
     }),
     requestStream: (input) => framed(direct.open(posted(input))),
@@ -213,7 +212,6 @@ function plugged(plugin: ElizaAgentPlugin): Remote {
     effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
       const route = try relayed(request)
       const id = fresh()
-      // A request the page stops waiting for is aborted on the phone too, under the id it was asked with.
       const asked = onInterrupt(tryPromise({ try: () => plugin.request({ ...route, id }), catch: undelivered }), () => ignore(tryPromise(() => plugin.abort({ id }))))
       const answered = timeout(asked, patience) catch effect (cause) => match (cause) {
         when Unsent: throw cause;

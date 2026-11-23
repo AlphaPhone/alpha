@@ -62,7 +62,6 @@ function owned(directory: string) {
 export const scratch = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "alpha-eliza-")));
 
 const children = new Set<ChildProcess>();
-// A run that ends without stopping its services takes them along.
 process.once("exit", () => { for (const child of children) child.kill("SIGKILL"); });
 
 function ended(child: ChildProcess) {
@@ -168,7 +167,6 @@ async function startProvider(key: string) {
     outgoing.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store" }).flushHeaders();
     outgoing.write(piece({ role: "assistant", content: "" }, null));
     for (const part of reply.kind === "text" ? reply.parts : [reply.first]) outgoing.write(piece({ content: part }, null));
-    // A stalled reply stays open until the cloud gives up on it, as a provider that stopped mid-answer does.
     if (reply.kind === "stall") return;
     outgoing.write(piece({}, "stop"));
     outgoing.write(frame({ ...named, object: "chat.completion.chunk", choices: [], usage: usage(messages, text) }));

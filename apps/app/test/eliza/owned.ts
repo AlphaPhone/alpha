@@ -1,4 +1,3 @@
-// What a journey over eliza's real agent and cloud asks for: `await owned("<area>")`, in a `beforeAll` given ten minutes.
 import { inject } from "vitest";
 import { type Reply, said } from "./services.ts";
 import type { Owned } from "./setup.ts";

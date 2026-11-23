@@ -22,7 +22,6 @@ export function App({ alpha }: AppProps) {
   const showing = state.trail.at(-1);
   const back = can({ type: "goBack" });
   return (
-    // The phone hands Back to the page only while the page says it can go back (platform/device.vibe).
     <main ref={(page) => { if (page) page.ownerDocument.documentElement.dataset.alphaCanGoBack = String(back); }} className="mx-auto flex min-h-dvh max-w-md flex-col bg-background font-sans text-base text-foreground">
       {showing === undefined
         ? alpha.slot("home")

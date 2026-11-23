@@ -27,25 +27,29 @@ the device. This branch rebuilds it on the stack below.
   `apps/app/test/<area>.*`, one file per area and runner so that areas built
   side by side do not meet in one file, and what it shows is built from
   components in `packages/ui`. Every area is built on `apps/app/src/runtime/`.
-  `spec/app/sample/` with `apps/app/test/sample/` is the worked area, which
-  only its own journeys mount, and `spec/app/ask/` with `apps/app/src/ask/`
-  the one that talks to the real agent: read both before starting another.
+  `spec/app/sample/` with `apps/app/test/sample/` holds the two worked areas,
+  which only their own journeys mount: the reminders (a read, a feed, an undo
+  window, an attempt outside, kept across restarts) and the text size (events
+  that name their sender, an opening that asks the phone, the phone's signals,
+  a page-wide effect). `spec/app/ask/` with `apps/app/src/ask/` is the one
+  that talks to the real agent: read all three before starting another.
 - **The kit holds what areas share.** `spec/kit/` has the rules several areas
   keep: a read whose late answers are refused, an attempt sent once with an
   honest outcome, a review of what was shown, an undo window, a draft and a
   permission. Import one under a name (`import read as R from
   "../../kit/read"`) and hold its component in the area's state. A rule
   moves there when a second area needs it; never model the same state twice.
-- **The world is a service.** A native bridge, the resident agent or a cloud
-  API is a `service` in `apps/app/src/platform/`, beside the layer a browser
-  runs. What a transition needs done outside is its `out`; the area's shell
+- **The world is a service.** A plugin of the phone, the resident agent or a
+  cloud API is a `service` in `apps/app/src/platform/`, whose phone layer is
+  eliza's own client of it (`@elizaos/os/bridges/*`, `@elizaos/agent/client`,
+  `@elizaos/cloud/client`), beside the layer a browser runs. What a transition needs done outside is its `out`; the area's shell
   carries each item out through the service and sends the answer back as an
   event that names its ticket, so the rules refuse a late answer. The shell
-  passes the time in as an event's `now`: no component reads a clock, runs a
+  passes the time in as an event's `now` or `at`: no component reads a clock, runs a
   timer or uses an effect hook. A journey runs over the real agent and cloud
   where what it checks is theirs, and otherwise over the fakes of
-  `apps/app/test/fakes/`, which stand at the network and at the bridge to
-  Android and nowhere inside Alpha.
+  `apps/app/test/fakes/`, which stand at the network and at Capacitor's
+  native boundary and nowhere inside Alpha or eliza's clients.
 - **Components show, areas decide.** A component in `packages/ui` takes props
   and holds no rule. A screen in `apps/app/src/<area>/` reads its machine
   through `useMachine`, offers each control exactly when `can` allows its
@@ -59,7 +63,10 @@ the device. This branch rebuilds it on the stack below.
   `eliza.lock.json` records: `pnpm eliza` builds that commit outside the
   repository and links it as `.eliza`. Never edit its checkout, and never
   restate a shape it exports: make shared changes upstream and advance the
-  pin. `legacy/` keeps its own pin, for reading only.
+  pin. Stay on the newest commit of the branch that builds: a defect of
+  eliza's that stops an advance is written down with its failing command,
+  and the pin stays one commit before it. `legacy/` keeps its own pin, for
+  reading only.
 - **Do not import another product's interface or identity.**
 - **Say what was shown.** An APK build, an emulator HOME-role test, a full
   AOSP image boot, a real integration and device or user acceptance are
@@ -217,8 +224,12 @@ Check each point before you write, and again after.
 - **Compact.** Reread for needless branches, `try` blocks, wrappers and
   indirection. Shorter, if it reads as well.
 - **No code comments.** Use clear names and structure to make the code readable.
-  Use comment syntax only for required tool directives that need it, such as
-  `//@` contracts and Vitest environment directives.
+  Use comment syntax only for what a tool reads: `//@` contracts, Vitest
+  environment directives, an ESLint exception with its reason, the spec
+  citations of "Tests" (a citation's line may end with `: ` and what the
+  step shows), and the doc comment of a declaration (`/** … */`), which
+  Studio, the stories and VibeLang's `@throws` and `@model` read. A line
+  that explains the code below it is a name or a doc comment that is missing.
 - **Scripts and tests.** Extend existing ones before adding; no new scripts.
   Delete code that becomes unused. Tests follow "Tests" below.
 - **Speed.** Keep checks and CI fast: a small change reruns only what it

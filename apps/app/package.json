@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "typecheck": "vibelang --noEmit -p .",
-    "test": "vitest run",
-    "test:browser": "vitest run --project browser",
+    "build": "node test/eliza/checkout.ts --ready && vite build",
+    "typecheck": "node test/eliza/checkout.ts --ready && vibelang --noEmit -p .",
+    "test": "node test/eliza/checkout.ts --ready && vitest run",
+    "test:browser": "node test/eliza/checkout.ts --ready && vitest run --project browser",
     "prepare": "node test/eliza/checkout.ts --link",
     "eliza": "node test/eliza/checkout.ts",
     "eliza:page": "node test/eliza/page.ts"

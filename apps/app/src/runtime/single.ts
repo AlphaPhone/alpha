@@ -4,12 +4,10 @@
  * no, and builds no machine.
  */
 export function single(): Promise<boolean> {
-  // A browser without Web Locks cannot tell: the phone's WebView has them, and the Android host opens one page.
   if (!("locks" in navigator)) return Promise.resolve(true);
   return new Promise((told) => {
     void navigator.locks.request("alpha.page", { ifAvailable: true }, (lock) => {
       told(lock !== null);
-      // Held for as long as the page lives.
       return lock === null ? undefined : new Promise<never>(() => {});
     });
   });

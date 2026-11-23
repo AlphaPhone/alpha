@@ -5,7 +5,6 @@ import { type Resident, type Shown, area } from "../runtime/area.tsx";
 import { Home } from "./Home.tsx";
 
 function Apps({ alpha }: Shown<Resident>) {
-  // The shell is resident and App already reads it, so Home is drawn with the same state, in the same paint.
   const { can, send } = useMachine(alpha.runtime);
   return <Home offered={(view) => can({ type: "openView", view })} onOpen={(view) => void send({ type: "openView", view })} />;
 }

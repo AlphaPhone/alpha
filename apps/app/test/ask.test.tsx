@@ -10,7 +10,6 @@ afterEach(closeAll);
 
 const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] ol li")].map((line) => line.textContent);
 
-// The same journey over each boundary Alpha has: a browser's fetch, and the plugins Android gives the page.
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/ask/index.md, "Story: Talk to my agent"
   it("Talk to my agent (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {

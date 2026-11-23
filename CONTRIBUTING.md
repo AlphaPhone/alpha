@@ -8,7 +8,7 @@ Everything is built on [the stack](AGENTS.md#the-stack): Node 26, pnpm, VibeLang
 
 | Path | Holds |
 |---|---|
-| `apps/` | deployable applications; `apps/app` is the hello world to replace |
+| `apps/` | deployable applications; `apps/app` is Alpha's page: Home, the built-in apps and Ask Alpha, over eliza's agent and cloud (`pnpm eliza` builds the pinned commit once) |
 | `packages/` | what applications share: `@repo/ui` (components), `@repo/design-system` (tokens) |
 | `vibestack/` | the tools: the `spec` command, Studio, and what any project uses but does not own (`vibestack/testing`, `vibestack/design`, `vibestack/stories`) |
 | `vibestack/examples/` | standalone projects, each with its own install; never part of the workspace |
@@ -262,7 +262,7 @@ failing exploration found is saved and replayed instead
 ### Which test, for what
 
 [AGENTS.md, "Tests"](AGENTS.md#tests) defines what earns a test and the rules
-`check` enforces. The hello world in `apps/app` demonstrates each kind.
+`check` enforces. `apps/app` has each kind.
 
 | Kind | Checks | Source or example |
 |---|---|---|

@@ -25,20 +25,31 @@ on Effect, and the interface in React on one design system.
 | `vibestack/` | The toolchain, with [its guide](vibestack/README.md) |
 | `legacy/` | The implementation being replaced, kept as the guide to what each area does and removed area by area as it is rebuilt |
 
-The agent runtime is the open-source
-[elizaOS](https://github.com/elizaOS/eliza) runtime at the commit
-`legacy/upstream.lock.json` pins.
+The resident agent, the cloud and the Android device package are the
+open-source [elizaOS](https://github.com/elizaOS/eliza), branch `vibestack`,
+at the commit `eliza.lock.json` pins (`legacy/` keeps its own older pin, for
+reading only).
 
 ## Setup and checks
 
-Needs Node 26, pnpm 10.24.0 and Dafny 4.11 on the `PATH`.
+Needs Node 26, pnpm 10.24.0, Dafny 4.11 and `openssl` on the `PATH`.
 
 ```sh
 pnpm install
-pnpm dev      # Studio, and every app's development server
+pnpm eliza    # once per pinned commit: clone, install and build eliza (a few minutes)
+pnpm dev      # Studio, and the app over eliza's agent and cloud, started for this run
 pnpm check    # models, proofs, types, tests, traces and each page explored
 pnpm verify   # everything CI runs
 ```
+
+`pnpm eliza` builds the pinned commit outside the repository, in
+`~/.cache/alpha/eliza-vibestack/<commit>` (or the directory `ALPHA_ELIZA_DIR`
+names), and links it as `.eliza`; every worktree shares that build, and
+typecheck, test, build and dev say so where it is missing. `pnpm dev` starts
+eliza's cloud command and its agent as processes of that run, with a scripted
+model in place of a paid one, and stops them with it. `ALPHA_FAKES=1 pnpm dev`
+serves the app over the journeys' fakes instead, and `ALPHA_FAKES=phone` over
+the fake phone's plugins.
 
 Agents start with [AGENTS.md](AGENTS.md); the spec format is in
 [SPEC.md](SPEC.md) and the repository's map in

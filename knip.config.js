@@ -3,7 +3,9 @@
 //   ignore vibestack/examples/**            standalone projects with their own install, outside the workspace
 //   ignore **/test/fixtures/**              inputs the tools' tests read as text, never imported
 //   ignoreIssues server.vibe exports        AGENTS is used in its own file, in a body ignoreExportsUsedInFile cannot see
-//   root @informalsystems/quint, lemmascript  run as executables by vibestack/units.ts and vibestack/prove.ts
+//   root lemmascript                        run as an executable by vibestack/prove.ts
+//   apps openssl                            the system's own, run by apps/app/test/eliza/services.ts for the local cloud's certificate
+//   apps entry test/drivers, *.schema, *.contract  none yet in apps/app: an area that writes one needs no change here
 //   root @vitest/browser                    loaded by Vitest's browser mode, beside @vitest/browser-playwright
 //   root @repo/design-system                read as files by vibestack/design/test/design.test.ts
 //   tailwindcss (ui, design-system, studio, apps)  resolved by @tailwindcss/vite and the lint plugin from CSS
@@ -36,7 +38,6 @@ export default {
         "!vibestack/studio/**"
       ],
       "ignoreDependencies": [
-        "@informalsystems/quint",
         "lemmascript",
         "@vitest/browser",
         "@repo/design-system"
@@ -87,6 +88,9 @@ export default {
       ],
       "ignoreDependencies": [
         "tailwindcss"
+      ],
+      "ignoreBinaries": [
+        "openssl"
       ]
     }
   }

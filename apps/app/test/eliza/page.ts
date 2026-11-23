@@ -1,4 +1,3 @@
-// Rung 4 of the eliza integration: `pnpm dev` over eliza's agent and cloud, and a person's journey through the page in Chromium.
 import { spawn } from "node:child_process";
 import path from "node:path";
 import readline from "node:readline";
@@ -18,7 +17,6 @@ process.stdout.write(`pnpm dev serves ${origin} after ${Date.now() - started} ms
 const browser = await chromium.launch();
 try {
   const page = await browser.newPage();
-  // A cold dev server on a busy machine transforms the page's modules for minutes before the first load ends.
   page.setDefaultTimeout(600_000);
   const problems: string[] = [];
   page.on("pageerror", (error) => problems.push(error.message));
@@ -31,7 +29,6 @@ try {
   const lines = await ask.getByRole("listitem").allTextContents();
   const seen = [...problems];
   const conversations = JSON.parse(await page.evaluate(async () => (await fetch("/agent/api/conversations")).text())) as { conversations: { title: string }[] };
-  // The page asks the cloud for its own account, under the device key the dev server adds as the phone's plugin does.
   const account = JSON.parse(await page.evaluate(async () => (await fetch("/cloud/api/v1/user")).text())) as { data?: { email?: string } };
   process.stdout.write(`${JSON.stringify({ lines, agentHolds: conversations.conversations.map((one) => one.title), cloudAccount: account.data?.email, problems: seen })}\n`);
   if (seen.length || lines.at(-1) !== "You said: Hello from the browser" || account.data?.email !== "owner@alpha.test") process.exitCode = 1;

@@ -8,7 +8,7 @@ import { at, mounts } from "../src/areas.ts";
 import { Cloud } from "../src/platform/cloud.vibe";
 import { type Slot, Vault } from "../src/platform/vault.vibe";
 import { area } from "../src/runtime/area.tsx";
-import { button, closeAll, hardware, open, press, underAct, until } from "./alpha.tsx";
+import { button, closeAll, hardware, only, open, press, underAct, until } from "./alpha.tsx";
 import { account } from "./fakes/cloud.ts";
 import { scene } from "./fakes/scene.ts";
 
@@ -20,7 +20,6 @@ const failed = (exit: Exit.Exit<unknown, unknown>) => (Exit.isFailure(exit) ? Op
 
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 it("Move between Home and the apps on an Alpha image, where a screen that throws or cannot be loaded stops alone (spec/app/shell/index.md, \"Story: Move between Home and the apps\")", async () => {
-  // React reports what an error boundary caught on the console: that report is expected here.
   const reported = vi.spyOn(console, "error").mockImplementation(() => {});
   const broken = area(Layer.empty, () => { throw new Error("this screen is broken"); });
   const { alpha } = await open({ ...scene(), phone: true, image: true }, [
@@ -29,8 +28,7 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
     at("view:Files", () => Promise.resolve({ default: broken })),
     at("view:Maps", () => Promise.reject(new Error("the code of this screen cannot be loaded"))),
   ]);
-  // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-  // The phone admits them by the plugins its host registered, and the broken layer over Home took nothing away.
+  // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it": the phone admits them by the plugins its host registered, and the broken layer over Home took nothing away.
   await until(alpha, alpha.runtime, Shell, (s) => s.image && s.contacts);
   expect(["Phone", "Messages", "Contacts"].map((name) => Boolean(button(name)))).toEqual([true, true, true]);
 
@@ -47,31 +45,28 @@ it("Move between Home and the apps on an Alpha image, where a screen that throws
   reported.mockRestore();
 });
 
-// The platform's services over each boundary Alpha has: a browser's fetch, and the plugins Android gives the page.
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/kit/read.md, "Story: Read from outside"
   it("Read from outside: my account, by eliza's own client of its cloud (spec/kit/read.md, \"Story: Read from outside\")", async () => {
     const world = { ...scene(), phone };
-    const { alpha } = await open(world, []);
-    const asked = () => alpha.runtime.runPromiseExit(Cloud.use((cloud) => Effect.tryPromise({ try: () => cloud.client.account(), catch: (cause) => cause })));
+    const { alpha } = await open(world, only("home"));
+    const asked = () => alpha.runtime.runPromiseExit(Effect.flatMap(Cloud, (cloud) => Effect.tryPromise({ try: () => cloud.client.account(), catch: (cause) => cause })));
     // spec/kit/read.md, "Only the newest ticket's answer is taken, once": eliza's typed client decodes the answer, and the page holds no key.
     expect(await asked()).toEqual(Exit.succeed(account));
-    expect(await alpha.runtime.runPromise(Cloud.use((cloud) => cloud.call(HttpClientRequest.get("/api/v1/user"))))).toEqual({ success: true, data: account });
+    expect(await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => cloud.call(HttpClientRequest.get("/api/v1/user"))))).toEqual({ success: true, data: account });
     if (!phone) return;
-    // On the phone the plugin holds the key: signed out, a request never leaves, and eliza's client says the account needs attention.
     world.signedIn = false;
-    expect(failed(await alpha.runtime.runPromiseExit(Cloud.use((cloud) => cloud.call(HttpClientRequest.get("/api/v1/user")))))?._tag).toBe("Unsent");
+    expect(failed(await alpha.runtime.runPromiseExit(Effect.flatMap(Cloud, (cloud) => cloud.call(HttpClientRequest.get("/api/v1/user")))))?._tag).toBe("Unsent");
     expect(failed(await asked())).toBeInstanceOf(CloudError);
   });
 
   // spec/kit/attempt.md, "Story: Do something outside, once"
   it("Do something outside, once: a secret is kept only in a slot the phone's host opens (spec/kit/attempt.md, \"Story: Do something outside, once\")", async () => {
     const world = { ...scene(), phone };
-    // No slot is open to the page yet (vault.vibe), so a journey names its own.
     const [open_, shut] = ["alpha.test.open", "alpha.test.shut"] as unknown as [Slot, Slot];
     world.slots.add(open_);
-    const { alpha } = await open(world, []);
-    const run = <A, E>(work: (vault: Vault.Shape) => Effect.Effect<A, E>) => alpha.runtime.runPromiseExit(Vault.use(work));
+    const { alpha } = await open(world, only("home"));
+    const run = <A, E>(work: (vault: Vault.Shape) => Effect.Effect<A, E>) => alpha.runtime.runPromiseExit(Effect.flatMap(Vault, work));
     if (!phone) return void expect(failed(await run((vault) => vault.read(open_)))?.code).toBe("absent");
     // spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"
     expect(await run((vault) => vault.read(open_))).toEqual(Exit.succeed(Option.none()));

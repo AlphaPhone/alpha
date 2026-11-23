@@ -19,7 +19,6 @@ export function eliza(): Plugin {
         server: {
           proxy: {
             "/agent": { target: agent.origin, rewrite: under("/agent"), headers: { authorization: `Bearer ${agent.token}` } },
-            // The proxy adds the device key, as the phone's `ElizaCloud` plugin does: the page never holds it either.
             "/cloud": { target: cloud.local, rewrite: under("/cloud"), headers: { authorization: `Bearer ${key.token}` } },
           },
         },

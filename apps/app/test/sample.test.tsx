@@ -44,7 +44,6 @@ vi.stubGlobal("localStorage", new Proxy(localStorage, {
   },
 }));
 
-// The same journey over each boundary Alpha has: a browser's fetch, and the plugins Android gives the page.
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/sample/index.md, "Story: See and dismiss reminders"
   it("See and dismiss reminders (spec/app/sample/index.md, \"Story: See and dismiss reminders\")", async () => {
@@ -77,8 +76,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, reminders, Reminders, (s) => s.deletion.attempt.outcome === "Confirmed");
     expect([world.sample.deleted, Boolean(button("Undo dismissing “Water the plants”"))]).toEqual([["Water the plants"], false]);
 
-    // spec/app/sample/index.md, "Only the newest asking's answer is taken: the titles, or a failure that keeps the titles last read"
-    // A read whose answer the store does not take is told as failed, so the owner can ask again.
+    // spec/app/sample/index.md, "Only the newest asking's answer is taken: the titles, or a failure that keeps the titles last read": a read whose answer the store does not take is told as failed, so the owner can ask again.
     let answer = () => {};
     world.sample.gate = new Promise<void>((done) => { answer = done; });
     await press("Refresh");
@@ -90,8 +88,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await press("Refresh");
     await until(alpha, reminders, Reminders, (s) => s.list.status === "Loaded");
 
-    // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
-    // A Back the store does not take changes nothing, and neither the buttons nor what follows the shell stop for it.
+    // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top": a Back the store does not take changes nothing, and neither the buttons nor what follows the shell stop for it.
     refusing = shellKept;
     await hardware("back");
     expect((await alpha.runtime.runPromise(Shell.use((shell) => shell.get()))).trail).toEqual(["Notes"]);
@@ -100,7 +97,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.length === 0);
     expect(world.sample.feeds.size).toBe(0);
 
-    // A screen with a step of its own takes Back first, and the app closes only at the Back after it.
     depth = 1;
     await press("Files");
     await until(alpha, alpha.runtime, Shell, (s) => s.trail.at(-1) === "Files");
@@ -125,7 +121,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(second.alpha, reopened, Reminders, (s) => s.deletion.attempt.outcome === "Unknown" && s.list.status === "Loaded");
     expect([told(), world.sample.asked]).toEqual(["Alpha cannot tell whether the agent deleted “Call the bank”", ["Water the plants", "Call the bank"]]);
 
-    // The hold ends while Alpha is closed: opened a minute later, it deletes at once, with no clock moved.
     await press("Dismiss Buy bread");
     await second.close();
     asleep(world, 60_000);
@@ -134,7 +129,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect(world.sample.deleted).toEqual(["Water the plants", "Buy bread"]);
     await third.close();
 
-    // What is kept and is no longer a state is set aside, and Alpha opens: Home, and the area afresh.
     localStorage.setItem(kept, JSON.stringify({ titles: "of another shape" }));
     const fourth = await open(world, withSample);
     await until(fourth.alpha, sample.runtime(fourth.alpha), Reminders, (s) => s.list.status === "Loaded");
@@ -142,7 +136,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
   });
 });
 
-// The second sample over each boundary: a machine whose events name their sender, opened by what the phone kept.
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
   // spec/app/sample/size.md, "Story: Read Alpha at my size"
   it("Read Alpha at my size (spec/app/sample/size.md, \"Story: Read Alpha at my size\")", async () => {
@@ -152,16 +145,14 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const shown = () => [page.style.fontSize, page.hasAttribute("data-alpha-large-text"), localStorage.getItem("alpha.textScale")];
     const told = () => document.querySelector("section[aria-label='Text size'] [role=alert]")?.textContent;
 
-    // spec/app/sample/size.md, "When Alpha opens, the phone says the size it kept, once, and a size it does not offer counts as none"
-    // The opening asks the phone first, and the page has the kept size before its first paint.
+    // spec/app/sample/size.md, "When Alpha opens, the phone says the size it kept, once, and a size it does not offer counts as none": the opening asks the phone first, and the page has the kept size before its first paint.
     localStorage.setItem("alpha.textScale", "130");
     const { alpha } = await open(world, withSize);
     const sizing = size.runtime(alpha);
     await until(alpha, sizing, Size.Machine, (s) => s.started && s.percent === 130);
     expect(shown()).toEqual(["130%", true, "130"]);
 
-    // spec/app/sample/size.md, "The owner chooses another offered size once Alpha has started, one change at a time"
-    // The owner is the sender of the choice and the phone of its answer: the size the owner has is not offered.
+    // spec/app/sample/size.md, "The owner chooses another offered size once Alpha has started, one change at a time": the owner is the sender of the choice and the phone of its answer: the size the owner has is not offered.
     expect(Boolean(button("Text at 130%"))).toBe(false);
     await press("Text at 100%");
     await until(alpha, sizing, Size.Machine, (s) => s.percent === 100 && s.setting.status === "Loaded");
@@ -179,8 +170,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await seen(true);
     expect(told()).toBeUndefined();
 
-    // spec/app/sample/size.md, "An asking the phone has not answered after ten seconds is given up, and the size stays"
-    // A phone that never answers: the deadline is the state's, counted from the time the reactor gave the choice.
+    // spec/app/sample/size.md, "An asking the phone has not answered after ten seconds is given up, and the size stays": a phone that never answers: the deadline is the state's, counted from the time the reactor gave the choice.
     const silent = alpha.over(reacting(Size, {
       open: [{ type: "start", was: 115 }, "Phone"],
       carry: (fx): Job<Size.Event, never, [by: Size.Sender]> => answer("apply", Effect.never, { type: "applied", ticket: fx.ticket, kept: false }, "Phone"),
@@ -197,7 +187,6 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 // spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"
 it("Two machines that tell each other are built in any order, and each hears how its telling went (spec/kit/read.md, \"Only the newest ticket's answer is taken, once\")", async () => {
   const { alpha } = await open(scene(), []);
-  // The conversation opens by telling the reminders to read, which they take; their read tells the conversation to stop a reply, which it refuses, having none.
   const asking = reacting(Ask, {
     open: [{ type: "begin" }],
     carry: (fx): Job<Ask.Event, Sample.Machine, []> => fx.tag === "Open"

@@ -36,7 +36,6 @@ function carry(fx: Out): Job<Event, Agent, []> {
     when { tag: "Fetch", let ticket }: answer("fetch", fetched(ticket), { type: "failed", ticket });
     when { tag: "Listen", let ticket }: stream("feed", fed(ticket), { type: "dropped", ticket });
     when { tag: "Unlisten" }: stop("feed");
-    // The hold is in the state, so `timers` tells its end, also after a restart: nothing is left to do for the spec's own Wake.
     when { tag: "Wake" }: stop("wake");
     when { tag: "Delete", let id, let title }: answer(`delete ${id}`, deleted(id, title), { type: "deleted", id, confirmed: false, known: false });
   }

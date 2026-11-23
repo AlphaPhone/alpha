@@ -86,7 +86,6 @@ effect function paged() {
     textScale,
     effect setTextScale(percent: number): boolean!! {
       const wanted = Math.min(largest, Math.max(smallest, Math.round(percent)))
-      // Kept first: a size the store did not take is not shown either, so the page and the next launch agree.
       return effect { try store.set(key, String(wanted)); return zoom(wanted) === wanted } catch () => false
     },
     mark: (name: string, value: string | undefined) => sync(() => marked(name, value)),

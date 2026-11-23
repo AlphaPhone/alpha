@@ -21,13 +21,13 @@ const turns = Layer.effect(Turns, effect {
 })
 
 /** What the agent answers to `POST /api/conversations`: eliza's own record of a conversation. */
-schema Created { readonly conversation: ConversationRecord }
+const created = () => Schema.Struct({ conversation: ConversationRecord })
 
 // spec/app/ask/index.md, "The conversation is the one the agent names in answer to that opening, or none when it does not"
 effect function opened(id: number): Event!!(Agent | Turns) {
   return effect {
     const { controller } = try Turns
-    const { conversation } = try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Ask Alpha" }), Created)
+    const { conversation } = try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Ask Alpha" }), created())
     try promise(() => controller.bind(conversation))
     return { type: "opened", id, conversation: conversation.id, room: conversation.roomId }
   } catch (failure) => ({ type: "unopened", id, known: outcomeOf(failure).known })
@@ -38,7 +38,6 @@ function ended(id: number, result: TurnResult): Event {
   return match (result) {
     when { kind: "Replied", let reply }: { type: "answered", id, text: reply.text };
     when { kind: "MaybeAccepted" }: { type: "unanswered", id, known: false };
-    // The agent says in a reply of its own that it failed; without one, only that something on the way did.
     when { kind: "AgentFailed", let reply }: { type: "unanswered", id, known: reply !== undefined };
     default: { type: "unanswered", id, known: true };
   }

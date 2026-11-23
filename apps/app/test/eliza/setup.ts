@@ -1,5 +1,3 @@
-// Vitest's global setup: eliza's cloud and agents for the journeys that ask for them (owned.ts), started on the first
-// asking and stopped with the run. A run that asks for none starts none.
 import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -29,7 +27,6 @@ const journeys = /^(.+)\.eliza\.test\.tsx$/;
 
 export default async function setup(project: TestProject) {
   const state = scratch();
-  // One owner per journey file, named after it: the cloud's operator funds an owner only while the cloud is stopped, so all are made before it serves the run.
   const names = fs.readdirSync(path.join(import.meta.dirname, "..")).flatMap((file) => journeys.exec(file)?.[1] ?? []);
   const email = (name: string) => `${name}@alpha.test`;
   let cloud: Promise<Cloud> | undefined;

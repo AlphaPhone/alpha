@@ -19,12 +19,14 @@ async function relay(answer: Answering, incoming: IncomingMessage, outgoing: Ser
 /**
  * The fake agent and cloud at the dev server's /agent and /cloud, from the routes the journeys use, so that `pnpm dev`
  * and the explore stage run with no agent; `apply: "serve"` keeps it out of every build. With `real` the agent is the one at that address.
+ * With `phone` the page reaches them through the fake phone's plugins, as on an Alpha image.
  */
-export function fakes(real?: string): Plugin {
+export function fakes(real?: string, phone = false): Plugin {
   const { agent, cloud } = services(scene());
   return {
     name: "alpha-fakes",
     apply: "serve",
+    transformIndexHtml: () => (phone ? [{ tag: "script", attrs: { type: "module", src: "/test/fakes/page.ts" }, injectTo: "head-prepend" }] : []),
     configureServer(server) {
       if (real === undefined) server.middlewares.use("/agent", (incoming, outgoing) => void relay(agent, incoming, outgoing));
       server.middlewares.use("/cloud", (incoming, outgoing) => void relay(cloud, incoming, outgoing));

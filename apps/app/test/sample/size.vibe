@@ -9,7 +9,6 @@ effect function applied(ticket: number, percent: number): Event!!Device {
   return { type: "applied", ticket, kept: try (try Device).setTextScale(percent) }
 }
 
-// Each answer names the sender the spec expects of it: the phone.
 function carry(fx: Out): Job<Event, Device, [by: Sender]> {
   return match (fx) {
     when { tag: "Apply", let ticket, let percent }: answer("apply", applied(ticket, percent), { type: "applied", ticket, kept: false }, "Phone");
@@ -21,8 +20,7 @@ function timers(state: Size.Size) {
   return state.setting.status === "Loading" ? [due<Event, [by: Sender]>("apply", state.due, { type: "giveUp", now: untimed }, "Phone")] : []
 }
 
-// spec/app/sample/size.md, "When Alpha opens, the phone says the size it kept, once, and a size it does not offer counts as none"
-// The opening carries what only the phone knows, so it is an effect that asks first.
+// spec/app/sample/size.md, "When Alpha opens, the phone says the size it kept, once, and a size it does not offer counts as none": the opening carries what only the phone knows, so it is an effect that asks first.
 const opening = effect {
   const kept = try (try Device).textScale()
   const start: Event = { type: "start", was: Option.getOrElse(kept, () => 0) }
@@ -31,8 +29,7 @@ const opening = effect {
 
 const machine = reacting(Size, { open: opening, carry, timers })
 
-// spec/app/sample/size.md, "Once the owner has left the page, a size that was not kept is no longer told"
-// A service's stream becomes events; shown again there is nothing to tell, so `told` returns none.
+// spec/app/sample/size.md, "Once the owner has left the page, a size that was not kept is no longer told": a service's stream becomes events; shown again there is nothing to tell, so `told` returns none.
 const left = hearing(
   Stream.unwrap(effect { return (try Device).visible }),
   Size.Machine,
@@ -40,7 +37,6 @@ const left = hearing(
   "Phone",
 )
 
-// What the whole page follows is applied from the machine's first state on, through the service that owns the root element.
 const marked = applying(Size.Machine, (state) => state.percent >= 130, effect (large) => {
   try (try Device).mark("large-text", large ? "" : undefined)
 })

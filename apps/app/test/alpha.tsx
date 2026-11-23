@@ -53,7 +53,6 @@ export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly
   const alpha = boot(platform, mounts);
   opened.set(alpha, { mounts });
   const root = createRoot(document.body.appendChild(document.createElement("div")));
-  // Drawn once the root runtime is built, and with it the shell's first state.
   await drawn(async () => {
     root.render(<App alpha={alpha} />);
     await alpha.runtime.runPromise(Effect.void);
@@ -72,7 +71,6 @@ export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly
 /** Wait, with every screen of `alpha` loaded, until the machine `key` names in `runtime` reaches a state `ok` accepts, and React has drawn it. */
 export async function until<I, S>(alpha: Alpha, runtime: ManagedRuntime.ManagedRuntime<I, unknown>, key: Context.Key<I, { readonly changes: Stream.Stream<S> }>, ok: (state: S) => boolean) {
   await drawn(async () => {
-    // A screen whose code cannot be loaded stops alone (runtime/contained.tsx): the journey goes on.
     await Promise.allSettled((opened.get(alpha)?.mounts ?? []).map((mount) => mount.load()));
     await runtime.runPromise(Effect.flatMap(key, (machine) => Stream.runHead(Stream.filter(machine.changes, ok))));
   });

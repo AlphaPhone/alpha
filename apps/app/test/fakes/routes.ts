@@ -1,6 +1,3 @@
-// The services Alpha reaches over the network, faked once at that boundary: plain fetch Requests and Responses, so
-// that the journeys (world.vibe) and the dev server (serve.ts) answer from the same routes.
-
 /** One route of a fake service: its answer to `request`, or undefined to leave it to the next route. */
 export type Route = (request: Request, url: URL) => Response | Promise<Response> | undefined;
 

@@ -16,7 +16,7 @@ export interface Checkout {
   readonly root: string;
   /** `agent.mjs` and its PGlite files, as the device carries them. */
   readonly bundle: string;
-  /** `packages/cloud`, with the Worker built to `dist/`. */
+  /** `packages/cloud`, with the cloud's own command built to `dist/src/main.js`. */
   readonly cloud: string;
 }
 
@@ -53,7 +53,7 @@ export function ready(at: Checkout = checkout()): boolean {
 /** The checkout, or the command that makes it. */
 export function prepared(): Checkout {
   const at = checkout();
-  if (!ready(at)) throw new Error(`eliza ${at.commit.slice(0, 12)} is not built at ${at.root}: run \`pnpm --filter @repo/app eliza\``);
+  if (!ready(at)) throw new Error(`eliza ${at.commit.slice(0, 12)} is not built at ${at.root}: run \`pnpm eliza\` once (a few minutes; worktrees share the build)`);
   linked(at);
   return at;
 }
@@ -71,7 +71,6 @@ async function alone<A>(at: Checkout, work: () => Promise<A>): Promise<A> {
   fs.mkdirSync(path.dirname(at.root), { recursive: true });
   for (let waited = 0; ; waited += 1) {
     try { fs.mkdirSync(lock); break; } catch { /* Another worktree holds it. */ }
-    // A build that died leaves its lock: after an hour without it finishing, it is taken over.
     const held = fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs;
     if (held !== undefined && Date.now() - held > 3_600_000) fs.rmSync(lock, { recursive: true, force: true });
     if (waited % 12 === 0) process.stdout.write(`another worktree is building eliza ${at.commit.slice(0, 12)}: waiting\n`);
@@ -80,7 +79,7 @@ async function alone<A>(at: Checkout, work: () => Promise<A>): Promise<A> {
   try { return await work(); } finally { fs.rmSync(lock, { recursive: true, force: true }); }
 }
 
-/** Clone eliza at the pinned commit, install it, and build the agent bundle and the cloud Worker. Each step is skipped once it is done. */
+/** Clone eliza at the pinned commit, install it, and build its packages and the agent bundle. Each step is skipped once it is done. */
 async function prepare() {
   const at = checkout();
   if (!ready(at)) await alone(at, () => build(at));
@@ -97,9 +96,7 @@ async function build(at: Checkout) {
   }
   run(at.root, "git", "checkout", "-q", "--detach", at.commit);
   run(at.root, "pnpm", "install", "--frozen-lockfile", "--prefer-offline");
-  // The agent imports the cloud's client and the device package the agent's client, so the order is theirs.
   for (const name of ["core", "cloud", "agent", "os"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
-  run(at.root, "pnpm", "--filter", "@elizaos/cloud", "build:worker");
   fs.rmSync(at.bundle, { recursive: true, force: true });
   const started = Date.now();
   const { buildAgentBundle } = await import(pathToFileURL(path.join(at.root, "packages/agent/dist/src/bundle/build.js")).href) as {
@@ -114,7 +111,15 @@ async function build(at: Checkout) {
 function link() {
   const at = checkout();
   if (ready(at)) return linked(at);
-  process.stdout.write(`eliza ${at.commit.slice(0, 12)} is not built yet: run \`pnpm eliza\` once (about twelve minutes) before typecheck, test or dev\n`);
+  process.stdout.write(`eliza ${at.commit.slice(0, 12)} is not built yet: run \`pnpm eliza\` once (a few minutes) before typecheck, test, build or dev\n`);
 }
 
-if (process.argv[1] === import.meta.filename) await (process.argv.includes("--link") ? link() : prepare());
+/** Before a command that needs the checkout: say the one command that makes it, and stop, where it is not built. */
+function required() {
+  try { prepared(); } catch (cause) {
+    process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] === import.meta.filename) await (process.argv.includes("--link") ? link() : process.argv.includes("--ready") ? required() : prepare());

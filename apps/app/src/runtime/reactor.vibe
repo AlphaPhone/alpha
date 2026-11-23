@@ -73,7 +73,6 @@ export function answer<Ev, R, By extends ReadonlyArray<unknown>>(key: string, an
 
 /** Every answer of `answers`, a stream that has already turned its failure into a last event; `lost` where it is cut short. */
 export function stream<Ev, R, By extends ReadonlyArray<unknown>>(key: string, answers: Stream.Stream<Ev, never, R>, lost: Ev, ...by: By): Job<Ev, Exclude<R, Attempts>, By> {
-  // The reactor gives every job the attempts of its machine, so a job that names them asks nothing of the runtime for it.
   return Job.Run({ key, answers: answers as Stream.Stream<Ev, never, Exclude<R, Attempts>>, lost: Option.some(lost), by })
 }
 
@@ -173,7 +172,6 @@ function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Lay
     try logError(`what is kept under ${key} is not a state: set aside under ${key}.unreadable`)
     if (found !== undefined) try ignore(store.set(`${key}.unreadable`, found))
     try ignore(store.remove(key))
-    // The state starts afresh, and so do its attempts' numbers: under a new epoch their keys are new too.
     try ignore(store.remove(`${key}.epoch`))
     return Layer.catch(Layer.fresh(stored(key)), () => memory)
   })
@@ -286,7 +284,6 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
       }
     }
     if (open !== undefined) {
-      // An opening that must first ask the world is asked once the runtime is whole, like any job; one that needs nothing is sent before anything else can be.
       if (Effect.isEffect(open)) try launch("open", effect { try contained(send(...(try open)), `opening ${scope}`) })
       else try contained(send(...open), `opening ${scope}`)
     }

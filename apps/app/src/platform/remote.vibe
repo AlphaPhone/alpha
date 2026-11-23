@@ -114,7 +114,6 @@ export effect function remoteAt(base: string): Wired!!HttpClient.HttpClient {
   return {
     open,
     effect call(request: HttpClientRequest.HttpClientRequest) {
-      // The head and the body together: an answer that starts and never ends is as unreachable as one that never starts.
       const whole = effect { return try (try answered(request)).text }
       const text = timeout(whole, patience) catch effect (cause) => match (cause) {
         when Refused: throw cause;

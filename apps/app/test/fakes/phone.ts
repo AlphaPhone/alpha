@@ -1,13 +1,14 @@
-// The phone as Android gives it to the page, faked once at that boundary: what Capacitor's own runtime
-// (`@capacitor/core`) calls on a native platform, with eliza's plugins behind it by their names, arguments, answers,
-// rejections and events (`.eliza/packages/os/android`, typed by `.eliza/packages/os/src/bridges/definitions`). Alpha's
-// phone layers, eliza's clients and Capacitor itself run against it unchanged.
 import type { AgentEvents, AgentRequest, AgentStatus, AgentStreamRequest, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent";
 import type { ElizaCloudPlugin, NativeCloudRequest } from "@elizaos/os/bridges/definitions/cloud";
 import type { ElizaSecureStorePlugin, ElizaSecureStoreResult } from "@elizaos/os/bridges/definitions/secure-store";
 import type { Answering } from "./routes.ts";
 
-/** A plugin as its Java or Kotlin answers the page: each method of eliza's definition `P`. */
+/**
+ * A plugin as its Java or Kotlin answers the page: each method of eliza's definition `P`. The phone is faked once, at
+ * the boundary Capacitor's own runtime calls on a native platform (`plugIn`), with eliza's plugins behind it by their
+ * names, arguments, answers, rejections and events (`.eliza/packages/os/android`, typed by
+ * `.eliza/packages/os/src/bridges/definitions`): Alpha's phone layers, eliza's clients and Capacitor run on it unchanged.
+ */
 export type Native<P> = { [Method in Exclude<keyof P, "addListener">]: P[Method] };
 
 /** Send the page's listeners an event of a plugin, as `notifyListeners` does. */
@@ -17,7 +18,7 @@ export type Emit<Events> = <Name extends keyof Events & string>(event: Name, dat
 export type Faked = (emit: (event: string, data: unknown) => void) => object;
 
 /** The fake of a plugin whose definition is `P` and whose events are `Events`: it does not compile once eliza changes either. */
-export const plugin = <P, Events = Record<never, never>>(make: (emit: Emit<Events>) => Native<P>): Faked => (emit) => make(emit) as object;
+export const plugin = <P, Events = Record<never, never>>(make: (emit: Emit<Events>) => Native<P>): Faked => (emit) => make(emit);
 
 /** A plugin the host registers and no journey calls: its presence alone is what the page reads. */
 export const present: Faked = () => ({});
@@ -51,7 +52,6 @@ export function elizaAgent(agent: Answering): Faked {
         const response = await agent(request);
         emit("streamData", { id, kind: "head", index: index++, status: response.status, headers: Object.fromEntries(response.headers) });
         const reader = response.body?.getReader();
-        // The plugin closes the agent's socket when the page aborts the stream.
         request.signal.addEventListener("abort", () => void reader?.cancel(), { once: true });
         if (request.signal.aborted) void reader?.cancel();
         for (let read = await reader?.read(); read && !read.done; read = await reader?.read()) emit("streamData", { id, kind: "chunk", index: index++, dataBase64: base64(read.value) });
@@ -92,7 +92,7 @@ export function elizaAgent(agent: Answering): Faked {
           void pump(options.id, asked(options, options.id));
           return Promise.resolve({ id: options.id });
         } catch (cause) {
-          return Promise.reject(cause as Error);
+          return Promise.reject(cause instanceof Error ? cause : rejection("Broken"));
         }
       },
       abort: aborted,
@@ -168,7 +168,6 @@ interface Capacitor {
  */
 export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
   const page = globalThis as { Capacitor?: Capacitor; androidBridge?: object };
-  // Capacitor's runtime keeps the object it found when it was first imported: it is changed, and never replaced.
   const capacitor = (page.Capacitor ??= {});
   const hearing = new Map<string, Map<string, Hear>>();
   const heard = (name: string, event: string) => hearing.get(`${name} ${event}`) ?? hearing.set(`${name} ${event}`, new Map()).get(`${name} ${event}`)!;

@@ -2,6 +2,7 @@ import { afterEach, expect, it } from "vitest";
 import { page } from "vitest/browser";
 import { Machine as Reminders } from "../gen/app__sample.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
+import { single } from "../src/runtime/single.ts";
 import { closeAll, open, until } from "./alpha.tsx";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
@@ -27,6 +28,7 @@ it("Move between Home and the apps, and find the same place after the page is op
   await page.getByRole("button", { name: "Back" }).click();
   await expect.element(page.getByRole("button", { name: "Notes" })).toBeVisible();
   expect(trail()).toEqual([]);
+  expect([await single(), await single()]).toEqual([true, false]);
 });
 
 // spec/app/sample/index.md, "Story: See and dismiss reminders"
