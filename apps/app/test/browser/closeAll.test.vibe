@@ -162,3 +162,38 @@ it("closing every tab is its own exact form, negotiated only beside Browser tabs
     grounded: false,
   })
 })
+
+it.live('Show the local Browser list after the receipt, when the requesting foreground still holds (spec/browser/session.md, "A request to see my tabs opens the local list after the receipt")', () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const operation = { type: "browser_tabs_show" }
+      const tabOnly = ["browser.tabs.v1"]
+      try settledTabs(tabs)
+      const before = try tabs.get()
+      const stale = try agent.control(operation, undefined, () => succeed(null))
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
+      try stale
+      const suppressed = try tabs.get()
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+      const present = try agent.control(operation, undefined, () => succeed(null))
+      const beforeReceipt = try tabs.get()
+      try present
+      const afterReceipt = try tabs.get()
+      try Effect.try(() => {
+        assert.isFalse(suppressed.layers.tabsOpen)
+        assert.isFalse(beforeReceipt.layers.tabsOpen)
+        assert.isTrue(afterReceipt.layers.tabsOpen)
+        assert.deepStrictEqual(afterReceipt.tabs, before.tabs)
+        assert.strictEqual(afterReceipt.cur, before.cur)
+        assert.deepStrictEqual((try Ref.get(fake.opened)), ["browser"])
+        assert.isTrue(groundedIn(operation, "Hey Alpha, show my open tabs."))
+        assert.isFalse(groundedIn(operation, "I'm thinking about the tabs."))
+        assert.notInclude(browserDeviceCapabilities(["browser.tabs.show.v1"], true), "browser.tabs.show.v1")
+        assert.include(browserDeviceCapabilities([...tabOnly, "browser.tabs.show.v1"], true), "browser.tabs.show.v1")
+      })
+    }
+  })
+})

@@ -1,7 +1,7 @@
-// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"
+// spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/agent.md, "Story: Go back, forward or reload only on the page I was looking at"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/pageContext.md, "The agent has no separate page read: a page-text request is refused with where the page comes from, and only back, forward and reload are view commands"; spec/browser/session.md, "A request to see my tabs opens the local list after the receipt"
 import { type BrowserControlOperation, browserControlReviewNotice, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
 import { observedTabCurrent, parseNativeHistoryCommand } from "@elizaos/plugin-browser/native-command"
-import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, curTab, isPrivateTab, keptOf, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
+import { type AgentOutcome, type AgentSettled, type BrowserTab, type Event as SessionEvent, type ListedTab, curTab, isPrivateTab, isTab, keptOf, listingCurrent, listingOf, selectionOf, visibleTabs } from "../../gen/browser__session.effect.vibe"
 import { type Preference, Machine, machine } from "../../gen/browser__agent.effect.vibe"
 import type { PageCommand } from "../../gen/browser__page.ts"
 import { type Interaction, interactionAnswer } from "../../gen/browser__pageContext.ts"
@@ -92,6 +92,10 @@ const historyOf = { back: "GoBack", forward: "GoForward", reload: "Reload", stop
 
 function inBrowser(state: ForegroundState): boolean {
   return state.visible && state.screen === "home" && state.view === "browser"
+}
+
+function tabListCanShow(state: ForegroundState): boolean {
+  return state.visible && state.screen === "home" && !state.locked && !state.shade && !state.modal
 }
 
 /** BrowserAgent over the session and the agent machine in memory. */
@@ -202,7 +206,8 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
       const operation: BrowserControlOperation = parsed.operation
       const state = try tabs.get()
       const selected = state.cur
-      const shown = inBrowser(try foreground.get())
+      const at = try foreground.get()
+      const shown = inBrowser(at)
       const request = newId()
       const observedTab = observed === undefined ? "" : observed.id.slice(observed.id.indexOf(":") + 1)
       const observedRevision = observed === undefined ? 0 : Number(observed.revision)
@@ -215,6 +220,15 @@ export const agentLayer = Layer.provide(Layer.effect(BrowserAgent, effect {
           const id = newTabId()
           try outcome({ type: "agentTabNew", request, id, priv: operation.private === true }, request)
           return effect { try tabs.dispatch({ type: "agentPresent", tab: id, selected, edit: true }) }
+        }
+        case "browser_tabs_show": {
+          if (!tabListCanShow(at) || !isTab(state, selected)) throw refuse("RefusedChanged")
+          return effect {
+            const now = try foreground.get()
+            if (tabListCanShow(now) && now.view === at.view && now.assistantSurface === at.assistantSurface) {
+              try tabs.dispatch({ type: "agentShowTabs", selected })
+            }
+          }
         }
         case "browser_tab_switch": {
           const target = try chosen(operation.target, false, choose)

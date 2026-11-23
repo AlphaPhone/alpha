@@ -1,8 +1,8 @@
-// spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/session.md, "Closing every tab is negotiated only beside Browser tabs, and it never runs without the owner's review"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/agent.md, "The open creates its tab without selecting it, the journal's receipt names that tab, and the tab is shown only after the receipt was attempted and only while the same foreground is current"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"
+// spec/browser/agent.md, "Story: Open the site I asked for"; spec/browser/session.md, "Story: Let the agent open and drive my tabs"; spec/browser/session.md, "Story: Close every tab from one listed review"; spec/browser/session.md, "Closing every tab is negotiated only beside Browser tabs, and it never runs without the owner's review"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"; spec/browser/agent.md, "The native call names the admitted revision, is sent at most once per claim, and its result is a dispatch, never a finished page"; spec/browser/agent.md, "The open creates its tab without selecting it, the journal's receipt names that tab, and the tab is shown only after the receipt was attempted and only while the same foreground is current"; spec/browser/pageContext.md, "An exact link of the page the latest message carried keeps its open card, and opens only after the owner approves it"; spec/browser/session.md, "A request to see my tabs opens the local list after the receipt"
 import type { ExecutorCall } from "@elizaos/agent/client"
-import { BROWSER_FIND_CAPABILITY, BROWSER_HISTORY_CAPABILITY, BROWSER_OPEN_NEW_TAB_CAPABILITY, BROWSER_SEARCH_CAPABILITY, BROWSER_TABS_CAPABILITY, type BrowserControlOperation, browserControlRunsUnreviewed, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
-import { browserDestinationMatches, groundBrowserDestination, groundBrowserSearchQuery } from "@elizaos/plugin-browser/grounding"
-import { closeAllNegotiated, closeAllRunsUnreviewed } from "../../gen/browser__session.ts"
+import { BROWSER_FIND_CAPABILITY, BROWSER_HISTORY_CAPABILITY, BROWSER_OPEN_NEW_TAB_CAPABILITY, BROWSER_SEARCH_CAPABILITY, BROWSER_TABS_CAPABILITY, BROWSER_TABS_SHOW_CAPABILITY, type BrowserControlOperation, browserControlRunsUnreviewed, describeBrowserControl, parseBrowserControl, parseBrowserNavigate } from "@elizaos/plugin-browser/contract"
+import { asksToSeeBrowserTabs, browserDestinationMatches, groundBrowserDestination, groundBrowserSearchQuery } from "@elizaos/plugin-browser/grounding"
+import { closeAllNegotiated, closeAllRunsUnreviewed, tabListNegotiated } from "../../gen/browser__session.ts"
 import { groundOf, offersCard, runs } from "../../gen/browser__pageContext.ts"
 import { browserNavigationSummary, copy } from "../assistant/presentation.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
@@ -69,6 +69,7 @@ function wordsTyped(operation: BrowserControlOperation, text: string): boolean {
 export function browserDeviceCapabilities(offered: readonly string[], onDevice: boolean): string[] {
   const wanted = [
     BROWSER_SEARCH_CAPABILITY, BROWSER_TABS_CAPABILITY, BROWSER_HISTORY_CAPABILITY, ...(onDevice ? [BROWSER_FIND_CAPABILITY] : []), BROWSER_OPEN_NEW_TAB_CAPABILITY,
+    ...(tabListNegotiated(offered.includes(BROWSER_TABS_CAPABILITY), offered.includes(BROWSER_TABS_SHOW_CAPABILITY)) ? [BROWSER_TABS_SHOW_CAPABILITY] : []),
     ...(closeAllNegotiated(offered.includes(BROWSER_TABS_CAPABILITY), offered.includes(BROWSER_TABS_CLOSE_ALL_CAPABILITY)) ? [BROWSER_TABS_CLOSE_ALL_CAPABILITY] : []),
   ]
   return wanted.filter((capability) => offered.includes(capability))
@@ -80,6 +81,7 @@ export function groundedIn(raw: unknown, text: string): boolean {
   if (op === undefined) return false
   if (op.kind === "closeAll") return closeAllRunsUnreviewed(true, true)
   if (op.kind === "navigate") return browserDestinationMatches(raw, groundBrowserDestination(text, op.url, ASSISTANT_NAME))
+  if (op.operation.type === "browser_tabs_show") return asksToSeeBrowserTabs(text, ASSISTANT_NAME)
   return browserControlRunsUnreviewed(op.operation, { boundToMessage: true, wordsTyped: wordsTyped(op.operation, text) })
 }
 
@@ -90,6 +92,7 @@ export function controlSummary(operation: BrowserControlOperation): string {
     case "browser_tab_new": return operation.private === true ? "Opened a private tab." : "Opened a new tab."
     case "browser_tab_switch": return "Switched tabs in Browser."
     case "browser_tab_close": return "Closed the tab."
+    case "browser_tabs_show": return "Opening your tab list in Browser."
     case "browser_find": return `Finding “${operation.text}” in the page.`
     case "browser_history": return { back: "Went back a page.", forward: "Went forward a page.", reload: "Reloading the page.", stop: "Stopped loading the page." }[operation.action]
   }
@@ -177,13 +180,19 @@ export const operationPorts = effect {
   }
 
   effect function permitted(op: BrowserOperation, call: ExecutorCall | undefined) {
+    if (op.kind === "control" && op.operation.type === "browser_tabs_show") {
+      return call !== undefined && asksToSeeBrowserTabs((try facts.of(call)).ownerText, ASSISTANT_NAME)
+    }
     if (op.kind !== "navigate" || !(try page.carried(op.url))) return true
     const told = call === undefined ? { reviewed: false, ownerText: "" } : try facts.of(call)
     return runs(groundOf(groundedIn({ type: "browser_navigate", url: op.url, ...(op.newTab ? { newTab: true } : {}) }, told.ownerText), true), told.reviewed)
   }
 
   effect function run(op: BrowserOperation, call: ExecutorCall | undefined) {
-    if (!(try permitted(op, call))) return { kind: "refused", code: "not_started", result: { message: PAGE_LINK_UNREVIEWED } }
+    if (!(try permitted(op, call))) {
+      const message = op.kind === "control" && op.operation.type === "browser_tabs_show" ? "Ask me to show your open tabs." : PAGE_LINK_UNREVIEWED
+      return { kind: "refused", code: "not_started", result: { message } }
+    }
     const proposalId = call?.proposalId ?? ""
     const present = presentation(op, proposalId) catch (error) => error
     if (present instanceof BrowserOpenRefused) return { kind: "refused", code: "not_started", result: { message: present.message } }

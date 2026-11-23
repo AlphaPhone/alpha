@@ -626,6 +626,25 @@ pure def agentPresent(s: Session, tab: str, selected: str, edit: bool): SessionC
   { state: { ...s, cur: tab, layers: { ...noLayers, editing: edit } }, out: List(ShowBrowser) }
 ```
 
+### A request to see my tabs opens the local list after the receipt
+
+When I ask only to see my open tabs, a phone that negotiated both
+`browser.tabs.v1` and `browser.tabs.show.v1` opens its tab list. It
+does so after attempting the action receipt, while the same tab and
+foreground are current and the phone is visible, unlocked and uncovered.
+The Browser list stays on the phone. The receipt reports dispatch and
+carries no title, address, count or other tab information.
+
+```quint
+pure def tabListNegotiated(tabs: bool, list: bool): bool = tabs and list
+pure def canAgentShowTabs(s: Session, selected: str): bool = isTab(s, selected) and s.cur == selected
+pure def agentShowTabs(s: Session, selected: str): SessionChange =
+  { state: { ...s, layers: { ...noLayers, tabsOpen: true } }, out: List(ShowBrowser) }
+pure def lawListingNeedsBrowserTabs(list: bool): bool = not(tabListNegotiated(false, list))
+pure def stepAgentShowTabsKeepsEveryTab(before: Session, via: str, after: Session): bool =
+  via == "agentShowTabs" implies (after.tabs == before.tabs and after.cur == before.cur)
+```
+
 ### The agent opens a new tab, private only when asked, and is refused at the limit
 
 ```quint
