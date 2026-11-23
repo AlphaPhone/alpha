@@ -1665,6 +1665,7 @@ export function installPrototypeCameraAdapter(_Component: unknown, views: Record
         current:()=>!disposed&&!document.hidden&&owner.isActive()&&visit===hostVisit,
         busy:()=>!!(edit||closeVideoEdit||mutating||sharing),
         reviewOpen:()=>!!albumReview||!!shareReview||deviceLibrary.reviewBusy(),
+        openId:()=>{const open=owner.get('photos').open;return typeof open==='string'&&open?nativeId(open):undefined;},
         select:rows=>{selection=rows;selectionTab='lib';photosFilter=undefined;owner.set({tab:'lib',album:null,open:null,nativePhotoSelection:null,nativeMultiSelection:Date.now()});},
         openReview:(request,rows,missing)=>{
           // Reviewed: the owner confirms over the grid; a share then picks a target in Android's share sheet.

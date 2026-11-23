@@ -3,16 +3,20 @@
 /// window are found at once; any other item is read from the library, and the reads can outlast
 /// a hide, a departure, a busy start or the library's own review. Only the same visible visit,
 /// free and with no review open, may then select or open the album review. The count of items
-/// it could not find is exact.
+/// it could not find is exact. An album or share with `selected` (photos.view-selected.v1) names
+/// the item open in the viewer when it arrives, and opens the review only if that item is still
+/// the open one after the read.
 module PhotosAgentHost {
+  /// kind "open": the item open in the viewer (`selected`), reviewed as an album or share.
   type Request = { phase: str, kind: str, ids: Set[int], found: Set[int], visit: int }
-  type Result = { kind: str, asked: int, selected: int, missing: int }
+  /// target: the open item an "open" request named (0 otherwise); seen: the item open when it completed.
+  type Result = { kind: str, asked: int, selected: int, missing: int, target: int, seen: int }
   type State = {
     inPhotos: bool, hidden: bool, disposed: bool, visit: int, busy: bool,
-    library: Set[int], window: Set[int], requests: int -> Request,
+    library: Set[int], window: Set[int], requests: int -> Request, open: int,
     selection: Set[int], selectionAsked: Set[int], albumReview: Set[int], libraryReview: bool,
     results: List[Result], confirmed: List[Set[int]],
-    refusedLeft: int, refusedBusy: int, refusedNone: int, refusedReview: int
+    refusedLeft: int, refusedBusy: int, refusedNone: int, refusedReview: int, refusedMoved: int
   }
   var s: State
   pure val Items = Set(1, 2)
@@ -23,23 +27,28 @@ module PhotosAgentHost {
   /// Item 2 is older than the loaded window.
   action init = s' = {
     inPhotos: true, hidden: false, disposed: false, visit: 0, busy: false,
-    library: Items, window: Set(1), requests: Slots.mapBy(_ => idle),
+    library: Items, window: Set(1), requests: Slots.mapBy(_ => idle), open: 0,
     selection: Set(), selectionAsked: Set(), albumReview: Set(), libraryReview: false,
-    results: [], confirmed: [], refusedLeft: 0, refusedBusy: 0, refusedNone: 0, refusedReview: 0
+    results: [], confirmed: [], refusedLeft: 0, refusedBusy: 0, refusedNone: 0, refusedReview: 0, refusedMoved: 0
   }
   val visible = s.inPhotos and not(s.hidden) and not(s.disposed)
   val reviewOpen = s.albumReview != Set() or s.libraryReview
   /// The reads have answered: window items found at the request, others read now. The request
-  /// acts only in the visit it started in, while Photos shows, is free and has no review open.
+  /// acts only in the visit it started in, while Photos shows, is free and has no review open; an
+  /// "open" request also only while its item is still the open one. Selecting or opening a review
+  /// closes the viewer.
   pure def complete(v: State, asked: Request): State = {
     val rows = asked.found.union(asked.ids.exclude(asked.found).intersect(v.library))
-    val result = { kind: asked.kind, asked: asked.ids.size(), selected: rows.size(), missing: asked.ids.size() - rows.size() }
+    val opened = asked.kind == "open"
+    val result = { kind: asked.kind, asked: asked.ids.size(), selected: rows.size(), missing: asked.ids.size() - rows.size(),
+      target: if (opened) asked.ids.fold(0, (a, b) => a + b) else 0, seen: if (opened) v.open else 0 }
     if (asked.visit != v.visit or not(v.inPhotos and not(v.hidden) and not(v.disposed))) { ...v, refusedLeft: bump(v.refusedLeft) }
     else if (v.busy) { ...v, refusedBusy: bump(v.refusedBusy) }
+    else if (opened and Set(v.open) != asked.ids) { ...v, refusedMoved: bump(v.refusedMoved) }
     else if (rows == Set()) { ...v, refusedNone: bump(v.refusedNone) }
-    else if (asked.kind == "select") { ...v, selection: rows, selectionAsked: asked.ids, results: v.results.append(result) }
+    else if (asked.kind == "select") { ...v, open: 0, selection: rows, selectionAsked: asked.ids, results: v.results.append(result) }
     else if (v.albumReview != Set() or v.libraryReview) { ...v, refusedReview: bump(v.refusedReview) }
-    else { ...v, albumReview: rows, results: v.results.append(result) }
+    else { ...v, open: 0, albumReview: rows, results: v.results.append(result) }
   }
   /// The assistant names items while Photos shows and no review is open (the library refuses
   /// otherwise). A busy host refuses at once; a request inside the window finishes at once.
@@ -51,6 +60,19 @@ module PhotosAgentHost {
       else if (ids.subseteq(s.window)) complete(s, asked)
       else { ...s, requests: s.requests.set(slot, asked) }
   }
+  /// The assistant names the item open in the viewer. A busy host refuses at once, and so does one
+  /// with no item open.
+  action requestOpen(slot: int): bool = all {
+    Slots.contains(slot), s.requests.get(slot).phase == "none", visible, not(reviewOpen), s.results.length() < 3,
+    val asked = { phase: "reading", kind: "open", ids: Set(s.open), found: Set(s.open).intersect(s.window), visit: s.visit }
+    s' = if (s.busy) { ...s, refusedBusy: bump(s.refusedBusy) }
+      else if (s.open == 0) { ...s, refusedNone: bump(s.refusedNone) }
+      else if (s.window.contains(s.open)) complete(s, asked)
+      else { ...s, requests: s.requests.set(slot, asked) }
+  }
+  /// The owner opens an item in the viewer (also one older than the window), or closes it.
+  action view(media: int): bool = all { Items.contains(media), visible, s.library.contains(media), s.open != media, s' = { ...s, open: media } }
+  action closeViewer = all { s.open != 0, s' = { ...s, open: 0 } }
   action settle(slot: int): bool = all {
     Slots.contains(slot), s.requests.get(slot).phase == "reading",
     s' = complete({ ...s, requests: s.requests.set(slot, idle) }, s.requests.get(slot))
@@ -73,19 +95,20 @@ module PhotosAgentHost {
   /// The editor, a video edit, a change or a share starts or ends.
   action busyStarts = all { not(s.busy), s' = { ...s, busy: true } }
   action busyEnds = all { s.busy, s' = { ...s, busy: false } }
-  /// An item leaves the library (also from the loaded window), or comes back outside it.
+  /// An item leaves the library (also from the loaded window), or comes back outside it. The
+  /// viewer closes when its item leaves.
   action remove(media: int): bool = all { Items.contains(media), s.library.contains(media),
-    s' = { ...s, library: s.library.exclude(Set(media)), window: s.window.exclude(Set(media)) } }
+    s' = { ...s, library: s.library.exclude(Set(media)), window: s.window.exclude(Set(media)), open: if (s.open == media) 0 else s.open } }
   action restore(media: int): bool = all { Items.contains(media), not(s.library.contains(media)),
     s' = { ...s, library: s.library.union(Set(media)) } }
   /// Unmounting ends the host; the retired library's own review card is no longer shown.
-  action dispose = all { not(s.disposed), s' = { ...s, disposed: true, inPhotos: false, selection: Set(), albumReview: Set() } }
+  action dispose = all { not(s.disposed), s' = { ...s, disposed: true, inPhotos: false, open: 0, selection: Set(), albumReview: Set() } }
   action step = {
     nondet slot = Slots.oneOf()
     nondet kind = Kinds.oneOf()
     nondet ids = Set(Set(1), Set(2), Set(1, 2)).oneOf()
     nondet media = Items.oneOf()
-    any { request(slot, kind, ids), settle(slot), libraryReviewOpens, libraryReviewEnds, confirmAlbum, cancelAlbum,
+    any { request(slot, kind, ids), requestOpen(slot), view(media), closeViewer, settle(slot), libraryReviewOpens, libraryReviewEnds, confirmAlbum, cancelAlbum,
       leave, enter, hide, show, busyStarts, busyEnds, remove(media), restore(media), dispose }
   }
   val SingleReview = not(s.albumReview != Set() and s.libraryReview)
@@ -95,19 +118,25 @@ module PhotosAgentHost {
   val ExactMissingCount = s.results.indices().forall(i => {
     val r = s.results.nth(i)
     r.selected > 0 and r.selected + r.missing == r.asked })
-  val safety = SingleReview and ReviewOnlyWhileShown and SelectionOnlyWhileShown and SelectionWasAsked and ExactMissingCount
+  /// An open-item review is of the one item that was open when it was asked and when it opened.
+  val OpenTargetStillOpen = s.results.indices().forall(i => {
+    val r = s.results.nth(i)
+    r.kind == "open" implies (r.asked == 1 and r.target > 0 and r.seen == r.target) })
+  val safety = SingleReview and ReviewOnlyWhileShown and SelectionOnlyWhileShown and SelectionWasAsked and ExactMissingCount and OpenTargetStillOpen
   val OlderItemSelectedWitness = s.selection.contains(2) and not(s.window.contains(2))
   val MissingCountedWitness = s.results.indices().exists(i => s.results.nth(i).missing > 0)
   val LeftDuringReadWitness = s.refusedLeft > 0 and visible
   val ReviewRefusedWitness = s.refusedReview > 0 and s.libraryReview
   val BusyRefusedWitness = s.refusedBusy > 0
   val AlbumConfirmedWitness = s.confirmed.length() > 0
+  val OpenItemReviewedWitness = s.results.indices().exists(i => s.results.nth(i).kind == "open")
+  val OpenItemMovedWitness = s.refusedMoved > 0
   /// Item 2 is outside the window: it is read, then both are selected.
   run olderItemReadThenSelectedTest = init.then(request(1, "select", Set(1, 2)))
     .expect(s.requests.get(1).phase == "reading" and s.selection == Set()).then(settle(1))
-    .expect(s.selection == Set(1, 2) and s.results == [{ kind: "select", asked: 2, selected: 2, missing: 0 }] and safety)
+    .expect(s.selection == Set(1, 2) and s.results == [{ kind: "select", asked: 2, selected: 2, missing: 0, target: 0, seen: 0 }] and safety)
   run missingItemCountedTest = init.then(remove(2)).then(request(1, "album", Set(1, 2))).then(settle(1))
-    .expect(s.albumReview == Set(1) and s.results == [{ kind: "album", asked: 2, selected: 1, missing: 1 }] and safety)
+    .expect(s.albumReview == Set(1) and s.results == [{ kind: "album", asked: 2, selected: 1, missing: 1, target: 0, seen: 0 }] and safety)
   run windowOnlyRequestFinishesAtOnceTest = init.then(request(1, "select", Set(1)))
     .expect(s.selection == Set(1) and s.requests.get(1).phase == "none" and safety)
   /// Hidden and shown again while the library reads: the old request opens no review.
@@ -125,4 +154,14 @@ module PhotosAgentHost {
   /// A window row is found from the window even if it left the library during the read.
   run windowRowFoundFromWindowTest = init.then(request(1, "album", Set(1, 2))).then(remove(1)).then(settle(1))
     .expect(s.albumReview == Set(1, 2) and safety).then(confirmAlbum).expect(s.confirmed == [Set(1, 2)] and safety)
+  /// The open item is older than the window: it is read, then reviewed, and the viewer closes.
+  run openItemReviewedTest = init.then(view(2)).then(requestOpen(1)).expect(s.requests.get(1).phase == "reading").then(settle(1))
+    .expect(s.albumReview == Set(2) and s.open == 0 and s.results == [{ kind: "open", asked: 1, selected: 1, missing: 0, target: 2, seen: 2 }] and safety)
+  /// The owner opens another item while the open item is read: no review opens.
+  run openItemChangedDuringReadTest = init.then(view(2)).then(requestOpen(1)).then(view(1)).then(settle(1))
+    .expect(s.albumReview == Set() and s.refusedMoved == 1 and s.results == [] and safety)
+  run noOpenItemRefusedTest = init.then(requestOpen(1)).expect(s.refusedNone == 1 and s.requests.get(1).phase == "none" and safety)
+  /// The open item leaves the library during the read: the viewer closed, so nothing is reviewed.
+  run openItemRemovedDuringReadTest = init.then(view(2)).then(requestOpen(1)).then(remove(2)).then(settle(1))
+    .expect(s.albumReview == Set() and s.refusedMoved == 1 and safety)
 }
