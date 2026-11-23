@@ -35,6 +35,6 @@ export effect function command(plugin: string, method: string, args?: unknown): 
 }
 
 /** Whether `plugin` is registered on this device. */
-export effect function present(plugin: string): boolean {
+export effect function present(plugin: string) {
   return try (try Native).available(plugin)
 }

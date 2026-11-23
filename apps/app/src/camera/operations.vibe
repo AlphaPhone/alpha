@@ -102,7 +102,7 @@ export const operationPorts = effect {
   const facts = try CameraCallFacts
   let message = ""
 
-  effect function callOf(call: ExecutorCall): ActionCall {
+  effect function callOf(call: ExecutorCall) {
     const known = try facts.of(call)
     if (known.messageId !== "" && known.messageId !== message) {
       message = known.messageId

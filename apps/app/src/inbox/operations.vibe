@@ -95,7 +95,7 @@ export const layer = Layer.effect(MailOperations, effect {
     return s.records.some((r) => r.owner === s.owner) ? recordOf(s.owner, s) : undefined
   }
 
-  effect function outcomeOf(r: OperationRecord | undefined, announcedNow: boolean): OperationOutcome | undefined {
+  effect function outcomeOf(r: OperationRecord | undefined, announcedNow: boolean) {
     if (r === undefined) return undefined
     if (notStarted(r)) return "NotStarted"
     switch (r.receipt.receiptState) {
@@ -106,7 +106,7 @@ export const layer = Layer.effect(MailOperations, effect {
     }
   }
 
-  effect function settle(r: OperationRecord): boolean {
+  effect function settle(r: OperationRecord) {
     if (r.receipt.receiptState !== "SucceededReceipt") return false
     if (isLabelKind(r.kind) && r.proposal.tag === "LabelProposal") {
       const id = r.proposal.messageId
@@ -124,7 +124,7 @@ export const layer = Layer.effect(MailOperations, effect {
     return (try send({ type: "announce", requestId: r.requestId })) !== undefined
   }
 
-  effect function failed(error: GmailFailed | SignInExpired): OperationOutcome {
+  effect function failed(error: GmailFailed | SignInExpired) {
     if (error._tag === "SignInExpired") {
       try accounts.refresh()
       return "SignedOut"
@@ -155,7 +155,7 @@ export const layer = Layer.effect(MailOperations, effect {
     return try review(id)
   }
 
-  effect function confirm(shown: ComposerRef): OperationOutcome {
+  effect function confirm(shown: ComposerRef) {
     const r = try record()
     if (r === undefined || !journalKept) return "Refused"
     const confirmed = try send({ type: "confirm", requestId: r.requestId, shown })
@@ -223,7 +223,7 @@ export const layer = Layer.effect(MailOperations, effect {
     confirm,
     effect sendDraft(draft: Draft, requestId?: string, shownNow?: (ComposerRef | undefined)!!) {
       const shown = composerRef(draft)
-      effect function confirmShown(): OperationOutcome {
+      effect function confirmShown() {
         const now = shownNow === undefined ? shown : try shownNow
         if (now !== undefined && (now.draftId !== shown.draftId || now.content !== shown.content)) {
           const r = try record()

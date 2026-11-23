@@ -312,7 +312,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const done = try exit(routes.send(event))
     return Exit.isSuccess(done)
   }
-  effect function drawCard(proposal: PendingProposal, recovered: boolean, session: string): ProposalCard {
+  effect function drawCard(proposal: PendingProposal, recovered: boolean, session: string) {
     const described = ports.describe(proposal.operation)
     proposals.set(proposal.id, proposal)
     const items = listedNow.get(proposal.id)
@@ -354,7 +354,7 @@ export const reviewLayer = Layer.effect(DeviceReview, effect {
     const described = ports.describe(proposal.operation)
     return typeof said === "string" ? said : `${proposal.title ?? described.title}: ${copy.nothingListed}`
   }
-  effect function stateOf(routes: RoutesMachine.Shape): CardState {
+  effect function stateOf(routes: RoutesMachine.Shape) {
     return (try routes.get()).card
   }
   effect function screenCheck(reviewed: boolean, requestEligible: boolean, forceReview: boolean) {

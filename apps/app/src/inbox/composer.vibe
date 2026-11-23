@@ -122,7 +122,7 @@ export const layer = Layer.effect(MailComposer, effect {
     return accountOf(s.owner, s)
   }
 
-  effect function write(): ComposerRefusal | undefined {
+  effect function write() {
     return try Semaphore.withPermit(writing, effect {
       const w = try Ref.getAndSet(waiting, undefined)
       if (w === undefined) return undefined
@@ -145,7 +145,7 @@ export const layer = Layer.effect(MailComposer, effect {
     return try write()
   }
 
-  effect function start(draft: Draft): ComposerRefusal | undefined {
+  effect function start(draft: Draft) {
     try flush()
     const s = try machine.get()
     if (s.owner === "") return "no-account"
@@ -156,7 +156,7 @@ export const layer = Layer.effect(MailComposer, effect {
     return opened === undefined ? "changed" : undefined
   }
 
-  effect function fresh(fields: DraftFields): Draft {
+  effect function fresh(fields: DraftFields) {
     return { ...noDraft, id: newId(), revision: 1, fields }
   }
 
@@ -280,7 +280,7 @@ export const layer = Layer.effect(MailComposer, effect {
       }
       return undefined
     },
-    effect back(): ComposerBack {
+    effect back() {
       if (!(try mine()).composing) return { taken: false }
       const refusal = try flush()
       if (refusal !== undefined) return { taken: true, refusal }

@@ -121,7 +121,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     return after
   }
 
-  effect function feedFor(window: CalendarWindow, id: number): FeedReply {
+  effect function feedFor(window: CalendarWindow, id: number) {
     const expected = { timeMin: isoInstant(window.range.begin), timeMax: isoInstant(window.range.end) }
     return effect {
       const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/feed", { side: "owner", ...expected, timeZone: window.timeZone })), READ_TIMEOUT)
@@ -134,7 +134,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     } catch (error) => (error instanceof ResidentRefused && (error.status === 401 || error.status === 403) ? "FeedRefused" : "FeedFailed") as FeedReply
   }
 
-  effect function calendarsFor(id: number): readonly CalendarSummary[] | undefined {
+  effect function calendarsFor(id: number) {
     return effect {
       const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/calendars", { side: "owner" })), READ_TIMEOUT)
       const list = (try decodeCalendars(answer.data)).calendars
@@ -143,7 +143,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     } catch () => undefined
   }
 
-  effect function upcomingFor(window: CalendarWindow, id: number): EventRecord | null | "failed" {
+  effect function upcomingFor(window: CalendarWindow, id: number) {
     return effect {
       const answer = try timeout(resident.json("GET", query("/api/lifeops/calendar/next-context", { side: "owner", timeZone: window.timeZone })), READ_TIMEOUT)
       const next = try decodeNext(answer.data)
@@ -215,7 +215,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     try Ref.set(saved, valid && feed !== undefined && calendars !== undefined ? { ...entry, feed, calendars: calendars.calendars } : undefined)
   }
 
-  effect function readbackAt(sourceKey: string, at: number, timeZone: string): { readonly calendars: readonly CalendarSummary[]; readonly events: readonly EventRecord[] } | undefined {
+  effect function readbackAt(sourceKey: string, at: number, timeZone: string) {
     return effect {
       const window = namedReadWindow(at)
       const range = { timeMin: isoInstant(window.startMs), timeMax: isoInstant(window.endMs) }
@@ -244,7 +244,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
   }
 
   /** A refusal named by the agent is refused; an agent that was not running or asked to slow down took nothing; any other lost answer may have been applied and is unknown. */
-  effect function sent(call: () => Promise<CalendarChangeReply>): Sent {
+  effect function sent(call: () => Promise<CalendarChangeReply>) {
     return try tryPromise({ try: call, catch: (error) => error }) catch (error) =>
       (error instanceof ResidentUnavailable ? "transport"
         : error instanceof ResidentRefused ? (error.status === 429 ? "transport" : error.status >= 400 && error.status < 500 && error.status !== 408 ? "refused" : "unknown")
@@ -275,7 +275,7 @@ export const agentLayer = Layer.effect(AgentCalendar, effect {
     return (reply) => ("receipt" in reply ? sourceKeyId(reply.receipt.source) : fallback)
   }
 
-  effect function currentEvent(eventKey: string): EventRecord | undefined {
+  effect function currentEvent(eventKey: string) {
     const view = try SubscriptionRef.get(shown)
     return view.savedAt === undefined ? view.feed?.events.find((event) => agentEventKey(event) === eventKey) : undefined
   }

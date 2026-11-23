@@ -25,7 +25,7 @@ function sourceOf(row: CalendarRow): EventSource {
   return row.source === "device" ? "DeviceSource" : "AgentSource"
 }
 
-effect function agentEvent(row: CalendarRow): EventRecord | undefined {
+effect function agentEvent(row: CalendarRow) {
   const view = try (try AgentCalendar).view()
   return view.feed?.events.find((event) => `agent:${agentEventKey(event)}` === row.id)
 }
@@ -188,7 +188,7 @@ function wallOf(instant: number, zone: string): string {
 }
 
 /** The fields a new form opens with: today at the next full hour, another day at ten, one hour long, in the device zone. */
-export effect function newFields(day: number, creationId: string): DraftFieldsRecord {
+export effect function newFields(day: number, creationId: string) {
   const now = try Clock.currentTimeMillis
   const zone = deviceZone()
   const hour = Number((calendarWall(now, zone) ?? "T00").slice(11, 13))

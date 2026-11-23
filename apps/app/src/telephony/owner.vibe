@@ -60,14 +60,14 @@ export effect function ownerKept<S>(name: string, start: S, decode: (input: unkn
     return left
   }
 
-  effect function damaged(key: string): S {
+  effect function damaged(key: string) {
     const held = Option.isSome(storage) && (try storage.value.hold(key))
     const cleared = held && (try (effect { try store.remove(key); return true } catch () => false))
     if (!cleared) try Ref.update(inMemory, (states) => new Map(states).set(key, start))
     return start
   }
 
-  effect function load(): S {
+  effect function load() {
     const key = try session.ownerKey(slot)
     const running = (try Ref.get(inMemory)).get(key)
     if (running !== undefined) return running

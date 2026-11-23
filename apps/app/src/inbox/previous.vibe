@@ -42,7 +42,7 @@ export function previousMode(draft: PreviousDraft): Mode {
 }
 
 /** A previous draft as a shelved draft of this version: everything it held, its attachments checked again, revision one. */
-export effect function previousDraftOf(draft: PreviousDraft, toQ: string): Draft {
+export effect function previousDraftOf(draft: PreviousDraft, toQ: string) {
   const forwardParts = (draft.forward?.parts ?? []).slice(0, 10).map((part) => ({ partId: part.partId, name: part.name, nameKey: part.name.toLowerCase(), mimeType: part.mimeType, bytes: part.size }))
   const files: OutgoingFile[] = []
   for (const attachment of draft.attachments ?? []) {
@@ -74,11 +74,11 @@ export effect function keepPreviousDrafts(owner: string): number!! {
   const onDevice = try (native.available(SECURE_STORE) catch () => false)
   const prefix = onDevice ? "" : BROWSER_PREFIX
 
-  effect function hash(text: string): string {
+  effect function hash(text: string) {
     return try (tryPromise({ try: () => sha256Hex(text), catch: () => "" }) catch () => "")
   }
 
-  effect function read(slot: string): string | undefined {
+  effect function read(slot: string) {
     if (onDevice) {
       try adoptLegacySlot(slot, slot)
       const answer = try native.invoke(SECURE_STORE, "get", { key: slot })
@@ -96,7 +96,7 @@ export effect function keepPreviousDrafts(owner: string): number!! {
     if ((try store.get(slot)) === raw) try store.remove(slot)
   }
 
-  effect function slotsOf(previous: string): PreviousSlotDrafts[] {
+  effect function slotsOf(previous: string) {
     const ownerHash = try hash(previous)
     if (ownerHash === "") return []
     const found: PreviousSlotDrafts[] = []
