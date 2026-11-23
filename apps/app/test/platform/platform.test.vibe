@@ -70,7 +70,7 @@ module device {
   export function agent(routes: Readonly<Record<string, Reply | readonly Reply[]>>, plan: AgentPlan = {}): Agent {
     const listeners = new Map<string, Array<(event: unknown) => void>>()
     const emit = (name: keyof AgentEvents, event: unknown) => { for (const listener of listeners.get(name) ?? []) listener(event) }
-    const table: Record<string, Reply | Reply[]> = Object.fromEntries(Object.entries(routes).map(([key, reply]) => [key, Array.isArray(reply) ? [...reply] : reply]))
+    const table: Record<string, Reply | Reply[]> = Object.fromEntries(Object.entries(routes).map(([key, reply]) => [key, "status" in reply ? reply : [...reply]]))
     const state: Agent = {
       sent: [],
       streamed: [],
@@ -179,8 +179,8 @@ it.effect("reach the phone's native capabilities only where this build has them"
   const calls: string[] = []
   const port = bridge({
     AlphaTelephony: { status: () => ({ ready: true }) },
-    AlphaDevice: { haptic: () => ({}), snapshot: () => { throw { message: "Busy", code: "BUSY" } } },
-    ElizaSystem: { getNetworkStatus: () => { throw { message: "Not implemented", code: "UNIMPLEMENTED" } } },
+    AlphaDevice: { haptic: () => ({}), snapshot: () => Promise.reject({ message: "Busy", code: "BUSY" }) },
+    ElizaSystem: { getNetworkStatus: () => Promise.reject({ message: "Not implemented", code: "UNIMPLEMENTED" }) },
   }, calls)
   provide Native = nativeOver(port, "Launcher") {
     const native = try Native
@@ -191,13 +191,14 @@ it.effect("reach the phone's native capabilities only where this build has them"
     const refused = try Effect.flip(native.invoke("AlphaDevice", "snapshot"))
     const unimplemented = try Effect.flip(native.invoke("ElizaSystem", "getNetworkStatus"))
     const haptic = try native.invoke("AlphaDevice", "haptic", {})
+    const telephonyOffered = try native.available("AlphaTelephony")
     try Effect.try(() => assert.deepStrictEqual({
       telephony: telephony instanceof NativeUnavailable,
       unlisted: unlisted instanceof NativeUnavailable,
       refused: refused instanceof NativeFailed && refused.code === "BUSY",
       unimplemented: unimplemented instanceof NativeUnavailable,
       haptic,
-      telephonyOffered: try native.available("AlphaTelephony"),
+      telephonyOffered,
       calls,
     }, {
       telephony: true, unlisted: true, refused: true, unimplemented: true, haptic: {}, telephonyOffered: false,
@@ -620,11 +621,13 @@ it.live("count one return to Alpha once, and none after the screen that watched 
     provide lifecycleOver(shown.watch) {
       const app = try AppLifecycle
       try sleep("25 millis")
-      shown.current?.paused()
-      // spec/platform/lifecycle.md, "Leaving the app pauses it, and one return is counted once"
-      shown.current?.returned(1000)
-      shown.current?.returned(1100)
-      shown.current?.returned(1400)
+      try Effect.try(() => {
+        shown.current?.paused()
+        // spec/platform/lifecycle.md, "Leaving the app pauses it, and one return is counted once"
+        shown.current?.returned(1000)
+        shown.current?.returned(1100)
+        shown.current?.returned(1400)
+      })
       try sleep("25 millis")
       const now = try app.get()
       try Effect.try(() => assert.deepStrictEqual([now.foreground, now.returns, now.lastReturnAt], [true, 2, 1400]))
@@ -850,7 +853,7 @@ it.effect("move what the earlier Alpha kept into the secure store, and never ove
   }
   // spec/platform/storage.md, "A legacy slot is cleared only once the secure store holds a value for it"
   legacy.set("inbox-drafts:v1:ann", "old drafts")
-  provide fakeNative({ AlphaConnection: legacyPlugin, ElizaSecureStore: { get: () => ({ value: null }), compareAndExchange: () => { throw new Error("Secure storage is unavailable") } } }) {
+  provide fakeNative({ AlphaConnection: legacyPlugin, ElizaSecureStore: { get: () => ({ value: null }), compareAndExchange: () => new NativeFailed({ plugin: "ElizaSecureStore", method: "compareAndExchange", message: "Secure storage is unavailable" }) } }) {
     const outcomes = try adoptLegacySlots([["inbox-drafts:v1:ann", "device:other-drafts"]])
     try Effect.try(() => assert.deepStrictEqual([outcomes, legacy.get("inbox-drafts:v1:ann")], [["NotAdopted"], "old drafts"]))
   }
