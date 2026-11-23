@@ -12,10 +12,16 @@ documentation:
   one request of 18,947 uncached tokens the reported allowance was full again 7.6
   seconds later.
 - **A request holds more than it uses.** When it is admitted it holds its whole input,
-  cached or not, estimated about a quarter high, plus its output cap; a request that
-  sends no cap holds 16,384 for the output. It is refused (HTTP 429) when the allowance
-  left is smaller than that. When it finishes it gives the hold back and is charged the
-  input that missed the cache plus its output. Cached input is never charged.
+  cached or not, estimated about a quarter high (1.24 times), plus its output cap up to
+  16,384; a request that sends no cap, or a larger one, holds 16,384 for the output. It
+  is refused (HTTP 429) when the allowance left is smaller than that. When it finishes
+  it gives the hold back and is charged the input that missed the cache plus the output
+  it actually wrote. Cached input is never charged.
+- **The model's limits.** The context window is 131,072 tokens and the most a call can
+  write is 40,960, which is also the limit when no cap is sent (an uncapped call stopped
+  at exactly 40,960). Reasoning tokens count inside the cap; the model reasons by default
+  unless the request says `reasoning_effort: none`. Since one request's hold must fit in
+  the 150K allowance, the largest input an uncapped request can ever carry is about 107K.
 - **A refusal asks for a longer wait than is needed.** It carries `Retry-After: 59`.
   Three requests of 36K tokens refused together and re-sent each second were admitted
   5, 14 and 27 seconds later, as the allowance refilled. A refused request is not
@@ -23,12 +29,38 @@ documentation:
 - **The cache reuses a request's leading text in units of 1,024 tokens**, read as tool
   definitions, then the system prompt, then the messages. One changed byte in a tool
   definition makes the rest of the request a miss.
+- **A stored prefix is kept for between 10 and 20 minutes.** Eight requests were stored
+  and each read back once: those read at 5 and 10 minutes were reused, those read at 20,
+  30, 45, 60 and 90 minutes were not. One sample per interval; the audit assumes 10.
+- **A digit costs about one token.** Ids and timestamps cost several times what prose
+  does per character.
 
 So three things cost allowance: input that misses the cache, the size of a request while
 it runs, and a missing output cap. Output itself is small, about 2% of a turn's input.
 
 This runbook covers host tools. None is an APK, emulator, image or device acceptance
 result.
+
+### The route a phone uses
+
+A phone signed in to the Cloud does not call Cerebras itself. Its runtime posts each
+call to the Cloud, which sends it to Cerebras with one key shared by every phone. This
+was read from the code and rendered offline with the network stubbed; no Cloud turn was
+sent. Every live figure below was taken on the direct route.
+
+- The Cloud adds no text. Tool definitions arrive in the phone's order and bytes, the
+  system prompt is unchanged, and the output cap, the conversation's cache key and the
+  provider's cached count all pass through. The runtime changes therefore apply.
+- Planner tools go out non-strict with their schemas as written. The direct route sends
+  them strict with rewritten schemas, which are larger where a schema has an open map
+  (a Calendar read is 7.8K characters on the phone's route and 16.9K on the direct one).
+  The routing evals in section 1 send the phone's form; the whole-turn runs in section 2
+  send the direct form.
+- A refusal comes back with no wait. The phone re-sends once per model type, up to ten
+  uploads for one refused step, and then waits five seconds. The hold setting
+  `OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS` belongs to the direct route and does nothing here.
+- Nothing in the Cloud counts tokens or paces a phone. One phone's holds can refuse
+  another phone's call.
 
 ## 1. Read a phone's recorded requests
 
@@ -48,7 +80,7 @@ excerpts around each point where two requests stop matching.
 The report gives, per stage (Stage 1, planner, evaluator, side calls): call counts and
 input tokens; calls and tokens per turn; input tokens in any 60 seconds against
 `--tpm`; where each stage's characters go; the share of each request that an earlier
-request of the same stage, within `--cache-minutes` (default 5), already contained;
+request of the same stage, within `--cache-minutes` (default 10), already contained;
 and the text at which requests most often diverge.
 
 It ends with the provider's cache and limits applied to the recorded requests: cached
@@ -310,8 +342,10 @@ One conversation of 36 turns on a local resident in Android mode (section 2), br
 
 Output is about 2% of input. Over 295 calls the provider counted, Stage 1 wrote 196
 tokens at the median and 342 at most, the planner 103 and 263, the evaluator 180 and
-540. What output costs is its cap, which a call holds while it runs: 4,096 with the
-phone's settings, 16,384 without one.
+540. What output costs is its cap, which a call holds while it runs: at most 16,384,
+which is also what a call that sends no cap holds. Calls that reason write far more: a
+first step that reads history back reasons with 700 to 3,600 output tokens, and the
+personal assistant's planning call used more than 4,096.
 
 ## 2. Whole turns on a local resident
 
@@ -440,6 +474,187 @@ Read with these in mind:
 - **The side calls are capped at the tip.** Its logs record 4,096 on the large text
   calls that recorded none before.
 
+### Phone-like runs: the merged runtime and the follow-ups
+
+The phone loads the personal-assistant plugin and sends its requests in direct-request
+mode; the desktop launcher turns the plugin off and the eval sent no mode. From case set
+revision 5 the eval sends the phone's mode, and `resident-launch3.sh` in the work cache
+turns the plugin on. With it a reminder request carries the reminder tools (19.6K
+characters for the reminder create tool alone).
+
+One conversation, 5 s apart, Android mode, plugin loaded, case set revision 7 (46 turns:
+41 cases and 5 follow-ups). "Merged" is upstream `6e2a094775` as pinned by the product.
+"Follow-ups" adds the history-window rebind, Calendar descriptions, the role-word
+contact query, the constant evaluator schema and the device-turn tool surface. Both
+with the phone's 4,096 output caps. No provider refusal in either run.
+
+| | Merged | Follow-ups |
+| --- | --- | --- |
+| Cases passing | 38 of 46 | 42 of 46 |
+| Device requests routed correctly | 24 of 31 | 28 of 31 |
+| Input per turn, median and p90 | 31K, 59K | 34K, 60K |
+| Provider's cached share | 37% (planner 30%) | 46% (planner 43%) |
+| Uncached tokens charged in any 60 s, median | 130K | 135K |
+| Lowest allowance once a call holds its share | 50K | 48K |
+
+The follow-ups fix the vague call and text that became a contact lookup, "Open a new
+tab" (a stalled request on the merged run), find-in-page, and a text with a Calendar
+event. "Open example.com" proposed `open_view` once in place of the browser open (one
+run; the tool list was the same as the merged run's). A text and an alarm, and a photo
+and a text, still propose only the first operation.
+
+The follow-ups' requests are not smaller: more of the run's proposals were made and
+then rejected, so the recorded outcomes of earlier requests grew (proposal end states
+4.8K to 8.5K characters per Stage 1 call, effect receipts 3.2K to 4.7K). That is the
+text the one-line outcome rendering under review folds, one line per outcome. On the
+merged run, 48 of 49 Stage 1 requests carried the resident's "needs attention" notice
+rows (the rig has no embedding provider); the follow-ups keep those out of prompt
+history.
+
+### Output caps of 4,096 cut off reasoning
+
+The personal assistant plans a reminder with a separate large text call (core
+`runExtractorPipeline` from `extract-task-plan.ts`). It is sent with reasoning on, and
+under the 4,096 cap the model used all of it reasoning and wrote nothing
+(`finishReason: length`, 4,096 completion tokens, 4,096 of them reasoning). On the
+merged run "Remind me to call mom at 5pm" replied that it "ran into a hiccup". On the
+follow-ups run "Remind me to take out the trash before bed, at 10pm" was retried by
+the planner three times in one turn, each attempt cut off, and replied "It's not
+saved" after 24 seconds and 153K input tokens. A call cut off this way writes no usage
+row, so earlier logs cannot show how often it happened. Before revision 7 the eval
+scored these turns as passes.
+
+Creating a workflow fails the same way. Its authoring call (`WORKFLOW`, one large text
+call per attempt) sends no output limit of its own and reasons at "high", so on a phone
+launched with the caps `TEXT_LARGE_MAX_TOKENS=4096` is its only limit. On the pinned
+prompt, sent straight to the provider, 10 of 10 capped calls stopped at the limit with
+nothing written, and the turn replied with a failure. Uncapped, 10 of 10 finished in
+5.6K to 11.7K tokens (4 to 8 s), and every draft passed the workflow's own parse and
+TypeScript checks. A cap of 8,192 still cut off 2 of 5. On the Pixel's v618 build
+(caps of 4,096) "create a workflow called Alpha device test" failed on both tries. A
+cut-off shows in the turn's trajectory record (`finishReason: length`), not in the
+agent log.
+
+The owner's decision is that there is no 4,096 cap: output may use the model's maximum
+and input its context window. The phone now launches with no output cap on any call (the
+five `*_MAX_TOKENS` lines are gone from `AlphaLocalAgentPlugin.java`): a call that sends
+none may write 40,960 tokens and holds the same as an explicit 40,960. The planner's
+upstream default of 8,192 stays until the runtime accepts `ELIZA_PLANNER_MAX_TOKENS=model`
+(a follow-up change); no recorded planner call wrote more than 301 tokens. What each policy costs, on the Pixel's own turns of
+November 19 and 20 replayed through the branch (Stage 1 and the first planner call of
+158 turns at the phone's real spacing; a host replay, nothing sent):
+
+| Output cap on Stage 1 and the planner | Lowest allowance, 1 phone | 2 phones | 3 phones |
+| --- | --- | --- | --- |
+| 4,096 | 92K | 64K | 45K |
+| None sent, or the model's 40,960 | 80K | 52K | 33K |
+
+No call of these replays starts without enough allowance under either policy, even with
+three phones. A cap costs allowance only while its call runs: the model's maximum holds
+12,288 more per running call than 4,096, and nothing more is charged unless more is
+written. On the recorded synthetic conversations, which send turns every 5 to 10
+seconds, one phone never runs short either way, while two or three phones on one key
+run short under every policy: there the uncached input alone exceeds the refill, and
+the output cap changes the count of short calls by 1% to 4%.
+
+### No output cap, merged and follow-ups
+
+The same one-conversation run (46 turns, 5 s apart, case set revision 8, which fails a
+reply that says a create did not take effect), with and without the 4,096 caps. "No
+cap" sends none on Stage 1, the evaluator and the side calls; the planner sends its
+runtime default of 8,192. Follow-ups are upstream `b943a738c5`: the earlier follow-ups
+plus the Cloud refusal change, the Stage 1 re-send after a `parser_error` and minute
+stamps.
+
+| | Merged, 4,096 | Merged, no cap | Follow-ups, 4,096 | Follow-ups, no cap |
+| --- | --- | --- | --- | --- |
+| Cases passing | 38 of 46 | 38 of 46 | 42 of 46 | 42 of 46 |
+| Calls cut off at the cap | 1 | 0 | 3 (one turn) | 0 |
+| Reminders saved | 2 of 3 | 0 of 3 (refused) | 2 of 3 | 3 of 3 |
+| Provider refusals | 0 | 16 | 0 | 0 |
+| Planner input, median and p90 | 18K, 34K | 23K, 36K | 20K, 30K | 19K, 23K |
+| Uncached tokens charged in any 60 s, p90 | 183K | 234K | 185K | 165K |
+| Lowest allowance once a call holds its share | 50K | -35K | 48K | 68K |
+
+The merged runtime is close to the limit at this pace even with caps: its planner
+requests carry tools guessed from the request. Without caps each running call holds
+12,288 more and it ran short on its own: the audit of its own calls agrees with the
+refusals. The follow-ups send smaller planner requests and stay clear without caps.
+At the Pixel's real spacing both fit either way (section 1). So the cap removal
+belongs with the follow-ups.
+
+The follow-up tip `516c7e8a56` (adds the planner's `model` value, the parser re-send,
+the idle limit, reminder planning at low reasoning and every review proposal of one
+reply recorded), same run, no cap: 43 of 46, device requests 30 of 31; text plus alarm
+now proposes both. Input per turn is the same (34K median), but turns are faster
+(median 2.6 s against 3.9 s; the reminder's planning call 1.1 s against 6.4 s), so at a
+fixed 5-second pause the same tokens land in less time: uncached tokens in any 60 s rose
+to 149K median and the run was refused 12 times; two reminders failed when the planning
+call itself was refused, which a side call did not re-send (`d0fac57d11` now re-sends an
+extractor call once after a refusal).
+
+The tip with that re-send, `d0fac57d11`, and a control run of `516c7e8a56`, back to back
+on November 21 with the key to themselves:
+
+| | `516c7e8a56` (control) | `d0fac57d11` |
+| --- | --- | --- |
+| Cases passing | 42 of 46 | 40 of 46 |
+| Provider refusals | 0 | 5, all at turns 10 to 12, each with a 60 s wait |
+| Input, cached share | 1.61M, 50% | 1.58M, 42% |
+| Output | 16.7K | 18.4K |
+| Median turn | 2.9 s | 2.8 s |
+
+Two of the tip's failures are those refusals: the reminder's extractor was refused, re-sent
+and refused again inside the same 60-second window, and a text with a Calendar event lost
+its reply. The others move between runs of one arm (reading a number from notes, a timer,
+a new tab). Output is about 1% of all tokens in every run: input is the lever.
+
+### Recorded outcomes without ids and times
+
+Upstream `1627967c86` prints recorded outcomes in the same record format without the
+fields no later step reads (request and receipt UUIDs, the redacted idempotency key, ISO
+times, resource versions), names each request by its history key, keeps the legend fixed
+and folds a proposal's later state into its row. `6cc102a735` then says each legend rule
+once. Same run on November 21, the first two back to back:
+
+| | `d0fac57d11` | `1627967c86` | `6cc102a735` |
+| --- | --- | --- | --- |
+| Cases passing | 42 of 46 | 44 of 46 | 44 of 46 |
+| Provider refusals | 0 | 0 | 0 |
+| Input | 1.61M | 1.20M | 1.13M |
+| Charged: uncached input plus output | 894K | 579K | 528K |
+| Provider's cached share | 46% | 54% | 55% |
+| Input per turn, median and p90 | 33K, 64K | 24K, 40K | 23K, 32K |
+| Stage 1, planner, evaluator median | 12.5K, 18.0K, 14.2K | 8.4K, 14.8K, 8.3K | 8.3K, 14.6K, 8.6K |
+| Output | 17K | 24K | 17K |
+| Median turn | 3.1 s | 2.6 s | 2.3 s |
+
+Charged tokens fall by 41%. On synthetic rows the planner routed as well as before (19
+of 20 in both forms, then 19 against 17 for the shorter legend), and a line in another
+person's text in the form's own record format misled the model no more often than
+today's (6 of 10 against 8 of 10; 1 of 5 against 4 of 5 for the shorter legend). A room
+with one record is now below the old form in provider tokens (532 against 589). The keys
+are positions in the dialogue window, so rows stay append-only only inside it (100
+messages by default).
+
+### The phone's decode mode
+
+On the Cloud route planner tools go out non-strict with their schemas as written; every
+whole-turn run here used the direct route, which sends them strict, rewritten and
+wrapped in one `arguments` object. The 39 routing requests in the four forms, live,
+three runs of the phone's form and the direct form:
+
+| | Phone's form | Direct form |
+| --- | --- | --- |
+| Expected operation proposed | 104 of 117 | 107 of 117 |
+| Device requests routed right | 100 of 105 | 101 of 105 |
+| Operation object failing its schema | 5 of 117 | 0 of 117 |
+| Prompt tokens per request | 9,671 | 9,783 |
+
+Routing is the same within noise. The phone's form produced an operation that fails its
+schema in about 4% of answers (a rejected call and a planner retry on the phone); the
+strict forms never did. Strict costs about 110 tokens more per request.
+
 ## 3. What a change must show
 
 - The audit on a phone running the change: input per turn, the allowance left and the
@@ -453,13 +668,61 @@ Read with these in mind:
 - No tool definition that differs between two turns of a conversation in one view: in
   the audit, the same digest for the same tool name.
 
+### Follow-ups after the merge
+
+Upstream branch `claude/agent-context-followups` (local, on upstream develop
+`0fc3586dce`), each change reviewed by an independent verifier before it was committed:
+
+| Change | What it fixes | Measured |
+| --- | --- | --- |
+| History window kept when a message or outcome lands mid-turn; failure notices out of prompt history | Planner and evaluator calls that carried the whole room | 580-message room: planner request 374K to 53K characters |
+| Calendar details described once | Repeated descriptions on alternate spellings | CALENDAR 21.5K to 19.4K characters |
+| Role-word contact query | "Ping my brother" becoming a contact lookup | Lookups first 0 of 15 (3 of 8 recorded before) |
+| Constant evaluator schema, no planner routing text | Evaluator bytes changing every turn | One request: 3,072 to 17,408 of 17.5K reused |
+| Guessed tools left behind tool search on device turns | Tool lists changing every turn | 9.4 to 6.2 tools per request, definitions down 26% |
+| Typed Cloud refusal, canonical form for a product Cloud | Up to ten uploads per refused step | One upload per refusal |
+| Stage 1 re-send on `parser_error`; cut-off Stage 1 replies "cut off" | "I hit a snag" after a cut-off reasoning call | Re-send answered 20 of 20 |
+| Minute stamps | 25 tokens per stamp | 4% at Stage 1 and the planner, 9% at the evaluator |
+| `ELIZA_PLANNER_MAX_TOKENS=model`; no re-call after a model-maximum stop | The planner's 8,192 default; three retries of a cut-off | |
+| Streamed idle limit (60 s) on the direct route; `parser_error` never transient | A silent re-send waiting for the 180 s deadline | |
+| Reminder planning at low reasoning, both routes | Reasoning at "high" by default | Correct 36 of 40 against 21 of 25; about two thirds fewer output tokens |
+| Every review proposal of one reply recorded | Text plus alarm proposing only the text | Both calls in the first reply 10 of 10 |
+| Extractor call re-sent once after a refusal (wait hint up to 5 s) | A reminder lost when its planning call was refused | |
+| Recorded outcomes without unread ids and times; legend rules said once | UUIDs and ISO times at about a token per digit | Whole turn: charged tokens 894K to 528K, 44 of 46 |
+
+Parked after ten rounds: a compact one-line rendering of recorded outcomes. It made
+requests with recorded outcomes 20% to 30% smaller (one probe 17.2K to 12.0K tokens), but
+a line in another person's text shaped like a record misled the model. A secret per-room
+marker on the runtime's own lines helped (forged lines: 0 of 65 false "sent" claims
+against 9 of 65 for today's form) but did not close it. A forged line with a wrong or
+stale marker still misled the model in 3 of 5 runs, against 5 of 5 for a forgery of
+today's format. Keeping the marker secret meant stripping it from every outgoing path
+or rotating it on every leak, and each round found another way out. The patch and the
+round reports are kept in the work cache (`parked/outcome-lines-v10`). Today's record
+format with the unread fields dropped (section 2) took most of the saving instead and
+adds no new shape to forge.
+
+Dropped: narrowing a reminder's retrieval to the reminder tools when Stage 1 names a
+reminder operation. It would cut a time-clause reminder's tool definitions from about
+100K to 24K characters, but four rounds of rules (word lists, then allow-lists of
+moments and asides) each dropped a second tool the owner asked for in some wording: the
+last, in 447 of about 3,600 adversarial decisions (a run-on second request with a verb
+outside its lists, a misspelt verb, no verb, or a joiner typo such as "an"). A safe version would need to recognise the reminder's own
+words, not exclude other verbs.
+
 ## 4. Known and open
 
-- **No phone has run the branch.** Everything above is a host measurement. Real
-  numbers need the upstream changes merged, the pin advanced and a build on a phone.
-- **A text and an alarm in one request proposes only the text.** The planner's first
-  reply usually holds both calls; the turn stops at the first approval pause with the
-  second still queued.
+- **No phone measurement yet.** The first changes are merged (upstream
+  `6e2a094775`, product `983f47b18e`); everything above is a host measurement until a
+  build on a phone is audited.
+- **Fixed upstream on develop, not yet on a phone pin:** a photo and a text in one
+  request now get a card each (`c1590fda6f`, `1a28b1578b`; only a request that is
+  nothing but a photo opens the camera without a card, and the Phone, Messages and
+  Contacts screens still hold one card at a time). The Cloud route carries a provider
+  400's `code`, `param` and provider message (`f60b554307`, `c962ce990d`), so the Stage 1
+  re-send after a `parser_error` applies there too. A calendar delete or move whose
+  target lookup Stage 1 bound as a requested search no longer replies "I couldn't look
+  up that event" (`b9c462d368`).
 - **Tools chosen per request sit before the system prompt** in the provider's read
   order: Calendar (18K characters), reminders (20K), messaging (13K). A turn whose tool
   set differs from the last one's re-reads the system prompt and the history. In the
@@ -474,4 +737,53 @@ Read with these in mind:
   by an English keyword floor (section 1).
 - **The device tool still differs by view,** and by two wordings: asking for an
   address in a new tab, and naming the phone's own calendar.
+- **Re-sends stack on the direct route.** After a refusal with no wait hint (the
+  provider's "high traffic" 429) the OpenAI plugin's own retries and the turn's re-send
+  multiply: 4 and then 4 more requests for one step on the generate lane in a November 20
+  resident run (16 of its 22 refusals had no hint). The stream lanes' budget allows 12
+  (loopback, not seen live). The no-cap runs' refusals all carried `Retry-After: 60`
+  and were each sent once. A refused request is not charged, so this costs time and
+  request count, not tokens.
 
+
+## 5. What landed, November 22, 2026
+
+Upstream elizaOS/eliza develop:
+
+| PR | Merge commit | What it changes |
+| --- | --- | --- |
+| [#40037](https://github.com/elizaOS/eliza/pull/40037) | `cfd908406e` | The follow-ups in section 3: history window, Calendar descriptions, role-word contacts, constant evaluator schema, device-turn tool surface, Cloud refusal, Stage 1 re-send, minute stamps, no planner re-call at the model's maximum, slim recorded outcomes with a fixed legend, extractor re-send, Cloud 400 fields |
+| [#40038](https://github.com/elizaOS/eliza/pull/40038) | `89baf73d94` | A calendar change that read its own target counts as the requested read |
+| [#40090](https://github.com/elizaOS/eliza/pull/40090) | `51a6976551` | The reviews queued behind a requested photo's card are recorded |
+| [#40174](https://github.com/elizaOS/eliza/pull/40174) | `e2ebd0f3ed` | No agent model call sends an output cap; the cap settings are gone; references stay stable per conversation by default; a 4 s hold on direct Cerebras only; SMS drafts with reasoning off |
+| [#40186](https://github.com/elizaOS/eliza/pull/40186) | open | A rejected or expired proposal's record says it never ran |
+
+Settings the runtime no longer reads: `ELIZA_PLANNER_MAX_TOKENS` (and its `model`
+value), `ELIZA_CODING_PLANNER_MAX_TOKENS`, `ELIZA_STAGE1_MAX_TOKENS`,
+`ELIZA_EVALUATOR_MAX_TOKENS`, every `<TYPE>_MAX_TOKENS` and `DEFAULT_MAX_TOKENS`,
+`ELIZAOS_CLOUD_IMAGE_DESCRIPTION_MAX_TOKENS`, `ELIZA_SECRET_SWAP_STABLE_REFERENCES`,
+`OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS` (and `CEREBRAS_`), `OPENAI_ATTEMPT_IDLE_TIMEOUT_SECONDS`.
+Anthropic's adapter still sends its model's maximum, because that API requires a
+value.
+
+Before #40174, the phone still sent two caps after the launcher stopped setting any:
+the planner's own 8,192 default on every planning round, and 160 on the SMS reply
+draft. Live, with a synthetic thread, 5 requests per variant:
+
+| SMS draft | Usable drafts | Median latency |
+| --- | --- | --- |
+| Cap of 160, reasoning high (before) | 2 of 5; 3 spent every token reasoning | 364 ms |
+| No cap, reasoning high | 5 of 5 | 412 ms |
+| No cap, reasoning off (now) | 5 of 5 | 134 ms |
+
+A regression the whole-turn eval caught after #40037: once both text cards were
+rejected, "Did the text to Sam about the keys go out?" was no longer answered. It
+failed 0 of 2, against 7 of 7 before. The rejection had moved into a no-op reason under
+a scope that said records "do not prove current resource state", so the planner
+proposed a Messages read. #40186 puts the rejection first in the reason ("Rejected by
+the owner; it never ran.") and tells the legend that such a reason answers whether the
+request ran.
+
+Product: [alpha#1428](https://github.com/eliza-research/alpha/pull/1428) removed the
+launcher's five 4,096 caps; [alpha#1448](https://github.com/eliza-research/alpha/pull/1448)
+pins `e2ebd0f3ed` and stops setting the two settings the runtime no longer reads.

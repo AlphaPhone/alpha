@@ -45,7 +45,7 @@ import { selectDeviceCapabilities } from '../apps/app/src/runtime/phone-context.
 const root = fileURLToPath(new URL('../', import.meta.url));
 /** An Alpha-image phone: every reviewed surface the launcher can run. */
 export const DEVICE_PROFILE = Object.freeze({ android: true, native: true, camera: true, foregroundReview: true, canonicalNotes: true, photoLibrary: true, files: true, clockRepeatDays: true, aospImage: true });
-const CASESET_REVISION = 5;
+const CASESET_REVISION = 8;
 
 /**
  * `expect` lists what the turn must propose: each entry is a set of acceptable operation
@@ -59,6 +59,8 @@ const CASESET_REVISION = 5;
  */
 export interface PhoneCase { id: string; family: string; view: string; text: string; expect: readonly (readonly string[])[]; allow?: readonly string[]; proposal?: RegExp; reply?: RegExp; mustNotRefuse?: boolean }
 const REFUSAL = /\b(can['’]t|cannot|unable to|not able to|don['’]t have (a way|the ability|access))\b/i;
+/** A reply that reports the request was attempted and did not take effect. */
+const NOT_DONE = /\b(hiccup|snag|(system|temporary) error|rate limit|failed|incomplete|not saved|(wasn['’]t|was not|isn['’]t|is not|didn['’]t|did not) (saved|save|set|created|go through)|couldn['’]t|could not|can['’]t confirm|try again)\b/i;
 const CALL = ['phone_call', 'phone_dial'], TEXT = ['sms_compose', 'sms_send'], CLOCK = ['clock_*'];
 // A phone has no timer operation: Clock takes an alarm at a time of day, never a duration. A
 // relative reminder is the nearest it can offer, and an alarm in its place is wrong.
@@ -102,7 +104,12 @@ export const CASES: readonly PhoneCase[] = Object.freeze([
   { id: 'note', family: 'other-actions', view: 'home', mustNotRefuse: true, text: 'Create a note called Groceries with milk and eggs.', expect: [] },
   { id: 'calendar-read', family: 'other-actions', view: 'calendar', text: "What's on my calendar tomorrow?", expect: [] },
   // A reminder is not an alarm: guidance that sends "wake me" to Clock must not take this too.
-  { id: 'reminder-plain', family: 'other-actions', view: 'home', text: 'Remind me to call mom at 5pm.', expect: [], allow: REMINDER },
+  { id: 'reminder-plain', family: 'other-actions', view: 'home', mustNotRefuse: true, text: 'Remind me to call mom at 5pm.', expect: [], allow: REMINDER },
+  // A reminder worded with a time clause, a comma or "and" once loaded every sibling create tool beside the reminder's.
+  { id: 'reminder-before', family: 'other-actions', view: 'home', mustNotRefuse: true, text: 'Remind me to take out the trash before bed, at 10pm.', expect: [], allow: REMINDER },
+  { id: 'reminder-after', family: 'other-actions', view: 'home', mustNotRefuse: true, text: 'Remind me to email Dana after lunch tomorrow, at 1pm.', expect: [], allow: REMINDER },
+  // A request that needs the phone and a record that is not the phone's.
+  { id: 'text-and-calendar', family: 'multi', view: 'home', text: "Text Sam I'm running late and put lunch with Sam on my calendar tomorrow at noon.", expect: [TEXT], allow: ['calendar_create'] },
   { id: 'question', family: 'chat', view: 'home', text: 'What is the capital of France?', expect: [], reply: /paris/i },
   { id: 'thanks', family: 'chat', view: 'home', text: 'Thanks!', expect: [] },
   { id: 'phone-question', family: 'chat', view: 'home', text: 'How do phone alarms differ from timers?', expect: [] },
@@ -134,7 +141,7 @@ export function judgeTurn(item: PhoneCase, operations: readonly { type?: string 
   const routed = judge(item.expect, operations.map(operation => operation.type ?? 'unknown'), item.allow);
   if (routed !== 'pass') return routed;
   if (item.proposal && !operations.some(operation => item.proposal!.test(JSON.stringify(operation)))) return 'content';
-  if (item.mustNotRefuse && REFUSAL.test(reply)) return 'content';
+  if (item.mustNotRefuse && (REFUSAL.test(reply) || NOT_DONE.test(reply))) return 'content';
   return item.reply && !item.reply.test(reply) ? 'content' : 'pass';
 }
 
