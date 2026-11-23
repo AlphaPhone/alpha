@@ -3,7 +3,9 @@
 The views the agent opens on this phone and the commands it gives inside
 them. A turn tells the agent which renderer it may deliver to
 (`viewClientId`, `viewDelivery: "completed-action"` and the view in front,
-`uiView`) unless the screen is private. A reply whose action results
+`uiView`) unless the screen is private. The same renderer and delivery mode
+go in the turn context's `voiceUi` so the agent can decide whether to offer
+a completed-action view or a device proposal. A reply whose action results
 prepared a view (`navigationPrepared` with a `navigationBinding` for this
 renderer) is delivered by the owner-bound claim of the agent's view routes:
 `POST /api/views/interact-claim` with the binding, then exactly one

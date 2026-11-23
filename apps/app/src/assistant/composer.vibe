@@ -352,12 +352,17 @@ export const composerLayer = Layer.effect(Composer, effect {
     } : undefined
     const page = observation === undefined ? undefined : try pageForTurn(pages, observed, observation, browserTab, peer.optionalFields)
     const browserPage = page === undefined ? undefined : wirePage(page)
-    const voiceUi = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff") ? { agentActionMode: "direct-request-v1" as const } : undefined
+    const viewFields = try views.turnFields(observed, screen.observation.view)
+    const direct = statesDirectRequests(asksFirst ? "PreferenceOn" : "PreferenceOff")
+    const voiceUi = viewFields === undefined ? undefined : {
+      viewDelivery: viewFields.viewDelivery,
+      uiClientId: viewFields.viewClientId,
+      ...(direct ? { agentActionMode: "direct-request-v1" as const } : {}),
+    }
     const context = encodeTurnContext({
       ...(observation === undefined ? {} : { observation, ...(browserPage === undefined ? {} : { browserPage }) }),
       ...(voiceUi === undefined ? {} : { voiceUi }),
     }, { optionalFields: peer.optionalFields })
-    const viewFields = try views.turnFields(observed, screen.observation.view)
     const pageLinks = browserPage === undefined ? [] : (page?.links ?? []).map((link) => link.url)
     const userId = `local-user-${attempt}`
     const replyId = `local-reply-${attempt}`
