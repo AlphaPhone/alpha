@@ -53,8 +53,14 @@ pure val nowValues = Set(0, 10, 20, 30)
 pure val atValues = Set(0, 10, 20)
 pure val targetValues = Set(10, 30)
 pure val seenValues = Set(0, 1, 2)
-pure val revisionValues = Set(0, 1)
+pure val revisionValues = Set(0, 1, 2)
 pure val approvalValues = Set(1)
+pure val freshValues = Set(4, 5)
+pure val attemptValues = Set(1, 2, 3, 4, 5)
+pure val resultValues = Set(M::Done, M::Refused, M::Lost)
+pure val reasonValues = Set(M::NoReason, M::NotificationsOff)
+pure val weight_due = 6
+pure val weight_deleted = 8
 ```
 
 ### Every reminder the desk holds keeps the rules of a reminder under its own number
@@ -156,9 +162,12 @@ pure def sometimesFull(d: Reminders): bool = d.full
 
 ### Android is asked once, its answer settles the change, and a refused change is tried again, for the reminder they name; each answer marks the list out of date
 
+Android's answer names the reminder and the number of the change it
+answers, which is the reminder's own number only for its scheduling.
+
 ```quint
-pure val weight_operate = 3
-pure val weight_answer = 4
+pure val weight_operate = 5
+pure val weight_answer = 10
 
 pure def canOperate(d: Reminders, number: int, now: int, by: O::Actor): bool =
   d.numbers.contains(number) and not(d.interrupted.contains(number)) and M::canOperate(held(d, number), now, by)
@@ -167,11 +176,11 @@ pure def operate(d: Reminders, number: int, now: int, by: O::Actor): Acted =
   val m = routed(number, d, M::operate(held(d, number), now, by))
   { ...m, state: { ...m.state, since: d.since.put(number, d.listing.ticket) } }
 
-pure def canAnswer(d: Reminders, number: int, result: M::Answer, reason: M::Reason, by: O::Actor): bool =
-  M::canAnswer(held(d, number), number, result, reason, by)
+pure def canAnswer(d: Reminders, number: int, attempt: int, result: M::Answer, reason: M::Reason, by: O::Actor): bool =
+  d.numbers.contains(number) and M::canAnswer(held(d, number), attempt, result, reason, by)
 
-pure def answer(d: Reminders, number: int, result: M::Answer, reason: M::Reason, by: O::Actor): Acted =
-  val m = routed(number, d, M::answer(held(d, number), number, result, reason, by))
+pure def answer(d: Reminders, number: int, attempt: int, result: M::Answer, reason: M::Reason, by: O::Actor): Acted =
+  val m = routed(number, d, M::answer(held(d, number), attempt, result, reason, by))
   { ...m, state: { ...m.state, stale: true } }
 
 pure def canRetry(d: Reminders, number: int, now: int, signedIn: int, by: O::Actor): bool =
@@ -236,7 +245,7 @@ pure def sometimesMissingFromARead(d: Reminders): bool =
 ### The owner's decisions, the phone's ringing, changes made elsewhere and a deletion carried out reach the reminder they name
 
 ```quint
-pure val weight_decide = 3
+pure val weight_decide = 12
 
 pure def canDecide(d: Reminders, number: int, change: M::Change, seen: int, fresh: int, target: int, now: int, signedIn: int, by: O::Actor): bool =
   M::canDecide(held(d, number), change, seen, fresh, target, now, signedIn, by)

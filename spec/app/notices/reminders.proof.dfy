@@ -119,17 +119,17 @@ lemma operate_ensures(d: Reminders, number: int, now: int, by_: app__approvals__
   }
 }
 
-lemma answer_ensures(d: Reminders, number: int, result: app__notices__reminder_Answer, reason: app__notices__reminder_Reason, by_: app__approvals__operation_Actor)
-  ensures (inv(d) ==> canAnswer(d, number, result, reason, by_) ==> alwaysEveryReminderKeepsItsRules(answer(d, number, result, reason, by_).state))
-  ensures (inv(d) ==> canAnswer(d, number, result, reason, by_) ==> alwaysTheListIsCurrentOrMarked(answer(d, number, result, reason, by_).state))
-  ensures (inv(d) ==> canAnswer(d, number, result, reason, by_) ==> alwaysFewCreationsAreUnconfirmed(answer(d, number, result, reason, by_).state))
-  ensures (inv(d) ==> canAnswer(d, number, result, reason, by_) ==> stepAFailureIsSaidOnce(d, "answer", answer(d, number, result, reason, by_).state, answer(d, number, result, reason, by_).out))
-  ensures (inv(d) ==> canAnswer(d, number, result, reason, by_) ==> stepAnUnknownSchedulingIsSettledByALaterRead(d, "answer", answer(d, number, result, reason, by_).state))
-  ensures (inv(d) ==> canAnswer(d, number, result, reason, by_) ==> stepEachReminderIsPickedUpOnce(d, "answer", answer(d, number, result, reason, by_).state, answer(d, number, result, reason, by_).out))
+lemma answer_ensures(d: Reminders, number: int, attempt: int, result: app__notices__reminder_Answer, reason: app__notices__reminder_Reason, by_: app__approvals__operation_Actor)
+  ensures (inv(d) ==> canAnswer(d, number, attempt, result, reason, by_) ==> alwaysEveryReminderKeepsItsRules(answer(d, number, attempt, result, reason, by_).state))
+  ensures (inv(d) ==> canAnswer(d, number, attempt, result, reason, by_) ==> alwaysTheListIsCurrentOrMarked(answer(d, number, attempt, result, reason, by_).state))
+  ensures (inv(d) ==> canAnswer(d, number, attempt, result, reason, by_) ==> alwaysFewCreationsAreUnconfirmed(answer(d, number, attempt, result, reason, by_).state))
+  ensures (inv(d) ==> canAnswer(d, number, attempt, result, reason, by_) ==> stepAFailureIsSaidOnce(d, "answer", answer(d, number, attempt, result, reason, by_).state, answer(d, number, attempt, result, reason, by_).out))
+  ensures (inv(d) ==> canAnswer(d, number, attempt, result, reason, by_) ==> stepAnUnknownSchedulingIsSettledByALaterRead(d, "answer", answer(d, number, attempt, result, reason, by_).state))
+  ensures (inv(d) ==> canAnswer(d, number, attempt, result, reason, by_) ==> stepEachReminderIsPickedUpOnce(d, "answer", answer(d, number, attempt, result, reason, by_).state, answer(d, number, attempt, result, reason, by_).out))
 {
-  if inv(d) && canAnswer(d, number, result, reason, by_) {
-    var after := answer(d, number, result, reason, by_).state;
-    var r := app__notices__reminder_answer(held(d, number), number, result, reason, by_).state;
+  if inv(d) && canAnswer(d, number, attempt, result, reason, by_) {
+    var after := answer(d, number, attempt, result, reason, by_).state;
+    var r := app__notices__reminder_answer(held(d, number), attempt, result, reason, by_).state;
     forall n | n in d.numbers ensures held(after, n) == (if n == number then r else held(d, n)) {
     }
     NoMoreUnconfirmed(d, after);
