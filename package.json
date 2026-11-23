@@ -45,7 +45,7 @@
     "cloud:local": "node scripts/local-cloud.ts",
     "dev:cloud": "node scripts/dev-cloud.ts",
     "test:browser": "turbo run test:browser --filter=@alphacompute/alphaphone-app",
-    "test:browser:production": "turbo run gen --filter=@alphacompute/alphaphone-app && playwright test --project=production",
+    "test:browser:production": "pnpm -s gen && playwright test --project=production",
     "test:browser:legacy": "playwright test --project=chromium"
   },
   "dependencies": {
