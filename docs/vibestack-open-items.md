@@ -203,7 +203,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
   - an approved text is not watched after "submitted" (`SMS_SETTLE` covers only the owner's sends);
   - ring, "Screen it" and the in-app incoming call card exist only as model.
 - **Camera:**
-  - viewer swipe, zoom and pan are modelled (`PhotoLibrary.swipe`, `zoomedTo`/`pans`/`doubleTapped`) but no control calls them;
+  - viewer zoom and pan are modelled (`zoomedTo`/`pans`/`doubleTapped` in `gen/camera__media`) but no control calls them; the viewer swipes and takes the arrow keys now;
   - removing one item from a custom album is gone: `AlbumOp` has no remove, though `PhotoStore` keeps it; Empty Recently deleted has no event, store method or control;
   - albums are a filter of the loaded window (at most 600 rows), and counts come from that window; `store.summary()` and `store.list({album})` are never called;
   - the Photos grid is not virtualised, pages by a "Show more" button and keeps every thumbnail in Machine state;

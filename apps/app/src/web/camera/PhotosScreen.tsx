@@ -1,7 +1,7 @@
 // spec/camera/library.md, "Story: See my whole permitted library, newest first"; spec/camera/library.md, "Story: Be told honestly what Android lets Alpha read"; spec/camera/browse.md, "Story: Look at one photo"; spec/camera/browse.md, "Story: Change my photos in batches I confirm"; spec/camera/albums.md, "Story: Keep my photos in albums"; spec/camera/agentLibrary.md, "Story: Let the assistant point at photos I can see"; spec/camera/media.md, "Story: Ask Alpha about the photo I am looking at"
 import { Effect } from "effect";
 import { ChevronLeft, Heart, Images, Mail, MessageSquare, Pencil, ScanText, Settings2, Share2, Sparkles, Trash2, Undo2, X } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMachine as useCatalog } from "../../../gen/camera__library.react.ts";
 import { useMachine as useBrowse } from "../../../gen/camera__browse.react.ts";
 import { useMachine as useAlbums } from "../../../gen/camera__albums.react.ts";
@@ -98,6 +98,13 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
   const [name, setName] = useState("");
   const offer = scopeOffer(catalog.scope, false, true, false);
   const viewer = rows.find((row) => row.id === browse.viewer);
+  const viewerAt = viewer === undefined ? -1 : rows.indexOf(viewer);
+  /** Move the viewer to the item `step` places along the list it was opened from. */
+  const step = (by: number) => {
+    const next = viewerAt < 0 ? undefined : rows[viewerAt + by];
+    if (next !== undefined) library((l) => l.swipe(next.id));
+  };
+  const swipeFrom = useRef<number | null>(null);
   const editing = viewer !== undefined && viewer.video;
   const card = reviews !== undefined && reviews.review !== 0 && reviews.reviewAction !== ""
     ? { ...reviewText(reviews.reviewAction as "trash" | "share" | "favorite" | "unfavorite", reviews.reviewCount), count: reviews.reviewCount }
@@ -211,7 +218,14 @@ export function PhotosView({ route, catalog, browse, rows, said, now, messages, 
         <SheetContent side="full" title={viewer === undefined ? "Photo" : `${viewerTitle(viewer.rank, now).day} ${viewerTitle(viewer.rank, now).time}`}>
           {viewer !== undefined && (
             <>
-              <div className="flex flex-1 items-center justify-center bg-foreground">
+              <div className="flex flex-1 touch-pan-y items-center justify-center bg-foreground" tabIndex={-1}
+                onKeyDown={(event) => { if (event.key === "ArrowLeft") step(-1); else if (event.key === "ArrowRight") step(1); }}
+                onPointerDown={(event) => { swipeFrom.current = event.clientX; }}
+                onPointerUp={(event) => {
+                  const from = swipeFrom.current;
+                  swipeFrom.current = null;
+                  if (from !== null && Math.abs(event.clientX - from) > 48) step(event.clientX < from ? 1 : -1);
+                }}>
                 {viewer.video ? (browse.playable === "" ? <img src={viewer.image} alt="" className="max-h-full max-w-full object-contain" /> : <video src={browse.playable} poster={viewer.image === "" ? undefined : viewer.image} controls playsInline className="max-h-full max-w-full" />) : <img src={viewer.image} alt="" className="max-h-full max-w-full object-contain" />}
               </div>
               <p className="px-4 font-mono text-xs uppercase text-muted-foreground">
