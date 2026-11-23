@@ -62,6 +62,11 @@ export function genuineBatchProgress(value: BatchProgressCue): boolean {
   return value.kind === 'thinking' ? bounded(value.label) : value.kind === 'running_action'
     ? bounded(value.actionName) : value.kind === 'running_tool' && bounded(value.toolName);
 }
+/** A cue waits this long before speaking, so a reply that is already on its way is not preceded by
+ * a cue it would clip; a reply within the hold means the cue is never spoken. */
+export const BATCH_CUE_HOLD_MS = 300;
+/** A cue already audible finishes before reply speech, but never holds a ready reply longer than this. */
+export const BATCH_CUE_REPLY_BOUND_MS = 2500;
 export function createBatchProgressAcknowledgment(input: {
   turnId: string; conversationId: string; ownerId: string;
   signal: AbortSignal;
@@ -69,18 +74,28 @@ export function createBatchProgressAcknowledgment(input: {
   /** The recorded clip's capture is retired (batch). null on a live path: its capture stays open
    * for barge-in and the host's live session hears the cue as its own playback. */
   captureRetired: (() => boolean) | null;
-  /** Existing selected speech facade; settles only after matching playback/media cleanup. */
-  speak(text: string, signal: AbortSignal): Promise<void>;
+  /** Existing selected speech facade; settles only after matching playback/media cleanup.
+   * onStarted reports the first audible playback (not synthesis or fetch). */
+  speak(text: string, signal: AbortSignal, onStarted: () => void): Promise<void>;
 }) {
   const cue = new AbortController();
-  let used = false, final = false, retired = false;
+  let used = false, final = false, retired = false, playing = false, ended = false;
   let pending: Promise<void> = Promise.resolve();
+  let wake: (() => void) | undefined, bound: ReturnType<typeof setTimeout> | undefined;
   const check = () => { input.signal.throwIfAborted(); input.assertCurrent(); };
   const microphoneClear = () => input.captureRetired === null || input.captureRetired();
-  const cancel = () => { retired = true; cue.abort(input.signal.reason ?? new DOMException('Voice cue retired.', 'AbortError')); };
+  const cancel = () => { retired = true; wake?.(); cue.abort(input.signal.reason ?? new DOMException('Voice cue retired.', 'AbortError')); };
   input.signal.addEventListener('abort', cancel, { once: true });
   if (input.signal.aborted) cancel();
-  const preempt = () => { final = true; cue.abort(new DOMException('Final voice reply superseded its cue.', 'AbortError')); };
+  // The reply is ready. A held cue, or one still being synthesised, is never heard; an audible cue
+  // finishes, within the bound.
+  const preempt = () => {
+    final = true; wake?.();
+    if (cue.signal.aborted || ended) return;
+    if (!playing) cue.abort(new DOMException('Final voice reply superseded its cue.', 'AbortError'));
+    else if (bound === undefined)
+      bound = setTimeout(() => cue.abort(new DOMException('Voice cue outlasted the ready reply.', 'AbortError')), BATCH_CUE_REPLY_BOUND_MS);
+  };
   return {
     progress(value: BatchProgressCue): void {
       if (used || final || retired || cue.signal.aborted || value.kind !== 'thinking' || !genuineBatchProgress(value) ||
@@ -90,23 +105,28 @@ export function createBatchProgressAcknowledgment(input: {
       if (typeof label !== 'string' || !label.trim() || label.length > 160) return;
       try { check(); if (!microphoneClear()) return; } catch { cancel(); return; }
       used = true;
-      // One microtask lets an already-ready final/token preempt queued prospective speech.
-      pending = Promise.resolve().then(async () => {
+      // The hold lets a reply that arrives soon after the status replace the cue instead of clipping it.
+      pending = new Promise<void>(resolve => {
+        const timer = setTimeout(resolve, BATCH_CUE_HOLD_MS);
+        wake = () => { clearTimeout(timer); resolve(); };
+      }).then(async () => {
+        wake = undefined;
         if (final || retired || cue.signal.aborted) return;
         check();
         if (!microphoneClear()) throw Error('Voice capture was not retired before acknowledgement.');
-        try { await input.speak(label, cue.signal); }
+        try { await input.speak(label, cue.signal, () => { if (!cue.signal.aborted) playing = true; }); }
         catch (error) {
           // Normal selected playback may reject AbortError AFTER confirmed cleanup.
           // Unconfirmed cleanup/provider errors are not hidden or converted into permission to listen.
           if (!(cue.signal.aborted && error instanceof Error && error.name === 'AbortError')) throw error;
         }
+        finally { playing = false; ended = true; if (bound !== undefined) clearTimeout(bound); }
       });
       void pending.catch(() => {});
     },
     replyStarted(): void { preempt(); },
-    /** Preempts the cue and settles once its playback has stopped (or never began), so reply speech
-     * never starts over it. Never rejects; failures still reach finish(). */
+    /** Settles once the cue has finished playing (or was never spoken), so reply speech never starts
+     * over it. Never rejects; failures still reach finish(). */
     async idle(): Promise<void> { preempt(); await pending.catch(() => {}); },
     async finish(): Promise<void> {
       preempt();
