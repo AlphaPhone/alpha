@@ -91,8 +91,7 @@ type Moved = { state: Files, out: List[Effect] }
 ### What the simulator tries
 
 ```quint
-pure val ticketValues = Set(1, 2, 3)
-pure val lookValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
 pure val requestValues = Set(7, 8)
 pure val targetValues = Set(1, 4)
 pure val folderValues = Set(1)
@@ -110,35 +109,39 @@ pure val weight_enter = 30
 pure val weight_accessReported = 15
 pure val weight_storageRead = 100
 pure val weight_openVolume = 40
-pure val weight_openFolder = 30
+pure val weight_openFolder = 10
 pure val weight_listed = 100
 pure val weight_openCategory = 5
 pure val weight_toggle = 30
 pure val weight_selectAll = 15
 pure val weight_askToDelete = 20
-pure val weight_confirmDelete = 5
+pure val weight_confirmDelete = 15
 pure val weight_openMoveTo = 40
 pure val weight_moveInto = 40
-pure val weight_moveUp = 5
+pure val weight_moveUp = 15
 pure val weight_destRead = 100
-pure val weight_begin = 25
+pure val weight_begin = 40
 pure val weight_keepBoth = 40
-pure val weight_replaceThem = 5
-pure val weight_goBack = 5
+pure val weight_replaceThem = 40
+pure val weight_goBack = 40
 pure val weight_finished = 100
-pure val weight_searchFor = 10
+pure val weight_searchFor = 3
 pure val weight_searched = 100
 pure val weight_openShare = 30
 pure val weight_shareTo = 40
 pure val weight_shareEnded = 100
-pure val weight_approve = 10
-pure val weight_renameShown = 3
+pure val weight_approve = 2
+pure val weight_renameShown = 1
 pure val weight_refresh = 3
-pure val weight_agentLook = 5
+pure val weight_agentLook = 1
 pure val weight_agentLooked = 100
-pure val weight_agentFilter = 5
-pure val weight_agentOpen = 3
-pure val weight_restart = 3
+pure val weight_agentFilter = 1
+pure val weight_agentOpen = 1
+pure val weight_restart = 1
+pure val weight_cancelSelection = 8
+pure val weight_keepFiles = 8
+pure val weight_closeMoveTo = 8
+pure val weight_closeShare = 8
 pure val entriesValues =
   Set(List())
     .union(Set(List({ id: 4, name: "a", revision: 1, kind: F::Folder, volume: 1 }, { id: 2, name: "b", revision: 1, kind: F::Image, volume: 1 })))
@@ -344,9 +347,9 @@ pure def refresh(s: Files, by: Actor): Moved =
   val listing = R::ask(s.listing)
   { state: { ...s, listing: listing }, out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })) }
 
-pure def canListed(s: Files, look: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, look)
+pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 
-pure def listed(s: Files, look: int, ok: bool, gone: bool, entries: List[F::Item], by: Actor): Moved =
+pure def listed(s: Files, ticket: int, ok: bool, gone: bool, entries: List[F::Item], by: Actor): Moved =
   val items = if (not(ok)) List() else if (s.inCategory) entries.select(i => i.kind == s.category) else entries
   val picked = s.picked.select(id => has(items, id))
   val same = chosen(s) == items.select(i => picked.includes(i.id))
