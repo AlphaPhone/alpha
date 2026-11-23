@@ -10,7 +10,7 @@ import { cutOffLabel } from "../../gen/assistant__receipts.effect.vibe"
 import { statesDirectRequests } from "../../gen/assistant__review.effect.vibe"
 import { interruptedAfterEffect, turnEffects } from "./turn-effects.vibe"
 import { observes } from "../../gen/assistant.effect.vibe"
-import { namesCalendarSelection, namesMaps, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
+import { namesCalendarSelection, namesMaps, namesNotesSelection, sendsDay, type MapsShown as ShownKind } from "../../gen/assistant__context.effect.vibe"
 import { Preferences } from "../settings/preferences.vibe"
 import { Latency } from "../voice/latency.vibe"
 import type { DictationTarget } from "../voice/dictation.vibe"
@@ -338,7 +338,7 @@ export const composerLayer = Layer.effect(Composer, effect {
     const asksFirst = try preferences.asksBeforeActions()
     try sources.preferReview(asksFirst)
     const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
-    const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
+    const noteSelection = namesNotesSelection(observed, screen.observation.view === "notes", screen.observation.selectedObject !== undefined) ? try sources.notesSelection() : undefined
     const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
     const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
     const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
@@ -347,7 +347,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       ...screen.observation,
       ...(screen.observation.timeZone === undefined && zone !== undefined && zone !== "" ? { timeZone: zone } : {}),
       ...(calendarSelection === undefined ? {} : { selectedObject: calendarSelection }),
-      ...(notesList === undefined ? {} : { selectedObject: notesList }),
+      ...(noteSelection === undefined ? {} : { selectedObject: noteSelection }),
       ...(browserTab === undefined ? {} : { selectedObject: browserTabObject(browserTab) }),
       ...(mapsNamed === undefined ? {} : { selectedObject: { kind: mapsNamed.kind, id: mapsNamed.id, revision: mapsNamed.revision } }),
       ...(day === undefined ? {} : { calendarDay: day }),

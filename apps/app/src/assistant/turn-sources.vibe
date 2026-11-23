@@ -3,6 +3,7 @@ import { Machine as PresentationMachine } from "../../gen/calendar__presentation
 import { AgentCalendar } from "../calendar/agent.vibe"
 import { DeviceCalendar } from "../calendar/device.vibe"
 import { calendarDayObservation } from "../calendar/observation.vibe"
+import { NotesEditor } from "../notes/editor.vibe"
 import { NotesListFilter } from "../notes/listFilter.vibe"
 import { Foreground } from "../shell/foreground.vibe"
 import { TurnSources } from "./ports.vibe"
@@ -10,6 +11,7 @@ import { TurnSources } from "./ports.vibe"
 /** The turn sources over the Calendar and Notes services. */
 export const turnSourcesLive = Layer.effect(TurnSources, effect {
   const notes = try NotesListFilter
+  const editor = try NotesEditor
   const foreground = try Foreground
   const presentation = try PresentationMachine
   const agent = try AgentCalendar
@@ -18,7 +20,10 @@ export const turnSourcesLive = Layer.effect(TurnSources, effect {
   return {
     calendarDay: () => day catch () => undefined,
     calendarSelection: () => device.selected(),
-    notesList: () => notes.context(),
+    effect notesSelection() {
+      const open = try editor.selection()
+      return open ?? (try notes.context())
+    },
     preferReview: (reviewFirst: boolean) => notes.prefer(reviewFirst),
   }
 })

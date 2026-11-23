@@ -160,6 +160,19 @@ pure def lawAnotherScreenKeepsItsOwnSelection(observed: bool, alreadySelected: b
   not(namesCalendarSelection(observed, false, alreadySelected))
 ```
 
+### A turn from Notes names the settled note or the visible list
+
+The observed Notes screen sends the current canonical note's identity and
+revision, or its visible list when no settled note is open. Notes text and
+unfinished edits stay on the phone.
+
+```quint
+pure def namesNotesSelection(observed: bool, onNotes: bool, alreadySelected: bool): bool =
+  observed and onNotes and not(alreadySelected)
+pure def lawAnExistingSelectionIsKept(observed: bool, onNotes: bool): bool =
+  not(namesNotesSelection(observed, onNotes, true))
+```
+
 ## Story: Let my agent read the page I have open in Browser
 
 > As the owner, when I ask about the page I have open in Browser, I want my

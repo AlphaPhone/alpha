@@ -114,14 +114,14 @@ export service TurnSources {
   calendarDay(): (TurnDay | undefined)!!
   /** The inspected event or source that the phone's Calendar still shows. */
   calendarSelection(): (CalendarSelection | undefined)!!
-  /** The Notes list the turn is sent from, or undefined off the list. */
-  notesList(): (TurnRecord | undefined)!!
+  /** The settled note or visible Notes list the turn is sent from. */
+  notesSelection(): (TurnRecord | undefined)!!
   /** The owner's "Ask before Alpha acts" preference as Notes' list filter reads it, before each turn. */
   preferReview(reviewFirst: boolean): void!!
   static readonly defaultValue = () => ({
     calendarDay: () => succeed(undefined),
     calendarSelection: () => succeed(undefined),
-    notesList: () => succeed(undefined),
+    notesSelection: () => succeed(undefined),
     preferReview: () => succeed(undefined),
   })
 }
