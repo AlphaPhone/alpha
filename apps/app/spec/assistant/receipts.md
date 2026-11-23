@@ -46,6 +46,9 @@ pure def lawOnlyAnAppliedReceiptIsCompleted(r: Result): bool = titleOf(r) == Com
 
 ### A reply cut off after an effect says so, and a queued approval request reads as needing approval
 
+On a failed live reply, the resident's negotiated applied-effect marker
+means an effect completed before the reply stopped.
+
 ```quint
 type CutOff = NotCutOff | DoneCutOff | NeedsApprovalCutOff
 pure def cutOffLabel(interrupted: bool, appliedEffects: int, approvalRequests: int, effectBeforeFailure: bool): CutOff =

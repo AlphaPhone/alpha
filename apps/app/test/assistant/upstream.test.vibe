@@ -88,6 +88,22 @@ it.effect("A failed reply shows the agent's fix and its live wait, and nothing i
   ))
 })
 
+it.effect(`A failed live reply shows that an effect already completed (spec/assistant/receipts.md, "A reply cut off after an effect says so, and a queued approval request reads as needing approval")`, () => effect {
+  const seen: Seen = { calls: [] }
+  const script = { kind: "fail" as const, failureKind: "provider_issue", cutOffEffect: "applied" as const }
+  provide assistantOver(fakeResident(seen, { turn: script, proposals: [] }), fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.edit("Save this and tell me what happened")
+    try composer.send()
+    const row = (try transcriptNow()).rows.find((each) => each.kind === "agent")
+    const posted = seen.calls.find((call) => call.method === "STREAM")
+    try Effect.try(() => assert.deepStrictEqual({
+      cutOff: row?.kind === "agent" ? row.cutOff : undefined,
+      requested: posted?.headers?.["x-eliza-device-cut-off-effect"],
+    }, { cutOff: "DoneCutOff", requested: "applied" }))
+  }
+})
+
 it.effect("Approve an action card once, over the agent's own review routes (spec/assistant/approvals.md, \"A recovered card lists again at the tap and reuses a result it already tracks\")", () => effect {
   const seen: Seen = { calls: [] }
   const digest = "b".repeat(64)

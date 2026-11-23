@@ -5,7 +5,7 @@ import type { ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
 import { adviceOf, answerOf, headerAdmitted, methodAdmitted, pathAdmitted, type DeviceHeader, type PathShape } from "../../gen/platform.effect.vibe"
 import { Machine as Connection, admissionOf, machine as connectionMachine, recoveryAfterArchive, recoveryAfterReview, retriesDeferred, retryDelayMs } from "../../gen/platform__resident.effect.vibe"
 import { routeCrosses } from "../shell/ownerRoutes.vibe"
-import { Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer, type ResidentHeaders } from "./resident.vibe"
+import { CUT_OFF_EFFECT_HEADER, postsConversationTurn, Resident, ResidentRefused, ResidentUnavailable, type ResidentAnswer, type ResidentHeaders } from "./resident.vibe"
 import { ResidentControl, ResidentRecovery, type HeldRecovery, type ResidentSession } from "./resident-control.vibe"
 import { agentBridge, agentReport, agentRequest, relayFrames, stopAgent, withdraw } from "./resident-bridge.vibe"
 import { FeatureStarting, RecoveryArchive, RecoveryReview, ResidentAgents, ResidentRefusal, ResidentWhoAmI } from "./native.schema.vibe"
@@ -28,6 +28,7 @@ const DEVICE_HEADERS: Readonly<Record<string, DeviceHeader>> = {
   "x-eliza-device-key": "DeviceKeyHeader",
   "x-eliza-device-capabilities": "CapabilitiesHeader",
   "x-elizaos-client-id": "ClientIdHeader",
+  [CUT_OFF_EFFECT_HEADER]: "CutOffEffectHeader",
 }
 const CLIENT_TOKEN = /^[A-Za-z0-9._-]{1,128}$/
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
@@ -47,13 +48,14 @@ export function pathShapeOf(path: string): PathShape {
 }
 
 /** The device headers `headers` names, under their lower-case names; undefined when any header it names may not cross to the resident. */
-export function deviceHeaders(headers: ResidentHeaders | undefined): ResidentHeaders | undefined {
+export function deviceHeaders(headers: ResidentHeaders | undefined, method: Verb, path: string): ResidentHeaders | undefined {
   const sent: Record<string, string> = {}
   for (const [given, value] of Object.entries(headers ?? {})) {
     if (typeof value !== "string") return undefined
     const name = given.toLowerCase()
     const header: DeviceHeader = Object.hasOwn(DEVICE_HEADERS, name) ? DEVICE_HEADERS[name]! : "OtherHeader"
-    if (!headerAdmitted(header, value.length, !CONTROL_CHARACTER.test(value), CLIENT_TOKEN.test(value), Object.hasOwn(sent, name))) return undefined
+    const cutOffTurn = header === "CutOffEffectHeader" && value === "applied" && postsConversationTurn(method, path)
+    if (!headerAdmitted(header, value.length, !CONTROL_CHARACTER.test(value), CLIENT_TOKEN.test(value), cutOffTurn, Object.hasOwn(sent, name))) return undefined
     sent[name] = value
   }
   return sent
@@ -212,7 +214,7 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
       if (!routeAllowed(method, path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
       if ((method === "GET" || method === "DELETE") && body !== undefined) throw new ResidentRefused({ status: 400, code: "InvalidBody", message: "Invalid local request body" })
-      const sent = deviceHeaders(headers)
+      const sent = deviceHeaders(headers, method, path)
       if (sent === undefined) throw headerRefusal()
       try ensureRunning()
       const gen = (try conn.get()).generation
@@ -279,7 +281,7 @@ export function residentOver(agent: ElizaAgentPlugin, present: boolean, httpBase
       return Stream.unwrap(effect {
         if (!pathAdmitted(pathShapeOf(path))) throw new ResidentRefused({ status: 400, code: "InvalidPath", message: "Invalid local app request" })
         if (!routeAllowed("POST", path)) throw new ResidentRefused({ status: 400, code: "InvalidRoute", message: "Invalid local app request" })
-        const sent = deviceHeaders(headers)
+        const sent = deviceHeaders(headers, "POST", path)
         if (sent === undefined) throw headerRefusal()
         try ensureRunning()
         const gen = (try conn.get()).generation

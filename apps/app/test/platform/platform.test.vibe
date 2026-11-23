@@ -5,7 +5,7 @@ import { Native, NativeFailed, NativeUnavailable } from "../../src/platform/nati
 import { nativeOver } from "../../src/platform/native-live.vibe"
 import { Resident, ResidentRefused } from "../../src/platform/resident.vibe"
 import { ResidentControl, ResidentRecovery } from "../../src/platform/resident-control.vibe"
-import { residentOver } from "../../src/platform/resident-live.vibe"
+import { deviceHeaders, residentOver } from "../../src/platform/resident-live.vibe"
 import { subscription } from "../../src/platform/view-events.vibe"
 import { Cloud, CloudSignedOut, CloudUnavailable } from "../../src/platform/cloud.vibe"
 import { cloudOver } from "../../src/platform/cloud-live.vibe"
@@ -562,34 +562,46 @@ it.live("hear that a busy agent never got my message", () => effect {
 // spec/platform/index.md, "Story: Talk to the resident agent"
 it.live("name my phone and what it can do to my agent, and never send a header it does not read", () => effect {
   const capability = { "X-Eliza-Device-Capabilities": "notes.local-record.v1,calendar.local-event.v1" }
-  const phone = agent({ ...owned, "POST /api/client-devices/register": { status: 200, data: { ok: true } } }, { chunks: ["hel", "lo"] })
+  const cutOff = { "X-Eliza-Device-Cut-Off-Effect": "applied" }
+  const phone = agent({ ...owned, "POST /api/client-devices/register": { status: 200, data: { ok: true } }, "POST /api/conversations/c1/messages": { status: 200, data: { ok: true } } }, { chunks: ["hel", "lo"] })
   provide residentOver(phone.plugin, true, undefined) {
     const resident = try Resident
     // spec/platform/index.md, "A request carries only the device headers the resident reads, each one bounded line"
     try resident.json("POST", "/api/client-devices/register", { protocol: 5 }, capability)
-    const reply = try Stream.runCollect(resident.stream("/api/conversations/c1/messages/stream", { text: "hi" }, capability))
+    try resident.json("POST", "/api/conversations/c1/messages", { text: "hi" }, cutOff)
+    const reply = try Stream.runCollect(resident.stream("/api/conversations/c1/messages/stream", { text: "hi" }, { ...capability, ...cutOff }))
     const before = phone.sent.length
     const bearer = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { Authorization: "Bearer stolen" }))
     const twice = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { "x-eliza-device-id": "a", "X-Eliza-Device-Id": "b" }))
     const broken = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { "x-eliza-device-key": "a\r\nX-Other: 1" }))
     const client = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, { "X-ElizaOS-Client-Id": "not a token" }))
     const long = try Effect.flip(Stream.runCollect(resident.stream("/api/conversations/c1/messages/stream", {}, { "x-eliza-device-capabilities": "x".repeat(2049) })))
+    const broad = try Effect.flip(resident.json("POST", "/api/client-devices/register", {}, cutOff))
+    const incorrect = try Effect.flip(resident.json("POST", "/api/conversations/c1/messages", {}, { "x-eliza-device-cut-off-effect": "Applied" }))
+    const markerRepeated = try Effect.flip(resident.json("POST", "/api/conversations/c1/messages", {}, { ...cutOff, "x-eliza-device-cut-off-effect": "applied" }))
     const register = phone.sent.find((request) => request.path === "/api/client-devices/register") as { readonly headers?: unknown } | undefined
-    const codes = [bearer, twice, broken, client, long].map((refused) => refused instanceof ResidentRefused ? `${refused.status} ${refused.code}` : refused._tag)
+    const buffered = phone.sent.find((request) => request.path === "/api/conversations/c1/messages") as { readonly headers?: unknown } | undefined
+    const codes = [bearer, twice, broken, client, long, broad, incorrect, markerRepeated].map((refused) => refused instanceof ResidentRefused ? `${refused.status} ${refused.code}` : refused._tag)
     try Effect.try(() => assert.deepStrictEqual({
       register: register?.headers,
+      buffered: buffered?.headers,
       stream: (phone.streamed[0] as { readonly headers?: unknown } | undefined)?.headers,
       reply: text([...reply]),
       codes,
       sentSince: phone.sent.length - before,
       streams: phone.streamed.length,
+      get: deviceHeaders(cutOff, "GET", "/api/conversations/c1/messages"),
+      stop: deviceHeaders(cutOff, "POST", "/api/conversations/c1/stop"),
     }, {
       register: { "x-eliza-device-capabilities": "notes.local-record.v1,calendar.local-event.v1" },
-      stream: { "x-eliza-device-capabilities": "notes.local-record.v1,calendar.local-event.v1" },
+      buffered: { "x-eliza-device-cut-off-effect": "applied" },
+      stream: { "x-eliza-device-capabilities": "notes.local-record.v1,calendar.local-event.v1", "x-eliza-device-cut-off-effect": "applied" },
       reply: "hello",
-      codes: ["400 InvalidHeader", "400 InvalidHeader", "400 InvalidHeader", "400 InvalidHeader", "400 InvalidHeader"],
+      codes: Array(8).fill("400 InvalidHeader"),
       sentSince: 0,
       streams: 1,
+      get: undefined,
+      stop: undefined,
     }))
   }
 })

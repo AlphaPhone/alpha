@@ -98,7 +98,8 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 
 ## Assistant
 
-- The composer sends the Browser page as `metadata.clientDevice.browserPage`, but upstream at the pin reads it only as `metadata.browserPage` (`readTurnContext`, `turns.vibe`), so the page never reaches the agent even now that the peer declares it.
+- Alpha's live failure transcript can show the resident's confirmed applied-effect marker once Alpha pins a supporting SDK. User Stop and reopened history still need committed-effect evidence.
+- The current composer sends `metadata.browserPage` through the SDK context encoder. Verify the Browser capture and selected tab arrive on the pinned resident in an enrolled phone turn.
 - A Calendar approval request the agent queued can never be reviewed on the phone: `src/assistant/reply-lines.vibe` admits only `maps-share` and `checkin-*` choice blocks, so `[CHOICE:approval-<id>]` shows as text. Classify it through Calendar's `calendarReviewText` into a transcript row, render it in `src/web/assistant/Transcript.tsx` with its status and a Review button that calls `ApprovalReviews.open(id)`, and call `ApprovalReviews.retire()` on a conversation change (a hidden page now retires it). The rule belongs in `spec/assistant/reply.md`.
 
 - `metadata.clientDevice.calendarAgendaSource` is not sent. Legacy sent it only from the browser build, for the browser-local Calendar source (`AlphaCalendar.prepareAgentSource`), which is also the only build that advertises `calendar.agenda-read.v1` (`spec/calendar/deviceActions.md`). The port has no browser-local Calendar (see the owner item on browser-build stores), so this waits on that decision; if kept, Calendar must export the shown source and the assistant sends it beside `calendarDay`.
