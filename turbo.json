@@ -6,6 +6,10 @@
     "//#build:upstream": {
       "cache": false
     },
+    "deployment:check": {
+      "dependsOn": ["//#build:upstream"],
+      "cache": false
+    },
     "gen": {
       "outputs": ["gen/**", "generated/**"]
     },
