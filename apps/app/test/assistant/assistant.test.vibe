@@ -67,6 +67,41 @@ it.effect("A handed-over draft never overwrites typing (spec/assistant/index.md,
   }
 })
 
+it.effect("A quoted reply keeps its target on a stream retry (spec/assistant/conversation.md, \"Only a recorded message of this session that is settled can be quoted, and only my own can be edited, from an empty composer\")", () => effect {
+  const seen: Seen = { calls: [] }
+  const quote = { messageId: "a0000000-0000-4000-8000-000000000123", text: "Lunch at noon.", from: "agent" as const }
+  const resident = fakeResident(seen, {
+    turn: { kind: "reply", text: "Okay." },
+    proposals: [],
+    history: [{ id: quote.messageId, role: "assistant", text: quote.text }],
+    dropBeforeReply: true,
+  })
+  provide assistantOver(resident, fakeHost([]), countingExecutors({ count: 0 })) {
+    const composer = try Composer
+    try composer.open("c1", false)
+    try composer.aim({ kind: "reply", quote })
+    try composer.edit("Could we make that one?")
+    try composer.send("Summarize this file.")
+    try composer.send()
+    const sent = seen.calls.filter((call) => call.method === "STREAM" || (call.method === "POST" && call.path.endsWith("/messages")))
+    const bodies = sent.map((call) => call.body as { readonly text: string; readonly clientMessageId: string; readonly metadata: { readonly replyToMessageId?: string } })
+    const shown = (try transcriptNow()).rows.find((row) => row.kind === "user" && row.text === "Could we make that one?")
+    try Effect.try(() => assert.deepStrictEqual({
+      attempts: sent.map((call) => call.method),
+      texts: bodies.map((body) => body.text),
+      quotes: bodies.map((body) => body.metadata.replyToMessageId),
+      quoteInTranscript: shown?.kind === "user" ? shown.quote : undefined,
+      retried: bodies[2]?.clientMessageId !== undefined && bodies[2].clientMessageId === bodies[3]?.clientMessageId,
+    }, {
+      attempts: ["STREAM", "POST", "STREAM", "POST"],
+      texts: ["Summarize this file.", "Summarize this file.", "Could we make that one?", "Could we make that one?"],
+      quotes: [undefined, undefined, quote.messageId, quote.messageId],
+      quoteInTranscript: quote,
+      retried: true,
+    }))
+  }
+})
+
 it.effect("Let my agent act only with my say-so (spec/assistant/review.md, \"Story: Let my agent act only with my say-so\")", () => effect {
   const journal = new Map<string, { readonly revision: number }>()
   const runs = { count: 0 }
