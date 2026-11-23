@@ -6,6 +6,7 @@ public final class NetworkLocationQueryTest {
  public static void main(String[] args){
   NetworkLocationQuery query=new NetworkLocationQuery();
   check(!query.usable(),"an empty scan is not usable");
+  check(query.json().equals("{\"considerIp\":true,\"fallbacks\":{\"ipf\":true,\"lacf\":true}}"),"an empty query asks for the address-only answer and names no network: "+query.json());
   check(query.addWifi("A0:B1:C2:D3:E4:F5","\"Cafe\"",-61,1200),"an ordinary access point is kept");
   check(!query.addWifi("a0:b1:c2:d3:e4:f5","Cafe",-60,0),"a duplicate BSSID is dropped");
   check(!query.addWifi("10:22:33:44:55:66","Home_nomap",-50,0),"an owner's _nomap opt-out is never sent");
