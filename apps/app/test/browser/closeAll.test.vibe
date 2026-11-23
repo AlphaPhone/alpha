@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest"
 import { BrowserTabs } from "../../src/browser/session.vibe"
 import { BrowserAgent } from "../../src/browser/agent.vibe"
 import { BROWSER_TABS_CLOSE_ALL_CAPABILITY, NO_TABS_TO_CLOSE_NOTICE, TABS_UNLISTED_NOTICE, browserDeviceCapabilities, closedSummary, closingCard, groundedIn, operationPorts, parseBrowserCloseAll } from "../../src/browser/operations.vibe"
+import { BrowserCallFacts } from "../../src/browser/ports.vibe"
 import { AGENT_REFUSALS } from "../../src/browser/messages.ts"
 import { callsTo, fakeHost, loadPage, report, settledTabs, shownBrowser } from "./fakes.vibe"
 
@@ -194,6 +195,33 @@ it.live('Show the local Browser list after the receipt, when the requesting fore
         assert.notInclude(browserDeviceCapabilities(["browser.tabs.show.v1"], true), "browser.tabs.show.v1")
         assert.include(browserDeviceCapabilities([...tabOnly, "browser.tabs.show.v1"], true), "browser.tabs.show.v1")
       })
+    }
+  })
+})
+
+it.live('The local tab list waits for explicit review of unbound proposals (spec/browser/session.md, "A request to see my tabs opens the local list after the receipt")', () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      provide Layer.succeed(BrowserCallFacts, {
+        of: ({ proposalId }) => succeed({ reviewed: proposalId === "reviewed", ownerText: "Tell me the weather" }),
+      }) {
+        const tabs = try BrowserTabs
+        const ports = try operationPorts
+        const operation = { type: "browser_tabs_show" }
+        try settledTabs(tabs)
+        const guessed = try promise(() => ports.execute(operation, call("guessed")))
+        const reviewed = try promise(() => ports.execute(operation, call("reviewed")))
+        const beforeReceipt = try tabs.get()
+        ports.present(operation, call("reviewed"))
+        const opened = try timeout(Stream.runHead(Stream.filter(tabs.changes, (state) => state.layers.tabsOpen)), "2 seconds")
+        try Effect.try(() => {
+          assert.strictEqual(guessed.kind, "refused")
+          assert.deepStrictEqual(reviewed, { kind: "applied" })
+          assert.isFalse(beforeReceipt.layers.tabsOpen)
+          assert.isTrue(Option.isSome(opened))
+        })
+      }
     }
   })
 })
