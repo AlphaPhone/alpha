@@ -45,7 +45,7 @@ export const listAskLayer = Layer.effect(ListAsk, effect {
         const person = personIn(text, p.recents)
         if (person === undefined) return null
         const count = p.recents.filter((r) => r.title === person).length
-        const filtered = try (phone.send({ type: "alphaFiltered", query: person, label: person }) catch () => undefined)
+        const filtered = (phone.send({ type: "alphaFiltered", query: person, label: person }) catch () => undefined)
         if (filtered === undefined) return null
         return count === 0 ? `No calls with ${first(person)}.` : count === 1 ? `One call with ${first(person)}.` : `${count} calls with ${first(person)}.`
       }
@@ -56,7 +56,7 @@ export const listAskLayer = Layer.effect(ListAsk, effect {
       if (m.view.tag !== "ThreadList") return null
       const hits = m.threads.filter((t) => threadMatches(t, query)).length
       if (hits === 0) return `No texts match “${query}”.`
-      const filtered = try (messages.send({ type: "alphaFiltered", query, label: query }) catch () => undefined)
+      const filtered = (messages.send({ type: "alphaFiltered", query, label: query }) catch () => undefined)
       if (filtered === undefined) return null
       return hits === 1 ? "One conversation." : `${hits} conversations.`
     },
@@ -85,8 +85,8 @@ export effect function askAlpha(key: string, text: string) {
   const assistant = try Assistant
   const navigation = try Navigation
   const comms = try CommsMachine
-  try (comms.send({ type: "alphaOpened" }, "Owner") catch () => undefined)
-  const opened = try (navigation.open("assistant", `comms:${key}`) catch () => false)
+  comms.send({ type: "alphaOpened" }, "Owner") catch () => undefined
+  const opened = (navigation.open("assistant", `comms:${key}`) catch () => false)
   if (!opened) return "AskNotTaken" as AskAnswer
   const asking = fork.detached assistant.askComms(key, text)
   const said = try timeoutOption(Fiber.join(asking), Duration.millis(ASK_WAIT_MS))
@@ -107,8 +107,8 @@ export effect function askFromList(app: "phone" | "messages", key: string, text:
   }
   effect function clear() {
     if (!stillTyped(try typedNow(), text)) return
-    if (app === "phone") try (phone.send({ type: "queryTyped", typed: "" }) catch () => undefined)
-    else try (messages.send({ type: "queryTyped", typed: "" }) catch () => undefined)
+    if (app === "phone") phone.send({ type: "queryTyped", typed: "" }) catch () => undefined
+    else messages.send({ type: "queryTyped", typed: "" }) catch () => undefined
   }
   const line = try lists.ask(app, text)
   if (line !== null) {
@@ -136,6 +136,6 @@ export effect function sendRequest(key: string) {
   if (request.trim() === "") return "AskNotTaken" as AskAnswer
   const answer = try askAlpha(key, request)
   const unchanged = (try drafts.get()).requests.find((r) => r.subject === key)?.request === request
-  if (askLeavesField(answer, unchanged)) try (drafts.send({ type: "requestSent", subject: key }, "Owner") catch () => undefined)
+  if (askLeavesField(answer, unchanged)) drafts.send({ type: "requestSent", subject: key }, "Owner") catch () => undefined
   return answer
 }

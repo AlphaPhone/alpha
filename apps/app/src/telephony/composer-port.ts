@@ -71,6 +71,7 @@ function post(kind: "sms" | "mms", draft: object): Promise<unknown> {
  * sends, which go through the composer port, where the owner's Send in the launcher's composer is the
  * review (upstream `spec/os/android/messages.md`, "a send the owner composed and tapped Send on in the
  * host's own composer is its own review"). Alpha's sends are never routed here.
+ * @throws {never}
  */
 export function composerPlugin(native: MessagesNativePlugin): MessagesNativePlugin {
   return new Proxy(native, {

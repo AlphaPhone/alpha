@@ -64,10 +64,8 @@ export function useComms() {
     endCall: () => act(CallWatch.use((w) => w.endShown())),
     /** The open proposal and its kept words; a restored one is shown and never approved. */
     card,
-    /** Approve the open, live proposal: only the owner's tap, staged first, then run once through the assistant's device review, which redraws its chat card. */
-    approve: (proposalId: string) =>
-      act(Effect.flatMap(CommsStage.use((s) => s.approve(proposalId)), (staged) =>
-        staged ? Effect.flatMap(commsReviewFromAssistant(), (review) => review.approve(proposalId)) : Effect.succeed(false))),
+    // A live proposal has one button, its chat card's Approve (spec/telephony/comms.md, "Story: Approve what Alpha proposes, one thing at a
+    // time"): the assistant's device review stages it here with CommsStage.approve before it runs, so the bar draws no card of its own.
     /** Dismiss the open proposal, live or restored; a live one is declined through the assistant's device review, and nothing runs. */
     decline: (proposalId: string) =>
       act(Effect.flatMap(CommsStage.use((s) => s.decline(proposalId)), (staged) =>

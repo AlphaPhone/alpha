@@ -177,7 +177,7 @@ async function measurePrefix(blob: Blob): Promise<number> {
   }
 }
 
-function* recorders(media: MediaStream): Generator<MediaRecorder> {
+function* recorders(media: MediaStream): Generator<MediaRecorder, void> {
   if (typeof MediaRecorder === "undefined") return;
   for (const mimeType of ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/mp4", "video/webm", undefined]) {
     try {

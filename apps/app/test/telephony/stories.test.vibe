@@ -23,7 +23,9 @@ import { phoneRouteOf, messagesRouteOf } from "../../src/telephony/routes.vibe"
 import { VoicemailView } from "../../src/telephony/voicemail.vibe"
 import { fakePhone, until } from "./fakes.vibe"
 
-const quiet = <A, E>(program: A!E) => program catch () => "Rejected" as const
+effect function quiet<A, E>(program: A!E) {
+  return program catch () => "Rejected" as const
+}
 
 it.live("Use Phone, Messages and Contacts only on the Alpha image (spec/telephony/common.md, \"Story: Use Phone, Messages and Contacts only on the Alpha image\")", () => effect {
   // spec/telephony/common.md, "The apps exist only on the Alpha image with the telephony plugin registered"
@@ -322,9 +324,10 @@ it.live("Open a conversation (spec/telephony/messages.md, \"Story: Open a conver
     try view.closeThread()
     const back = (try messages.get()).view.tag
     try Fiber.interrupt(visit)
-    try Effect.try(() => assert.deepStrictEqual(
-      { rows: Option.map(opened, (m) => m.rows.map((r) => r.id)), selected: Option.map(opened, (m) => m.view), called, back,
-        markedRead: fake.calls.includes("markThreadRead"), lookalike: messagesRouteOf("thread:12").tag },
+    const seen = { rows: Option.map(opened, (m) => m.rows.map((r) => r.id)), selected: Option.map(opened, (m) => m.view), called, back,
+      markedRead: fake.calls.includes("markThreadRead"), lookalike: messagesRouteOf("thread:12").tag }
+    try Effect.try(() => assert.deepStrictEqual<typeof seen>(
+      seen,
       { rows: Option.some(["sms:1"]), selected: Option.some({ tag: "InThread", threadId: "thread:1", addresses: ["4155550100"] }), called: "CallStarted",
         back: "ThreadList", markedRead: true, lookalike: "NoRoute" },
     ))

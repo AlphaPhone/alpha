@@ -137,7 +137,7 @@ export const agentCamera = Layer.effect(AgentCamera, effect {
     if ((try scene()).shown || request.sensitive === true) return
     if (needsCard(request.reviewed, request.ownerWords, (try machine.get()).directTaken)) return
     try handoffs.open("camera")
-    try (timeout(Stream.runHead(Stream.filter(viewfinder.changes, (c) => c.visible)), Duration.millis(openLimitMs)) catch () => undefined)
+    timeout(Stream.runHead(Stream.filter(viewfinder.changes, (c) => c.visible)), Duration.millis(openLimitMs)) catch () => undefined
   }
 
   effect function run(request: CaptureRequest): CaptureAttempt!! {

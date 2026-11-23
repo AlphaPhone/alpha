@@ -51,13 +51,13 @@ export const NAMES_MAX = 50
 export effect function displayNames(call: BridgeCaller, surface: NameSurface, numbers: readonly string[]) {
   const wanted = [...new Set(numbers.filter((n) => n !== ""))].slice(0, NAMES_MAX)
   if (wanted.length === 0) return {} as Readonly<Record<string, string>>
-  const found = try (call("resolveNames", (c) => c.names.resolve({ surface, numbers: wanted })) catch () => [])
+  const found = call("resolveNames", (c) => c.names.resolve({ surface, numbers: wanted })) catch () => []
   return Object.fromEntries(found.flatMap((row) => row.name === null ? [] : [[row.number, row.name as string]])) as Readonly<Record<string, string>>
 }
 
 /** The surface left the screen: a lookup still in flight for it is dropped. */
 export effect function closeNames(call: BridgeCaller, surface: NameSurface) {
-  try (call("closeNames", (c) => c.names.close(surface)) catch () => undefined)
+  call("closeNames", (c) => c.names.close(surface)) catch () => undefined
 }
 
 /** The spec's build variant for the platform's. */

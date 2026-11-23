@@ -4,7 +4,7 @@ import type { FileShareTargets, SharedFile } from "../files/share.vibe"
 import type { CameraHandoffs, ReviewedFile } from "../camera/ports.vibe"
 import { maxPictures, occupied, slotOf, Machine as DraftsMachine } from "../../gen/telephony__drafts.effect.vibe"
 import { Machine as MessagesMachine } from "../../gen/telephony__messages.effect.vibe"
-import { bridgeCall, TelephonyBridges } from "./bridges.vibe"
+import { callerOf, TelephonyBridges } from "./bridges.vibe"
 import { DraftSends, MMS_PICTURE_BYTES } from "./drafts.vibe"
 import { bytesOf } from "./wav.ts"
 
@@ -33,7 +33,7 @@ export const pictureAttachLayer = Layer.effect(PictureAttach, effect {
       if (chosen.length === 0) return "none"
       let refused = false
       for (const file of chosen) {
-        const bytes = try (Effect.try(() => bytesOf(file.dataBase64)) catch () => undefined)
+        const bytes = (Effect.try(() => bytesOf(file.dataBase64)) catch () => undefined)
         const added = bytes === undefined ? "unsupported" : try sends.addPicture(thread, file.mimeType, bytes)
         if (added !== "added") refused = true
       }
@@ -52,9 +52,9 @@ export effect function pictureDrafter() {
     if (!bridges.offered || !pictureFits(mimeType, size)) return false
     const slot = slotOf((try drafts.get()).slots, "new")
     if (occupied(slot) || slot.text !== "" || slot.recipients.length > 0) return false
-    const bytes = try (Effect.try(() => bytesOf(dataBase64)) catch () => undefined)
+    const bytes = (Effect.try(() => bytesOf(dataBase64)) catch () => undefined)
     if (bytes === undefined) return false
-    try (messages.send({ type: "composeOpened" }) catch () => undefined)
+    messages.send({ type: "composeOpened" }) catch () => undefined
     return (try sends.addPicture("new", mimeType, bytes)) === "added"
   }
 }
@@ -66,6 +66,7 @@ export effect function pictureDrafter() {
  */
 export const messagesShareTarget = effect {
   const bridges = try TelephonyBridges
+  const call = callerOf(bridges)
   const draft = try pictureDrafter()
   return {
     get messages() {
@@ -73,9 +74,9 @@ export const messagesShareTarget = effect {
     },
     effect message(file: SharedFile) {
       if (!bridges.offered || !pictureFits(file.mimeType, file.size)) return false
-      const status = try (bridgeCall("status", (c) => c.messages.status()) catch () => undefined)
+      const status = (call("status", (c) => c.messages.status()) catch () => undefined)
       if (status?.mmsSend !== true) return false
-      const read = try (file.read catch () => undefined)
+      const read = (file.read catch () => undefined)
       if (read === undefined || read.mimeType !== file.mimeType || read.name !== file.name) return false
       return try draft(read.mimeType, read.size, read.dataBase64)
     },

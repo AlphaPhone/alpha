@@ -94,7 +94,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     try notices.say(text, false)
   }
 
-  effect function send(event: ViewEvent) {
+  effect function send(event: ViewEvent): (Camera | undefined)!! {
     const before = try view.get()
     const after = view.send(event) catch () => undefined
     if (after !== undefined) try react(before, after)
@@ -108,14 +108,14 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     return after
   }
 
-  effect function writeFocus(tap: number) {
+  effect function writeFocus(tap: number): void!! {
     const point = points.get(tap) ?? { x: 0.5, y: 0.5 }
     const applied = bridge.setFocusPoint(point.x, point.y) catch () => false
     points.delete(tap)
     try focusSend({ type: "driverReplies", applied })
   }
 
-  effect function react(before: Camera, after: Camera) {
+  effect function react(before: Camera, after: Camera): void!! {
     if (after.phase === "PreviewStarting" && (before.phase !== "PreviewStarting" || before.epoch !== after.epoch)) try forkDetach(start(after.epoch, lensOf(after)))
     if (before.phase !== "PreviewOff" && after.phase === "PreviewOff") {
       try focusSend({ type: "clear" })
@@ -135,7 +135,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
   effect function armVolume(wanted: boolean) {
     if (wanted === volumeArmed) return
     volumeArmed = wanted
-    const done = try (effect {
+    const done = (effect {
       try bridge.setVolumeShutter(wanted)
       return true
     } catch () => false)
@@ -154,7 +154,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     }
   }
 
-  effect function start(ticket: number, lens: LensDirection) {
+  effect function start(ticket: number, lens: LensDirection): void!! {
     const answer = try exit(bridge.startPreview(lens))
     if (Exit.isSuccess(answer)) {
       const reply = answer.value
@@ -170,11 +170,14 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     try send({ type: "previewFails", ticket, kind: denied ? "CameraNotice" : "UnavailableNotice" })
   }
 
-  effect function bindMode(mode: Mode, epoch: number) {
+  effect function bindMode(mode: Mode, epoch: number): void!! {
     const answer = try exit(bridge.setCaptureMode(mode === "VideoMode" ? "video" : "photo"))
     const now = try view.get()
     if (now.epoch !== epoch) return
-    if (Exit.isSuccess(answer)) return try send({ type: "bindSettles", ok: true })
+    if (Exit.isSuccess(answer)) {
+      try send({ type: "bindSettles", ok: true })
+      return
+    }
     const failure = Cause.squash(answer.cause)
     if (failure instanceof CameraFailed && failure.code === "PREVIEW_STOPPED") try send({ type: "bindStopsPreview" })
     else try send({ type: "bindSettles", ok: false })
@@ -187,7 +190,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     view.send({ type: "lastLoaded", id: row.id, image: row.image }) catch () => undefined
   }
 
-  effect function captureOwner() {
+  effect function captureOwner(): void!! {
     const saved = effect {
       const photo = try bridge.capturePhoto(bridge.browser ? { saveToGallery: false, quality: 85 } : { saveToGallery: true, thumbnailOnly: true })
       const preview = photo.thumbnail ?? photo.base64
@@ -208,7 +211,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     if (after?.capturing === true && !borrowed) try forkDetach(captureOwner())
   }
 
-  effect function countdown() {
+  effect function countdown(): void!! {
     ticking = true
     try ensuring(effect {
       while ((try view.get()).countdown > 0) {
@@ -220,7 +223,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     }))
   }
 
-  effect function poll() {
+  effect function poll(): void!! {
     while ((try view.get()).recording === "RecordingActive") {
       try sleep("500 millis")
       const state = bridge.recordingState() catch () => undefined
@@ -234,7 +237,7 @@ export const viewfinder = Layer.effect(Viewfinder, effect {
     }
   }
 
-  effect function finalize() {
+  effect function finalize(): void!! {
     const kept = effect {
       const video = try bridge.stopRecording()
       if (!positive(video.duration) || !positive(video.fileSize) || video.path === "") throw new CameraFailed({ method: "stopRecording", code: "INCOMPLETE", message: "" })
