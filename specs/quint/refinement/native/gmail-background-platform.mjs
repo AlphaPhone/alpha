@@ -46,6 +46,7 @@ public final class NotificationManager {
   channel=candidate;
  }
  public NotificationChannel getNotificationChannel(String id){return channel!=null&&channel.id.equals(id)?channel:null;}
+ public NotificationChannelGroup getNotificationChannelGroup(String id){return null;}
  public boolean areNotificationsEnabled(){return GmailBackgroundTraces.allowed;}
  public StatusBarNotification[] getActiveNotifications(){
   return GmailBackgroundTraces.activeKeys().stream()
@@ -54,6 +55,8 @@ public final class NotificationManager {
  public void notify(String tag,int id,Notification notice){GmailBackgroundTraces.post(tag,id,notice);}
  public void cancel(String tag,int id){GmailBackgroundTraces.cancel(tag,id);}
 }`,
+      'android/app/NotificationChannelGroup.java':`package android.app;
+public final class NotificationChannelGroup {public boolean isBlocked(){return false;}}`,
       'android/os/SystemClock.java':`package android.os;
 public final class SystemClock {private static long now; public static long elapsedRealtime(){return now+=500;}}`,
       'android/app/Activity.java':`package android.app;

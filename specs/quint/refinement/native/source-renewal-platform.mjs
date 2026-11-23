@@ -127,7 +127,11 @@ public final class NotificationChannel {
  public void setDescription(String value){}
  public void setLockscreenVisibility(int value){}
  public int getImportance(){return importance;}
+ public String group;
+ public String getGroup(){return group;}
 }`,
+    'android/app/NotificationChannelGroup.java':`package android.app;
+public final class NotificationChannelGroup {public boolean blocked;public boolean isBlocked(){return blocked;}}`,
     'android/os/Bundle.java':`package android.os;
 public final class Bundle {
  private final java.util.Map<String,String> strings=new java.util.HashMap<>();
@@ -198,6 +202,8 @@ public final class NotificationManager {
  public boolean refusePost;
  public void createNotificationChannel(NotificationChannel c){channels.putIfAbsent(c.id,c);}
  public NotificationChannel getNotificationChannel(String id){return channels.get(id);}
+ public final Map<String,NotificationChannelGroup> groups=new LinkedHashMap<>();
+ public NotificationChannelGroup getNotificationChannelGroup(String id){return groups.get(id);}
  public boolean areNotificationsEnabled(){return gate.equals("allowed")||gate.equals("flip")&&reads++%2==0;}
  public StatusBarNotification[] getActiveNotifications(){return active.entrySet().stream().map(row->new StatusBarNotification(row.getKey(),0,row.getValue())).toArray(StatusBarNotification[]::new);}
  public PendingIntent tap(int code,Intent intent,boolean existing){
