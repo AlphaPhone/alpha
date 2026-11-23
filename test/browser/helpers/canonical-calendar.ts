@@ -129,6 +129,8 @@ export async function installCanonicalCalendarFixture(page: Page, options: Canon
           const data=await client.request(input.path,input.method,input.body,new AbortController().signal);
           return {status:200,body:JSON.stringify(data)};
         }
+        // Trash retention is off on this agent, as in the product, so the recording-cleanup read is refused.
+        if(plugin==='Agent'&&method==='request'&&input.path==='/api/notes/trash/recordings')return { status: 404, body: JSON.stringify({ success: false, error: { code: 'NOTES_TRASH_RETENTION_DISABLED' } }) };
         return base(plugin,method,input);
       };
     }else{
