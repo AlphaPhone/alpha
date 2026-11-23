@@ -2,14 +2,16 @@
 // saved. Source/test evidence for the browser build's Calendar plugin only (real BrowserCalendar,
 // its store and its review dialog); no agent, account or device calendar is involved.
 import {test,expect} from '@playwright/test';
+import {seedBrowserCalendar} from './helpers/browser-calendar';
 const DAY=86400000,begin=Date.UTC(2027,2,1);
 const seeded={sourceRevision:'b'.repeat(64),events:[{id:'all-day-event',calendarId:'local',title:'Harbour festival',body:'',location:'Quay',begin,end:begin+2*DAY,allDay:true,timeZone:'UTC',who:['Ana','Ben'],revision:'c'.repeat(64)}]};
 const update=(start:number,end:number)=>({type:'calendar_update',target:{sourceId:'local',sourceRevision:seeded.sourceRevision,eventId:'all-day-event',revision:seeded.events[0].revision},fields:{title:'Harbour festival',description:'',location:'Quay',start:new Date(start).toISOString(),end:new Date(end).toISOString(),timeZone:'Asia/Tokyo'}});
 const stored=(page:import('@playwright/test').Page)=>page.evaluate(async()=>{const {calendarDocument}=await import('/src/browser/calendar-store.ts');return JSON.parse((await calendarDocument.readRaw())!).events as any[];});
 
 test('an all-day update is reviewed as the dates and attendees that are saved, and instants that are not whole dates are refused unreviewed',async({page})=>{
- await page.addInitScript(seeded=>{localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'}));if(localStorage.getItem('alpha.browser.calendar.v1')===null)localStorage.setItem('alpha.browser.calendar.v1',JSON.stringify(seeded));},seeded);
+ await page.addInitScript(()=>localStorage.setItem('alpha.connection.selection.v1',JSON.stringify({kind:'offline'})));
  await page.goto('/?mode=dev');
+ await seedBrowserCalendar(page,seeded);
  const run=(id:string,operation:unknown)=>page.evaluate(async([id,operation])=>{
   const {BrowserCalendar}=await import('/src/browser/calendar.ts');
   (window as any).calendarResult=undefined;void new BrowserCalendar().executeAgent({operationId:id as string,operation}).then(result=>{(window as any).calendarResult=result;});
