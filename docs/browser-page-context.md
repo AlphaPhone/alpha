@@ -66,7 +66,14 @@ Brave Leo, Firefox AI chatbot).
 4. **Send (Alpha renderer).** While Browser is on screen with a loaded public
    page and Browser page for Alpha is on, each ordinary turn waits at most
    1.2 s for a capture and sends it to a peer that declared `browserPage`.
-5. **Settings.** Settings → Privacy → Browser page for Alpha (on by default,
+5. **Opening a page link (elizaOS [#40193](https://github.com/elizaOS/eliza/pull/40193)
+   and Alpha).** "Open the second story" proposes `browser_navigate` with that
+   link's exact url. The server used to ground every destination in an address
+   the owner typed, so such an open was always refused. It now also accepts an
+   exact link of the page the request carried, and the phone shows it on its
+   review card: the page, not the owner, wrote the address, so it never opens
+   on its own.
+6. **Settings.** Settings → Privacy → Browser page for Alpha (on by default,
    like Location for Alpha). The PRD records the decision.
 
 ## Todo and how each is checked
@@ -118,6 +125,5 @@ model turn that uses the page, and owner acceptance.
 
 ## Not in this change
 
-- Clicking, typing or scrolling inside pages from chat. Opening a link the
-  page shows already works through `browser_navigate`, with its review card.
+- Clicking, typing or scrolling inside pages from chat.
 - Other open tabs as context, and screenshots.
