@@ -653,9 +653,9 @@ export function androidDependencyFingerprint(root: string) {
   return sha256(lines.join('\n'));
 }
 
-export function refreshAndroidClasspath(root: string, env: NodeJS.ProcessEnv) {
+export async function refreshAndroidClasspath(root: string, env: NodeJS.ProcessEnv) {
   const configurations = ['launcherReleaseRuntimeClasspath', 'launcherDebugRuntimeClasspath'];
-  generateAlphaAndroidHost(root);
+  await generateAlphaAndroidHost(root);
   const coords = new Set();
   for (const configuration of configurations) {
     const output = execFileSync('./gradlew', ['-q', ':app:dependencies', '--configuration', configuration], {cwd: path.join(root, 'android'), env, encoding: 'utf8', maxBuffer: 64 << 20});
@@ -1069,7 +1069,7 @@ async function main(argv: readonly string[]) {
   const check = argv.includes('--check');
   if (argv.includes('--refresh-android')) {
     const {androidEnv} = await import('./toolchain.ts');
-    const snapshot = refreshAndroidClasspath(ROOT, androidEnv());
+    const snapshot = await refreshAndroidClasspath(ROOT, androidEnv());
     console.log(`Resolved ${snapshot.coordinates.length} Android runtime coordinates into ${ANDROID_CLASSPATH}`);
   }
   const packagedRuntime = argv.includes('--packaged-runtime');

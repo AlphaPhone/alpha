@@ -68,6 +68,8 @@ jobs:
         run: bash scripts/ci/prepare-host-test-json.sh
       - name: Prepare reviewed Kotlin compiler for native routing checks
         run: node test/fixtures/kotlin-tools.mjs --prepare
+      - name: Verify launcher overlay and first-boot provisioning
+        run: pnpm --dir vendor/eliza exec turbo run test --filter=@elizaos/os -- test/image.test.vibe test/image-provisioning.test.vibe
       # The normal chain builds and verifies its native source/model inputs.
       - name: Record tracked source frame before the Android build
         timeout-minutes: 1
