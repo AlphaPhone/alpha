@@ -94,7 +94,7 @@ export function MessageView({ reader, canMarkRead, canChange, onBack, onReply, o
           </Button>
         </div>
       </header>
-      <h2 className="px-4 font-serif text-2xl">{body.subject || "(no subject)"}</h2>
+      <h2 className="px-4 font-display text-2xl">{body.subject || "(no subject)"}</h2>
       <div className="flex items-center gap-3 px-4">
         <Avatar name={body.sender || body.senderAddress} src={senderImage} />
         <div className="min-w-0">

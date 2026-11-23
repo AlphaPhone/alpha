@@ -23,7 +23,7 @@ export function ScheduleList({ groups, range, emptyText, onOpen }: ScheduleListP
       <p className="px-4 py-2 font-mono text-xs uppercase tracking-widest text-muted-foreground">{range}</p>
       {groups.length === 0 ? <EmptyState title={emptyText} /> : groups.map((group) => (
         <div key={group.key} role="group" aria-label={group.label}>
-          <h2 className="px-4 pt-3 font-serif text-lg">{group.label}</h2>
+          <h2 className="px-4 pt-3 font-display text-lg">{group.label}</h2>
           {group.items.map(({ row, time }) => (
             <ListRow key={row.id} title={row.title} detail={row.where ? `${time} · ${row.where}` : time} onClick={() => onOpen(row)} />
           ))}

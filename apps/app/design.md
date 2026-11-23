@@ -11,7 +11,7 @@ titles, Public Sans everywhere else, and small uppercase tabular labels for meta
   at least 3:1 off `background` and `card`.
 - **Meaning.** `primary` is the one accent: the Alpha mark, the send control, a selected item and the
   focus `ring`. `destructive` is only for an effect the owner confirms. `ok` and `warn` mark state.
-- **Type.** `font-serif` for a view's one title, `font-sans` for content, `font-mono` with uppercase and
+- **Type.** `font-display` for a view's one title, `font-sans` for content, `font-mono` with uppercase and
   tabular numerals for labels, `font-legible` when the owner turns on legible text.
 - **Shape.** One generous `radius`; sheets take `rounded-xl` on their top edge only.
 - **Motion.** Sheets move on `ease-sheet`; everything else on `ease-standard`. Motion is removed under
@@ -51,7 +51,7 @@ Name a value by its token (`bg-primary`, `var(--primary)`), never by its value.
 | --- | --- |
 | `radius` | 1rem |
 | `font.sans` | "Public Sans", system-ui, sans-serif |
-| `font.serif` | "Denton", "Fraunces", Georgia, serif |
+| `font.display` | "Denton", "Fraunces", Georgia, serif |
 | `font.mono` | "Public Sans", system-ui, sans-serif |
 | `font.legible` | "Atkinson Hyperlegible", "Public Sans", system-ui, sans-serif |
 | `shadow.sm` | 0 1px 2px oklch(0 0 0 / 0.08) |

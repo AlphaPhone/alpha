@@ -36,7 +36,7 @@ export function NotesTrash({ view, rows, asked, canAsk, canRestore, canAskErase,
     <section className="flex h-full flex-col" aria-label="Recently deleted">
       <header className="flex flex-wrap items-center gap-2 px-2 py-2">
         <Button variant="ghost" size="icon" aria-label="Back" onClick={onClose}><ArrowLeft aria-hidden /></Button>
-        <h1 className="min-w-0 flex-1 font-serif text-2xl [overflow-wrap:anywhere]">Recently deleted</h1>
+        <h1 className="min-w-0 flex-1 font-display text-2xl [overflow-wrap:anywhere]">Recently deleted</h1>
         {view.retentionOn && <Button variant="ghost" disabled={!canAskErase} onClick={() => onAskErase(true)}>Delete all</Button>}
       </header>
       <ul className="flex flex-col divide-y divide-border overflow-y-auto">
