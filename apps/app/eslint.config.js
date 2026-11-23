@@ -11,5 +11,5 @@ import { parseTokens } from "../../vendor/eliza/vibestack/design/tokens.ts";
 export default defineConfig({
   files: ["src/web/**/*.tsx"],
   languageOptions: { parser: tseslint.parser },
-  extends: [designSystem({ tailwind, tokens: parseTokens(JSON.parse(readFileSync(path.join(import.meta.dirname, "tokens.json"), "utf8"))), entryPoint: path.join(import.meta.dirname, "generated/theme.css") })],
+  extends: [designSystem({ tailwind, tokens: parseTokens(JSON.parse(readFileSync(path.join(import.meta.dirname, "tokens.json"), "utf8"))), entryPoint: path.join(import.meta.dirname, "src/web/index.css") })],
 });

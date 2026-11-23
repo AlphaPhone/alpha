@@ -103,7 +103,7 @@ export function PhotoGrid({ rows, selection, selecting, columns, now, onOpen, on
                     {row.video && <Play aria-hidden className="absolute right-1 bottom-1 size-4 text-background" />}
                     {row.favorite && <Heart aria-hidden className="absolute bottom-1 left-1 size-4 fill-background text-background" />}
                     {selecting && (
-                      <span aria-hidden className={cn("absolute top-1 right-1 flex size-5 items-center justify-center rounded-full border-2 border-background", on ? "bg-primary" : "bg-scrim/18 dark:bg-scrim/55")}>
+                      <span aria-hidden className={cn("absolute top-1 right-1 flex size-5 items-center justify-center rounded-full border-2 border-background", on ? "bg-primary" : "bg-scrim")}>
                         {on && <Check className="size-3 text-primary-foreground" />}
                       </span>
                     )}

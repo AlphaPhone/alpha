@@ -153,7 +153,7 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
       )}
 
       {said !== "" && (
-        <button type="button" aria-label="Dismiss camera message" onClick={actions.dismissNotice} className={cn("relative z-10 mx-4 mt-4 rounded-xl bg-scrim/18 dark:bg-scrim/55 px-4 py-3 text-left text-sm", focusRing)}>
+        <button type="button" aria-label="Dismiss camera message" onClick={actions.dismissNotice} className={cn("relative z-10 mx-4 mt-4 rounded-xl bg-scrim px-4 py-3 text-left text-sm", focusRing)}>
           {said}
         </button>
       )}
@@ -177,7 +177,7 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
           <div className="flex justify-center gap-2" role="group" aria-label="Zoom">
             {stops.map(([tenths, label]) => (
               <button key={tenths} type="button" aria-label={`Zoom ${tenths / 10}×`} aria-pressed={camera.zoom === tenths} onClick={() => actions.zoomTo(tenths)}
-                className={cn("min-h-11 min-w-11 rounded-full font-mono text-xs", camera.zoom === tenths ? "bg-background text-foreground" : "bg-scrim/18 dark:bg-scrim/55", focusRing)}>
+                className={cn("min-h-11 min-w-11 rounded-full font-mono text-xs", camera.zoom === tenths ? "bg-background text-foreground" : "bg-scrim", focusRing)}>
                 {label}
               </button>
             ))}

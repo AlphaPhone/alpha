@@ -4,7 +4,8 @@ Alpha Phone's own identity: white paper, black ink and one pure blue accent. Ser
 titles, Public Sans everywhere else, and small uppercase tabular labels for metadata.
 
 - **Surfaces.** `background` is the page. `card` and `secondary` are the quiet fills of sheets and rows,
-  `accent` the pressed fill, `scrim` the shade under a sheet.
+  `accent` the pressed fill, and `scrim` the shade under a sheet. The scrim uses black at
+  18% opacity in light and 55% in dark.
 - **Text.** `foreground` by default, `muted-foreground` for metadata. Every `x-foreground` is the text
   color on `x`, and each pair meets WCAG AA in both themes.
 - **Edges.** `border` divides and may be faint. `input` is the edge of a control; it and `ring` stand
@@ -20,6 +21,8 @@ titles, Public Sans everywhere else, and small uppercase tabular labels for meta
 
 Name a value by its token (`bg-primary`, `var(--primary)`), never by its value.
 
+## Design tokens
+
 <!-- tokens:start -->
 | Color | Light | Dark |
 | --- | --- | --- |
@@ -34,7 +37,7 @@ Name a value by its token (`bg-primary`, `var(--primary)`), never by its value.
 | `secondary` | oklch(0.967 0 0) | oklch(0.24 0 0) |
 | `secondary-foreground` | oklch(0 0 0) | oklch(0.98 0 0) |
 | `muted` | oklch(0.967 0 0) | oklch(0.24 0 0) |
-| `muted-foreground` | oklch(0.52 0 0) | oklch(0.74 0 0) |
+| `muted-foreground` | oklch(0.525 0 0) | oklch(0.74 0 0) |
 | `accent` | oklch(0.94 0 0) | oklch(0.28 0 0) |
 | `accent-foreground` | oklch(0 0 0) | oklch(0.98 0 0) |
 | `destructive` | oklch(0.55 0.22 27) | oklch(0.7 0.17 22) |
@@ -45,7 +48,6 @@ Name a value by its token (`bg-primary`, `var(--primary)`), never by its value.
 | `ok` | oklch(0.52 0.14 150) | oklch(0.8 0.18 152) |
 | `warn` | oklch(0.53 0.11 85) | oklch(0.84 0.15 90) |
 | `info` | oklch(0.452 0.313 264.05) | oklch(0.72 0.16 264) |
-| `scrim` | oklch(0 0 0) | oklch(0 0 0) |
 
 | Token | Value |
 | --- | --- |
