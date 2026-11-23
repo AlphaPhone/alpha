@@ -141,8 +141,8 @@ pure def sometimesDismissed(a: Actions): bool = resultOf(a.ongoing) == OwnerCanc
 
 ### An effect dispatches only after a fresh call-state reading allows it
 
-A refusal is reported in the guard's own words: nothing was done during a call that may be an
-emergency call.
+Every effect kind is guarded, a deletion of the open voicemail included. A refusal is reported in
+the guard's own words: nothing was done during a call that may be an emergency call.
 
 ```quint
 pure def canGuardAnswered(a: Actions, runId: str, by: Actor): bool = by == Device and runIdOf(a.ongoing) == runId and isGuarding(a.ongoing)

@@ -441,8 +441,11 @@ export const telephonyActionsLayer = Layer.effect(TelephonyActions, effect {
           return try settle(operationId, open === null ? { kind: "voicemail-read", status: "none-selected" } : { kind: "voicemail-read", status: "read", ...open }, open === null ? "none-selected" : "read")
         }
         case "voicemail_delete_selected": {
+          // A voicemail delete is an effect (`effectKind`): it reads the call state like any other before it runs.
+          if ((try tell({ type: "numberReady", runId: operationId, number: "" }, "Device")) === undefined) return try cancelled(operationId, { kind: "voicemail-delete", status: "cancelled" })
+          if (!(try guard(operationId))) return { result: { kind: "voicemail-delete", status: "unavailable" }, settled: "Refused", refusal: "emergency" } satisfies ActionExecution
           const status = try voicemail.deleteSelected()
-          return try settle(operationId, { kind: "voicemail-delete", status }, status)
+          return try finish(operationId, { kind: "voicemail-delete", status }, status)
         }
         case "sms_latest_sender": {
           const sender = try messages.latestSender("includeAddress" in op && op.includeAddress === true)
