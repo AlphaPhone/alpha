@@ -233,6 +233,8 @@ export class AlphaClient {
   private ownPageChange: { active: AbortController; kind: string; id: string } | null = null;
   /** A view the request in flight brings forward itself (the agent's own Maps navigation request). */
   private ownViewOpen: { active: AbortController; view: string } | null = null;
+  /** Short-lived window admitting agent-initiated in-place context refreshes (e.g. post-nav data load or Notes/Calendar/Photos commit). */
+  private ownContextRefresh: { view: string; expiresAt: number } | null = null;
   /** Each context an own page change published, keyed by its revision, with the context it replaced. */
   private ownMoves = new Map<number, ContextEnvelope>();
   private proposals = new Map<string, ActionProposal>();
@@ -364,6 +366,7 @@ export class AlphaClient {
     this.activeWorkflow = false;
     this.ownPageChange = null;
     this.ownViewOpen = null;
+    this.ownContextRefresh = null;
     this.ownMoves.clear();
     this.transport = null;
     this.proposals.clear();
@@ -378,7 +381,7 @@ export class AlphaClient {
     const next = copyContext(context, this.context.revision);
     const selection = next.sensitive ? null : localSelection;
     if (selection === this.localSelection && JSON.stringify(next) === JSON.stringify(this.context)) return;
-    const ownChange = this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next), previous = this.context;
+    const ownChange = this.isOwnPageChange(next, selection) || this.isOwnViewOpen(next) || this.isOwnContextRefresh(next, selection), previous = this.context;
     this.localSelection = selection;
     this.context = copyContext(context, this.context.revision + 1);
     this.proposals.clear();
@@ -386,10 +389,14 @@ export class AlphaClient {
     // for the new document. Approvals bound to the earlier document are still retired above.
     if (ownChange) {
       this.activeRevision = this.context.revision;
-      if (this.ownMoves.size >= 32) this.ownMoves.clear();
+      if (this.ownMoves.size >= 64) {
+        const oldest = this.ownMoves.keys().next().value;
+        if (oldest !== undefined) this.ownMoves.delete(oldest);
+      }
       this.ownMoves.set(this.context.revision, previous);
     } else {
       this.ownMoves.clear();
+      this.ownContextRefresh = null;
       if(!this.activeWorkflow||next.sensitive){this.active?.abort();this.active=null;this.activeWorkflow=false;this.ownPageChange=null;this.ownViewOpen=null;}
     }
     this.emit();
@@ -428,6 +435,30 @@ export class AlphaClient {
   private isOwnViewOpen(next: ContextEnvelope): boolean {
     const own = this.ownViewOpen;
     return !!own && own.active === this.active && !!this.active && !this.activeWorkflow && !next.sensitive && !this.context.sensitive && next.view === own.view;
+  }
+  /**
+   * Admits same-view, non-sensitive context revisions for a brief window after an agent-initiated
+   * mutation or owned navigation (e.g. Notes/Calendar/Reminders/Photos refresh or post-mount view
+   * load) so active voice sessions continue without tripping `foreground-check-failed`.
+   * Leaving the view, entering a sensitive surface, or changing telephony selection still ends it.
+   */
+  admitOwnContextRefresh(view: string, ttlMs = 3000): () => void {
+    if (!view || this.context.sensitive) return () => {};
+    const admitted = { view, expiresAt: Date.now() + Math.max(0, ttlMs) };
+    this.ownContextRefresh = admitted;
+    return () => { if (this.ownContextRefresh === admitted) this.ownContextRefresh = null; };
+  }
+  clearOwnContextRefresh(): void {
+    this.ownContextRefresh = null;
+  }
+  private isOwnContextRefresh(next: ContextEnvelope, selection: string | null): boolean {
+    const own = this.ownContextRefresh;
+    if (!own || next.sensitive || this.context.sensitive || selection !== this.localSelection) return false;
+    if (Date.now() > own.expiresAt) {
+      this.ownContextRefresh = null;
+      return false;
+    }
+    return next.view === this.context.view && next.view === own.view && next.timeZone === this.context.timeZone;
   }
   /**
    * True when the published context is `expected`, or was reached from it only by own page

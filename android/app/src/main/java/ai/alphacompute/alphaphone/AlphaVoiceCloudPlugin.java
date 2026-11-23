@@ -5,9 +5,11 @@ import ai.eliza.voice.CartesiaSpeech;
 import ai.eliza.voice.LocalSpeechBridgePlugin;
 import ai.eliza.voice.RecordingPcm;
 import ai.eliza.plugins.media.RecordingWindow;
+import ai.eliza.voice.SessionSpeech;
 import ai.eliza.voice.SpeechRequestGate;
 import ai.eliza.voice.CloudSpeechTimings;
 import ai.eliza.voice.SpeechStreamBridgePlugin;
+import ai.eliza.voice.VoiceBundleAssets;
 import com.getcapacitor.*;
 import com.getcapacitor.annotation.*;
 import java.io.*;
@@ -15,6 +17,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONObject;
 
 /**
@@ -39,8 +44,8 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  });}
  private static final Set<AlphaVoiceCloudPlugin> activeVoices=new java.util.concurrent.CopyOnWriteArraySet<>();
  private static final Set<Streaming> activeStreams=new java.util.concurrent.CopyOnWriteArraySet<>();
- private final PasswordSurfaces.Listener secretSurface=visible->{if(visible)retireSpeechAuthority();};
- @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);super.handleOnDestroy();}
+ private final PasswordSurfaces.Listener secretSurface=visible->{if(visible){closeWarmSpeech();retireSpeechAuthority();}};
+ @Override protected void handleOnDestroy(){activeVoices.remove(this);PasswordSurfaces.removeListener(secretSurface);closeWarmSpeech();prewarmExecutor.shutdownNow();super.handleOnDestroy();}
  @Override protected boolean sensitiveSurfaceActive(){return PasswordSurfaces.visible();}
  static void retireProviderAuthority(){
   for(AlphaVoiceCloudPlugin voice:activeVoices)voice.mainHandler().post(voice::retireSpeechAuthority);
@@ -82,11 +87,43 @@ public final class AlphaVoiceCloudPlugin extends LocalSpeechBridgePlugin {
  // recording going with the screen off. Segments are transcribed through the same recordingId
  // lookups as a draft: the shared LocalVoiceRecording.selectAlso.
  private volatile boolean noteForeground=true;
+ private final ExecutorService prewarmExecutor=Executors.newSingleThreadExecutor(runnable->{Thread t=new Thread(runnable,"alpha-voice-prewarm");t.setDaemon(true);t.setPriority(Thread.MIN_PRIORITY);return t;});
+ private final AtomicBoolean prewarmPending=new AtomicBoolean();
+ private final Object warmSpeechLock=new Object();
+ private SessionSpeech warmSpeech;
+ private void closeWarmSpeech(){synchronized(warmSpeechLock){if(warmSpeech!=null){warmSpeech.close();warmSpeech=null;}}}
+ private void prewarmVoiceAsync(){
+  if(destroyed()||!noteForeground||sensitiveSurfaceActive()||callActive())return;
+  if(!prewarmPending.compareAndSet(false,true))return;
+  final android.content.Context appContext=getContext().getApplicationContext();
+  try{
+   prewarmExecutor.execute(()->{
+    try{
+     if(destroyed()||!noteForeground||sensitiveSurfaceActive()||callActive())return;
+     VoiceBundleAssets.install(appContext);
+     if(destroyed()||!noteForeground||sensitiveSurfaceActive()||callActive())return;
+     SessionSpeech speech=SessionSpeech.shared(appContext);
+     boolean kept=false;
+     try{
+      speech.prepareVoice();
+      if(!destroyed()&&noteForeground&&!sensitiveSurfaceActive()&&!callActive()){
+       synchronized(warmSpeechLock){
+        if(warmSpeech!=null)warmSpeech.close();
+        warmSpeech=speech;
+        kept=true;
+       }
+      }
+     }finally{if(!kept)speech.close();}
+    }catch(IOException|RuntimeException|LinkageError ignored){/* Advisory startup warmup: absence or busy/destroyed teardown never fails. */}
+    finally{prewarmPending.set(false);}
+   });
+  }catch(RuntimeException rejected){prewarmPending.set(false);}
+ }
  /** The shared bridge's refusal code for an active call, so the renderer shows its one call line. */
  private static final String CALL_ACTIVE_CODE="call-active";
- @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));}
- @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();}
- @Override protected void handleOnPause(){noteForeground=false;super.handleOnPause();}
+ @Override public void load(){super.load();activeVoices.add(this);PasswordSurfaces.addListener(secretSurface);recording().selectAlso(id->AlphaNoteRecorder.get(getContext()).segment(id));prewarmVoiceAsync();}
+ @Override protected void handleOnResume(){noteForeground=true;super.handleOnResume();prewarmVoiceAsync();}
+ @Override protected void handleOnPause(){noteForeground=false;closeWarmSpeech();super.handleOnPause();}
  private boolean callActive(){android.media.AudioManager audio=(android.media.AudioManager)getContext().getSystemService(android.content.Context.AUDIO_SERVICE);int mode=audio==null?android.media.AudioManager.MODE_NORMAL:audio.getMode();return mode==android.media.AudioManager.MODE_IN_CALL||mode==android.media.AudioManager.MODE_IN_COMMUNICATION||mode==android.media.AudioManager.MODE_RINGTONE;}
  /** The last state the notification showed, so it is rebuilt only when the state changes. */
  private volatile String lastNoteState;

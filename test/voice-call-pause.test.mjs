@@ -212,22 +212,21 @@ test('a dictation clip a call cut short says so', async () => {
   assert.deepEqual(texts(t.panel().lines), [ENDED]);
 });
 
-test('a spoken request that needs review ends with the microphone off, not as a voice failure', async () => {
-  // "Call Maya": the reply carries a proposal, so the turn ends for the owner's review (VoiceTurnReview).
-  const s = surface(); s.f.badReply = {complete: false, reviewRequired: true};
+test('a spoken request that needs review keeps the microphone open and listening, not as a voice failure', async () => {
+  // "Call Maya": the reply carries a proposal, so voice stays open for follow-up commands (VoiceTurnReview).
+  const s = surface(); s.f.badReply = {complete: true, reviewRequired: true};
   await s.start(); await s.speak();
   const held = s.panel();
-  assert.equal(held.state, 'error', 'the conversation does not listen again');
-  assert.equal(held.reviewHold, true);
-  assert.deepEqual(texts(held.statusLines), ['Mic off · use keyboard']);
+  assert.equal(held.state, 'listening', 'the conversation keeps listening after speaking');
+  assert.equal(held.reviewHold, false);
+  assert.equal(held.reviewAvailable, true);
   assert.equal(held.problem, false);
-  assert.equal(held.muteLabel, 'Microphone off');
-  assert.equal(held.muted, 'true');
-  assert.equal(held.recoveryLabel, '', 'nothing offers to retry the reviewed request');
-  assert.equal(s.f.activeRecording, null);
+  assert.equal(held.muted, 'false');
+  assert.equal(held.recoveryLabel, '');
   // A reply that failed is still a failure.
   const t = surface(); t.f.badReply = {complete: false};
   await t.start(); await t.speak();
+  assert.equal(t.panel().state, 'error');
   assert.equal(t.panel().reviewHold, false);
   assert.deepEqual(texts(t.panel().statusLines), ['Voice stopped']);
 });

@@ -399,6 +399,55 @@ let sending: AbortController | null = null;
 /** Pre-warm debounce: at most one agent inference warm per interval, reset by a new connection. */
 export const INFERENCE_WARM_INTERVAL_MS = 60_000;
 let lastInferenceWarm = Number.NEGATIVE_INFINITY;
+let lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
+let localVoiceWarming = false;
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
+      connectionController.warmInference();
+    }
+  });
+}
+try {
+  void DailyApps?.addListener?.('appResumed', () => {
+    lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
+    if (typeof document === 'undefined' || !document.hidden) connectionController.warmInference();
+  })?.catch?.(() => {});
+} catch { /* Non-Capacitor runtime. */ }
+function alphaVoiceCloudMethodAvailable(name: string): boolean {
+  if (!Capacitor.isPluginAvailable('AlphaVoiceCloud')) return false;
+  const headers = (Capacitor as { PluginHeaders?: Array<{ name?: unknown; methods?: Array<{ name?: unknown }> }> }).PluginHeaders;
+  if (!Array.isArray(headers)) return true;
+  const entry = headers.find(item => item?.name === 'AlphaVoiceCloud');
+  return !!entry && Array.isArray(entry.methods) && entry.methods.some(method => method?.name === name);
+}
+function warmLocalVoice(selected: Active, now: number): void {
+  if (localVoiceWarming || now - lastLocalVoiceWarm < INFERENCE_WARM_INTERVAL_MS) return;
+  if (sending || document.hidden || state.open || selected.kind !== 'resident' || !state.session) return;
+  if (!alphaVoiceCloudMethodAvailable('localSpeechStatus')) return;
+  if (!Capacitor.isNativePlatform() && !selected.remote.browserSpeechAvailable) return;
+  localVoiceWarming = true;
+  lastLocalVoiceWarm = now;
+  const session = state.session;
+  void import('./voice-selection').then(({ speechRoute }) => {
+    if (active !== selected || state.session !== session || document.hidden || state.open || speechRoute() !== 'device') {
+      lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
+      return;
+    }
+    const native = registerPlugin<{ localSpeechStatus(input: { requestId: string; ttsOnly?: boolean }): Promise<unknown> }>('AlphaVoiceCloud');
+    void native.localSpeechStatus({ requestId: `warm-${crypto.randomUUID()}`, ttsOnly: true }).catch(() => {
+      if (lastLocalVoiceWarm === now) lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
+    });
+    if (alphaVoiceCloudMethodAvailable('liveCaptureStatus')) {
+      void import('./native-live-voice').then(m => m.warmNativeLiveVoice()).catch(() => {});
+    }
+  }).catch(() => {
+    if (lastLocalVoiceWarm === now) lastLocalVoiceWarm = Number.NEGATIVE_INFINITY;
+  }).finally(() => {
+    localVoiceWarming = false;
+  });
+}
 const appRequests = new Set<AbortController>();
 const conversationMemory = new Map<string, string>();
 let lastNativeVoiceInference:(NativeInferenceVoiceJoin&{epoch:number;sessionId:string})|undefined;
@@ -1107,6 +1156,7 @@ function activate(next: Active, session: VerifiedSession, name: string) {
   }
   startConversationEvents(next,session);
   lastInferenceWarm=Number.NEGATIVE_INFINITY;
+  lastLocalVoiceWarm=Number.NEGATIVE_INFINITY;
   if(!document.hidden)connectionController.warmInference();
 }
 /**
@@ -2400,7 +2450,9 @@ export const connectionController = {
    * ahead of the owner's own request. */
   warmInference(){
     const selected=active,now=Date.now();
-    if(selected?.kind!=='resident'||!state.session||now-lastInferenceWarm<INFERENCE_WARM_INTERVAL_MS)return;
+    if(selected?.kind!=='resident'||!state.session)return;
+    warmLocalVoice(selected,now);
+    if(now-lastInferenceWarm<INFERENCE_WARM_INTERVAL_MS)return;
     if(sending||state.inferenceOffline||state.residentPlanNotice||(residentCloudFlow()&&!state.cloudAccount))return;
     lastInferenceWarm=now;
     void selected.remote.request('/api/cloud/warm',{},AbortSignal.timeout(10000)).catch(()=>{});
