@@ -183,7 +183,7 @@ export function voiceBundleAdmission({names, read}: VoiceBundleEntries, host: Vo
  * speech roots and old upstream outputs must not masquerade as its absence.
  * This says nothing about a built APK, native capability or voice acceptance.
  */
-function voiceStagingState(root: string, receipt: NativeBuildReceipt | null) {
+function voiceStagingState(root: string) {
   const at = (relative: string) => {
     let current = path.resolve(root);
     const rootStat = fs.lstatSync(current);
@@ -201,6 +201,7 @@ function voiceStagingState(root: string, receipt: NativeBuildReceipt | null) {
   for (const relative of [
     'vendor/eliza/packages/os/android/local-inference/native',
   ]) if (at(relative)) throw Error(`Unrecognized voice staging outside the admitted product output: ${relative}`);
+  let receipt: NativeBuildReceipt | null | undefined;
   const checkRawVoiceJni = (rawJni: string) => {
     if (!at(rawJni)) return;
     const entries = fs.readdirSync(path.join(root, rawJni), {withFileTypes: true});
@@ -211,6 +212,7 @@ function voiceStagingState(root: string, receipt: NativeBuildReceipt | null) {
       if (!entry.isDirectory()) continue;
       const library = `${rawJni}/${entry.name}/libparadeevoicejni.so`;
       if (!at(library)) continue;
+      if (receipt === undefined) receipt = readNativeBuildReceipt(root);
       const recorded = receipt?.files.find(row => row.path === library);
       if (!recorded) throw Error('Unrecorded voice JNI payload is staged in the application');
       verifyNativeFileBytes(root, [recorded]);
@@ -255,7 +257,7 @@ function voiceStagingState(root: string, receipt: NativeBuildReceipt | null) {
  */
 export function verifyVoiceHost(root: string, {runtime = verifyParadeeRuntime, abis}: VoiceVerificationOptions = {}) {
   const selected = selectedAndroidAbis(abis);
-  const staging = voiceStagingState(root, readNativeBuildReceipt(root));
+  const staging = voiceStagingState(root);
   const record = readVoiceHost(root);
   const native = path.join(root, PARADEE_NATIVE);
   if (staging === 'absent') {
