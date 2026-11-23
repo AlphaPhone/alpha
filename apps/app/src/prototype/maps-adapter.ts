@@ -603,7 +603,7 @@ export function installPrototypeMapsAdapter(Component: { prototype: Bag }, views
     if(!showable())return false;
     if(!api?.isActive()){
       const openMaps=(detent?:string)=>{
-        shell!.openView('maps',undefined,detent);
+        if(detent)shell!.openView('maps',undefined,detent);else shell!.openView('maps');
         return Promise.race([new Promise<void>(resolve=>shell!.setState({},()=>resolve())),new Promise<void>(resolve=>setTimeout(resolve,2000))]);
       };
       if(shell!.voiceConversationActive?.()&&typeof shell!.runOwnedVoiceViewNavigation==='function'){
