@@ -7,11 +7,17 @@ import android.content.Context;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** The account the resident runs for: the signed-in Eliza Cloud account of the stored provider selection, or Alpha's local account, under which the resident runs with no hosted provider. */
+/** The account the resident runs for: the signed-in Cloud account of the stored provider selection, or Alpha's local account, under which the resident runs with no usable Cloud key. */
 final class AlphaAgentCredentials implements AgentCredentials {
- /** The account of a resident with no admitted Cloud account; its credential is never framed into a launch. */
+ /** The account of a resident with no admitted Cloud account (P-43: the resident always runs). */
  static final Account LOCAL = new Account("alpha-local", "alpha-local");
- private static final String UNBOUND = "unbound";
+ /**
+  * The key a cloud launch is framed with when no Cloud account is admitted (android/agent/host.json launches on
+  * Alpha Cloud). It is no Cloud key, so Alpha Cloud refuses each model call and the agent reports the account as
+  * needing sign-in; it is a printable key of at least 8 characters because the agent refuses a shorter frame
+  * credential at launch (upstream launch.schema.vibe BearerKey), which would stop the resident (A2-005, E2-004).
+  */
+ static final String UNBOUND = "alpha-local-no-cloud-key";
  private final Context context;
 
  AlphaAgentCredentials(Context context) { this.context = context.getApplicationContext(); }
