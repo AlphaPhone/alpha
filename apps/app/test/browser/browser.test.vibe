@@ -35,14 +35,17 @@ it.live("browse in tabs: a typed address loads in its own WebView, only a normal
       // spec/browser/session.md, "A new tab, normal or private, opens selected with its address field, unless eight are open"
       for (const n of [1, 2, 3, 4, 5, 6, 7]) try tabs.dispatch({ type: "openTab", id: `extra${n}`, profile: "Normal" })
       const after = try tabs.get()
+      const got1 = try callsTo(fake.calls, "create")
+      const got2 = try callsTo(fake.calls, "navigate")
+      const got3 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual({
-        created: (try callsTo(fake.calls, "create")).map((c) => c.args.private),
-        navigated: (try callsTo(fake.calls, "navigate")).map((c) => c.args.url),
+        created: got1.map((c) => c.args.private),
+        navigated: got2.map((c) => c.args.url),
         visits: after.visits.map((v) => v.url),
         privatePage: after.tabs.find((t) => t.id === priv)?.page.url,
         tabCount: after.tabs.length,
         saved: snapshotOf(after).tabs.some((t) => t.id === priv),
-        toasts: (try Ref.get(fake.toasts)).length >= 2,
+        toasts: got3.length >= 2,
       }, {
         created: [false, true],
         navigated: ["https://example.test/news", "https://secret.test/"],
@@ -76,8 +79,9 @@ it.live("restore saved tabs into an untouched launch, and never write over a rec
       const state = try settledTabs(tabs)
       try tabs.dispatch({ type: "openTab", id: "bnew", profile: "Normal" })
       try sleep("50 millis")
+      const got4 = try callsTo(unreadable.calls, "saveBrowsingState")
       try Effect.try(() => assert.deepStrictEqual(
-        { hydration: state.hydration, writes: (try callsTo(unreadable.calls, "saveBrowsingState")).length },
+        { hydration: state.hydration, writes: got4.length },
         { hydration: "ReadFailed", writes: 0 },
       ))
     }
@@ -103,8 +107,9 @@ it.live("clear browsing data only after the owner confirms it on the unlocked ph
       try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
       try sleep("20 millis")
       const refused = try reviews.confirm("browser-clear-site", "ClearSiteData", "example.test")
+      const got5 = try callsTo(fake.calls, "clearBrowsingData")
       try Effect.try(() => assert.deepStrictEqual(
-        { cleared: (try callsTo(fake.calls, "clearBrowsingData")).length, kept: cleared.tabs.map((t) => t.profile), visits: cleared.visits.length, refused },
+        { cleared: got5.length, kept: cleared.tabs.map((t) => t.profile), visits: cleared.visits.length, refused },
         { cleared: 1, kept: ["Private"], visits: 0, refused: false },
       ))
     }
@@ -129,9 +134,10 @@ it.live("the agent opens in the untouched tab, and a view command is reported di
       try report(fake.events, session, { id: opened.tab, sequence: 2, navigation: "8", url: "https://example.test/next", committed: true, canBack: true })
       const stale = try agent.command({ subaction: "back" }, selection)
       const stop = try agent.command({ subaction: "stop" }, undefined)
+      const got6 = try callsTo(fake.calls, "command")
       try Effect.try(() => assert.deepStrictEqual(
         { reused: opened.tab === started.cur, refusedHttp, dispatched, stale: stale.ok ? "ok" : stale.code, stop: stop.ok ? "ok" : stop.code,
-          commands: (try callsTo(fake.calls, "command")).map((c) => [c.args.command, c.args.navigation]) },
+          commands: got6.map((c) => [c.args.command, c.args.navigation]) },
         { reused: true, refusedHttp: "BrowserOpenRefused", dispatched: { ok: true, data: { dispatched: true, completed: false, requiresReadback: true } },
           stale: "STALE_REF", stop: "UNSUPPORTED", commands: [["back", "7"]] },
       ))
@@ -162,8 +168,10 @@ it.live("find searches only the tab that still shows the bar, and a page egress 
       try tabs.dispatch({ type: "openTab", id: "bother", profile: "Normal" })
       try tabs.typeFind("ignored")
       try sleep("200 millis")
+      const got7 = try callsTo(fake.calls, "find")
+      const got8 = try Ref.get(fake.toasts)
       try Effect.try(() => assert.deepStrictEqual(
-        { searches: (try callsTo(fake.calls, "find")).map((c) => c.args.query), found: [found.count, found.index], copyRefused: (try Ref.get(fake.toasts)).includes("Load the current page before copying its link.") },
+        { searches: got7.map((c) => c.args.query), found: [found.count, found.index], copyRefused: got8.includes("Load the current page before copying its link.") },
         { searches: ["milk"], found: [3, 1], copyRefused: true },
       ))
     }
@@ -183,8 +191,9 @@ it.live("a view command whose native receipt names another tab or session is not
       try report(fake.events, session, { id: opened.tab, sequence: 1, navigation: "7", url: "https://example.test/", committed: true, canBack: true })
       try opened.present
       const answer = try agent.command({ subaction: "back" }, try agent.selection())
+      const got9 = try callsTo(fake.calls, "command")
       try Effect.try(() => assert.deepStrictEqual(
-        { ok: answer.ok, code: answer.ok ? "" : answer.code, sent: (try callsTo(fake.calls, "command")).length },
+        { ok: answer.ok, code: answer.ok ? "" : answer.code, sent: got9.length },
         { ok: false, code: "UNAVAILABLE", sent: 1 },
       ))
     }
@@ -213,6 +222,53 @@ it.live("an approved open is shown only while the foreground it was approved in 
         afterLeaving: { selected: false, shown: false },
         afterStaying: { selected: true, shown: true },
       }))
+    }
+  })
+})
+
+// spec/browser/session.md, "Story: Let the agent open and drive my tabs"
+it.live("the agent switches to and closes the tab its words name, asks the owner when several match, and opens a new tab", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const visit = effect (url: string, title: string, sequence: number) => {
+        const opened = try agent.openApproved(url, true)
+        try report(fake.events, session, { id: opened.tab, sequence, navigation: "1", url, title, committed: true })
+        try opened.present
+        return opened.tab
+      }
+      const news = try visit("https://news.example/", "Daily News", 1)
+      const sport = try visit("https://news.example/sport", "Sport News", 2)
+      const bread = try visit("https://recipes.example/", "Bread", 3)
+      const none = () => succeed(null)
+      const second = () => succeed(1)
+
+      const unchosen = (agent.control({ type: "browser_tab_switch", target: "news" }, undefined, none) catch (error) => error.message)
+      const offered: string[][] = []
+      const chosen = try agent.control({ type: "browser_tab_switch", target: "news" }, undefined, (choice) => effect {
+        offered.push(choice.options.map((option) => option.title))
+        return try second()
+      })
+      try chosen
+      const afterChoice = (try tabs.get()).cur
+      const exact = try agent.control({ type: "browser_tab_switch", target: "daily news" }, undefined, none)
+      try exact
+      const afterExact = (try tabs.get()).cur
+      const closing = try agent.control({ type: "browser_tab_close", target: "bread" }, undefined, none)
+      try closing
+      const afterClose = (try tabs.get()).tabs.map((t) => t.id)
+      const before = (try tabs.get()).tabs.length
+      const fresh = try agent.control({ type: "browser_tab_new" }, undefined, none)
+      try fresh
+      const now = try tabs.get()
+      try Effect.try(() => assert.deepStrictEqual(
+        { afterExact, unchosen: typeof unchosen === "string" ? unchosen : "ran", offered, afterChoice, breadClosed: !afterClose.includes(bread), newTab: [now.tabs.length - before, [news, sport, bread].includes(now.cur)] },
+        { afterExact: news, unchosen: "More than one tab matches “news”, and none was chosen.", offered: [["Daily News", "Sport News"]], afterChoice: sport, breadClosed: true, newTab: [1, false] },
+      ))
     }
   })
 })
