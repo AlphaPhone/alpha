@@ -1,4 +1,4 @@
-import { expect, fn, screen, userEvent, within } from "storybook/test";
+import { expect, fn, screen, userEvent, waitFor, within } from "storybook/test";
 import type { ComponentMeta } from "vibestack/stories";
 import type { InboxMessageActionsProps } from "./InboxMessageActions.tsx";
 
@@ -26,12 +26,13 @@ export const meta: ComponentMeta<InboxMessageActionsProps> = {
       await userEvent.click(within(canvasElement).getByRole("button", { name: "Reply" }));
       await userEvent.click(within(canvasElement).getByRole("button", { name: "More actions" }));
       await userEvent.click(await screen.findByRole("menuitem", { name: "Move to Trash" }));
-      await expect([onReply.mock.calls.length, onTrash.mock.calls.length]).toEqual([1, 1]);
+      await waitFor(() => expect([onReply.mock.calls.length, onTrash.mock.calls.length, screen.queryByRole("menu")]).toEqual([1, 1, null]));
     },
     Unread: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
       await userEvent.click(within(canvasElement).getByRole("button", { name: "More actions" }));
       await expect(await screen.findByRole("menuitem", { name: "Mark as read" })).toBeInTheDocument();
       await userEvent.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     },
     "Read only account": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: "More actions" })).toBeNull(),
   },
