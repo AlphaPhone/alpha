@@ -20,6 +20,7 @@ import {
   assistNative, assistantOver, assistantWith, countingExecutors, fakeHost, fakePreferences, fakeResident, fakeResidentControl, itemizingExecutors, journalNative,
   locationNative, networkNative, noNative, privateScreen, wireProposal, type Seen,
 } from "./fakes.vibe"
+import { readerHearsAcknowledgments, unlessAcknowledgmentsHeard } from "./reply-reader.vibe"
 
 const futureExpiry = "2099-01-01T00:00:00.000Z"
 const quietResident = (proposals: readonly unknown[] = []) => fakeResident({ calls: [] }, { turn: { kind: "reply", text: "ok" }, proposals })
@@ -239,8 +240,10 @@ effect function acknowledgedTurn(before: readonly unknown[], answer: string) {
 const calendarAnswer = "You have two meetings today: standup at nine and a review at three."
 const cueText = (text: string) => ({ type: "token", text })
 const restart = { type: "token", fullText: "" }
+/** Whether the agent client's reader hears acknowledgment frames and tool labels; an older one fails the turn on them. */
+const acknowledgments = await readerHearsAcknowledgments()
 
-it.effect("The agent's acknowledgment frame is the one acknowledgement, shown before its tool and never in the answer (spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\")", () => effect {
+it.effect.skipIf(!acknowledgments)(`The agent's acknowledgment frame is the one acknowledgement, shown before its tool and never in the answer${unlessAcknowledgmentsHeard(acknowledgments)} (spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole")`, () => effect {
   const cue = "Let me check your calendar."
   const { settled, working } = try acknowledgedTurn([cueText(cue), { type: "acknowledgment", text: cue }, restart, { type: "tool", name: "CALENDAR", label: "Using Calendar" }], calendarAnswer)
   try Effect.try(() => assert.deepStrictEqual(
@@ -257,7 +260,7 @@ it.effect("An agent with no acknowledgment frame is acknowledged once from the t
   ))
 })
 
-it.effect("An acknowledgment frame after the tool fallback, or a tool after the frame, never acknowledges again (spec/assistant/reply.md, \"One brief acknowledgment at most, only before work runs, and the final answer is delivered whole\")", () => effect {
+it.effect.skipIf(!acknowledgments)(`An acknowledgment frame after the tool fallback, or a tool after the frame, never acknowledges again${unlessAcknowledgmentsHeard(acknowledgments)} (spec/assistant/reply.md, "One brief acknowledgment at most, only before work runs, and the final answer is delivered whole")`, () => effect {
   const fallbackFirst = try acknowledgedTurn([cueText("On it."), { type: "tool", name: "CALENDAR" }, { type: "acknowledgment", text: "Let me check your calendar." }, restart], calendarAnswer)
   const frameFirst = try acknowledgedTurn([cueText("Sure."), { type: "acknowledgment", text: "Sure." }, cueText(" One more."), { type: "tool", name: "ALARM", label: "Using Clock" }], calendarAnswer)
   const units = (turn: { readonly settled?: Row }) => turn.settled?.kind === "agent" ? [turn.settled.reply.acks, turn.settled.reply.ackUnits, turn.settled.text] : []

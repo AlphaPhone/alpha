@@ -4,6 +4,7 @@ import { readReplyStream } from "@elizaos/agent/client"
 import { acknowledgement, voiceReplyHooks } from "../../src/voice/acknowledgement.vibe"
 import { Speech, SpeechInterrupted, type SpeakOptions } from "../../src/voice/speech.vibe"
 import { initial as speechInitial } from "../../gen/voice__speech.ts"
+import { readerHearsAcknowledgments, unlessAcknowledgmentsHeard } from "../assistant/reply-reader.vibe"
 import { acknowledged, audible, cancel, ended, initial, replyMayStart, replyReady } from "../../gen/voice__acknowledgement.ts"
 
 /** One line the fake speaker was asked to say: whether it was stopped, and its start report. */
@@ -258,7 +259,10 @@ async function* agentStream(beforeTool: () => void): AsyncGenerator<Uint8Array> 
   yield frame({ type: "done", fullText: "You have two meetings.", messageId: "m1", userMessageId: "u1", agentName: "Alpha", actionResults: [] })
 }
 
-it.live(`a voice turn speaks the agent's acknowledgment before its tool runs, and the cue's own text never readies the reply (spec/voice/acknowledgement.md, "A reply ready before the cue is audible drops it at once")`, () => effect {
+/** Whether the agent client's reader hears acknowledgment frames and tool labels; an older one fails the turn on them. */
+const acknowledgments = await readerHearsAcknowledgments()
+
+it.live.skipIf(!acknowledgments)(`a voice turn speaks the agent's acknowledgment before its tool runs, and the cue's own text never readies the reply${unlessAcknowledgmentsHeard(acknowledgments)} (spec/voice/acknowledgement.md, "A reply ready before the cue is audible drops it at once")`, () => effect {
   const said: Said[] = []
   provide speaker(said, true) {
     const cue = try acknowledgement()
