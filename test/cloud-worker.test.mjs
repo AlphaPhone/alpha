@@ -84,7 +84,7 @@ function smokeFixture(environment){
    {key:'plus_monthly',name:'Plus',amountCents:3000,currency:'usd',interval:'month',allowance:{amountUsd:'25.000000'}},
    {key:'pro_monthly',name:'Pro',amountCents:10000,currency:'usd',interval:'month',allowance:{amountUsd:'90.000000'}},
   ]}],
-  [`${row.api}/api/v1/auth/methods`]:[200,{email:true,google:true}],
+  [`${row.api}/api/v1/auth/methods`]:[200,{email:true,sms:false,google:true}],
   [`${row.web}/.well-known/assetlinks.json`]:[200,links],
   [redirectUri]:[200,callback,'text/html'],
  };
@@ -117,6 +117,9 @@ test('smoke refuses incomplete and wrong-authority HTTP 200 answers, one gate ea
   ['app registration',registration,[200,{...config,redirectUri:redirectUri+'-other'}]],
   ['app registration',registration,[200,{...config,codeChallengeMethod:'plain'}]],
   ['plans',`${row.api}/api/v1/subscriptions/plans`,[200,{plans:[]}]],
+  ['sign-in methods',`${row.api}/api/v1/auth/methods`,[200,{email:true,google:true}]],
+  ['sign-in methods',`${row.api}/api/v1/auth/methods`,[200,{email:true,sms:true,google:false}]],
+  ['sign-in methods',`${row.api}/api/v1/auth/methods`,[200,{email:false,sms:false,google:true}]],
   ['asset links',`${row.web}/.well-known/assetlinks.json`,[200,[{target:{package_name:identity.appId}}]]],
   ['asset links',`${row.web}/.well-known/assetlinks.json`,[200,[{...links[0],target:{...links[0].target,sha256_cert_fingerprints:[colon('a'.repeat(64))]}}]]],
   ['callback page',redirectUri,[302,'','text/html']],

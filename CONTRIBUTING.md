@@ -17,34 +17,27 @@ Read [README.md](README.md), [docs/development.md](docs/development.md) and [AGE
 ## Android packaging
 
 Alpha has one launcher product/flavor. Every APK packages the resident runtime,
-on-device voice and local embeddings. Run `bun run android:build:local` (debug and
+on-device voice and local embeddings. Run `pnpm android:build:local` (debug and
 instrumentation APKs; add `-- --release` for the release APK, as CI does) and
-`bun run android:verify`; retain debug, release and instrumentation evidence
+`pnpm android:verify`; retain debug, release and instrumentation evidence
 separately. Browser test mocks do not define another APK lane.
 
 ## Formal models
 
-Run the Quint models and LemmaScript proofs locally before merging a PR:
-`bun run quint:check`, `bun run quint:tests` and `bun run lemma:check`. That is the only point
-at which running them is required. They are not part of `bun run verify` or of PR and push CI; CI runs them only
-when `develop` is promoted to `main`. Proofs need Dafny 4.11.0 on `PATH`.
-
-`quint:check` typechecks, runs the scenarios of and simulates every model registered in
-`specs/quint/*/manifest.json`. `quint:tests` runs `test/quint-*`: owning tests compare product
-behavior with model transitions. New implementation refinement must import or compile the whole
-source file. Do not add new source slices, source-text assertions or JavaScript restatements of
-the model. Existing authenticated member-level tests with unique effect, refusal, ownership or
-recovery coverage remain explicitly scoped partial-source contract regressions. Retain those
-checks until a qualified whole-file test covers their behavior; do not describe them as whole-file
-refinement. Keep owning tests together where their product component is shared and remove duplicate
-aggregate runners. The evidence classes and retained partial-source inventory are documented in
-[specs/quint/README.md](specs/quint/README.md).
+The app's behaviour is specified in `apps/app/spec/**/*.md`: each rule carries its Quint model, and
+a Dafny proof sits beside the spec where Dafny cannot discharge an obligation alone. `pnpm check`
+(the vibestack spec check, part of `pnpm verify`) typechecks and simulates every model, replays the
+generated machines, runs the proofs and explores the stories in Chromium. It needs Dafny 4.11.0 on
+`PATH` (`scripts/ci/prepare-dafny.sh` in CI) and a Playwright Chromium
+(`scripts/ci/install-playwright-browser.sh chromium`). The legacy `specs/quint` and `specs/lemma`
+trees and the `test/quint-*` refinement tests are retired in favour of it; `test/root-tests.json`
+lists them with where each one's behaviour moved.
 
 ## Browser tests
 
-Run `bun run test:browser` and `bun run test:browser:production` locally before finalising a PR,
-and state in the PR description that they were run and are final. PR CI runs only
-`bun run verify` and, when build inputs change, the Android build; the browser tests run in CI
+Run `pnpm test:browser` (the Vitest browser project) and `pnpm test:browser:production` locally
+before finalising a PR, and state in the PR description that they were run and are final. PR CI runs
+only `pnpm verify` and, when build inputs change, the Android build; the browser tests run in CI
 only when `develop` is promoted to `main`. The CI lanes are listed in
 [docs/development.md](docs/development.md).
 Locally both lanes use 4 workers (`ALPHA_BROWSER_WORKERS` overrides). Projected (not yet measured

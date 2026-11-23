@@ -4,7 +4,6 @@
     "jsx": "react-jsx",
     "module": "nodenext",
     "lib": ["es2024", "dom", "dom.iterable"],
-    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
@@ -13,11 +12,7 @@
     "types": ["node"],
     "customConditions": ["eliza-source"],
     "rootDir": ".",
-    "rootDirs": [".", ".vibe/declarations"],
-    "plugins": [{
-      "name": "@effect/language-service",
-      "diagnosticSeverity": { "unstableApiUsage": "suggestion" }
-    }]
+    "rootDirs": [".", ".vibe/declarations"]
   },
   "include": ["src", "test", "generated/*.ts", "*.config.ts"],
   "vibe": { "sidecarDir": ".vibe/declarations" }

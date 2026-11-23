@@ -6,8 +6,9 @@ const read = file => fs.readFileSync(new URL(`../${file}`, import.meta.url), 'ut
 const launcher = () => read('android/app/src/main/java/ai/alphacompute/alphaphone/AlphaLocalAgentPlugin.java');
 const launchEnv = () => Object.fromEntries([...launcher().matchAll(/env\.put\("([A-Z0-9_]+)","([^"]*)"\)/g)].map(match => [match[1], match[2]]));
 
-// Settings the runtime no longer reads. A launcher that set one would change nothing and suggest a
-// cap or a hold that does not exist.
+// Settings the phone never sets. The caps and the stable-reference switch are no longer read, so
+// setting one would change nothing and suggest a cap that does not exist; the two rate-limit holds
+// are read only as a host override, and the phone leaves the hold to the runtime.
 const RETIRED = [
   'ELIZA_PLANNER_MAX_TOKENS', 'ELIZA_CODING_PLANNER_MAX_TOKENS', 'ELIZA_STAGE1_MAX_TOKENS', 'ELIZA_EVALUATOR_MAX_TOKENS',
   'TEXT_SMALL_MAX_TOKENS', 'TEXT_LARGE_MAX_TOKENS', 'RESPONSE_HANDLER_MAX_TOKENS', 'ACTION_PLANNER_MAX_TOKENS', 'DEFAULT_MAX_TOKENS',
@@ -21,22 +22,24 @@ const RETIRED = [
 test('the phone launches its agent with secret swap and no retired cap or hold setting', () => {
   const env = launchEnv();
   assert.equal(env.ELIZA_SECRET_SWAP_ENABLED, 'true');
-  for (const name of RETIRED) assert.equal(env[name], undefined, `${name} is no longer read by the runtime`);
+  for (const name of RETIRED) assert.equal(env[name], undefined, `the phone does not set ${name}`);
 });
 
 test('the pinned runtime sends no output cap and keeps references stable without a setting', () => {
-  const planner = read('vendor/eliza/plugins/plugin-assistant/src/runtime/planner-loop.ts');
-  assert.doesNotMatch(planner, /PLANNER_DEFAULT_MAX_TOKENS|ELIZA_PLANNER_MAX_TOKENS/);
-  assert.doesNotMatch(read('vendor/eliza/packages/agent/src/runtime/runtime-settings.ts'), /outputCapSettingsFromEnv/);
-  assert.doesNotMatch(read('vendor/eliza/packages/core/src/security/secret-swap.ts'), /ELIZA_SECRET_SWAP_STABLE_REFERENCES/);
-  assert.doesNotMatch(read('vendor/eliza/plugins/plugin-native-phone/src/routes/reply-draft-route.ts'), /DRAFT_MAX_TOKENS/);
+  // The agent's chat request carries a cap only when its caller asks for one; no setting adds one.
+  assert.match(read('vendor/eliza/packages/agent/src/models/chat.vibe'), /params\.maxTokens === undefined \? \{ tag: "NoCapAsked" \}/);
+  for (const file of ['packages/agent/src/conversation/planning.vibe', 'packages/agent/src/models/binding.vibe', 'packages/agent/src/device-actions/reply-draft.vibe'])
+    assert.doesNotMatch(read(`vendor/eliza/${file}`), /PLANNER_DEFAULT_MAX_TOKENS|ELIZA_PLANNER_MAX_TOKENS|DRAFT_MAX_TOKENS|outputCapSettingsFromEnv/, file);
+  const swap = read('vendor/eliza/packages/core/src/security/secret-swap.vibe');
+  assert.match(swap, /SECRET_SWAP_ENABLED_SETTING = "ELIZA_SECRET_SWAP_ENABLED"/);
+  assert.doesNotMatch(swap, /ELIZA_SECRET_SWAP_STABLE_REFERENCES/);
 });
 
-// Measured on the hosted model: a request refused with Retry-After 59 is admitted seconds later,
-// because the allowance refills all the time. The runtime re-sends a refused step once after five
-// seconds, so a local hold must end before that.
-test('the pinned runtime ends a direct Cerebras rate-limit hold before its re-send', () => {
-  const hold = Number(/RATE_LIMIT_MAX_HOLD_MS = ([0-9_]+)/.exec(read('vendor/eliza/plugins/plugin-openai/models/text.ts'))?.[1].replaceAll('_', ''));
-  assert.ok(hold >= 1000 && hold < 5000, String(hold));
-  assert.match(read('vendor/eliza/plugins/plugin-assistant/src/runtime/evaluator.ts'), /RATE_LIMIT_RETRY_MAX_WAIT_MS = 5_000/);
+// A launch variable may only shorten a rate-limit hold (spec/agent/models/binding.md, "A host may
+// shorten how long a rate limit holds the account"); the phone sets none (first test), so the pinned
+// runtime's own handling of a refused step decides how long a turn waits.
+test('the pinned runtime reads the Cerebras rate-limit hold only as a launch override', () => {
+  const binding = read('vendor/eliza/packages/agent/src/models/binding.vibe');
+  assert.match(binding, /holdSettings = \["OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS", "CEREBRAS_RATE_LIMIT_MAX_HOLD_SECONDS"\]/);
+  assert.match(binding, /maxHold: rateLimitHold\(launch\.environment\)/);
 });

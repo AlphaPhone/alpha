@@ -13,16 +13,9 @@ changes upstream and consume a reviewed commit; never edit the vendor checkout.
 
 ## Setup
 
-Use Bun 1.4.2 (`packageManager` in `package.json`) and JDK 21. The pinned upstream
-source prepares and builds on Bun. Node.js 24+ is needed for LemmaScript and the
-Node-only host tests (`pnpm test:node`). The production browser test preview
-also uses genuine Node; its CI job pins Node 26.13.0. Bundle preparation and building
-continue to use Bun.
-Canonical host-test commands automatically cache a hash-pinned Bun 1.4.4 test process on
-Linux and macOS. This avoids the older test runner's synchronous-child/GC bug. It does not
-replace Bun 1.4.2 on `PATH`: `ALPHA_BUN` continues to identify the 1.4.2 SDK, bytecode and
-Android builder. `test-results/host-test-runtime.json` records both runtimes and the complete
-selected test inventory. The cache uses `XDG_CACHE_HOME`, or `~/.cache` by default.
+Use Node 26 and pnpm 10.24.0 (`packageManager` in `package.json`) and JDK 21. There is no Bun:
+the pinned upstream workspace installs with the same pnpm lockfile and builds with its own turbo
+(`pnpm build:upstream`, which the root `typecheck`, `test` and `build` tasks run first).
 Native builds need Python 3 for toolchain bootstrapping, Android SDK platform 36
 and build-tools 36.0.0. Set
 `JAVA_HOME` and `ANDROID_HOME`; standard macOS SDK/JDK locations are also detected.
@@ -35,23 +28,19 @@ pnpm verify
 pnpm dev
 ```
 
-`pnpm verify` runs deployment-output checks, source preparation, TypeScript, host tests,
-the production web build and its bundle audit.
-Host scripts use native TypeScript. `pnpm typecheck:scripts` checks their interfaces.
+`pnpm verify` runs the Cloud deployment-output check, the repository tooling tests (`pnpm test:root`,
+`test/root-tests.json`), the spec check, VibeLang typecheck, the app and Cloud tests, lint, the
+production web build and its bundle audit.
 Host contract tests need a JDK and the `sqlite3` command-line tool on `PATH`
 for native Calendar queries. Archive builds check SQLite before verification.
-Tests that load the real SDK require the pinned Bun and a prepared SDK; set
-`ALPHA_REQUIRE_PREPARED_SDK=1` to fail instead of skipping when preparation is missing.
 
-The Quint models and LemmaScript function proofs are not part of `pnpm verify`. Run
-`pnpm quint:check`, `pnpm quint:tests` and `pnpm lemma:check` before merging a PR;
-CI runs them only when `develop` is promoted to `main`. See [CONTRIBUTING.md](../CONTRIBUTING.md).
-Function proofs require Dafny 4.11.0 on `PATH`; `LEMMA_REQUIRE_BACKEND=1` makes a
-missing backend fail. A generation-only run records a skipped proof. Promotion CI installs the
-hash-pinned backend and requires proofs.
+The spec check (`pnpm check`, inside `pnpm verify`) owns the models and proofs; see
+[CONTRIBUTING.md](../CONTRIBUTING.md).
+The proof stage needs Dafny 4.11.0 on `PATH`; `verify.yml` and the promotion spec job install the
+hash-pinned release with `scripts/ci/prepare-dafny.sh`.
 
 A pull request runs one CI job, `pnpm verify` (`verify.yml`). The Android build
-(`android.yml`: `pnpm android:build:local -- --release`, then the digest restart check) also runs when a
+(`android.yml`: `pnpm android:build:local -- --release`, then the post-build checks) also runs when a
 pull request changes Android, renderer, script, lockfile or upstream-pin paths; documentation-only
 changes do not run it. The browser tests are not run by PR CI: run `pnpm test:browser` and
 `pnpm test:browser:production` before finalising a PR and say so in its description. CI runs
@@ -111,9 +100,8 @@ replace each other's optimized modules.
 ## Development
 
 ```sh
-pnpm dev                       # local agent and renderer
-pnpm dev:ui                    # renderer only
-pnpm dev:cloud                 # genuine account-bound Cloud development
+pnpm dev                       # renderer only (Vite); no resident agent is started
+pnpm dev:cloud                 # the renderer against an account-bound Cloud
 pnpm test:browser              # Chromium, development surfaces enabled
 pnpm test:browser:production   # production bundle
 ```
@@ -165,13 +153,15 @@ device result.
 
 `ALPHA_CLOUD_DEPLOYMENT_FILE=<file.json>` points the build and operator tools at a
 candidate Cloud (the same `production` and `staging` rows as the policy). Run
-`node scripts/cloud-deployment.ts` with it set to regenerate the authorities. A
+`pnpm cloud:deployment` with it set to regenerate the authorities. A
 candidate build has its own credential namespace, and the production bundle audit
 refuses it.
 
-`cloud/` holds the product Cloud's data: `policy.example.json` (the same rows the app
-is built with) and `resources.example.json` (the operator's Cloudflare ids). There is
-no route code here.
+`cloud/` is the product Cloud package (`@alphacompute/alpha-cloud`): `deployment.json`
+(the rows the app is built with), `resources.example.json` (the operator's Cloudflare
+ids) and the `alpha-cloud` command in `cloud/src` that builds the profile, seed,
+registration and Worker configuration from them. Routes come from upstream
+`@elizaos/cloud`.
 
 ```sh
 pnpm cloud:worker check --policy cloud/policy.example.json --resources cloud/resources.example.json \
@@ -606,8 +596,8 @@ Complete it in this order:
    exports the verified public certificates and fingerprints under
    `artifacts/release-public-identities/` for enrollment.
 2. Register `ai.alphacompute.alphaphone` in production and staging. Run
-   `node scripts/cloud-readiness.ts registration --environment <environment>`
-   to print each environment's operator inputs. Keep the existing
+   `pnpm --filter @alphacompute/alpha-cloud exec alpha-cloud registration --inputs <file> --environment <environment> --out <file>`
+   to write each environment's registration. Keep the existing
    `/alphaphone/auth/callback` URLs and entitlement audience.
 
    - In `ELIZA_MOBILE_APP_AUTH_CLIENTS_JSON`, replace the former Alpha row's
@@ -628,12 +618,12 @@ Complete it in this order:
      `node scripts/render-assetlinks.ts --cloud-config --published https://eliza.app/.well-known/assetlinks.json`.
      Preserve existing grants and other products' entries. Deploy and verify
      the published file with `node scripts/render-assetlinks.ts --check <web-origin>/.well-known/assetlinks.json`.
-   - Use `node scripts/cloud-deployment.ts --pages-registration` to update
+   - Use the `alpha-cloud registration` output to update
      Alpha's entry in the protected Cloud release Environment variable
      `ELIZA_NATIVE_AUTH_CALLBACKS_JSON` for production and staging. Keep one
      entry per callback URI and preserve the other products' entries. Verify
      the new Android target in the deployed Pages
-     callback page, run `node scripts/cloud-readiness.ts probe --environment <environment>`,
+     callback page, run `node scripts/cloud-worker.ts smoke --environment <environment>`,
      then complete sign-in on the intended APK. Test with the new package
      selected to open its supported links if the old package is also installed.
      [Cloud registration #666](https://github.com/alphacompute/alphaphone/issues/666),
@@ -835,10 +825,10 @@ operator does not enable OS enrollment or establish device acceptance.
 
 Build output belongs in ignored `web-dist/`, `artifacts/`, `test-results/` and
 `.eliza/` directories. Android host and Capacitor sync output are ignored too.
-Cloud deployment source is `scripts/cloud-deployment-policy.ts`; regenerate its
-renderer and Android bindings with `node scripts/cloud-deployment.ts`.
-`node scripts/cloud-deployment.ts --pages-registration` prints the public Pages
-callback registration for an operator without creating a `config/` directory.
+Cloud deployment source is `cloud/deployment.json`; regenerate its renderer and
+Android bindings with `pnpm cloud:deployment` (`pnpm cloud:deployment:check` checks
+them). `alpha-cloud registration` writes the public callback registration for an
+operator.
 
 The reviewed pin `1803ea88c9460f2e3cb779abe31cd77cfc6f64c5` includes original-preserving message forks and the corrected Pixel source inventory ([eliza#39808](https://github.com/elizaOS/eliza/pull/39808), [eliza#39810](https://github.com/elizaOS/eliza/pull/39810), [eliza#39813](https://github.com/elizaOS/eliza/pull/39813)). Only the conversation-route catalog hash changed and was checked against the selected Git object; no `plugins/plugin-native-messages` file changed, so the three NativeMessageDeletion sidecar entries kept their hashes. The new upstream `packages/agent/quint/ConversationFork.qnt` and `ConversationFork.cases.json` sidecars behind the fork route are not catalogued in `specs/quint/legacy/core/source-inventory.json`. The mobile builder, dependency lock and 23 UUID package files retain their reviewed bytes. This pin does not itself qualify an APK or image.
 
