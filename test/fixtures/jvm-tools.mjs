@@ -4,7 +4,6 @@ import {existsSync,readdirSync,mkdtempSync,rmSync} from 'node:fs';
 import {homedir,tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {execFileSync,spawnSync} from 'node:child_process';
-import {preparePatchedNative} from '../../scripts/prepare-patched-native.ts';
 import {scaledTimeout} from '../../specs/quint/refinement/timeouts.mjs';
 
 export const root=resolve(import.meta.dirname,'../..');
@@ -14,9 +13,9 @@ export const upstreamConnection=name=>join(root,'vendor/eliza/plugins/plugin-nat
 export const upstreamSecureStore=name=>join(root,'vendor/eliza/packages/os/android/secure-store/src/main/java/ai/eliza/plugins/securestore/nativeonly',name);
 export const upstreamAgentRuntime=name=>join(root,'vendor/eliza/plugins/plugin-native-agent/android/src/main/java/ai/eliza/plugins/agent/runtime',name);
 // Shared speech pipeline (ai.eliza.voice) and its upstream host-JVM fixtures at the reviewed pin.
-export const upstreamVoiceSource=name=>join(root,'vendor/eliza/plugins/plugin-local-inference/native/android/src/main/java/ai/eliza/voice',name);
+export const upstreamVoiceSource=name=>join(root,'vendor/eliza/packages/os/android/local-inference/src/main/java/ai/eliza/voice',name);
 // The shared product-subclassable speech bridge (AlphaVoiceCloudPlugin's base) at the reviewed pin.
-export const upstreamBridgeSource=name=>join(root,'vendor/eliza/plugins/plugin-local-inference/native/android/speech-bridge/src/main/java/ai/eliza/voice',name);
+export const upstreamBridgeSource=name=>join(root,'vendor/eliza/packages/os/android/local-inference/speech-bridge/src/main/java/ai/eliza/voice',name);
 export const upstreamVoiceFixture=name=>join(root,'vendor/eliza/packages/app/scripts/paradee-voice/speech-pipeline',name);
 
 const homebrew='/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home';
@@ -58,9 +57,8 @@ export function runJvm(sources,mainClass,{json=false,args=[],input,timeout=jvmTi
  }finally{rmSync(temporary,{recursive:true,force:true});}
 }
 
-/** Authenticated shared voice additions, compiled from the reviewed patch, never a vendor edit. */
+/** Shared voice sources in the reviewed Vibestack pin. */
 export function sharedSpeechSource(name) {
  if(!/^[A-Za-z][A-Za-z0-9]*\.java$/.test(name))throw Error('Invalid shared speech source');
- const staged=preparePatchedNative({root});
- return join(staged.root,'plugins/plugin-local-inference/native/android/speech-bridge/src/main/java/ai/eliza/voice',name);
+ return upstreamBridgeSource(name);
 }

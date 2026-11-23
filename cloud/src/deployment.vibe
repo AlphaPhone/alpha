@@ -124,10 +124,14 @@ export interface DeploymentSelection {
 
 /** The deployment rows a build uses: ALPHA_CLOUD_CUTOVER=1 selects Alpha Cloud, ALPHA_CLOUD_DEPLOYMENT_FILE names another rows file. */
 export effect function selectDeployment(): DeploymentSelection!DeploymentInvalid!FileSystem.FileSystem {
-  const cutoverSetting = Config.withDefault(Config.String("ALPHA_CLOUD_CUTOVER"), "") catch effect () => { throw new DeploymentInvalid({ problem: "ALPHA_CLOUD_CUTOVER cannot be read" }) }
-  const named = Config.withDefault(Config.String("ALPHA_CLOUD_DEPLOYMENT_FILE"), "") catch effect () => { throw new DeploymentInvalid({ problem: "ALPHA_CLOUD_DEPLOYMENT_FILE cannot be read" }) }
-  const requested = cutoverSetting === "1"
-  const file = named.trim()
+  const cutoverFlag = Config.withDefault(Config.String("ALPHA_CLOUD_CUTOVER"), "") catch effect () => {
+    throw new DeploymentInvalid({ problem: "ALPHA_CLOUD_CUTOVER could not be read" })
+  }
+  const requested = cutoverFlag === "1"
+  const deploymentFile = Config.withDefault(Config.String("ALPHA_CLOUD_DEPLOYMENT_FILE"), "") catch effect () => {
+    throw new DeploymentInvalid({ problem: "ALPHA_CLOUD_DEPLOYMENT_FILE could not be read" })
+  }
+  const file = deploymentFile.trim()
   if (file === "" && !requested) return { rows: try validateDeployment(shippedDeployment), candidate: false, cutover: false }
   let rows = alphaDeployment
   if (file !== "") {

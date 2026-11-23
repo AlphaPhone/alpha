@@ -33,9 +33,9 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **OWNER:** Saved mail moved from the encrypted `connected-read-cache:v1:<sha256>` slot to the WebView's KeyValueStore (localStorage), up to 8 lists and 16 bodies at rest unencrypted, and the legacy slot is never read or cleared. Move saved mail to the mail store's secure slots (`keys.savedMail` is unused), or accept it?
 - **OWNER:** Inbox keeps all accounts' drafts in one 8 MiB secure slot and all operations in another, and an operation record stores its attachments twice (`proposal.mail.files` and `composer.content`), so a send with more than about 2.9 MiB of attachments cannot be journaled although `proposalLimit` (7.5 MiB) admits it. Key the slots per account, drop file bytes from `ComposerRef.content` (bind a digest), or raise the native limit?
 - **OWNER:** The agent's Gmail body reads and mailbox changes (legacy gmail-agent-read-host: 32,000-character body reads, agent archive, Trash and read state) have no counterpart: `android/agent/policy.json` admits only `INBOX_READ` and `INBOX_COMPOSE_EMAIL`, and upstream has no change action. Keep them retired?
-- **OWNER:** Legacy slots not carried over:
+- **Upgrade requirement:** Keep access to existing on-device Notes and unsaved drafts in the current Alpha package, as required by the PRD. The agent's earlier Notes importer reads its own state file. Verify a separate upgrade path from the encrypted `notes-records:v1:device` and `notes-draft:v1:device` slots, including an unreadable slot and an interrupted retry. Keep the earlier data until the upgrade or recovery is verified.
+- **OWNER:** Other legacy slots not carried over:
   - old inbox operation records (`inbox-operation:v1:<sha256>`), possibly including a send in flight during the update: move to `device:<key>` in MailOperations, or drop? Dropping can send twice: the draft of that send is adopted onto the shelf as an ordinary draft (not marked earlier), one tap sends it under a new request id, and chat-reviewed emails now derive their request id differently (SHA-256 over the reviewed content, where legacy used uuidv5 over the message, grant, sender and proposal), so Cloud's request-id idempotency catches neither. The legacy slot is never cleared.
-  - the legacy Notes draft `notes-draft:v1:device` is deliberately not adopted, because `notes-canonical-draft:v1:device` cannot read its change set; accept losing it?
   - `inbox-drafts:v1:chat:<sha256>` is not adopted by Inbox. The assistant's email shelf now uses the same key shape; confirm the old slots may be read as shelves.
 - **OWNER:** Telephony:
   - an Alpha `mms_send` operation settles as unavailable, with no card;
@@ -56,7 +56,6 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - Fill the assistant's ports in `PortCells` (declared in `src/assistant/ports.vibe`):
   - `BrowserPages` with `browserPagesFromBrowser`, `MapsViews` with `mapsViewsFromMaps`, `BrowserViews` with `browserViewsFromBrowser` (all in `src/assistant/fills.vibe`);
   - `AdvertisedCapabilities.names()` with `DeviceCapabilities.advertise(offered)`. Until then no `x-eliza-device-capabilities` header is sent.
-- `AssistantHost.peer()` (`src/shell/assistantHost.vibe`) must set `browserPage` from the fresh status. Until it does, no Browser page is ever sent.
 - Requests to `/api/client-devices/proposals` (claim, decision, receipt) and turns must carry `DeviceEnrollment.headers()`. Device actions must be refused while `AgentSession.enrollmentId` is empty, and the ChatOnly phase should show legacy's "Chat only" reason; no UI shows it yet.
 - `AppServices` must contain the Machine services of `gen/clock__notifications` and `gen/clock__reminderTaps`, plus ApprovalReviews, AgentRequests, FilePicker, Notifications and ReminderTaps; their change streams must emit the current value first (assumed by `src/shell/surfaceSheets.vibe`).
 - Browser has no always-mounted sheet; the "Browser shade sheet" was read as the browser build's notification shade in clock-notices. If another Browser sheet was meant, it needs its own surface and Back.
@@ -143,7 +142,6 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - **agent/client:**
   - `TurnTransport`, `RuntimeJsonBridge.request`/`requestStream` and `client.request`/`client.stream` take no headers, so the development host off the phone drops device headers;
   - `encodeTurnContext` must accept the `selectedObject` kinds `map-place`, `map-route` and `map-search` and the metadata keys `viewClientId`, `viewDelivery` and `uiView` (assumed, not checked);
-  - there is no `clientDevice.browserPage` (eliza#40067/#40193);
   - voice speaks the agent's `acknowledgment` frame from the readers of elizaOS/eliza#40293 (`1ff497fc4f0`), which the vibestack-dp pin contains; this is not yet run against the pin;
   - the strict DoneFrame refuses `awaitingReview`, and DoneFrame notices are never produced;
   - there is no shared-note read-reply lease (`readReply`/`completeReadReply`);
