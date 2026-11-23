@@ -1,12 +1,11 @@
-import fs from "node:fs";
-import path from "node:path";
+import { checkout } from "@repo/eliza-harness/checkout";
 import { project } from "vibestack/testing/vitest";
 import { defineConfig, mergeConfig } from "vitest/config";
 
-const base = project({ root: import.meta.dirname });
-const eliza = new RegExp(`^${fs.realpathSync.native(path.join(import.meta.dirname, "../../.eliza")).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+/** eliza's client runs as this package's own code, on its one copy of Effect, so the schemas it exports decode here. */
+const linked = (directory: string) => new RegExp(`^${RegExp.escape(directory)}`);
 
-export default defineConfig(async (env) => mergeConfig(await base(env), {
+export default defineConfig(async (env) => mergeConfig(await project({ root: import.meta.dirname })(env), {
   resolve: { dedupe: ["effect", "vibelang-runtime"] },
-  test: { server: { deps: { inline: [eliza] } } },
+  test: { server: { deps: { inline: [linked(checkout().root)] } } },
 }));

@@ -10,7 +10,10 @@
       ".",
       ".vibe/declarations"
     ],
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "lib": [
+      "es2025"
+    ]
   },
   "include": [
     "src",
