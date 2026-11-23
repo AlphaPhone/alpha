@@ -1,0 +1,49 @@
+// spec/app/sample/size.md, "Story: Read Alpha at my size"
+import * as Size from "../../gen/app__sample__size.effect.vibe"
+import type { Effect as Out, Event, Sender } from "../../gen/app__sample__size.effect.vibe"
+import { Device } from "../../src/platform/device.vibe"
+import { type Job, answer, applying, due, hearing, reacting, together, untimed } from "../../src/runtime/reactor.vibe"
+
+// spec/app/sample/size.md, "The phone answers the newest asking: the size is the one wanted, or it stays and the owner is told"
+effect function applied(ticket: number, percent: number): Event!!Device {
+  return { type: "applied", ticket, kept: try (try Device).setTextScale(percent) }
+}
+
+// Each answer names the sender the spec expects of it: the phone.
+function carry(fx: Out): Job<Event, Device, [by: Sender]> {
+  return match (fx) {
+    when { tag: "Apply", let ticket, let percent }: answer("apply", applied(ticket, percent), { type: "applied", ticket, kept: false }, "Phone");
+  }
+}
+
+// spec/app/sample/size.md, "An asking the phone has not answered after ten seconds is given up, and the size stays"
+function timers(state: Size.Size) {
+  return state.setting.status === "Loading" ? [due<Event, [by: Sender]>("apply", state.due, { type: "giveUp", now: untimed }, "Phone")] : []
+}
+
+// spec/app/sample/size.md, "When Alpha opens, the phone says the size it kept, once, and a size it does not offer counts as none"
+// The opening carries what only the phone knows, so it is an effect that asks first.
+const opening = effect {
+  const kept = try (try Device).textScale()
+  const start: Event = { type: "start", was: Option.getOrElse(kept, () => 0) }
+  return [start, "Phone"] as const
+}
+
+const machine = reacting(Size, { open: opening, carry, timers })
+
+// spec/app/sample/size.md, "Once the owner has left the page, a size that was not kept is no longer told"
+// A service's stream becomes events; shown again there is nothing to tell, so `told` returns none.
+const left = hearing(
+  Stream.unwrap(effect { return (try Device).visible }),
+  Size.Machine,
+  (visible): Event | undefined => (visible ? undefined : { type: "seen", visible }),
+  "Phone",
+)
+
+// What the whole page follows is applied from the machine's first state on, through the service that owns the root element.
+const marked = applying(Size.Machine, (state) => state.percent >= 130, effect (large) => {
+  try (try Device).mark("large-text", large ? "" : undefined)
+})
+
+/** The text size: in memory, opened by what the phone kept, told when the owner leaves, and marked on the page. A real one is resident (src/resident.vibe). */
+export const size = together(machine, left, marked)

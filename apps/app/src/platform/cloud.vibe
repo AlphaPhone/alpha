@@ -1,22 +1,159 @@
 // spec/kit/read.md, "Story: Read from outside"
-import { type Remote, Unsent, remoteAt } from "./remote.vibe"
+import { createCloudClient } from "@elizaos/cloud/client"
+import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
+import { CloudRefused } from "@elizaos/os/bridges/cloud"
+import type { CloudClient as Relay, CloudFailure, CloudMethod, CloudPath, CloudRequest } from "@elizaos/os/bridges/definitions/cloud"
+import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, remoteAt } from "./remote.vibe"
 
-/** The cloud account's API: eliza's cloud. Areas reach it with `ask(Cloud, …)`, `listen(Cloud, …)` and `attempted(Cloud, …)`. */
-export service Cloud: Remote {}
+module held {
+  import { cloudClient } from "@elizaos/os/bridges/cloud"
 
-/** The cloud over HTTP at `base`: in a browser the page's own `/cloud`, which the dev server answers. */
-export function cloudAt(base: string) {
-  return Layer.effect(Cloud, remoteAt(base))
+  let made: ReturnType<typeof cloudClient> | undefined
+  /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(): ReturnType<typeof cloudClient> {
+    return (made ??= cloudClient())
+  }
 }
-
-const absent = new Unsent({ cause: "eliza's Android package has no plugin that relays a page's request to the cloud" })
+import { client } from held
 
 /**
- * The cloud on the phone, where the device key lives in native code and eliza's Android package gives a page no way
- * to send a request under it: every request is `Unsent`, until that package has the plugin. The agent reaches the
- * cloud itself, so what the owner asks of it works without this.
+ * eliza's own typed client of its cloud: the account, plans, entitlement, billing, managed Google and maps, each
+ * answer decoded by eliza's schemas. An area that reads one of them calls it and restates no wire shape.
  */
-export const absentCloud = Layer.succeed(Cloud, {
-  call: () => Effect.fail(absent),
-  events: () => Stream.fail(absent),
+export type CloudClient = ReturnType<typeof createCloudClient>
+
+/**
+ * The cloud account's API: eliza's cloud, for what the page itself asks of it. `client` is eliza's typed client; a
+ * route it has no call for is read with `ask(Cloud, …)` and `attempted(Cloud, …)` of remote.vibe. The page never
+ * holds the device key: the phone's `ElizaCloud` plugin adds it, and in a browser the dev server does.
+ */
+export interface Account extends Remote {
+  readonly client: CloudClient
+}
+
+export service Cloud: Account {}
+
+module web {
+  /** @throws {never} */
+  export function answer(body: BodyInit | null, status: number, headers: Record<string, string>): Response {
+    return new Response(status === 204 || status === 304 ? null : body, { status, headers })
+  }
+  /** The cloud's own answer to a request with no usable credential. @throws {never} */
+  export function unauthorized(): Response {
+    return unauthorized()
+  }
+  /** What fetch was asked for, as its parts: the body as text, bytes or a form, or `false` for one this platform cannot send. @throws {never} */
+  export function asked(input: RequestInfo | URL, init?: RequestInit): {
+    url: URL; method: string; headers: Record<string, string>; signal: AbortSignal | undefined
+    body: { text: string } | { bytes: Uint8Array } | { form: FormData } | undefined | false
+  } {
+    const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url)
+    const sent = init?.body
+    const body = sent === undefined || sent === null ? undefined
+      : typeof sent === "string" ? { text: sent }
+      : sent instanceof Uint8Array ? { bytes: sent }
+      : sent instanceof FormData ? { form: sent }
+      : false
+    return { url, method: init?.method ?? "GET", headers: Object.fromEntries(new Headers(init?.headers)), body, signal: init?.signal ?? undefined }
+  }
+}
+import { answer, asked, unauthorized } from web
+
+/** eliza's client takes an origin and a fetch: this origin is never reached, since each platform's fetch below sends by its own way. */
+const placeholder = "https://cloud.invalid"
+
+function typed(fetch: typeof globalThis.fetch): CloudClient {
+  return createCloudClient({ baseUrl: placeholder, credential: () => undefined, fetch })
+}
+
+/** fetch over `direct`, for eliza's client: the same path, query, headers and body, sent through the platform's `HttpClient`. */
+function fetching(direct: Wired): typeof globalThis.fetch {
+  return (input, init) => {
+    const { url, method, headers, body, signal } = asked(input, init)
+    if (body === false) return Promise.reject(new TypeError("this body cannot be sent"))
+    const started = HttpClientRequest.make(method as "GET")(`${url.pathname}${url.search}`, { headers })
+    const request = body === undefined ? started
+      : "form" in body ? HttpClientRequest.bodyFormData(started, body.form)
+      : "text" in body ? HttpClientRequest.bodyText(started, body.text, headers["content-type"])
+      : HttpClientRequest.bodyUint8Array(started, body.bytes, headers["content-type"])
+    return runPromise(effect {
+      const opened = try direct.open(request)
+      return answer(Stream.toReadableStream(opened.body), opened.status, { ...opened.headers })
+    }, { signal })
+  }
+}
+
+/** The cloud over HTTP at `base`: in a browser the page's own `/cloud`, which the dev server answers, adding the device key. */
+export function cloudAt(base: string) {
+  return Layer.effect(Cloud, effect {
+    const direct = try remoteAt(base)
+    return { call: direct.call, events: direct.events, client: typed(fetching(direct)) }
+  })
+}
+
+/** The plugin's refusals that say the request never left the phone (`definitions/cloud.ts`, `CloudFailure`): the rest may have reached the cloud. */
+const kept: ReadonlyArray<CloudFailure> = [
+  "no-origin", "not-listed", "body-too-large", "header-refused", "sign-in-required", "reauth-required", "not-configured",
+  "unknown-environment", "invalid-request", "name-in-use", "link-refused", "no-browser",
+]
+
+function undelivered(cause: unknown): Unsent | Unreachable {
+  return cause instanceof BridgeUnavailable || (cause instanceof CloudRefused && kept.includes(cause.failure)) ? new Unsent({ cause }) : new Unreachable({ cause })
+}
+
+const methods: ReadonlyArray<string> = ["GET", "POST", "PATCH", "DELETE"] satisfies ReadonlyArray<CloudMethod>
+const ours = (headers: Readonly<Record<string, string>>) => Object.fromEntries(Object.entries(headers).filter(([name]) => name !== "content-type" && name !== "content-length"))
+
+/** What the plugin is asked: it sends only to the deployment's origin, a route of its list, with the headers that route admits, under the device key it alone holds. */
+function relayed(method: string, path: string, query: Readonly<Record<string, string>>, headers: Readonly<Record<string, string>>, body: unknown): CloudRequest | undefined {
+  if (!methods.includes(method)) return undefined
+  return { method: method as CloudMethod, path: path as CloudPath, query, headers: ours(headers), ...(body === undefined ? {} : { body }) }
+}
+
+/** The cloud on the phone as a `Remote`: one whole answer per request. The plugin streams nothing, so a stream is never sent. */
+function plugged(relay: Relay): Remote {
+  return {
+    effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
+      const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
+      const body = text === "" ? undefined : parsed(text) catch effect (cause) => { throw new Unsent({ cause }) }
+      const headers = Object.fromEntries(Object.entries(request.headers).filter((one): one is [string, string] => typeof one[1] === "string"))
+      const sent = relayed(request.method, request.url, Object.fromEntries(new URLSearchParams(UrlParams.toString(request.urlParams))), headers, body)
+      if (sent === undefined) throw new Unsent({ cause: `the phone relays no ${request.method} to the cloud` })
+      const reply = timeout(tryPromise({ try: (signal) => relay.request({ ...sent, signal }), catch: undelivered }), patience) catch effect (cause) => match (cause) {
+        when Unsent: throw cause;
+        default: throw new Unreachable({ cause });
+      }
+      if (reply.status < 200 || reply.status >= 300) throw new Refused({ status: reply.status })
+      return try parsed(new TextDecoder().decode(reply.body))
+    },
+    events: () => Stream.fail(new Unsent({ cause: "the phone's cloud plugin streams nothing" })),
+  }
+}
+
+/** fetch over the plugin, for eliza's client. An account that must sign in again answers 401, as the cloud itself would; any other refusal is a failed fetch. */
+function relaying(relay: Relay): typeof globalThis.fetch {
+  return async (input, init) => {
+    const { url, method, headers, body, signal } = asked(input, init)
+    const sent = body === undefined ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, undefined)
+      : body !== false && "text" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(body.text) as unknown)
+      : undefined
+    if (sent === undefined) throw new TypeError("the phone relays only JSON to the cloud")
+    try {
+      const reply = await relay.request(signal === undefined ? sent : { ...sent, signal })
+      const head = { etag: reply.etag, "content-type": reply.contentType, "retry-after": reply.retryAfter }
+      return answer(reply.body as Uint8Array<ArrayBuffer>, reply.status, Object.fromEntries(Object.entries(head).filter((one): one is [string, string] => one[1] !== undefined)))
+    } catch (cause) {
+      if (cause instanceof CloudRefused && (cause.failure === "sign-in-required" || cause.failure === "reauth-required")) return unauthorized()
+      throw new TypeError("the cloud request failed", { cause })
+    }
+  }
+}
+
+/**
+ * The cloud on the phone, through the `ElizaCloud` plugin of eliza's Android package: eliza's `cloudClient()` of
+ * `@elizaos/os/bridges/cloud`.
+ */
+export const relayedCloud = Layer.sync(Cloud, () => {
+  const relay = client()
+  return { ...plugged(relay), client: typed(relaying(relay)) }
 })

@@ -3,14 +3,16 @@ import { Effect, Layer } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as Ask from "../gen/app__ask.effect.vibe";
 import * as Sample from "../gen/app__sample.effect.vibe";
+import * as Size from "../gen/app__sample__size.effect.vibe";
 import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { at, mounts } from "../src/areas.ts";
 import { area } from "../src/runtime/area.tsx";
-import { type Job, reacting, stop, tell } from "../src/runtime/reactor.vibe";
-import { asleep, button, closeAll, hardware, later, open, press, underAct, until } from "./alpha.tsx";
+import { type Job, answer, due, reacting, stop, tell, untimed } from "../src/runtime/reactor.vibe";
+import { asleep, button, closeAll, hardware, later, open, press, seen, underAct, until } from "./alpha.tsx";
 import { push } from "./fakes/sample.ts";
 import { scene } from "./fakes/scene.ts";
 import sample from "./sample/index.tsx";
+import size from "./sample/size.tsx";
 
 underAct();
 afterEach(closeAll);
@@ -137,6 +139,58 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const fourth = await open(world, withSample);
     await until(fourth.alpha, sample.runtime(fourth.alpha), Reminders, (s) => s.list.status === "Loaded");
     expect([localStorage.getItem(`${kept}.unreadable`), document.querySelector("h1")?.textContent]).toEqual([JSON.stringify({ titles: "of another shape" }), "Notes"]);
+  });
+});
+
+// The second sample over each boundary: a machine whose events name their sender, opened by what the phone kept.
+describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
+  // spec/app/sample/size.md, "Story: Read Alpha at my size"
+  it("Read Alpha at my size (spec/app/sample/size.md, \"Story: Read Alpha at my size\")", async () => {
+    const world = { ...scene(), phone };
+    const withSize = [...mounts, at("overlay", () => import("./sample/size.tsx"))];
+    const page = document.documentElement;
+    const shown = () => [page.style.fontSize, page.hasAttribute("data-alpha-large-text"), localStorage.getItem("alpha.textScale")];
+    const told = () => document.querySelector("section[aria-label='Text size'] [role=alert]")?.textContent;
+
+    // spec/app/sample/size.md, "When Alpha opens, the phone says the size it kept, once, and a size it does not offer counts as none"
+    // The opening asks the phone first, and the page has the kept size before its first paint.
+    localStorage.setItem("alpha.textScale", "130");
+    const { alpha } = await open(world, withSize);
+    const sizing = size.runtime(alpha);
+    await until(alpha, sizing, Size.Machine, (s) => s.started && s.percent === 130);
+    expect(shown()).toEqual(["130%", true, "130"]);
+
+    // spec/app/sample/size.md, "The owner chooses another offered size once Alpha has started, one change at a time"
+    // The owner is the sender of the choice and the phone of its answer: the size the owner has is not offered.
+    expect(Boolean(button("Text at 130%"))).toBe(false);
+    await press("Text at 100%");
+    await until(alpha, sizing, Size.Machine, (s) => s.percent === 100 && s.setting.status === "Loaded");
+    expect(shown()).toEqual(["100%", false, "100"]);
+
+    // spec/app/sample/size.md, "The phone answers the newest asking: the size is the one wanted, or it stays and the owner is told"
+    refusing = "alpha.textScale";
+    await press("Text at 150%");
+    await until(alpha, sizing, Size.Machine, (s) => s.unkept);
+    expect([shown(), told()]).toEqual([["100%", false, "100"], "The phone did not keep that size"]);
+
+    // spec/app/sample/size.md, "Once the owner has left the page, a size that was not kept is no longer told"
+    await seen(false);
+    await until(alpha, sizing, Size.Machine, (s) => !s.unkept);
+    await seen(true);
+    expect(told()).toBeUndefined();
+
+    // spec/app/sample/size.md, "An asking the phone has not answered after ten seconds is given up, and the size stays"
+    // A phone that never answers: the deadline is the state's, counted from the time the reactor gave the choice.
+    const silent = alpha.over(reacting(Size, {
+      open: [{ type: "start", was: 115 }, "Phone"],
+      carry: (fx): Job<Size.Event, never, [by: Size.Sender]> => answer("apply", Effect.never, { type: "applied", ticket: fx.ticket, kept: false }, "Phone"),
+      timers: (state) => (state.setting.status === "Loading" ? [due<Size.Event, [by: Size.Sender]>("apply", state.due, { type: "giveUp", now: untimed }, "Phone")] : []),
+    }));
+    await silent.runPromise(Size.Machine.use((machine) => machine.send({ type: "choose", percent: 150, at: untimed }, "Owner")));
+    await later(alpha, 9_999);
+    expect((await silent.runPromise(Size.Machine.use((machine) => machine.get()))).setting.status).toBe("Loading");
+    await later(alpha, 1);
+    await until(alpha, silent, Size.Machine, (s) => s.unkept && s.percent === 115);
   });
 });
 

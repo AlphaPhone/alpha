@@ -1,17 +1,36 @@
 // spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
-import { Bridge } from "./bridge.vibe"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 
 module web {
-  /** @throws {never} */
-  export function zoom(percent: number): void {
+  import { Capacitor } from "@capacitor/core"
+
+  /** Whether the phone's host registered `plugin` in this build. @throws {never} */
+  export function registered(plugin: string): boolean {
+    return Capacitor.isNativePlatform() && Capacitor.isPluginAvailable(plugin)
+  }
+  /** Whether the page runs inside the phone's host. @throws {never} */
+  export function native(): boolean {
+    return Capacitor.isNativePlatform()
+  }
+  /** Text at `percent` of its size, and the percent the page then has. @throws {never} */
+  export function zoom(percent: number): number {
     document.documentElement.style.fontSize = `${percent}%`
+    return Number.parseFloat(document.documentElement.style.fontSize)
+  }
+  /** @throws {never} */
+  export function marked(name: string, value: string | undefined): void {
+    if (value === undefined) document.documentElement.removeAttribute(`data-alpha-${name}`)
+    else document.documentElement.setAttribute(`data-alpha-${name}`, value)
   }
   /** @throws {never} */
   export const page = (): EventTarget => window
   /** @throws {never} */
   export const pages = (): EventTarget => document
+  /** @throws {never} */
+  export const showing = (): boolean => document.visibilityState === "visible"
 }
-import { page, pages, zoom } from web
+import { marked, native, page, pages, registered, showing, zoom } from web
+export { native, registered }
 
 /** What this phone admits: an Alpha image's apps, and Contacts where the image grants them. */
 export interface Capabilities {
@@ -22,14 +41,24 @@ export interface Capabilities {
 /** A hardware or gesture button the system hands to the launcher. */
 export type Button = "back" | "home"
 
-/** The phone itself: what it admits, its text size, and the Back and Home it hands to Alpha. */
+/** The sizes text may have, in percent of the page's own. */
+const [smallest, largest] = [75, 150]
+
+/** The phone itself: what it admits, the page's text size and marks, the Back and Home it hands to Alpha, and whether the page shows. */
 export service Device {
   capabilities(): Capabilities!!
-  /** Text at `percent` of its size, 75 to 150: the page's root size, which every `rem` follows, on a phone as in a browser. */
-  setTextScale(percent: number): void!!
+  /** The text size that is kept, in percent, or none where the owner never chose one. */
+  textScale(): Option.Option<number>!!
+  /**
+   * Text at `percent` of its size, 75 to 150: the page's root size, which every `rem` follows, on a phone as in a
+   * browser, kept so that the next launch opens with it. Whether the page has it now and it was kept.
+   */
+  setTextScale(percent: number): boolean!!
+  /** `data-alpha-<name>` on the page's root element, for what the whole page follows, such as its look; `undefined` takes it off. */
+  mark(name: string, value: string | undefined): void!!
   readonly buttons: Stream.Stream<Button>
-  /** Each time the page may have slept: Alpha's time looks at the clock again then. */
-  readonly resumed: Stream.Stream<unknown>
+  /** Each time the page is shown or hidden, and which: a page that was hidden may have slept. */
+  readonly visible: Stream.Stream<boolean>
 }
 
 /**
@@ -42,30 +71,46 @@ const buttons: Stream.Stream<Button> = Stream.suspend(() => Stream.merge(
   Stream.as(Stream.fromEventListener(page(), "launcher-home"), "home" as const),
 ))
 
-const paged = {
-  effect setTextScale(percent: number) { zoom(Math.min(150, Math.max(75, Math.round(percent)))) },
-  buttons,
-  resumed: Stream.suspend(() => Stream.fromEventListener(pages(), "visibilitychange")),
+const key = "alpha.textScale"
+
+/** The page's part of the phone, the same on a phone and in a browser; the text size kept is applied before the first paint. */
+effect function paged() {
+  const store = try KeyValueStore.KeyValueStore
+  effect function textScale(): Option.Option<number>!! {
+    const kept = Number((store.get(key) catch () => undefined) ?? Number.NaN)
+    return Number.isFinite(kept) && kept >= smallest && kept <= largest ? Option.some(kept) : Option.none()
+  }
+  const kept = try textScale()
+  if (Option.isSome(kept)) zoom(kept.value)
+  return {
+    textScale,
+    effect setTextScale(percent: number): boolean!! {
+      const wanted = Math.min(largest, Math.max(smallest, Math.round(percent)))
+      // Kept first: a size the store did not take is not shown either, so the page and the next launch agree.
+      return effect { try store.set(key, String(wanted)); return zoom(wanted) === wanted } catch () => false
+    },
+    mark: (name: string, value: string | undefined) => sync(() => marked(name, value)),
+    buttons,
+    visible: Stream.suspend(() => Stream.map(Stream.fromEventListener(pages(), "visibilitychange"), () => showing())),
+  }
 }
 
-/** The plugins whose presence in this build is what the phone admits: the host registers Alpha's telephony plugin only on an Alpha image, and eliza's contacts plugin where that image grants contacts. */
-const telephony = "AlphaTelephony"
+/** The plugins whose presence in this build is what the phone admits: eliza's telephony plugin, which a host registers only on an Alpha image, and its contacts plugin where that image grants contacts. */
+const telephony = "ElizaTelephony"
 const contacts = "ElizaContacts"
 
 /** The phone: what it admits is which plugins its host registered. */
-export const capacitorDevice = Layer.effect(Device, effect {
-  const bridge = try Bridge
+export const phoneDevice = Layer.effect(Device, effect {
   return {
-    ...paged,
+    ...(try paged()),
     effect capabilities() {
-      const image = try bridge.has(telephony)
-      return { image, contacts: image && (try bridge.has(contacts)) }
+      const image = registered(telephony)
+      return { image, contacts: image && registered(contacts) }
     },
   }
 })
 
 /** A browser: no Alpha image. */
-export const browserDevice = Layer.succeed(Device, {
-  ...paged,
-  effect capabilities() { return { image: false, contacts: false } },
+export const browserDevice = Layer.effect(Device, effect {
+  return { ...(try paged()), effect capabilities() { return { image: false, contacts: false } } }
 })

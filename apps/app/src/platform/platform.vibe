@@ -3,10 +3,10 @@ import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { type Install, install } from "../runtime/attempts.vibe"
 import { type Time, timeOver } from "../runtime/time.vibe"
 import { type Agent, agentAt, relayedAgent } from "./agent.vibe"
-import { capacitorBridge } from "./bridge.vibe"
-import { type Cloud, absentCloud, cloudAt } from "./cloud.vibe"
-import { Device, browserDevice, capacitorDevice } from "./device.vibe"
-import { type Vault, browserVault, capacitorVault } from "./vault.vibe"
+import { type Cloud, cloudAt, relayedCloud } from "./cloud.vibe"
+import { Device, browserDevice, phoneDevice } from "./device.vibe"
+import { type Plugins, browserPlugins, phonePlugins } from "./plugins.vibe"
+import { type Vault, browserVault, relayedVault } from "./vault.vibe"
 
 module web {
   /** @throws {never} */
@@ -15,21 +15,21 @@ module web {
 import { storage } from web
 
 /** Every service of the world outside Alpha. Areas reach the world only through these. */
-export type Platform = KeyValueStore.KeyValueStore | Time | Install | Agent | Cloud | Device | Vault
+export type Platform = KeyValueStore.KeyValueStore | Time | Install | Agent | Cloud | Device | Vault | Plugins
 
 /** Alpha's time and its installation's name, which every platform has: over the store, and over the phone that says when the page woke. */
-export const grounded = Layer.merge(install, Layer.unwrap(effect { return timeOver((try Device).resumed) }))
+export const grounded = Layer.merge(install, Layer.unwrap(effect { return timeOver((try Device).visible) }))
 
 const store = KeyValueStore.layerStorage(storage)
 
-/** The phone: each service through its Capacitor plugin, with the agent's token and the cloud's key kept in native code. */
+/** The phone: each service through eliza's client of its Capacitor plugin, with the agent's token and the cloud's key kept in native code. */
 export function phonePlatform(): Layer.Layer<Platform> {
-  return Layer.provideMerge(grounded, Layer.provide(Layer.mergeAll(store, capacitorDevice, capacitorVault, relayedAgent, absentCloud), capacitorBridge))
+  return Layer.provideMerge(grounded, Layer.provideMerge(Layer.mergeAll(phoneDevice, relayedVault, relayedAgent, relayedCloud, phonePlugins), store))
 }
 
 /** A page that is no phone: `agent` and `cloud` as they are reached from it, and no image, plugins or secrets. */
 export function pagePlatform(agent: Layer.Layer<Agent>, cloud: Layer.Layer<Cloud>): Layer.Layer<Platform> {
-  return Layer.provideMerge(grounded, Layer.mergeAll(store, browserDevice, browserVault, agent, cloud))
+  return Layer.provideMerge(grounded, Layer.provideMerge(Layer.mergeAll(browserDevice, browserVault, agent, cloud, browserPlugins), store))
 }
 
 /** A browser page: the agent and the cloud at the page's own `/agent` and `/cloud`, which the dev server answers. */

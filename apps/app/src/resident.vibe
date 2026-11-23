@@ -1,5 +1,5 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
-import { whole } from "./runtime/reactor.vibe"
+import { together, whole } from "./runtime/reactor.vibe"
 import { shell } from "./shell/shell.vibe"
 
 /**
@@ -7,7 +7,7 @@ import { shell } from "./shell/shell.vibe"
  * their screen has never been loaded. Every other machine is its area's own (runtime/area.tsx). One line each, in
  * any order: they find each other once all are built. Lines are only ever added.
  */
-export const machines = Layer.mergeAll(
+const machines = together(
   shell,
 )
 

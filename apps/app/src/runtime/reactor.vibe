@@ -1,6 +1,6 @@
 // spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
-import { Attempts, Install, attemptsOf } from "./attempts.vibe"
+import { Attempts, Install, attemptsOf, fresh } from "./attempts.vibe"
 import { Time } from "./time.vibe"
 
 module pure {
@@ -8,8 +8,17 @@ module pure {
   export function written(value: unknown): string {
     try { return JSON.stringify(value) ?? "" } catch { return "" }
   }
+  /** The names an event's time has in a spec: the time of the event, and the time an asking it makes starts at. */
+  const times = ["now", "at"] as const
+  /** `event` with each of its times set to `now`: a spec reads the time only from an event. @throws {never} */
+  export function stamped<A>(event: A, now: number): A {
+    if (typeof event !== "object" || event === null) return event
+    const found = times.filter((name) => name in event)
+    return found.length === 0 ? event : { ...event, ...Object.fromEntries(found.map((name) => [name, now])) }
+  }
 }
-import { written } from pure
+import { stamped, written } from pure
+export { stamped }
 
 /** What a transition that returns effects gives: the state it led to and what it asks of the world. */
 export interface Moved<S, Fx> {
@@ -54,7 +63,7 @@ export interface Due<Ev, By> {
   readonly by: By
 }
 
-/** What a screen and a shell write for an event's `now`: the reactor replaces it with Alpha's time. */
+/** What a screen and a shell write for an event's `now` or `at`: the reactor replaces it with Alpha's time. */
 export const untimed = 0
 
 /** The one answer of `answered`, an effect that has already turned each failure into an event; `lost` where it never answers. */
@@ -133,12 +142,14 @@ export function whole<Out, E, In>(layer: Layer.Layer<Out, E, In>): Layer.Layer<O
   return Layer.provideMerge(filled, Layer.provideMerge(layer, late)) as unknown as Layer.Layer<Out, E, Exclude<In, Out | Whole>>
 }
 
-function stamped<A>(event: A, now: number): A {
-  return typeof event === "object" && event !== null && "now" in event ? { ...event, now } : event
-}
+/**
+ * The layers of one runtime, side by side: machines, and what follows, hears and applies them. Each finds the others
+ * once the runtime is whole, so their order means nothing, and none may take another while it is built.
+ */
+export const together = Layer.mergeAll
 
 /** `work`, with what killed it logged: nothing here dies silently, and nothing that dies takes its neighbours along. Whether it succeeded. */
-export effect function contained(work: unknown!unknown, what: string): boolean!! {
+export effect function contained<R = never>(work: unknown!unknown!R, what: string): boolean!!R {
   const ended = try exit(work)
   if (Exit.isSuccess(ended)) return true
   if (!Cause.hasInterruptsOnly(ended.cause) && Cause.hasDies(ended.cause)) try logError(`${what} died`, ended.cause)
@@ -162,6 +173,8 @@ function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Lay
     try logError(`what is kept under ${key} is not a state: set aside under ${key}.unreadable`)
     if (found !== undefined) try ignore(store.set(`${key}.unreadable`, found))
     try ignore(store.remove(key))
+    // The state starts afresh, and so do its attempts' numbers: under a new epoch their keys are new too.
+    try ignore(store.remove(`${key}.epoch`))
     return Layer.catch(Layer.fresh(stored(key)), () => memory)
   })
   return Layer.catch(stored(key), () => aside)
@@ -176,7 +189,7 @@ interface Parts<S, Ev, M, Fx, R, By extends ReadonlyArray<unknown>> {
   readonly outOf: (moved: M) => ReadonlyArray<Fx>
   readonly carry: (fx: Fx) => Job<Ev, R, By>
   readonly timers: (state: S) => ReadonlyArray<Due<Ev, By>>
-  readonly open: readonly [event: Ev, ...by: By] | undefined
+  readonly open: Opening<Ev, R, By> | undefined
 }
 
 function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<unknown>, R>(
@@ -188,7 +201,16 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
     const whole = try Whole
     const time = try Time
     const install = try Install
-    const attempts = attemptsOf(install, durable ? scope : `${scope}@${install.launch}`)
+    const store = try KeyValueStore.KeyValueStore
+    /** What tells this run of the state's attempts from an earlier one under the same key: kept beside the state, and new with each state that starts afresh; in memory, the launch. */
+    effect function epoch(): string!! {
+      if (!durable) return install.launch
+      const found = store.get(`${scope}.epoch`) catch () => undefined
+      if (found !== undefined) return found
+      const made = fresh()
+      return effect { try store.set(`${scope}.epoch`, made); return made } catch () => install.launch
+    }
+    const attempts = attemptsOf(install, `${scope}@${try epoch()}`)
     const running = try FiberMap.make<string>()
     const turn = try Semaphore.make(1)
     /** Each deadline a job waits on or has told the machine of, so that none is told twice. */
@@ -263,19 +285,29 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
         })
       }
     }
-    if (open !== undefined) try contained(send(...open), `opening ${scope}`)
+    if (open !== undefined) {
+      // An opening that must first ask the world is asked once the runtime is whole, like any job; one that needs nothing is sent before anything else can be.
+      if (Effect.isEffect(open)) try launch("open", effect { try contained(send(...(try open)), `opening ${scope}`) })
+      else try contained(send(...open), `opening ${scope}`)
+    }
     try contained(Semaphore.withPermit(turn, effect { try arm(try inner.get()) }), `arming ${scope}`)
     return { changes: inner.changes, get: () => inner.get(), send, receive }
   })
 }
 
-/** A machine is kept only with the event that takes up what was under way when Alpha stopped: the spec's `reopen` or `restart`. */
-type Kept<Ev, By extends ReadonlyArray<unknown>> =
-  | { readonly keep: number; readonly open: readonly [event: Ev, ...by: By] }
-  | { readonly keep?: undefined; readonly open?: readonly [event: Ev, ...by: By] }
+/**
+ * The event a machine is sent once when it is built, with its sender: the event itself, or, where the event carries
+ * what only the world knows (what the phone kept, today's date), an effect that asks and returns it.
+ */
+export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = readonly [event: Ev, ...by: By] | ((readonly [event: Ev, ...by: By])!never!R)
+
+/** A machine is kept only with the event that takes up what was under way when Alpha stopped: the spec's `reopen`, `restart` or `start`. */
+type Kept<Ev, R, By extends ReadonlyArray<unknown>> =
+  | { readonly keep: number; readonly open: Opening<Ev, R, By> }
+  | { readonly keep?: undefined; readonly open?: Opening<Ev, R, By> }
 
 /** What `reacting` takes beside the spec. */
-export type Options<S, Ev, By extends ReadonlyArray<unknown>> = Kept<Ev, By> & {
+export type Options<S, Ev, R, By extends ReadonlyArray<unknown>> = Kept<Ev, R, By> & {
   /** The deadlines `state` waits on. Each is told to the machine once its time has come, also after a restart. */
   readonly timers?: (state: S) => ReadonlyArray<Due<Ev, By>>
 }
@@ -296,7 +328,7 @@ type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | 
  */
 export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>, SE, SR, R = never>(
   spec: Spec<I, S, Ev, M, Refused, Undecoded, By, SE, SR>,
-  options: Options<S, Ev, By> & Carrying<M, Ev, R, By>,
+  options: Options<S, Ev, R, By> & Carrying<M, Ev, R, By>,
 ): Layer.Layer<I, never, Needs<SR, R>> {
   const carry = options.carry as ((fx: unknown) => Job<Ev, R, By>) | undefined
   const key = options.keep === undefined ? undefined : storeKey(spec.Machine.key, options.keep)
@@ -314,29 +346,74 @@ export function reacting<I, S, Ev, M, Refused, Undecoded, By extends ReadonlyArr
 }
 
 /**
+ * `work`, started once every machine of the runtime is built, with the services it names, and running until the
+ * runtime closes. A layer that needs another machine is written with it, and never takes that machine while it is
+ * built: machines are built side by side, in no order.
+ */
+export function started<R>(work: unknown!!R, what: string): Layer.Layer<never, never, R | Whole> {
+  return Layer.effectDiscard(effect {
+    const whole = try Whole
+    try fork.scoped contained(flatMap(whole.context, (context) => Effect.provideContext(work, context as Context.Context<R>)), what)
+  }) as unknown as Layer.Layer<never, never, R | Whole>
+}
+
+/**
  * Tell the machine `target` names each new fact it needs from the machine `source` names: `fact` reads it from each
- * state the source publishes, and `told` makes it the target's event, from `by`. Equal facts in a row are told once.
- * A fact the target refuses is told again each time the target changes, until it is taken or a newer one replaces it.
+ * state the source publishes, and `told` makes it the target's event, from `by`, or nothing for a fact the target has
+ * no event for. Equal facts in a row are told once. A fact the target refuses is told again each time the target
+ * changes, until it is taken or a newer one replaces it.
  */
 export function following<IA, A, IB, Ev, Refused, By extends ReadonlyArray<unknown>, F>(
   source: Context.Key<IA, { readonly changes: Stream.Stream<A> }>,
   fact: (a: A) => F,
   target: Context.Key<IB, { readonly changes: Stream.Stream<unknown>; send(event: Ev, ...by: By): unknown!Refused }>,
-  told: (fact: F) => Ev,
+  told: (fact: F) => Ev | undefined,
   ...by: By
 ): Layer.Layer<never, never, IA | IB | Whole> {
-  const followed = effect {
+  return started(effect {
     const from = try source
     const to = try target
     let taken: string | undefined
     try Stream.runForEach(Stream.zipLatest(Stream.map(from.changes, fact), to.changes), effect ([value]) => {
       const text = written(value)
       if (text === taken) return
-      if (try contained(to.send(told(value), ...by), "following")) taken = text
+      const event = told(value)
+      if (event === undefined || (try contained(to.send(event, ...by), "following"))) taken = text
     })
-  }
-  return Layer.effectDiscard(effect {
-    const whole = try Whole
-    try fork.scoped contained(flatMap(whole.context, (context) => Effect.provideContext(followed, context as Context.Context<IA | IB>)), "following")
-  }) as unknown as Layer.Layer<never, never, IA | IB | Whole>
+  }, "following")
+}
+
+/**
+ * Tell the machine `target` names each thing a service says: `heard` is the service's stream (the page shown or
+ * hidden, a plugin's events, the agent's feed), and `told` makes each item the target's event, from `by`, or nothing.
+ * An event the rules refuse is dropped: what must not be lost is a fact of a machine, which `following` tells again.
+ */
+export function hearing<A, R, IB, Ev, Refused, By extends ReadonlyArray<unknown>>(
+  heard: Stream.Stream<A, never, R>,
+  target: Context.Key<IB, { send(event: Ev, ...by: By): unknown!Refused }>,
+  told: (said: A) => Ev | undefined,
+  ...by: By
+): Layer.Layer<never, never, R | IB | Whole> {
+  return started(effect {
+    const to = try target
+    try Stream.runForEach(heard, effect (said) => {
+      const event = told(said)
+      if (event !== undefined) try contained(to.send(event, ...by), "hearing")
+    })
+  }, "hearing")
+}
+
+/**
+ * Do `apply` with each new fact of the machine `source` names, from its first state on: what the whole page follows,
+ * such as its look or its text size, held from launch by a resident machine and applied through a service.
+ */
+export function applying<IA, A, F, R>(
+  source: Context.Key<IA, { readonly changes: Stream.Stream<A> }>,
+  fact: (a: A) => F,
+  apply: (fact: F) => unknown!!R,
+): Layer.Layer<never, never, IA | R | Whole> {
+  return started(effect {
+    const from = try source
+    try Stream.runForEach(Stream.changesWith(Stream.map(from.changes, fact), (a, b) => written(a) === written(b)), (value) => contained(apply(value), "applying"))
+  }, "applying")
 }

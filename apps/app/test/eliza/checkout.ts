@@ -93,12 +93,12 @@ async function build(at: Checkout) {
   const source = process.env.ALPHA_ELIZA_SOURCE ?? lock.remote;
   if (!fs.existsSync(path.join(at.root, ".git"))) {
     fs.mkdirSync(path.dirname(at.root), { recursive: true });
-    run(path.dirname(at.root), "git", "clone", "-q", ...(fs.existsSync(source) ? ["--shared"] : ["--branch", lock.branch]), source, at.root);
+    run(path.dirname(at.root), "git", "clone", "-q", ...(fs.existsSync(source) ? ["--local"] : ["--branch", lock.branch]), source, at.root);
   }
   run(at.root, "git", "checkout", "-q", "--detach", at.commit);
   run(at.root, "pnpm", "install", "--frozen-lockfile", "--prefer-offline");
-  run(at.root, "pnpm", "--filter", "@elizaos/core", "build");
-  run(at.root, "pnpm", "--filter", "@elizaos/agent", "build");
+  // The agent imports the cloud's client and the device package the agent's client, so the order is theirs.
+  for (const name of ["core", "cloud", "agent", "os"]) run(at.root, "pnpm", "--filter", `@elizaos/${name}`, "build");
   run(at.root, "pnpm", "--filter", "@elizaos/cloud", "build:worker");
   fs.rmSync(at.bundle, { recursive: true, force: true });
   const started = Date.now();

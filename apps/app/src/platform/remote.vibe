@@ -13,12 +13,21 @@ export error Garbled { cause: unknown }
 
 export type Failure = Unsent | Unreachable | Refused | Garbled
 
+/** What a listener asks of a stream beside its request. */
+export interface Listening {
+  /**
+   * How long the stream may say nothing before it counts as unreachable. Give it for a stream that is an answer, such
+   * as a reply being written. A feed has none: eliza's streams send no heartbeat, so a quiet feed and a dead one look alike.
+   */
+  readonly quiet?: Duration.Input
+}
+
 /** An HTTP service outside Alpha, such as the resident agent or the cloud. What it answers is untrusted until `ask` or `listen` has decoded it. */
 export interface Remote {
-  /** The JSON body of the answer to `request`. */
+  /** The JSON body of the answer to `request`: the whole of it within `patience`. */
   call(request: HttpClientRequest.HttpClientRequest): unknown!Failure
-  /** The JSON data of each Server-Sent Event the answer to `request` streams. */
-  events(request: HttpClientRequest.HttpClientRequest): Stream.Stream<unknown, Failure>
+  /** The JSON data of each Server-Sent Event the answer to `request` streams: its head within `patience`. */
+  events(request: HttpClientRequest.HttpClientRequest, listening?: Listening): Stream.Stream<unknown, Failure>
 }
 
 /** How long Alpha waits for an answer before the other side counts as unreachable. */
@@ -52,31 +61,69 @@ export effect function parsed(text: string): unknown!Garbled {
   return try Effect.try({ try: (): unknown => JSON.parse(text), catch: (cause) => new Garbled({ cause }) })
 }
 
+/** The JSON data of each Server-Sent Event in `bytes`, which counts as unreachable once it has said nothing for `listening.quiet`. */
+export function sse(bytes: Stream.Stream<Uint8Array, Failure>, listening: Listening = {}): Stream.Stream<unknown, Failure> {
+  const heard = listening.quiet === undefined
+    ? bytes
+    : Stream.timeoutOrElse(bytes, { duration: listening.quiet, orElse: () => Stream.fail(new Unreachable({ cause: "the stream went quiet" })) })
+  return heard
+    |> Stream.decodeText(%)
+    |> Stream.pipeThroughChannel(%, Sse.decode())
+    |> Stream.mapError(%, (cause): Failure => match (cause) {
+      when Unsent: cause;
+      when Unreachable: cause;
+      when Refused: cause;
+      when Garbled: cause;
+      default: new Unreachable({ cause });
+    })
+    |> Stream.mapEffect(%, (event) => parsed(event.data))
+}
+
+/** One answer of an HTTP service as it arrives: its head, and its body as it is written. */
+export interface Opened {
+  readonly status: number
+  readonly headers: Readonly<Record<string, string>>
+  /** The body as it is written, for a stream. */
+  readonly body: Stream.Stream<Uint8Array, Unreachable>
+  /** The whole body as text, which is empty where the answer has none. */
+  readonly text: string!Unreachable
+}
+
+/** An HTTP service as a `Remote`, and each answer as it arrives, for a client that reads the bytes itself. */
+export interface Wired extends Remote {
+  /** The answer to `request`, whatever its status: its head within `patience`. */
+  open(request: HttpClientRequest.HttpClientRequest): Opened!Unreachable
+}
+
 /** The service at `base`, reached through whatever `HttpClient` the platform gives: fetch in a browser, a fake in tests. */
-export effect function remoteAt(base: string): Remote!!HttpClient.HttpClient {
+export effect function remoteAt(base: string): Wired!!HttpClient.HttpClient {
   const client = HttpClient.mapRequest(try HttpClient.HttpClient, HttpClientRequest.prependUrl(base))
-  effect function answered(request: HttpClientRequest.HttpClientRequest): HttpClientResponse.HttpClientResponse!(Unreachable | Refused) {
-    const response = client.execute(request) catch effect (cause) => { throw new Unreachable({ cause }) }
-    if (response.status < 200 || response.status >= 300) throw new Refused({ status: response.status })
-    return response
+  effect function open(request: HttpClientRequest.HttpClientRequest): Opened!Unreachable {
+    const response = timeout(client.execute(request), patience) catch effect (cause) => { throw new Unreachable({ cause }) }
+    return {
+      status: response.status, headers: response.headers,
+      body: Stream.mapError(response.stream, (cause) => new Unreachable({ cause })),
+      text: mapError(response.text, (cause) => new Unreachable({ cause })),
+    }
+  }
+  effect function answered(request: HttpClientRequest.HttpClientRequest): Opened!(Unreachable | Refused) {
+    const opened = try open(request)
+    if (opened.status < 200 || opened.status >= 300) throw new Refused({ status: opened.status })
+    return opened
   }
   return {
+    open,
     effect call(request: HttpClientRequest.HttpClientRequest) {
-      const response = timeout(answered(request), patience) catch effect (cause) => match (cause) {
+      // The head and the body together: an answer that starts and never ends is as unreachable as one that never starts.
+      const whole = effect { return try (try answered(request)).text }
+      const text = timeout(whole, patience) catch effect (cause) => match (cause) {
         when Refused: throw cause;
         default: throw new Unreachable({ cause });
       }
-      return try parsed(response.text catch effect (cause) => { throw new Unreachable({ cause }) })
+      return try parsed(text)
     },
-    events(request: HttpClientRequest.HttpClientRequest) {
-      return Stream.unwrap(effect {
-        const response = try answered(request)
-        return response.stream
-          |> Stream.decodeText(%)
-          |> Stream.pipeThroughChannel(%, Sse.decode())
-          |> Stream.mapError(%, (cause) => new Unreachable({ cause }))
-          |> Stream.mapEffect(%, (event) => parsed(event.data))
-      })
+    events(request: HttpClientRequest.HttpClientRequest, listening?: Listening) {
+      return Stream.unwrap(effect { return sse((try answered(request)).body, listening) })
     },
   }
 }
@@ -88,9 +135,9 @@ export effect function ask<I, A>(remote: Context.Key<I, Remote>, request: HttpCl
 }
 
 /** Each event `remote` streams in answer to `request`, decoded by `schema`, which the listening area owns. */
-export function listen<I, A>(remote: Context.Key<I, Remote>, request: HttpClientRequest.HttpClientRequest, schema: Schema.Decoder<A>): Stream.Stream<A, Failure, I> {
+export function listen<I, A>(remote: Context.Key<I, Remote>, request: HttpClientRequest.HttpClientRequest, schema: Schema.Decoder<A>, listening?: Listening): Stream.Stream<A, Failure, I> {
   return Stream.unwrap(effect {
-    const events = (try remote).events(request)
+    const events = (try remote).events(request, listening)
     return Stream.mapEffect(events, (data) => Schema.decodeUnknownEffect(schema)(data) |> Effect.mapError(%, (cause) => new Garbled({ cause })))
   })
 }

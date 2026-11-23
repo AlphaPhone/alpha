@@ -4,6 +4,7 @@ import { agentAt } from "../../src/platform/agent.vibe"
 import { cloudAt } from "../../src/platform/cloud.vibe"
 import { type Platform, pagePlatform, phonePlatform } from "../../src/platform/platform.vibe"
 import { plugIn } from "./phone.ts"
+import { plugins } from "./plugins.ts"
 import { type Answering, fetched } from "./routes.ts"
 import { type Scene, services } from "./scene.ts"
 
@@ -20,7 +21,7 @@ function fetching(answer: Answering) {
 }
 
 /** A clock the journey moves, at the world's time: time never goes back when Alpha opens again. */
-export function clockAt(world: Scene) {
+function clockAt(world: Scene) {
   return Layer.provideMerge(Layer.effectDiscard(TestClock.setTime(world.now)), TestClock.layer())
 }
 
@@ -32,7 +33,7 @@ export function clockAt(world: Scene) {
 export function fakeWorld(world: Scene): Layer.Layer<Platform | TestClock.TestClock> {
   const { agent, cloud } = services(world)
   const platform = world.phone
-    ? Layer.provide(phonePlatform(), Layer.effectDiscard(acquireRelease(sync(() => plugIn(world, agent)), (unplug) => sync(unplug))))
+    ? Layer.provide(phonePlatform(), Layer.effectDiscard(acquireRelease(sync(() => plugIn(plugins(world, { agent, cloud }))), (unplug) => sync(unplug))))
     : pagePlatform(Layer.provide(agentAt("http://agent.test"), fetching(agent)), Layer.provide(cloudAt("http://cloud.test"), fetching(cloud)))
   return Layer.provideMerge(platform, clockAt(world))
 }

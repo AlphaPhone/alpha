@@ -72,7 +72,8 @@ export async function openOver(platform: Layer.Layer<Platform>, mounts: readonly
 /** Wait, with every screen of `alpha` loaded, until the machine `key` names in `runtime` reaches a state `ok` accepts, and React has drawn it. */
 export async function until<I, S>(alpha: Alpha, runtime: ManagedRuntime.ManagedRuntime<I, unknown>, key: Context.Key<I, { readonly changes: Stream.Stream<S> }>, ok: (state: S) => boolean) {
   await drawn(async () => {
-    await Promise.all((opened.get(alpha)?.mounts ?? []).map((mount) => mount.load()));
+    // A screen whose code cannot be loaded stops alone (runtime/contained.tsx): the journey goes on.
+    await Promise.allSettled((opened.get(alpha)?.mounts ?? []).map((mount) => mount.load()));
     await runtime.runPromise(Effect.flatMap(key, (machine) => Stream.runHead(Stream.filter(machine.changes, ok))));
   });
 }
@@ -104,6 +105,12 @@ export const fill = (name: string, text: string) => drawn(() => {
   if (!found) throw new Error(`no field ${name}`);
   Object.getOwnPropertyDescriptor(Object.getPrototypeOf(found) as object, "value")?.set?.call(found, text);
   found.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+/** The page is hidden, as when the owner leaves Alpha, or shown again: what `Device.visible` tells. */
+export const seen = (visible: boolean) => drawn(() => {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (visible ? "visible" : "hidden") });
+  document.dispatchEvent(new Event("visibilitychange"));
 });
 
 /** Hand Alpha a hardware button, as the phone does. */

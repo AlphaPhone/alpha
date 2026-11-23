@@ -20,22 +20,23 @@ export function askScene(): AskScene {
 
 const encoder = new TextEncoder();
 const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
+/** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
+const named = (turn: number) => ({ messageId: `m${turn}`, userMessageId: `u${turn}`, agentName: "Alpha", actionResults: [] });
 
 /** A streamed reply as eliza's agent writes one: what was said back in two pieces, or one piece that waits to be stopped. */
 function reply(scene: AskScene, room: string, text: string): Response {
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
+      controller.enqueue(frame({ type: "status", activity: "thinking" }));
       if (scene.stalled) {
-        controller.enqueue(frame({ type: "token", text: "Thinking", fullText: "Thinking" }));
-        scene.turns.set(room, () => {
-          controller.enqueue(frame({ type: "error", message: "The turn did not complete" }));
-          controller.close();
-        });
+        controller.enqueue(frame({ type: "token", text: "Thinking" }));
+        // A stopped turn's stream ends with no terminal frame: its reader has gone.
+        scene.turns.set(room, () => controller.close());
         return;
       }
-      controller.enqueue(frame({ type: "token", text: "You said: ", fullText: "You said: " }));
-      controller.enqueue(frame({ type: "token", text, fullText: `You said: ${text}` }));
-      controller.enqueue(frame({ type: "done", fullText: `You said: ${text}` }));
+      controller.enqueue(frame({ type: "token", text: "You said: " }));
+      controller.enqueue(frame({ type: "token", text }));
+      controller.enqueue(frame({ type: "done", fullText: `You said: ${text}`, ...named(scene.said.length) }));
       controller.close();
     },
     cancel: () => void scene.turns.delete(room),
@@ -52,20 +53,25 @@ export function askRoutes(scene: AskScene): Route[] {
       return Response.json({ conversation: { id: `c${id}`, roomId: `r${id}`, title: "Ask Alpha", createdAt: 0, updatedAt: 0 } }, { status: 201 });
     },
     (request, url) => {
-      const conversation = /^\/api\/conversations\/c(\d+)\/messages\/stream$/.exec(url.pathname)?.[1];
-      if (request.method !== "POST" || conversation === undefined) return;
+      const found = /^\/api\/conversations\/c(\d+)\/messages(\/stream)?$/.exec(url.pathname);
+      if (request.method !== "POST" || !found) return;
       return request.json().then((body: { text: string }) => {
+        // eliza's client asks again without a stream, under the same message id, where a stream dropped before its end.
+        if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
-        return reply(scene, `r${conversation}`, body.text);
+        return reply(scene, `r${found[1]}`, body.text);
       });
     },
     (request, url) => {
       const room = /^\/api\/turns\/([^/]+)\/abort$/.exec(url.pathname)?.[1];
       if (request.method !== "POST" || room === undefined) return;
-      const stop = scene.turns.get(room);
-      scene.turns.delete(room);
-      stop?.();
-      return Response.json({ aborted: stop !== undefined });
+      return request.json().then(({ reason }: { reason: string }) => {
+        const stop = scene.turns.get(room);
+        scene.turns.delete(room);
+        stop?.();
+        // The receipt eliza's client takes as a stop: the room, the reason it gave, and what the agent did (`turn-controller.vibe`, `StopAnswer`).
+        return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
+      });
     },
   ];
 }

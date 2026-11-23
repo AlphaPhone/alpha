@@ -1,7 +1,11 @@
 // @vitest-environment happy-dom
+import { Effect } from "effect";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import { afterEach, beforeAll, expect, it } from "vitest";
 import { Machine as Ask } from "../gen/app__ask.effect.vibe";
 import ask from "../src/ask/index.tsx";
+import { Agent } from "../src/platform/agent.vibe";
+import { Cloud } from "../src/platform/cloud.vibe";
 import { button, closeAll, fill, openOver, press, underAct, until } from "./alpha.tsx";
 import { owned } from "./eliza/owned.ts";
 import { elizaWorld } from "./eliza/world.vibe";
@@ -20,9 +24,12 @@ const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha
 
 // spec/app/ask/index.md, "Story: Talk to my agent"
 it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"Story: Talk to my agent\")", async () => {
-  expect([mine.mailed, mine.key.accountId === "", mine.agent.token === ""]).toEqual([expect.stringMatching(/^\d{6}$/), false, false]);
+  expect([mine.key.mailed, mine.key.accountId === "", mine.agent.token === ""]).toEqual([expect.stringMatching(/^\d{6}$/), false, false]);
   const { alpha } = await openOver(elizaWorld(mine));
   const asking = ask.runtime(alpha);
+  // What the owner's organization has left, as Alpha's own page asks the cloud: eliza's typed client, under the device key the page never holds.
+  const balance = async () => (await alpha.runtime.runPromise(Cloud.use((cloud) => Effect.promise(() => cloud.client.snapshot())))).balance.usdMicros;
+  expect(await balance()).toBe(mine.granted);
 
   // spec/app/ask/index.md, "The conversation is the one the agent names in answer to that opening, or none when it does not"
   await until(alpha, asking, Ask, (s) => s.conversation !== "");
@@ -36,8 +43,7 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   expect(lines()).toEqual(["Say hello.", "Hello from the cloud."]);
   // The cloud's model was asked as this owner's Alpha, with what the owner said, and the owner's organization was charged for it.
   expect((await mine.asked()).at(-1)).toEqual([{ role: "system", content: mine.system }, { role: "user", content: "Say hello." }]);
-  const ledger = await mine.ledger();
-  expect([ledger.charges.map((charge) => charge.outcome), (ledger.charges[0]?.charged ?? 0) > 0, ledger.balance < mine.granted]).toEqual([["known"], true, true]);
+  expect(await balance()).toBeLessThan(mine.granted);
 
   // spec/app/ask/index.md, "The owner stops the reply under way once, and the agent is asked to stop that conversation's turn"
   await mine.script({ kind: "stall", first: "Thinking" });
@@ -48,4 +54,20 @@ it("Talk to my agent, through eliza's agent and cloud (spec/app/ask/index.md, \"
   await press("Stop");
   await until(alpha, asking, Ask, (s) => s.turn.outcome === "Refused");
   expect([lines(), document.querySelector("section[aria-label='Ask Alpha'] [role=alert]")?.textContent]).toEqual([["Say hello.", "Hello from the cloud.", "Take your time.", "Thinking"], "The reply stopped"]);
+}, 300_000);
+
+// spec/kit/read.md, "Story: Read from outside"
+it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/kit/read.md, \"Story: Read from outside\")", async () => {
+  const { alpha } = await openOver(elizaWorld(mine), []);
+  const read = (route: string) => alpha.runtime.runPromise(Agent.use((agent) => agent.call(HttpClientRequest.get(route))));
+  // spec/kit/read.md, "Only the newest ticket's answer is taken, once": each route an area reads answers at the pinned commit, through Alpha's own Agent service.
+  expect(await read("/api/approvals")).toMatchObject({ approvals: [] });
+  expect(await read("/api/notifications")).toMatchObject({ notifications: [], unreadCount: 0 });
+  expect(await read("/api/scheduled-tasks?ownerVisibleOnly=1")).toEqual({ tasks: [] });
+  expect(await read("/api/triggers")).toEqual({ triggers: [] });
+  expect(await read("/api/tasks/current")).toEqual({ task: null });
+  // The agent keeps the conversation's history, which the journey above wrote: the owner's turns and its own replies.
+  const { conversations } = await read("/api/conversations") as { conversations: { id: string }[] };
+  const { messages } = await read(`/api/conversations/${conversations[0]?.id}/messages`) as { messages: { role: string; text: string }[] };
+  expect(messages.slice(0, 2)).toEqual([expect.objectContaining({ role: "user", text: "Say hello." }), expect.objectContaining({ role: "assistant", text: "Hello from the cloud." })]);
 }, 300_000);

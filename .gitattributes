@@ -5,3 +5,5 @@ apps/app/src/resident.vibe merge=union
 apps/app/test/fakes/scene.ts merge=union
 apps/app/test/bombadil.ts merge=union
 spec/app/index.md merge=union
+apps/app/src/platform/plugins.vibe merge=union
+apps/app/test/fakes/plugins.ts merge=union

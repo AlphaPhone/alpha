@@ -1,44 +1,73 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
+import { ConversationRecord, TurnController, type TurnResult } from "@elizaos/agent/client"
 import * as Ask from "../../gen/app__ask.effect.vibe"
 import type { Effect as Out, Event } from "../../gen/app__ask.effect.vibe"
-import { Aborted, Agent, Created, Frame } from "../platform/agent.vibe"
-import { ask, listen, outcomeOf } from "../platform/remote.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask, outcomeOf } from "../platform/remote.vibe"
 import { type Job, answer, reacting, run, stream } from "../runtime/reactor.vibe"
 
-const json = (path: string, body: object) => HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post(path), body)
+/**
+ * The conversation's turns, in eliza's own protocol: its `TurnController` over the platform's agent. It posts each
+ * turn once under a message id of its own, reads the reply stream, asks again without streaming where a stream
+ * drops, and stops a turn by the agent's receipt. Alpha restates none of those wire shapes.
+ */
+service Turns {
+  readonly controller: TurnController
+}
+
+const turns = Layer.effect(Turns, effect {
+  const { runtime } = try Agent
+  return { controller: new TurnController(runtime) }
+})
+
+/** What the agent answers to `POST /api/conversations`: eliza's own record of a conversation. */
+schema Created { readonly conversation: ConversationRecord }
 
 // spec/app/ask/index.md, "The conversation is the one the agent names in answer to that opening, or none when it does not"
-effect function opened(id: number): Event!!Agent {
+effect function opened(id: number): Event!!(Agent | Turns) {
   return effect {
-    const { conversation } = try ask(Agent, json("/api/conversations", { title: "Ask Alpha" }), Created)
-    if (conversation.id === "") return { type: "unopened", id, known: true }
+    const { controller } = try Turns
+    const { conversation } = try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Ask Alpha" }), Created)
+    try promise(() => controller.bind(conversation))
     return { type: "opened", id, conversation: conversation.id, room: conversation.roomId }
   } catch (failure) => ({ type: "unopened", id, known: outcomeOf(failure).known })
 }
 
+/** How a turn ended, as eliza's controller tells it: answered, known not to have been, or, where its post may have reached the agent, unknown. */
+function ended(id: number, result: TurnResult): Event {
+  return match (result) {
+    when { kind: "Replied", let reply }: { type: "answered", id, text: reply.text };
+    when { kind: "MaybeAccepted" }: { type: "unanswered", id, known: false };
+    // The agent says in a reply of its own that it failed; without one, only that something on the way did.
+    when { kind: "AgentFailed", let reply }: { type: "unanswered", id, known: reply !== undefined };
+    default: { type: "unanswered", id, known: true };
+  }
+}
+
 // spec/app/ask/index.md, "Only the turn under way is heard: its reply so far, then the whole reply, or that it did not finish"
-function said(id: number, conversation: string, text: string): Stream.Stream<Event, never, Agent> {
-  return listen(Agent, json(`/api/conversations/${conversation}/messages/stream`, { text }), Frame)
-    |> Stream.map(%, (frame): Event => match (frame) {
-      when { type: "token", let fullText }: { type: "heard", id, text: fullText };
-      when { type: "done", let fullText }: { type: "answered", id, text: fullText };
-      when { type: "error" }: { type: "unanswered", id, known: true };
-    })
-    |> Stream.catch(%, (failure) => Stream.succeed<Event>({ type: "unanswered", id, known: outcomeOf(failure).known }))
-    |> Stream.concat(%, Stream.succeed<Event>({ type: "unanswered", id, known: false }))
+function said(id: number, text: string): Stream.Stream<Event, never, Turns> {
+  return Stream.callback<Event, never, Turns>((queue) => effect {
+    const { controller } = try Turns
+    const heard = (written: string) => { Queue.offerUnsafe(queue, { type: "heard", id, text: written }) }
+    const result = tryPromise(() => controller.send({ text }, { stream: { onPreview: heard } })) catch () => undefined
+    Queue.offerUnsafe(queue, result === undefined ? { type: "unanswered", id, known: false } : ended(id, result))
+    Queue.endUnsafe(queue)
+  })
 }
 
 // spec/app/ask/index.md, "The owner stops the reply under way once, and the agent is asked to stop that conversation's turn"
-// The empty body makes it a POST for eliza's client, which sends a request without one as a GET.
-const stopped = (room: string) => ignore(ask(Agent, json(`/api/turns/${room}/abort`, {}), Aborted))
+const stopped = effect {
+  const { controller } = try Turns
+  try ignore(tryPromise(() => controller.interrupt()))
+}
 
-function carry(fx: Out): Job<Event, Agent, []> {
+function carry(fx: Out): Job<Event, Agent | Turns, []> {
   return match (fx) {
     when { tag: "Open", let id }: answer("open", opened(id), { type: "unopened", id, known: false });
-    when { tag: "Say", let id, let conversation, let text }: stream("say", said(id, conversation, text), { type: "unanswered", id, known: false });
-    when { tag: "Stop", let room }: run("stop", stopped(room));
+    when { tag: "Say", let id, let text }: stream("say", said(id, text), { type: "unanswered", id, known: false });
+    when { tag: "Stop" }: run("stop", stopped);
   }
 }
 
 /** Ask Alpha's one conversation, kept in memory: it is the agent's, and is opened when the screen first loads. */
-export const asking = reacting(Ask, { carry, open: [{ type: "begin" }] })
+export const asking = Layer.provideMerge(reacting(Ask, { carry, open: [{ type: "begin" }] }), turns)

@@ -31,9 +31,10 @@ try {
   const lines = await ask.getByRole("listitem").allTextContents();
   const seen = [...problems];
   const conversations = JSON.parse(await page.evaluate(async () => (await fetch("/agent/api/conversations")).text())) as { conversations: { title: string }[] };
-  const unauthorized = await page.evaluate(async () => (await fetch("/cloud/api/v1/chat/completions", { method: "POST", body: "{}" })).status);
-  process.stdout.write(`${JSON.stringify({ lines, agentHolds: conversations.conversations.map((one) => one.title), cloudWithoutAKey: unauthorized, problems: seen })}\n`);
-  if (seen.length || lines.at(-1) !== "You said: Hello from the browser") process.exitCode = 1;
+  // The page asks the cloud for its own account, under the device key the dev server adds as the phone's plugin does.
+  const account = JSON.parse(await page.evaluate(async () => (await fetch("/cloud/api/v1/user")).text())) as { data?: { email?: string } };
+  process.stdout.write(`${JSON.stringify({ lines, agentHolds: conversations.conversations.map((one) => one.title), cloudAccount: account.data?.email, problems: seen })}\n`);
+  if (seen.length || lines.at(-1) !== "You said: Hello from the browser" || account.data?.email !== "owner@alpha.test") process.exitCode = 1;
 } finally {
   await browser.close();
   process.kill(-dev.pid!, "SIGTERM");

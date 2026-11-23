@@ -10,6 +10,6 @@ const faked = process.env.SPEC_TESTS !== undefined || process.env.ALPHA_FAKES ==
 
 export default defineConfig({
   plugins: [vibelang(), react(), tailwindcss(), faked ? fakes(process.env.ALPHA_AGENT) : eliza()],
-  // eliza's client is linked from its own checkout, whose Effect is this one's version: one copy in the page.
-  resolve: { dedupe: ["effect", "vibelang-runtime"] },
+  // eliza's clients are linked from their own checkout, whose Effect and Capacitor are this one's versions: one copy of each in the page.
+  resolve: { dedupe: ["effect", "vibelang-runtime", "@capacitor/core"] },
 });

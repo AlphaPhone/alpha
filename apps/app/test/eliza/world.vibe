@@ -4,13 +4,14 @@ import { agentAt } from "../../src/platform/agent.vibe"
 import { cloudAt } from "../../src/platform/cloud.vibe"
 import { type Platform, pagePlatform } from "../../src/platform/platform.vibe"
 
-/** Where the services of services.ts answer: the agent with this launch's token, and the cloud's loopback origin. */
+/** Where the services of services.ts answer: the agent with this launch's token, and the cloud's loopback origin with the owner's device key. */
 export interface Running {
   readonly agent: { readonly origin: string; readonly token: string }
   readonly cloud: { readonly local: string }
+  readonly key: { readonly token: string }
 }
 
-/** Node's HTTP client, which adds `token` to each request as the dev server's proxy and the phone's plugin do: the page never holds it. */
+/** Node's HTTP client, which adds `token` to each request as the dev server's proxy and the phone's plugins do: the page never holds it. */
 function bearing(token: string) {
   return Layer.effect(HttpClient.HttpClient, effect {
     return HttpClient.mapRequest(try HttpClient.HttpClient, HttpClientRequest.bearerToken(token))
@@ -21,6 +22,6 @@ function bearing(token: string) {
 export function elizaWorld(running: Running): Layer.Layer<Platform> {
   return pagePlatform(
     Layer.provide(agentAt(running.agent.origin), bearing(running.agent.token)),
-    Layer.provide(cloudAt(running.cloud.local), NodeHttpClient.layerNodeHttp),
+    Layer.provide(cloudAt(running.cloud.local), bearing(running.key.token)),
   )
 }
