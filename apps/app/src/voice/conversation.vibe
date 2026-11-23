@@ -216,7 +216,8 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     try microphone.opened(ticket)
     events.opened({ echoCancelled: opened.echoCancelled })
     const ends = Stream.filter(native.listen("AlphaVoiceCloud", "liveCaptureEnded"), (value) => decode(LiveCaptureEnded, value)?.captureId === captureId)
-    const ended = Option.getOrUndefined(Stream.runHead(ends) catch () => Option.none())
+    const end = Stream.runHead(ends) catch () => Option.none<unknown>()
+    const ended = Option.getOrUndefined(end)
     if (!capturing) return
     capturing = false
     lastCause = { code: decode(LiveCaptureEnded, ended)?.error ?? "capture-ended" }
@@ -227,12 +228,13 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     try endStream()
     const account = try routes.account()
     if (account.kind !== "cloud") return undefined
-    const relay = try cloudStreaming(account.environment, account.credentialId, () => stream?.sessionId === sessionId, (text: string) => {
+    const connect = cloudStreaming(account.environment, account.credentialId, () => stream?.sessionId === sessionId, (text: string) => {
       const session = stream
       if (session === undefined || session.sessionId !== sessionId) return
       session.seq += 1
       emit(envelope(sessionId, session.turn, "partial", text, session.seq))
     })
+    const relay = try Effect.provideService(connect, Native, native)
     const session: StreamSession = { sessionId, relay, owner: voiceAbort(), capture: undefined, ended: undefined, turn: newId(), seq: 0 }
     stream = session
     try speech.bindStream(relay)
@@ -319,7 +321,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         events.opened({ echoCancelled: false })
         first = false
       }
-      const gated = try gateRecording(started.recordingId, speakingNow, () => !capturing)
+      const gated = try Effect.provideService(gateRecording(started.recordingId, speakingNow, () => !capturing), Native, native)
       const clip = decode(RecordingClip, native.invoke("AlphaVoiceCloud", "stopRecording", {}) catch () => undefined)
       if (!capturing || clip === undefined || !gated.heard) {
         native.invoke("AlphaVoiceCloud", "cancelRecording", {}) catch () => undefined
@@ -445,7 +447,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         try latency.endpointed("LongGap")
         try latency.mark("Request")
         if (route === "Device") try speech.warmDevice()
-        const ack = try acknowledgement()
+        const ack = try Effect.provideService(acknowledgement(), Speech, speech)
         cue = ack
         const microphoneClear = () => liveCapture || !runSync(microphone.get()).open
         const retireCue = () => { runFork(ack.cancel()) }

@@ -80,7 +80,7 @@ export effect function keepPreviousDrafts(owner: string) {
 
   effect function read(slot: string) {
     if (onDevice) {
-      try adoptLegacySlot(slot, slot)
+      try Effect.provideService(adoptLegacySlot(slot, slot), Native, native)
       const answer = try native.invoke(SECURE_STORE, "get", { key: slot })
       const decoded = try decodePreviousSlot(answer)
       return decoded.value ?? undefined

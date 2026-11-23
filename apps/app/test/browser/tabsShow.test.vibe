@@ -1,0 +1,129 @@
+// spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"; spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
+import { assert, it } from "@effect/vitest"
+import { canAgentShowTabs, initial } from "../../gen/browser__session.ts"
+import { BrowserAgent } from "../../src/browser/agent.vibe"
+import { BrowserTabs } from "../../src/browser/session.vibe"
+import { BROWSER_TABS_SHOW_CAPABILITY, TABS_SHOWN_SUMMARY, browserDeviceCapabilities, browserNotDone, groundedIn, operationPorts, parseBrowserTabsShow } from "../../src/browser/operations.vibe"
+import { callsTo, fakeHost, loadPage, settledTabs, shownBrowser } from "./fakes.vibe"
+
+const show = { type: "browser_tabs_show" }
+const call = (proposalId: string) => ({ proposalId, operationId: `${proposalId}-op`, attemptId: 1 })
+
+// spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
+it.live("showing the open tabs brings Browser's own tab list forward only when presented, changes no tab, and tells the agent nothing about them", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const ports = try operationPorts
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      const news = try loadPage(tabs, fake.events, session, "https://news.example/", "1", 1)
+      try tabs.dispatch({ type: "openTab", id: "bdocs", profile: "Normal" })
+      const docs = try loadPage(tabs, fake.events, session, "https://docs.example.org/", "1", 1)
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "" })
+      const card = ports.describe(show)
+      const applied = try promise(() => ports.execute(show, call("show")))
+      const openBeforeReceipt = (try tabs.get()).layers.tabsOpen
+      const shownBeforeReceipt = (try Ref.get(fake.opened)).includes("browser")
+      const receipt = ports.summarize(show, "Applied", "show")
+      ports.present(show, call("show"))
+      try sleep("30 millis")
+      const after = try tabs.get()
+      const closed = try callsTo(fake.calls, "close")
+      const opened = try Ref.get(fake.opened)
+      const said = try Ref.get(fake.toasts)
+      try Effect.try(() => assert.deepStrictEqual({
+        card, applied, openBeforeReceipt, shownBeforeReceipt, receipt,
+        listOpen: after.layers.tabsOpen,
+        tabs: after.tabs.map((t) => t.id),
+        cur: after.cur,
+        closed: closed.length,
+        shown: opened.includes("browser"),
+        said,
+      }, {
+        card: { title: "Show open tabs", detail: "Shows the list of your open tabs in Browser. The agent does not see your tabs." },
+        applied: { kind: "applied" },
+        openBeforeReceipt: false,
+        shownBeforeReceipt: false,
+        receipt: TABS_SHOWN_SUMMARY,
+        listOpen: true,
+        tabs: [news, docs],
+        cur: docs,
+        closed: 0,
+        shown: true,
+        said: [],
+      }))
+    }
+  })
+})
+
+// spec/browser/agent.md, "A deferred switch, close of the showing tab, page-history move or tab list that does not run after its receipt says a correction"
+it.live("a tab list that cannot open when presented, on a locked phone or after Browser changed, is corrected and never shown", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const ports = try operationPorts
+      try settledTabs(tabs)
+      const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+      try loadPage(tabs, fake.events, session, "https://news.example/", "1", 1)
+
+      try promise(() => ports.execute(show, call("locked")))
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, locked: true })
+      ports.present(show, call("locked"))
+      try sleep("30 millis")
+      const whileLocked = (try tabs.get()).layers.tabsOpen
+
+      try SubscriptionRef.set(fake.foreground, shownBrowser)
+      try promise(() => ports.execute(show, call("changed")))
+      try tabs.dispatch({ type: "openTab", id: "bother", profile: "Normal" })
+      ports.present(show, call("changed"))
+      try sleep("30 millis")
+      const afterChange = (try tabs.get()).layers.tabsOpen
+      const said = try Ref.get(fake.toasts)
+      try Effect.try(() => assert.deepStrictEqual({ whileLocked, afterChange, said }, {
+        whileLocked: false,
+        afterChange: false,
+        said: ["Browser changed or was not on screen, so the tab list did not open. Ask again.", "Browser changed or was not on screen, so the tab list did not open. Ask again."],
+      }))
+    }
+  })
+})
+
+// spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
+it("showing the tab list is its own exact form with no field, advertised whenever the agent offers it, and runs without review only from the owner's message", () => {
+  assert.deepStrictEqual({
+    parsed: [parseBrowserTabsShow(show), parseBrowserTabsShow({ ...show, all: true }), parseBrowserTabsShow({ ...show, target: "news" }), parseBrowserTabsShow({ type: "browser_tab_close" })],
+    beside: browserDeviceCapabilities(["browser.search.v1", "browser.tabs.v1", BROWSER_TABS_SHOW_CAPABILITY], false),
+    alone: browserDeviceCapabilities([BROWSER_TABS_SHOW_CAPABILITY], false),
+    unoffered: browserDeviceCapabilities(["browser.tabs.v1"], true).includes(BROWSER_TABS_SHOW_CAPABILITY),
+    grounded: groundedIn(show, "show my open tabs"),
+    notDone: browserNotDone(show),
+  }, {
+    parsed: [show, undefined, undefined, undefined],
+    beside: ["browser.search.v1", "browser.tabs.v1", BROWSER_TABS_SHOW_CAPABILITY],
+    alone: [BROWSER_TABS_SHOW_CAPABILITY],
+    unoffered: false,
+    grounded: true,
+    notDone: "Browser changed or was not on screen, so the tab list did not open. Ask again.",
+  })
+})
+
+// spec/browser/session.md, "The agent shows Browser's own list of open tabs only after its receipt, only while the tab the request came from is still selected, and changes no tab"
+it.live("a Browser with no session refuses the tab list before its receipt, and a started one accepts it", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      const started = try settledTabs(tabs)
+      const presented = try agent.showTabs()
+      try Effect.try(() => assert.deepStrictEqual({
+        unstarted: canAgentShowTabs(initial, initial.cur),
+        started: canAgentShowTabs(started, started.cur),
+        presented: Effect.isEffect(presented),
+      }, { unstarted: false, started: true, presented: true }))
+    }
+  })
+})

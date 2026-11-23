@@ -107,7 +107,7 @@ export effect function fakeHost(options: FakeOptions = {}) {
       },
     }),
   )
-  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, live: Layer.provide(layer, platform) }
+  return { calls, events, opened, toasts, drafts, mails, spoken, cloudCalls, foreground, sharing, live: Layer.provideMerge(layer, platform) }
 }
 
 /** The calls the fake host received for `method`. */

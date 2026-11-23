@@ -38,7 +38,7 @@ export const flowsLayer = Layer.effect(AssistantFlows, effect {
   const steps = try WorkflowStepDecisions
   const decisions = new Map<string, DecisionMachine.Shape>()
   const emails = new Map<string, EmailMachine.Shape>()
-  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => Effect.match(work, { onSuccess: () => true, onFailure: () => false })
   effect function emailFor(cardId: string, card: EmailCard) {
     const known = emails.get(cardId)
     if (known !== undefined) return known

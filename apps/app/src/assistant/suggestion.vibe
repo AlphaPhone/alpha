@@ -42,7 +42,7 @@ export const suggestionsLayer = Layer.effect(Suggestions, effect {
   const view = try SubscriptionRef.make<SuggestionView | undefined>(undefined)
   let suggested = ""
   let text = ""
-  const quiet = (event: SuggestionEvent) => map(machine.send(event), () => true) catch () => false
+  const quiet = (event: SuggestionEvent) => Effect.match(machine.send(event), { onSuccess: () => true, onFailure: () => false })
   const wordingOf = (value: string): Wording =>
     value.trim() === "" ? "MissingText" : value.length > wordingLimit ? "LongText" : value === suggested ? "ShortText" : "EditedText"
   effect function publish() {

@@ -44,9 +44,11 @@ function replyOf(turn: TurnScript, actionResults: readonly unknown[] = []) {
   return { ...base, text: turn.kind === "reply" ? turn.text : "" }
 }
 
-function proposalRoute(path: string): { readonly id: string; readonly step: string } | undefined {
+effect function proposalRoute(path: string) {
   const found = /^\/api\/client-devices\/proposals\/([^/]+)\/(decision|claim|receipt|reconciliation)$/.exec(path)
-  return found === null ? undefined : { id: decodeURIComponent(found[1] ?? ""), step: found[2] ?? "" }
+  if (found === null) return undefined
+  const id = Effect.try(() => decodeURIComponent(found[1] ?? "")) catch () => undefined
+  return id === undefined ? undefined : { id, step: found[2] ?? "" }
 }
 
 const encoder = new TextEncoder()
@@ -76,7 +78,7 @@ export function fakeResident(seen: Seen, script: ResidentScript) {
       if (path === "/api/conversations" && method === "POST") return { status: 200, data: { conversation: { id: "c1", roomId: "r1" } } }
       if (path === "/api/conversations") return { status: 200, data: { conversations: [{ id: "c1", roomId: "r1" }] } }
       if (path === "/api/client-devices/proposals") return script.listingStatus === undefined ? { status: 200, data: { proposals: script.proposals } } : { status: script.listingStatus, data: {} }
-      const step = proposalRoute(path)
+      const step = try proposalRoute(path)
       if (step !== undefined) {
         const digest = (body as { readonly digest?: string } | undefined)?.digest ?? ""
         const execution = { attemptId: `attempt-${step.id}`, dispatchStartedAt: "2026-11-22T00:00:00.000Z", providerIdempotencyKey: step.id }
@@ -185,7 +187,7 @@ export function assistNative(origin: "assist" | "listener" | "system" | "power")
     available: (plugin: string) => succeed(plugin === "DailyApps"),
     invoke: (plugin: string, method: string) => fail(new NativeUnavailable({ plugin, method })),
     listen: (plugin: string, event: string) => plugin === "DailyApps" && event === "assistantInvoked"
-      ? Stream.make<unknown>({ origin })
+      ? Stream.make({ origin })
       : Stream.fail(new NativeUnavailable({ plugin, method: event })),
   })
 }
@@ -411,6 +413,6 @@ export function assistantWith<P>(ports: Layer.Layer<P>, resident: Layer.Layer<Re
 }
 
 /** The assistant over the fakes, with its stores in memory and the shell's navigation on Home. */
-export function assistantOver(resident: Layer.Layer<Resident>, host: Layer.Layer<AssistantHost | AssistantEmail>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false }), control: Layer.Layer<ResidentControl | ResidentRecovery> = fakeResidentControl(), latency: Layer.Layer<Latency> = fakeLatency()) {
+export function assistantOver(resident: Layer.Layer<Resident>, host: ReturnType<typeof fakeHost>, executors: Layer.Layer<DeviceExecutors>, native: Layer.Layer<Native> = noNative, preferences: Layer.Layer<Preferences> = fakePreferences({ asks: false, shares: false }), control: Layer.Layer<ResidentControl | ResidentRecovery> = fakeResidentControl(), latency: Layer.Layer<Latency> = fakeLatency()) {
   return Layer.provideMerge(layer, Layer.mergeAll(fakeFeeds(), fakeComms(), resident, control, host, executors, native, memoryStore, preferences, fakeNavigation(), latency))
 }

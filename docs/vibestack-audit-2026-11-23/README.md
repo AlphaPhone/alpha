@@ -25,7 +25,9 @@ checked it against the tree it will ship from.
   auditor did not cover.
 - Skeptic pass: a second reader tried to refute each gap and appended `## Skeptic verdicts`. The
   pass was cut short by a usage limit, so only the files marked below have it.
-- The second coverage round (each file's "Not covered" list) did not run.
+- Second round: each file's "Not covered" list was audited against the same heads.
+  [`REGISTER-round2.md`](REGISTER-round2.md) holds its blockers, live rows, recorded rows and what is still not covered;
+  [`REGISTER-round2-closed.md`](REGISTER-round2-closed.md) holds the rows that need no work.
 - Recheck: every gap was read again against the `vibestack` heads of 2026-11-23 and given a current status.
   [`REGISTER.md`](REGISTER.md) holds what is still live, [`REGISTER-recorded.md`](REGISTER-recorded.md) what is open and
   already in the open-items doc, and [`REGISTER-closed.md`](REGISTER-closed.md) what was fixed, refuted or retired.

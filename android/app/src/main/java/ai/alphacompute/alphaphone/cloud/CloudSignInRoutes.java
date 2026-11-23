@@ -10,12 +10,16 @@ import java.util.Set;
  */
 public final class CloudSignInRoutes {
  private CloudSignInRoutes() {}
- /** Readiness reads: service document, App Auth registration and Steward providers. */
- public static final Set<String> READS = Set.of("/api/public/service", "/api/v1/app-auth/mobile/config", "/steward/auth/providers", "/steward/auth/oauth/google/authorize", "/api/v1/app-auth/mobile/google");
- public static final Set<String> WRITES = Set.of(CloudSmsCode.SEND_PATH, CloudSmsCode.VERIFY_PATH, CloudEmailCode.SEND_PATH, CloudEmailCode.VERIFY_PATH,
+ /** Readiness reads: service document, App Auth registration, Steward providers, and each wire's browser Google authorize. */
+ public static final Set<String> READS = union(Set.of("/api/public/service", "/api/v1/app-auth/mobile/config", "/steward/auth/providers", "/steward/auth/oauth/google/authorize", "/api/v1/app-auth/mobile/google"),
+  CloudAuthWire.ELIZA_AUTH_READS);
+ public static final Set<String> WRITES = union(Set.of(CloudSmsCode.SEND_PATH, CloudSmsCode.VERIFY_PATH, CloudEmailCode.SEND_PATH, CloudEmailCode.VERIFY_PATH,
   "/steward/auth/oauth/exchange", "/steward/auth/oauth/google/native/challenge", "/steward/auth/oauth/google/native/verify", "/api/v1/app-auth/mobile/google", "/api/v1/eliza/google/connect/native",
   "/steward/auth/mfa/totp/complete", "/steward/auth/mfa/sms/complete", "/steward/auth/logout",
-  "/api/v1/app-auth/connect", "/api/v1/app-auth/mobile/token", "/api/v1/app-auth/mobile/ack", CloudKeyRenewal.PATH);
+  "/api/v1/app-auth/connect", "/api/v1/app-auth/mobile/token", "/api/v1/app-auth/mobile/ack", CloudKeyRenewal.PATH), CloudAuthWire.ELIZA_AUTH_WRITES);
+ private static Set<String> union(Set<String> first, Set<String> second) {
+  java.util.Set<String> all = new java.util.HashSet<>(first); all.addAll(second); return java.util.Collections.unmodifiableSet(all);
+ }
  public static final String SELF_REVOCATION = "/api/v1/api-keys/current";
 
  /** GETs carry no body; every POST carries a JSON body. */

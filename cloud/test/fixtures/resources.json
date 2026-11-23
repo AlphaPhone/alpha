@@ -2,13 +2,13 @@
   "production": {
     "workerName": "alpha-test-api",
     "accountId": "0123456789abcdef0123456789abcdef",
-    "zone": "alphacompute.cc",
+    "zone": "alphaphone.dev",
     "hyperdriveId": "fedcba9876543210fedcba9876543210"
   },
   "staging": {
     "workerName": "alpha-test-api-staging",
     "accountId": "0123456789abcdef0123456789abcdef",
-    "zone": "alphacompute.cc",
+    "zone": "alphaphone.dev",
     "hyperdriveId": "00000000000000000000000000000011"
   }
 }

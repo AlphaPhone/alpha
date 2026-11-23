@@ -31,7 +31,7 @@
     "android:deps:write-verification": "node scripts/gradle-verification.ts --write",
     "test:android:instrumentation": "node --conditions=eliza-source --import vibelang/register scripts/android-instrumentation.ts",
     "aosp:stage": "node --conditions=eliza-source --import vibelang/register scripts/stage-aosp.ts",
-    "agent:bundle": "node --conditions=eliza-source --import vibelang/register scripts/build-agent-bundle.ts",
+    "agent:bundle": "pnpm -s build:upstream @elizaos/os @elizaos/plugin-calendar && node --conditions=eliza-source --import vibelang/register scripts/build-agent-bundle.ts",
     "agent:build-workflow-worker": "node --conditions=eliza-source --import vibelang/register scripts/build-workflow-worker.ts",
     "agent:stage-android": "node --conditions=eliza-source --import vibelang/register scripts/stage-agent-runtime.ts",
     "agent:build-embedding-host": "node scripts/build-embedding-host.ts",
@@ -73,6 +73,7 @@
     "turbo": "catalog:",
     "typescript": "catalog:",
     "vibelang": "0.0.13",
+    "vibelang-runtime": "0.0.13",
     "vibestack": "workspace:*",
     "vite": "catalog:",
     "yaml": "2.9.1"

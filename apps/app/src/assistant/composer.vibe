@@ -100,7 +100,7 @@ export const composerLayer = Layer.effect(Composer, effect {
   let acting = 0
   let ownKey: string | undefined
   let dictated: { readonly text: string; readonly binding: string } | undefined
-  const quiet = <E>(work: Effect.Effect<unknown, E>) => map(work, () => true) catch () => false
+  const quiet = <E>(work: Effect.Effect<unknown, E>) => Effect.match(work, { onSuccess: () => true, onFailure: () => false })
 
   effect function rows(change: (rows: readonly Row[]) => readonly Row[]) {
     try SubscriptionRef.update(transcript, (t) => ({ ...t, rows: collapseSystemNotices(change(t.rows)) }))
@@ -113,7 +113,8 @@ export const composerLayer = Layer.effect(Composer, effect {
     const key = JSON.stringify([identity.origin, identity.owner, identity.agent, identity.session])
     if (session?.key === key) return session
     if (session !== undefined) {
-      promise(() => session?.controller.reset() ?? Promise.resolve()) catch () => undefined
+      const previous = session.controller
+      promise(() => previous.reset()) catch () => undefined
       try quiet(sends.send({ type: "sessionSwitch" }))
       try quiet(client.send({ type: "detach", keepConsumed: false }))
       try quiet(stopped.send({ type: "agentChanged" }))
@@ -160,7 +161,7 @@ export const composerLayer = Layer.effect(Composer, effect {
       if (try quiet(stopped.send({ type: "restoredUnanswered" }))) try check(conversation, last.clientMessageId)
     }
   }
-  effect function expireLater(card: ProposalCard) {
+  effect function expireLater(card: ProposalCard): void!! {
     const now = try Clock.currentTimeMillis
     try sleep(Math.min(timerCeilingMs, Math.max(0, card.expiresAt - now + 1)))
     const rowsNow = (try SubscriptionRef.get(transcript)).rows
@@ -296,6 +297,8 @@ export const composerLayer = Layer.effect(Composer, effect {
       return false
     }
     const attempt = sendsBefore.nextId
+    // Start the peer's status check alongside the send's local preparation.
+    const peering = fork host.peer()
     ownKey = undefined
     const bound = try quiet(client.send({ type: "send" }))
     const unbind = () => effect { if (bound) try quiet(client.send({ type: "sendFailed" })) }
@@ -309,9 +312,10 @@ export const composerLayer = Layer.effect(Composer, effect {
     try quiet(stopped.send({ type: "sendStart" }))
     try stoppedNotice()
     let conversation = (try SubscriptionRef.get(transcript)).conversation
-    if (aimed?.kind === "edit" && conversation !== null) {
+    const sourceConversation = conversation
+    if (aimed?.kind === "edit" && sourceConversation !== null) {
       try quiet(drafts.send({ type: "edit", text: [] }))
-      const forked = conversations.branch(conversation, aimed.messageId, aimed.requestId, aimed.text) catch () => undefined
+      const forked = conversations.branch(sourceConversation, aimed.messageId, aimed.requestId, aimed.text) catch () => undefined
       if (forked === undefined) {
         try quiet(sends.send({ type: "transportCall", id: attempt }))
         try quiet(sends.send({ type: "transportRefuses", id: attempt }))
@@ -332,15 +336,15 @@ export const composerLayer = Layer.effect(Composer, effect {
     }
     const screen = try host.screen()
     const observed = observes(screen.exposure)
-    const peer = try host.peer()
-    const place = try location.forTurn(observed, peer.takesLocation)
     const asksFirst = try preferences.asksBeforeActions()
     try sources.preferReview(asksFirst)
-    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const notesList = observed && screen.observation.view === "notes" && screen.observation.selectedObject === undefined ? try sources.notesList() : undefined
     const browserTab = observed && screen.observation.view === "browser" && screen.observation.selectedObject === undefined ? try pages.selected() : undefined
     const mapsShown = observed && screen.observation.view === "maps" && screen.observation.selectedObject === undefined ? try maps.shown() : undefined
     const mapsNamed = namesMaps(observed, screen.observation.view === "maps", screen.observation.selectedObject !== undefined, shownKindOf(mapsShown)) ? mapsShown : undefined
+    const peer = try join peering
+    const place = try location.forTurn(observed, peer.takesLocation)
+    const day = sendsDay(observed, screen.onCalendar, { compared: peer.optionalFields, declaresLocation: peer.takesLocation }) ? try sources.calendarDay() : undefined
     const zone = Effect.try(() => Intl.DateTimeFormat().resolvedOptions().timeZone) catch () => undefined
     const observation = observed ? {
       ...screen.observation,

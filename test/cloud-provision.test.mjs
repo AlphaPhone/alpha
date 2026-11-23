@@ -4,26 +4,28 @@ import os from 'node:os';
 import path from 'node:path';
 import {spawnSync} from 'node:child_process';
 import test from 'node:test';
+import {ALPHA_CLOUD_DEPLOYMENT} from '../scripts/cloud-deployment-policy.ts';
 import {reconcileCloudResources,writeProvisionedResources} from '../scripts/cloud-provision.ts';
 
 const resources = JSON.parse(fs.readFileSync(new URL('../cloud/resources.json', import.meta.url), 'utf8'));
-const policy = JSON.parse(fs.readFileSync(new URL('../cloud/policy.json', import.meta.url), 'utf8'));
 const id = digit => digit.repeat(32);
 const accountId = id('a'), zoneId = id('b'), kvId = id('c'), hyperId = id('d');
-const apiHost = new URL(policy.staging.api).host;
-const inputs = {ids: resources.staging, sibling: resources.production, apiHost, accountId,
+const apiHost = new URL(ALPHA_CLOUD_DEPLOYMENT.staging.api).host;
+const webHost = new URL(ALPHA_CLOUD_DEPLOYMENT.staging.web).host;
+const inputs = {ids: resources.staging, sibling: resources.production, apiHost, webHost, accountId,
   databaseUrl: 'postgresql://fixture%2Duser:fixture%40password@db.example.invalid/alpha%2Dfixture?sslmode=require', token: 'synthetic-cloudflare-token'};
 const origin = {host: 'db.example.invalid', port: 5432, database: 'alpha-fixture', user: 'fixture-user', scheme: 'postgresql'};
 const zone = {id: zoneId, name: inputs.ids.zone, account: {id: accountId}};
 const kv = {id: kvId, title: `${inputs.ids.workerName}-cache`, supports_url_encoding: true};
-const hyperdrive = {id: hyperId, name: `${inputs.ids.workerName}-db`, origin};
+const hyperdrive = {id: hyperId, name: `${inputs.ids.workerName}-db`, origin, caching: {disabled: true}};
 const bucket = {name: inputs.ids.r2Bucket, creation_date: '2026-01-01T00:00:00Z', location: 'ENAM', storage_class: 'Standard'};
 const dnsRow = name => ({id: name === apiHost ? id('e') : id('f'), name, type: 'AAAA', content: '100::', proxied: true});
+const domain = (hostname, service) => ({id: hostname === apiHost ? id('7') : id('8'), hostname, service, environment: 'production', zone_id: zoneId});
 const known = {...inputs.ids, accountId, kvNamespaceId: kvId, hyperdriveId: hyperId};
 
 function cloudflareFixture({existing = false} = {}) {
   const state = {zone, kv: existing ? [kv] : [], hyper: existing ? [hyperdrive] : [],
-    bucket: existing ? bucket : null, dns: existing ? [dnsRow(apiHost), dnsRow(inputs.ids.blobHost)] : []};
+    bucket: existing ? bucket : null, dns: existing ? [dnsRow(inputs.ids.blobHost)] : [], domains: []};
   const writes = [], reads = [], onWrite = new Map();
   const ok = (result, extra = {}) => Response.json({success: true, errors: [], messages: [], result, ...extra});
   const error = (status, code) => Response.json({success: false, errors: [{code, message: inputs.databaseUrl}], result: null}, {status});
@@ -59,7 +61,7 @@ function cloudflareFixture({existing = false} = {}) {
         return onWrite.get('kv')?.(create, error) ?? create();
       }
       if (path.endsWith('/hyperdrive/configs')) {
-        assert.deepEqual(body, {name: hyperdrive.name, origin: {...origin, password: 'fixture@password'}});
+        assert.deepEqual(body, {name: hyperdrive.name, origin: {...origin, password: 'fixture@password'}, caching: {disabled: true}});
         const create = () => { state.hyper.push(hyperdrive); return ok(hyperdrive); };
         return onWrite.get('hyper')?.(create, error) ?? create();
       }
@@ -69,7 +71,7 @@ function cloudflareFixture({existing = false} = {}) {
         return onWrite.get('bucket')?.(create, error) ?? create();
       }
       if (path.endsWith('/dns_records')) {
-        assert.ok([apiHost, inputs.ids.blobHost].includes(body.name));
+        assert.equal(body.name, inputs.ids.blobHost);
         assert.deepEqual(body, {name: body.name, type: 'AAAA', content: '100::', proxied: true, comment: 'Alpha Cloud Worker route'});
         const created = dnsRow(body.name);
         state.dns.push(created);
@@ -78,9 +80,15 @@ function cloudflareFixture({existing = false} = {}) {
     } else if (path.endsWith('/storage/kv/namespaces')) return paged(url, state.kv);
     else if (path.endsWith('/hyperdrive/configs')) return paged(url, state.hyper);
     else if (path.endsWith(`/r2/buckets/${bucket.name}`)) return state.bucket instanceof Response ? state.bucket.clone() : state.bucket ? ok(state.bucket) : error(404, 10006);
+    else if (path.endsWith('/workers/domains')) {
+      const hostname = url.searchParams.get('hostname');
+      assert.ok([apiHost, webHost].includes(hostname));
+      assert.equal(url.searchParams.get('zone_id'), zoneId);
+      return paged(url, state.domains.filter(row => row.hostname === hostname));
+    }
     else if (path.endsWith('/dns_records')) {
       const name = url.searchParams.get('name.exact');
-      assert.ok([apiHost, inputs.ids.blobHost].includes(name));
+      assert.ok([apiHost, webHost, inputs.ids.blobHost].includes(name));
       return paged(url, state.dns.filter(row => row.name === name));
     }
     throw new Error(`Unexpected synthetic Cloudflare request ${options.method} ${path}`);
@@ -93,12 +101,24 @@ test('provision and repeat reconcile the exact account, resource names, and data
   fixture.state.kv.push({id: id('1'), title: 'another-namespace'});
   const source = {...inputs, fetcher: fixture.fetcher, create: true};
   assert.deepEqual(await reconcileCloudResources(source), known);
-  assert.equal(fixture.writes.length, 5);
+  assert.equal(fixture.writes.length, 4);
   assert.ok(fixture.reads.some(([path, search]) => path.endsWith('/storage/kv/namespaces') && search.includes('page=2')));
   fixture.state.dns.push({id: id('3'), name: apiHost, type: 'TXT', content: 'fixture-verification'});
   assert.deepEqual(await reconcileCloudResources(source), known);
   assert.deepEqual(await reconcileCloudResources({...source, ids: known, create: false}), known);
-  assert.equal(fixture.writes.length, 5);
+  assert.equal(fixture.writes.length, 4);
+});
+
+test('preflight follows both Workers custom domains after deployment and admits the previous API placeholder', async () => {
+  const fixture = cloudflareFixture({existing: true});
+  const source = {...inputs, ids: known, fetcher: fixture.fetcher};
+  fixture.state.dns.push({...dnsRow(apiHost), comment: 'Alpha Cloud Worker route'});
+  assert.deepEqual(await reconcileCloudResources(source), known);
+  fixture.state.dns.pop();
+  fixture.state.dns.push({...dnsRow(apiHost), type: 'Worker'}, {...dnsRow(webHost), type: 'Worker'});
+  fixture.state.domains = [domain(apiHost, known.workerName), domain(webHost, known.workerName + '-edge')];
+  assert.deepEqual(await reconcileCloudResources(source), known);
+  assert.deepEqual(fixture.writes, []);
 });
 
 test('ambiguous create responses recover by exact readback without a second create', async () => {
@@ -107,7 +127,7 @@ test('ambiguous create responses recover by exact readback without a second crea
   fixture.onWrite.set('hyper', create => { create(); throw new Error(inputs.databaseUrl); });
   fixture.onWrite.set('bucket', (create, error) => { create(); return error(409, 10004); });
   assert.deepEqual(await reconcileCloudResources({...inputs, fetcher: fixture.fetcher, create: true}), known);
-  assert.equal(fixture.writes.length, 5);
+  assert.equal(fixture.writes.length, 4);
 });
 
 test('an unconfirmed R2 write fails without exposing provider text and resumes on the next run', async () => {
@@ -120,7 +140,7 @@ test('an unconfirmed R2 write fails without exposing provider text and resumes o
   assert.equal(fixture.writes.length, 3);
   fixture.onWrite.delete('bucket');
   assert.deepEqual(await reconcileCloudResources({...inputs, fetcher: fixture.fetcher, create: true}), known);
-  assert.equal(fixture.writes.length, 6);
+  assert.equal(fixture.writes.length, 5);
 });
 
 test('wrong authority, config collisions and missing preflight state fail before writes', async () => {
@@ -133,8 +153,13 @@ test('wrong authority, config collisions and missing preflight state fail before
     // one that collides is refused at its create receipt (the next test covers receipts).
     [() => {}, {sibling: {...inputs.sibling, hyperdriveId: hyperId}}, /Conflicting Hyperdrive identity/, 'existing only'],
     [fixture => { fixture.state.hyper = [{...hyperdrive, origin: {...origin, database: 'wrong'}}]; }, {}, /Hyperdrive origin/],
+    [fixture => { fixture.state.hyper = [{...hyperdrive, caching: {disabled: false}}]; }, {}, /Hyperdrive query caching must be disabled/],
     [fixture => { fixture.state.bucket = fixture.error(401, 10000); }, {}, /R2 lookup failed \(HTTP 401\)/],
-    [fixture => { fixture.state.dns[0] = {...dnsRow(apiHost), proxied: false}; }, {}, /Conflicting DNS record/],
+    [fixture => { fixture.state.dns.push(dnsRow(apiHost)); }, {}, /Conflicting DNS record/],
+    [fixture => { fixture.state.dns.push({...dnsRow(webHost), type: 'CNAME', content: 'other.pages.dev'}); }, {}, /Conflicting DNS record/],
+    [fixture => { fixture.state.domains = [domain(apiHost, 'another-worker')]; }, {}, /Conflicting Worker custom domain/],
+    [fixture => { fixture.state.domains = [{...domain(webHost, known.workerName + '-edge'), environment: 'another-environment'}]; }, {}, /Conflicting Worker custom domain/],
+    [() => {}, {webHost: 'outside.example'}, /not in zone/],
     // With nothing provisioned, the recorded IDs no longer name anything: still refused before any write.
     [fixture => { fixture.state.bucket = null; }, {create: false, ids: known}, /resources are missing/, null, /recorded KV namespace ID does not match/],
     [() => {}, {create: false}, /Record the selected account/],
@@ -194,10 +219,11 @@ test('the preflight command checks the env file origin using only scoped reads',
           [`/client/v4/accounts/${accountId}/storage/kv/namespaces`]: [kv],
           [`/client/v4/accounts/${accountId}/hyperdrive/configs`]: [hyperdrive],
           [`/client/v4/accounts/${accountId}/r2/buckets/${known.r2Bucket}`]: bucket,
+          [`/client/v4/accounts/${accountId}/workers/domains`]: [],
         })};
         const name = url.searchParams.get('name.exact');
-        const dns = ${JSON.stringify({[apiHost]: dnsRow(apiHost), [known.blobHost]: dnsRow(known.blobHost)})};
-        const result = url.pathname === '/client/v4/zones/${zoneId}/dns_records' ? [dns[name]] : responses[url.pathname];
+        const dns = ${JSON.stringify({[known.blobHost]: [dnsRow(known.blobHost)], [apiHost]: [], [webHost]: []})};
+        const result = url.pathname === '/client/v4/zones/${zoneId}/dns_records' ? dns[name] : responses[url.pathname];
         if (!result) throw new Error('unexpected request path');
         return Response.json({success: true, result});
       };`);
@@ -207,8 +233,8 @@ test('the preflight command checks the env file origin using only scoped reads',
     }});
     const admitted = run();
     assert.equal(admitted.status, 0, admitted.stderr);
-    assert.match(admitted.stdout, /resource ownership verified for staging/);
-    assert.equal(fs.readFileSync(trace, 'utf8').trim().split('\n').length, 6);
+    assert.match(admitted.stdout, /preflight: staging resources verified/);
+    assert.equal(fs.readFileSync(trace, 'utf8').trim().split('\n').length, 9);
     fs.writeFileSync(envFile, 'DATABASE_URL=postgresql://fixture:synthetic@wrong.example.invalid/cloud\n');
     const refused = run();
     assert.equal(refused.status, 1);

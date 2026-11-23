@@ -20,8 +20,8 @@ describe("Alpha Cloud's Wrangler configuration", () => {
     const rendered = try renderEnvironment(templates, profile, "production", testResources.production, operatorInputs.production, client)
     const api = rendered.api as { name: string; assets?: { directory: string }; routes: ReadonlyArray<{ pattern: string }>; vars: Record<string, string> }
     const edge = rendered.edge as { name: string; routes: ReadonlyArray<{ pattern: string }>; services?: ReadonlyArray<{ binding: string; service: string }>; vars: Record<string, string> }
-    try check(() => assert.strictEqual(api.routes[0]?.pattern, "api.alphacompute.cc"))
-    try check(() => assert.strictEqual(edge.routes[0]?.pattern, "cloud.alphacompute.cc"))
+    try check(() => assert.strictEqual(api.routes[0]?.pattern, "api.alphaphone.dev"))
+    try check(() => assert.strictEqual(edge.routes[0]?.pattern, "cloud.alphaphone.dev"))
     try check(() => assert.strictEqual(api.vars.CLOUD_IDENTITY_DIGEST, operatorInputs.production.databaseIdentity))
     try check(() => assert.strictEqual(api.vars.CLOUD_PROFILE, undefined))
     try check(() => assert.strictEqual(rendered.profile, JSON.stringify(profile)))
@@ -48,6 +48,6 @@ describe("Alpha Cloud's Wrangler configuration", () => {
     // spec/cloud/deployment.md, "Story: Answer only the deployment's own callers"
     try check(() => assert.deepStrictEqual(fillTemplate({ vars: "{{vars}}", name: "x-{{name}}" }, { vars: { A: "1" }, name: "y" }), { vars: { A: "1" }, name: "x-y" }))
     try check(() => assert.strictEqual(leakedElizaHost("https://api.eliza.app/x"), "api.eliza.app"))
-    try check(() => assert.strictEqual(leakedElizaHost("https://api.alphacompute.cc"), undefined))
+    try check(() => assert.strictEqual(leakedElizaHost("https://api.alphaphone.dev"), undefined))
   })
 })

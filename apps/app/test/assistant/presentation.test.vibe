@@ -1,10 +1,10 @@
 // spec/assistant/reply.md, "Story: Understand why a reply did not finish"; spec/assistant/receipts.md, "Story: Hear what my actions actually did"; spec/assistant/receipts.md, "Story: Settle an action whose outcome is unknown"; spec/assistant/approvals.md, "Story: See what my agent asked for after a restart"; spec/assistant/review.md, "Story: Act only on what I asked for"; spec/assistant/context.md, "Story: Know when my words leave the phone"
 import { assert, it } from "@effect/vitest"
-import { mayExecute } from "../../gen/assistant__approvals.ts"
-import { disclosed } from "../../gen/assistant__context.ts"
-import { admitted, attributed, cutOffLabel, titleOf } from "../../gen/assistant__receipts.ts"
-import { offersManagePlan, refusedBeforeOutput } from "../../gen/assistant__reply.ts"
-import { contradicts } from "../../gen/assistant__review.ts"
+import { mayExecute } from "../../gen/assistant__approvals.effect.vibe"
+import { disclosed } from "../../gen/assistant__context.effect.vibe"
+import { admitted, attributed, cutOffLabel, titleOf } from "../../gen/assistant__receipts.effect.vibe"
+import { offersManagePlan, refusedBeforeOutput } from "../../gen/assistant__reply.effect.vibe"
+import { contradicts } from "../../gen/assistant__review.effect.vibe"
 import { browserCommand, ownPhotoRequest, targetOf, writtenNumbers } from "../../src/assistant/grounding.vibe"
 import { StoredSuggestion } from "../../src/assistant/payloads.schema.vibe"
 import { actionResultText, copy, cutOffText, failureKindOf, failureText, receiptTitle, unsyncedSummary } from "../../src/assistant/presentation.vibe"
@@ -26,7 +26,7 @@ it.effect("At most five reply notices of at most 500 characters reach the transc
 })
 
 it.effect("Hear what my actions actually did (spec/assistant/receipts.md, \"An action's result in a turn is its latest receipt from that turn, and a success is never replaced by a later failure\")", () => effect {
-  const result = attributed([{ turn: 1, action: 1, result: "Failed" }, { turn: 1, action: 1, result: "Applied" }, { turn: 1, action: 1, result: "Failed" }, { turn: 2, action: 1, result: "Failed" }], 1, 1)
+  const result = attributed([{ turn: 1, actionId: 1, result: "Failed" }, { turn: 1, actionId: 1, result: "Applied" }, { turn: 1, actionId: 1, result: "Failed" }, { turn: 2, actionId: 1, result: "Failed" }], 1, 1)
   try Effect.try(() => assert.deepStrictEqual(
     {
       result, title: receiptTitle(titleOf(result)), unknown: receiptTitle(titleOf("Unknown")),

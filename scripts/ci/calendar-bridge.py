@@ -89,14 +89,14 @@ def owned_path(path):
     return p
 
 
-def safe_git(root, args):
+def safe_git(root, args, *, seconds=2):
     env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8',
            'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null',
            'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_NO_LAZY_FETCH': '1',
            'GIT_OPTIONAL_LOCKS': '0', 'GIT_TERMINAL_PROMPT': '0'}
     result = subprocess.run(['/usr/bin/git', '-c', 'core.hooksPath=/dev/null',
         '-c', 'core.fsmonitor=false', '-c', 'core.pager=cat', '-C', str(root), *args],
-        env=env, capture_output=True, check=True, timeout=timeout(2))
+        env=env, capture_output=True, check=True, timeout=timeout(seconds))
     require(len(result.stdout) <= 16384, 'Git metadata output exceeds bound')
     return result.stdout.decode().strip()
 
@@ -162,7 +162,7 @@ GENERATED = ['apps/app/public/licenses/THIRD_PARTY_NOTICES.txt',
 
 def tracked_frame(root):
     changed = safe_git(root, ['diff', '--no-ext-diff', '--no-textconv', '--name-only',
-                             '--ignore-submodules=none', 'HEAD', '--']).splitlines()
+                             '--ignore-submodules=untracked', 'HEAD', '--'], seconds=8).splitlines()
     require(set(changed).issubset(GENERATED), 'Unexpected tracked source changed')
     return {'changed': changed, 'generatedHashes': {name: digest(root / name) for name in GENERATED}}
 

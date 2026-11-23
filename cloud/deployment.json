@@ -34,12 +34,12 @@
   },
   "alphaCloudHosts": {
     "production": {
-      "api": "https://api.alphacompute.cc",
-      "web": "https://cloud.alphacompute.cc"
+      "api": "https://api.alphaphone.dev",
+      "web": "https://cloud.alphaphone.dev"
     },
     "staging": {
-      "api": "https://api-staging.alphacompute.cc",
-      "web": "https://cloud-staging.alphacompute.cc"
+      "api": "https://api-staging.alphaphone.dev",
+      "web": "https://cloud-staging.alphaphone.dev"
     }
   }
 }

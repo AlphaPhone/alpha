@@ -31,8 +31,8 @@ public final class CloudSignInFlow {
  public static final long RESEND_COOLDOWN_MS = 30 * 1000L;
  /** Wrong codes allowed per attempt before it ends; a new code starts a new attempt. */
  public static final int MAX_VERIFY_ATTEMPTS = 5;
- /** Errors a return may carry (shared callback contract errorAllowlist). */
- public static final java.util.Set<String> RETURN_ERRORS = java.util.Set.of("app_link_unverified", "mfa_required",
+ /** Errors a return may carry (shared callback contract errorAllowlist, plus the Vibestack Cloud's Google-denied `access_denied`). */
+ public static final java.util.Set<String> RETURN_ERRORS = java.util.Set.of("app_link_unverified", "mfa_required", "access_denied",
   "oauth_authentication_failed", "oauth_authorization_failed", "oauth_callback_incomplete", "oauth_identity_incomplete",
   "oauth_login_disabled", "oauth_profile_fetch_failed", "oauth_provider_mismatch", "oauth_provider_unavailable",
   "oauth_provider_unknown", "oauth_redirect_invalid", "oauth_state_consumed", "oauth_state_expired", "oauth_state_invalid",

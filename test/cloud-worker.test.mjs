@@ -41,11 +41,17 @@ test('secrets: internal ones are generated once and never rotated, and a frozen 
  assert.deepEqual(secretProblems({...complete,DATABASE_URL:'mysql://db.internal/alpha'},environment),['DATABASE_URL must be a postgres:// URL']);
  assert.deepEqual(secretProblems({...complete,CLOUD_SEALING_KEY:'short'},environment),['CLOUD_SEALING_KEY must hold at least 32 bytes']);
  assert.deepEqual(secretProblems({...complete,RESEND_API_KEY:'https://api.eliza.app/key'},environment),['RESEND_API_KEY names a deployed Eliza Cloud host']);
- // The Worker gets exactly its own names, the inference key under the Worker's name.
- const worker=workerSecrets(complete);
+ // The canonical profile and legacy Worker routes both need inference credentials.
+ const worker=workerSecrets({...complete,STRIPE_PUBLISHABLE_KEY:'pk_test_x',UNRELATED_KEY:'x'});
  assert.deepEqual(Object.keys(worker).sort(),Object.keys(WORKER_SECRET_SOURCE).sort());
+ const canonical=[
+  'CLOUD_DIGEST_KEY','CLOUD_SEALING_KEY','CLOUD_ENTITLEMENT_KEY','RESEND_API_KEY','GOOGLE_CLIENT_SECRET',
+  'STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','CEREBRAS_API_KEY','CARTESIA_API_KEY','GOOGLE_MAPS_API_KEY',
+ ];
+ for(const name of canonical)assert.equal(worker[name],complete[name],name);
  assert.equal(worker.INFERENCE_API_KEY,operator.CEREBRAS_API_KEY);
- for(const name of ['DATABASE_URL','CLOUD_SEALING_KEY','CLOUD_DIGEST_KEY','CLOUD_ENTITLEMENT_KEY'])assert.equal(worker[name],undefined,name);
+ for(const name of ['DATABASE_URL','STRIPE_PUBLISHABLE_KEY','UNRELATED_KEY'])assert.equal(worker[name],undefined,name);
+ for(const name of GENERATED_SECRETS)assert.deepEqual(secretProblems({...complete,[name]:''},environment),[`${name} is missing`]);
 });
 
 test('the secrets file must be private and outside the checkout',t=>{
