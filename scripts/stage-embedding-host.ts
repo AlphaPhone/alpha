@@ -4,10 +4,9 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,verifyNativeJava} from './embedding-native-contract.ts';
+import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeEngineLockPath,readNativeEngineLock,nativeBinding,nativeInputs,nativeGenerated,verifyNativeJava} from './embedding-native-contract.ts';
 import {readNativeBuildReceipt} from './native-build-inputs.ts';
 import {ANDROID_ABIS} from './android-abis.ts';
-import {ENGINE_LOCK,pinnedEngine} from './paradee-runtime.ts';
 const root=path.resolve(import.meta.dirname,'..');
 const sha=(value: string | Buffer)=>createHash('sha256').update(value).digest('hex');
 const hash=(file: string)=>sha(fs.readFileSync(file));
@@ -79,8 +78,9 @@ export function verifyEmbeddingInputs(productRoot: string,qualification: Embeddi
     if (sha(git('show', pin + ':' + row.path)) !== row.sha256) throw Error('Embedding producer input changed: ' + row.path);
    }
   }
-  git('diff','--quiet','HEAD','--',...inputPaths,ENGINE_LOCK.replace(/^vendor\/eliza\//,''));
-  if(pinnedEngine(productRoot).commit!==qualification.forkPin)throw Error('Native engine pin changed');
+  git('diff','--quiet','HEAD','--',...inputPaths,nativeEngineLockPath);
+  const fork=readNativeEngineLock(source(nativeEngineLockPath)).commit;
+  if(fork!==qualification.forkPin)throw Error('Native engine lock changed');
   for(const row of inputs){
    const source=git('show',pin+':'+row.path);
    const generated=nativeGenerated(row.path,source.toString('utf8'),identity,binding);

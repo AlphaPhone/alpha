@@ -6,9 +6,8 @@ import os from 'node:os';
 import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync,spawn,spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
-import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeBinding,nativeInputs,nativeGenerated,verifyNativeSymbols} from './embedding-native-contract.ts';
+import {embeddingAbiLibraries,embeddingProducerInputPaths,nativeInputPaths,nativeJavaPath,nativeModule,nativeEngineLockPath,readNativeEngineLock,nativeBinding,nativeInputs,nativeGenerated,verifyNativeSymbols} from './embedding-native-contract.ts';
 import {ANDROID_ABIS} from './android-abis.ts';
-import {pinnedEngine} from './paradee-runtime.ts';
 
 export const NATIVE_BUILD_RECEIPT = '.eliza/native-inputs/receipt.json';
 export const NATIVE_BUILD_REQUIREMENTS = 'android/embedding-host/native-requirements.txt';
@@ -35,16 +34,18 @@ export function nativeRecipe(root:string) {
   const vendor=path.join(root,'vendor/eliza'),pin=json(root,'upstream.lock.json').commit;
   const git=(...args:string[])=>execFileSync('git',['-C',vendor,...args],{encoding:'utf8',maxBuffer:16*1024*1024}).trim();
   if(!/^[a-f0-9]{40}$/.test(pin)||git('rev-parse','HEAD')!==pin)throw Error('Native producer requires the locked SDK checkout');
-  // Trees include the complete upstream producer module closure, model recipes and Java/JNI inputs.
-  const sources=[...new Set([...embeddingProducerInputPaths,...nativeInputPaths,nativeJavaPath,'packages/os/android/local-inference/scripts','pnpm-lock.yaml','packages/os/android/local-inference/engine.lock.json','packages/os/android/local-inference/scripts/build-native.ts','packages/os/android/local-inference/scripts/build-phonon2-gguf.ts','packages/os/android/local-inference','packages/os/android/local-inference/voice-model-versions.json'])].sort();
+  const sources=[...new Set([...embeddingProducerInputPaths,...nativeInputPaths,nativeJavaPath,nativeModule])].sort();
+  git('diff','--quiet','HEAD','--',...sources);
+  const engine=readNativeEngineLock(git('show',`${pin}:${nativeEngineLockPath}`));
+  const toolchain=json(root,'android/embedding-host/build-toolchain.json');
+  if(toolchain.engineRepository!==engine.repository||toolchain.ndk!==engine.ndk)throw Error('The SDK native engine or toolchain does not match the reviewed product configuration');
+  const engineCommit=engine.commit;
   const ids=git('rev-parse',...sources.map(name=>`${pin}:${name}`)).split('\n');
   const sourceTrees=Object.fromEntries(sources.map((name,index)=>[name,ids[index]]));
-  git('diff','--quiet','HEAD','--',...sources);
-  const engineCommit=pinnedEngine(root).commit;
   const inputFiles=['app.config.json','android/consumer-host.json','android/embedding-host/build-toolchain.json',NATIVE_BUILD_REQUIREMENTS,'android/embedding-host/bootstrap-requirements.txt','android/paradee-voice/asr-inputs.json','scripts/build-embedding-host.ts','scripts/prepare-embedding-host.ts','scripts/embedding-native-contract.ts','scripts/embedding-build-remap.ts','scripts/native-build-inputs.ts','scripts/android-identity.ts','scripts/android-stage-voice-models.ts','scripts/voice-host.ts','scripts/paradee-runtime.ts','scripts/android-abis.ts','scripts/copy-file-clone.ts','scripts/stage-embedding-host.ts'];
   const productInputs=Object.fromEntries(inputFiles.map(name=>[name,fileDigest(path.join(root,name))]));
   const voice=json(root,'android/voice-host/qualified-voice-host.json');
-  return {schema:'alpha-native-recipe/v1',identity:androidIdentity(root).appId,engineCommit,sourceTrees,productInputs,models:voice.models,asrSlot:voice.asrSlot,embeddingModel:json(root,'android/embedding-host/qualified-host.json').model,toolchain:json(root,'android/embedding-host/build-toolchain.json'),python:NATIVE_PYTHON};
+  return {schema:'alpha-native-recipe/v1',identity:androidIdentity(root).appId,engineCommit,sourceTrees,productInputs,models:voice.models,asrSlot:voice.asrSlot,embeddingModel:json(root,'android/embedding-host/qualified-host.json').model,toolchain,python:NATIVE_PYTHON};
 }
 export const nativeRecipeDigest=(recipe:ReturnType<typeof nativeRecipe>)=>bytesDigest(JSON.stringify(recipe));
 export function nativeCacheRoot() {return path.join(process.env.XDG_CACHE_HOME||path.join(os.homedir(),'.cache'),'alpha','native-inputs');}
@@ -171,7 +172,7 @@ export function verifyNativeFileBytes(root:string,files:NativeFile[]) {
 }
 /** Inspect executable structure separately from frozen-byte custody checks. */
 export function verifyNativeBuildLibraries(root:string,receipt:NativeBuildReceipt) {
-  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)('./os-ported/app/build-helpers/verify-fused-symbols.ts');
+  const {assertAndroidVoiceLibrary,minElfLoadAlignment}=createRequire(import.meta.url)(path.join(root,'vendor/eliza',nativeModule,'scripts/build-helpers/verify-fused-symbols.ts'));
   const sdk=nativeAndroidSdk();
   const prebuilt=path.join(sdk,'ndk',receipt.producer.ndk,'toolchains/llvm/prebuilt');
   const host=fs.readdirSync(prebuilt).find(name=>fs.existsSync(path.join(prebuilt,name,'bin/llvm-nm')));

@@ -5,15 +5,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
+import {nativeEngineLockPath} from '../scripts/embedding-native-contract.ts';
 import {verifyParadeeRuntime,verifyParadeeAppLinkage,PARADEE_SOURCE,PARADEE_NATIVE} from '../scripts/paradee-runtime.ts';
-function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'alpha-paradee-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return root;}
+function fixture(t){const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'alpha-paradee-')));const prior=process.env.ELIZA_INFERENCE_ENGINE_DIR;process.env.ELIZA_INFERENCE_ENGINE_DIR=path.join(root,'engine');t.after(()=>{if(prior===undefined)delete process.env.ELIZA_INFERENCE_ENGINE_DIR;else process.env.ELIZA_INFERENCE_ENGINE_DIR=prior;fs.rmSync(root,{recursive:true,force:true});});return root;}
 function write(root,name,value){const file=path.join(root,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,value);return {path:name,bytes:Buffer.byteLength(value),sha256:createHash('sha256').update(value).digest('hex')};}
 function ffi(root){
- const vendor=path.join(root,'vendor/eliza'),fork=path.join(vendor,'plugins/plugin-local-inference/native/llama.cpp');
- fs.mkdirSync(fork,{recursive:true});
+ const vendor=path.join(root,'vendor/eliza'),fork=path.join(root,'engine');
+ fs.mkdirSync(fork,{recursive:true});fs.mkdirSync(vendor,{recursive:true});
  const git=(directory,...args)=>execFileSync('git',['-C',directory,'-c','user.name=Fixture','-c','user.email=fixture@example.test',...args],{stdio:['ignore','pipe','pipe']}).toString().trim();
  git(fork,'init');write(fork,'tools/omnivoice/include/eliza-inference-ffi.h','// pinned header\n');git(fork,'add','.');git(fork,'commit','-m','ffi');
- const forkPin=git(fork,'rev-parse','HEAD');git(vendor,'init');git(vendor,'update-index','--add','--cacheinfo','160000,'+forkPin+',plugins/plugin-local-inference/native/llama.cpp');git(vendor,'commit','-m','pin');
+ const forkPin=git(fork,'rev-parse','HEAD');git(vendor,'init');const lock=JSON.parse(fs.readFileSync(path.join(import.meta.dirname,'../vendor/eliza',nativeEngineLockPath),'utf8'));lock.engine.commit=forkPin;write(vendor,nativeEngineLockPath,JSON.stringify(lock));git(vendor,'add',nativeEngineLockPath);git(vendor,'commit','-m','pin');
  write(root,'upstream.lock.json',JSON.stringify({commit:git(vendor,'rev-parse','HEAD')}));return {fork,git};
 }
 function complete(root){
@@ -26,7 +27,7 @@ function complete(root){
  const files=pins.map(row=>({...row,path:bundle+row.path}));files.push(write(native,bundle+'manifest.json',JSON.stringify(manifest)));
  for(const abi of ['arm64-v8a','x86_64'])files.push(write(native,`jniLibs/${abi}/libelizainference.so`,abi));
  const sourceCommit=JSON.parse(fs.readFileSync(path.join(root,'upstream.lock.json'))).commit;
- const nativeCommit=execFileSync('git',['-C',path.join(root,'vendor/eliza/plugins/plugin-local-inference/native/llama.cpp'),'rev-parse','HEAD'],{encoding:'utf8'}).trim();
+ const nativeCommit=execFileSync('git',['-C',path.join(root,'engine'),'rev-parse','HEAD'],{encoding:'utf8'}).trim();
  const record={sourceCommit,nativeCommit,inputs,abis:['arm64-v8a','x86_64'],files};write(native,'build-record.json',JSON.stringify(record));return {native,record,save:()=>write(native,'build-record.json',JSON.stringify(record))};
 }
 test('complete byte integrity never grants qualification; modified native and missing ASR pins fail',t=>{const root=fixture(t),{native}=complete(root);assert.deepEqual(verifyParadeeRuntime(root),{packaged:true,qualified:false});fs.unlinkSync(path.join(root,'android/paradee-voice/asr-inputs.json'));assert.throws(()=>verifyParadeeRuntime(root),/ASR/);write(root,'android/paradee-voice/asr-inputs.json','{"files":[]}');assert.throws(()=>verifyParadeeRuntime(root),/ASR/);write(native,'jniLibs/arm64-v8a/libelizainference.so','changed');assert.throws(()=>verifyParadeeRuntime(root),/input changed/);});
@@ -34,10 +35,10 @@ test('record path traversal and duplicate records cannot escape admission',t=>{c
 
 test('unrecorded packaged assets are rejected',t=>{const root=fixture(t),{native}=complete(root);write(native,'assets/paradee-voice/v1/extra.bin','unreviewed');assert.throws(()=>verifyParadeeRuntime(root),/Unrecorded/);});
 
-test('staged runtime requires an exact clean nested FFI checkout',t=>{const root=fixture(t);complete(root);const fork=path.join(root,'vendor/eliza/plugins/plugin-local-inference/native/llama.cpp'),header=path.join(fork,'tools/omnivoice/include/eliza-inference-ffi.h');
+test('staged runtime requires an exact clean locked FFI checkout',t=>{const root=fixture(t);complete(root);const fork=path.join(root,'engine'),header=path.join(fork,'tools/omnivoice/include/eliza-inference-ffi.h');
  const original=fs.readFileSync(header);fs.writeFileSync(header,'changed');assert.throws(()=>verifyParadeeRuntime(root),/FFI source/);fs.writeFileSync(header,original);
  fs.unlinkSync(header);assert.throws(()=>verifyParadeeRuntime(root),/FFI source/);fs.writeFileSync(header,original);
- const saved=fork+'-saved';fs.renameSync(fork,saved);fs.mkdirSync(fork);assert.throws(()=>verifyParadeeRuntime(root),/submodule update/);fs.rmdirSync(fork);fs.renameSync(saved,fork);
+ const saved=fork+'-saved';fs.renameSync(fork,saved);fs.mkdirSync(fork);assert.throws(()=>verifyParadeeRuntime(root),/pinned FFI source/);fs.rmdirSync(fork);fs.renameSync(saved,fork);
  execFileSync('git',['-C',fork,'-c','user.name=Fixture','-c','user.email=fixture@example.test','commit','--allow-empty','-m','wrong head'],{stdio:'pipe'});assert.throws(()=>verifyParadeeRuntime(root),/FFI source/);
 });
 

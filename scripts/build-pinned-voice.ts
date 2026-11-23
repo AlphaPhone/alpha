@@ -7,11 +7,12 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {upstreamNativeSource} from './upstream-native-source.ts';
 import {verifyParadeeFfi} from './paradee-runtime.ts';
+import {nativeVoiceBuilder,nativeModule} from './embedding-native-contract.ts';
 import {verifyPinnedUpstream} from './pinned-upstream-source.ts';
 
 const identity = (root: string) => {
   const source = upstreamNativeSource(root);
-  for (const prefix of ['packages/os/android/local-inference/scripts/build-native.ts', 'packages/os/android/local-inference/scripts/build-helpers', 'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts', 'packages/os/android/local-inference/inputs.json']) source.read(prefix);
+  for (const prefix of [nativeVoiceBuilder, `${nativeModule}/scripts`, `${nativeModule}/inputs.json`]) source.read(prefix);
   const pin = source.pin;
   const {forkPin} = verifyParadeeFfi(root);
   return {sourceCommit: pin, nativeCommit: forkPin};
@@ -21,7 +22,7 @@ type BuildRecord = Partial<Identity> & {files?: {path: string; bytes: number; sh
 export function buildPinnedVoice(root: string, args: string[], {
   readIdentity = identity,
   verifyUpstream = verifyPinnedUpstream,
-  run = (file: string, argv: string[]) => execFileSync(file, argv, {stdio: 'inherit'}),
+  run = (file: string, argv: string[], env?: NodeJS.ProcessEnv) => execFileSync(file, argv, {stdio: 'inherit',env}),
 } = {}) {
   const index = args.indexOf('--out');
   if (index < 0 || !args[index + 1] || args.filter(value => value === '--out').length !== 1 || args.some(value => value.startsWith('--out='))) throw Error('Provide exactly one --out <fresh directory>');
@@ -33,7 +34,8 @@ export function buildPinnedVoice(root: string, args: string[], {
   }
   if (fs.existsSync(output)) throw Error('Voice output must be a fresh directory');
   const before = readIdentity(root);
-  run(process.execPath, [path.join(root, 'vendor/eliza/packages/os/android/local-inference/scripts/build-native.ts'), ...args]);
+  const env = readIdentity === identity ? {...process.env,ELIZA_INFERENCE_ENGINE_DIR:verifyParadeeFfi(root).fork} : undefined;
+  run(process.execPath, [path.join(root, 'vendor/eliza', nativeVoiceBuilder), ...args], env);
   const after = readIdentity(root);
   const recordPath = path.join(output, 'build-record.json');
   if (JSON.stringify(before) !== JSON.stringify(after)) throw Error('Voice source changed during the build');

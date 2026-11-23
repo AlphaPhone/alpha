@@ -3,30 +3,43 @@
 export function embeddingAbiLibraries<T>(record: {abi:string; libraries:T[]; additionalAbis?:{abi:string; libraries:T[]}[]}) {
  return [{abi:record.abi,libraries:record.libraries},...(record.additionalAbis??[])];
 }
+export const nativeModule = 'packages/os/android/local-inference';
+export const nativeEngineLockPath = `${nativeModule}/engine.lock.json`;
+export const nativeVoiceBuilder = `${nativeModule}/scripts/build-native.ts`;
+export const nativeJniSource = `${nativeModule}/src/main/elizavoice-jni`;
+export const nativeEngineCheckout = 'engine';
+
+export function readNativeEngineLock(text: string) {
+ const lock=JSON.parse(text);
+ if(lock?.schema!==1||lock.engine?.repository!=='https://github.com/elizaOS/llama.cpp.git'||
+   typeof lock.engine.commit!=='string'||!/^[a-f0-9]{40}$/.test(lock.engine.commit)||lock.engine.commit==='0'.repeat(40)||
+   lock.engine.ffiInclude!=='tools/omnivoice/include'||lock.engine.library!=='libelizainference.so'||
+   typeof lock.toolchain?.ndk!=='string'||typeof lock.toolchain?.cmake!=='string'||
+   lock.jni?.source!=='src/main/elizavoice-jni'||lock.jni?.class!=='ai/eliza/voice/VoiceNative'||
+   lock.jni?.subset!=='full'||lock.jni?.library!=='paradeevoicejni')throw Error('Unexpected SDK native producer contract');
+ return {repository:lock.engine.repository as string,commit:lock.engine.commit as string,ndk:lock.toolchain.ndk as string,cmake:lock.toolchain.cmake as string};
+}
+
 export const embeddingProducerInputPaths=[
- "package.json",
- "packages/agent/package.json",
- "packages/os/android/local-inference/engine.lock.json",
- "packages/os/android/local-inference/inputs.json",
- "packages/os/android/local-inference/scripts/build-helpers/arm64-simd.ts",
- "packages/os/android/local-inference/scripts/build-helpers/elizavoice-build-flags.ts",
- "packages/os/android/local-inference/scripts/build-helpers/verify-fused-symbols.ts",
- "packages/os/android/local-inference/scripts/build-native.ts",
- "packages/os/android/local-inference/scripts/build-phonon2-gguf.ts",
- "packages/os/android/local-inference/scripts/engine.ts",
- "packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts",
- "packages/os/android/local-inference/voice-model-versions.json",
- "packages/os/android/local-inference/voice-product-inputs.mjs",
+ 'package.json',
+ 'pnpm-lock.yaml',
+ 'pnpm-workspace.yaml',
+ 'packages/os/package.json',
+ nativeEngineLockPath,
+ `${nativeModule}/scripts/engine.ts`,
+ `${nativeModule}/scripts/build-helpers/arm64-simd.ts`,
+ `${nativeModule}/scripts/build-helpers/elizavoice-build-flags.ts`,
+ `${nativeModule}/scripts/build-helpers/verify-fused-symbols.ts`,
+ `${nativeModule}/scripts/stage-elizavoice-lib.ts`,
 ];
-// The native preparation and admission paths share one identity transformation.
 export const nativeInputPaths = [
- 'packages/os/android/local-inference/scripts/stage-elizavoice-lib.ts',
- 'packages/os/android/local-inference/scripts/build-helpers/arm64-simd.ts',
- 'packages/os/android/local-inference/scripts/build-helpers/verify-fused-symbols.ts',
- 'packages/os/android/local-inference/src/main/elizavoice-jni/CMakeLists.txt',
- 'packages/os/android/local-inference/src/main/elizavoice-jni/elizavoice-jni.cpp',
+ `${nativeModule}/scripts/stage-elizavoice-lib.ts`,
+ `${nativeModule}/scripts/build-helpers/arm64-simd.ts`,
+ `${nativeModule}/scripts/build-helpers/verify-fused-symbols.ts`,
+ `${nativeJniSource}/CMakeLists.txt`,
+ `${nativeJniSource}/elizavoice-jni.cpp`,
 ];
-export const nativeJavaPath = 'packages/os/android/local-inference/src/main/java/ai/eliza/voice/VoiceNative.java';
+export const nativeJavaPath = `${nativeModule}/src/main/java/ai/eliza/voice/VoiceNative.java`;
 interface NativeBinding {mode: 'registered'|'exported'; className: string; subset: 'full'}
 export function nativeBinding(cpp: string, cmake: string, identity: string): NativeBinding {
  if(!/^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(identity))throw Error('Invalid product identity');

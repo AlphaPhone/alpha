@@ -13,9 +13,8 @@ import type {EmbeddingManifest} from "./stage-embedding-host.ts";
 import {nativeCacheRoot,nativeCacheDirectory,nativeRecipe,nativeRecipeDigest,NATIVE_BUILD_RECEIPT,NATIVE_BUILD_REQUIREMENTS,NATIVE_PYTHON,fileDigest,verifyNativeBuildFiles,verifyNativeBuildLibraries,validateNativeBuildReceipt,nativeOutputInventory,writeNativeBuildReceipt,assertNativeOutputPath,withNativeCacheLock,nativeAndroidSdk,prepareNativeSource,clearStagedNativeInputs,type NativeBuildReceipt} from './native-build-inputs.ts';
 import {stageVoiceModels} from './android-stage-voice-models.ts';
 import {voiceHostProblems} from './voice-host.ts';
-import {embeddingAbiLibraries} from './embedding-native-contract.ts';
+import {embeddingAbiLibraries,nativeModule,nativeEngineCheckout,nativeVoiceBuilder} from './embedding-native-contract.ts';
 import {ANDROID_ABIS} from './android-abis.ts';
-import {pinnedEngine,verifyParadeeFfi} from './paradee-runtime.ts';
 
 export const QUALIFIED_HOST = 'android/embedding-host/qualified-host.json';
 export const BUILD_TOOLCHAIN = 'android/embedding-host/build-toolchain.json';
@@ -58,19 +57,16 @@ export async function preparePortableNativeInputs(root:string) {
   const command=(file:string,args:string[],cwd=root,env:NodeJS.ProcessEnv=process.env)=>execFileSync(file,args,{cwd,env,stdio:'inherit'});
   const productReceipt=path.join(root,NATIVE_BUILD_RECEIPT);
   if(fs.existsSync(productReceipt)) {
-    try {const receipt=verifyNativeBuildFiles(root);verifyNativeBuildLibraries(root,receipt);verifyParadeeFfi(root);console.log('Verified cached native inputs for the current source recipe.');return;}
+    try {const receipt=verifyNativeBuildFiles(root);verifyNativeBuildLibraries(root,receipt);console.log('Verified cached native inputs for the current source recipe.');return;}
     catch { /* Owned generated output is refreshed below; tracked records and vendor remain untouched. */ }
   }
   assertNativeOutputPath(cacheRoot,path.relative(cacheRoot,cache).split(path.sep).join('/'));
   await withNativeCacheLock(cache,async(assertHeld)=>{
   const sdk=resolveSdk(),toolchain=recipe.toolchain as Toolchain,ndk=path.join(sdk,'ndk',toolchain.ndk);
   if(!fs.existsSync(path.join(ndk,'source.properties')))command('sdkmanager',[`ndk;${toolchain.ndk}`]);
-  const engine=pinnedEngine(root),fork=engine.directory;
-  if(!process.env.ELIZA_INFERENCE_ENGINE_DIR) {
-    prepareNativeSource(engine.repository,fork,engine.commit);
-    command('git',['submodule','update','--init','--recursive'],fork);
-  }
-  verifyParadeeFfi(root);
+  const fork=path.join(cache,nativeEngineCheckout);
+  prepareNativeSource(toolchain.engineRepository,fork,recipe.engineCommit);
+  command('git',['submodule','update','--init','--recursive','--depth','1'],fork);
   const voiceOutput=path.join(cache,'voice'),cacheOutput=path.join(cache,'output'),builtReceipt=path.join(cacheOutput,NATIVE_BUILD_RECEIPT);
   let receipt:NativeBuildReceipt|undefined;
   if(fs.existsSync(builtReceipt)) {
@@ -89,7 +85,6 @@ export async function preparePortableNativeInputs(root:string) {
   // Source-only SDK changes reuse the same compiled native inputs without changing their producer receipt.
   const source=path.join(cache,'source');
   prepareNativeSource(path.join(root,'vendor/eliza'),source,pin);
-
   // Python and build tools live in this cache, never in a user/global environment.
   let uv='uv';
   if(spawnSync(uv,['--version'],{stdio:'ignore'}).status!==0) {
@@ -107,14 +102,14 @@ export async function preparePortableNativeInputs(root:string) {
     command(uv,['pip','install','--python',python,'--require-hashes',...platformIndex,'-r',requirements]);
     fs.writeFileSync(requirementsStamp,fileDigest(requirements));
   }
-  if([source,cache,sdk,fork].some(file=>/[\s=\0]/.test(file)))throw Error('Native compiler path remapping requires build, engine, cache and SDK paths without whitespace');
-  const remap=['#',`+-ffile-prefix-map=${source}=/alpha-native-source`,`+-ffile-prefix-map=${fork}=/alpha-inference-engine`,`+-ffile-prefix-map=${cache}=/alpha-native-build`,`+-ffile-prefix-map=${cacheRoot}=/alpha-native-cache`,`+-ffile-prefix-map=${sdk}=/android-sdk`].join(' ');
+  if([source,cache,sdk].some(file=>/[\s=\0]/.test(file)))throw Error('Native compiler path remapping requires build/cache/SDK paths without whitespace');
+  const remap=['#',`+-ffile-prefix-map=${source}=/alpha-native-source`,`+-ffile-prefix-map=${cache}=/alpha-native-build`,`+-ffile-prefix-map=${cacheRoot}=/alpha-native-cache`,`+-ffile-prefix-map=${sdk}=/android-sdk`].join(' ');
   const nativeEnv={...process.env,TURBO_TELEMETRY_DISABLED:'1',CI:process.env.CI??'1'};
-  const env:NodeJS.ProcessEnv={...nativeEnv,...nativeModelEnvironment(),PATH:`${path.join(venv,'bin')}${path.delimiter}${nativeEnv.PATH}`,ANDROID_HOME:sdk,ANDROID_SDK_ROOT:sdk,ELIZA_NDK_VERSION:toolchain.ndk,ELIZA_INFERENCE_ENGINE_DIR:fork,CMAKE_BUILD_PARALLEL_LEVEL:'2',PYTHONPATH:path.join(fork,'gguf-py'),CCC_OVERRIDE_OPTIONS:remap};
-    const {assertAndroidVoiceLibrary}=createRequire(import.meta.url)('./os-ported/app/build-helpers/verify-fused-symbols.ts');
+  const env:NodeJS.ProcessEnv={...nativeEnv,...nativeModelEnvironment(),PATH:`${path.join(venv,'bin')}${path.delimiter}${nativeEnv.PATH}`,ANDROID_HOME:sdk,ANDROID_SDK_ROOT:sdk,ELIZA_NDK_VERSION:toolchain.ndk,CMAKE_BUILD_PARALLEL_LEVEL:'2',PYTHONPATH:path.join(fork,'gguf-py'),ELIZA_INFERENCE_ENGINE_DIR:fork,CCC_OVERRIDE_OPTIONS:remap};
+    const {assertAndroidVoiceLibrary}=createRequire(import.meta.url)(path.join(source,nativeModule,'scripts/build-helpers/verify-fused-symbols.ts'));
     // The upstream builder verifies each download, converted GGUF and native ABI/symbol contract.
     // It runs in an isolated source checkout; it never writes into vendor/eliza.
-    command('node',[path.join(source,'packages/os/android/local-inference/scripts/build-native.ts'),'--workspace',path.join(cache,'workspace'),'--out',voiceOutput,'--model-cache',path.join(cacheRoot,'models'),'--python',python],source,env);
+    command('node',[path.join(source,nativeVoiceBuilder),'--workspace',path.join(cache,'workspace'),'--out',voiceOutput,'--model-cache',path.join(cacheRoot,'models'),'--python',python],source,env);
     const nativeTools=ndkTools(ndk),host=readJson<any>(path.join(root,'android/voice-host/qualified-voice-host.json'));
     const abis=host.abis.map((abi:any)=>({abi:abi.abi,release:abi.release,alignment16KiB:true,abiVersion:assertAndroidVoiceLibrary({lib:path.join(voiceOutput,'jniLibs',abi.abi,'libelizainference.so'),objdump:path.join(nativeTools,'bin/llvm-objdump'),nm:path.join(nativeTools,'bin/llvm-nm')}).abiVersion,componentBuild:`Portable source build from SDK ${pin}, engine ${recipe.engineCommit}, recipe ${nativeRecipeDigest(recipe)}. Integrity only; no device qualification.`,libraries:abi.libraries.map((library:any)=> {
       const output=path.join(voiceOutput,'jniLibs',abi.abi,library.name);
