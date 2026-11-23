@@ -1,5 +1,6 @@
 package ai.alphacompute.alphaphone;
 
+import ai.alphacompute.alphaphone.cloud.CloudAuthWire;
 import ai.alphacompute.alphaphone.cloud.CloudCredentialSlots;
 import ai.alphacompute.alphaphone.cloud.CloudEmailCode;
 import ai.alphacompute.alphaphone.cloud.CloudKeyRenewal;
@@ -111,7 +112,7 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   PluginCall waiting;
   volatile CountDownLatch authorizationDecision;
   volatile boolean authorized;
-  String email, phone, emailVerifier, mfaType, mfaChallenge;
+  String email, phone, codeVerifier, mfaType, mfaChallenge;
   long expiresAt, resendAt;
   int failedVerifies;
   boolean busy;
@@ -444,10 +445,10 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   long now = System.currentTimeMillis();
   Response registration = get(environment.api() + "/api/v1/app-auth/mobile/config?clientId=" + Uri.encode(config().clientId)
    + "&environment=" + environment.name + "&redirectUri=" + Uri.encode(environment.callback()));
-  boolean registered = CloudSignInReadiness.registered(registration.status, registration.data.opt("success"), registration.data.optString("clientId", null),
-   registration.data.optString("environment", null), registration.data.optString("redirectUri", null), registration.data.optString("codeChallengeMethod", null), config(), environment);
+  boolean registered = CloudAuthWire.registered(environment, registration.status, registration.data, config());
   if (CloudSignInReadiness.unanswered(registration.status)) throw new SignInFailure("unavailable");
   if (!registered) return CloudSignInReadiness.Result.notReady(now);
+  if (environment.wire == CloudAuthWire.Wire.ELIZA_AUTH) return measureElizaAuth(environment, registration.data, previous, now);
   Response providers = get(environment.api() + "/steward/auth/providers?tenantId=" + Uri.encode(environment.tenant));
   if (CloudSignInReadiness.unanswered(providers.status)) throw new SignInFailure("unavailable");
   if (providers.status != 200) return CloudSignInReadiness.Result.notReady(now);
@@ -460,7 +461,7 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   // An empty object names no address, so Steward refuses it and no email is sent. Null: no usable answer.
   Boolean emailReady = false;
   if (emailOffered) {
-   try { int route = probePost(environment, CloudEmailCode.SEND_PATH); emailReady = route >= 500 ? null : (Boolean) CloudSignInReadiness.emailRoutePresent(route); }
+   try { int route = probePost(environment, CloudAuthWire.emailSendPath(environment)); emailReady = route >= 500 ? null : (Boolean) CloudSignInReadiness.emailRoutePresent(route); }
    catch (Exception unanswered) { emailReady = null; /* Other methods remain independent. */ }
   }
   // Native Google verifies an ID token and does not require a browser return.
@@ -469,13 +470,38 @@ public abstract class AlphaCloudSignInClient extends Plugin {
    googleReady = false;
    if (Boolean.TRUE.equals(providers.data.opt("google")) && (browserPackage() != null || defaultBrowserPackage() != null) && appLinkVerified(environment)) {
     try {
-     Response browser = get(CloudSignInFlow.authorizeUrl(environment, CloudSignInFlow.s256(CloudSignInFlow.newVerifier()), CloudSignInFlow.newState()));
+     Response browser = get(CloudAuthWire.authorizeUrl(config(), environment, CloudSignInFlow.s256(CloudSignInFlow.newVerifier()), CloudSignInFlow.newState()));
      if (CloudSignInReadiness.unanswered(browser.status)) googleReady = null;
      else if (CloudSignInReadiness.redirectAllowed(browser.status, browser.location)) googleReady = assetLinksGranted(environment);
     } catch (Exception unanswered) { googleReady = null; /* Other sign-in methods remain independent. */ }
    }
   }
   return CloudSignInReadiness.Result.measured(emailReady, googleReady, phoneOffered, previous, now);
+ }
+ /**
+  * Readiness on the Vibestack Cloud's own sign-in wire: the registration answer names the methods it
+  * offers (no Steward providers read, no captcha), the email route is probed as on Steward, and browser
+  * Google is probed at the Cloud's authorize route. Native Google on this wire mints the key in one call
+  * (`/api/v1/app-auth/mobile/google`), which this client does not speak, so it is never offered here.
+  */
+ private CloudSignInReadiness.Result measureElizaAuth(CloudSignInEnvironment environment, JSONObject registration, CloudSignInReadiness.Result previous, long now) throws Exception {
+  JSONObject methods = CloudAuthWire.methods(registration);
+  if (methods == null) return CloudSignInReadiness.Result.notReady(now);
+  Boolean emailReady = false;
+  if (methods.optBoolean("email", false)) {
+   try { int route = probePost(environment, CloudAuthWire.emailSendPath(environment)); emailReady = route >= 500 ? null : (Boolean) CloudSignInReadiness.emailRoutePresent(route); }
+   catch (Exception unanswered) { emailReady = null; /* Other methods remain independent. */ }
+  }
+  Boolean googleReady = false;
+  if ("browser".equals(config().googleSignInMode) && methods.optBoolean("google", false)
+   && (browserPackage() != null || defaultBrowserPackage() != null) && appLinkVerified(environment)) {
+   try {
+    Response browser = get(CloudAuthWire.authorizeUrl(config(), environment, CloudSignInFlow.s256(CloudSignInFlow.newVerifier()), CloudSignInFlow.newState()));
+    if (CloudSignInReadiness.unanswered(browser.status)) googleReady = null;
+    else if (CloudSignInReadiness.redirectAllowed(browser.status, browser.location)) googleReady = assetLinksGranted(environment);
+   } catch (Exception unanswered) { googleReady = null; /* Other sign-in methods remain independent. */ }
+  }
+  return CloudSignInReadiness.Result.measured(emailReady, googleReady, methods.optBoolean("sms", false), previous, now);
  }
  // ── Google: native Credential Manager with server-bound nonce and PKCE ────────────────────
 
@@ -584,7 +610,7 @@ public abstract class AlphaCloudSignInClient extends Plugin {
      if (attempt != next || next.cancelled || destroyed) throw new SignInFailure("cancelled");
      pendingRetirementUnconfirmed = false;
     }
-    String url = CloudSignInFlow.authorizeUrl(next.environment, CloudSignInFlow.s256(pending.verifier), pending.state);
+    String url = CloudAuthWire.authorizeUrl(config(), next.environment, CloudSignInFlow.s256(pending.verifier), pending.state);
     getActivity().runOnUiThread(() -> {
      // On a Home host the page opens in the browser's own task: Home returns to the host's
      // single-task activity, and Android would finish a page that sat above it in the host's task.
@@ -649,6 +675,8 @@ public abstract class AlphaCloudSignInClient extends Plugin {
    attempt = next; next.waiting = call;
   }
   if ("browser".equals(config().googleSignInMode)) { startGoogleBrowser(next); return; }
+  // Native Google on the Cloud's own wire is one key-minting call this client does not speak; readiness never offers it.
+  if (environment.wire == CloudAuthWire.Wire.ELIZA_AUTH) { end(next, "unavailable", false); return; }
   next.googleVerifier = CloudSignInFlow.newVerifier();
   next.googleCancellation = new android.os.CancellationSignal();
   next.busy = true;
@@ -816,11 +844,11 @@ public abstract class AlphaCloudSignInClient extends Plugin {
      return;
     }
     try {
-     JSONObject body = new JSONObject().put("code", received.code).put("redirectUri", returned.callback())
-      .put("tenantId", returned.tenant).put("codeVerifier", pending.verifier);
-     Response exchanged = post(owner, "/steward/auth/oauth/exchange", body, null);
+     JSONObject body = CloudAuthWire.exchangeBody(config(), returned, received.code, pending.verifier);
+     Response exchanged = post(owner, CloudAuthWire.exchangePath(returned), body, null);
      if (exchanged.status != 200) throw new SignInFailure(CloudSignInFlow.failureForStatus("exchange", exchanged.status));
-     JSONObject session = exchanged.data.optJSONObject("data") != null && !exchanged.data.has("token") ? exchanged.data.optJSONObject("data") : exchanged.data;
+     JSONObject session = CloudAuthWire.session(returned, exchanged.data, System.currentTimeMillis());
+     if (session == null) throw new SignInFailure("unavailable");
      // No screen waits for a second factor of an adopted return: the owner uses the email code instead.
      if (owner.adopted && Boolean.TRUE.equals(session.opt("mfaRequired"))) throw new SignInFailure("mfa-browser");
      completeOrRequireMfa(owner, session);
@@ -906,15 +934,15 @@ public abstract class AlphaCloudSignInClient extends Plugin {
    previous = attempt != null && attempt.mfaType == null && attempt.expiresAt > now ? attempt : null;
    if (attempt != null && previous == null) attempt.cancel();
    current = new Attempt(environment, false, requestId, () -> { throw new IllegalStateException("Code not sent"); });
-   current.email = email; current.emailVerifier = CloudSignInFlow.newVerifier(); current.busy = true; attempt = current;
+   current.email = email; current.codeVerifier = CloudSignInFlow.newVerifier(); current.busy = true; attempt = current;
   }
   final long[] wait = {0};
   run(() -> {
    try {
-    Response sent = post(current, CloudEmailCode.SEND_PATH, CloudEmailCode.sendBody(config(), current.environment, email, current.emailVerifier), null);
+    Response sent = post(current, CloudAuthWire.emailSendPath(current.environment), CloudAuthWire.emailSendBody(config(), current.environment, email, current.codeVerifier), null);
     JSONObject data = sent.data.optJSONObject("data") != null ? sent.data.optJSONObject("data") : sent.data;
     long now = System.currentTimeMillis(), expiresAt = CloudEmailCode.expiresAt(data.opt("expiresAt"), now);
-    long resendAt = CloudEmailCode.resendAt(data.opt("resendAt"), sent.retryAfter, now);
+    long resendAt = CloudEmailCode.resendAt(CloudAuthWire.resendAt(current.environment, data), sent.retryAfter, now);
     // The request left the phone, so the cooldown starts here. A send with no answer starts none.
     synchronized (lock) { lastEmailSendAt = now; emailSendAllowedAt = Math.max(emailSendAllowedAt, resendAt); wait[0] = emailSendAllowedAt; }
     if (sent.status != 200 && sent.status != 202) throw new SignInFailure(CloudSignInFlow.failureForStatus("send", sent.status));
@@ -952,18 +980,19 @@ public abstract class AlphaCloudSignInClient extends Plugin {
    previous = attempt != null && attempt.mfaType == null && attempt.expiresAt > now ? attempt : null;
    if (attempt != null && previous == null) attempt.cancel();
    current = new Attempt(environment, false, requestId, () -> { throw new IllegalStateException("Code not sent"); });
-   current.phone = phone; current.busy = true; attempt = current;
+   // The Cloud's own wire binds a text-message code to a PKCE pair as it does an email code.
+   current.phone = phone; current.codeVerifier = CloudSignInFlow.newVerifier(); current.busy = true; attempt = current;
   }
   final long[] wait = {0};
   run(() -> {
    try {
     requirePhoneAvailable(current);
-    Response sent = post(current, CloudSmsCode.SEND_PATH, CloudSmsCode.sendBody(current.environment, phone), null);
+    Response sent = post(current, CloudAuthWire.smsSendPath(current.environment), CloudAuthWire.smsSendBody(config(), current.environment, phone, current.codeVerifier), null);
     JSONObject data = sent.data.optJSONObject("data") != null ? sent.data.optJSONObject("data") : sent.data;
     long now = System.currentTimeMillis(), expiresAt = CloudEmailCode.expiresAt(data.opt("expiresAt"), now);
     // As for email: the answered request starts the cooldown, and Cloud's resend time or Retry-After
     // (also on a refusal) extends it, for SMS sends only.
-    long resendAt = CloudEmailCode.resendAt(data.opt("resendAt"), sent.retryAfter, now);
+    long resendAt = CloudEmailCode.resendAt(CloudAuthWire.resendAt(current.environment, data), sent.retryAfter, now);
     synchronized (lock) { lastEmailSendAt = now; smsSendAllowedAt = Math.max(smsSendAllowedAt, resendAt); wait[0] = smsSendAllowedAt; }
     if (sent.status != 200 && sent.status != 202) throw new SignInFailure(CloudSignInFlow.failureForStatus("send", sent.status));
     synchronized (lock) {
@@ -998,9 +1027,13 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   CloudSignInEnvironment environment = current.environment;
   Response registration = get(environment.api() + "/api/v1/app-auth/mobile/config?clientId=" + Uri.encode(config().clientId)
    + "&environment=" + environment.name + "&redirectUri=" + Uri.encode(environment.callback()));
-  if (!CloudSignInReadiness.registered(registration.status, registration.data.opt("success"), registration.data.optString("clientId", null),
-   registration.data.optString("environment", null), registration.data.optString("redirectUri", null), registration.data.optString("codeChallengeMethod", null), config(), environment))
-   throw new SignInFailure("unavailable");
+  if (!CloudAuthWire.registered(environment, registration.status, registration.data, config())) throw new SignInFailure("unavailable");
+  if (environment.wire == CloudAuthWire.Wire.ELIZA_AUTH) {
+   JSONObject methods = CloudAuthWire.methods(registration.data);
+   if (methods == null || !methods.optBoolean("sms", false)) throw new SignInFailure("unavailable");
+   synchronized (lock) { if (attempt != current || current.cancelled) throw new SignInFailure("cancelled"); }
+   return;
+  }
   Response providers = get(environment.api() + "/steward/auth/providers?tenantId=" + Uri.encode(environment.tenant));
   JSONObject captcha = providers.data.optJSONObject("captcha");
   JSONArray required = captcha == null ? null : captcha.optJSONArray("requiredFor");
@@ -1032,14 +1065,16 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   run(() -> {
    boolean answered = false;
    try {
+    CloudSignInEnvironment environment = current.environment;
     Response verified = mfa
-     ? post(current, "/steward/auth/mfa/" + current.mfaType + "/complete", new JSONObject().put("challengeId", current.mfaChallenge).put("code", code), null)
-     : phone ? post(current, CloudSmsCode.VERIFY_PATH, CloudSmsCode.verifyBody(current.environment, current.phone, code), null)
-     : post(current, CloudEmailCode.VERIFY_PATH, CloudEmailCode.verifyBody(config(), current.environment, current.email, code, current.emailVerifier), null);
+     ? post(current, CloudAuthWire.factorPath(environment, current.mfaType), CloudAuthWire.factorBody(environment, current.mfaChallenge, current.mfaType, code), null)
+     : phone ? post(current, CloudAuthWire.smsVerifyPath(environment), CloudAuthWire.smsVerifyBody(config(), environment, current.phone, code, current.codeVerifier), null)
+     : post(current, CloudAuthWire.emailVerifyPath(environment), CloudAuthWire.emailVerifyBody(config(), environment, current.email, code, current.codeVerifier), null);
     // A timeout, rate limit or server error says nothing about the code: it is handled as no answer.
     answered = !CloudSignInFlow.verifyRetryable(verified.status);
     if (verified.status != 200) throw new SignInFailure(CloudSignInFlow.failureForStatus(mfa ? "mfa" : "verify", verified.status));
-    JSONObject session = verified.data.optJSONObject("data") != null && !verified.data.has("token") ? verified.data.optJSONObject("data") : verified.data;
+    JSONObject session = CloudAuthWire.session(environment, verified.data, System.currentTimeMillis());
+    if (session == null) throw new SignInFailure("unavailable");
     completeOrRequireMfa(current, session);
    } catch (SignInFailure failure) {
     boolean wrong = "invalid-code".equals(failure.code);
@@ -1165,6 +1200,7 @@ public abstract class AlphaCloudSignInClient extends Plugin {
    long expiresAt = challenge == null ? 0 : instant(challenge.opt("expiresAt"));
    if (id == null || id.isEmpty() || id.length() > 256 || expiresAt <= System.currentTimeMillis()
        || !("totp".equals(type) || "sms".equals(type) || "passkey".equals(type))) throw new SignInFailure("unavailable");
+   askFactorCode(current, type, id);
    synchronized (lock) {
     if (destroyed || attempt != current || current.cancelled || current.waiting == null) throw new SignInFailure("cancelled");
     current.mfaType = type; current.mfaChallenge = id; current.failedVerifies = 0;
@@ -1178,8 +1214,14 @@ public abstract class AlphaCloudSignInClient extends Plugin {
   }
   complete(current, session);
  }
+ /** The Cloud's own wire sends a text-message second factor only when asked; Steward sent it with the challenge. */
+ private void askFactorCode(Attempt current, String type, String challengeId) throws Exception {
+  if (!CloudAuthWire.factorCodeAsked(current.environment, type)) return;
+  Response sent = post(current, CloudAuthWire.FACTOR_SMS_SEND, CloudAuthWire.factorCodeBody(challengeId), null);
+  if (sent.status != 200 && sent.status != 202) throw new SignInFailure(CloudSignInFlow.failureForStatus("send", sent.status));
+ }
 
- // ── Shared tail: Steward session → eliza_mobile_ key ─────────────────────────────────────────
+ // ── Shared tail: Steward or Cloud session → eliza_mobile_ key ─────────────────────────────────────────
 
  private void complete(Attempt current, JSONObject session) throws Exception {
   if (Boolean.TRUE.equals(session.opt("mfaRequired"))) {
@@ -1187,6 +1229,7 @@ public abstract class AlphaCloudSignInClient extends Plugin {
    String type = challenge == null ? null : challenge.optString("type", null), id = challenge == null ? null : challenge.optString("challengeId", null);
    long expiresAt = challenge == null ? 0 : instant(challenge.opt("expiresAt"));
    if (id == null || id.isEmpty() || id.length() > 256 || !("totp".equals(type) || "sms".equals(type) || "passkey".equals(type))) throw new SignInFailure("unavailable");
+   askFactorCode(current, type, id);
    synchronized (lock) {
     if (destroyed || attempt != current || current.cancelled) throw new SignInFailure("cancelled");
     if (current.mfaType != null) throw new SignInFailure("unavailable");
@@ -1266,7 +1309,7 @@ public abstract class AlphaCloudSignInClient extends Plugin {
    finish(current, outcome);
   } finally {
    // The Steward session is not needed past this point: revoke it, best effort, never stored.
-   try { JSONObject body = new JSONObject(); if (refresh != null && refresh.length() <= 16384) body.put("refreshToken", refresh); post(null, environment, "/steward/auth/logout", body, token); }
+   try { JSONObject body = new JSONObject(); if (refresh != null && refresh.length() <= 16384) body.put("refreshToken", refresh); post(null, environment, CloudAuthWire.logoutPath(environment), body, token); }
    catch (Exception ignored) { /* Best effort; the session expires on its own. */ }
   }
  }
