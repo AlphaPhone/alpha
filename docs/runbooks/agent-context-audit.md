@@ -726,7 +726,18 @@ words, not exclude other verbs.
 - **Tools chosen per request sit before the system prompt** in the provider's read
   order: Calendar (18K characters), reminders (20K), messaging (13K). A turn whose tool
   set differs from the last one's re-reads the system prompt and the history. In the
-  one-conversation run the planner reused 51% for that reason.
+  one-conversation run the planner reused 51% for that reason. RESTORE_CONTEXT used to
+  be one more such change: it went out in one of three forms, or not at all, depending
+  on what the request deferred. Since upstream [#40250](https://github.com/elizaOS/eliza/pull/40250) (`RESTORE_SHA`) every request
+  with tools carries one form, placed after discovery and ahead of the device tool. A
+  spurious restore gets one "nothing deferred" answer per round instead of failing the
+  turn. In a 46-turn host run with a Qwen tokenizer and 1,024-token cache units, pairs
+  that differed only by that tool went from 6 of 72 to none, and the planner's uncached
+  tokens fell 7.5% counted against any earlier request in the last 10 minutes (2.4%
+  against the request before). The domain tools still change with the request. In a room
+  where nothing is ever deferred the definition is 232 tokens more on every request;
+  whether those are cached depends on how the provider renders tools, which is not
+  visible from here.
 - **The account's limit is close even after the change.** In one conversation that
   changes subject every turn, a phone on the branch is charged about 14K uncached tokens
   a turn, and the account regains 2,500 a second. One phone sending a turn every nine
@@ -737,14 +748,20 @@ words, not exclude other verbs.
   by an English keyword floor (section 1).
 - **The device tool still differs by view,** and by two wordings: asking for an
   address in a new tab, and naming the phone's own calendar.
-- **Re-sends stack on the direct route.** After a refusal with no wait hint (the
-  provider's "high traffic" 429) the OpenAI plugin's own retries and the turn's re-send
-  multiply: 4 and then 4 more requests for one step on the generate lane in a November 20
-  resident run (16 of its 22 refusals had no hint). The stream lanes' budget allows 12
-  (loopback, not seen live). The no-cap runs' refusals all carried `Retry-After: 60`
-  and were each sent once. A refused request is not charged, so this costs time and
-  request count, not tokens.
-
+- **Re-sends no longer stack on the direct route** (upstream [#40249](https://github.com/elizaOS/eliza/pull/40249), `RESEND_SHA`).
+  After a refusal with no wait hint (the provider's "high traffic" 429) the OpenAI
+  plugin's lane re-sends it, and the turn no longer re-sends a call the lane already
+  re-sent: at most 4 requests for one step on the generate lane, 6 on the stream lanes
+  (8 and 12 before; a November 20 resident run showed the 8). A call whose only request
+  was refused still gets the turn's one re-send, after the 4 s hold. The cost: an
+  overload with no hint that outlasts the lane's re-sends (about 2.4 s on the generate
+  lane, 8 s on the stream lanes) now ends the step, where the turn's re-send 5 s later
+  could still have been answered. In the November 20 resident run two steps used up
+  the lane that way, and the turn's re-send did not save either: one met four more
+  refusals, the other one more and then `Retry-After: 59`. A lane re-send that meets
+  `Retry-After: 60` ends the step the same way; there the turn's re-send went out after
+  the 4 s hold, and Cerebras has admitted requests it refused that way 5 to 27 s later.
+  A refused request is not charged, so this saves time and request count, not tokens.
 
 ## 5. What landed, November 22, 2026
 
