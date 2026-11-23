@@ -102,7 +102,7 @@ pure val earliestValues = Set(0, 5)
 pure val latestValues = Set(5)
 pure val basisValues = Set(1, 2)
 pure val revisionValues = Set(1, 2)
-pure val ticketValues = Set(1, 2, 3)
+pure val ticketValues = Set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
 pure val nameValues = Set("", "Trip")
 pure val lettersValues = Set(0, 4)
 ```
