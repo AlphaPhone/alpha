@@ -97,10 +97,12 @@ test("claimed Notes navigation displays the view and reports only IDs and a conf
 		"PRIVATE_PERSONAL_CONTENT",
 	);
 	expect(Object.keys(state.metadata).sort()).toEqual([
+		"notesEditorNavigation",
 		"uiView",
 		"viewClientId",
 		"viewDelivery",
 	]);
+	expect(state.metadata.notesEditorNavigation).toBe(1);
 	const duplicate = await page.evaluate(async () => {
 		const win = window as any;
 		try {
