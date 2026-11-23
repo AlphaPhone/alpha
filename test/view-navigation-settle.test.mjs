@@ -47,3 +47,21 @@ test('a retired session posts nothing after the claim',async()=>{
  const f=fixture({claim:()=>f.retire()});
  await assert.rejects(f.client.deliver(f.results,f.client.capture(f.state),switchTo(f)));assert.equal(f.replies().length,0);f.client.dispose();
 });
+
+test('a saved note handoff is delivered only when the exact note opens',async()=>{
+ for(const selectedId of ['saved-note','other-note',undefined]){
+  const f=fixture();
+  f.results[0].values.noteId='saved-note';
+  const delivery=await f.client.deliver(f.results,f.client.capture(f.state),async(view,current,noteId)=>{
+   current();
+   assert.equal(noteId,'saved-note');
+   f.state={view,revision:2,sensitive:false,
+    ...(selectedId?{selectedObject:{kind:'canonical-note',id:selectedId}}:{})};
+   return true;
+  });
+  assert.equal(delivery.status,selectedId==='saved-note'?'delivered':'unknown');
+  assert.equal(f.replies().length,1);
+  assert.equal(f.replies()[0].success,selectedId==='saved-note');
+  f.client.dispose();
+ }
+});

@@ -685,9 +685,34 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
   async function deliverChatNavigation(shell:Shell,navigation:ReturnType<typeof connectionController.captureViewNavigation>,results:readonly unknown[]|undefined,current?:()=>void,continuation?:import('../runtime/alpha-client').VoiceNavigationContinuation){
     if(!navigation||!results?.length)return false;
     const attempt={...navigation.attempt,current:()=>{navigation.attempt.current();current?.();}};
-    const delivered=await navigation.client.deliver(results,attempt,(view,check)=>{
+    const delivered=await navigation.client.deliver(results,attempt,async(view,check,noteId)=>{
+      let notes:CanonicalNotesUi|undefined;
+      if(noteId!==undefined){
+        check();
+        if(shell.notesSourceMode!=='canonical')return false;
+        syncCanonicalNotes(shell);
+        notes=shell.canonicalNotesUi??undefined;
+        if(!notes?.current||notes.pending)return false;
+        if(!notes.controller.hasViewNote(noteId))await notes.refresh();
+        check();
+        if(shell.canonicalNotesUi!==notes||!notes.current)return false;
+      }
       const commit=(chat?:string,onCommitted?:(value:import('../runtime/alpha-client').ContextEnvelope)=>void)=>new Promise<boolean>((resolve,reject)=>{
-        try{check();if(!openInternalView(shell,view,chat)){resolve(false);return;}shell.setState({},()=>{try{context(shell);const switched=shell.live&&(shell.S().view||'home')===view;if(switched)onCommitted?.(alphaClient.getState().context);resolve(switched);}catch(error){reject(error);}});}catch(error){reject(error);}
+        try{
+          check();
+          if(noteId!==undefined&&(shell.canonicalNotesUi!==notes||!notes?.openSaved(noteId))){resolve(false);return;}
+          if(!openInternalView(shell,view,chat)){resolve(false);return;}
+          shell.setState({},()=>{
+            try{
+              context(shell);
+              const observed=alphaClient.getState().context;
+              const switched=shell.live&&observed.view===view&&!observed.sensitive&&
+                (noteId===undefined||(observed.selectedObject?.kind==='canonical-note'&&observed.selectedObject.id===noteId));
+              if(switched)onCommitted?.(observed);
+              resolve(switched);
+            }catch(error){reject(error);}
+          });
+        }catch(error){reject(error);}
       });
       // Keep an open conversation at its current detent during typed navigation.
       // Read at delivery time so closing it while a reply is pending stays respected.

@@ -24,7 +24,7 @@ const object = (value: unknown): Record<string, unknown> => {
 		throw Error("Navigation reply was not verified");
 	return value as Record<string, unknown>;
 };
-/** The only values a completed-action handoff carries: navigation takes no record parameters. */
+/** The only values a completed-action handoff carries. Notes may name an exact saved record. */
 const HANDOFF_VALUE_KEYS = new Set([
 	"mode",
 	"viewId",
@@ -35,6 +35,7 @@ const HANDOFF_VALUE_KEYS = new Set([
 	"completedActionHandoffId",
 	"navigationPrepared",
 	"navigationBinding",
+	"noteId",
 ]);
 /** A view command refused before anything ran, with a reason the agent can pass on. Its result is
  * reported as `<code>: <reason>`; any other executor failure stays "failed or unknown". */
@@ -109,6 +110,7 @@ export class ViewNavigationClient {
 			? {
 					viewClientId: this.clientId,
 					viewDelivery: "completed-action",
+					notesEditorNavigation: 1,
 					uiView: alphaCanonicalViewId(context.view),
 				}
 			: {};
@@ -303,7 +305,7 @@ export class ViewNavigationClient {
 	async deliver(
 		results: readonly unknown[] | undefined,
 		attempt: NavigationAttempt,
-		navigate: (view: string, current: () => void) => Promise<boolean>,
+		navigate: (view: string, current: () => void, noteId?: string) => Promise<boolean>,
 	): Promise<{ status: "none" | "delivered" | "unknown" | "unavailable"; label?: string; parentView?: string }> {
 		const views = results?.filter(
 			(result) => findViewActionHandoff([result])?.navigationPrepared === true,
@@ -344,7 +346,17 @@ export class ViewNavigationClient {
 				),
 			values = object(object(selected).values);
 		if (Object.keys(values).some((key) => !HANDOFF_VALUE_KEYS.has(key)))
-			throw Error("Navigation does not accept record parameters");
+			throw Error("Invalid navigation parameters");
+		const noteId = values.noteId;
+		if (noteId !== undefined &&
+			(target !== "notes" || typeof noteId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(noteId)))
+			throw Error("Invalid saved note navigation target");
+		const targetVisible = () => {
+			const observed = this.context();
+			return observed?.view === target && !observed.sensitive && !document.hidden &&
+				(noteId === undefined ||
+					(observed.selectedObject?.kind === "canonical-note" && observed.selectedObject.id === noteId));
+		};
 		const assertFresh = () => {
 			attempt.current();
 			if (!attempt.fence())
@@ -388,7 +400,7 @@ export class ViewNavigationClient {
 			)
 				return { status: "none" };
 			// The existing shell executor waits for its React commit, not just setState dispatch.
-			switched = await navigate(target, attempt.current);
+			switched = await navigate(target, attempt.current, noteId);
 		} catch {
 			switched = false;
 		} finally {
@@ -402,11 +414,7 @@ export class ViewNavigationClient {
 			attempt.controller.signal.aborted
 		)
 			return { status: "unknown" };
-		switched =
-			switched &&
-			this.context()?.view === target &&
-			!this.context()?.sensitive &&
-			!document.hidden;
+		switched = switched && targetVisible();
 		acknowledged = true;
 		const accepted = object(
 			await this.request(
@@ -426,9 +434,7 @@ export class ViewNavigationClient {
 			!this.disposed &&
 			this.currentSession() &&
 			!attempt.controller.signal.aborted &&
-			this.context()?.view === target &&
-			!this.context()?.sensitive &&
-			!document.hidden
+			targetVisible()
 		) {
 			this.deliveredContexts.set(attempt.controller, structuredClone(this.context()!));
       this.observationView = target;
