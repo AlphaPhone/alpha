@@ -104,7 +104,7 @@ const ApprovalStateText = Schema.Literals(["pending", "approved", "executing", "
 
 /** One approval request in the agent's queue. */
 export const ApprovalRow = Schema.Struct({
-  id: Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)),
+  id: Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/)),
   state: ApprovalStateText,
   subjectUserId: Schema.optionalKey(Schema.String),
   ownerEntityId: Schema.optionalKey(Schema.NullOr(Schema.String)),

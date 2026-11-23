@@ -29,7 +29,7 @@ export effect function bindCalendar(binding: AgentBinding) {
 }
 
 /** The window Calendar reads for what is on screen now. */
-export effect function currentWindow(): CalendarWindow {
+export effect function currentWindow(): CalendarWindow!! {
   const state = try (try PresentationMachine).get()
   const now = try Clock.currentTimeMillis
   const zone = deviceZone()
@@ -95,7 +95,8 @@ export effect function whileVisible() {
 /** Calendar is in front again. */
 export effect function enterCalendar() {
   try rollToToday()
-  (try PresentationMachine).send({ type: "enter" }) catch () => undefined
+  const presentation = try PresentationMachine
+  presentation.send({ type: "enter" }) catch () => undefined
 }
 
 /** Calendar is no longer in front: its transient overlays close and a pending save request ends; the form keeps what was typed. */

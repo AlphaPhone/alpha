@@ -4,7 +4,7 @@ import { readOperation, readResult } from "@elizaos/agent/operations"
 import { deleteUndoMs } from "@elizaos/os/bridges/deletion-window"
 import { type CalendarCapability, type CalendarOperation, type ScreenView, calendarAdvertised } from "../../gen/calendar__deviceActions.effect.vibe"
 import { namedChangeAllowed } from "../../gen/calendar__namedRead.effect.vibe"
-import { overlapsRange, rangeOutcome, rangeReadAdmitted } from "../../gen/calendar__rangeRead.ts"
+import { overlapsRange, rangeOutcome, rangeReadAdmitted } from "../../gen/calendar__rangeRead.effect.vibe"
 import { AssistantHost } from "../assistant/host.vibe"
 import type { OperationPorts } from "../assistant/review.vibe"
 import { Native } from "../platform/native.vibe"
@@ -161,11 +161,11 @@ export function describeCalendarOperation(op: Wire): { readonly title: string; r
         detail: `From ${formatDateTime(Date.parse(op.start), op.timeZone)} to ${formatDateTime(Date.parse(op.end), op.timeZone)} (${op.timeZone}), from ${count === 1 ? "one calendar" : `${count} calendars`} on this phone, up to ${op.maximumEvents} events. Titles and times only, never places, notes or guests.`,
       }
     }
-    case "calendar_named": return op.action === "read"
-      ? { title: `Share “${op.name}”`, detail: "Choose the matching event, then review what to share. Nothing changes yet.", destination: "calendar" }
-      : op.action === "delete"
-        ? { title: `Delete “${op.name}”`, detail: "Open the matching event in Calendar to review this deletion.", destination: "calendar" }
-        : { title: `Change “${op.name}”`, detail: detailOf(op.fields, "open"), destination: "calendar" }
+    case "calendar_named": return op.action === "update"
+      ? { title: `Change “${op.name}”`, detail: detailOf(op.fields, "open"), destination: "calendar" }
+      : op.action === "read"
+        ? { title: `Share “${op.name}”`, detail: "Choose the matching event, then review what to share. Nothing changes yet.", destination: "calendar" }
+        : { title: `Delete “${op.name}”`, detail: "Open the matching event in Calendar to review this deletion.", destination: "calendar" }
   }
 }
 
@@ -225,7 +225,7 @@ export const operationPorts = effect {
   effect function journalOf(call: ExecutorCall) {
     const identity = try host.identity()
     if (identity === undefined) return undefined
-    const scope = try tryPromise({ try: () => sha256Hex(JSON.stringify([identity.origin, identity.owner, identity.agent, identity.installationId])), catch: () => "" }) catch () => ""
+    const scope = tryPromise({ try: () => sha256Hex(JSON.stringify([identity.origin, identity.owner, identity.agent, identity.installationId])), catch: () => "" }) catch () => ""
     return scope === "" ? undefined : { scope, proposalId: call.proposalId }
   }
 
@@ -309,7 +309,7 @@ export const operationPorts = effect {
     if (ready !== undefined && !ready.truncated && unique.length <= op.maximumEvents) {
       for (const event of unique) {
         const fields = sharedFields(event)
-        const revision = try tryPromise({ try: () => sha256Hex(JSON.stringify([fields.id, fields.calendarId, fields.title, fields.start, fields.end, fields.allDay])), catch: () => "" }) catch () => ""
+        const revision = tryPromise({ try: () => sha256Hex(JSON.stringify([fields.id, fields.calendarId, fields.title, fields.start, fields.end, fields.allDay])), catch: () => "" }) catch () => ""
         if (revision === "") return { kind: "refused", code: "calendar_unavailable" }
         events.push({ ...fields, revision })
       }

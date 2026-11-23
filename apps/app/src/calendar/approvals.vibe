@@ -74,7 +74,7 @@ export const approvalsLayer = Layer.effect(ApprovalReviews, effect {
     return after
   }
 
-  effect function readRow(requestId: string): ApprovalRecord | undefined {
+  effect function readRow(requestId: string): (ApprovalRecord | undefined)!! {
     return effect {
       const answer = try resident.json("GET", READ_PATH)
       const list = (try decodeApprovals(answer.data)).approvals
@@ -88,7 +88,7 @@ export const approvalsLayer = Layer.effect(ApprovalReviews, effect {
     } catch () => undefined
   }
 
-  effect function targetOf(row: ApprovalRecord): ApprovalTarget {
+  effect function targetOf(row: ApprovalRecord): ApprovalTarget!! {
     if (row.action === "schedule_event") return { verified: true }
     const view = try agent.view()
     const loaded = view.savedAt === undefined && view.feed !== undefined ? approvalTarget(row.payload, view.calendars, view.feed.events) : { verified: false }
@@ -118,7 +118,7 @@ export const approvalsLayer = Layer.effect(ApprovalReviews, effect {
   }
 
   return {
-    changes: sheet.changes,
+    changes: SubscriptionRef.changes(sheet),
     effect open(requestId: string) {
       if (!UUID.test(requestId)) return
       const opened = try send({ type: "open", requestId: requestId.toLowerCase() })

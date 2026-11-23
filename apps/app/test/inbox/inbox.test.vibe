@@ -14,6 +14,7 @@ import { FilePicker } from "../../src/files/picker.vibe"
 import { Preferences } from "../../src/settings/preferences.vibe"
 import { Assistant } from "../../src/assistant/assistant.vibe"
 import { layer as inbox, InboxAccounts, Mailbox, MailComposer, MailOperations, MailNoticesShell } from "../../src/inbox/layer.vibe"
+import { losingAnswer } from "./lost.ts"
 
 const grantA = "grant-a"
 const grantB = "grant-b"
@@ -43,13 +44,12 @@ function gmailCloud(calls: Calls, options: { readonly loseDispatch?: boolean; re
       ledger.set(requestId, entry)
       return { version: 1, providerExactlyOnce: false, review: entry.review, receipt: { requestId, kind: entry.kind, reviewDigest: entry.digest, state: entry.state, providerResult: null, rejectionCode: null } }
     },
-    "POST /api/v1/eliza/google/gmail/inbox-v1/operations/r-send/dispatch": () => {
+    "POST /api/v1/eliza/google/gmail/inbox-v1/operations/r-send/dispatch": losingAnswer(() => {
       calls.push("dispatch")
       const entry = ledger.get("r-send")!
       entry.state = "succeeded"
-      if (options.loseDispatch === true) throw new Error("connection reset")
       return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: entry.digest, state: "succeeded", providerResult: { messageId: "sent-1" }, rejectionCode: null } }
-    },
+    }, () => options.loseDispatch === true),
     "GET /api/v1/eliza/google/gmail/inbox-v1/operations/r-send": () => {
       calls.push("receipt")
       const entry = ledger.get("r-send")!
