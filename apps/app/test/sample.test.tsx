@@ -133,6 +133,16 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const fourth = await open(world, withSample);
     await until(fourth.alpha, sample.runtime(fourth.alpha), Reminders, (s) => s.list.status === "Loaded");
     expect([localStorage.getItem(`${kept}.unreadable`), document.querySelector("h1")?.textContent]).toEqual([JSON.stringify({ titles: "of another shape" }), "Notes"]);
+
+    // spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted": an agent that takes a deletion and never answers is waited on for ten seconds, and the deletion is then unknown, never refused.
+    const last = sample.runtime(fourth.alpha);
+    world.sample.stalled = true;
+    await press("Dismiss Call the bank");
+    await later(fourth.alpha, 5_000);
+    await until(fourth.alpha, last, Reminders, (s) => s.deletion.attempt.outcome === "Sent");
+    await later(fourth.alpha, 10_000);
+    await until(fourth.alpha, last, Reminders, (s) => s.deletion.attempt.outcome === "Unknown");
+    expect(told()).toBe("Alpha cannot tell whether the agent deleted “Call the bank”");
   });
 });
 
