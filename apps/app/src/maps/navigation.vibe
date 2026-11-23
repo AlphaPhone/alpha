@@ -262,10 +262,10 @@ export const navigationLayer = Layer.effect(MapsNavigation, effect {
     effect setHidden(hidden: boolean) {
       const kind = (try content.get()).guidance?.kind ?? "NoProvider"
       try voice.setHidden(hidden, maySpeak(kind))
-      if (hidden) try service.hide() else try service.show()
+      if (hidden) { try service.hide() } else { try service.show() }
     },
     effect setInMaps(inMaps: boolean) {
-      if (inMaps) try service.select() else try service.leave()
+      if (inMaps) { try service.select() } else { try service.leave() }
     },
     effect retire() {
       try apply({ type: "providerRetires" })

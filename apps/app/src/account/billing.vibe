@@ -237,7 +237,7 @@ export const billingService = Layer.effect(Membership, effect {
   effect function perform(out: ReadonlyArray<BillingEffect>): void!! {
     for (const effectOf of out) {
       match (effectOf) {
-        when "LoadPlans": {
+        when "LoadPlans": try effect {
           const loaded = loadPlans() catch () => ({ ok: false, current: { tag: "NoPaidPlan" } as const })
           try send({ type: "managerLoaded", present: loaded.current, ok: loaded.ok })
         };

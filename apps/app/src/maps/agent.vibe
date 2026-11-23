@@ -50,11 +50,11 @@ export service MapsAgent {
   /** Claim and apply a view navigation the agent asked for; a redelivery of an effect already applied applies nothing. */
   deliver(request: number, effectKey: number, binding: NavigationBinding, apply: void!!): void!!
   /** The agent's read of the selected place or route, after the owner approved its card; undefined when the selection changed. */
-  readSelected(): string | undefined!!
+  readSelected(): (string | undefined)!!
   review(): boolean!!
   approve(): boolean!!
   /** What Maps shows now with its identity and revision; undefined off Maps, on a locked screen, or with nothing shown. */
-  context(): MapsContext | undefined!!
+  context(): (MapsContext | undefined)!!
 }
 
 /** The identity of what is shown, kept while the same place or search stays selected: a route keeps its destination's. */

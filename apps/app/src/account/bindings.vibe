@@ -77,7 +77,7 @@ export service AccountBindings {
   readonly agent: Stream.Stream<AgentBinding>
   agentNow(): AgentBinding!!
   /** The verified agent session, or undefined before the resident verifies one. */
-  identity(): AgentSession | undefined!!
+  identity(): (AgentSession | undefined)!!
   /** Whether sign-in or sign-out work is in flight, and whether the sign-in card is open and untouched. */
   idle(): ConnectionIdle!!
   /** The Ready card's account chips, then each change of them. */
