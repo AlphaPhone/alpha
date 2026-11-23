@@ -190,3 +190,29 @@ it.live("a view command whose native receipt names another tab or session is not
     }
   })
 })
+
+// spec/browser/agent.md, "The open creates its tab without selecting it, the journal's receipt names that tab, and the tab is shown only after the receipt was attempted and only while the same foreground is current"
+it.live("an approved open is shown only while the foreground it was approved in is still in front", () => effect {
+  const fake = try fakeHost()
+  try scoped(effect {
+    provide fake.live {
+      const tabs = try BrowserTabs
+      const agent = try BrowserAgent
+      try settledTabs(tabs)
+      const home = { ...shownBrowser, view: "" }
+      try SubscriptionRef.set(fake.foreground, home)
+      const left = try agent.openApproved("https://example.test/", true)
+      try SubscriptionRef.set(fake.foreground, { ...shownBrowser, view: "maps" })
+      try left.present
+      const afterLeaving = { selected: (try tabs.get()).cur === left.tab, shown: (try Ref.get(fake.opened)).includes("browser") }
+      try SubscriptionRef.set(fake.foreground, home)
+      const stayed = try agent.openApproved("https://example.org/", true)
+      try stayed.present
+      const afterStaying = { selected: (try tabs.get()).cur === stayed.tab, shown: (try Ref.get(fake.opened)).includes("browser") }
+      try Effect.try(() => assert.deepStrictEqual({ afterLeaving, afterStaying }, {
+        afterLeaving: { selected: false, shown: false },
+        afterStaying: { selected: true, shown: true },
+      }))
+    }
+  })
+})

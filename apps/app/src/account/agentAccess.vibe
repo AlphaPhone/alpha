@@ -30,7 +30,7 @@ export const agentAccessService = Layer.effect(GoogleAgentAccess, effect {
   effect function perform(out: ReadonlyArray<AccessEffect>): void!! {
     for (const effectOf of out) {
       match (effectOf) {
-        when "PublishAccess": {
+        when "PublishAccess": try effect {
           const phase = (try machine.get()).phase
           const reply = try publish()
           if (phase === "Primary") {

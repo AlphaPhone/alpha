@@ -2,6 +2,7 @@
 import { MapsFailure } from "@elizaos/plugin-maps/client/contracts";
 import { Effect, type Stream } from "effect";
 import { MapsAgent } from "../../maps/agent.vibe";
+import type { MapsTile } from "../../maps/cloud.vibe";
 import { emptyContent, MapsContent, type MapsContentState } from "../../maps/content.vibe";
 import { MapsHandoff } from "../../maps/handoff.vibe";
 import { MapsSession } from "../../maps/layer.vibe";
@@ -31,6 +32,11 @@ export function act(use: (s: Services) => Effect.Effect<unknown, unknown>): void
 /** Run one Maps action and resolve with its result, or undefined when it failed. */
 export function ask<A>(use: (s: Services) => Effect.Effect<A, unknown>): Promise<A | undefined> {
   return shared.ask<A | undefined>(Effect.flatMap(services, use), undefined);
+}
+
+/** One map tile through the Maps plane; the signal cancels it and its Cloud request. Undefined when it failed or was cancelled. */
+export function tileOf(z: number, x: number, y: number, signal: AbortSignal): Promise<MapsTile | undefined> {
+  return shared.runtime.runPromise(Effect.flatMap(services, (s) => s.plane.tile(z, x, y)), { signal }).catch(() => undefined);
 }
 
 /** Call `each` with every value of a Maps stream until the returned stop is called. */

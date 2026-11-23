@@ -22,6 +22,8 @@ export interface ItemizedSet {
   readonly unnamed: number
   /** How a counted, unnamed item is called, such as "private tab". */
   readonly unnamedLabel?: string
+  /** A sentence under the set about what the action leaves alone, such as the private tabs that stay open. */
+  readonly note?: string
 }
 
 /** The app an action card opens: the view the operation acts in, Reminders and Clock included. */
