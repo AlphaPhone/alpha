@@ -64,7 +64,8 @@ it("Read what my agent keeps, from eliza's agent with its modules loaded (spec/k
   expect(await read("/api/triggers")).toEqual({ triggers: [] });
   expect(await read("/api/tasks/current")).toEqual({ task: null });
   expect(await read("/api/client-devices/capabilities")).toMatchObject({ protocol: 1 });
-  expect(await read("/api/conversations/messages/search?q=hello")).toMatchObject({ results: expect.arrayContaining([expect.objectContaining({ text: "Say hello." })]) });
+  const found = await read("/api/conversations/messages/search?q=hello") as { results: { text: string }[] };
+  expect(found.results.map((one) => one.text)).toContain("Say hello.");
   expect((await alpha.runtime.runPromise(Effect.flatMap(Cloud, (cloud) => Effect.promise(() => cloud.client.account())))).email).toBe("ask@alpha.test");
   const { conversations } = await read("/api/conversations") as { conversations: { id: string }[] };
   const { messages } = await read(`/api/conversations/${conversations[0]?.id}/messages`) as { messages: { role: string; text: string }[] };
