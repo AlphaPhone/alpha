@@ -41,6 +41,8 @@ export interface KeptReview { readonly noteId: string; readonly title: string; r
 export service NotesEditor {
   readonly drafts: Stream.Stream<DraftContent | undefined>
   readonly keptReviews: Stream.Stream<KeptReview | undefined>
+  /** The title of each edited draft an owner change or sign-out closed before it was saved; its words were kept in the encrypted draft slot of the owner they were written for. */
+  readonly unsaved: Stream.Stream<string>
   draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
@@ -94,6 +96,8 @@ const make = effect {
   const content = try SubscriptionRef.make<DraftContent | undefined>(undefined)
   const keptReview = try SubscriptionRef.make<KeptReview | undefined>(undefined)
   const writing = try Semaphore.make(1)
+  const lastOwner = try Ref.make<{ owner: string; snapshot: NotesSnapshot; digest: string } | undefined>(undefined)
+  const unsaved = try PubSub.unbounded<string>()
 
   effect function send(event: EditorEvent): (Editor | undefined)!! {
     return (machine.send(event) catch () => undefined)
@@ -123,9 +127,9 @@ const make = effect {
     try show({ ...held, ...fieldsOf(saved), basePrint: notePrint(saved) })
   }
 
-  effect function keepFailedDraft(state: Editor): void!! {
+  effect function keepFailedDraft(state: Editor, kept?: { owner: string; snapshot: NotesSnapshot; digest: string }): void!! {
     const held = try SubscriptionRef.get(content)
-    const owner = try owned()
+    const owner = kept ?? (try owned())
     if (held === undefined || owner === undefined || !state.present) return
     const base = state.draftId === "" ? undefined : owner.snapshot.notes.find((row) => row.id === state.draftId)
     const basePrint = base === undefined ? "" : (tryPromise(() => sha256Hex(notePrint(base))) catch () => "")
@@ -205,12 +209,22 @@ const make = effect {
   effect function publish(current: OwnedSnapshot | undefined): void!! {
     const state = try machine.get()
     if (current === undefined) {
+      // spec/notes/editor.md: an owner change or sign-out keeps an edited draft as a failed save does, and says it was not saved.
+      const held = try SubscriptionRef.get(content)
+      const previous = try Ref.get(lastOwner)
+      if (state.current && state.present && dirty(state) && held !== undefined && previous !== undefined) {
+        try keepFailedDraft(state, previous)
+        try PubSub.publish(unsaved, held.title.trim() === "" ? (held.defaultTitle ?? "Untitled") : held.title.trim())
+      }
+      try Ref.set(lastOwner, undefined)
       if (state.current) try send({ type: "retireOwner" })
       try show(undefined)
       try SubscriptionRef.set(keptReview, undefined)
       return
     }
     if (!state.current) try send({ type: "bindOwner" })
+    const previous = try Ref.get(lastOwner)
+    try Ref.set(lastOwner, previous !== undefined && previous.owner === current.owner ? { ...previous, snapshot: current.snapshot } : try owned())
     const after = try send({ type: "publish", revision: current.snapshot.revision, notes: [...noteIds(current.snapshot)], trashed: [...trashIds(current.snapshot)] })
     if (after === undefined) return
     const held = try SubscriptionRef.get(content)
@@ -276,6 +290,7 @@ const make = effect {
   return {
     drafts: SubscriptionRef.changes(content),
     keptReviews: SubscriptionRef.changes(keptReview),
+    unsaved: Stream.fromPubSub(unsaved),
     draft: () => SubscriptionRef.get(content),
     openNote,
     effect newNote(kind: "text" | "list", folderId?: string) {

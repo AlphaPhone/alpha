@@ -10,7 +10,7 @@ import { NotesTrash } from "../../src/notes/trash.vibe"
 import { slots } from "../../src/notes/slots.vibe"
 import { statusLabel } from "../../gen/notes__collection.effect.vibe"
 import { Machine as CollectionMachine } from "../../gen/notes__collection.effect.vibe"
-import { bound, check, notesOver } from "./harness.vibe"
+import { bound, check, notesOver, told } from "./harness.vibe"
 import { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
 
 describe("Notes journeys", () => {
@@ -57,6 +57,33 @@ describe("Notes journeys", () => {
         saved: true, created: [["New note", "\nPick up the keys"]], sameScan: true, failed: false, uncertain: true, kept: true, retried: "saved",
         afterRetry: "\nPick up the keys and the mail", removed: true, undone: "restored", live: true,
       }))
+    }
+  })
+
+  it.live("An owner change keeps an unsaved edit and says it was not saved (spec/notes/editor.md, \"Story: Keep my unsaved words on this phone when a save fails\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    told.length = 0
+    provide notesOver(agent, device) {
+      const editor = try NotesEditor
+      const collection = try NotesCollection
+      try bound()
+      try editor.newNote("text")
+      try editor.edit({ body: "Pick up the keys" })
+      try editor.save()
+      try editor.edit({ body: "Pick up the keys and the mail" })
+      // spec/notes/editor.md, "A failed save keeps its changes in the encrypted draft slot, merged with earlier kept changes"
+      try collection.retire()
+      const shown = try editor.draft()
+      let waited = 0
+      while (told.length === 0 && waited < 100) {
+        try Effect.sleep("50 millis")
+        waited += 1
+      }
+      try check(() => assert.deepStrictEqual(
+        { shown, kept: device.slots.has(slots.draft), said: [...told] },
+        { shown: undefined, kept: true, said: ["Your edit to “New note” wasn’t saved because the account changed."] },
+      ))
     }
   })
 

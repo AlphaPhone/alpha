@@ -4,6 +4,7 @@ import { Machine as EditorMachine } from "../../gen/notes__editor.effect.vibe"
 import { Machine as TrashMachine } from "../../gen/notes__trash.effect.vibe"
 import { Foreground, type ForegroundState } from "../shell/foreground.vibe"
 import { Navigation } from "../shell/navigation.vibe"
+import { Notices } from "../shell/notices.vibe"
 import { audioLayer } from "./audio.vibe"
 import { cleanupLayer } from "./cleanup.vibe"
 import { clientLayer } from "./client.vibe"
@@ -41,6 +42,9 @@ const followOwner = Layer.effectDiscard(effect {
   const editor = try NotesEditor
   const handoff = try NotesHandoff
   const sources = try NotesSources
+  const notices = try Notices
+  // spec/notes/editor.md: an edit an owner change closed before it was saved is named, never dropped silently.
+  try fork.scoped Stream.runForEach(editor.unsaved, (title) => notices.show(`Your edit to “${title}” wasn’t saved because the account changed.`, { failure: true }))
   try fork.scoped Stream.runForEach(handoff.requests, (request) =>
     request.kind === "open-notes" && request.noteId !== undefined ? openUnlessShown(editor, request.noteId) : Effect.void)
   try fork.scoped Stream.runForEach(Stream.changesWith(collection.snapshots, (a, b) => a?.snapshot.revision === b?.snapshot.revision && a?.owner === b?.owner),
@@ -129,5 +133,5 @@ export { NotesHandoff, NotesOrigins, type NotesRequest } from "./origins.vibe"
 export { NotesOrganize } from "./organize.vibe"
 export { NotesRecordingOpen } from "./recordingOpen.vibe"
 
-/** Every Notes service and machine; it needs the platform's Native, Resident, Build and KeyValueStore, the account's CloudSession, voice's VoiceRoute and RecordingTranscriber, and the shell's Foreground and Navigation. */
+/** Every Notes service and machine; it needs the platform's Native, Resident, Build and KeyValueStore, the account's CloudSession, voice's VoiceRoute and RecordingTranscriber, and the shell's Foreground, Navigation and Notices. */
 export const layer = Layer.provideMerge(Layer.mergeAll(followOwner, followForeground, followRoutes), agent)
