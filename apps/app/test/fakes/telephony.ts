@@ -1,11 +1,11 @@
-// spec/app/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"
-import { createHash } from "node:crypto";
+// spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
 import type { ActionJournalPlugin } from "@elizaos/os/bridges/definitions/action-journal";
 import type { AddressBookNativePlugin } from "@elizaos/os/bridges/definitions/contacts";
 import type { MessagesNativePlugin } from "@elizaos/os/bridges/definitions/messages";
 import type { PhoneNativePlugin } from "@elizaos/os/bridges/definitions/phone";
 import { smsBindingHash } from "@elizaos/os/bridges/messages";
 import { type Faked, plugin, rejection } from "./phone.ts";
+import type { Route } from "./routes.ts";
 
 /** A call in the phone's log. */
 export interface LoggedCall { id: number; number: string; name: string | null; date: number; type: "incoming" | "outgoing" | "missed" }
@@ -38,20 +38,34 @@ export interface TelephonyScene {
   sent: { operationId: string; recipients: string[]; body: string }[];
   journal: Map<string, Record<string, unknown>>;
   contacts: boolean;
+  /** Whether the phone lets Alpha write contacts, beside reading them. */
+  editable: boolean;
+  /** The phone's own contact editor, each time it was opened: on a new contact, or on the contact named. */
+  editors: string[];
   people: Person[];
   staged: { id: string; kind: string; target: Record<string, unknown>; phase: string; deadline: { expiresAt: number } }[];
   live: Live[];
   emergency: boolean | null;
   ended: string[];
+  /** The calls whose screen the strip's Return brought to the front. */
+  returned: string[];
   /** The phone's own report of its calls, pushed as the in-call service does. */
   report: () => void;
   /** The providers' change notice, as the SMS provider's observer sends it. */
   changed: () => void;
+  /** Every part of the send under `operationId` delivered, as the radio's delivery reports say, and the observer told. */
+  deliver: (operationId: string) => void;
   /** While set, the radio has not answered a send yet. */
   hold: Promise<void> | undefined;
+  /** What the agent's reply drafter answers: one draft, or none; and every thread it was asked about. */
+  replyDraft: string | null;
+  readonly asked: unknown[];
 }
 
-const versionOf = (id: string, revision: number) => createHash("sha256").update(`${id}:${revision}`).digest("hex");
+async function versionOf(id: string, revision: number): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${id}:${revision}`));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /** A fresh image: a call log, two voicemails, one conversation and two contacts. */
 export function telephonyScene(): TelephonyScene {
@@ -71,6 +85,8 @@ export function telephonyScene(): TelephonyScene {
     sent: [],
     journal: new Map(),
     contacts: true,
+    editable: true,
+    editors: [],
     people: [
       { id: "7", displayName: "Maya Chen", givenName: "Maya", familyName: "Chen", phoneNumbers: [{ number: "+14155550100", type: "mobile" }], emailAddresses: [], notes: "Climbing on Tuesdays", revision: 1 },
       { id: "8", displayName: "Ben Ortiz", givenName: "Ben", familyName: "Ortiz", phoneNumbers: [{ number: "+14155550122", type: "mobile" }], emailAddresses: [], revision: 1 },
@@ -79,16 +95,39 @@ export function telephonyScene(): TelephonyScene {
     live: [],
     emergency: false,
     ended: [],
+    returned: [],
     report: () => {},
     changed: () => {},
+    deliver: () => {},
     hold: undefined,
+    replyDraft: "Five works, see you there",
+    asked: [],
   };
+}
+
+/** The resident agent's reply drafter, over `world`: it answers one draft for the open conversation, and sends nothing. */
+export function telephonyRoutes(world: TelephonyScene): Route[] {
+  return [
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/messages/reply-draft") return undefined;
+      return request.json().then((thread: unknown) => {
+        world.asked.push(thread);
+        return Response.json({ draft: world.replyDraft });
+      });
+    },
+  ];
 }
 
 /** `ElizaTelephony`: eliza's calls, call log, voicemail and SMS provider, over `world`. */
 function telephony(world: TelephonyScene): Faked {
   return plugin<PhoneNativePlugin & MessagesNativePlugin, Record<string, unknown>>((emit) => {
     world.changed = () => emit("messagesChanged", {});
+    world.deliver = (operationId) => {
+      const record = world.journal.get(operationId);
+      if (record === undefined) return;
+      world.journal.set(operationId, { ...record, status: "delivered", parts: (record.parts as Record<string, unknown>[]).map((part) => ({ ...part, delivery: "success" })) });
+      emit("smsSendUpdated", { operationId });
+    };
     const status = () => ({
       version: 2, voiceCapable: true, smsCapable: true,
       permissions: { contacts: "granted", phoneState: "granted", sms: world.sms, sendSms: "granted", callLog: world.callLog },
@@ -160,7 +199,7 @@ function telephony(world: TelephonyScene): Faked {
         const one = voicemail(id);
         if (one === undefined) return Promise.resolve({ status: "not-found" });
         one.deleted = true;
-        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id }, phase: "queued", deadline: { expiresAt: 1_800_000_000_000 } };
+        const staged = { id: `staged-${world.staged.length + 1}`, kind: "voicemail", target: { id }, phase: "deleted", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
         return Promise.resolve({ status: "queued", deletion: staged });
       },
@@ -176,7 +215,11 @@ function telephony(world: TelephonyScene): Faked {
         const rows = world.texts.filter((one) => `thread:${one.thread}` === threadId).sort((x, y) => y.date - x.date).slice(0, limit);
         return Promise.resolve({ messages: rows.map(message), next: null });
       },
-      latestIncomingSender: () => Promise.resolve({ status: "empty" }),
+      latestIncomingSender: (options?: { includeAddress: true }) => {
+        const newest = world.texts.filter((one) => one.box === "inbox").sort((x, y) => y.date - x.date)[0];
+        if (newest === undefined) return Promise.resolve({ status: "empty" });
+        return Promise.resolve(options?.includeAddress ? { status: "found", address: newest.address, threadId: `thread:${newest.thread}` } : { status: "found", numberEnding: newest.address.slice(-4) });
+      },
       markThreadRead: ({ threadId, throughDate }) => {
         const unread = world.texts.filter((one) => `thread:${one.thread}` === threadId && one.box === "inbox" && !one.read && one.date <= throughDate);
         for (const one of unread) one.read = true;
@@ -217,7 +260,7 @@ function telephony(world: TelephonyScene): Faked {
 /** `ElizaContacts`: the address book, over `world`. */
 function contacts(world: TelephonyScene): Faked {
   return plugin<AddressBookNativePlugin>(() => {
-    const status = () => ({ available: true, readable: world.contacts, writable: world.contacts });
+    const status = () => ({ available: true, readable: world.contacts, writable: world.contacts && world.editable });
     const find = (id: string) => world.people.find((one) => one.id === id);
     return {
       status: () => Promise.resolve(status()),
@@ -226,24 +269,32 @@ function contacts(world: TelephonyScene): Faked {
         return Promise.resolve(status());
       },
       list: ({ query, limit }) => {
-        const found = world.people.filter((one) => one.displayName.toLowerCase().includes(query.toLowerCase())).sort((x, y) => Number(x.id) - Number(y.id));
+        const q = query.toLowerCase();
+        const digits = query.replace(/[^\d+]/g, "");
+        const found = world.people.filter((one) => one.displayName.toLowerCase().includes(q) || (digits !== "" && one.phoneNumbers.some((phone) => phone.number.replace(/[^\d+]/g, "").includes(digits)))).sort((x, y) => Number(x.id) - Number(y.id));
         const page = found.slice(0, limit);
         return Promise.resolve({
           contacts: page.map((one) => ({ id: one.id, lookup: `lookup-${one.id}`, name: one.displayName, revision: String(one.revision), starred: false, phones: one.phoneNumbers.map(({ number }) => number), emails: one.emailAddresses.map(({ address }) => address) })),
           more: found.length > limit,
         });
       },
-      create: () => Promise.resolve({ status: "returned" }),
-      edit: () => Promise.resolve({ status: "returned" }),
-      get: ({ id }) => {
-        const one = find(id);
-        if (one === undefined) return Promise.reject(new Error("Contact not found"));
-        return Promise.resolve({
-          id: one.id, lookup: `lookup-${one.id}`, displayName: one.displayName, givenName: one.givenName, familyName: one.familyName,
-          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: versionOf(one.id, one.revision),
-        });
+      create: () => {
+        world.editors.push("new");
+        return Promise.resolve({ status: "returned" });
       },
-      save: ({ id, version, ...draft }) => {
+      edit: ({ id }: { id: string }) => {
+        world.editors.push(id);
+        return Promise.resolve({ status: "returned" });
+      },
+      get: async ({ id }) => {
+        const one = find(id);
+        if (one === undefined) throw new Error("Contact not found");
+        return {
+          id: one.id, lookup: `lookup-${one.id}`, displayName: one.displayName, givenName: one.givenName, familyName: one.familyName,
+          ...(one.notes === undefined ? {} : { notes: one.notes }), starred: false, phoneNumbers: one.phoneNumbers, emailAddresses: one.emailAddresses, version: await versionOf(one.id, one.revision),
+        };
+      },
+      save: async ({ id, version, ...draft }) => {
         const fill = (one: Person) => {
           Object.assign(one, { displayName: draft.displayName, givenName: draft.givenName ?? one.givenName, familyName: draft.familyName ?? one.familyName, phoneNumbers: draft.phoneNumbers, emailAddresses: draft.emailAddresses });
           if (draft.notes !== undefined) one.notes = draft.notes;
@@ -252,23 +303,25 @@ function contacts(world: TelephonyScene): Faked {
           const made: Person = { id: String(Math.max(...world.people.map((one) => Number(one.id))) + 1), displayName: "", givenName: "", familyName: "", phoneNumbers: [], emailAddresses: [], revision: 1 };
           fill(made);
           world.people.push(made);
-          return Promise.resolve({ status: "saved", id: made.id, version: versionOf(made.id, made.revision) });
+          return { status: "saved", id: made.id, version: await versionOf(made.id, made.revision) };
         }
         const one = find(id);
-        if (one === undefined) return Promise.resolve({ status: "not-found" });
-        if (versionOf(one.id, one.revision) !== version) return Promise.resolve({ status: "stale" });
+        if (one === undefined) return { status: "not-found" };
+        const revision = one.revision;
+        if (await versionOf(id, revision) !== version || find(id) !== one || one.revision !== revision) return { status: "stale" };
         fill(one);
         one.revision += 1;
-        return Promise.resolve({ status: "saved", id: one.id, version: versionOf(one.id, one.revision) });
+        return { status: "saved", id: one.id, version: await versionOf(one.id, one.revision) };
       },
-      remove: ({ id, version }) => {
+      remove: async ({ id, version }) => {
         const one = find(id);
-        if (one === undefined) return Promise.resolve({ status: "not-found" });
-        if (versionOf(one.id, one.revision) !== version) return Promise.resolve({ status: "stale" });
+        if (one === undefined) return { status: "not-found" };
+        const revision = one.revision;
+        if (await versionOf(id, revision) !== version || find(id) !== one || one.revision !== revision) return { status: "stale" };
         world.people = world.people.filter((person) => person !== one);
         const staged = { id: `staged-${world.staged.length + 1}`, kind: "contact", target: { id, version }, phase: "queued", deadline: { expiresAt: 1_800_000_000_000 } };
         world.staged.push(staged);
-        return Promise.resolve({ status: "queued", deletion: staged });
+        return { status: "queued", deletion: staged };
       },
       resolveNames: ({ numbers }) => Promise.resolve({ names: numbers.map((number) => ({ number, name: world.people.find((one) => one.phoneNumbers.some((phone) => phone.number === number))?.displayName ?? null, photo: null })) }),
     };
@@ -295,10 +348,17 @@ function journal(world: TelephonyScene): Faked {
 function ongoing(world: TelephonyScene): Faked {
   return (emit) => {
     const snapshot = () => ({ calls: world.live.map((one) => ({ ...one })) });
-    world.report = () => emit("ongoingCall", snapshot());
+    const told = world.report;
+    world.report = () => {
+      told();
+      emit("ongoingCall", snapshot());
+    };
     return {
       ongoingCall: () => Promise.resolve(snapshot()),
-      showCall: ({ id }: { id: string }) => Promise.resolve({ shown: world.live.some((one) => one.id === id) }),
+      showCall: ({ id }: { id: string }) => {
+        world.returned.push(id);
+        return Promise.resolve({ shown: world.live.some((one) => one.id === id) });
+      },
       endCall: ({ id }: { id: string }) => {
         world.ended.push(id);
         const found = world.live.some((one) => one.id === id);
@@ -309,10 +369,17 @@ function ongoing(world: TelephonyScene): Faked {
   };
 }
 
+/** `AlphaCallState`: whether a call is live and whether it may be an emergency call, read and pushed with each report. */
 function callState(world: TelephonyScene): Faked {
-  return () => ({
-    callState: () => Promise.resolve({ inCall: world.live.length > 0, emergency: world.live.length > 0 ? world.emergency : false, emergencyLive: world.live.length > 0 && world.emergency !== false, watching: true }),
-  });
+  return (emit) => {
+    const reading = () => ({ inCall: world.live.length > 0, emergency: world.live.length > 0 ? world.emergency : false, emergencyLive: world.live.length > 0 && world.emergency !== false, watching: true });
+    const told = world.report;
+    world.report = () => {
+      told();
+      emit("callState", reading());
+    };
+    return { callState: () => Promise.resolve(reading()) };
+  };
 }
 
 /** The telephony plugins an Alpha image's host registers. */

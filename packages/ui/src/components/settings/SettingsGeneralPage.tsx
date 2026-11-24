@@ -1,4 +1,4 @@
-import { AppWindow, Battery, Bell, Bluetooth, Lock, Phone, Plane, Signal, Sun, Volume2, Wifi } from "lucide-react";
+import { AppWindow, Battery, Bell, Bluetooth, Lock, Phone, Plane, RadioTower, Signal, Sun, Volume2, Wifi, WifiCog } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
 import { SettingsNavRow } from "./SettingsNavRow.tsx";
@@ -6,6 +6,7 @@ import { SettingsPage } from "./SettingsPage.tsx";
 import { type SettingsPageLink, SettingsPageLinks } from "./SettingsPageLinks.tsx";
 import { SettingsResetNotice, type SettingsResetNoticeProps } from "./SettingsResetNotice.tsx";
 import { SettingsResetRow } from "./SettingsResetRow.tsx";
+import { SettingsSetAsHomeRow } from "./SettingsSetAsHomeRow.tsx";
 import { type AndroidTold, placed, type Reading, type SettingsAndroidProps, type SettingsPageName, type SettingsPlaceProps } from "./vocabulary.ts";
 
 export type SettingsGeneralPageProps = SettingsAndroidProps &
@@ -24,12 +25,16 @@ export type SettingsGeneralPageProps = SettingsAndroidProps &
     onBack?: () => void;
     /** Opens a page that hangs from this one. */
     onOpen?: (page: SettingsPageName) => void;
-    /** Alpha runs on the phone itself, so Erase all data is on this page. */
+    /** Alpha runs on the phone itself, so Network, Carrier & SIM setup and Erase all data are on this page. */
     onPhone?: boolean;
     /** The phone's review of a reset is open. */
     reviewing?: boolean;
     /** Asks the phone to review a reset; offered while no reset is pending. */
     onErase?: () => void;
+    /** Android's dialog for the Home role is open, on a phone that is no Alpha image. */
+    requestingHome?: boolean;
+    /** Asks Android to make Alpha the Home app, on a phone that is no Alpha image, where the Phone page does not exist. */
+    onRequestHome?: () => void;
     /** What Alpha said about the last reset attempt. */
     said?: SettingsResetNoticeProps["said"];
   };
@@ -46,7 +51,7 @@ const links: SettingsPageLink[] = [
  * and default apps, and Erase all data at the foot. Rows are numbered by slot, as on the first page.
  * @model spec/app/settings/index.md
  */
-export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, said, starting, onAndroid, place, onPlace }: SettingsGeneralPageProps) {
+export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false, told, onBack, onOpen, onPhone = false, reviewing, onErase, requestingHome, onRequestHome, said, starting, onAndroid, place, onPlace }: SettingsGeneralPageProps) {
   const at = (row: number) => placed({ place, onPlace }, row);
   const android = { starting, onAndroid };
   return (
@@ -55,6 +60,8 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false
       <ListGroup>
         <SettingsPageLinks links={links} onOpen={onOpen} place={place} onPlace={onPlace} />
         {image ? <SettingsNavRow title="Phone" icon={<Phone />} onOpen={onOpen && (() => onOpen("phone"))} {...at(4)} /> : null}
+        {onPhone ? <SettingsNavRow title="Network" icon={<WifiCog />} onOpen={onOpen && (() => onOpen("network"))} {...at(12)} /> : null}
+        {onPhone ? <SettingsNavRow title="Carrier & SIM setup" icon={<RadioTower />} onOpen={onOpen && (() => onOpen("carrier"))} {...at(13)} /> : null}
       </ListGroup>
       <ListGroup>
         <SettingsAndroidRow target="wifi-networks" title="Wi-Fi" icon={<Wifi />} reading={wifi} {...android} {...at(5)} />
@@ -65,6 +72,7 @@ export function SettingsGeneralPage({ wifi, bluetooth, mobileData, image = false
       <ListGroup>
         <SettingsAndroidRow target="screen-lock" title="Screen lock" icon={<Lock />} {...android} {...at(9)} />
         <SettingsAndroidRow target="default-apps" title="Default apps" icon={<AppWindow />} {...android} {...at(10)} />
+        {!image && (requestingHome || onRequestHome) ? <SettingsSetAsHomeRow requesting={requestingHome} onRequest={onRequestHome} {...at(14)} /> : null}
       </ListGroup>
       {onPhone ? (
         <ListGroup>

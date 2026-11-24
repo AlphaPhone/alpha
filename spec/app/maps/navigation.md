@@ -15,10 +15,12 @@ holds one trip; the location it follows is the
 ### A trip holds its starting point, its route request, the route shown, and the guidance along it
 
 A route is named by the ticket of the request that brought it and has a
-number of turns. Guidance counts the navigations started (`journey`), points
-at the next turn, and keeps the service that guides with the screen off,
-whether Maps is away from the screen, and the turn whose instruction is
-being spoken (-1 for none).
+number of turns, and is asked for one way of travelling: driving, transit,
+walking or cycling, driving first. Guidance counts the navigations started
+(`journey`), points at the next turn, and keeps the service that guides with
+the screen off, whether Maps is away from the screen, the turn whose
+instruction is being spoken (-1 for none), and how many fixes in a row have
+been beyond the next turn (`cleared`).
 
 ```quint
 import read as R from "../../kit/read"
@@ -26,17 +28,18 @@ import read as R from "../../kit/read"
 type Origin = Unset | MyLocation | Coordinates | SomePlace
 type Guidance = Stopped | Going | Arrived
 type Service = Unstarted | Starting | Running
-type Fix = Along | Passed | Strayed | There
+type Fix = Along | Passed | Beyond | Strayed | There | Unusable
+type Travel = Drive | Transit | Walk | Bicycle
 type Trip = {
-  origin: Origin, plan: R::Read, route: int, turns: int,
+  origin: Origin, travel: Travel, plan: R::Read, route: int, turns: int,
   guidance: Guidance, journey: int, turn: int, rerouting: bool,
-  service: Service, away: bool, speaking: int,
+  service: Service, away: bool, speaking: int, cleared: int,
 }
 
 pure val initial: Trip = {
-  origin: Unset, plan: R::unread, route: 0, turns: 0,
+  origin: Unset, travel: Drive, plan: R::unread, route: 0, turns: 0,
   guidance: Stopped, journey: 0, turn: 0, rerouting: false,
-  service: Unstarted, away: false, speaking: -1,
+  service: Unstarted, away: false, speaking: -1, cleared: 0,
 }
 
 pure val ticketValues = Set(1, 2, 3)
@@ -77,7 +80,7 @@ pure def canAnswerRoute(t: Trip, ticket: int, ok: bool, turns: int): bool =
 
 pure def answerRoute(t: Trip, ticket: int, ok: bool, turns: int): Trip =
   val answered = { ...t, plan: R::answer(t.plan, ok), rerouting: false }
-  if (ok) { ...answered, route: ticket, turns: turns, turn: 0, speaking: -1 } else answered
+  if (ok) { ...answered, route: ticket, turns: turns, turn: 0, speaking: -1, cleared: 0 } else answered
 ```
 
 ### A failed request keeps the route already shown
@@ -117,6 +120,32 @@ numbered below zero would name a route below zero.
 pure def alwaysTicketsAreNotNegative(t: Trip): bool = t.plan.ticket >= 0
 ```
 
+### A route is asked for one of the ways of travelling the provider offers
+
+The provider's coverage names the ways it routes; a way it does not name is
+never offered. Choosing another way while not navigating keeps the route
+shown until the new one arrives.
+
+```quint
+type Offer = { drive: bool, transit: bool, walk: bool, bicycle: bool }
+
+pure val noOffer: Offer = { drive: false, transit: false, walk: false, bicycle: false }
+
+pure def offers(o: Offer, travel: Travel): bool =
+  match travel {
+    | Drive => o.drive
+    | Transit => o.transit
+    | Walk => o.walk
+    | Bicycle => o.bicycle
+  }
+
+pure def canChooseTravel(t: Trip, travel: Travel): bool = t.guidance == Stopped and travel != t.travel
+
+pure def chooseTravel(t: Trip, travel: Travel): Trip = { ...t, travel: travel }
+
+pure def lawNoOfferRoutesNothing(travel: Travel): bool = not(offers(noOffer, travel))
+```
+
 ### A route can be kept through a failed request
 
 ```quint
@@ -140,25 +169,99 @@ pure def canStartGuidance(t: Trip): bool =
   t.guidance == Stopped and t.route != 0 and t.plan.status != R::Loading and not(t.away)
 
 pure def startGuidance(t: Trip): Trip =
-  { ...t, guidance: Going, journey: t.journey + 1, turn: 0, rerouting: false, service: Starting, speaking: -1 }
+  { ...t, guidance: Going, journey: t.journey + 1, turn: 0, rerouting: false, service: Starting, speaking: -1, cleared: 0 }
 ```
 
 ### Each fix of this journey moves guidance on: past a turn, off the route, or arrived
 
-A fix past the next turn moves to the one after, even if no fix was near
-it, and the newer instruction cuts off the older one. Straying asks for a
-new route from where the phone is, once. Arriving stops the service, the
-request and speech.
+A fix near the next turn moves to the one after; so does the second fix in
+a row beyond it, even if no fix was near it, and the newer instruction cuts
+off the older one. Straying asks for a new route from where the phone is,
+once. A fix that cannot guide pauses speech and moves nothing. Arriving
+stops the service, the request and speech.
 
 ```quint
 pure def canFollowFix(t: Trip, journey: int): bool = t.guidance == Going and journey == t.journey
 
+pure def canReroute(t: Trip): bool = t.guidance == Going and not(t.rerouting)
+
+pure def reroute(t: Trip): Trip = { ...t, rerouting: true, plan: R::ask(t.plan), cleared: 0 }
+
 pure def followFix(t: Trip, journey: int, fix: Fix): Trip =
   if (fix == There)
-    { ...t, guidance: Arrived, service: Unstarted, rerouting: false, plan: withdrawn(t.plan), speaking: -1 }
-  else if (fix == Passed and t.turn + 1 < t.turns) { ...t, turn: t.turn + 1, speaking: -1 }
-  else if (fix == Strayed and not(t.rerouting)) { ...t, rerouting: true, plan: R::ask(t.plan) }
-  else t
+    { ...t, guidance: Arrived, service: Unstarted, rerouting: false, plan: withdrawn(t.plan), speaking: -1, cleared: 0 }
+  else if (fix == Unusable) { ...t, speaking: -1 }
+  else if ((fix == Passed or (fix == Beyond and t.cleared >= 1)) and t.turn + 1 < t.turns)
+    { ...t, turn: t.turn + 1, speaking: -1, cleared: 0 }
+  else if (fix == Beyond and t.turn + 1 < t.turns) { ...t, cleared: 1 }
+  else if (fix == Strayed and not(t.rerouting)) reroute(t)
+  else { ...t, cleared: 0 }
+```
+
+### A turn is never passed backwards, nor past the arrival step, and one fix beyond a turn never passes it
+
+The arrival step is the route's last; only arriving ends it.
+
+```quint
+pure def stepATurnIsNeverPassedBackwards(before: Trip, after: Trip): bool =
+  (before.journey == after.journey and before.route == after.route and before.guidance == Going) implies after.turn >= before.turn
+
+pure def alwaysClearingCountsOneFix(t: Trip): bool = t.cleared >= 0 and t.cleared <= 1 and (t.cleared == 1 implies t.guidance == Going)
+
+pure def lawOneFixBeyondNeverPassesATurn(turns: int): bool =
+  val going = { ...initial, route: 1, turns: turns, guidance: Going, journey: 1 }
+  followFix(going, 1, Beyond).turn == 0
+
+pure def sometimesPassedOnTwoFixes(t: Trip): bool = t.guidance == Going and t.turn > 0 and t.turns >= 3
+```
+
+### A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or after two fixes beyond 60, the route left beyond 75
+
+The shell measures each fix against the route: its age when used (at most
+30 seconds old and 5 seconds ahead), its accuracy (at most 50 meters), and
+its distance to the destination, to the route, to the next turn and past
+it. An approximate fix, such as the network position that stands in while
+GPS is silent, shows where the phone is and never moves guidance. Arrival
+needs 25 meters of the place at 30 meters accuracy; leaving the route needs
+more than the larger of 75 meters and twice the accuracy; a turn is passed
+within 40 meters of it, or after two fixes on the route in a row beyond it
+by more than the larger of 60 meters and twice the accuracy. A fix too
+coarse, too old or too far ahead cannot guide: the owner reads "Turn
+guidance needs a precise, up-to-date location." and the watch keeps
+running.
+
+```quint
+pure val maxFixAgeMs = 30000
+pure val maxFixAheadMs = 5000
+pure val maxGuidingAccuracy = 50
+pure val arrivalMeters = 25
+pure val arrivalAccuracy = 30
+pure val nearTurnMeters = 40
+
+pure def larger(a: int, b: int): int = if (a > b) a else b
+
+pure def usable(precise: bool, ageMs: int, accuracy: int): bool =
+  precise and ageMs >= 0 - maxFixAheadMs and ageMs <= maxFixAgeMs and accuracy >= 0 and accuracy <= maxGuidingAccuracy
+
+pure def judged(precise: bool, ageMs: int, accuracy: int, toEnd: int, toRoute: int, toTurn: int, beyond: int): Fix =
+  if (not(usable(precise, ageMs, accuracy))) Unusable
+  else if (toEnd >= 0 and toEnd < arrivalMeters and accuracy <= arrivalAccuracy) There
+  else if (toRoute > larger(75, 2 * accuracy)) Strayed
+  else if (toTurn >= 0 and toTurn <= nearTurnMeters) Passed
+  else if (beyond > larger(60, 2 * accuracy)) Beyond
+  else Along
+
+pure val ageMsValues = Set(-5001, -5000, 0, 30000, 30001)
+pure val accuracyValues = Set(0, 30, 31, 50, 51)
+pure val metersValues = Set(-1, 0, 24, 40, 61, 76, 120)
+
+pure def lawACoarseOrStaleFixNeverMoves(ageMs: int, accuracy: int, meters: int): bool =
+  judged(false, ageMs, accuracy, meters, meters, meters, meters) == Unusable
+    and judged(true, maxFixAgeMs + 1, accuracy, meters, meters, meters, meters) == Unusable
+    and judged(true, 0 - maxFixAheadMs - 1, accuracy, meters, meters, meters, meters) == Unusable
+
+pure def lawStrayingNeedsMoreThan75Meters(accuracy: int, meters: int): bool =
+  judged(true, 0, accuracy, 100, meters, 100, 0) == Strayed implies meters > 75
 ```
 
 ### The next turn and the one after are turns of the route followed
@@ -195,7 +298,7 @@ pure def alwaysGuidanceHasARoute(t: Trip): bool = t.guidance != Stopped implies 
 pure def canEndGuidance(t: Trip): bool = t.guidance != Stopped
 
 pure def endGuidance(t: Trip): Trip =
-  { ...t, guidance: Stopped, service: Unstarted, rerouting: false, plan: withdrawn(t.plan), speaking: -1 }
+  { ...t, guidance: Stopped, service: Unstarted, rerouting: false, plan: withdrawn(t.plan), speaking: -1, cleared: 0 }
 ```
 
 ### Stop on the notification, or the location failing, ends only the journey it belongs to
@@ -239,11 +342,6 @@ pure def alwaysJourneysAreCounted(t: Trip): bool = t.journey >= 0 and (t.guidanc
 pure def sometimesArrived(t: Trip): bool = t.guidance == Arrived
 ```
 
-### Guidance can move past a turn
-
-```quint
-pure def sometimesPastTheFirstTurn(t: Trip): bool = t.guidance == Going and t.turn > 0
-```
 
 ## Story: Reroute
 
@@ -357,9 +455,11 @@ pure def sometimesGuidingAway(t: Trip): bool = t.guidance == Going and t.away an
 > As the owner, when spoken guidance exists, I want to hear only the
 > instruction for the turn ahead, never an older one.
 
-### Speech is deferred: when it exists, it speaks the next turn with Maps on screen
+### The next turn is spoken with Maps on screen, never while it is away, and the instruction owed is spoken on coming back
 
-This release guides visually; the shell sends no speech yet.
+Each instruction is spoken once for its turn. Leaving Maps silences it, and
+coming back owes the instruction of the turn ahead, which is spoken again
+for the same trip.
 
 ```quint
 pure def canSpeak(t: Trip, at: int): bool =
@@ -370,6 +470,22 @@ pure def speak(t: Trip, at: int): Trip = { ...t, speaking: at }
 pure def canStopSpeaking(t: Trip): bool = t.speaking >= 0
 
 pure def stopSpeaking(t: Trip): Trip = { ...t, speaking: -1 }
+```
+
+### An instruction is spoken for its turn and distance band: now within 50 meters, soon within 250, far beyond
+
+Within 50 meters the instruction is spoken alone; further away the distance
+comes first.
+
+```quint
+type Band = Now | Soon | Far
+
+pure def bandOf(distance: int): Band = if (distance <= 50) Now else if (distance <= 250) Soon else Far
+
+pure val distanceValues = Set(0, 50, 51, 250, 251)
+
+pure def lawTheBandsAreOrdered(distance: int): bool =
+  ((bandOf(distance) == Now) iff (distance <= 50)) and ((bandOf(distance) == Far) iff (distance > 250))
 ```
 
 ### The newest instruction owns speech

@@ -1,7 +1,6 @@
 // spec/app/inbox/drafts.md, "Story: Write a message"; spec/app/inbox/drafts.md, "Story: Set a draft aside or discard it"; spec/app/inbox/sending.md, "Story: Send a draft I reviewed"
 import { Button, InboxComposer, InboxDiscardDialog, InboxDraftReview, InboxFileOfferSheet, InboxSuggestionSheet, type InboxNoticeKind, type InboxSendOutcomeProps, InboxShelfSheet } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
-import { useState } from "react";
 import { type Mailbox, accessOf } from "../../gen/app__inbox.ts";
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { type Composer, flushed, ready } from "../../gen/app__inbox__drafts.ts";
@@ -21,7 +20,7 @@ import { untimed } from "../runtime/reactor.vibe";
 import type { Time } from "../runtime/time.vibe";
 import { Incoming, mibOf } from "./adding.vibe";
 import { Offers, fits } from "./suggestion.vibe";
-import { Letters, type Words, acceptable } from "./composer.vibe";
+import { Letters, type Words, acceptable, backFromDraft } from "./composer.vibe";
 import { Mail } from "./gmail.vibe";
 
 export interface ComposeProps {
@@ -30,6 +29,7 @@ export interface ComposeProps {
 }
 
 const titles = { Fresh: "new", Reply: "reply", ReplyAll: "replyAll", Forward: "forward", Saved: "saved" } as const;
+const emptyAddressFields = { to: "", cc: "", bcc: "" } as const;
 
 /** How the last operation on `letter` stands, while it is worth telling: an unknown send as the check of Sent settled it. */
 function outcomeOf(ops: Operations, letter: Letter, checked: readonly number[]): InboxSendOutcomeProps["outcome"] | undefined {
@@ -56,29 +56,34 @@ export function Compose({ runtime, list }: ComposeProps) {
   const { state, can, send } = useTimed(runtime, useDrafts);
   const ops = useTimed(runtime, useChanges);
   const adding = useAdding(runtime);
-  const [typing, setTyping] = useState({ to: "", cc: "", bcc: "" });
   if (!state || !ops.state || !adding.state || !state.open) return null;
   const letter = state.letter;
   const draft = letter.id;
   const words = runtime.runSync(Letters.use((all) => Effect.sync(() => all.words(draft))));
+  const typing = words.pending ?? emptyAddressFields;
   const access = accessOf(list, letter.account);
   const from = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.email(letter.account))));
   const { policy } = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.limits(letter.account))));
   const write = { type: "write", now: untimed } as const;
   const change = (next: Partial<Words>) => {
     if (!can(write, "Owner")) return;
-    runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...words, ...next }))));
+    runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...all.words(draft), ...next }))));
     void send(write, "Owner");
   };
   const line = (name: "to" | "cc" | "bcc") => ({
     recipients: words[name].map((address) => ({ address, valid: acceptable(address) })),
     value: typing[name],
-    onValueChange: (value: string) => setTyping({ ...typing, [name]: value }),
+    onValueChange: (value: string) => change({ pending: { ...typing, [name]: value } }),
     onAdd: (address: string) => {
       const added = { type: "addRecipient", now: untimed, draft, valid: acceptable(address) } as const;
-      if (address === "" || words[name].includes(address) || !can(added, "Owner")) return;
-      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...words, [name]: [...words[name], address] }))));
-      setTyping({ ...typing, [name]: "" });
+      if (address === "") return;
+      const pending = { ...typing, [name]: "" };
+      if (words[name].includes(address)) {
+        change({ pending });
+        return;
+      }
+      if (!can(added, "Owner")) return;
+      runtime.runSync(Letters.use((all) => Effect.sync(() => all.set(draft, { ...all.words(draft), [name]: [...words[name], address], pending }))));
       void send(added, "Owner");
     },
     onRemove: (address: string) => {
@@ -89,9 +94,10 @@ export function Compose({ runtime, list }: ComposeProps) {
     },
   });
   const kept = state.stored && flushed(state);
-  const sending = { type: "prepare", kind: "Send", access, letter, kept, again: false } as const;
+  const addressed = Object.values(typing).every((value) => value.trim() === "");
+  const sending = { type: "prepare", kind: "Send", access, letter, kept: kept && addressed, again: false } as const;
   // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
-  const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept, again: false } as const;
+  const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept: kept && addressed, again: false } as const;
   const deleting = { type: "prepare", kind: "DeleteDraft", access, letter, kept, again: false } as const;
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
   const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
@@ -154,7 +160,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         onSend={ops.can(sending, "Owner") ? () => void ops.send(sending, "Owner") : undefined}
         onSaveToGmail={ops.can(saving, "Owner") ? () => void ops.send(saving, "Owner") : undefined}
         onDeleteGmailCopy={ops.can(deleting, "Owner") ? () => void ops.send(deleting, "Owner") : undefined}
-        onSetAside={can(aside, "Owner") ? () => void send(aside, "Owner") : undefined}
+        onSetAside={ready(state) && (can(aside, "Owner") || state.pending || state.unkept || state.write.status === "Loading") ? () => void runtime.runPromise(backFromDraft) : undefined}
         onDiscard={can({ type: "askDiscard" }, "Owner") ? () => void send({ type: "askDiscard" }, "Owner") : undefined}
       />
       <InboxDraftReview
@@ -165,6 +171,7 @@ export function Compose({ runtime, list }: ComposeProps) {
         cc={words.cc.map((address) => ({ address, valid: acceptable(address) }))}
         bcc={words.bcc.map((address) => ({ address, valid: acceptable(address) }))}
         subject={words.subject}
+        text={words.text}
         attachments={words.files.map((file) => file.name)}
         repeat={ops.state.repeat}
         changed={ops.state.changed}

@@ -21,7 +21,8 @@ passes the tap on.
 ### The layer shows at most one toast, how long it has left, plain toasts and Undo toasts waiting behind it, the dialog it is shown in, and how much longer Android asks toasts to stay
 
 Each toast is numbered and has a length in characters; one with Undo names
-the area and the number of the change it offers to take back. Android's
+the area and the number of the change it offers to take back. The notices
+kept until the owner dismisses them are named the same way. Android's
 recommended timeout is read as a scale, in percent, through the kit's
 [read](../../kit/read.md); the layer starts unscaled, during startup, with
 no dialog open.
@@ -30,11 +31,13 @@ no dialog open.
 import read as R from "../../kit/read"
 
 type Toast = { number: int, chars: int, undo: bool, area: str, about: int }
+type Kept = { area: str, about: int }
 type Act = Undone | AskScale
 type Effect = { act: Act, area: str, number: int }
 type Toasts = {
   issued: int, showing: bool, current: Toast, lasts: int, left: int, held: bool,
   next: Toast, undos: List[Toast], scale: int, scaling: R::Read, starting: bool, dialog: int, shownIn: int,
+  kept: List[Kept],
 }
 type Shown = { state: Toasts, out: List[Effect] }
 
@@ -43,6 +46,7 @@ pure val none: Toast = { number: 0, chars: 0, undo: false, area: "", about: 0 }
 pure val initial: Toasts = {
   issued: 0, showing: false, current: none, lasts: 0, left: 0, held: false,
   next: none, undos: List(), scale: 100, scaling: R::unread, starting: true, dialog: 0, shownIn: 0,
+  kept: List(),
 }
 
 pure val charsValues = Set(10, 191, 400)
@@ -310,4 +314,52 @@ pure def alwaysAToastIsShownOnTop(s: Toasts): bool =
 
 ```quint
 pure def sometimesUndoInADialog(s: Toasts): bool = s.shownIn != 0 and s.current.undo
+```
+
+## Story: Keep what I must not miss
+
+> As the owner, I want a notice about work that was lost, or a privacy
+> state left on, to stay listed after its toast has gone, until I dismiss
+> it.
+
+### An area keeps a notice under its own name and number, once; at most three are listed, and a fourth pushes out the oldest
+
+The area raises its toast as well, which goes in its time like any other.
+
+```quint
+pure val keptLimit = 3
+
+pure def canKeep(s: Toasts, area: str, about: int): bool = area != "" and about > 0
+
+pure def keep(s: Toasts, area: str, about: int): Toasts =
+  val one = { area: area, about: about }
+  if (s.kept.includes(one)) s
+  else if (s.kept.length() >= keptLimit) { ...s, kept: s.kept.tail().append(one) }
+  else { ...s, kept: s.kept.append(one) }
+```
+
+### A kept notice stays listed until the owner dismisses it
+
+```quint
+pure def canDismiss(s: Toasts, area: str, about: int): bool = s.kept.includes({ area: area, about: about })
+
+pure def dismiss(s: Toasts, area: str, about: int): Toasts = { ...s, kept: s.kept.select(k => k != { area: area, about: about }) }
+
+pure def stepAKeptNoticeLeavesOnlyWhenDismissedOrPushedOut(before: Toasts, via: str, after: Toasts): bool =
+  before.kept.every(k => after.kept.includes(k) or via == "dismiss" or (via == "keep" and before.kept.length() >= keptLimit))
+```
+
+### Never more than three notices are kept, each named by its area and number
+
+```quint
+pure def alwaysFewNoticesAreKept(s: Toasts): bool =
+  s.kept.length() <= keptLimit and s.kept.every(k => k.area != "" and k.about > 0)
+```
+
+### A kept notice can outlive its toast, and the list can fill
+
+```quint
+pure def sometimesANoticeOutlivesItsToast(s: Toasts): bool = s.kept.length() > 0 and not(s.showing)
+
+pure def sometimesTheKeptListIsFull(s: Toasts): bool = s.kept.length() == keptLimit
 ```

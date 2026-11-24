@@ -3,7 +3,8 @@ import { Readable } from "node:stream";
 import type { ReadableStream as NodeStream } from "node:stream/web";
 import type { Plugin } from "vite";
 import type { Answering } from "./routes.ts";
-import { scene, services } from "./scene.ts";
+import { agentEvent } from "./calendar.ts";
+import { type Scene, scene, services } from "./scene.ts";
 import { notices } from "./settings.ts";
 
 async function relay(answer: Answering, incoming: IncomingMessage, outgoing: ServerResponse) {
@@ -18,12 +19,24 @@ async function relay(answer: Answering, incoming: IncomingMessage, outgoing: Ser
 }
 
 /**
+ * What the dev server shows beyond the journeys' empty world, as develop's browser fixture does: the agent's calendar
+ * holds "Design review" at 3:00 PM, today until it ends and then tomorrow.
+ */
+function developed(world: Scene): Scene {
+  const review = new Date();
+  review.setHours(15, 0, 0, 0);
+  if (Date.now() >= review.getTime() + 3_600_000) review.setDate(review.getDate() + 1);
+  world.calendar.events.push(agentEvent("Design review", review.getTime(), review.getTime() + 3_600_000));
+  return world;
+}
+
+/**
  * The fake agent and cloud at the dev server's /agent and /cloud, from the routes the journeys use, so that `pnpm dev`
  * and the explore stage run with no agent; `apply: "serve"` keeps it out of every build. With `real` the agent is the one at that address.
  * With `phone` the page reaches them through the fake phone's plugins, as on an Alpha image.
  */
 export function fakes(real?: string, phone = false): Plugin {
-  const { agent, cloud } = services(scene());
+  const { agent, cloud } = services(developed(scene()));
   return {
     name: "alpha-fakes",
     apply: "serve",

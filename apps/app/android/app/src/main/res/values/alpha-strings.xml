@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="alpha_messages_label">Messages</string>
+    <string name="alpha_phone_label">Phone</string>
+    <string name="alpha_reset_recovery_label">Reset Alpha data</string>
+    <string name="alpha_channel_group_assistant">Assistant</string>
+    <string name="alpha_channel_group_mail_briefs">Mail and briefs</string>
+    <string name="alpha_channel_group_workflows">Workflows</string>
+    <string name="alpha_channel_group_ongoing">Ongoing activity</string>
+</resources>

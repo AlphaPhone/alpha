@@ -1,8 +1,7 @@
-import { CircleAlert, SearchX, X } from "lucide-react";
+import { X } from "lucide-react";
 import { cn } from "../../lib/cn.ts";
+import { AppHeader } from "../AppHeader.tsx";
 import { Button } from "../Button.tsx";
-import { EmptyState } from "../EmptyState.tsx";
-import { Screen } from "../Screen.tsx";
 import { SearchField } from "../SearchField.tsx";
 import { Spinner } from "../Spinner.tsx";
 import { HomeAppMenu } from "./HomeAppMenu.tsx";
@@ -56,6 +55,8 @@ export type AppsDrawerProps = {
   onAddToHome?: (id: string) => void;
   /** Hands the menu's app to Android's App info; left out while Android is being asked something. */
   onShowAppInfo?: (id: string) => void;
+  /** Reads the apps again after they could not be read; left out where nothing may be read. */
+  onTryAgain?: () => void;
   /** A failure told while the drawer is open. */
   notice?: HomeNoticeMessage;
   className?: string;
@@ -78,9 +79,9 @@ const arrange = (apps: readonly HomeInstalledApp[], query: string) => {
 };
 
 const empty = {
-  CannotRead: { title: "Apps could not be read", icon: <CircleAlert /> },
-  NoAppsInstalled: { title: "No apps", icon: undefined },
-  NoMatch: { title: "No apps match", icon: <SearchX /> },
+  CannotRead: "Apps could not be read.",
+  NoAppsInstalled: "No apps",
+  NoMatch: "No apps match",
 };
 
 /**
@@ -89,46 +90,62 @@ const empty = {
  * @model spec/app/home/index.md
  */
 export function AppsDrawer({
-  view, apps, refreshing = false, query, onSearch, onClose, onOpenApp, opening, menu, onOpenMenu, onCloseMenu, onAddToHome, onShowAppInfo, notice, className,
+  view, apps, refreshing = false, query, onSearch, onClose, onOpenApp, opening, menu, onOpenMenu, onCloseMenu, onAddToHome, onShowAppInfo, onTryAgain, notice, className,
 }: AppsDrawerProps) {
   const entries = arrange(apps, query);
-  const open = entries.find(({ app }) => app.id === menu);
   return (
-    <Screen
-      title="Apps"
-      className={className}
-      actions={<Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X /></Button>}
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Apps"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !event.defaultPrevented) {
+          event.preventDefault();
+          if (menu) onCloseMenu();
+          else onClose();
+        }
+      }}
+      className={cn("flex min-h-0 flex-col bg-background pt-[max(--spacing(14),calc(env(safe-area-inset-top)+--spacing(3)))] text-foreground motion-safe:animate-fade", className)}
     >
-      <SearchField aria-label="Search apps" placeholder="Search apps" autoComplete="off" value={query} onValueChange={onSearch} />
-      {notice ? <HomeNotice notice={notice} place="InDrawer" /> : null}
-      {view === "Grid" ? (
-        <div aria-busy={refreshing || undefined} className={cn(tileColumns, "py-2")}>
-          {entries.map(({ app, detail }) => (
-            <HomeDrawerApp
-              key={app.id}
-              label={app.label}
-              detail={detail}
-              image={app.image}
-              opening={opening === app.id}
-              disabled={!onOpenApp}
-              onClick={onOpenApp && (() => onOpenApp(app.id))}
-              onOpenMenu={onOpenMenu && (() => onOpenMenu(app.id))}
-            />
-          ))}
-        </div>
-      ) : view === "Spinner" ? (
-        <div className="flex justify-center py-12 text-muted-foreground"><Spinner label="Reading apps" /></div>
-      ) : (
-        <EmptyState {...empty[view]} />
-      )}
-      <HomeAppMenu
-        open={open !== undefined}
-        label={open?.detail ? `${open.app.label} (${open.detail})` : (open?.app.label ?? "")}
-        onHome={open?.app.onHome ?? false}
-        onAddToHome={open && onAddToHome && (() => onAddToHome(open.app.id))}
-        onShowAppInfo={open && onShowAppInfo && (() => onShowAppInfo(open.app.id))}
-        onClose={onCloseMenu}
-      />
-    </Screen>
+      <AppHeader title="Apps" className="min-h-11 shrink-0 px-3 [&_h1]:py-0 [&_h1]:pl-2">
+        <Button variant="ghost" size="icon" aria-label="Close apps" onClick={onClose}><X className="size-5" /></Button>
+      </AppHeader>
+      <SearchField aria-label="Search apps" placeholder="Search apps" autoComplete="off" value={query} onValueChange={onSearch} className="mx-4 mt-3 mb-2 shrink-0 [&_input]:rounded-full [&_input]:border-0 [&_input]:bg-secondary [&_input]:pl-11 [&>svg]:size-4.5" />
+      {notice ? <HomeNotice notice={notice} place="InDrawer" className="mx-5 my-1" /> : null}
+      <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pt-1 pb-[calc(--spacing(27)+env(safe-area-inset-bottom))]">
+        {view === "Grid" ? (
+          <div aria-busy={refreshing || undefined} className={cn(tileColumns, "gap-y-5 px-0.5 py-1.5")}>
+            {entries.map(({ app, detail }) => (
+              <HomeAppMenu
+                key={app.id}
+                open={app.id === menu}
+                label={detail ? `${app.label} (${detail})` : app.label}
+                onHome={app.onHome}
+                onAddToHome={onAddToHome && (() => onAddToHome(app.id))}
+                onShowAppInfo={onShowAppInfo && (() => onShowAppInfo(app.id))}
+                onClose={onCloseMenu}
+              >
+                <HomeDrawerApp
+                  label={app.label}
+                  detail={detail}
+                  image={app.image}
+                  opening={opening === app.id}
+                  disabled={!onOpenApp}
+                  onClick={onOpenApp && (() => onOpenApp(app.id))}
+                  onOpenMenu={onOpenMenu && (() => onOpenMenu(app.id))}
+                />
+              </HomeAppMenu>
+            ))}
+          </div>
+        ) : view === "Spinner" ? (
+          <div className="flex justify-center py-7 text-muted-foreground"><Spinner label="Reading apps" /></div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 px-4 py-7 text-center text-sm text-muted-foreground">
+            <p role="status">{empty[view]}</p>
+            {view === "CannotRead" && onTryAgain ? <Button variant="secondary" onClick={onTryAgain}>Try again</Button> : null}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

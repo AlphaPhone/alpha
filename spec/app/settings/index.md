@@ -15,16 +15,15 @@ The rest of the area:
 - [Timed read](./timed.md): a read with a time limit, which every asking here uses
 - [Network](./network.md): nearby Wi-Fi, a join through Android's approval, and whether the phone is online
 - [Carrier & SIM setup](./carrier.md): the identifiers a carrier asks for, read only when the owner asks
-- [Passwords](./passwords.md): Alpha's password vault, unlocked only by Android
-- [Updates](./updates.md): Alpha's own launcher updates, by hand and hands-off
 
-Rows of other areas sit on these pages and are theirs: the listening rows and the "Microphone may be on" notice
+Rows of other areas sit on these pages and are theirs: the update rows
+(the update area); the listening rows and the "Microphone may be on" notice
 (the voice area); sign-in, the plan, the AI provider and the agent's
 connection, its Cancel and its restart details (the account area); the
 access walkthrough and the crash journal (the startup area); collecting
 other apps' notifications, their history and recovering notification data
 (the notices area); Google Calendar and its saved-event backups (the
-calendar area); the password manager provider Android uses (the passwords
+calendar area); the password manager and its provider (the passwords
 area); the conversations (Ask Alpha); and each phone action's custody (the
 approvals area). Browser and Files on the Apps page open the app itself,
 through the [shell](../shell/).
@@ -39,19 +38,19 @@ through the [shell](../shell/).
 General holds Display, Sound, Notifications, Battery and, on a phone,
 Network and Carrier & SIM setup, and on an Alpha image, Phone. Privacy
 holds Permissions. Apps holds a page for each app with something to set:
-Inbox, Workflows, Calendar, Camera, Photos, Maps and Notes, and Alpha's
-Passwords. About holds Agent activity and the Licences. Developer and its
-Problem log hang from the first page.
+Inbox, Workflows, Calendar, Camera, Photos, Maps and Notes. About holds
+Agent activity and the Licences. Developer and its Problem log hang from
+the first page.
 
 ```quint
 import facts as F from "./facts"
 
-type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | PasswordsPage | About | Activity | Licences | Developer | Problems
+type Page = Top | General | Display | Sound | Notifications | Battery | NetworkPage | CarrierPage | PhonePage | Privacy | Permissions | Apps | InboxApp | WorkflowsApp | CalendarApp | CameraApp | PhotosApp | MapsApp | NotesApp | About | Activity | Licences | Developer | Problems
 
 pure def parent(page: Page): Page =
   if (page == Display or page == Sound or page == Notifications or page == Battery or page == NetworkPage or page == CarrierPage or page == PhonePage) General
   else if (page == Permissions) Privacy
-  else if (page == InboxApp or page == WorkflowsApp or page == CalendarApp or page == CameraApp or page == PhotosApp or page == MapsApp or page == NotesApp or page == PasswordsPage) Apps
+  else if (page == InboxApp or page == WorkflowsApp or page == CalendarApp or page == CameraApp or page == PhotosApp or page == MapsApp or page == NotesApp) Apps
   else if (page == Activity or page == Licences) About
   else if (page == Problems) Developer
   else Top
@@ -94,7 +93,10 @@ pure def refocused(places: List[int], focused: int): List[int] =
 The Developer page and its Problem log exist only in a development build,
 Network and Carrier & SIM setup only on a phone, which a browser is not,
 and the Phone page only on an Alpha image, which is a phone. What the build
-and the phone are never changes while Alpha runs.
+and the phone are never changes while Alpha runs. A development build is
+the development server or a build that allows test mocks
+([platform](../platform/index.md)); a production build, a release or a
+debug one, never shows the developer pages or their controls.
 
 ```quint
 pure def admitted(s: Settings, page: Page): bool =
@@ -139,7 +141,7 @@ Opening Settings from Home shows the first page. A notice or Ask Alpha may
 open General, Display, Sound, Notifications, Battery, Privacy, Permissions,
 Apps, the Inbox, Workflows and Calendar pages, or About; the account
 section is the account area's. The developer pages, the Phone page,
-Network, Carrier & SIM setup, Passwords, Agent activity and the licences
+Network, Carrier & SIM setup, Agent activity and the licences
 are never opened this way. Opening a page is all
 the agent may do here: what it changes is the owner's to change
 ([Preferences](./preferences.md)).
@@ -220,6 +222,19 @@ pure def sometimesProblemLogShowing(s: Settings): bool = s.page == Problems
 pure def sometimesPhonePageShowing(s: Settings): bool = s.page == PhonePage
 ```
 
+### Carrier & SIM setup is a sensitive screen, and only on a phone
+
+While it shows, the identifiers stay on the phone: the assistant is told
+only that the screen is sensitive, and admits nothing that acts on it
+([assistant](../assistant/index.md)). No other page of Settings is
+sensitive.
+
+```quint
+pure def sensitive(s: Settings): bool = s.page == CarrierPage
+
+pure def alwaysASensitivePageIsOnAPhone(s: Settings): bool = sensitive(s) implies s.phone
+```
+
 ### Carrier & SIM setup can be showing on a phone that is no Alpha image
 
 ```quint
@@ -236,8 +251,8 @@ pure def sometimesCarrierOnALauncher(s: Settings): bool = s.page == CarrierPage 
 ### Each page links to what another area owns there
 
 Account and plan is on the first page. Google and email is on the Inbox
-page, Google Calendar and its saved events on the Calendar page, and the password
-manager Android uses on Passwords. Collecting other apps' notifications, with its
+page, Google Calendar and its saved events on the Calendar page, and the
+password manager on Apps. Collecting other apps' notifications, with its
 history, is on Notifications. The listener is on Privacy, and on the first
 page while the voice area reports that it could not confirm the microphone
 stopped. The conversations are on Agent activity, and in a development
@@ -254,7 +269,7 @@ pure def links(s: Settings, neighbour: Neighbour, micMayBeOn: bool): bool =
   if (neighbour == AccountAndPlan) s.page == Top
   else if (neighbour == GoogleAndEmail) s.page == InboxApp
   else if (neighbour == CalendarAccount) s.page == CalendarApp
-  else if (neighbour == PasswordManager) s.page == PasswordsPage
+  else if (neighbour == PasswordManager) s.page == Apps
   else if (neighbour == NotificationCollection) s.page == Notifications
   else if (neighbour == Listener) s.page == Privacy or (s.page == Top and micMayBeOn)
   else if (neighbour == Conversations) s.page == Activity

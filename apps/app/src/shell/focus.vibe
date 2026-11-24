@@ -1,0 +1,183 @@
+// spec/app/shell/focus.md, "Story: Keep my place when the screen changes under me"
+import * as Focus from "../../gen/app__shell__focus.effect.vibe"
+import type { Event, Target } from "../../gen/app__shell__focus.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import type { Shell as Shown } from "../../gen/app__shell.effect.vibe"
+import { Device } from "../platform/device.vibe"
+import { applying, contained, following, reacting, started, together } from "../runtime/reactor.vibe"
+
+module page {
+  import type { Target } from "../../gen/app__shell__focus.effect.vibe"
+  const focusable = "a[href], button, input, select, textarea, [tabindex], [contenteditable=true]"
+  const layered = "[role=dialog], [role=alertdialog], [role=menu]"
+
+  /** A control's focus key: its `data-focus-key`, its id, or its role and accessible name; "" for nothing that holds focus. @throws {never} */
+  export function keyOf(element: Element | null): string {
+    if (!(element instanceof HTMLElement) || !element.isConnected || element === document.body) return ""
+    const named = element.dataset.focusKey ?? element.id
+    if (named) return named
+    const label = element.getAttribute("aria-label") ?? (element.textContent ?? "").trim().slice(0, 40)
+    return `${element.getAttribute("role") ?? element.tagName.toLowerCase()}:${label}`
+  }
+  function find(key: string): HTMLElement | undefined {
+    return [...document.querySelectorAll<HTMLElement>(focusable)].find((element) => keyOf(element) === key)
+  }
+  /** The key of the control focused now. @throws {never} */
+  export const active = (): string => keyOf(document.activeElement)
+  /** Whether focus is inside a sheet, menu or dialog. @throws {never} */
+  export const layeredNow = (): boolean => document.activeElement?.closest(layered) != null
+  /** Whether a control with `key` is on the page. @throws {never} */
+  export const shown = (key: string): boolean => key !== "" && find(key) !== undefined
+  /** Focus the control with `key`. @throws {never} */
+  export function give(key: string): void {
+    const target = find(key)
+    if (target === undefined) return
+    target.focus()
+    if (document.activeElement !== target) queueMicrotask(() => {
+      if (active() === "") find(key)?.focus()
+    })
+  }
+  function targetOf(target: Target): HTMLElement | undefined {
+    const main = document.querySelector("main")
+    if (main === null) return undefined
+    if (target === "Search") return main.querySelector<HTMLElement>("input[type=search]") ?? undefined
+    if (target === "HomeStart") return main.querySelector<HTMLElement>(focusable) ?? undefined
+    if (target === "Title") return main.querySelector<HTMLElement>("h1") ?? undefined
+    if (target === "Region") return main
+    return undefined
+  }
+  /** Whether the screen's target is drawn. @throws {never} */
+  export const found = (target: Target): boolean => targetOf(target) !== undefined
+  /** Focus the screen's target, letting a title or region take focus from script. @throws {never} */
+  export function moveTo(target: Target): void {
+    const element = targetOf(target)
+    if (element === undefined) return
+    if (!element.matches(focusable)) element.tabIndex = -1
+    element.focus()
+  }
+  /** What the page says about focus: it moved, the owner keyed or pressed, or the window changed. */
+  export type Heard = "focus" | "keyed" | "pointed" | "resize"
+  const keys = new Set(["Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"])
+  /** Each change of focus, each Tab or arrow key, each press, and each change of the window. @throws {never} */
+  export function watched(heard: (what: Heard) => void): () => void {
+    const focus = () => heard("focus")
+    const keyed = (event: KeyboardEvent) => { if (keys.has(event.key)) heard("keyed") }
+    const pointed = () => heard("pointed")
+    const resize = () => heard("resize")
+    document.addEventListener("focusin", focus)
+    document.addEventListener("focusout", focus)
+    document.addEventListener("keydown", keyed, true)
+    document.addEventListener("pointerdown", pointed, true)
+    window.addEventListener("resize", resize)
+    return () => {
+      document.removeEventListener("focusin", focus)
+      document.removeEventListener("focusout", focus)
+      document.removeEventListener("keydown", keyed, true)
+      document.removeEventListener("pointerdown", pointed, true)
+      window.removeEventListener("resize", resize)
+    }
+  }
+  /** @throws {never} */
+  export const paged = (): boolean => typeof window !== "undefined" && typeof document !== "undefined"
+}
+import { active, found, give, layeredNow, moveTo, paged, shown, watched } from page
+import type { Heard } from page
+
+/** How long the shell waits for a frame. */
+const frame = Effect.sleep("16 millis")
+
+/** The control the owner last focused outside a sheet, menu or dialog: the opener of the next layer. */
+let outside = ""
+
+/** What the screen showing gives focus to: the drawer's search, Home's first control, or the app's title. */
+function targetFor(s: Shown): Target {
+  return s.trail.length > 0 ? "Title" : s.drawer ? "Search" : "HomeStart"
+}
+
+effect function tell(event: Event): (Focus.Focus | undefined)!!Focus.Machine {
+  return effect { return try (try Focus.Machine).send(event) } catch () => undefined
+}
+
+// spec/app/shell/focus.md, "Focus is told as it moves"
+effect function heardFocus(): void!!Focus.Machine {
+  const key = active()
+  if (key !== "" && !layeredNow()) outside = key
+  const now = try (try Focus.Machine).get()
+  if (key === now.active) return
+  try tell(key === "" ? { type: "blurred" } : { type: "focused", key })
+}
+
+// spec/app/shell/focus.md, "A new screen is given focus within twelve frames, unless the owner has already moved it there"
+const framed = started(effect {
+  if (!paged()) return
+  const focus = try Focus.Machine
+  try Stream.runForEach(Stream.filter(focus.changes, (f) => f.cause !== "Idle"), effect () => {
+    while ((try focus.get()).cause !== "Idle") {
+      try frame
+      try heardFocus()
+      const before = try focus.get()
+      if (before.cause === "Idle") return
+      const after = try tell({ type: "frame", activeShown: before.active !== "", targetFound: found(before.target), heldShown: shown(before.held) })
+      if (after !== undefined && after.moves > before.moves) moveTo(before.target)
+    }
+  })
+}, "focus")
+
+// spec/app/shell/focus.md, "Home's tiles and the drawer's apps show a focus ring only while the owner moves by keyboard; every other control, a field above all, shows its ring whenever it has focus"
+const watching = started(effect {
+  if (!paged()) return
+  const focus = try Focus.Machine
+  const shell = try Shell.Machine
+  const heard = Stream.callback<Heard>((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
+  try Stream.runForEach(heard, effect (what) => {
+    const f = try focus.get()
+    if (what === "focus") try heardFocus()
+    else if (what === "keyed" && Focus.canKeyed(f)) try tell({ type: "keyed" })
+    else if (what === "pointed" && Focus.canPointed(f)) try tell({ type: "pointed" })
+    else if (what === "resize" && f.held !== "" && !shown(f.held)) try tell({ type: "resizeLost", target: targetFor(try shell.get()) })
+  })
+}, "focus")
+
+// spec/app/shell/focus.md, "A layer that closes gives focus back to the control that opened it, never over a control that took it"
+effect function closed(layer: string): void!!Focus.Machine {
+  const focus = try Focus.Machine
+  const before = try focus.get()
+  const opener = before.openers.find((one) => one.layer === layer)?.opener ?? ""
+  const after = try tell({ type: "layerClosed", layer, openerReady: shown(opener) })
+  if (after === undefined) return
+  if (after.restores > before.restores) give(after.lastRestore)
+  if (after.waiting === "") return
+  const waited = after.waiting
+  const returned = effect {
+    while (!shown(waited)) try frame
+    const now = try focus.get()
+    const back = try tell({ type: "openerReturned", opener: waited })
+    if (back !== undefined && back.restores > now.restores) give(back.lastRestore)
+  }
+  const ended = try Effect.raceFirst(Effect.as(returned, false), Effect.as(Effect.sleep("1 second"), true))
+  if (ended && Focus.canWaitEnds(try focus.get())) try tell({ type: "waitEnds" })
+}
+
+const layering = started(effect {
+  if (!paged()) return
+  const layers = try Layers.Machine
+  let open: ReadonlyArray<string> = []
+  try Stream.runForEach(layers.changes, effect (l) => {
+    const now = l.open.map((layer) => layer.id)
+    for (const id of now) if (!open.includes(id)) try tell({ type: "layerOpened", layer: id, opener: outside })
+    for (const id of open) if (!now.includes(id)) try closed(id)
+    open = now
+  })
+}, "focus")
+
+/** Focus, in memory: given to each new screen, back to a layer's opener, told as it moves, and marked on the page while the owner moves by keyboard. */
+export const focus = together(
+  reacting(Focus, {}),
+  following(Shell.Machine, (s) => ({ screen: s.trail.at(-1) ?? (s.drawer ? "drawer" : "home"), target: targetFor(s) }), Focus.Machine, ({ target }) => ({ type: "screenChanged", target } as const)),
+  framed,
+  watching,
+  layering,
+  applying(Focus.Machine, (f) => f.keyboard, effect (keyboard) => { try (try Device).mark("keyboard", keyboard ? "" : undefined) }),
+)
+

@@ -1,24 +1,24 @@
 // spec/app/ask/index.md, "Story: Talk to my agent"
+import type { TurnReply } from "@elizaos/agent/client";
 import type { Route } from "./routes.ts";
 
-/** What the fake agent holds for Ask Alpha, and how it behaves; a journey changes it between steps. */
 export interface AskScene {
-  /** How many conversations were opened, and every text a turn was asked with. */
   opened: number;
   readonly said: string[];
-  /** Opening a conversation answers 503, as an agent that is starting does. */
   down: boolean;
-  /** A reply writes its first piece and then nothing, until its turn is stopped. */
   stalled: boolean;
-  /** The turns under way, by room: each stops its reply. */
   readonly turns: Map<string, () => void>;
-  /** What the agent keeps of each conversation, by its id, as eliza's history routes show it. */
   readonly kept: Map<string, Kept>;
-  /** Searching answers 500. */
   searchDown: boolean;
+  acknowledgment?: string;
+  metadata?: unknown[];
+  /** The failure fields of the resident's terminal reply. */
+  refusal?: Pick<TurnReply, "cloudCode" | "planAction"> & { readonly failureKind: NonNullable<TurnReply["failureKind"]> };
+  nextReplyChunks?: readonly string[];
+  nextReplyProvisional?: boolean;
+  cloudWarmCalls: number;
 }
 
-/** One conversation as the agent keeps it: its room, title and messages. */
 export interface Kept {
   readonly roomId: string;
   readonly title: string;
@@ -26,22 +26,40 @@ export interface Kept {
 }
 
 export function askScene(): AskScene {
-  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false };
+  return { opened: 0, said: [], down: false, stalled: false, turns: new Map(), kept: new Map(), searchDown: false, cloudWarmCalls: 0 };
 }
 
 const encoder = new TextEncoder();
 const frame = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
 /** What ends a turn, as eliza's agent names its messages (`.eliza/packages/agent/src/client/reply-frame.schema.vibe`, `DoneFrame`). */
-const named = (turn: number) => ({ messageId: `m${turn}`, userMessageId: `u${turn}`, agentName: "Alpha", actionResults: [] });
+const named = (turn: number) => ({ messageId: `m${turn}a`, userMessageId: `m${turn}u`, agentName: "Alpha", actionResults: [] });
 
-/** A streamed reply as eliza's agent writes one: what was said back in two pieces, or one piece that waits to be stopped. */
 function reply(scene: AskScene, room: string, text: string, keep: (said: string) => void): Response {
+  const custom = scene.nextReplyChunks;
+  const provisional = scene.nextReplyProvisional;
+  scene.nextReplyChunks = undefined;
+  scene.nextReplyProvisional = undefined;
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       controller.enqueue(frame({ type: "status", activity: "thinking" }));
+      if (scene.refusal !== undefined) {
+        controller.enqueue(frame({ type: "done", fullText: "", ...named(scene.said.length), ...scene.refusal }));
+        controller.close();
+        return;
+      }
+      if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "acknowledgment", text: scene.acknowledgment }));
+      if (scene.acknowledgment !== undefined) controller.enqueue(frame({ type: "tool", name: "CALENDAR", label: "Using Calendar" }));
       if (scene.stalled) {
         controller.enqueue(frame({ type: "token", text: "Thinking" }));
         scene.turns.set(room, () => controller.close());
+        return;
+      }
+      if (custom !== undefined && custom.length > 0) {
+        for (const piece of custom) controller.enqueue(frame({ type: "token", text: piece, ...(provisional ? { provisional } : {}) }));
+        const full = custom.join("");
+        keep(full);
+        controller.enqueue(frame({ type: "done", fullText: full, ...named(scene.said.length) }));
+        controller.close();
         return;
       }
       controller.enqueue(frame({ type: "token", text: "You said: " }));
@@ -102,10 +120,12 @@ export function askRoutes(scene: AskScene): Route[] {
       if (request.method !== "POST" || !found) return;
       const messages = scene.kept.get(`c${found[1]}`)?.messages ?? [];
       const keep = (role: "user" | "assistant", text: string) => void messages.push({ id: `m${scene.said.length}${role === "user" ? "u" : "a"}`, role, text });
-      return request.json().then((body: { text: string }) => {
+      return request.json().then((body: { text: string; metadata?: unknown }) => {
+        scene.metadata?.push(body.metadata);
         if (found[2] === undefined) return Response.json({ text: `You said: ${body.text}`, ...named(scene.said.length) });
         scene.said.push(body.text);
         keep("user", body.text);
+        Object.assign(messages.at(-1) ?? {}, { clientMessageId: (body as { clientMessageId?: string }).clientMessageId });
         return reply(scene, `r${found[1]}`, body.text, (said) => keep("assistant", said));
       });
     },
@@ -118,6 +138,12 @@ export function askRoutes(scene: AskScene): Route[] {
         stop?.();
         return Response.json({ aborted: stop !== undefined, roomId: room, reason, outcome: stop === undefined ? "nothingRunning" : "stopped" });
       });
+    },
+    (request, url) => (request.method === "GET" && url.pathname === "/api/status" ? Response.json({ serverInstanceId: "alpha-fake" }) : undefined),
+    (request, url) => {
+      if (request.method !== "POST" || url.pathname !== "/api/cloud/warm") return;
+      scene.cloudWarmCalls += 1;
+      return Response.json({ warmed: true });
     },
   ];
 }

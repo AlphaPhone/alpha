@@ -2,29 +2,29 @@
 import type { InstalledApp, LaunchTarget } from "@elizaos/os/bridges/definitions/system"
 
 module held {
-  import { appKey, launcherRefusalCode, systemClient } from "@elizaos/os/bridges/system"
-
-  let made: ReturnType<typeof systemClient> | undefined
-  /** eliza's client of the `ElizaSystem` plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function client(): ReturnType<typeof systemClient> {
-    return (made ??= systemClient())
+  import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+  type Bridge = typeof import("@elizaos/os/bridges/system")
+  let loaded: Promise<Bridge> | undefined
+  let ready: Bridge | undefined
+  /**
+   * eliza's bridge of the `ElizaSystem` plugin, loaded the first time the phone's launcher is built: loading it
+   * registers the plugin, which Capacitor binds once to what the host has declared by then.
+   * @throws {never}
+   */
+  export function bridge(): Promise<Bridge> {
+    return (loaded ??= import("@elizaos/os/bridges/system").then((found) => (ready = found)))
   }
-  /** @throws {never} */
-  export function keyOf(app: LaunchTarget): string {
-    return appKey(app)
+  /** The apps of `apps` that match `query`, in the order the drawer lists them, as eliza's launcher tells; all of them before the bridge is loaded. @throws {never} */
+  export function found(apps: readonly InstalledApp[], query: string): InstalledApp[] {
+    return ready === undefined ? [...apps] : ready.filterLauncherApps(apps, query)
   }
-  /** @throws {never} */
-  export function refusalOf(cause: unknown): string {
-    return launcherRefusalCode(cause) ?? "failed"
-  }
-  /** Each change of the phone's apps, until the listener is taken off again. @throws {never} */
-  export function onChange(heard: () => void): () => void {
-    const handle = client().addListener("launcherAppsChanged", () => heard())
-    return () => void handle.then((listening) => listening.remove(), () => undefined)
+  /** What tells apart two apps whose labels read alike: their profile, package or activity. @throws {never} */
+  export function details(apps: readonly InstalledApp[]): Map<string, string[]> {
+    return ready === undefined ? new Map() : ready.describeLauncherApps(apps, { builtinPrefix: "alpha:", productName: "Alpha" })
   }
 }
-import { client, keyOf, onChange, refusalOf } from held
-export { keyOf }
+import { bridge, details, found } from held
+export { details, found }
 
 /** How Alpha is presented, as the phone says: as its launcher, as the assistant alone, or as an ordinary app. */
 export interface Presentation {
@@ -49,7 +49,7 @@ export error Unlisted { cause: unknown }
  */
 export service Launcher {
   presentation(): Presentation!!
-  apps(): ReadonlyArray<InstalledApp>!Unlisted
+  apps(): ReadonlyArray<Listed>!Unlisted
   open(app: InstalledApp): Asked!!
   info(app: InstalledApp): Asked!!
   shade(): Asked!!
@@ -64,9 +64,17 @@ const refusals: Readonly<Record<string, Why>> = {
 
 const refused = (code: string | undefined): Asked => ({ done: false, why: refusals[code ?? ""] ?? "Unable" })
 
-/** The phone's launcher, through eliza's `systemClient()` of `@elizaos/os/bridges/system`. */
-export const phoneLauncher = Layer.sync(Launcher, () => {
-  const system = client()
+/** An installed app and its key: its package, its activity and its profile, as eliza's `appKey` names it. */
+export interface Listed {
+  readonly key: string
+  readonly app: InstalledApp
+}
+
+/** The phone's launcher, through eliza's client `System` of `@elizaos/os/bridges/system`. */
+export const phoneLauncher = Layer.effect(Launcher, effect {
+  const loaded = try promise(() => bridge())
+  const system = loaded.System
+  const refusalOf = (cause: unknown) => loaded.launcherRefusalCode(cause) ?? "failed"
   return {
     effect presentation() {
       const build = tryPromise(() => system.getBuildInfo()) catch () => ({ launcher: false, version: "" })
@@ -75,7 +83,7 @@ export const phoneLauncher = Layer.sync(Launcher, () => {
     },
     effect apps() {
       const listed = try tryPromise({ try: () => system.listLauncherApps({ icons: true }), catch: (cause) => new Unlisted({ cause }) })
-      return listed.apps
+      return listed.apps.map((app) => ({ key: loaded.appKey(app), app }))
     },
     effect open(app: InstalledApp) {
       const target = { packageName: app.packageName, ...(app.activityName ? { activityName: app.activityName } : {}), ...(app.user ? { user: app.user } : {}) }
@@ -93,7 +101,10 @@ export const phoneLauncher = Layer.sync(Launcher, () => {
       const handed = tryPromise(() => system.openNotificationShade()) catch () => undefined
       return handed === undefined ? refused(undefined) : handed.status === "opened" ? { done: true } : refused(handed.status)
     },
-    changes: Stream.callback<void>((queue) => acquireRelease(sync(() => onChange(() => { Queue.offerUnsafe(queue, undefined) })), (off) => sync(off))),
+    changes: Stream.callback<void>((queue) => acquireRelease(
+      promise(() => system.addListener("launcherAppsChanged", () => { Queue.offerUnsafe(queue, undefined) })),
+      (listening) => ignore(tryPromise(() => listening.remove())),
+    )),
   }
 })
 

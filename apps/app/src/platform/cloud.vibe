@@ -1,9 +1,11 @@
-// spec/kit/read.md, "Story: Read from outside"
+// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "A cloud request the phone holds back for want of a sign-in reads as the cloud's own 401"; spec/app/platform/index.md, "A request is refused for want of a network only when Android confirms the app's network is down"
 import { createCloudClient } from "@elizaos/cloud/client"
 import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
 import { CloudRefused } from "@elizaos/os/bridges/cloud"
 import type { CloudClient as Relay, CloudFailure, CloudMethod, CloudPath, CloudRequest } from "@elizaos/os/bridges/definitions/cloud"
-import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, remoteAt } from "./remote.vibe"
+import { cloudStatusOf, refusedOffline, replied } from "../../gen/app__platform.effect.vibe"
+import { type Failure, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt } from "./remote.vibe"
+import { WiFi, phoneWiFi } from "./wifi.vibe"
 
 module held {
   import { cloudClient } from "@elizaos/os/bridges/cloud"
@@ -38,9 +40,9 @@ module web {
   export function answer(body: BodyInit | null, status: number, headers: Record<string, string>): Response {
     return new Response(status === 204 || status === 304 ? null : body, { status, headers })
   }
-  /** The cloud's own answer to a request with no usable credential. @throws {never} */
-  export function unauthorized(): Response {
-    return unauthorized()
+  /** The cloud's own answer of `status` to a request with no usable credential, with no body. @throws {never} */
+  export function unauthorized(status: number): Response {
+    return new Response(null, { status })
   }
   /** What fetch was asked for, as its parts: the body as text, bytes or a form, or `false` for one this platform cannot send. @throws {never} */
   export function asked(input: RequestInfo | URL, init?: RequestInit): {
@@ -93,12 +95,30 @@ export function cloudAt(base: string) {
 
 /** The plugin's refusals that say the request never left the phone (`definitions/cloud.ts`, `CloudFailure`): the rest may have reached the cloud. */
 const kept: ReadonlyArray<CloudFailure> = [
-  "no-origin", "not-listed", "body-too-large", "header-refused", "sign-in-required", "reauth-required", "not-configured",
+  "no-origin", "not-listed", "body-too-large", "header-refused", "not-configured",
   "unknown-environment", "invalid-request", "name-in-use", "link-refused", "no-browser",
 ]
 
-function undelivered(cause: unknown): Unsent | Unreachable {
+/** The plugin's refusals that hold a request back for an account that is signed out or must sign in again. */
+const forSignIn: ReadonlyArray<CloudFailure> = ["sign-in-required", "reauth-required"]
+
+const heldForSignIn = (cause: unknown): boolean => cause instanceof CloudRefused && forSignIn.includes(cause.failure)
+
+function undelivered(cause: unknown): Failure {
+  if (heldForSignIn(cause)) return refusal(cloudStatusOf(true, 0), undefined)
   return cause instanceof BridgeUnavailable || (cause instanceof CloudRefused && kept.includes(cause.failure)) ? new Unsent({ cause }) : new Unreachable({ cause })
+}
+
+/** Nothing, where Android has not said the phone's network is down; otherwise the request never leaves the phone. */
+effect function networked(wifi: WiFi.Shape): void!Unsent {
+  const read = try wifi.connectivity()
+  const network = Option.isNone(read) ? "NetUnknown" : read.value.online ? "NetOnline" : "NetOffline"
+  if (refusedOffline(network)) throw new Unsent({ cause: "Android says the phone has no network" })
+}
+
+/** Whether Android has said the phone's network is down. */
+effect function offline(wifi: WiFi.Shape): boolean!! {
+  return effect { try networked(wifi); return false } catch () => true
 }
 
 const methods: ReadonlyArray<string> = ["GET", "POST", "PATCH", "DELETE"] satisfies ReadonlyArray<CloudMethod>
@@ -111,7 +131,7 @@ function relayed(method: string, path: string, query: Readonly<Record<string, st
 }
 
 /** The cloud on the phone as a `Remote`: one whole answer per request. The plugin streams nothing, so a stream is never sent. */
-function plugged(relay: Relay): Remote {
+function plugged(relay: Relay, wifi: WiFi.Shape): Remote {
   return {
     effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
       const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : ""
@@ -119,31 +139,35 @@ function plugged(relay: Relay): Remote {
       const headers = Object.fromEntries(Object.entries(request.headers).filter((one): one is [string, string] => typeof one[1] === "string"))
       const sent = relayed(request.method, request.url, Object.fromEntries(new URLSearchParams(UrlParams.toString(request.urlParams))), headers, body)
       if (sent === undefined) throw new Unsent({ cause: `the phone relays no ${request.method} to the cloud` })
+      try networked(wifi)
       const reply = timeout(tryPromise({ try: (signal) => relay.request({ ...sent, signal }), catch: undelivered }), patience) catch effect (cause) => match (cause) {
         when Unsent: throw cause;
+        when Refused: throw cause;
         default: throw new Unreachable({ cause });
       }
-      if (reply.status < 200 || reply.status >= 300) throw new Refused({ status: reply.status })
+      if (!replied(reply.status)) throw refusal(reply.status, reply.retryAfter)
       return try parsed(new TextDecoder().decode(reply.body))
     },
     events: () => Stream.fail(new Unsent({ cause: "the phone's cloud plugin streams nothing" })),
   }
 }
 
-/** fetch over the plugin, for eliza's client. An account that must sign in again answers 401, as the cloud itself would; any other refusal is a failed fetch. */
-function relaying(relay: Relay): typeof globalThis.fetch {
+/** fetch over the plugin, for eliza's client. An account that must sign in answers 401, as the cloud itself would; a phone Android says is offline, and any other refusal, is a failed fetch. */
+function relaying(relay: Relay, wifi: WiFi.Shape): typeof globalThis.fetch {
   return async (input, init) => {
     const { url, method, headers, body, signal } = asked(input, init)
     const sent = body === undefined ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, undefined)
       : body !== false && "text" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(body.text) as unknown)
+      : body !== false && "bytes" in body ? relayed(method, url.pathname, Object.fromEntries(url.searchParams), headers, JSON.parse(new TextDecoder().decode(body.bytes)) as unknown)
       : undefined
     if (sent === undefined) throw new TypeError("the phone relays only JSON to the cloud")
+    if (await runPromise(offline(wifi))) throw new TypeError("the phone has no network")
     try {
       const reply = await relay.request(signal === undefined ? sent : { ...sent, signal })
       const head = { etag: reply.etag, "content-type": reply.contentType, "retry-after": reply.retryAfter }
       return answer(reply.body as Uint8Array<ArrayBuffer>, reply.status, Object.fromEntries(Object.entries(head).filter((one): one is [string, string] => one[1] !== undefined)))
     } catch (cause) {
-      if (cause instanceof CloudRefused && (cause.failure === "sign-in-required" || cause.failure === "reauth-required")) return unauthorized()
+      if (heldForSignIn(cause)) return unauthorized(cloudStatusOf(true, 0))
       throw new TypeError("the cloud request failed", { cause })
     }
   }
@@ -151,9 +175,10 @@ function relaying(relay: Relay): typeof globalThis.fetch {
 
 /**
  * The cloud on the phone, through the `ElizaCloud` plugin of eliza's Android package: eliza's `cloudClient()` of
- * `@elizaos/os/bridges/cloud`.
+ * `@elizaos/os/bridges/cloud`, sent only while Android has not said the phone is offline.
  */
-export const relayedCloud = Layer.sync(Cloud, () => {
+export const relayedCloud = Layer.provide(Layer.effect(Cloud, effect {
+  const wifi = try WiFi
   const relay = client()
-  return { ...plugged(relay), client: typed(relaying(relay)) }
-})
+  return { ...plugged(relay, wifi), client: typed(relaying(relay, wifi)) }
+}), phoneWiFi)

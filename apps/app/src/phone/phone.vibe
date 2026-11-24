@@ -1,0 +1,190 @@
+// spec/app/phone/index.md, "Story: See my recent calls"; spec/app/phone/index.md, "Story: Type a number"; spec/app/phone/index.md, "Story: Call a number"; spec/app/phone/index.md, "Story: Know when a call is live"
+import type { AddressBookRow } from "@elizaos/os/bridges/contacts"
+import type { TelephonyCallLogEntry, TelephonyPermissionState } from "@elizaos/os/bridges/phone"
+import * as Phone from "../../gen/app__phone.effect.vibe"
+import type { Effect as Out, Event, Telecom, Typed } from "../../gen/app__phone.effect.vibe"
+import type { Grant } from "../../gen/kit__permission.ts"
+import { Calls } from "../platform/calls.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, applying, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { on, visiting } from "./visit.vibe"
+import { judge, matches } from "./words.ts"
+
+/** The largest call-log page Phone reads: eliza's own bound. */
+export const recentsLimit = 50
+
+/** What Phone's machine counts, kept beside it: the recent calls last read, the search, and the keypad's digits. */
+export interface Dialing {
+  readonly rows: ReadonlyArray<TelephonyCallLogEntry>
+  readonly source: ReadonlyArray<TelephonyCallLogEntry> | undefined
+  readonly sought: string
+  readonly filterLabel: string
+  readonly digits: string
+  readonly matched: string
+  readonly matchedNumber: string
+}
+
+const none: Dialing = { rows: [], source: undefined, sought: "", filterLabel: "", digits: "", matched: "", matchedNumber: "" }
+
+/** The numbers and rows behind Phone's counts: what the screens show and what a handoff dials. */
+export service Dialer {
+  get(): Dialing!!
+  set(change: Partial<Dialing>): void!!
+}
+
+const dialer = Layer.sync(Dialer, () => {
+  let held = none
+  return { get: () => sync(() => held), set: (change: Partial<Dialing>) => sync(() => { held = { ...held, ...change } }) }
+})
+
+/** Android's word on a permission, as the kit's permission takes it. */
+export function grantOf(state: TelephonyPermissionState | undefined): Grant {
+  return state === "granted" ? "Granted" : state === "denied" ? "Denied" : "Unasked"
+}
+
+const missedTypes = new Set(["missed", "rejected", "blocked"])
+
+// spec/app/phone/index.md, "Only the newest read of the log is shown, with what Android says about access"
+effect function readLog(ticket: number, device: boolean): Event!!(Telephony | Dialer | Phone.Machine) {
+  const store = try Dialer
+  const machine = try Phone.Machine
+  const before = try machine.get()
+  const held = try store.get()
+  let source = device ? undefined : held.source
+  let grant = before.log.grant
+  let ok = true
+  if (source === undefined || grant !== "Granted") {
+    const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+    grant = grantOf(status?.permissions.callLog)
+    ok = status !== undefined
+    if (grant === "Granted") {
+      const page = telephony("recentCalls", (c) => c.phone.recentCalls({ limit: recentsLimit })) catch () => undefined
+      ok = page !== undefined
+      if (page !== undefined) {
+        const names = try namesOf("phone", page.calls.map((entry) => entry.number))
+        source = page.calls.map((entry) => ({ ...entry, cachedName: names.get(entry.number) ?? entry.cachedName }))
+      }
+    }
+  }
+  const current = try machine.get()
+  const query = (try store.get()).sought
+  const rows = grant === "Granted" ? (source ?? []).filter((entry) =>
+    (current.chip === "AllCalls" || missedTypes.has(entry.type)) && matches(query, entry.cachedName ?? "", entry.number)) : []
+  if (Phone.canRecentsRead(current, ticket, rows.length)) try store.set({ source: ok && grant === "Granted" ? source : undefined, rows })
+  return { type: "recentsRead", ticket, ok, grant, count: rows.length }
+}
+
+// spec/app/phone/index.md, "Only the newest lookup names a contact"
+effect function matchNumber(ticket: number): Event!!(Telephony | Dialer) {
+  const store = try Dialer
+  const digits = (try store.get()).digits
+  const query = digits.replace(/\D/g, "")
+  if (query.length < 3) {
+    try store.set({ matched: "", matchedNumber: "" })
+    return { type: "numberMatched", ticket, found: false }
+  }
+  const page = effect {
+    try telephony("open", (c) => c.contacts.open())
+    return try telephony("list", (c) => c.contacts.list({ query, limit: 5 }))
+  } catch () => undefined
+  const found = page?.contacts.flatMap((row: AddressBookRow) => "incomplete" in row ? [] : row.phones
+    .filter((number) => number.replace(/\D/g, "").includes(query))
+    .map((number) => ({ name: row.name, number }))).at(0)
+  if ((try store.get()).digits === digits) try store.set({ matched: found?.name ?? "", matchedNumber: found?.number ?? "" })
+  return { type: "numberMatched", ticket, found: found !== undefined }
+}
+
+// spec/app/phone/index.md, "Access that arrives reads the log, and access that goes forgets the rows"
+effect function askLog(): Event!!Telephony {
+  const status = telephony("requestAccess", (c) => c.phone.requestAccess("callLog")) catch () => undefined
+  return { type: "logReported", grant: grantOf(status?.permissions.callLog) }
+}
+
+/** Whether a failure means the phone may have acted: no answer came back. */
+const lost = (failure: unknown) => failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === ""
+
+/** The dial screen opened with `number`, as the phone answers it. */
+effect function dialScreen(ticket: number, number: string): Event!!Telephony {
+  const report = telephony("dial", (c) => c.phone.dial(number)) catch () => undefined
+  return { type: "dialAnswered", ticket, opened: report?.dialStatus === "DialHandedOff" }
+}
+
+// spec/app/phone/index.md, "Call hands the typed number to the dialer, only if the phone says it is a number it can dial"; spec/app/phone/index.md, "Tapping a recent call hands its number to the dialer"; spec/app/phone/index.md, "With the dialer role a call is placed through Telecom, and counts as started only when Telecom accepted it"
+effect function handoff(ticket: number, typed: boolean, tapped: string): Event!!(Telephony | Dialer) {
+  const held = try (try Dialer).get()
+  const number = typed ? held.digits : tapped
+  const shape = judge(number)
+  if (shape !== "Dialable" && shape !== "Emergency") return { type: "dialAnswered", ticket, opened: false }
+  const status = telephony("status", (c) => c.phone.status()) catch () => undefined
+  if (status?.roles.dialer.held !== true || shape === "Emergency") return try dialScreen(ticket, number)
+  const placed = telephony("placeCall", (c) => c.phone.placeCall(number)) catch (failure) => (lost(failure) ? undefined : null)
+  if (placed === undefined) return { type: "dialLost" }
+  switch (placed?.placeStatus) {
+    case "CallPlaced": case "CallEmergencyHandoff": return { type: "dialAnswered", ticket, opened: true }
+    case "CallRoleRequired": case "CallPermissionRequired": return try dialScreen(ticket, number)
+    default: return { type: "dialAnswered", ticket, opened: false }
+  }
+}
+
+function carry(fx: Out): Job<Event, Telephony | Dialer | Phone.Machine | SystemSettings | Calls, []> {
+  return match (fx) {
+    when { tag: "ReadLog", let ticket, let device }: answer("log", readLog(ticket, device), { type: "recentsRead", ticket, ok: false, grant: "Unasked", count: 0 });
+    when { tag: "MatchNumber", let ticket }: answer("match", matchNumber(ticket), { type: "numberMatched", ticket, found: false });
+    when { tag: "AskLog" }: answer("ask", askLog(), { type: "logReported", grant: "Unasked" });
+    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "MarkSeen" }: run("seen", effect {});
+    when { tag: "Handoff", let ticket, let source, let number }: answer(`dial ${ticket}`, handoff(ticket, source === "TypedNumber", number), { type: "dialLost" });
+  }
+}
+
+/** Keep the characters the dial keypad can supply. */
+export function keypadDigits(number: string): string {
+  return number.replace(/[^\d+*#]/g, "").slice(0, Phone.maxDigits)
+}
+
+/** A number handed to Phone, judged as the keypad judges it; nothing for a number the keypad cannot hold. */
+export function prefilled(number: string): { readonly digits: string; readonly event: Event } | undefined {
+  const digits = keypadDigits(number)
+  const typed: Typed = judge(digits)
+  return digits === "" || typed === "Blank" ? undefined : { digits, event: { type: "prefill", digits: digits.length, typed } }
+}
+
+// spec/app/phone/index.md, "The phone says whether a call is live, whether it may be an emergency call, and whether the carrier is ready"
+const Reading = Schema.Struct({ inCall: Schema.NullOr(Schema.Boolean), emergency: Schema.NullOr(Schema.Boolean), emergencyLive: Schema.Boolean, carrier: Schema.optional(Schema.Boolean) })
+
+/** Telecom's call-state reading as Phone takes it: a call it cannot rule out as an emergency call may be one, and without a reading Alpha cannot tell. */
+export function telecomOf(raw: unknown): { readonly telecom: Telecom; readonly carrier: boolean } {
+  const row = Option.getOrUndefined(Schema.decodeUnknownOption(Reading)(raw))
+  if (row === undefined || row.inCall === null) return { telecom: "CallUnknown", carrier: row?.carrier ?? false }
+  const telecom: Telecom = !row.inCall ? "NoCall" : row.emergencyLive || row.emergency !== false ? "MaybeEmergencyCall" : "OrdinaryCall"
+  return { telecom, carrier: row.carrier ?? true }
+}
+
+/** Telecom's reading when Alpha opens; afterwards each one the phone pushes. */
+const opening = effect {
+  const raw = (try Calls).state() catch () => undefined
+  return [{ type: "telecomReported", ...telecomOf(raw) }] as const
+}
+
+// spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"
+/** Whether the carrier's visual voicemail is ready, as the phone last kept its voicemail, when Alpha opens. */
+const ready = started(effect {
+  const listing = telephony("voicemail", (c) => c.phone.voicemail()) catch () => undefined
+  if (listing !== undefined) try contained((try Phone.Machine).send({ type: "voicemailReported", ready: listing.carrier === "CarrierReady" }), "visual voicemail")
+}, "visual voicemail")
+
+const machine = reacting(Phone, { carry, open: opening })
+
+const shown = visiting(on("Phone"), Phone.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
+
+const clearedLog = applying(Phone.Machine, (state) => ({ front: state.front, recents: state.tab === "Recents" }), effect ({ front, recents }) => {
+  const store = try Dialer
+  if (!front) try store.set({ rows: [], source: undefined, sought: "", filterLabel: "" })
+  else if (!recents) try store.set({ rows: [], source: undefined })
+})
+
+const telecom = hearing(Stream.unwrap(effect { return (try Calls).readings }), Phone.Machine, (raw): Event => ({ type: "telecomReported", ...telecomOf(raw) }))
+
+/** Phone: resident, since Contacts, Voicemail, Messages and the agent hand it a number and every area reads whether a call is live; it reads only while its view is in front. */
+export const phone = together(machine, dialer, shown, telecom, ready, clearedLog)

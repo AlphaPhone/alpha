@@ -10,19 +10,15 @@ import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
-import { type TelephonyScene, telephonyScene } from "./telephony.ts";
+import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
+import { type UpdateScene, updateScene } from "./update.ts";
+import { type VoiceScene, voiceScene } from "./voice.ts";
 
-/** Everything the fake world holds, one field per area; a journey reads and changes it. */
 export interface Scene {
-  /** The page runs on a phone: its world is Capacitor's plugins (phone.ts), and not fetch. */
   phone: boolean;
-  /** The phone is an Alpha image, which admits Phone, Messages and Contacts. */
   image: boolean;
-  /** The world's time, in milliseconds: it only moves on, also while Alpha is closed. */
   now: number;
-  /** The owner is signed in on the phone, whose native code then holds a device key for the cloud. */
   signedIn: boolean;
-  /** What the phone's secure store holds, and the slots its host opens to the page. */
   readonly secrets: Map<string, string>;
   readonly slots: Set<string>;
   readonly sample: SampleScene;
@@ -35,9 +31,10 @@ export interface Scene {
   readonly maps: MapsScene;
   readonly telephony: TelephonyScene;
   readonly platform: PlatformScene;
+  readonly update: UpdateScene;
+  readonly voice: VoiceScene;
 }
 
-/** A fresh world: each area adds its field here, one line each. */
 export function scene(): Scene {
   return {
     phone: false, image: false, now: 0, signedIn: true, secrets: new Map(), slots: new Set(),
@@ -51,13 +48,14 @@ export function scene(): Scene {
     maps: mapsScene(),
     telephony: telephonyScene(),
     platform: platformScene(),
+    update: updateScene(),
+    voice: voiceScene(),
   };
 }
 
-/** The agent says it is ready, as eliza's does: its client asks before each request. */
 const health: Route = (request, url) => (request.method === "GET" && url.pathname === "/api/health" ? Response.json({ ready: true }) : undefined);
 
-/** The resident agent and the cloud over `world`: each area adds its routes here, one line each. @throws {never} */
+/** @throws {never} */
 export function services(world: Scene) {
   return {
     agent: answering([
@@ -66,11 +64,12 @@ export function services(world: Scene) {
       ...askRoutes(world.ask),
       ...calendarRoutes(world.calendar),
       ...platformRoutes(world.platform),
+      ...telephonyRoutes(world.telephony),
     ]),
     cloud: answering([
       ...cloudRoutes(),
       ...inboxRoutes(world.inbox),
-      ...mapsRoutes(world.maps),
+      ...mapsRoutes(world.maps, () => world.now),
     ]),
   };
 }

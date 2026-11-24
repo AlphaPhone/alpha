@@ -65,9 +65,9 @@ pure def canShow(s: Carrier): bool = not(s.showing)
 
 pure def show(s: Carrier): Carrier = forgotten(true, s)
 
-pure def canPageHidden(s: Carrier): bool = s.showing
+pure def canHideCarrier(s: Carrier): bool = s.showing
 
-pure def pageHidden(s: Carrier): Carrier = forgotten(false, s)
+pure def hideCarrier(s: Carrier): Carrier = forgotten(false, s)
 ```
 
 ### The identifiers are read only when the owner taps Show identifiers, one read at a time, with ten seconds to answer, and a new read forgets the last
@@ -156,7 +156,8 @@ pure def giveUpOnEid(s: Carrier, now: int): Carrier = { ...s, eidRead: T::answer
 
 ### Copy puts one identifier Android returned on the clipboard, one copy at a time, and the page says whether it was copied
 
-Only an IMEI, an ICCID or the EID the page shows can be copied.
+Only an IMEI, an ICCID or the EID the page shows can be copied. Whether it
+was copied is announced, as well as shown.
 
 ```quint
 pure val valueValues = Set("", "356938035643809")

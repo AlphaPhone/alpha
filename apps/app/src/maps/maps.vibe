@@ -1,381 +1,610 @@
-// spec/app/maps/index.md, "Story: Find a place"; spec/app/maps/index.md, "Story: Plan directions and choose a route"; spec/app/maps/connection.md, "Story: Keep Cloud Maps on the account that asked for it"
+// spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Connect through my cloud account"
 import { CloudError } from "@elizaos/cloud/client"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Screen from "../../gen/app__maps.effect.vibe"
-import type { Effect as ScreenOut, Event as ScreenEvent, Leg, Place } from "../../gen/app__maps.effect.vibe"
-import * as Connection from "../../gen/app__maps__connection.effect.vibe"
-import { mayRequest, mayReturn, noCoverage, pauseSeconds } from "../../gen/app__maps__connection.effect.vibe"
-import type { Connection as ConnectionState, Coverage, Effect as ConnectionOut, Event as ConnectionEvent } from "../../gen/app__maps__connection.effect.vibe"
-import * as Guidance from "../../gen/app__maps__guidance.effect.vibe"
-import type { Effect as GuidanceOut, Event as GuidanceEvent } from "../../gen/app__maps__guidance.effect.vibe"
-import * as Locator from "../../gen/app__maps__location.effect.vibe"
-import { gpsGraceMs, oneShot, oneShotTimeoutMs } from "../../gen/app__maps__location.effect.vibe"
-import type { Effect as LocatorOut, Event as LocatorEvent, Fix, Locator as LocatorState } from "../../gen/app__maps__location.effect.vibe"
-import * as Plane from "../../gen/app__maps__plane.effect.vibe"
-import { basemapFor } from "../../gen/app__maps__plane.effect.vibe"
-import type { Effect as PlaneOut, Event as PlaneEvent } from "../../gen/app__maps__plane.effect.vibe"
-import * as Saved from "../../gen/app__maps__saved.effect.vibe"
-import type { ProviderKind, Travel } from "../../gen/app__maps__vocabulary.effect.vibe"
+import { mode, pressMs, readable, shown, typingMs } from "../../gen/app__maps.effect.vibe"
+import type { Change, Effect as Out, Event as Ev, HandOff, Maps as State } from "../../gen/app__maps.effect.vibe"
+import * as Credits from "../../gen/app__maps__credits.effect.vibe"
+import type { Effect as CreditsOut, Event as CreditsEv } from "../../gen/app__maps__credits.effect.vibe"
+import { findTimeoutMs, holding, networkGraceMs } from "../../gen/app__maps__connection.effect.vibe"
+import type { Wait } from "../../gen/app__maps__connection.effect.vibe"
+import { judged, maxFixAgeMs, maxFixAheadMs } from "../../gen/app__maps__navigation.effect.vibe"
+import type { Offer, Origin, Travel } from "../../gen/app__maps__navigation.effect.vibe"
+import type { Saved } from "../../gen/app__maps__places.effect.vibe"
+import type { Grant as Allowed } from "../../gen/kit__permission.effect.vibe"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import { type CloudClient, Cloud } from "../platform/cloud.vibe"
-import { Location } from "../platform/location.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Grant, Location, type Sighting } from "../platform/location.vibe"
+import { Navigation } from "../platform/navigation.vibe"
 import { type Job, answer, due, following, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
 import { Time } from "../runtime/time.vibe"
-import { type Point, type Shape, coordinateOf, measured, pointOf } from "./geometry.ts"
+import { type Coverage, type Spot, type View, type Way, atlas } from "./atlas.vibe"
+import { type Point, coordinateOf, measured, pointOf } from "./geometry.ts"
 
 type CloudPlace = Awaited<ReturnType<CloudClient["mapsPlacesSearch"]>>["places"][number]
-type CloudRoute = Awaited<ReturnType<CloudClient["mapsRoutes"]>>["routes"][number]
-type Capabilities = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>
 
-/** A Maps request that was not answered for this screen: refused before it left, failed, or answered for an account or generation that moved on. */
+module web {
+  /** Hand `url` to the phone, which opens it in the app that owns it. @throws {never} */
+  export function opened(url: string): void {
+    globalThis.open?.(url, "_blank", "noopener")
+  }
+  /** The phone's share sheet with `text`, or, where the phone has none, `text` copied: whether either took it. */
+  export async function shared(title: string, text: string): Promise<boolean> {
+    const phone = globalThis.navigator
+    if (phone?.share !== undefined) {
+      await phone.share({ title, text })
+      return true
+    }
+    return copied(text)
+  }
+  /** `text` on the clipboard: whether it was put there. */
+  export async function copied(text: string): Promise<boolean> {
+    try {
+      await globalThis.navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      return false
+    }
+  }
+  /** `text` read as JSON, or `undefined` where it is not JSON. @throws {never} */
+  export function parsed(text: string): unknown {
+    try { return JSON.parse(text) } catch { return undefined }
+  }
+}
+import { copied, opened, parsed, shared } from web
+
+/** A Maps request the phone did not get an answer to: held back by a wait Cloud named, refused or failed. */
 error Unanswered { cause: unknown }
 
-/** The shapes of the routes the screen was answered, by route number: what guidance measures fixes against and the map draws. */
-export service Routes {
-  keep(id: number, shape: Shape): void!!
-  shape(id: number): Option.Option<Shape>!!
-}
-
-const routes = Layer.sync(Routes, () => {
-  const kept = new Map<number, Shape>()
-  return {
-    keep: (id: number, shape: Shape) => sync(() => { kept.set(id, shape) }),
-    shape: (id: number) => sync(() => Option.fromUndefinedOr(kept.get(id))),
-  }
-})
-
-/** The number guidance knows a route of the screen by: its plan's ticket and its place among the alternatives. */
-export function routeId(ticket: number, index: number): number {
-  return ticket * 10 + index + 1
-}
-
 const google = "eliza-cloud-google"
-
-/** The kind of provider a deployment's coverage names: Google's own, or an open-data provider. */
-function kindOf(capabilities: Capabilities): ProviderKind {
-  if (!capabilities.available) return "NoProvider"
-  return capabilities.providerId === google || capabilities.sources.data === "Google Maps" ? "GoogleProvider" : "OpenProvider"
-}
-
 const travelModes = { Drive: "drive", Walk: "walk", Bicycle: "bicycle", Transit: "transit" } as const satisfies Record<Travel, string>
+const noOffer: Offer = { drive: false, transit: false, walk: false, bicycle: false }
 
-/** What the coverage offers, by the modes it names. */
-export function coverageOf(capabilities: Capabilities): Coverage {
-  if (!capabilities.available) return noCoverage
-  const modes: ReadonlyArray<string> = capabilities.capabilities.modes
-  return {
-    kind: kindOf(capabilities),
-    offer: {
-      drive: modes.includes("drive"), walk: modes.includes("walk"), bicycle: modes.includes("bicycle"), transit: modes.includes("transit"),
-      alternatives: capabilities.capabilities.alternatives, map: capabilities.capabilities.map,
-    },
-  }
+/** The wait a failure of Cloud names, with the seconds it names (0 for none), or nothing where it names no wait. */
+function waitOf(failure: unknown, now: number): { readonly wait: Wait; readonly seconds: number } | undefined {
+  if (!(failure instanceof CloudError)) return undefined
+  const why = failure.failure
+  const until = (at: number) => (at > now ? Math.ceil((at - now) / 1000) : 0)
+  if (why.tag === "CloudRateLimited") return { wait: "RateLimited", seconds: until(why.retryAt) }
+  if (why.tag === "CloudAllowanceExhausted") return { wait: "AllowanceSpent", seconds: until(why.resetsAt) }
+  if (why.tag === "CloudUnavailable" && why.retryAfter > 0) return { wait: "Unnamed", seconds: 0 }
+  return undefined
 }
 
-/** A provider's place as the screen shows it. */
-export function placeOf(raw: CloudPlace, kind: ProviderKind): Place {
-  const { lat, lng } = pointOf(raw.coordinate)
-  return { ref: raw.id, name: raw.name, category: "", kind, lat, lng, phone: raw.phone ?? "" }
+// spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"
+effect function held(failure: unknown, account: number): void!!(Time | Screen.Machine) {
+  const named = waitOf(failure, try (try Time).now())
+  if (named === undefined) return
+  try ignore((try Screen.Machine).send({ type: "cloudWaits", wait: named.wait, seconds: named.seconds, now: untimed, account }))
 }
 
-/** The phone's position as a place to show or to start from. */
-export function herePlace(fix: Fix): Place {
-  return { ref: "", name: "Your location", category: "", kind: "NoProvider", lat: fix.lat, lng: fix.lng, phone: "" }
-}
-
-// spec/app/maps/connection.md, "A wait Cloud names is kept when it is at most a day, an allowance reset when at most 400 days, and any other wait is one minute"
-effect function paused(failure: unknown, captured: number): void!!(Connection.Machine | Time) {
-  if (!(failure instanceof CloudError)) return
-  const { failure: why } = failure
-  const wall = try Clock.currentTimeMillis
-  const until = why.tag === "CloudRateLimited" ? why.retryAt : why.tag === "CloudAllowanceExhausted" ? why.resetsAt : undefined
-  if (until === undefined) return
-  const seconds = pauseSeconds(Math.ceil((until - wall) / 1000))
-  try ignore((try Connection.Machine).send({ type: "pause", captured, waitMs: seconds * 1000, now: untimed }))
-}
-
-// spec/app/maps/connection.md, "A data request starts only on the installed provider of the bound account outside a pause, and its answer is taken only for the generation and account it started under"
-effect function asked<A>(call: (client: CloudClient, signal: AbortSignal, coverage: Coverage) => Promise<A>): { answer: A; coverage: Coverage }!Unanswered!(Cloud | Connection.Machine | Time) {
-  const connection = try Connection.Machine
-  const now = try (try Time).now()
-  const before = try connection.get()
-  if (!mayRequest(before, now)) throw new Unanswered({ cause: "Maps is not available now" })
+/** A call of eliza's cloud client for Maps under `signal`, refused while a wait Cloud named still holds. */
+effect function askedUnder<A>(call: (client: CloudClient, signal: AbortSignal) => Promise<A>, signal?: AbortSignal): A!Unanswered!(Cloud | Time | Screen.Machine) {
+  const { link } = try (try Screen.Machine).get()
+  if (holding(link)) throw new Unanswered({ cause: "Cloud asked Alpha to wait" })
   const { client } = try Cloud
-  const sent: { value: A }!Unanswered = tryPromise({ try: (signal) => call(client, signal, before.coverage).then((value) => ({ value })), catch: (cause) => new Unanswered({ cause }) })
-  const got = try (sent catch effect (failure) => {
-    try paused(failure.cause, before.generation)
-    throw failure
-  })
-  if (!mayReturn(try connection.get(), before.generation, before.account, false)) throw new Unanswered({ cause: "the account or the provider changed" })
-  return { answer: got.value, coverage: before.coverage }
+  const sent: A!Unanswered = tryPromise({ try: (own) => call(client, signal ?? own), catch: (cause) => new Unanswered({ cause }) })
+  return try Effect.tapError(sent, (failure) => held(failure.cause, link.account))
 }
 
-/** Where the screen ranks a search around: the phone's last position, when it has one. */
-effect function near(): { near?: { latitude: number; longitude: number } }!!Locator.Machine {
-  const here = try (try Locator.Machine).get()
-  return here.located ? { near: coordinateOf(here.here) } : {}
+const asked = <A>(call: (client: CloudClient, signal: AbortSignal) => Promise<A>) => askedUnder(call)
+
+function offerOf(coverage: Coverage): Offer {
+  if (!coverage.available) return noOffer
+  const modes: ReadonlyArray<string> = coverage.capabilities.modes
+  return { drive: modes.includes("drive"), transit: modes.includes("transit"), walk: modes.includes("walk"), bicycle: modes.includes("bicycle") }
 }
 
-// spec/app/maps/index.md, "Only the newest search's answer is shown: its places, or that there are none, or that it failed"
-effect function searched(ticket: number, text: string): ScreenEvent!!(Cloud | Connection.Machine | Time | Locator.Machine) {
-  const around = try near()
-  return effect {
-    const { answer: found, coverage } = try asked((client, signal) => client.mapsPlacesSearch({ query: text, limit: 10, ...around }, { signal }))
-    return { type: "found", ticket, places: found.places.map((raw) => placeOf(raw, coverage.kind)) }
-  } catch () => ({ type: "notFound", ticket })
+function isGoogle(coverage: Coverage): boolean {
+  return coverage.available && (coverage.providerId === google || coverage.sources.data === "Google Maps")
 }
 
-// spec/app/maps/index.md, "A starting point is the phone's position, coordinates, a saved place or a place the provider found"
-effect function origins(ticket: number, text: string): ScreenEvent!!(Cloud | Connection.Machine | Time | Locator.Machine) {
-  const around = try near()
-  return effect {
-    const { answer: found, coverage } = try asked((client, signal) => client.mapsPlacesSearch({ query: text, limit: 5, ...around }, { signal }))
-    return { type: "originsFound", ticket, places: found.places.map((raw) => placeOf(raw, coverage.kind)) }
-  } catch () => ({ type: "originsFailed", ticket })
+/** The coverage of the provider the machine installed, or none. */
+export function coverageOf(state: State): Coverage | undefined {
+  return state.link.provider === 0 ? undefined : atlas.coverage(state.link.coverage.ticket)
 }
 
-// spec/app/maps/index.md, "A place opens from a result, a saved place or a pin, and a result's details are asked for under the next ticket"
-effect function details(ticket: number, ref: string): ScreenEvent!!(Cloud | Connection.Machine | Time) {
-  return effect {
-    const { answer: found, coverage } = try asked((client, signal) => client.mapsPlaceDetails({ id: ref }, { signal }))
-    if (found.place === null) return { type: "undetailed", ticket }
-    return { type: "detailed", ticket, point: placeOf(found.place, coverage.kind) }
-  } catch () => ({ type: "undetailed", ticket })
-}
-
-function legOf(route: CloudRoute): Leg {
-  return { meters: Math.round(route.distanceMeters), seconds: Math.round(route.durationSeconds), steps: Math.max(1, route.steps.length) }
-}
-
-function shapeOf(route: CloudRoute): Shape {
-  return { line: route.geometry.map(pointOf), turns: route.steps.map((step) => pointOf(step.coordinate)) }
-}
-
-/** The routes from `from` to `to`, each shape kept under its route number. */
-effect function routesBetween(from: Point, to: Point, travel: Travel, ticket: number): ReadonlyArray<Leg>!Unanswered!(Cloud | Connection.Machine | Time | Routes) {
-  const kept = try Routes
-  const { answer: found, coverage } = try asked((client, signal, offered) =>
-    client.mapsRoutes({ from: coordinateOf(from), to: coordinateOf(to), mode: travelModes[travel], alternatives: offered.offer.alternatives }, { signal }))
-  const listed = found.routes.slice(0, coverage.offer.alternatives ? 3 : 1)
-  for (const [index, route] of listed.entries()) try kept.keep(routeId(ticket, index), shapeOf(route))
-  return listed.map(legOf)
-}
-
-// spec/app/maps/index.md, "The provider's routes are listed in order, and choosing one asks nothing new"
-effect function planned(ticket: number, from: Place, to: Place, travel: Travel): ScreenEvent!!(Cloud | Connection.Machine | Time | Routes) {
-  return effect {
-    const legs = try routesBetween(from, to, travel, ticket)
-    return legs.length === 0 ? { type: "routeFailed", ticket } : { type: "routed", ticket, legs: [...legs] }
-  } catch () => ({ type: "routeFailed", ticket })
-}
-
-/** The session `generation` of the location machine once it has ended: with a fix, or without. */
-effect function ended(generation: number): Option.Option<LocatorState>!!Locator.Machine {
-  const locator = try Locator.Machine
-  return try Stream.runHead(Stream.filter(locator.changes, (s) => s.generation !== generation || s.phase === "Idle" || s.phase === "Failed"))
-}
-
-// spec/app/maps/index.md, "Locate shows the phone's position, or makes it the starting point in directions"
-effect function locatedHere(ticket: number): ScreenEvent!!Locator.Machine {
-  const locator = try Locator.Machine
-  const begun = (try (locator.send({ type: "beginLocate", purpose: "OwnerFix", now: untimed }) |> Effect.map(%, (moved) => moved.state) |> Effect.option(%)))
-  if (Option.isNone(begun)) return { type: "unlocated", ticket }
-  const last = Option.getOrUndefined(try ended(begun.value.generation))
-  return last !== undefined && last.generation === begun.value.generation && last.phase === "Idle" && last.located
-    ? { type: "located", ticket, point: herePlace(last.here) }
-    : { type: "unlocated", ticket }
-}
-
-function carryScreen(fx: ScreenOut): Job<ScreenEvent, Cloud | Connection.Machine | Time | Locator.Machine | Routes, ["Owner" | "Flow"]> {
-  return match (fx) {
-    when { tag: "Search", let ticket, let text }: answer("search", searched(ticket, text), { type: "notFound", ticket }, "Flow");
-    when { tag: "Details", let ticket, let ref }: answer("details", details(ticket, ref), { type: "undetailed", ticket }, "Flow");
-    when { tag: "FindOrigin", let ticket, let text }: answer("origin", origins(ticket, text), { type: "originsFailed", ticket }, "Flow");
-    when { tag: "Plan", let ticket, let from, let to, let travel }: answer("plan", planned(ticket, from, to, travel), { type: "routeFailed", ticket }, "Flow");
-    when { tag: "Locate", let ticket }: answer("locate", locatedHere(ticket), { type: "unlocated", ticket }, "Flow");
-  }
-}
-
-// spec/app/maps/index.md, "When the owner pauses, the typed query or starting point is sent, and only while Maps is in front"
-function screenTimers(state: Screen.Maps) {
-  if (state.pending === "NoPending") return []
-  const len = state.pending === "QueryPending" ? state.query.length : state.originText.length
-  return [due<ScreenEvent, ["Owner" | "Flow"]>("debounce", state.due, { type: "debounce", len, now: untimed }, "Flow")]
-}
-
-const screen = reacting(Screen, { carry: carryScreen, timers: screenTimers })
-
-// spec/app/maps/connection.md, "Only the newest read for the bound account installs the provider, and coverage with no provider or no mode is Maps not offered"
-effect function covered(generation: number): ConnectionEvent!!Cloud {
+// spec/app/maps/connection.md, "Only the newest read's answer is taken, while signed in, and a healthy answer installs the provider for that account"; spec/app/maps/connection.md, "Opening Maps, regaining the network or Retry reads the coverage again only when no provider is working"
+effect function covered(ticket: number): Ev!!Cloud {
   const { client } = try Cloud
   return effect {
     const found = try tryPromise({ try: (signal) => client.mapsCapabilities({ signal }), catch: (cause) => new Unanswered({ cause }) })
-    return { type: "covered", generation, answer: "Covered", coverage: coverageOf(found) }
-  } catch (failure) => ({
-    type: "covered", generation, coverage: noCoverage,
-    answer: failure.cause instanceof CloudError && failure.cause.failure.tag === "CloudCredentialInvalid" ? "Unauthorized" : failure.cause instanceof CloudError ? "Unavailable" : "Garbled",
-  })
+    atlas.covered(ticket, found)
+    if (!found.available) return { type: "answerCoverage", ticket, ok: true, covered: false, google: false, offer: noOffer }
+    return { type: "answerCoverage", ticket, ok: true, covered: found.capabilities.map, google: isGoogle(found), offer: offerOf(found) }
+  } catch () => ({ type: "answerCoverage", ticket, ok: false, covered: false, google: false, offer: noOffer })
 }
 
-function carryConnection(fx: ConnectionOut): Job<ConnectionEvent, Cloud | Guidance.Machine, []> {
-  return match (fx) {
-    when { tag: "ReadCoverage", let generation }: answer("coverage", covered(generation), { type: "covered", generation, answer: "Unavailable", coverage: noCoverage });
-    when { tag: "Retired" }: run("retired", Effect.flatMap(Guidance.Machine, (guidance) => ignore(guidance.send({ type: "providerRetires" }))));
+/** A provider's place as the atlas keeps it, with its most specific category where the provider names one. */
+function spotOf(raw: CloudPlace): Spot {
+  const categories: unknown = (raw as { readonly categories?: unknown }).categories
+  const category = Array.isArray(categories) && typeof categories[0] === "string" ? categories[0] : ""
+  return {
+    name: raw.name, category, at: pointOf(raw.coordinate), providerId: raw.providerId, id: raw.id, google: raw.providerId === google,
+    address: raw.address, phone: raw.phone, website: raw.website, hours: raw.openingHours,
   }
 }
 
-const connection = reacting(Connection, { carry: carryConnection, open: [{ type: "openMaps" }] })
-
-// spec/app/maps/connection.md, "Changing account retires the provider before anything reads the new account, clears the pause and owes a read"
-const account = started(effect {
-  const { client } = try Cloud
-  const found = tryPromise(() => client.account()) |> Effect.option(%)
-  const owner = try found
-  if (Option.isSome(owner)) try ignore((try Connection.Machine).send({ type: "bindAccount", account: owner.value.id }))
-}, "reading the Maps account")
-
-// spec/app/maps/location.md, "Only the owner's own locate or the guidance they started may prompt for permission"
-effect function checked(generation: number): LocatorEvent!!Location {
-  const grant = try (try Location).permission()
-  return { type: "permissionChecked", owner: generation, granted: grant === "precise" || grant === "approximate" }
+/** Where the screen ranks a search around: the phone's last position, when it has one. */
+function near(): { near?: { latitude: number; longitude: number } } {
+  const here = atlas.snapshot().here
+  return here === undefined ? {} : { near: coordinateOf(here.at) }
 }
 
-effect function prompted(generation: number): LocatorEvent!!Location {
-  const grant = try (try Location).request()
-  return { type: "permissionAnswered", owner: generation, granted: grant === "precise" || grant === "approximate" }
+// spec/app/maps/index.md, "Only the newest search's answer is shown: results, none, or a failure"
+effect function searched(ticket: number, query: string): Ev!!(Cloud | Time | Screen.Machine) {
+  return effect {
+    const found = try asked((client, signal) => client.mapsPlacesSearch({ query, limit: 10, ...near() }, { signal }))
+    const places = found.places.map((raw) => atlas.numberOf(spotOf(raw)))
+    atlas.found(places)
+    return { type: "answerSearch", ticket, ok: true, found: places.length }
+  } catch () => ({ type: "answerSearch", ticket, ok: false, found: 0 })
 }
 
-// spec/app/maps/location.md, "Fixes count only from the current watch; a one-shot session ends at its first fix or after 15 seconds"
-function watched(generation: number): Stream.Stream<LocatorEvent, never, Location | Time> {
+// spec/app/maps/index.md, "A starting point can be a place found by its name, around the phone or the last start"
+effect function foundOrigins(ticket: number, query: string): Ev!!(Cloud | Time | Screen.Machine) {
+  const { startLat, startLng } = try (try Screen.Machine).get()
+  const around = atlas.snapshot().here?.at ?? (startLat === 0 && startLng === 0 ? undefined : { lat: startLat, lng: startLng })
+  return effect {
+    const found = try asked((client, signal) => client.mapsPlacesSearch({ query, limit: 5, ...(around === undefined ? {} : { near: coordinateOf(around) }) }, { signal }))
+    const places = found.places.map((raw) => atlas.numberOf(spotOf(raw)))
+    atlas.originsFound(places)
+    return { type: "answerOrigins", ticket, ok: true, found: places.length }
+  } catch () => ({ type: "answerOrigins", ticket, ok: false, found: 0 })
+}
+
+// spec/app/maps/index.md, "The agent's search shows its cards in the conversation and leaves the screen alone"
+effect function foundForAgent(query: string): void!!(Cloud | Time | Screen.Machine) {
+  try ignore(asked((client, signal) => client.mapsPlacesSearch({ query, limit: 5, ...near() }, { signal }))
+    |> Effect.map(%, (found) => found.places.map((raw) => atlas.numberOf(spotOf(raw)))))
+}
+
+// spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
+effect function detailed(ticket: number, place: number): Ev!!(Cloud | Time | Screen.Machine) {
+  const spot = atlas.spot(place)
+  const serving = coverageOf(try (try Screen.Machine).get())
+  return effect {
+    if (spot === undefined || spot.id === "") throw new Unanswered({ cause: "a pin has no provider details" })
+    if (serving?.available !== true || serving.providerId !== spot.providerId) throw new Unanswered({ cause: "another provider named the place" })
+    const found = try asked((client, signal) => client.mapsPlaceDetails({ id: spot.id }, { signal }))
+    if (found.place === null) throw new Unanswered({ cause: "the provider no longer knows the place" })
+    atlas.numberOf(spotOf(found.place))
+    return { type: "answerDetails", ticket, ok: true }
+  } catch () => ({ type: "answerDetails", ticket, ok: false })
+}
+
+// spec/app/maps/index.md, "Coordinates typed into Search drop a pin"; spec/app/maps/index.md, "A finger held still on the map for half a second drops a pin there, never during guidance"
+effect function pinned(at: Point): Ev!!never {
+  const name = `${(at.lat / 1e6).toFixed(5)}, ${(at.lng / 1e6).toFixed(5)}`
+  return { type: "dropPin", place: atlas.numberOf({ name, category: "Dropped pin", at, providerId: "", id: "", google: false }) }
+}
+
+// spec/app/maps/index.md, "Routes are asked for the place on screen, under the trip's newest ticket"; spec/app/maps/index.md, "A route is asked from coordinates or another place, which ends a pending \"Use my location\""
+effect function planned(ticket: number, origin: Origin, travel: Travel, place: number, start: Point): Ev!!(Cloud | Time | Screen.Machine) {
+  const from = origin === "MyLocation" ? atlas.snapshot().here?.at : origin === "Unset" ? undefined : start
+  const to = atlas.spot(place)
+  return effect {
+    if (from === undefined || to === undefined) throw new Unanswered({ cause: "the route has no start or no end" })
+    const found = try asked((client, signal) => client.mapsRoutes({ from: coordinateOf(from), to: coordinateOf(to.at), mode: travelModes[travel] }, { signal }))
+    const ways: Way[] = found.routes.map((route) => ({
+      meters: Math.round(route.distanceMeters), seconds: Math.round(route.durationSeconds), line: route.geometry.map(pointOf),
+      turns: route.steps.map((step) => ({ instruction: step.instruction, at: pointOf(step.coordinate), meters: Math.round(step.distanceMeters) })),
+    }))
+    atlas.routed(ticket, ways)
+    return { type: "answerRoute", ticket, ok: true, turns: Math.max(1, ways[0].turns.length), routes: ways.length }
+  } catch () => ({ type: "answerRoute", ticket, ok: false, turns: 0, routes: 0 })
+}
+
+function allowedOf(grant: Grant): Allowed {
+  return grant === "precise" ? "Granted" : grant === "approximate" ? "Limited" : grant === "denied" ? "Denied" : "Unasked"
+}
+
+// spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/navigation.md, "A fix moves guidance only when it is precise, fresh and close: arrival within 25 meters, a turn passed within 40 meters or beyond 60, the route left beyond 75"; spec/app/maps/connection.md, "\"Use my location\" gives up after 15 seconds without a fix"
+function located(session: number, once: boolean): Stream.Stream<Ev, never, Location | Time | Screen.Machine> {
   return Stream.unwrap(effect {
     const location = try Location
     const time = try Time
-    return location.watch()
-      |> Stream.mapEffect(%, (heard) => effect {
-        if (heard.kind === "started") return { type: "watchStarted", owner: generation, created: true, now: untimed } satisfies LocatorEvent
-        const ageMs = (try time.now()) - heard.taken
-        return { type: "fixArrives", owner: generation, ageMs, fix: { lat: heard.lat, lng: heard.lng, accuracy: heard.accuracy, precise: heard.precise } } satisfies LocatorEvent
+    const screen = try Screen.Machine
+    const began = try time.now()
+    const exact = (try location.permission()) === "precise"
+    let gps = false
+    const fixes = location.watch()
+      |> Stream.map(%, (heard): Sighting | undefined => {
+        if (heard.kind !== "fix") return undefined
+        gps = true
+        return { ...heard, precise: heard.precise && exact }
       })
-      |> Stream.catch(%, () => Stream.succeed<LocatorEvent>({ type: "watchFails", owner: generation }))
+    const standIn = Stream.fromEffect(time.until(began + networkGraceMs) |> Effect.andThen(%, location.rough()))
+      |> Stream.map(%, (rough): Sighting | undefined => (gps || Option.isNone(rough) ? undefined : rough.value))
+    const heard = Stream.merge(fixes, standIn)
+      |> Stream.mapEffect(%, (fix) => effect {
+        if (fix === undefined) return undefined
+        const ageMs = (try time.now()) - fix.taken
+        if (once && (ageMs > maxFixAgeMs || ageMs < -maxFixAheadMs)) return undefined
+        return { fix, ageMs }
+      })
+      |> Stream.filter(%, (seen): seen is { readonly fix: Sighting; readonly ageMs: number } => seen !== undefined)
+      |> Stream.mapEffect(%, ({ fix, ageMs }) => effect {
+        const at: Point = { lat: fix.lat, lng: fix.lng }
+        atlas.located({ at, accuracy: fix.accuracy, approximate: !fix.precise })
+        if (once) return { type: "locationFix", session, fix: "Along" } satisfies Ev
+        const { trip, chosen } = try screen.get()
+        const way = atlas.way(trip.route, chosen)
+        if (way === undefined) return { type: "locationFix", session, fix: "Along" } satisfies Ev
+        const along = measured(at, { line: way.line, turns: way.turns.map((turn) => turn.at) }, trip.turn)
+        return { type: "locationFix", session, fix: judged(fix.precise, ageMs, fix.accuracy, along.toEnd, along.toRoute, along.toStep, along.beyond) } satisfies Ev
+      })
+      |> Stream.catch(%, () => Stream.succeed<Ev>({ type: "locationLost", session }))
+    if (!once) return heard
+    const givenUp = Stream.fromEffect(time.until(began + findTimeoutMs) |> Effect.as(%, { type: "findTimedOut", session } satisfies Ev))
+    return Stream.merge(Stream.take(heard, 1), givenUp) |> Stream.take(%, 1)
   })
 }
 
-effect function cleared(): LocatorEvent!!Location {
-  return { type: "cleanupSettles", confirmed: try (try Location).clear() }
+effect function stopped(): void!!Location {
+  try ignore((try Location).clear())
 }
 
-function carryLocator(fx: LocatorOut): Job<LocatorEvent, Location | Time, []> {
-  return match (fx) {
-    when { tag: "Check", let generation }: answer("check", checked(generation), { type: "permissionChecked", owner: generation, granted: false });
-    when { tag: "Prompt", let generation }: answer("prompt", prompted(generation), { type: "permissionAnswered", owner: generation, granted: false });
-    when { tag: "Watch", let generation }: stream("watch", watched(generation), { type: "watchFails", owner: generation });
-    when { tag: "Unwatch" }: answer("watch", cleared(), { type: "cleanupSettles", confirmed: false });
-    when { tag: "LookUp" }: run("network", Effect.void);
+/** The words of the notification of guidance: where it goes and the next turn. */
+effect function notified(): { readonly title: string; readonly text: string }!!Screen.Machine {
+  const { trip, chosen, place } = try (try Screen.Machine).get()
+  const turn = atlas.way(trip.route, chosen)?.turns[trip.turn]
+  return { title: `Navigating to ${atlas.spot(place)?.name ?? "your destination"}`, text: turn?.instruction ?? "Follow the route" }
+}
+
+// spec/app/maps/index.md, "Android confirms or loses the service of this journey"; spec/app/maps/index.md, "The phone guides with the screen off only for the journey that just started"
+effect function guided(journey: number): Ev!!(Navigation | Screen.Machine) {
+  const { title, text } = try notified()
+  return { type: "serviceReport", journey, running: try (try Navigation).start(journey, title, text) }
+}
+
+// spec/app/maps/index.md, "End stops guidance and its location and goes back to the directions"
+effect function unguided(): void!!(Location | Navigation | Screen.Machine) {
+  try ignore((try Location).clear())
+  try (try Navigation).stop((try (try Screen.Machine).get()).trip.journey)
+}
+
+// spec/app/maps/index.md, "Arriving with Maps away is told once on the phone"
+effect function arrivedAway(place: number): void!!Navigation {
+  try (try Navigation).arrived("Arrived", `Arrived at ${atlas.spot(place)?.name ?? "your destination"}.`)
+}
+
+// spec/app/maps/index.md, "Continuing past the disclosure asks Android, once"
+effect function permitted(): Ev!!Location {
+  return { type: "observeLocation", grant: allowedOf(try (try Location).request()) }
+}
+
+// spec/app/maps/index.md, "\"Use my location\" locates once when allowed, asks when it may, and otherwise opens Settings"
+effect function settingsOpened(): void!!Location {
+  try ignore((try Location).openSettings())
+}
+
+const savedKey = "alpha/maps/saved@1"
+const previousKey = "alpha.maps.saved-places.v1"
+
+interface KeptPlace {
+  readonly name: string
+  readonly spot: Spot
+}
+
+const isPoint = (at: unknown): at is Point =>
+  typeof at === "object" && at !== null && "lat" in at && "lng" in at && Number.isInteger(at.lat) && Number.isInteger(at.lng)
+    && Math.abs(Number(at.lat)) <= 90_000_000 && Math.abs(Number(at.lng)) <= 180_000_000
+
+const isName = (name: unknown): name is string => typeof name === "string" && name.trim() !== "" && name.length <= 300
+
+/** The places Alpha kept under `savedKey`, or `undefined` where the list cannot be read. */
+function keptIn(text: string): ReadonlyArray<KeptPlace> | undefined {
+  const list = parsed(text)
+  if (!Array.isArray(list) || list.length > 200) return undefined
+  const kept = list.flatMap((entry: unknown): KeptPlace[] => {
+    if (typeof entry !== "object" || entry === null || !("name" in entry) || !("spot" in entry)) return []
+    const spot = entry.spot as Partial<Spot> | null
+    if (!isName(entry.name) || spot === null || typeof spot !== "object" || !isPoint(spot.at) || !isName(spot.name)) return []
+    return [{ name: entry.name, spot: { name: spot.name, category: String(spot.category ?? ""), at: spot.at, providerId: String(spot.providerId ?? ""), id: String(spot.id ?? ""), google: false } }]
+  })
+  return kept.length === list.length ? kept : undefined
+}
+
+/** One place the previous Alpha kept: the place, `"google"` for one Google served, which is not kept, or `undefined` where it cannot be read. */
+function previouslyKept(item: unknown): KeptPlace | "google" | undefined {
+  if (typeof item !== "object" || item === null || !("label" in item) || !("coordinate" in item) || !isName(item.label)) return undefined
+  const providerId = "providerId" in item && typeof item.providerId === "string" ? item.providerId : ""
+  if (providerId === google) return "google"
+  const c = item.coordinate as { latitude?: unknown; longitude?: unknown } | null
+  if (c === null || typeof c.latitude !== "number" || typeof c.longitude !== "number") return undefined
+  const at = pointOf({ latitude: c.latitude, longitude: c.longitude })
+  const id = "providerPlaceId" in item && typeof item.providerPlaceId === "string" ? item.providerPlaceId : ""
+  return isPoint(at) ? { name: item.label, spot: { name: item.label, category: "", at, providerId, id, google: false } } : undefined
+}
+
+/** The places the previous Alpha kept under `previousKey`, its Google places left out, or `undefined` where the list cannot be read. */
+function previouslyKeptIn(text: string): ReadonlyArray<KeptPlace> | undefined {
+  const data = parsed(text)
+  if (typeof data !== "object" || data === null || !("version" in data) || data.version !== 1 || !("items" in data) || !Array.isArray(data.items)) return undefined
+  const read: ReadonlyArray<KeptPlace | "google" | undefined> = data.items.map(previouslyKept)
+  if (read.includes(undefined)) return undefined
+  return read.filter((entry): entry is KeptPlace => entry !== undefined && entry !== "google")
+}
+
+/** The machine's saved list of `kept`, numbered in the atlas, once per place. */
+function savedOf(kept: ReadonlyArray<KeptPlace>): Saved[] {
+  const saved: Saved[] = []
+  for (const entry of kept) {
+    const place = atlas.numberOf(entry.spot)
+    if (!saved.some((known) => known.place === place)) saved.push({ place, name: entry.name })
   }
+  return saved
 }
 
-// spec/app/maps/location.md, "When GPS gives no fix for 4 seconds, a network position stands in as approximate until GPS answers"
-function locatorTimers(state: LocatorState) {
-  const timers = []
-  if (oneShot(state.purpose) && state.phase !== "Idle" && state.phase !== "Failed") timers.push(due<LocatorEvent, []>("timeout", state.startedAt + oneShotTimeoutMs, { type: "timedOut", now: untimed }))
-  if (state.phase === "Watching" && !state.gps && !state.networkAsked) timers.push(due<LocatorEvent, []>("network", state.watchingSince + gpsGraceMs, { type: "networkDue", now: untimed }))
-  return timers
+// spec/app/maps/index.md, "Saved places are kept on the phone, and are what survives a restart"; spec/app/maps/index.md, "A saved list that cannot be read is never written over, and a change is told only once it reads back"
+effect function keep(saved: ReadonlyArray<Saved>, change: Change): Ev!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const kept: KeptPlace[] = saved.flatMap((entry) => {
+    const spot = atlas.spot(entry.place)
+    return spot === undefined || spot.google ? [] : [{ name: entry.name, spot }]
+  })
+  const text = JSON.stringify(kept)
+  const ok = try (store.set(savedKey, text) |> Effect.andThen(%, store.get(savedKey)) |> Effect.map(%, (back) => back === text) |> Effect.orElseSucceed(%, () => false))
+  return { type: "savedKept", change, ok }
 }
 
-// spec/app/maps/index.md, "The quiet fix taken on opening centres the map only while nothing is chosen, listed or being located, and its failure says nothing"
-const locator = reacting(Locator, { carry: carryLocator, timers: locatorTimers, open: [{ type: "beginLocate", purpose: "QuietFix", now: untimed }] })
+effect function restored(): readonly [Ev]!!KeyValueStore.KeyValueStore {
+  const store = try KeyValueStore.KeyValueStore
+  const read = (key: string) => store.get(key) |> Effect.orElseSucceed(%, () => undefined)
+  const text = try read(savedKey)
+  let kept = text === undefined ? [] : keptIn(text)
+  if (text === undefined) {
+    const previous = try read(previousKey)
+    if (previous !== undefined) kept = previouslyKeptIn(previous)
+  }
+  if (kept === undefined) return [{ type: "savedUnreadable" }]
+  return [{ type: "restoreSaved", saved: savedOf(kept) }]
+}
 
-// spec/app/maps/guidance.md, "A fix guides only when it is usable, and only for the current session"
-function guided(session: number): Stream.Stream<GuidanceEvent, never, Locator.Machine | Guidance.Machine | Routes> {
-  return Stream.unwrap(effect {
-    const locations = try Locator.Machine
-    const guidance = try Guidance.Machine
-    const kept = try Routes
-    const begun = try (locations.send({ type: "beginLocate", purpose: "GuidanceWatch", now: untimed }) |> Effect.option(%))
-    if (Option.isNone(begun)) return Stream.succeed<GuidanceEvent>({ type: "watchFailed", owner: session })
-    const generation = begun.value.state.generation
-    let counted = begun.value.state.fixes
-    return locations.changes
-      |> Stream.takeWhile(%, (s) => s.generation === generation && s.phase !== "Failed")
-      |> Stream.filter(%, (s) => s.fixes > counted)
-      |> Stream.mapEffect(%, (s) => effect {
-        counted = s.fixes
-        const now = try guidance.get()
-        const shape = try kept.shape(now.route)
-        const along = Option.isSome(shape) ? measured(s.here, shape.value, now.step) : { toStep: 0, beyond: 0, toRoute: 0, toEnd: 0 }
-        return { type: "fix", owner: session, reading: { accuracy: s.here.accuracy, ageMs: 0, precise: s.here.precise && !s.approximate, ...along } } satisfies GuidanceEvent
-      })
-      |> Stream.concat(%, Stream.succeed<GuidanceEvent>({ type: "watchFailed", owner: session }))
+// spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"
+effect function handed(place: number, kind: HandOff): void!!(Screen.Machine | Time) {
+  const spot = atlas.spot(place)
+  if (spot === undefined) return
+  if (kind === "CopyNumber") {
+    const number = spot.phone ?? ""
+    const ok = number === "" ? false : try (tryPromise(() => copied(number)) |> Effect.orElseSucceed(%, () => false))
+    try ignore((try Screen.Machine).send({ type: "numberCopied", ok }))
+    return
+  }
+  const where = `${spot.at.lat / 1e6},${spot.at.lng / 1e6}`
+  const { trip, chosen } = try (try Screen.Machine).get()
+  const way = atlas.way(trip.route, chosen)
+  const arrival = way === undefined ? "" : new Date((try (try Time).now()) + way.seconds * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+  try ignore(match (kind) {
+    when "SharePlace": tryPromise(() => shared(spot.name, `${spot.name}${spot.address === undefined ? "" : `, ${spot.address}`}`));
+    when "EtaShare": tryPromise(() => shared(spot.name, `On my way to ${spot.name}${arrival === "" ? "" : `, arriving around ${arrival}`}`));
+    when "Website": sync(() => { if (spot.website !== undefined) opened(spot.website) });
+    when "MapsApp": sync(() => opened(`geo:${where}?q=${encodeURIComponent(`${where}(${spot.name})`)}`));
+    when "Call": sync(() => { if (spot.phone !== undefined) opened(`tel:${spot.phone.replace(/[^+0-9]/g, "")}`) });
+    when "CopyNumber": Effect.void;
   })
 }
 
-// spec/app/maps/guidance.md, "A reroute belongs to its session, and a failed or late one keeps the current route"
-effect function rerouted(ticket: number): GuidanceEvent!!(Cloud | Connection.Machine | Time | Routes | Locator.Machine | Guidance.Machine | Screen.Machine) {
-  const here = try (try Locator.Machine).get()
-  const shown = try (try Screen.Machine).get()
-  return effect {
-    const legs = try routesBetween(here.here, shown.place, shown.travel, 1000 + ticket)
-    const first = legs[0]
-    return first === undefined ? { type: "rerouteSettles", ticket, route: 0, steps: 1 } : { type: "rerouteSettles", ticket, route: routeId(1000 + ticket, 0), steps: first.steps }
-  } catch () => ({ type: "rerouteSettles", ticket, route: 0, steps: 1 })
-}
-
-function carryGuidance(fx: GuidanceOut): Job<GuidanceEvent, Cloud | Connection.Machine | Time | Routes | Locator.Machine | Guidance.Machine | Screen.Machine, []> {
+function carry(fx: Out): Job<Ev, Cloud | Time | Location | Navigation | Screen.Machine | KeyValueStore.KeyValueStore | Shell, []> {
   return match (fx) {
-    when { tag: "StartWatch", let session }: stream("guide", guided(session), { type: "watchFailed", owner: session });
-    when { tag: "StopWatch" }: run("guide", Effect.flatMap(Locator.Machine, (locations) => ignore(locations.send({ type: "stopLocate" }))));
-    when { tag: "PlanReroute", let ticket }: answer("reroute", rerouted(ticket), { type: "rerouteSettles", ticket, route: 0, steps: 1 });
+    when { tag: "ReadCoverage", let ticket }: answer("coverage", covered(ticket), { type: "answerCoverage", ticket, ok: false, covered: false, google: false, offer: noOffer });
+    when { tag: "DrawMap" }: run("draw", Effect.void);
+    when { tag: "FindPlaces", let ticket, let query }: answer("search", searched(ticket, query), { type: "answerSearch", ticket, ok: false, found: 0 });
+    when { tag: "FindForAgent", let query }: run("agentSearch", foundForAgent(query));
+    when { tag: "FindOrigins", let ticket, let query }: answer("origins", foundOrigins(ticket, query), { type: "answerOrigins", ticket, ok: false, found: 0 });
+    when { tag: "ReadDetails", let ticket, let place }: answer("details", detailed(ticket, place), { type: "answerDetails", ticket, ok: false });
+    when { tag: "MakePin", let lat, let lng }: answer("pin", pinned({ lat, lng }), { type: "dropPin", place: 0 });
+    when { tag: "PlanRoute", let ticket, let origin, let travel, let place, let lat, let lng }: answer("route", planned(ticket, origin, travel, place, { lat, lng }), { type: "answerRoute", ticket, ok: false, turns: 0, routes: 0 });
+    when { tag: "StartLocation", let session, let once }: stream("location", located(session, once), { type: "locationLost", session });
+    when { tag: "StopLocation" }: run("location", stopped());
+    when { tag: "AskLocation" }: answer("permission", permitted(), { type: "observeLocation", grant: "Denied" });
+    when { tag: "OpenLocationSettings" }: run("settings", settingsOpened());
+    when { tag: "ShowMyLocation" }: run("show", sync(() => atlas.showMe()));
+    when { tag: "GuideWithScreenOff", let journey }: answer("service", guided(journey), { type: "serviceReport", journey, running: false });
+    when { tag: "StopGuidance" }: run("location", unguided());
+    when { tag: "TellArrival", let place }: run("arrival", arrivedAway(place));
+    when { tag: "KeepSaved", let saved, let change }: answer("saved", keep(saved, change), { type: "savedKept", change, ok: false });
+    when { tag: "HandedOn", let place, let kind }: run("handOn", handed(place, kind));
+    when { tag: "OpenEvent" }: run("event", Effect.flatMap(Shell, (shell) => ignore(shell.send({ type: "openView", view: "Calendar" }))));
+    when { tag: "TellAgent", let ticket }: answer("tell", succeed<Ev>({ type: "answerTell", ticket, confirmed: false, known: false }), { type: "answerTell", ticket, confirmed: false, known: false });
+    when { tag: "BringMapsForward" }: run("forward", Effect.flatMap(Shell, (shell) => ignore(shell.send({ type: "openView", view: "Maps" }))));
   }
 }
 
-const guidance = reacting(Guidance, { carry: carryGuidance })
+// spec/app/maps/index.md, "Cloud's wait holds the screen's requests until it ends, and its end lets them go again"; spec/app/maps/index.md, "A finger held still on the map for half a second drops a pin there, never during guidance"
+const screen = reacting(Screen, {
+  carry,
+  open: restored(),
+  timers: (state) => [
+    ...(holding(state.link) ? [due("hold", state.link.holdEnds, { type: "waitEnded", hold: state.link.holds } satisfies Ev)] : []),
+    ...(state.pressing ? [due("press", state.pressedAt + pressMs, { type: "pressHeld", press: state.presses } satisfies Ev)] : []),
+    ...(state.pausing ? [due("typing", state.typedAt + typingMs, { type: "typingSettled", typed: state.types } satisfies Ev)] : []),
+  ],
+})
 
-// spec/app/maps/plane.md, "Only the answer to the latest copyright request, for the view in place, is shown, and a failed one never breaks the map"
-effect function copyrighted(token: number): PlaneEvent!!(Cloud | Connection.Machine | Time | Screen.Machine | Locator.Machine) {
-  const shown = try (try Screen.Machine).get()
-  const here = try (try Locator.Machine).get()
-  const centre: Point = shown.choice !== "NoChoice" ? shown.place : here.here
-  const span = 20_000
+/** A view grown by one view of margin on each side: the area a copyright is asked for. */
+function grown(view: View): View {
+  const tall = view.north - view.south
+  const wide = view.east - view.west
+  return {
+    north: Math.min(90, view.north + tall), south: Math.max(-90, view.south - tall),
+    east: Math.min(180, view.east + wide), west: Math.max(-180, view.west - wide), zoom: view.zoom,
+  }
+}
+
+const within = (view: View, area: View) =>
+  view.zoom === area.zoom && view.north <= area.north && view.south >= area.south && view.east <= area.east && view.west >= area.west
+
+// spec/app/maps/credits.md, "When the camera settles outside the area the shown copyright covers, the copyright is asked for that view, and within it nothing changes"
+/** The camera settled on `view`: the credits are told whether the copyright shown still covers it. */
+export effect function settled(view: View): void!!Credits.Machine {
+  const credited = atlas.snapshot().credited
+  atlas.viewed(view)
+  try ignore((try Credits.Machine).send({ type: "cameraSettled", covered: credited !== undefined && within(view, credited) }))
+}
+
+// spec/app/maps/credits.md, "Only the answer to the latest copyright request, for the view in place, is shown, and a failed one never breaks the map"
+effect function copyrighted(token: number): CreditsEv!!(Cloud | Time | Screen.Machine) {
+  const view = atlas.snapshot().view
   return effect {
-    const { answer: found } = try asked((client, signal) => client.mapsViewport({
-      zoom: 14, north: Math.min(90, (centre.lat + span) / 1e6), south: Math.max(-90, (centre.lat - span) / 1e6),
-      east: Math.min(180, (centre.lng + span) / 1e6), west: Math.max(-180, (centre.lng - span) / 1e6),
-    }, { signal }))
+    if (view === undefined) throw new Unanswered({ cause: "the map has not settled" })
+    const area = grown(view)
+    atlas.creditedFor(area)
+    const found = try asked((client, signal) => client.mapsViewport({ zoom: area.zoom, north: area.north, south: area.south, east: area.east, west: area.west }, { signal }))
     return { type: "copyrightAnswered", token, success: true, text: found.copyright }
   } catch () => ({ type: "copyrightAnswered", token, success: false, text: "" })
 }
 
-function carryPlane(fx: PlaneOut): Job<PlaneEvent, Cloud | Connection.Machine | Time | Screen.Machine | Locator.Machine, []> {
+function carryCredits(fx: CreditsOut): Job<CreditsEv, Cloud | Time | Screen.Machine, []> {
   return match (fx) {
     when { tag: "Copyright", let token }: answer("copyright", copyrighted(token), { type: "copyrightAnswered", token, success: false, text: "" });
   }
 }
 
-const plane = reacting(Plane, { carry: carryPlane })
+const credits = reacting(Credits, { carry: carryCredits })
 
-/** The basemap the connection's provider gives: its raster where it serves one, and otherwise none, so that nothing is drawn but what Cloud serves. */
-function basemapOf(state: ConnectionState): PlaneEvent {
-  if (state.phase !== "Installed" || !state.coverage.offer.map) return { type: "releasePlane" }
-  return { type: "mountPlane", element: 1, basemap: basemapFor(state.coverage.kind, true, state.coverage.kind === "GoogleProvider") }
+// spec/app/maps/credits.md, "A failed tile never breaks a surface whose style has loaded, and a cancelled tile breaks nothing"
+/** The provider's tile at `z/x/y` for the map drawing it, cancelled with `signal`, and refused while Cloud's wait holds. */
+export effect function tile(z: number, x: number, y: number, signal: AbortSignal): Uint8Array!Unanswered!(Cloud | Time | Screen.Machine) {
+  const found = try askedUnder((client, own) => client.mapsTile({ z, x, y }, { signal: own }), signal)
+  return found.bytes
 }
 
-// spec/app/maps/saved.md, "When Alpha opens again the saved places are as they were"
-const saved = reacting(Saved, { keep: 1, open: [{ type: "reopen" }] })
+// spec/app/maps/connection.md, "Signing in, out or to another account retires the provider and reads the new account's coverage"; spec/app/maps/index.md, "Another account hides every route, place and search of the last one, and ends its guidance"
+effect function accountRead(): void!!(Cloud | Screen.Machine) {
+  const { client } = try Cloud
+  const number = try (tryPromise({ try: () => client.account(), catch: (cause) => new Unanswered({ cause }) })
+    |> Effect.match(%, {
+      onSuccess: (owner): number | undefined => atlas.accountOf(owner.id),
+      onFailure: (failure): number | undefined => (failure.cause instanceof CloudError && failure.cause.failure.tag === "CloudCredentialInvalid" ? 0 : undefined),
+    }))
+  if (number === undefined) return
+  const screen = try Screen.Machine
+  const { link } = try screen.get()
+  if (link.known && link.account === number) return
+  atlas.forget()
+  try ignore(screen.send({ type: "changeAccount", account: number }))
+}
+
+// spec/app/maps/connection.md, "A failed read is tried again"
+const retried = started(effect {
+  const screen = try Screen.Machine
+  const time = try Time
+  try Stream.runForEach(
+    screen.changes |> Stream.map(%, (s) => s.link.coverage.status === "Failed" && s.link.account !== 0 ? s.link.coverage.ticket : 0) |> Stream.changes(%),
+    effect (ticket) => {
+      if (ticket === 0) return
+      try time.until((try time.now()) + 30_000)
+      try ignore(screen.send({ type: "connect" }))
+    },
+  )
+}, "retrying Maps")
+
+// spec/app/maps/index.md, "What Android reports about location is taken at once; guidance without it ends"; spec/app/maps/index.md, "A fix goes to whoever holds the location"; spec/app/maps/connection.md, "Signing in, out or to another account retires the provider and reads the new account's coverage"
+const opening = started(effect {
+  const shell = try Shell
+  const screen = try Screen.Machine
+  const location = try Location
+  try Stream.runForEach(shell.changes |> Stream.map(%, (s) => showing(s, "Maps")) |> Stream.changes(%), effect (shown) => {
+    if (!shown) return
+    const grant = allowedOf(try location.permission())
+    try ignore(screen.send({ type: "observeLocation", grant }))
+    const now = try screen.get()
+    if (grant !== "Denied" && grant !== "Unasked" && mode(now) === "Browse") try ignore(screen.send({ type: "useMyLocation" }))
+    try accountRead()
+    try ignore(screen.send({ type: "connect" }))
+  })
+}, "opening Maps")
+
+// spec/app/maps/index.md, "Leaving Maps keeps guidance with its service and ends it without; a pending \"Use my location\" and the Calendar return end"; spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"
+const presence = started(effect {
+  const shell = try Shell
+  const device = try Device
+  const screen = try Screen.Machine
+  const page = Stream.concat(Stream.fromEffect(device.showing()), device.visible)
+  const inFront = Stream.zipLatest(shell.changes |> Stream.map(%, (s) => showing(s, "Maps")), page) |> Stream.map(%, ([maps, shown]) => maps && shown)
+  try Stream.runForEach(Stream.changes(inFront), effect (shown) => {
+    if (shown) {
+      try ignore(screen.send({ type: "comeBack" }))
+      return
+    }
+    try ignore(screen.send({ type: "leaveMaps" }))
+  })
+}, "following whether Maps shows")
+
+// spec/app/maps/index.md, "The notification of this journey opens Maps on its guidance, or stops it"
+const notification = started(effect {
+  const device = try Device
+  const screen = try Screen.Machine
+  const navigation = try Navigation
+  try Stream.runForEach(device.visible |> Stream.filter(%, (shown) => shown), effect () => {
+    if (!(try navigation.opened())) return
+    const { trip } = try screen.get()
+    try ignore(screen.send({ type: "openNotification", journey: trip.journey, showable: true }))
+  })
+}, "opening Maps from its notification")
+
+// spec/app/maps/index.md, "Android confirms or loses the service of this journey"
+const serviceEnds = started(effect {
+  const screen = try Screen.Machine
+  try Stream.runForEach((try Navigation).ended, effect (ended) => {
+    const event: Ev = ended.by === "notification" ? { type: "stopFromNotification", journey: ended.journey } : { type: "serviceReport", journey: ended.journey, running: false }
+    try ignore(screen.send(event))
+  })
+}, "hearing guidance's service")
+
+// spec/app/maps/navigation.md, "The ongoing notification belongs to the journey whose service runs, and opening it shows Maps"
+const notificationWords = started(effect {
+  const screen = try Screen.Machine
+  const navigation = try Navigation
+  const facts = screen.changes |> Stream.filter(%, (s) => s.trip.guidance === "Going" && s.trip.service === "Running") |> Stream.map(%, (s) => [s.trip.journey, s.trip.turn, s.trip.route, s.chosen] as const)
+  try Stream.runForEach(Stream.changesWith(facts, (a, b) => a.every((x, i) => x === b[i])), effect ([journey]) => {
+    const { title, text } = try notified()
+    try ignore(navigation.update(journey, title, text))
+  })
+}, "writing guidance's notification")
 
 /**
- * Maps: its screen, the connection to Cloud Maps, the phone's location, guidance and the map, which live from Maps'
- * first opening until Alpha closes; the saved places, kept across restarts; and what each follows of the others.
+ * Maps: its screen and the map's credits, which live from Maps' first opening until Alpha closes; the saved places,
+ * kept on the phone; and what each follows: the shell's showing Maps, the account, Android's permission and the surface.
  */
-export const maps = Layer.provideMerge(together(
+export const maps = together(
   screen,
-  connection,
-  account,
-  locator,
-  guidance,
-  plane,
-  saved,
-  following(Shell, (shell) => showing(shell, "Maps"), Screen.Machine, (shown): ScreenEvent => ({ type: "show", showing: shown }), "Flow"),
-  following(Shell, (shell) => showing(shell, "Maps"), Locator.Machine, (shown): LocatorEvent => ({ type: "showScreen", showing: shown })),
-  following(Connection.Machine, (state) => state.phase === "Installed", Screen.Machine, (installed): ScreenEvent => ({ type: "providerChanged", installed }), "Flow"),
-  following(Connection.Machine, basemapOf, Plane.Machine, (told) => told),
-  following(Screen.Machine, (state) => `${state.choice}:${state.place.lat}:${state.place.lng}`, Plane.Machine, (): PlaneEvent => ({ type: "cameraSettled", covered: false })),
-), routes)
+  credits,
+  retried,
+  opening,
+  presence,
+  notification,
+  serviceEnds,
+  notificationWords,
+  following(Screen.Machine, (state) => [state.place, state.details.status] as const, Screen.Machine, ([place, status]): Ev | undefined => (status !== "Idle" || (atlas.spot(place)?.id ?? "") === "" ? undefined : { type: "readDetails", place })),
+  following(Screen.Machine, (state) => [state.link.plane, state.link.basemap === "Cloud"] as const, Credits.Machine, ([plane, raster]): CreditsEv => ({ type: "drawnOn", plane, raster })),
+  following(Screen.Machine, (state) => (state.link.surface === "Drawn" ? state.link.plane : 0), Credits.Machine, (plane): CreditsEv | undefined => (plane === 0 ? undefined : { type: "planeDrawn", plane })),
+)
+
+// spec/app/maps/index.md, "An event's place opens on its card once Maps is on screen, never over navigation, and Maps remembers the event"
+/** Calendar hands Maps an event's place by its words: Maps comes forward, finds the place and opens it on its card. */
+export effect function enteredFromEvent(meeting: number, address: string): boolean!!(Cloud | Time | Screen.Machine | Shell) {
+  try ignore((try Shell).send({ type: "openView", view: "Maps" }))
+  const found = try (asked((client, signal) => client.mapsGeocode({ query: address, limit: 1 }, { signal })) |> Effect.option(%))
+  const first = Option.isSome(found) ? found.value.places[0] : undefined
+  if (first === undefined) return false
+  const place = atlas.numberOf(spotOf(first))
+  return try (((try Screen.Machine).send({ type: "enterFromEvent", meeting, place })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+}
+
+/** What Maps shows, as the agent's turn names it: the place or route on screen by its handle and revision, or nothing. */
+export interface Selected {
+  readonly kind: "map-place" | "map-route"
+  readonly id: string
+  readonly revision: string
+}
+
+// spec/app/maps/index.md, "While Maps is in front the agent is told what it shows, a place, a route or a search, by a handle that names it on this phone only"
+export function selectedOf(state: State, inFront: boolean): Selected | undefined {
+  const what = shown(state, inFront)
+  if (!readable(what)) return undefined
+  return { kind: what === "ShowsRoute" ? "map-route" : "map-place", id: atlas.handleOf(state.place), revision: String(state.review.revision) }
+}

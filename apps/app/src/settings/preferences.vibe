@@ -38,8 +38,8 @@ schema PreviousChoices {
   autoLoadMailImages?: boolean
 }
 
-/** What a new phone holds: Alpha asks first, loads no images, and may use the location and the open Browser page and change Gmail and Calendar. */
-const fresh: Choices = { askFirst: true, images: false, shares: ["AgentLocation", "BrowserPage", "GmailChanges", "CalendarEdits"] }
+// spec/app/settings/preferences.md, "A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar"
+const fresh: Choices = Prefs.newPhone
 
 const look = (): Look => (darkPhone() ? "DarkLook" : "LightLook")
 const json = <A>(schema: Schema.Codec<A, A>) => Schema.fromJsonString(schema)
@@ -68,7 +68,7 @@ effect function keepTheme(keep: number, chosen: Theme, legible: boolean): Event!
 }
 
 // spec/app/settings/preferences.md, "What the phone could not read is taken as asking first, loading no images and sharing nothing"; spec/app/settings/preferences.md, "The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight"
-effect function readChoices(): (Choices | undefined)!!KeyValueStore.KeyValueStore {
+effect function readChoices(): (Choices | undefined)!KeyValueStore.KeyValueStoreError!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
   const own = try store.get(keys.choices)
   if (own !== undefined) return Schema.decodeUnknownOption(json(Choices))(own) |> Option.getOrUndefined(%)
@@ -179,6 +179,11 @@ const looked = applying(Prefs.Machine, (state) => Prefs.shown(state), effect (sh
   try sync(() => drawn(shown === "DarkLook"))
 })
 
+// spec/app/settings/preferences.md, "Android's status and navigation bars follow the look Alpha draws"
+const bars = applying(Prefs.Machine, Prefs.barsDark, effect (dark) => {
+  try (try Device).bars(dark)
+})
+
 // spec/app/settings/preferences.md, "Legible text is turned on or off by the owner and kept with the appearance, the same way"
 const legible = applying(Prefs.Machine, (state) => state.legible, effect (on) => {
   try (try Device).mark("legible", on ? "" : undefined)
@@ -190,4 +195,4 @@ const large = applying(Prefs.Machine, Prefs.largeText, effect (on) => {
 })
 
 /** The owner's preferences, from launch: the look and the text the whole page follows, and what other areas ask before they act. */
-export const preferences = together(machine, opened, resumed, phoneLook, looked, legible, large)
+export const preferences = together(machine, opened, resumed, phoneLook, looked, bars, legible, large)

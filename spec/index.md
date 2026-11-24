@@ -8,6 +8,7 @@ Calendar and Maps, and never hosts the agent.
 
 - [App](./app/): the phone's interface, in `apps/app`
 - [Kit](./kit/): rules several areas keep
-- [Cloud](./cloud/): Alpha Cloud, Alpha's own deployment of eliza's cloud, in `apps/cloud`
+- [Cloud](./cloud/): Alpha's side of eliza's cloud, in `apps/cloud`
 - [Agent](./agent/): the agent pack the phone runs, in `apps/agent`
-- [Cloud](./cloud/): Alpha's deployment of eliza's cloud, in `apps/cloud`
+- [Site](./site/): Alpha's public page, in `apps/site`
+- [Release](./release/): how a new version of Alpha reaches phones: the launcher channel, a pilot phone by cable and the OS image

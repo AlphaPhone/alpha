@@ -160,7 +160,7 @@ signer and boot, and tells every open page. Anything else evicts the file
 and fails the install.
 
 ```quint
-pure val answerWindow = 30
+pure val answerWindow = 30000
 
 pure def canAdmit(s: Install): bool = s.phase == Admitting
 
@@ -242,6 +242,8 @@ pure def answer(s: Install, page: int, activation: int, ready: bool): Install =
 ```
 
 ### A page that has not answered within 30 seconds fails the update
+
+Times are Alpha's, in milliseconds.
 
 ```quint
 pure def canExpire(s: Install, now: int): bool = s.phase == Activating and now >= s.deadline and s.waiting.size() > 0
@@ -595,6 +597,6 @@ pure val pageValues = Set(1, 2)
 pure val activationValues = Set(1, 2, 3)
 pure val ticketValues = Set(1, 2, 3)
 pure val progressValues = Set(0, 5, 8, 9, 10)
-pure val atValues = Set(0, 10)
-pure val nowValues = Set(0, 20, 100)
+pure val atValues = Set(0, 10000)
+pure val nowValues = Set(0, 20000, 100000)
 ```

@@ -1,7 +1,8 @@
-// spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"
+// spec/kit/read.md, "Only the newest ticket's answer is taken, once"; spec/kit/undo.md, "A held change takes effect only once its time has come"; spec/kit/attempt.md, "Only a recorded attempt is sent"; spec/app/platform/index.md, "A kept value that is no longer a state is set aside where nothing is held, and its machine starts afresh"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import { Attempts, Install, attemptsOf, fresh } from "./attempts.vibe"
 import { Time } from "./time.vibe"
+import { setAside } from "../../gen/app__platform.effect.vibe"
 
 module pure {
   /** `value` as text, to tell whether two facts are the same. @throws {never} */
@@ -33,7 +34,7 @@ export interface Moved<S, Fx> {
 export interface Steps<S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>> {
   readonly changes: Stream.Stream<S>
   get(): S!!
-  send(event: Ev, ...by: By): M!Refused
+  send(event: Ev, ...by: NoInfer<By>): M!Refused
   receive(input: unknown, ...by: By): M!Undecoded
 }
 
@@ -160,17 +161,31 @@ function storeKey(machine: string, version: number): string {
   return `alpha/${machine.replace(/^.*\/spec\//, "").replace(/\.md#Machine$/, "")}@${version}`
 }
 
+/** The places a value kept under `key` that is no longer a state may be copied to, in order. */
+const asides = (key: string): ReadonlyArray<string> => [`${key}.unreadable`, ...Array.from({ length: 8 }, (_, index) => `${key}.unreadable.${index + 2}`)]
+
 /**
  * The machine kept under `key`. What is stored there and is not a state, after a change of its shape or of an
- * `always` rule, is set aside under `<key>.unreadable` and the machine starts afresh: one area's state never keeps
- * Alpha from opening. A store that cannot be read at all leaves the machine in memory.
+ * `always` rule, is copied to the first of its `asides` that holds nothing and the machine starts afresh: one area's
+ * state never keeps Alpha from opening, and no copy is written over. Where every place is taken, or the store cannot
+ * be read at all, the value stays and the machine runs in memory.
  */
 function kept<I, S, SE, SR>(key: string, stored: (key: string, start?: S) => Layer.Layer<I, SE, SR>, memory: Layer.Layer<I>) {
   const aside = Layer.unwrap(effect {
     const store = try KeyValueStore.KeyValueStore
     const found = store.get(key) catch () => undefined
-    try logError(`what is kept under ${key} is not a state: set aside under ${key}.unreadable`)
-    if (found !== undefined) try ignore(store.set(`${key}.unreadable`, found))
+    if (found !== undefined) {
+      let place: string | undefined
+      for (const one of asides(key)) {
+        const held = (store.get(one) catch () => "") !== undefined
+        if (place === undefined && setAside("KeptUnreadable", held)) place = one
+      }
+      if (place === undefined) return memory
+      const at = place
+      try logError(`what is kept under ${key} is not a state: set aside under ${at}`)
+      const copied = effect { try store.set(at, found); return true } catch () => false
+      if (!copied) return memory
+    }
     try ignore(store.remove(key))
     try ignore(store.remove(`${key}.epoch`))
     return Layer.catch(Layer.fresh(stored(key)), () => memory)
@@ -284,19 +299,29 @@ function reactor<I, S, Ev, M, Fx, Refused, Undecoded, By extends ReadonlyArray<u
       }
     }
     if (open !== undefined) {
-      if (Effect.isEffect(open)) try launch("open", effect { try contained(send(...(try open)), `opening ${scope}`) })
-      else try contained(send(...open), `opening ${scope}`)
+      if (Effect.isEffect(open)) try launch("open", effect {
+        const opened = (try open) as unknown as readonly [Ev, ...By]
+        try contained(send(...opened), `opening ${scope}`)
+      })
+      else try contained(send(...(open as unknown as readonly [Ev, ...By])), `opening ${scope}`)
     }
     try contained(Semaphore.withPermit(turn, effect { try arm(try inner.get()) }), `arming ${scope}`)
     return { changes: inner.changes, get: () => inner.get(), send, receive }
   })
 }
 
+/** One call to a machine's `send`, with its sender held at the type `spec` declared so literals in `open` never widen `By`. */
+type OpeningArgs<Ev, By extends ReadonlyArray<unknown>> = NoInfer<By> extends readonly []
+  ? readonly [event: Ev]
+  : NoInfer<By> extends readonly [infer A]
+    ? readonly [event: Ev, by: A]
+    : never
+
 /**
  * The event a machine is sent once when it is built, with its sender: the event itself, or, where the event carries
  * what only the world knows (what the phone kept, today's date), an effect that asks and returns it.
  */
-export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = readonly [event: Ev, ...by: By] | ((readonly [event: Ev, ...by: By])!never!R)
+export type Opening<Ev, R, By extends ReadonlyArray<unknown>> = OpeningArgs<Ev, By> | (OpeningArgs<Ev, By>!never!R)
 
 /** A machine is kept only with the event that takes up what was under way when Alpha stopped: the spec's `reopen`, `restart` or `start`. */
 type Kept<Ev, R, By extends ReadonlyArray<unknown>> =
@@ -315,7 +340,7 @@ type Carrying<M, Ev, R, By extends ReadonlyArray<unknown>> = M extends { readonl
   : { readonly carry?: undefined }
 
 /** What a reacting machine needs to be built: the platform's part, and, in name only, what its jobs need when they run. */
-type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | R
+type Needs<SR, R> = SR | KeyValueStore.KeyValueStore | Whole | Time | Install | Exclude<R, Attempts>
 
 /**
  * The machine of the generated module `spec`, in memory or, with `keep`, in the store under the spec's own name.

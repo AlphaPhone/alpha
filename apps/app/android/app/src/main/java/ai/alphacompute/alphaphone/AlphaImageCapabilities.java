@@ -1,0 +1,24 @@
+package ai.alphacompute.alphaphone;
+
+import ai.eliza.plugins.messages.ImageCapability;
+import android.content.Context;
+
+/**
+ * Alpha's inputs to the shared image admission (plugin-native-messages ImageCapability): its build
+ * type (always the launcher, never test mocks) and the installed provisioning resource the Alpha image overlay sets. The decision itself is
+ * shared; a provisioning capability, never an inference from HOME role or launcher flavor.
+ */
+final class AlphaImageCapabilities {
+ private AlphaImageCapabilities(){}
+ static final ImageCapability IMAGE=new ImageCapability(true,BuildConfig.DEBUG,false,
+  R.bool.alpha_aosp_image_capability);
+ // Both development and release images allow a silent check of existing grants. This capability
+ // only changes setup presentation and never enables image-only services or grants access.
+ private static final ImageCapability STARTUP_DEFAULTS = new ImageCapability(true, false, false, 0);
+ static boolean startupPermissionDefaults(Context context) { return STARTUP_DEFAULTS.admitted(context); }
+ /** A provisioned release launcher installed from a system partition (no image feature read). */
+ static boolean aospImage(Context context){return IMAGE.provisioned(context);}
+ // Provisioning is necessary but not sufficient: Telecom/SMS roles remain unavailable.
+ static boolean roleEnabled(String role){return "home".equals(role)||"assistant".equals(role);}
+ static boolean defaultAppEnabled(Context context,String role){return "dial".equals(role)&&aospImage(context);}
+}

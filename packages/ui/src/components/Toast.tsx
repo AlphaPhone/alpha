@@ -29,6 +29,7 @@ export function ToastRegion({ className, ...props }: ToastRegionProps) {
 export function Toast({ onUndo, undoLabel = "Undo", className, children, ...props }: ToastProps) {
   return (
     <div
+      data-host-chrome=""
       className={cn(
         "pointer-events-auto flex min-h-12 w-fit max-w-sm items-center gap-1 rounded-tile bg-foreground py-0.5 pl-5 text-sm font-medium text-background shadow-md motion-safe:animate-drop",
         onUndo ? "pr-0.5" : "pr-5",

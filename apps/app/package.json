@@ -12,23 +12,31 @@
     "prepare": "eliza-harness --link",
     "eliza": "eliza-harness",
     "eliza:page": "node test/eliza/page.ts",
-    "aosp": "node --import vibelang/register scripts/aosp.vibe",
-    "licences": "node --import vibelang/register scripts/licences.vibe"
+    "aosp": "node scripts/aosp.ts",
+    "licences": "node scripts/licences.ts",
+    "release": "node scripts/release.ts",
+    "android": "node scripts/android.ts"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.2",
     "@capacitor/core": "8.5.2",
     "@elizaos/agent": "link:../../.eliza/packages/agent",
     "@elizaos/cloud": "link:../../.eliza/packages/cloud",
     "@elizaos/os": "link:../../.eliza/packages/os",
+    "@elizaos/plugin-notes": "link:../../.eliza/packages/plugin-notes",
+    "@elizaos/plugin-workflow": "link:../../.eliza/packages/plugin-workflows",
     "@repo/design-system": "workspace:*",
     "@repo/ui": "workspace:*",
+    "dompurify": "3.4.17",
     "effect": "4.1.1",
     "lucide-react": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "vibelang-runtime": "0.0.13"
   },
   "devDependencies": {
     "@antithesishq/bombadil": "0.7.10",
+    "@capacitor/cli": "8.5.2",
     "@repo/eliza-harness": "workspace:*",
     "@effect/platform-node": "4.1.1",
     "@effect/vitest": "4.1.1",

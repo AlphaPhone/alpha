@@ -1,7 +1,7 @@
-// spec/app/maps/connection.md, "Every Maps request goes through eliza's cloud client under its own request key, and a tile comes back as its image"
+// spec/app/maps/connection.md, "Story: Serve Maps through my cloud account"
 import type { LocationErrorEvent, LocationPlugin, LocationResult } from "@elizaos/os/bridges/definitions/location";
 import type { CloudClient } from "../../src/platform/cloud.vibe";
-import { type Faked, plugin } from "./phone.ts";
+import { type Faked, plugin, rejection } from "./phone.ts";
 import type { Route } from "./routes.ts";
 
 type Capabilities = Awaited<ReturnType<CloudClient["mapsCapabilities"]>>;
@@ -37,13 +37,18 @@ export interface MapsScene {
   limited: number | undefined;
   /** What each Maps request asked, by its route, and the request key it carried. */
   readonly asked: { path: string; key: string | null; body: unknown }[];
-  /** Where the fake phone is, and whether it allows location. */
+  /** Where the fake phone is. */
   here: { latitude: number; longitude: number; accuracy: number } | undefined;
+  /** Whether Android currently grants Alpha location permission. */
   allowed: "granted" | "denied" | "prompt";
+  /** How precisely Android lets Alpha locate the phone, once location is allowed. */
+  precision: "precise" | "approximate";
   /** The page's listeners of the fake location plugin. */
   readonly listeners: Set<(result: LocationResult) => void>;
   /** The native watches the page started and has not cleared. */
   readonly watches: Set<string>;
+  /** Alpha's screen-off guidance service: the session running with its notification, the arrival notices shown, and whether the owner opened Alpha from the notification. */
+  readonly guidance: { session: string | undefined; title: string; text: string; arrivals: string[]; opened: boolean; stop?: (reason: string) => void };
 }
 
 export const harbour = cloudPlace("test:harbour", "Harbour Cafe", 43.7312, 7.4211, "+377 93 15 00 00");
@@ -67,8 +72,10 @@ export function mapsScene(): MapsScene {
     asked: [],
     here: { latitude: 43.7300, longitude: 7.4200, accuracy: 8 },
     allowed: "granted",
+    precision: "precise",
     listeners: new Set(),
     watches: new Set(),
+    guidance: { session: undefined, title: "", text: "", arrivals: [], opened: false },
   };
 }
 
@@ -85,7 +92,7 @@ async function asked(scene: MapsScene, request: Request, url: URL): Promise<unkn
 }
 
 /** Cloud Maps as eliza's cloud answers it, raw JSON in eliza's own shapes. */
-export function mapsRoutes(scene: MapsScene): Route[] {
+export function mapsRoutes(scene: MapsScene, now: () => number): Route[] {
   return [
     (request, url) => (request.method === "GET" && url.pathname === "/api/v1/maps/capabilities" ? Response.json(scene.coverage) : undefined),
     (request, url) => {
@@ -94,17 +101,20 @@ export function mapsRoutes(scene: MapsScene): Route[] {
         if (scene.limited !== undefined) {
           const wait = scene.limited;
           scene.limited = undefined;
-          return Response.json({ error: { code: "RateLimited", message: "slow down" } }, { status: 429, headers: { "retry-after": String(wait) } });
+          return Response.json({ error: "rate_limited", ...(wait > 0 ? { retryAt: now() + wait * 1000 } : {}) }, { status: 429 });
         }
         const query = typeof body === "object" && body !== null && "query" in body ? String(body.query).toLowerCase() : "";
-        return Response.json({ providerId: "test-open", attribution, places: scene.places.filter((place) => place.name.toLowerCase().includes(query)) });
+        const providerId = scene.coverage.available ? scene.coverage.providerId : "test-open";
+        return Response.json({ providerId, attribution, places: scene.places.filter((place) => place.name.toLowerCase().includes(query)).map((place) => ({ ...place, providerId })) });
       });
     },
     (request, url) => {
       if (request.method !== "POST" || url.pathname !== "/api/v1/maps/places/details") return;
       return asked(scene, request, url).then((body) => {
         const id = typeof body === "object" && body !== null && "id" in body ? String(body.id) : "";
-        return Response.json({ providerId: "test-open", attribution, place: scene.places.find((place) => place.id === id) ?? null });
+        const providerId = scene.coverage.available ? scene.coverage.providerId : "test-open";
+        const found = scene.places.find((place) => place.id === id);
+        return Response.json({ providerId, attribution, place: found ? { ...found, providerId } : null });
       });
     },
     (request, url) => {
@@ -121,15 +131,15 @@ export function mapsRoutes(scene: MapsScene): Route[] {
   ];
 }
 
-/** `ElizaLocation` of eliza's Android package: its permission, one watch per call, and the positions the scene moves to. */
+/** `ElizaLocation` of eliza's Android package: its permission, which Maps and Settings read, one watch per call, and the positions the scene moves to. */
 export function elizaLocation(scene: MapsScene, now: () => number): Faked {
   return plugin<LocationPlugin, { locationChange: LocationResult; error: LocationErrorEvent }>((emit) => {
     const told = (result: LocationResult) => emit("locationChange", result);
     let next = 0;
     return {
-      checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: "precise" }),
-      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: "precise" }),
-      getCurrentPosition: () => Promise.reject(new Error("not used by Maps")),
+      checkPermissions: () => Promise.resolve({ location: scene.allowed, accuracy: scene.precision }),
+      requestPermissions: () => Promise.resolve({ location: scene.allowed === "prompt" ? "granted" : scene.allowed, accuracy: scene.precision }),
+      getCurrentPosition: () => Promise.reject(rejection("TIMEOUT")),
       watchPosition: () => {
         const watchId = `w${++next}`;
         scene.watches.add(watchId);
@@ -146,4 +156,42 @@ export function elizaLocation(scene: MapsScene, now: () => number): Faked {
       removeAllListeners: () => Promise.resolve(),
     };
   });
+}
+
+/** `AlphaMapsTransport` of Alpha's host: the foreground service that guides with the screen off, and its notification's Stop. */
+export function alphaMapsTransport(scene: MapsScene): Faked {
+  return (emit) => {
+    const guidance = scene.guidance;
+    guidance.stop = (reason) => {
+      const session = guidance.session;
+      guidance.session = undefined;
+      if (session !== undefined) emit("navigationStopped", { sessionId: session, reason });
+    };
+    return {
+      navigationAvailability: () => Promise.resolve({ background: true }),
+      startNavigation: ({ sessionId, title, text }: { sessionId: string; title: string; text: string }) => {
+        Object.assign(guidance, { session: sessionId, title, text });
+        return Promise.resolve();
+      },
+      updateNavigation: ({ sessionId, title, text }: { sessionId: string; title: string; text: string }) => {
+        const active = guidance.session === sessionId;
+        if (active) Object.assign(guidance, { title, text });
+        return Promise.resolve({ active });
+      },
+      navigationArrived: ({ text }: { text: string }) => {
+        guidance.arrivals.push(text);
+        return Promise.resolve({ shown: true });
+      },
+      stopNavigation: ({ sessionId }: { sessionId: string }) => {
+        const stopped = guidance.session === sessionId;
+        if (stopped) guidance.session = undefined;
+        return Promise.resolve({ stopped });
+      },
+      consumeNavigationOpen: () => {
+        const open = guidance.opened;
+        guidance.opened = false;
+        return Promise.resolve({ open });
+      },
+    };
+  };
 }

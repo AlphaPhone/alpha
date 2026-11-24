@@ -11,7 +11,10 @@ for its reply. The rest of the area:
 - [Search](./search.md): searching every conversation and opening a hit
 - [Cards](./cards.md): what a reply carries, and each card's life
 - [Dock](./dock.md): how a drag of Ask Alpha chooses a height, and the keyboard
-- [Device actions](./actions.md): an action the agent proposes for the phone, reviewed and run at most once
+- [Reply](./reply.md): a reply as it is written: its label, acknowledgment, cards, notices and failures
+- [Turn context](./context.md): what a turn tells the agent besides the screen: location, Browser's page, Maps, the clock and capabilities
+- [Question](./question.md): Ask Alpha on a file, reviewed before it joins the draft
+- [Email card](./email.md): an email the agent drafted, sent from the chat once per version
 - [Kit extensions](./extend.md): what the area needs of the kit that it lacks
 
 Speaking a turn and reading a reply aloud belong to the voice area, the
@@ -686,8 +689,8 @@ pure def told(showing: Showing, zone: str, day: int, selected: bool, sensitive: 
 ### A sensitive screen says only that it is sensitive: no selection and no day
 
 A sensitive screen is the passwords view, a password surface in Settings,
-a locked or secure screen, a screen that is off, a hidden page, and the
-agent connection dialog.
+Settings' page of the carrier's identifiers, a locked or secure screen, a
+screen that is off, a hidden page, and the agent connection dialog.
 
 ```quint
 pure def lawASensitiveScreenTellsNothingOfItself(showing: Showing, zone: str, day: int, selected: bool, sensitive: bool, revision: int): bool =

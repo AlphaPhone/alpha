@@ -7,9 +7,10 @@ import { Spinner } from "../Spinner.tsx";
 export type AssistantDraftNoticeProps = Omit<ComponentProps<"div">, "children"> & {
   /**
    * What is wrong with the draft: its slot is being opened, a save failed, the slot is damaged or cannot be read, a
-   * different copy is saved, or a message may already have been sent and is under review.
+   * different copy is saved, a message may already have been sent and is under review, or the text is longer than a
+   * message may hold and is kept as a draft.
    */
-  status: "opening" | "failed" | "damaged" | "unreadable" | "conflict" | "review";
+  status: "opening" | "failed" | "damaged" | "unreadable" | "conflict" | "review" | "long";
   /** The copy saved in the slot, shown while the owner chooses between it and the text being written. */
   saved?: string;
   /** Saves the draft again after storage failed. */
@@ -37,6 +38,7 @@ export function AssistantDraftNotice({ status, saved, onRetry, onRecover, onReop
   if (status === "opening") return <Banner {...props}><span className="flex items-center gap-2"><Spinner size="sm" label="Opening draft" />Opening your draft</span></Banner>;
   if (status === "failed") return <Banner variant="warn" action={small("Retry", onRetry)} {...props}>Draft not saved</Banner>;
   if (status === "damaged") return <Banner variant="warn" action={small("Recover", onRecover)} {...props}>Draft damaged</Banner>;
+  if (status === "long") return <Banner variant="warn" {...props}>Too long to send</Banner>;
   if (status === "unreadable") return <Banner variant="warn" action={small("Try again", onReopen)} {...props}>Draft cannot be read</Banner>;
   const review = status === "review";
   return (

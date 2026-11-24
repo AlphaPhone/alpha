@@ -35,6 +35,7 @@ const opened = new WeakMap<Alpha, { world?: Scene; mounts: readonly Mount[] }>()
 export async function closeAll() {
   for (const close of closing.splice(0)) await close();
   localStorage.clear();
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
 }
 
 /**
@@ -94,6 +95,14 @@ export const button = (name: string) => [...document.querySelectorAll("button")]
 export const press = (name: string) => drawn(() => {
   const found = button(name);
   if (!found) throw new Error(`no button ${name}`);
+  found.click();
+});
+
+/** Press the button named `name` on the sheet or dialog on top, where the page behind it may hold one of the same name. */
+export const pressOnTop = (name: string) => drawn(() => {
+  const top = [...document.querySelectorAll("[role=dialog]")].at(-1);
+  const found = top && [...top.querySelectorAll("button")].find((one) => (one.getAttribute("aria-label") ?? one.textContent) === name);
+  if (!found) throw new Error(`no button ${name} on top`);
   found.click();
 });
 

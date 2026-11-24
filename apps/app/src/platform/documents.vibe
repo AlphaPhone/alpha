@@ -1,0 +1,25 @@
+// spec/app/files/preview.md, "Story: Look at a file"
+import type { SelectedDocumentsClient } from "@elizaos/os/bridges/definitions/media"
+import { registered } from "./device.vibe"
+
+module held {
+  import type { SelectedDocumentsClient } from "@elizaos/os/bridges/definitions/media"
+  import { selectedDocumentsClient, selectedDocumentsPlugin } from "@elizaos/os/bridges/media"
+
+  let made: SelectedDocumentsClient | undefined
+  /** @throws {never} */
+  export function client(name: string): SelectedDocumentsClient {
+    return (made ??= selectedDocumentsClient(selectedDocumentsPlugin(name), name))
+  }
+}
+import { client } from held
+
+export service Documents {
+  readonly client: Option.Option<SelectedDocumentsClient>
+}
+
+const name = "SelectedDocuments"
+
+export const phoneDocuments = Layer.sync(Documents, () => ({ client: registered(name) ? Option.some(client(name)) : Option.none() }))
+
+export const browserDocuments = Layer.succeed(Documents, { client: Option.none() })

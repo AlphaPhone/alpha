@@ -23,7 +23,7 @@ const Reminders = Sample.Machine;
 let depth = 0;
 const deep = area(Layer.empty, () => <p>Files</p>, { back: Effect.sync(() => depth-- > 0) });
 /** Alpha with the sample area at the Notes view, and that screen at Files, which only this journey mounts. */
-const withSample = [...mounts, at("view:Notes", () => import("./sample/index.tsx")), at("view:Files", () => Promise.resolve({ default: deep }))];
+const withSample = [...mounts.filter((m) => m.at !== "view:Notes" && m.at !== "view:Files"), at("view:Notes", () => import("./sample/index.tsx")), at("view:Files", () => Promise.resolve({ default: deep }))];
 const kept = "alpha/app/sample/index@1";
 const shown = () => [...document.querySelectorAll("section[aria-label=Reminders] li span")].map((title) => title.textContent);
 const told = () => document.querySelector("section[aria-label=Reminders] [role=alert]")?.textContent;

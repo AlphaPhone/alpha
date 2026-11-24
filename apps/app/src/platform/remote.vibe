@@ -1,13 +1,21 @@
-// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"
+// spec/kit/read.md, "Story: Read from outside"; spec/kit/attempt.md, "A sent attempt ends as its own answer says, or as unknown when no answer can be trusted"; spec/app/platform/index.md, "A refusal carries a wait only when the other side answered 429 with a whole number of seconds, at most a day"; spec/app/platform/index.md, "Only a 2xx answer is the reply; every other status is a refusal"
 import * as Sse from "effect/encoding/Sse"
+import { replied, waitAdvised } from "../../gen/app__platform.effect.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
 
 /** The request provably never left Alpha: its route is not one the phone relays, or the bridge was busy or is not there. */
 export error Unsent { cause: unknown }
 /** The other side could not be reached, did not answer in time, or stopped mid-answer: it may have acted. */
 export error Unreachable { cause: unknown }
-/** The other side answered with a status other than 2xx. */
-export error Refused { status: number }
+/** The other side answered with a status other than 2xx, and how many seconds it asked Alpha to wait, where it asked. */
+export error Refused { status: number; wait?: number }
+
+/** The refusal of `status`, with the wait `said` gave where the platform's rule takes it: a `Retry-After` of whole seconds, or seconds already read. */
+export function refusal(status: number, said: string | number | undefined): Refused {
+  const seconds = typeof said === "number" ? said : said !== undefined && /^\d+$/.test(said.trim()) ? Number(said.trim()) : undefined
+  return seconds !== undefined && waitAdvised(status, Number.isSafeInteger(seconds), seconds) ? new Refused({ status, wait: seconds }) : new Refused({ status })
+}
+
 /** The other side answered 2xx with something that is not what was asked for. */
 export error Garbled { cause: unknown }
 
@@ -108,7 +116,7 @@ export effect function remoteAt(base: string): Wired!!HttpClient.HttpClient {
   }
   effect function answered(request: HttpClientRequest.HttpClientRequest): Opened!(Unreachable | Refused) {
     const opened = try open(request)
-    if (opened.status < 200 || opened.status >= 300) throw new Refused({ status: opened.status })
+    if (!replied(opened.status)) throw refusal(opened.status, opened.headers["retry-after"])
     return opened
   }
   return {
@@ -156,14 +164,13 @@ export effect function attempted<I>(remote: Context.Key<I, Remote>, request: Htt
 
 /**
  * Carry out the kit attempt `id` as `attempted` does, where the request itself names the attempt's idempotency key, as
- * eliza's calendar routes ask in their body: `build` makes it from the key. Beside how it ended, what a confirmed
- * answer decodes to by `schema`, which the asking area owns, or nothing where it does not decode.
+ * eliza's calendar routes ask in their body or query: `build` makes it from the key, and no header carries it. Beside
+ * how it ended, the answer's body, untrusted, where it came.
  */
-export effect function attemptedWith<I, A>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number, schema: Schema.Decoder<A>): { readonly outcome: Outcome; readonly answer: Option.Option<A> }!!(I | Attempts) {
+export effect function attemptedWith<I>(remote: Context.Key<I, Remote>, build: (key: string) => HttpClientRequest.HttpClientRequest, id: number): (Outcome & { readonly body: unknown })!!(I | Attempts) {
   const key = try (try Attempts).key(id)
   return effect {
-    const body = try (try remote).call(HttpClientRequest.setHeader(build(key), "idempotency-key", key))
-    const answer = Schema.decodeUnknownEffect(schema)(body) |> Effect.option(%)
-    return { outcome: { confirmed: true, known: true }, answer: try answer }
-  } catch (failure) => ({ outcome: outcomeOf(failure), answer: Option.none<A>() })
+    const body = try (try remote).call(build(key))
+    return { confirmed: true, known: true, body }
+  } catch (failure) => ({ ...outcomeOf(failure), body: undefined })
 }

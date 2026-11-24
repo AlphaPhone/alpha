@@ -1,0 +1,36 @@
+// spec/app/update/index.md, "A release names its variant, signer, version, download address, digest, size, version name and notes"; spec/app/update/page.md, "A page is opening, holding for an update, or mounted, and knows the update it last read"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+
+/**
+ * The numbers that stand for digests and Android's activations in the update machines: each name Alpha has met, by
+ * the number it was given, 1 for the first. Kept, so that the number a kept machine holds names the same thing after
+ * a restart; a new name gets the next number, so numbers rise in the order names were met.
+ */
+export service Names {
+  /** The number that stands for `name`, given and kept the first time it is met. */
+  number(name: string): number!!
+  /** The name `number` stands for, or none for 0 or a number never given. */
+  name(number: number): Option.Option<string>!!
+}
+
+const key = "alpha/update/names@1"
+const Kept = Schema.fromJsonString(Schema.Array(Schema.String))
+
+/** The names, read once from the store and kept there with each new one; one list for the whole page. */
+export const names = Layer.effect(Names, effect {
+  const store = try KeyValueStore.KeyValueStore
+  const text = store.get(key) catch () => undefined
+  const list = [...(text === undefined ? [] : Option.getOrElse(Schema.decodeUnknownOption(Kept)(text), () => []))]
+  return {
+    effect number(name: string): number!! {
+      const found = list.indexOf(name)
+      if (found >= 0) return found + 1
+      list.push(name)
+      try ignore(store.set(key, JSON.stringify(list)))
+      return list.length
+    },
+    effect name(number: number): Option.Option<string>!! {
+      return number >= 1 ? Option.fromNullishOr(list[number - 1]) : Option.none()
+    },
+  }
+})

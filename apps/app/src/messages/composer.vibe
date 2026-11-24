@@ -1,0 +1,298 @@
+// spec/app/messages/composer.md, "Story: Keep my draft"; spec/app/messages/composer.md, "Story: Let Alpha suggest a draft"; spec/app/messages/composer.md, "Story: Send a message"; spec/app/messages/sending.md, "Story: Send a message once"; spec/app/messages/sending.md, "Story: Know whether it arrived"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import { MMS_ATTACHMENT_TYPES, MMS_MAX_RECIPIENTS, MMS_MAX_TOTAL_BYTES, SMS_DIRECT_MAX_RECIPIENTS } from "@elizaos/os/bridges/definitions/messages"
+import type { MmsAttachmentType, MmsReview, OperationId, SmsReview, SmsSendStatus } from "@elizaos/os/bridges/messages"
+import type { PhoneNumber } from "@elizaos/os/bridges/phone"
+import * as Composer from "../../gen/app__messages__composer.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__messages__composer.effect.vibe"
+import type { Effect as SendOut } from "../../gen/app__messages__sending.effect.vibe"
+import { Machine as Messages } from "../../gen/app__messages.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask } from "../platform/remote.vibe"
+import { SystemSettings } from "../platform/systemSettings.vibe"
+import { Telephony, TelephonyRefused, telephony } from "../platform/telephony.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, applying, contained, following, hearing, reacting, run, started, stream, together } from "../runtime/reactor.vibe"
+import { grantOf } from "../phone/phone.vibe"
+import { Conversations, Inbox, elsewhere } from "./messages.vibe"
+
+/** A picture the owner attached: what the phone says it is, and its bytes. */
+export interface Picture {
+  readonly name: string
+  readonly contentType: MmsAttachmentType
+  readonly bytes: Uint8Array
+}
+
+/** What one send carries, kept from Send until its record is retired, so that a send read back after a restart is the same one. */
+export interface Outgoing {
+  readonly thread: number
+  readonly to: ReadonlyArray<string>
+  readonly body: string
+  readonly sim: number | null
+  readonly pictures: ReadonlyArray<Picture>
+  readonly pictured: boolean
+  readonly operation: OperationId | undefined
+  readonly status: SmsSendStatus | undefined
+}
+
+/** The texts behind the composer: each conversation's draft, saved on the phone, the pictures of the open one, and the send in hand. */
+export service Drafts {
+  text(thread: number): string!!
+  write(thread: number, text: string): void!!
+  drop(thread: number): void!!
+  pictures(): ReadonlyArray<Picture>!!
+  setPictures(pictures: ReadonlyArray<Picture>): void!!
+  outgoing(): Option.Option<Outgoing>!!
+  setOutgoing(outgoing: Option.Option<Outgoing>): void!!
+  /** What the phone last said it can send itself: texts directly, and pictures. */
+  sending(): { readonly direct: boolean; readonly pictures: boolean }!!
+  setSending(sending: { readonly direct: boolean; readonly pictures: boolean }): void!!
+}
+
+const draftKey = (thread: number) => `alpha/messages/draft/${thread}@1`
+const outgoingKey = "alpha/messages/outgoing@1"
+
+module text {
+  /** What the store kept for the send in hand, without its pictures' bytes, which are never kept: only that it had some. @throws {never} */
+  export function keptSend(raw: string | undefined): { thread: number; to: string[]; body: string; sim: number | null; pictures: never[]; pictured: boolean; operation: undefined; status: undefined } | undefined {
+    if (raw === undefined) return undefined
+    try {
+      const found = JSON.parse(raw)
+      return typeof found?.thread === "number" && Array.isArray(found?.to) && typeof found?.body === "string"
+        ? { ...found, pictures: [], pictured: found.pictured !== false, operation: undefined, status: undefined }
+        : undefined
+    } catch {
+      return undefined
+    }
+  }
+  /** The send in hand as the store keeps it. @throws {never} */
+  export function keepSend(outgoing: { readonly pictures: ReadonlyArray<unknown>; readonly pictured: boolean }): string {
+    return JSON.stringify({ ...outgoing, pictures: [], pictured: outgoing.pictured || outgoing.pictures.length > 0 })
+  }
+}
+import { keepSend, keptSend } from text
+
+const drafts = Layer.effect(Drafts, effect {
+  const store = try KeyValueStore.KeyValueStore
+  let pictures: ReadonlyArray<Picture> = []
+  let sending = { direct: true, pictures: true }
+  let outgoing: Option.Option<Outgoing> = Option.fromNullishOr(keptSend(store.get(outgoingKey) catch () => undefined))
+  return {
+    effect text(thread: number): string!! {
+      return (store.get(draftKey(thread)) catch () => undefined) ?? ""
+    },
+    write: (thread: number, text: string) => ignore(store.set(draftKey(thread), text)),
+    drop: (thread: number) => ignore(store.remove(draftKey(thread))),
+    pictures: () => sync(() => pictures),
+    setPictures: (next: ReadonlyArray<Picture>) => sync(() => { pictures = next }),
+    outgoing: () => sync(() => outgoing),
+    sending: () => sync(() => sending),
+    setSending: (next: { readonly direct: boolean; readonly pictures: boolean }) => sync(() => { sending = next }),
+    effect setOutgoing(next: Option.Option<Outgoing>): void!! {
+      outgoing = next
+      try ignore(Option.isSome(next) ? store.set(outgoingKey, keepSend(next.value)) : store.remove(outgoingKey))
+    },
+  }
+})
+
+// spec/app/messages/composer.md, "The phone says how many SIMs it has, and with more than one the owner picks one, which needs SIM access"
+/** The SIM a send goes out on: the one the owner picked, counted from one, or else the phone's default for texts or its only SIM; with several and no default, none. */
+effect function simOf(chosen: number | null): (number | undefined)!!Telephony {
+  const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+  const sims = status?.subscriptions ?? []
+  if (chosen !== null) return sims[chosen - 1]?.id
+  return sims.find((one) => one.defaultSms)?.id ?? (sims.length === 1 ? sims[0].id : undefined)
+}
+
+const sentStatuses = new Set<SmsSendStatus>(["submitted", "sent", "delivered"])
+
+// spec/app/messages/sending.md, "Send journals a new operation, or reads the journal back when the last outcome is unknown"; spec/app/messages/sending.md, "The journal entry lands, or the phone denies the send before any radio is used"
+/** The send under its operation's key: the phone journals it before it uses the radio, and the same key never sends twice. */
+function journaled(id: number, recipients: number): Stream.Stream<Event, never, Telephony | Drafts | Attempts> {
+  return Stream.unwrap(effect {
+    const store = try Drafts
+    const held = try store.outgoing()
+    if (Option.isNone(held)) return Stream.succeed<Event>({ type: "journaled", id, allowed: false })
+    const send = held.value
+    const operation = (try (try Attempts).key(id)) as OperationId
+    const sim = try simOf(send.sim)
+    if (sim === undefined) return Stream.succeed<Event>({ type: "journaled", id, allowed: false })
+    const to = send.to as PhoneNumber[]
+    const status: SmsSendStatus | undefined = send.pictures.length > 0
+      ? Effect.map(telephony("sendMms", (c) => c.messages.sendMms({ recipients: to, body: send.body, subscriptionId: sim, attachments: send.pictures.map((one) => ({ name: one.name, contentType: one.contentType, bytes: one.bytes })) } satisfies MmsReview, operation)), (result) => result.status) catch (failure) => (failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "" ? undefined : "denied")
+      : Effect.map(telephony("sendSms", (c) => c.messages.sendSms({ recipients: to, body: send.body, subscriptionId: sim } satisfies SmsReview & { subscriptionId: number }, operation)), (result) => result.status) catch (failure) => (failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "" ? undefined : "denied")
+    try store.setOutgoing(Option.some({ ...send, sim, status, operation }))
+    if (status === undefined) return Stream.succeed<Event>({ type: "lost" })
+    if (status === "denied" || status === "cancelled") return Stream.succeed<Event>({ type: "journaled", id, allowed: false })
+    return Stream.fromIterable<Event>([{ type: "journaled", id, allowed: true }, ...Array.from({ length: recipients }, (): Event => ({ type: "transmit", id }))])
+  })
+}
+
+// spec/app/messages/sending.md, "The radio reports each part sent or failed, and the send ends when every recipient has an answer"
+effect function radioed(id: number): Event!!Drafts {
+  const held = try (try Drafts).outgoing()
+  const status = Option.isSome(held) ? held.value.status : undefined
+  return status === undefined || status === "unknown" ? { type: "lost" } : { type: "partSent", id, ok: sentStatuses.has(status) }
+}
+
+// spec/app/messages/sending.md, "The journal read back settles an unknown outcome: sent, or never sent"
+effect function readBack(id: number): Event!!(Telephony | Drafts | Attempts) {
+  const held = try (try Drafts).outgoing()
+  if (Option.isNone(held)) return { type: "readBack", id, wasSent: false, known: true }
+  const operation = (try (try Attempts).key(id)) as OperationId
+  const send = held.value
+  const sim = send.sim ?? 0
+  const history = telephony("smsSendHistory", (c) => c.messages.smsSendHistory()) catch () => undefined
+  if (history === undefined) return { type: "readBack", id, wasSent: false, known: false }
+  const found = history.find((one) => one.operationId === operation)
+  if (found === undefined) return { type: "readBack", id, wasSent: false, known: !send.pictured && sim >= 0 }
+  return { type: "readBack", id, wasSent: sentStatuses.has(found.status), known: found.status !== "unknown" }
+}
+
+function sending(fx: SendOut): Job<Event, Telephony | Drafts | Attempts, []> {
+  return match (fx) {
+    when { tag: "Journal", let id, let recipients }: stream(`send ${id}`, journaled(id, recipients), { type: "lost" });
+    when { tag: "Radio", let id, let recipient }: answer(`radio ${id} ${recipient}`, radioed(id), { type: "lost" });
+    when { tag: "ReadJournal", let id }: answer(`read back ${id}`, readBack(id), { type: "readBack", id, wasSent: false, known: false });
+    when { tag: "Tombstone" }: run("retired", effect { try (try Drafts).setOutgoing(Option.none()) });
+  }
+}
+
+/** What the agent answers to `POST /api/messages/reply-draft`: one short reply for the owner to read, or none. */
+const Drafted = Schema.Struct({ draft: Schema.NullOr(Schema.String) })
+
+/** The open conversation's tail as the agent's drafter reads it, oldest first. */
+const tailLength = 20
+
+// spec/app/messages/composer.md, "Alpha's suggestion is asked for only when the draft is empty, and lands only if it still is"
+/** Alpha's draft for `thread`, asked of the agent from the messages last read: it lands in the conversation's draft only while the owner has written nothing there. */
+effect function suggestion(ticket: number, thread: number): Event!!(Agent | Inbox | Drafts | Conversations | Composer.Machine) {
+  const refused: Event = { type: "suggested", ticket, ok: false }
+  const rows = (try (try Inbox).get()).messages.flatMap((row) => ("incomplete" in row ? [] : [{ direction: row.direction === "incoming" ? "in" : "out", date: row.date, body: row.body }]))
+  const tail = [...rows].sort((a, b) => a.date - b.date).slice(-tailLength)
+  const conversation = try (try Conversations).get(thread)
+  const participant = Option.isSome(conversation) && conversation.value.addresses.length === 1 ? conversation.value.addresses[0] : null
+  if (tail.length === 0 || tail[tail.length - 1].direction !== "in") return refused
+  const answered = ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/messages/reply-draft"), { participant, messages: tail, truncated: rows.length > tail.length }), Drafted) catch () => undefined
+  const draft = answered?.draft ?? ""
+  const state = try (try Composer.Machine).get()
+  if (draft === "" || state.thread !== thread || state.slot.author !== "Nobody") return refused
+  try (try Drafts).write(thread, draft)
+  return { type: "suggested", ticket, ok: true }
+}
+
+function carry(fx: Out): Job<Event, Telephony | Drafts | Attempts | Conversations | Inbox | Agent | SystemSettings | Composer.Machine, []> {
+  return match (fx) {
+    when { tag: "SaveDraft" }: answer("save", succeed<Event>({ type: "draftSaved" }), { type: "draftSaved" });
+    when { tag: "DropDraft", let thread }: run(`drop ${thread}`, effect { try (try Drafts).drop(thread) });
+    when { tag: "Suggest", let ticket, let thread }: answer("suggest", suggestion(ticket, thread), { type: "suggested", ticket, ok: false });
+    when { tag: "Prompt", let need }: answer("prompt", effect {
+      const status = telephony("requestAccess", (c) => c.phone.requestAccess(need === "SendAccess" ? "sendSms" : "phoneState")) catch () => undefined
+      return { type: "accessReported", need, grant: grantOf(need === "SendAccess" ? status?.permissions.sendSms : status?.permissions.phoneState) } satisfies Event
+    }, { type: "accessReported", need, grant: "Unasked" });
+    when { tag: "OpenSettings" }: run("settings", effect { try (try SystemSettings).open("AppPermissions", 0) });
+    when { tag: "OpenMessagingApp" }: run("elsewhere", effect { try elsewhere((try (try Composer.Machine).get()).thread) });
+    when { tag: "Sending" }: sending(fx.effect);
+  }
+}
+
+// spec/app/messages/composer.md, "A restart closes the conversation and keeps the saved drafts, the send, access and the SIMs the phone has"
+const machine = reacting(Composer, { keep: 1, open: [{ type: "restart" }], carry })
+
+// spec/app/messages/composer.md, "Opening a conversation brings back the draft the phone saved for it"; spec/app/messages/composer.md, "Closing the conversation's composer waits until its draft is saved"
+/** The conversation Messages has open, and how many it is with, told to the composer until it takes it. */
+const opened = started(effect {
+  const messages = try Messages
+  const composer = try Composer.Machine
+  const numbering = try Conversations
+  let taken = -1
+  try Stream.runForEach(Stream.zipLatest(messages.changes, composer.changes), effect ([state]) => {
+    const thread = state.pane === "Conversation" ? state.thread : 0
+    if (thread === taken) return
+    const conversation = try numbering.get(thread)
+    const recipients = Option.isSome(conversation) ? conversation.value.addresses.length : 0
+    const event: Event = thread === 0 ? { type: "closeDraft" } : { type: "openDraft", thread, recipients }
+    if ((try composer.get()).thread === thread || (try contained(composer.send(event), "the open conversation"))) taken = thread
+    if (thread === 0) return
+    const status = telephony("status", (c) => c.messages.status()) catch () => undefined
+    const count = status?.subscriptions?.length ?? 0
+    if (status !== undefined) {
+      try (try Drafts).setSending({ direct: status.sendMode === "direct", pictures: status.mmsSend })
+      try contained(composer.send({ type: "accessReported", need: "SendAccess", grant: grantOf(status.permissions.sendSms) }), "send access")
+      try contained(composer.send({ type: "accessReported", need: "SimAccess", grant: grantOf(status.permissions.phoneState) }), "SIM access")
+    }
+    if (count >= 1) try contained(composer.send({ type: "simsReported", count }), "the SIMs")
+  })
+}, "the composer's conversation")
+
+// spec/app/messages/sending.md, "A delivery report counts only for a part reported sent"
+/** The phone's word that a send's record changed: a delivery report for each recipient every part of which arrived, counted once. */
+const reports: Stream.Stream<Event, never, Telephony | Drafts | Composer.Machine> = Stream.flatMap(
+  Stream.callback<OperationId, never, Telephony>((queue) => Effect.asVoid(acquireRelease(
+    Effect.orElseSucceed(telephony("observeMessages", (c) => c.messages.observeMessages(() => {}, (operation) => { Queue.offerUnsafe(queue, operation) })), () => undefined),
+    (unsubscribe) => (unsubscribe === undefined ? Effect.void : ignore(tryPromise(() => unsubscribe()))),
+  ))),
+  (operation) => Stream.unwrap(effect {
+    const held = try (try Drafts).outgoing()
+    const state = try (try Composer.Machine).get()
+    if (Option.isNone(held) || held.value.operation !== operation || held.value.sim === null) return Stream.empty
+    const send = held.value
+    const record = telephony("smsSendResult", (c) => c.messages.smsSendResult({ recipients: send.to as PhoneNumber[], body: send.body, subscriptionId: send.sim ?? 0 }, operation)) catch () => undefined
+    if (record === undefined) return Stream.empty
+    const arrived = send.to.filter((_number, at) => {
+      const parts = record.parts.filter((part) => part.recipientIndex === at)
+      return parts.length > 0 && parts.every((part) => part.delivery === "success")
+    }).length
+    const id = state.outgoing.op.id
+    return Stream.fromIterable(Array.from({ length: Math.max(0, arrived - state.outgoing.reported) }, (): Event => ({ type: "reportArrived", id })))
+  }),
+)
+
+// spec/app/messages/sending.md, "A finished record is retired by a tombstone"
+const retiring = following(Composer.Machine, (state) => (Composer.canRetire(state, state.outgoing.op.id) ? state.outgoing.op.id : 0), Composer.Machine, (id): Event | undefined => (id === 0 ? undefined : { type: "retire", id }))
+
+// spec/app/messages/composer.md, "What Alpha cannot send is handed to the messaging app"
+/** Whether Alpha can send this message itself, as the phone last said: texts directly, pictures as MMS, and no more recipients than one send takes. */
+export effect function supported(recipients: number, pictures: number): boolean!!Drafts {
+  const can = try (try Drafts).sending()
+  return can.direct && (pictures === 0 ? recipients <= SMS_DIRECT_MAX_RECIPIENTS : can.pictures && recipients <= MMS_MAX_RECIPIENTS)
+}
+
+/** What the owner's Send carries, put in hand just before it: the draft, the conversation's numbers, the SIM and the pictures; a send whose outcome is unknown keeps what it carried. */
+export effect function prepare(thread: number, sim: number | null): void!!(Drafts | Conversations | Composer.Machine) {
+  const state = try (try Composer.Machine).get()
+  const store = try Drafts
+  if (Composer.bound(state) || state.outgoing.op.outcome === "Recorded" || state.outgoing.op.outcome === "Sent") return
+  const conversation = try (try Conversations).get(thread)
+  const to = Option.isSome(conversation) ? conversation.value.addresses : []
+  const pictures = try store.pictures()
+  try store.setOutgoing(Option.some({ thread, to, body: state.slot.author === "Nobody" ? "" : try store.text(thread), sim, pictures, pictured: pictures.length > 0, operation: undefined, status: undefined }))
+}
+
+// spec/app/messages/composer.md, "The owner attaches up to five pictures, and removes them one by one"
+/** Attach the owner's chosen files in turn: each the phone's MMS takes, a JPEG, PNG or GIF within its size with those before, is attached while the composer takes one. */
+export effect function attachAll(files: ReadonlyArray<File>): void!!(Drafts | Composer.Machine) {
+  const store = try Drafts
+  const machine = try Composer.Machine
+  for (const file of files) {
+    const held = try store.pictures()
+    const fits = (MMS_ATTACHMENT_TYPES as ReadonlyArray<string>).includes(file.type) && file.size > 0 && held.reduce((sum, one) => sum + one.bytes.length, 0) + file.size <= MMS_MAX_TOTAL_BYTES
+    if (!Composer.canAttach(try machine.get(), fits)) return
+    const bytes = promise(() => file.arrayBuffer()) catch () => undefined
+    if (bytes === undefined) continue
+    try store.setPictures([...held, { name: file.name, contentType: file.type as MmsAttachmentType, bytes: new Uint8Array(bytes) }])
+    try ignore(machine.send({ type: "attach", fits }))
+  }
+}
+
+// spec/app/messages/composer.md, "An edited draft is saved for its conversation, one save at a time"
+const saving = following(Composer.Machine, (state) => Composer.canSaveDraft(state), Composer.Machine, (due): Event | undefined => (due ? { type: "saveDraft" } : undefined))
+
+// spec/app/messages/composer.md, "The composer holds at most five pictures and a SIM the phone has"
+/** The pictures kept beside the composer go when it holds none: a message sent with them, or another conversation opened. */
+const unpictured = applying(Composer.Machine, (state) => state.pictures === 0, effect (none: boolean) => {
+  if (none) try (try Drafts).setPictures([])
+})
+
+/** The composer: kept across restarts, so a draft and a send under way survive them; nothing is sent when Alpha opens again. */
+export const composer = together(machine, drafts, opened, saving, retiring, unpictured, hearing(reports, Composer.Machine, (event: Event) => event))

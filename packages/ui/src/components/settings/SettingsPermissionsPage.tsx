@@ -1,4 +1,4 @@
-import { MapPin, ShieldCheck } from "lucide-react";
+import { FolderLock, MapPin, ShieldCheck } from "lucide-react";
 import { ListGroup } from "../ListGroup.tsx";
 import { SettingsAccessRow } from "./SettingsAccessRow.tsx";
 import { SettingsAndroidRow } from "./SettingsAndroidRow.tsx";
@@ -20,7 +20,7 @@ const accesses: Access[] = ["camera", "microphone", "location", "calendar", "pho
 
 /**
  * Permissions: each access Alpha holds as the phone reports it, each opening the walkthrough to review it, and the way
- * into Android's permission and location settings.
+ * into Android's permission, all-files and location settings.
  * @model spec/app/settings/facts.md
  */
 export function SettingsPermissionsPage({ grants, told, onBack, onReview, starting, onAndroid }: SettingsPermissionsPageProps) {
@@ -33,6 +33,7 @@ export function SettingsPermissionsPage({ grants, told, onBack, onReview, starti
       </ListGroup>
       <ListGroup>
         <SettingsAndroidRow target="app-permissions" title="Alpha's permissions" icon={<ShieldCheck />} starting={starting} onAndroid={onAndroid} />
+        <SettingsAndroidRow target="all-files-access" title="Access to all files" icon={<FolderLock />} starting={starting} onAndroid={onAndroid} />
         <SettingsAndroidRow target="location-settings" title="Location" icon={<MapPin />} starting={starting} onAndroid={onAndroid} />
       </ListGroup>
     </SettingsPage>

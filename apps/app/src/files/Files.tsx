@@ -1,36 +1,53 @@
-// spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"
-import { Alert, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListGroup, ListRow, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
-import { Option, type ManagedRuntime } from "effect";
-import { useState } from "react";
+// spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"; spec/app/files/index.md, "The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed"
+import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
+import { Effect, Option, type ManagedRuntime } from "effect";
+import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ChevronRight, Download, Ellipsis, File, FileText, Folder, FolderInput, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
+import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Machine, Order } from "../../gen/app__files.effect.vibe";
-import { browse, chosen, empty, filled } from "../../gen/app__files.ts";
+import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
 import { useMachine } from "../../gen/app__files.react.ts";
 import type { Dest, Work } from "../../gen/app__files__change.ts";
 import { finding } from "../../gen/app__files__search.ts";
+import type { Filter } from "../../gen/app__files__search.ts";
 import type { Item, Kind } from "../../gen/app__files__shared.ts";
 import type { Machine as TrashMachine } from "../../gen/app__files__trash.effect.vibe";
+import type { Alpha } from "../runtime/area.tsx";
+import { AppBack } from "../shell/AppBack.tsx";
 import type { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
+import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
+import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
+import type { Opened } from "./preview.vibe";
+import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
 
 export interface FilesProps {
   /** Provides Files and its Trash, `files` of files.vibe, the numbers of the phone's storage and Alpha's time. */
-  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | Handles | Time, unknown>;
+  alpha: Alpha;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time, unknown>;
 }
 
 const categories: readonly [Kind, string][] = [["Download", "Downloads"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
+const icons: Record<Kind, LucideIcon> = { Folder, Download, Image, Video, Audio: AudioLines, Document: FileText, Other: File };
 const orders: readonly [Order, string][] = [["ByName", "Name"], ["ByDate", "Date"], ["BySize", "Size"]];
-const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Email", "Email"], ["Copy", "Copy"], ["SaveTo", "Save to"]];
+const shares: readonly [Dest, string][] = [["Chooser", "Share to an app"], ["Email", "Email"], ["Copy", "Copy"]];
+const kinds: readonly [Kind | undefined, string][] = [[undefined, "Any kind"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
+const kindNames: Record<Kind, string> = { Folder: "Folder", Image: "Image", Video: "Video", Audio: "Audio", Document: "Document", Download: "Download", Other: "File" };
 /** A name no folder holds, since it is a path's separator: what asks whether a new name would be taken at all. */
 const unnamed = "/";
+/** A size in the units the owner reads, to one decimal above a kilobyte. */
+function sized(bytes: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let at = 0;
+  let value = bytes;
+  while (value >= 1024 && at < units.length - 1) { value /= 1024; at += 1; }
+  return `${at === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10} ${units[at]}`;
+}
 const changeWords: Record<Work, string> = { NewFolder: "make the folder", Rename: "rename it", MoveTo: "move them", CopyTo: "copy them" };
 
-/** The name the phone's storage gives a number: the last step of its path, or its volume's name at a volume's root. */
-function labelOf(runtime: FilesProps["runtime"], volumes: readonly { id: number; name: string }[], handle: number): string {
-  const named = volumes.find((volume) => volume.id === handle);
-  if (named) return named.name;
-  const spot = runtime.runSync(Handles.use((handles) => handles.spot(handle)));
-  return Option.isSome(spot) ? spot.value.path.slice(spot.value.path.lastIndexOf("/") + 1) : "…";
+/** The name the phone's storage gives a number: its volume's name at a volume's root, else the last step of its path. */
+function labelOf(runtime: FilesProps["runtime"], handle: number): string {
+  return Option.getOrElse(runtime.runSync(Effect.flatMap(Handles, (handles) => handles.label(handle))), () => "…");
 }
 
 /**
@@ -38,135 +55,232 @@ function labelOf(runtime: FilesProps["runtime"], volumes: readonly { id: number;
  * and one change, each control offered exactly when the rules take it from the owner.
  * @model spec/app/files/index.md
  */
-export function Files({ runtime }: FilesProps) {
+export function Files({ runtime, alpha }: FilesProps) {
   const { state, cause, can, send } = useMachine(runtime);
   const [text, setText] = useState("");
   const [naming, setNaming] = useState<{ work: Work; name: string } | undefined>(undefined);
-  if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Files</Alert>;
+  const [kind, setKind] = useState<Kind | undefined>(undefined);
+  const [filtering, setFiltering] = useState(false);
+  const items = state?.items;
+  const order = state?.order;
+  const reversed = state?.reversed;
+  const sorted = useMemo(() => {
+    if (!items || order === undefined || reversed === undefined) return [];
+    return items.toSorted((a, b) => (ahead(order, reversed, a, b) ? -1 : ahead(order, reversed, b, a) ? 1 : 0));
+  }, [items, order, reversed]);
+  const marked = state?.picked;
+  const marks = useMemo(() => new Set(marked), [marked]);
+  const back = <AppBack alpha={alpha} />;
+  const header = (title: string) => <AppHeader title={title} leading={back} />;
+  if (cause) return <>{header("Files")}<Alert variant="destructive" className="m-4">Alpha could not open Files</Alert></>;
   if (!state) return null;
   const owner = <E extends Parameters<typeof can>[0]>(event: E) => can(event, "Owner");
   const tell = <E extends Parameters<typeof send>[0]>(event: E) => void send(event, "Owner");
   const shown = browse(state);
-  const label = (handle: number) => labelOf(runtime, state.volumes, handle);
+  const label = (handle: number) => labelOf(runtime, handle);
   if (shown === "Closed") return null;
-  if (shown === "Unsupported") return <EmptyState className="m-4" title="This phone's storage cannot be reached" />;
+  if (shown === "Unsupported") return <>{header("Files")}<EmptyState className="m-4" title="This phone's storage cannot be reached" /></>;
   if (shown === "NotAsked" || shown === "NoAccess") {
     return (
-      <EmptyState className="m-4" title={shown === "NotAsked" ? "Alpha may not read your files yet" : "Alpha may not read your files"}>
-        {owner({ type: "allow" }) && <Button onClick={() => tell({ type: "allow" })}>{shown === "NotAsked" ? "Allow" : "Open Settings"}</Button>}
-      </EmptyState>
+      <>
+        {header("Files")}
+        <EmptyState className="m-4" title={shown === "NotAsked" ? "Alpha may not read your files yet" : "Alpha may not read your files"}>
+          {owner({ type: "allow" }) && <Button onClick={() => tell({ type: "allow" })}>{shown === "NotAsked" ? "Allow" : "Open Settings"}</Button>}
+        </EmptyState>
+      </>
     );
   }
   if (state.trash) return <Trash runtime={runtime} onBack={owner({ type: "closeTrash" }) ? () => tell({ type: "closeTrash" }) : undefined} />;
+  const atTop = shown === "AtTop";
   const looked = finding(state.search);
   const picked = chosen(state);
-  const sorted = [...state.items].sort((a, b) => {
-    const by = state.order === "ByName" ? a.name.localeCompare(b.name) : state.order === "ByDate" ? b.revision - a.revision : a.name.localeCompare(b.name);
-    return (a.kind === "Folder" ? 0 : 1) - (b.kind === "Folder" ? 0 : 1) || (state.reversed ? -by : by);
-  });
+  const [firstPicked] = picked;
+  const selecting = marks.size > 0;
+  const grid = state.layout === "Grid";
+  const category = categories.find(([kind]) => kind === state.category)?.[1];
+  const place = state.inCategory ? category : label(state.trail.at(-1) ?? 0);
+  const title = selecting ? `${marks.size} selected` : atTop ? "Files" : (place ?? "Files");
+  const wanted: Filter = { text: text.trim(), kind: kind ?? "Other", anyKind: kind === undefined };
+  const [details] = detailed(state);
+  const primary = state.volumes[0];
+  const iconBox = "flex size-11 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground";
+  const rowClass = "min-h-15 gap-3.5 rounded-xl px-2";
   const row = (item: Item) => {
     const toggle = { type: "toggle", target: item.id } as const;
     const open = item.kind === "Folder" ? ({ type: "openFolder", target: item.id } as const) : ({ type: "view", file: item } as const);
+    const selectable = owner(toggle);
+    const selected = marks.has(item.id);
+    const Icon = icons[item.kind];
+    const action = selecting ? toggle : open;
+    const onClick = owner(action) ? () => tell(action) : undefined;
+    const onContextMenu = selectable ? (event: MouseEvent) => {
+      event.preventDefault();
+      if (!selected) tell(toggle);
+    } : undefined;
     return (
-      <ListRow
-        key={item.id}
-        title={item.name}
-        selected={state.picked.includes(item.id)}
-        onClick={owner(open) && state.picked.length === 0 ? () => tell(open) : owner(toggle) && state.picked.length > 0 ? () => tell(toggle) : undefined}
-        trailing={owner(toggle) && <Checkbox aria-label={`Select ${item.name}`} checked={state.picked.includes(item.id)} onClick={(event) => { event.stopPropagation(); tell(toggle); }} />}
-      />
+      <div key={item.id} className="group relative min-w-0">
+        {grid ? (
+          <Button variant="ghost" aria-label={item.name} aria-pressed={selecting ? selected : undefined} disabled={!onClick} className="h-auto w-full flex-col items-stretch gap-1.5 rounded-xl p-1.5 text-left" onClick={onClick} onContextMenu={onContextMenu}>
+            <span aria-hidden className="grid aspect-square place-items-center rounded-lg bg-muted"><Icon className="size-7" /></span>
+            <span className="line-clamp-2 min-h-9 text-wrap text-xs break-words">{item.name}</span>
+          </Button>
+        ) : (
+          <ListRow
+            className={`${rowClass} pr-11`}
+            aria-label={item.name}
+            aria-pressed={selecting ? selected : undefined}
+            title={item.name}
+            leading={<span className={iconBox}><Icon className="size-5" /></span>}
+            detail={item.kind === "Folder" ? undefined : sized(item.bytes)}
+            selected={selected}
+            onClick={onClick}
+            onContextMenu={onContextMenu}
+          />
+        )}
+        {selectable && <Checkbox aria-label={`Select ${item.name}`} checked={selected} className={`absolute right-2 min-h-6 min-w-6 rounded-full ${grid ? "top-3" : "top-1/2 -translate-y-1/2"} ${selecting ? "" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`} onCheckedChange={() => tell(toggle)} />}
+      </div>
     );
   };
   const { change } = state;
   const ended = change.attempt.outcome;
+  const changeLayout = { type: "showAs", layout: grid ? "Rows" : "Grid" } as const;
+  const showFilter = owner({ type: "searchFor", wanted });
+  const refresh = owner({ type: "refresh" });
+  const makeFolder = owner({ type: "begin", work: "NewFolder", name: unnamed });
+  const showTools = showFilter || refresh || makeFolder || owner(changeLayout);
+  const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
-    <section aria-label="Files" className="flex flex-col gap-3 p-4">
-      {state.missing && <Alert variant="warn">That folder is no longer there</Alert>}
-      {(ended === "Refused" || ended === "Unknown") && <Alert variant="warn">{ended === "Unknown" ? `Alpha cannot tell whether the phone could ${changeWords[change.work]}` : `The phone could not ${changeWords[change.work]}`}</Alert>}
-      {change.sending.outcome === "Refused" && <Alert variant="warn">Android could not open sharing</Alert>}
-      {change.stale && <Alert variant="info">The selection changed, so nothing was shared</Alert>}
-      <Undo runtime={runtime} />
-      {shown === "AtTop" ? (
-        <>
-          {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
-          {state.storage.status === "Failed" && <Alert variant="destructive">Your storage cannot be read now</Alert>}
-          <ListGroup heading="Storage">
-            {state.volumes.map((volume) => (
-              <ListRow
-                key={volume.id}
-                title={volume.name}
-                detail={volume.total > 0 && <Progress aria-label={`${volume.name} used`} value={filled(volume.used, volume.total)} />}
-                onClick={owner({ type: "openVolume", target: volume.id }) ? () => tell({ type: "openVolume", target: volume.id }) : undefined}
-              />
-            ))}
-          </ListGroup>
-          <ListGroup heading="Categories">
-            {categories.map(([kind, name]) => (
-              <ListRow key={kind} title={name} onClick={owner({ type: "openCategory", kind }) ? () => tell({ type: "openCategory", kind }) : undefined} />
-            ))}
-            {owner({ type: "openTrash" }) && <ListRow title="Trash" onClick={() => tell({ type: "openTrash" })} />}
-          </ListGroup>
-        </>
-      ) : (
-        <>
-          <nav aria-label="Path" className="flex flex-wrap items-center gap-1">
+    <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <AppHeader title={title} leading={selecting && owner({ type: "cancelSelection" }) ? <Button variant="ghost" size="icon" aria-label="Cancel" onClick={() => tell({ type: "cancelSelection" })}><X /></Button> : back}>
+          {selecting && canDetails && <Button variant="ghost" size="icon" aria-label="Details" onClick={() => tell({ type: "showDetails", target: firstPicked.id })}><Info /></Button>}
+          {selecting && owner({ type: "selectAll" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
+          {!selecting && showTools && (
+            <Menu>
+              <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label={atTop ? "Files tools" : "Files options"}><Ellipsis /></Button></MenuTrigger>
+              <MenuContent>
+                {makeFolder && <MenuItem onSelect={() => setNaming({ work: "NewFolder", name: "" })}><Plus />New folder</MenuItem>}
+                {owner(changeLayout) && <MenuItem onSelect={() => tell(changeLayout)}>{grid ? <List /> : <LayoutGrid />}{grid ? "List" : "Grid"}</MenuItem>}
+                {orders.map(([order, name]) => owner({ type: "sortBy", order }) && (
+                  <MenuItem key={order} onSelect={() => tell({ type: "sortBy", order })}>
+                    <ArrowDownWideNarrow />{name}{state.order === order && (state.reversed ? <ArrowUp className="ml-auto size-4" /> : <ArrowDown className="ml-auto size-4" />)}
+                  </MenuItem>
+                ))}
+                {showFilter && <MenuItem onSelect={() => setFiltering(true)}><Search />Filter files</MenuItem>}
+                {refresh && <MenuItem onSelect={() => tell({ type: "refresh" })}><RefreshCw />Refresh</MenuItem>}
+              </MenuContent>
+            </Menu>
+          )}
+        </AppHeader>
+        {!atTop && (
+          <nav aria-label="Folder path" className="flex shrink-0 items-center gap-1 overflow-x-auto px-3 pb-1 text-xs whitespace-nowrap text-muted-foreground">
             {owner({ type: "openTop" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "openTop" })}>Files</Button>}
             {state.inCategory
-              ? <span className="px-2 font-semibold">{categories.find(([kind]) => kind === state.category)?.[1]}</span>
+              ? <><ChevronRight aria-hidden className="size-3 shrink-0" /><span aria-current="location" className="px-2 text-foreground">{category}</span></>
               : state.trail.map((handle, at) => {
                   const crumb = { type: "openCrumb", depth: at + 1 } as const;
-                  return owner(crumb) && at < state.trail.length - 1
-                    ? <Button key={handle} variant="ghost" size="sm" onClick={() => tell(crumb)}>{label(handle)}</Button>
-                    : <span key={handle} className="px-2 font-semibold">{label(handle)}</span>;
+                  return (
+                    <Fragment key={handle}>
+                      <ChevronRight aria-hidden className="size-3 shrink-0" />
+                      {owner(crumb) && at < state.trail.length - 1
+                        ? <Button variant="ghost" size="sm" onClick={() => tell(crumb)}>{label(handle)}</Button>
+                        : <span aria-current="location" className="px-2 text-foreground">{label(handle)}</span>}
+                    </Fragment>
+                  );
                 })}
           </nav>
-          <div className="flex flex-wrap items-center gap-2">
-            {orders.map(([order, name]) => (
-              owner({ type: "sortBy", order }) && <Button key={order} variant={state.order === order ? "secondary" : "ghost"} size="sm" aria-pressed={state.order === order} onClick={() => tell({ type: "sortBy", order })}>{name}</Button>
-            ))}
-            {owner({ type: "showAs", layout: state.layout === "Rows" ? "Grid" : "Rows" }) && (
-              <Button variant="ghost" size="sm" onClick={() => tell({ type: "showAs", layout: state.layout === "Rows" ? "Grid" : "Rows" })}>{state.layout === "Rows" ? "Grid" : "List"}</Button>
-            )}
-            {owner({ type: "refresh" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Refresh</Button>}
-            {owner({ type: "begin", work: "NewFolder", name: unnamed }) && <Button variant="ghost" size="sm" onClick={() => setNaming({ work: "NewFolder", name: "" })}>New folder</Button>}
-          </div>
-          <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); tell({ type: "searchFor", wanted: { text: text.trim(), kind: "Other", anyKind: true } }); }}>
-            <SearchField aria-label="Filter" value={text} onValueChange={setText} className="flex-1" />
-            {owner({ type: "searchFor", wanted: { text: text.trim(), kind: "Other", anyKind: true } }) && <Button type="submit" variant="outline">Filter</Button>}
+        )}
+        {filtering && showFilter && (
+          <form className="flex shrink-0 flex-col gap-2 px-4 pb-2" onSubmit={(event) => { event.preventDefault(); tell({ type: "searchFor", wanted }); }}>
+            <div className="flex gap-2">
+              <SearchField aria-label="Filter" value={text} onValueChange={setText} className="flex-1" />
+              <Button type="submit" variant="outline">Filter</Button>
+              <Button type="button" variant="ghost" size="icon" aria-label="Close filter controls" onClick={() => setFiltering(false)}><X /></Button>
+            </div>
+            <div role="group" aria-label="Kind" className="flex flex-wrap gap-1">
+              {kinds.map(([one, name]) => <Button key={name} type="button" variant={kind === one ? "secondary" : "ghost"} size="sm" aria-pressed={kind === one} onClick={() => setKind(one)}>{name}</Button>)}
+            </div>
           </form>
-          {looked !== "NoFilter" && (
+        )}
+        <div className="min-h-0 flex-1 touch-pan-y overflow-y-auto px-2 pb-28">
+          {state.missing && <Alert variant="warn">That folder is no longer there</Alert>}
+          {(ended === "Refused" || ended === "Unknown") && <Alert variant="warn">{ended === "Unknown" ? `Alpha cannot tell whether the phone could ${changeWords[change.work]}` : `The phone could not ${changeWords[change.work]}`}</Alert>}
+          {change.sending.outcome === "Refused" && <Alert variant="warn">Android could not open sharing</Alert>}
+          {change.stale && <Alert variant="info">The selection changed, so nothing was shared</Alert>}
+          <Undo runtime={runtime} />
+          {looked !== "NoFilter" ? (
             <div className="flex flex-col gap-2">
-              <Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">{state.search.filter.text === "" ? "Everything" : `“${state.search.filter.text}”`}</Chip>
+              <div className="px-2"><Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">
+                {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`].filter(Boolean).join(" · ") || "Everything"}
+              </Chip></div>
               {looked === "Looking" && <Spinner label="Looking" />}
-              {looked === "Nothing" && <EmptyState title="Nothing matches" />}
+              {looked === "Nothing" && <EmptyState icon={<Search />} title="Nothing matches" />}
               {looked === "Trouble" && <Alert variant="warn">The search could not finish</Alert>}
               {looked === "Unfinished" && <Alert variant="info">Nothing found in what the phone could search</Alert>}
               {looked === "Found" && (
-                <ListGroup heading="Found">
-                  {state.search.hits.map((hit) => (
-                    <ListRow key={hit.id} title={hit.name} onClick={owner({ type: "view", file: hit }) ? () => tell({ type: "view", file: hit }) : undefined} />
-                  ))}
+                <ListGroup aria-label="Found" surface="plain">
+                  {state.search.hits.map((hit) => {
+                    const Icon = icons[hit.kind];
+                    return <ListRow key={hit.id} className={rowClass} title={hit.name} aria-label={hit.name} leading={<span className={iconBox}><Icon className="size-5" /></span>} detail={sized(hit.bytes)} onClick={owner({ type: "view", file: hit }) ? () => tell({ type: "view", file: hit }) : undefined} />;
+                  })}
                 </ListGroup>
               )}
             </div>
+          ) : atTop ? (
+            <>
+              {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
+              {state.storage.status === "Failed" && <Alert variant="destructive">Your storage cannot be read now</Alert>}
+              {state.storage.status === "Loaded" && (
+                <>
+                  <ListGroup aria-label="Categories" surface="plain">
+                    {primary && owner({ type: "openVolume", target: primary.id }) && <ListRow className={rowClass} title="All files" leading={<span className={iconBox}><Folder className="size-5" /></span>} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
+                    {categories.map(([kind, name]) => {
+                      const counted = state.tally.counts.find((count) => count.kind === kind);
+                      const total = counted && `${counted.items} · ${sized(counted.bytes)}`;
+                      const Icon = icons[kind];
+                      return <ListRow key={kind} className={rowClass} title={name} aria-label={name} aria-description={total} leading={<span className={iconBox}><Icon className="size-5" /></span>} trailing={counted?.items} onClick={owner({ type: "openCategory", kind }) ? () => tell({ type: "openCategory", kind }) : undefined} />;
+                    })}
+                  </ListGroup>
+                  <ListGroup heading="Storage" surface="plain" className="mt-3">
+                    {state.volumes.map((volume) => {
+                      const name = label(volume.id);
+                      return (
+                        <ListRow
+                          key={volume.id}
+                          className={rowClass}
+                          title={name}
+                          aria-label={name}
+                          leading={<span className={iconBox}><HardDrive className="size-5" /></span>}
+                          detail={volume.total > 0 && <><span className="block">{sized(Math.max(0, volume.total - volume.used))} free of {sized(volume.total)}</span><Progress className="mt-2 h-1.5" aria-label={`${name} used`} value={filled(volume.used, volume.total)} /></>}
+                          onClick={owner({ type: "openVolume", target: volume.id }) ? () => tell({ type: "openVolume", target: volume.id }) : undefined}
+                        />
+                      );
+                    })}
+                    {owner({ type: "openTrash" }) && <ListRow className={rowClass} title="Trash" aria-label="Trash" leading={<span className={iconBox}><Trash2 className="size-5" /></span>} trailing={state.tally.trashed || undefined} onClick={() => tell({ type: "openTrash" })} />}
+                  </ListGroup>
+                </>
+              )}
+              <RecentFiles runtime={runtime} />
+            </>
+          ) : (
+            <>
+              {shown === "Reading" && state.items.length === 0 && <Spinner label="Reading the folder" />}
+              {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}
+              {empty(state) && <EmptyState icon={<Folder />} title="Nothing here" />}
+              {shown === "Showing" && state.partial && <Alert variant="info">Only part of this place could be read</Alert>}
+              {sorted.length > 0 && <div role="group" aria-label="Listed" className={grid ? "grid grid-cols-3 gap-2" : undefined}>{sorted.map(row)}</div>}
+            </>
           )}
-          {shown === "Reading" && state.items.length === 0 && <Spinner label="Reading the folder" />}
-          {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}
-          {empty(state) && <EmptyState title="Nothing here" />}
-          {shown === "Showing" && state.partial && <Alert variant="info">Only part of this place could be read</Alert>}
-          {sorted.length > 0 && <ListGroup aria-label="Listed" className={state.layout === "Grid" ? "grid grid-cols-2" : undefined}>{sorted.map(row)}</ListGroup>}
-          {state.picked.length > 0 && (
-            <div role="toolbar" aria-label="Selection" className="flex flex-wrap gap-2">
-              {owner({ type: "selectAll" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
-              {owner({ type: "askToDelete" }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "askToDelete" })}>Delete</Button>}
-              {owner({ type: "openMoveTo" }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "openMoveTo" })}>Move or copy</Button>}
-              {owner({ type: "openShare", mail: false }) && <Button variant="outline" size="sm" onClick={() => tell({ type: "openShare", mail: false })}>Share</Button>}
-              {owner({ type: "begin", work: "Rename", name: unnamed }) && <Button variant="outline" size="sm" onClick={() => setNaming({ work: "Rename", name: picked[0]?.name ?? "" })}>Rename</Button>}
-              {owner({ type: "cancelSelection" }) && <Button variant="ghost" size="sm" onClick={() => tell({ type: "cancelSelection" })}>Cancel</Button>}
-            </div>
-          )}
-        </>
-      )}
+        </div>
+        {selecting && (
+          <div role="toolbar" aria-label="Selection" className="mx-3 mb-2 flex shrink-0 items-stretch justify-around gap-1 rounded-xl border border-border bg-background p-1.5 shadow-md">
+            {owner({ type: "openShare", mail: false }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => tell({ type: "openShare", mail: false })}><Share2 />Share</Button>}
+            {owner({ type: "openMoveTo" }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => tell({ type: "openMoveTo" })}><FolderInput />Move or copy</Button>}
+            {owner({ type: "begin", work: "Rename", name: unnamed }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => setNaming({ work: "Rename", name: firstPicked?.name ?? "" })}><Pencil />Rename</Button>}
+            {owner({ type: "askToDelete" }) && <Button variant="ghost" className="h-13 flex-col gap-0.5 px-2 text-xs" onClick={() => tell({ type: "askToDelete" })}><Trash2 />Delete</Button>}
+          </div>
+        )}
+      </div>
       <Dialog open={state.deleting.showing} onOpenChange={(open) => { if (!open && owner({ type: "keepFiles" })) tell({ type: "keepFiles" }); }}>
         <DialogContent>
           <DialogTitle>{`Move ${picked.length === 1 ? `“${picked[0]?.name}”` : `${picked.length} items`} to the Trash?`}</DialogTitle>
@@ -175,6 +289,19 @@ export function Files({ runtime }: FilesProps) {
             {owner({ type: "keepFiles" }) && <Button variant="secondary" onClick={() => tell({ type: "keepFiles" })}>Keep</Button>}
             {owner({ type: "confirmDelete" }) && <Button variant="destructive" onClick={() => tell({ type: "confirmDelete" })}>Delete</Button>}
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={details !== undefined} onOpenChange={(open) => { if (!open && owner({ type: "closeDetails" })) tell({ type: "closeDetails" }); }}>
+        <DialogContent closeLabel="Close">
+          <DialogTitle>{details?.name}</DialogTitle>
+          {details && (
+            <dl aria-label="Details" className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+              <dt>Kind</dt><dd>{kindNames[details.kind]}</dd>
+              {details.kind !== "Folder" && <><dt>Size</dt><dd>{sized(details.bytes)}</dd></>}
+              <dt>Changed</dt><dd><time dateTime={new Date(details.revision).toISOString()}>{new Date(details.revision).toLocaleString()}</time></dd>
+              <dt>Where</dt><dd>{state.trail.map(label).join(" › ")}</dd>
+            </dl>
+          )}
         </DialogContent>
       </Dialog>
       <Dialog open={naming !== undefined} onOpenChange={(open) => { if (!open) setNaming(undefined); }}>
@@ -196,6 +323,7 @@ export function Files({ runtime }: FilesProps) {
           <DialogTitle>Some names are already there</DialogTitle>
           <div className="flex flex-col gap-2">
             {owner({ type: "keepBoth" }) && <Button onClick={() => tell({ type: "keepBoth" })}>Keep both</Button>}
+            {owner({ type: "replaceThem" }) && <Button variant="destructive" onClick={() => tell({ type: "replaceThem" })}>Replace</Button>}
             {owner({ type: "goBack" }) && <Button variant="secondary" onClick={() => tell({ type: "goBack" })}>Back</Button>}
           </div>
         </DialogContent>
@@ -225,6 +353,7 @@ export function Files({ runtime }: FilesProps) {
           </ListGroup>
         </SheetContent>
       </Sheet>
+      <Preview runtime={runtime} />
       <Sheet open={change.panel !== 0} onOpenChange={(open) => { if (!open && owner({ type: "closeShare" })) tell({ type: "closeShare" }); }}>
         <SheetContent title="Share">
           <ListGroup surface="plain">

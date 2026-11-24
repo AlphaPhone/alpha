@@ -1,262 +1,376 @@
-// spec/app/maps/index.md, "Story: Find a place"; spec/app/maps/index.md, "Story: Plan directions and choose a route"; spec/app/maps/guidance.md, "Story: Guide me along the route I started"; spec/app/maps/saved.md, "Story: Keep the places I care about on this phone"
-import { Alert, Banner, Button, Input, ListGroup, ListRow, SearchField, Spinner } from "@repo/ui";
-import type { ManagedRuntime } from "effect";
-import { Crosshair, Info, MapPin, Navigation, Star } from "lucide-react";
-import type { Machine as ScreenMachine, Place } from "../../gen/app__maps.effect.vibe";
-import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
-import { noPlace } from "../../gen/app__maps.ts";
-import type { Machine as ConnectionMachine } from "../../gen/app__maps__connection.effect.vibe";
-import { useMachine as useConnection } from "../../gen/app__maps__connection.react.ts";
-import type { Machine as GuidanceMachine } from "../../gen/app__maps__guidance.effect.vibe";
-import { useMachine as useGuidance } from "../../gen/app__maps__guidance.react.ts";
-import type { Machine as PlaneMachine } from "../../gen/app__maps__plane.effect.vibe";
-import { useMachine as usePlane } from "../../gen/app__maps__plane.react.ts";
-import type { Machine as SavedMachine } from "../../gen/app__maps__saved.effect.vibe";
-import { useMachine as useSaved } from "../../gen/app__maps__saved.react.ts";
-import type { Travel } from "../../gen/app__maps__vocabulary.ts";
-import { offers } from "../../gen/app__maps__vocabulary.ts";
-import { useTimed } from "../runtime/react.ts";
+// spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
+import { Alert, Banner, Button, Input, ListGroup, ListRow, type MapCamera, type MapStyle, MapView, Spinner } from "@repo/ui";
+import { ArrowUpDown, Copy, Crosshair, Info, LocateFixed, MapPin, Navigation, Phone, Search, Share2, Star, X } from "lucide-react";
+import { useState, useSyncExternalStore } from "react";
+import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
-import type { Time } from "../runtime/time.vibe";
-import { pointIn } from "./geometry.ts";
+import { AppBack } from "../shell/AppBack.tsx";
+import { useMachine as useScreen } from "../../gen/app__maps.react.ts";
+import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } from "../../gen/app__maps.ts";
+import type { CopyNotice, GuideNotice, Maps as State, SavedNotice } from "../../gen/app__maps.ts";
+import type { Machine as ScreenMachine } from "../../gen/app__maps.effect.vibe";
+import { useMachine as useCredits } from "../../gen/app__maps__credits.react.ts";
+import { breaksThePlane, cameraAim, compassShown, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
+import type { Machine as CreditsMachine } from "../../gen/app__maps__credits.effect.vibe";
+import { badgeOnly, holding } from "../../gen/app__maps__connection.ts";
+import { offers } from "../../gen/app__maps__navigation.ts";
+import type { Travel } from "../../gen/app__maps__navigation.ts";
+import { hasRoom } from "../../gen/app__maps__places.ts";
+import { type Seen, type Spot, atlas } from "./atlas.vibe";
+import { degreesOf, pointIn } from "./geometry.ts";
+import googleMaps from "./google-maps-attribution.svg";
+import { coverageOf, settled, tile } from "./maps.vibe";
 
-export interface MapsProps {
-  /** Provides the machines of `maps` in maps.vibe, and Alpha's time, at which `can` is asked. */
-  runtime: ManagedRuntime.ManagedRuntime<ScreenMachine | ConnectionMachine | GuidanceMachine | PlaneMachine | SavedMachine | Time, unknown>;
-}
-
-const modes: ReadonlyArray<{ travel: Travel; label: string }> = [
+const ways: ReadonlyArray<{ travel: Travel; label: string }> = [
   { travel: "Drive", label: "Drive" }, { travel: "Transit", label: "Transit" }, { travel: "Walk", label: "Walk" }, { travel: "Bicycle", label: "Bike" },
 ];
 
-const failures = {
-  NoFailure: "",
-  SignedOut: "Sign in to Alpha Cloud to use Maps.",
-  NotOffered: "Maps is not offered for this account.",
-  Transient: "Maps could not be reached.",
-  Invalid: "Maps answered with something it could not use.",
-} as const;
+/** The open map drawn where no provider is working, and outside the provider's coverage. */
+const worldStyle = "https://tiles.openfreemap.org/styles/bright";
 
-const endings = {
-  NotEnded: "",
-  EndedByOwner: "",
-  EndedFromNotification: "Navigation stopped from the notification.",
-  EndedByLocation: "Navigation stopped: the location was lost.",
-  EndedByProvider: "Navigation stopped: the Maps account changed.",
-  PausedInBackground: "Navigation paused while Alpha was in the background. Tap Start to resume.",
-} as const;
+const notices: Record<SavedNotice, string> = {
+  NoNotice: "",
+  PlaceSaved: "Place saved on this device.",
+  PlaceRenamed: "Saved place renamed.",
+  PlaceRemoved: "Place removed from saved.",
+  NotKept: "Saved places could not be changed.",
+};
+
+const told: Record<GuideNotice, string> = {
+  Quiet: "",
+  StoppedFromNotification: "Navigation stopped from the notification.",
+  PausedAway: "Navigation paused while the app is in the background. Tap Start to resume.",
+  AccountChanged: "The Maps account changed. Navigation ended.",
+  RerouteKept: "Waiting for a precise location before rerouting. Keeping the current route.",
+};
+
+const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number copied", CopyFailed: "Couldn't copy" };
+
+/** The recent search `typed` is, in any case, or `typed` itself. */
+const recentOf = (recent: readonly string[], typed: string) => recent.find((query) => query.toLowerCase() === typed.toLowerCase()) ?? typed;
 
 const minutes = (seconds: number) => `${Math.max(1, Math.round(seconds / 60))} min`;
 const distance = (meters: number) => (meters < 1000 ? `${meters} m` : `${(meters / 1000).toFixed(1)} km`);
-const coordinates = (p: Place) => `${(p.lat / 1e6).toFixed(5)}, ${(p.lng / 1e6).toFixed(5)}`;
-const routeName = (index: number) => (index === 0 ? "Recommended" : `Alternative ${index}`);
 
-/** A pin at coordinates the owner typed. */
-function pinAt(text: string): Place | undefined {
-  const point = pointIn(text);
-  return point === undefined ? undefined : { ...noPlace, name: text.trim(), ...point };
+// spec/app/maps/credits.md, "The camera goes to what the owner picked, on every map"
+/** Where the camera goes for `state`, named so the map applies each aim once. */
+function cameraOf(state: State, seen: Seen, following: boolean): MapCamera {
+  const way = atlas.way(state.trip.route, state.chosen);
+  const spot = atlas.spot(state.place);
+  const results = state.place === 0 && state.search.status === "Loaded" ? seen.results.slice(0, state.results) : [];
+  const aim = cameraAim(following, way !== undefined, true, spot !== undefined, true, true, results.length);
+  if (aim === "FollowPhone" && seen.here !== undefined) return { kind: "follow", key: `here:${seen.here.at.lat}:${seen.here.at.lng}`, at: degreesOf(seen.here.at) };
+  if (aim === "FitRoute" && way !== undefined) return { kind: "fit", key: `route:${state.trip.route}`, points: way.line.map(degreesOf), maxZoom: routeMaxZoom };
+  if (aim === "CenterOnPlace" && spot !== undefined) return { kind: "centre", key: `place:${state.place}`, at: degreesOf(spot.at), zoom: placeZoom };
+  if (aim === "FitResults") {
+    const points = results.flatMap((place) => atlas.spot(place)?.at ?? []).map(degreesOf);
+    return { kind: "fit", key: `results:${state.search.ticket}`, points, maxZoom: resultsMaxZoom };
+  }
+  if (aim === "KeepCamera" && way === undefined && spot === undefined && seen.here !== undefined && seen.showings > 0) {
+    return { kind: "centre", key: `me:${seen.showings}`, at: degreesOf(seen.here.at), zoom: placeZoom };
+  }
+  return northUpAfterGuidance(state.trip.journey > 0, following) ? { kind: "northUp", key: `north:${state.trip.journey}` } : { kind: "keep" };
 }
 
 /**
- * Maps: the search and its results, the place open, its directions with their start, modes and routes, guidance along
- * the route the owner started, the saved places and the map's credits. Each control is offered exactly when its event is.
+ * Maps: the map with its credits, the search and its results, a place's card, its directions and guidance along them,
+ * the saved places and the agent's questions. Each control is offered exactly when its event is.
  * @model spec/app/maps/index.md
  */
-export function Maps({ runtime }: MapsProps) {
-  const screen = useTimed(runtime, useScreen);
-  const connection = useConnection(runtime);
-  const guidance = useGuidance(runtime);
-  const plane = usePlane(runtime);
-  const saved = useSaved(runtime);
+export function Maps({ runtime, alpha }: Shown<ScreenMachine | CreditsMachine | Resident>) {
+  const screen = useScreen(runtime);
+  const credits = useCredits(runtime);
+  const seen = useSyncExternalStore(atlas.subscribe, atlas.snapshot, atlas.snapshot);
+  const [typed, setTyped] = useState("");
+  const [name, setName] = useState("");
+  const [start, setStart] = useState("");
   const { state, can, send } = screen;
-  if (screen.cause ?? connection.cause ?? saved.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Maps</Alert>;
-  if (!state || !connection.state || !guidance.state || !plane.state || !saved.state) return null;
-  const owner = "Owner" as const;
-  const offer = connection.state.coverage.offer;
-  const google = connection.state.coverage.kind === "GoogleProvider";
-  const guiding = guidance.state.phase !== "NotGuiding";
-  const keeping = { label: state.place.name, lat: state.place.lat, lng: state.place.lng, provider: state.place.ref === "" ? "" : state.place.kind, ref: state.place.ref, kind: state.place.kind };
-  const kept = saved.state.items.find((item) => item.lat === state.place.lat && item.lng === state.place.lng);
-  const submit = () => {
-    const pin = pinAt(state.query);
-    if (pin) return void send({ type: "pick", choice: "PinChoice", point: pin }, owner);
-    const search = { type: "submitSearch", len: state.query.length, key: state.query.trim().toLowerCase() } as const;
-    if (can(search, owner)) void send(search, owner);
+  if (screen.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Maps</Alert>;
+  if (!state || !credits.state) return null;
+  const now = mode(state);
+  const spot: Spot | undefined = atlas.spot(state.place);
+  const way = atlas.way(state.trip.route, state.chosen);
+  const alternatives = seen.ways.get(state.trip.route) ?? [];
+  const coverage = coverageOf(state);
+  const tiles = coverage?.available ? coverage.tiles : undefined;
+  const saved = state.saved.flatMap((entry) => {
+    const found = atlas.spot(entry.place);
+    return found === undefined ? [] : [{ ...entry, spot: found }];
+  });
+  const kept = saved.find((entry) => entry.place === state.place);
+  const following = followsThePhone(state) && seen.here !== undefined;
+  const style: MapStyle = state.link.basemap === "Cloud" && tiles !== undefined
+    ? { kind: "raster", tileSize: tiles.tileSize, minZoom: tiles.minZoom, maxZoom: tiles.maxZoom, tile: (z, x, y, signal) => runtime.runPromise(tile(z, x, y, signal)) }
+    : { kind: "vector", url: worldStyle };
+  const shownPins = now === "Search" ? seen.results.slice(0, state.results) : state.place !== 0 ? [state.place] : [];
+  const pins = shownPins.flatMap((place) => {
+    const found = atlas.spot(place);
+    return found === undefined ? [] : [{ key: String(place), label: found.name, chosen: place === state.place, at: degreesOf(found.at) }];
+  });
+  const pick = (key: string) => {
+    const place = Number(key);
+    if (can({ type: "pickResult", place })) void send({ type: "pickResult", place });
   };
-  const leg = state.routes[state.chosen];
-  const start = leg && { type: "start", route: state.route.ticket * 10 + state.chosen + 1, steps: leg.steps } as const;
+  const lift = () => { if (can({ type: "liftPress" })) void send({ type: "liftPress" }); };
+  const submit = () => {
+    const at = pointIn(typed);
+    if (at !== undefined && can({ type: "pinAt", lat: at.lat, lng: at.lng })) return void send({ type: "pinAt", lat: at.lat, lng: at.lng });
+    const query = recentOf(state.recent, typed.trim());
+    if (can({ type: "search", query, chars: query.length })) void send({ type: "search", query, chars: query.length });
+  };
+  const typing = (text: string) => {
+    setTyped(text);
+    const query = recentOf(state.recent, text.trim());
+    if (can({ type: "typeQuery", query, chars: query.length, now: untimed })) void send({ type: "typeQuery", query, chars: query.length, now: untimed });
+  };
+  const startAt = pointIn(start);
+  const startFrom = () => {
+    if (startAt !== undefined && can({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng })) {
+      return void send({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng });
+    }
+    if (startAt === undefined && can({ type: "findOrigin", query: start.trim() })) void send({ type: "findOrigin", query: start.trim() });
+  };
+  const starts = state.originsFound > 0 ? seen.origins.slice(0, state.originsFound).flatMap((place) => {
+    const found = atlas.spot(place);
+    return found === undefined || place === state.place ? [] : [{ place, name: found.name, spot: found }];
+  }) : [];
+  const turn = way?.turns[state.trip.turn];
+  const after = way?.turns[state.trip.turn + 1];
+  const ahead = way?.turns.slice(state.trip.turn) ?? [];
+  const room = hasRoom(state.saved, state.place);
+  const inside = spot === undefined || !coverage?.available
+    || coverage.regions.some(({ bounds: [west, south, east, north] }) => {
+      const at = degreesOf(spot.at);
+      return at.lng >= west && at.lng <= east && at.lat >= south && at.lat <= north;
+    });
   return (
-    <section aria-label="Maps" className="flex flex-col gap-3 p-4">
-      {connection.state.phase === "ReadFailed" && (
-        <Banner variant="warn" action={connection.can({ type: "retryCoverage" }) && <Button size="sm" variant="outline" onClick={() => void connection.send({ type: "retryCoverage" })}>Retry</Button>}>
-          {failures[connection.state.failure] || failures.Transient}
-        </Banner>
-      )}
-      {connection.state.phase === "Reading" && <Spinner label="Reaching Maps" />}
-      {connection.state.pausedUntil > 0 && connection.state.phase === "Installed" && (
-        <Banner variant="info">{`Maps asked Alpha to wait. Try again after ${new Date(connection.state.pausedUntil).toLocaleTimeString()}.`}</Banner>
-      )}
-      {guiding && (
-        <Banner
-          variant={guidance.state.offRoute ? "warn" : "info"}
-          action={<Button size="sm" variant="outline" onClick={() => void guidance.send({ type: "endGuidance" })}>End</Button>}
-        >
-          {guidance.state.phase === "Arrived" ? "You have arrived."
-            : guidance.state.offRoute ? "Off route. End navigation to plan a new route."
-            : !guidance.state.fixUsable ? "Waiting for a precise, up-to-date location."
-            : `Step ${guidance.state.step + 1} of ${guidance.state.lastStep + 1}`}
-        </Banner>
-      )}
-      {guidance.can({ type: "recenter" }) && <Button variant="outline" onClick={() => void guidance.send({ type: "recenter" })}><Crosshair />Recenter</Button>}
-      {endings[guidance.state.ended] !== "" && <Alert variant="warn">{endings[guidance.state.ended]}</Alert>}
-
-      {!state.directions && (
-        <form onSubmit={(event) => { event.preventDefault(); submit(); }}>
-          <SearchField
-            aria-label="Search Maps"
-            placeholder="Search Maps"
-            value={state.query}
-            onValueChange={(text) => void send({ type: "typeQuery", text, now: untimed }, owner)}
-            disabled={!can({ type: "typeQuery", text: "", now: untimed }, owner)}
-          />
-        </form>
-      )}
-      {can({ type: "locate" }, owner) && !state.directions && (
-        <Button variant="outline" onClick={() => void send({ type: "locate" }, owner)}><Crosshair />My location</Button>
-      )}
-      {state.locate.status === "Loading" && <Spinner label="Finding your location" />}
-      {state.locate.status === "Failed" && <Alert variant="warn">Alpha could not find your location.</Alert>}
-
-      {state.searching && state.choice === "NoChoice" && (
-        <>
-          {state.search.status === "Loading" && <Spinner label="Searching" />}
-          {state.search.status === "Failed" && <Alert variant="warn">The search failed. Press Enter to try again.</Alert>}
-          {state.search.status === "Loaded" && state.results.length === 0 && <Alert variant="info">No places found.</Alert>}
-          {state.results.length > 0 && (
-            <ListGroup heading="Results">
-              {state.results.map((place) => (
-                <ListRow key={place.ref} asChild title={place.name} detail={place.category || coordinates(place)} leading={<MapPin />}>
-                  <button type="button" aria-label={place.name} onClick={() => void send({ type: "pick", choice: "ResultChoice", point: place }, owner)} />
-                </ListRow>
-              ))}
-            </ListGroup>
-          )}
-        </>
-      )}
-
-      {state.choice === "NoChoice" && state.query === "" && state.recent.length > 0 && (
-        <ListGroup heading="Recent">
-          {state.recent.map((recent) => (
-            <ListRow key={recent.key} asChild title={recent.text}>
-              <button type="button" aria-label={recent.text} onClick={() => { void send({ type: "typeQuery", text: recent.text, now: untimed }, owner).then(() => send({ type: "submitSearch", len: recent.text.length, key: recent.key }, owner)); }} />
-            </ListRow>
-          ))}
-        </ListGroup>
-      )}
-
-      {state.choice === "NoChoice" && !state.searching && saved.state.items.length > 0 && (
-        <ListGroup heading="Saved">
-          {saved.state.items.map((item) => {
-            const point = { ...noPlace, ref: item.ref, name: item.label, lat: item.lat, lng: item.lng, kind: item.provider === "OpenProvider" ? "OpenProvider" : item.provider === "" ? "NoProvider" : "GoogleProvider" } as const;
-            return (
-              <ListRow key={item.id} asChild title={item.label} leading={<Star />}>
-                <button type="button" aria-label={item.label} onClick={() => void send({ type: "pick", choice: "SavedChoice", point }, owner)} />
-              </ListRow>
-            );
-          })}
-        </ListGroup>
-      )}
-
-      {state.choice !== "NoChoice" && !state.directions && (
-        <section aria-label={state.place.name} className="flex flex-col gap-2">
-          <h2 className="text-lg font-semibold">{state.place.name}</h2>
-          {state.place.category !== "" && <p>{state.place.category}</p>}
-          {state.details.status === "Loading" && <Spinner label="Reading the place" />}
-          {state.details.status === "Failed" && <Alert variant="warn">The place's details could not be read.</Alert>}
-          <div className="flex flex-wrap gap-2">
-            {can({ type: "openDirections", offered: offers(offer, state.travel) }, owner) && (
-              <Button onClick={() => void send({ type: "openDirections", offered: offers(offer, state.travel) }, owner)}><Navigation />Directions</Button>
-            )}
-            {kept === undefined && saved.can({ type: "savePlace", place: keeping }) && (
-              <Button variant="outline" onClick={() => void saved.send({ type: "savePlace", place: keeping })}><Star />Save</Button>
-            )}
-            {kept !== undefined && (
-              <Button variant="outline" onClick={() => void saved.send({ type: "removePlace", id: kept.id })}>Remove from saved</Button>
-            )}
-            {can({ type: "closePlace" }, owner) && <Button variant="ghost" onClick={() => void send({ type: "closePlace" }, owner)}>Close</Button>}
-          </div>
-        </section>
-      )}
-
-      {state.directions && (
-        <section aria-label="Directions" className="flex flex-col gap-2">
-          <h2 className="text-lg font-semibold">{`To ${state.place.name}`}</h2>
-          <form onSubmit={(event) => { event.preventDefault(); if (can({ type: "submitOrigin" }, owner)) void send({ type: "submitOrigin" }, owner); }}>
-            <Input
-              aria-label="Starting point"
-              placeholder={state.originKind === "LocatedOrigin" ? "Your location" : "Starting point"}
-              value={state.originText}
-              onChange={(event) => void send({ type: "editOrigin", text: event.target.value, point: pinAt(event.target.value) ?? noPlace, now: untimed }, owner)}
+    <section aria-label="Maps" className="relative isolate flex flex-1 flex-col">
+      <MapView
+        className="absolute inset-0 h-full rounded-none"
+        zoomControls={false}
+        label={spot === undefined ? "Map" : `Map of ${spot.name}`}
+        surface={state.link.plane}
+        style={style}
+        pins={pins}
+        here={seen.here === undefined ? undefined : degreesOf(seen.here.at)}
+        line={way?.line.map(degreesOf)}
+        camera={cameraOf(state, seen, following)}
+        compass={(bearing, pitch) => compassShown(bearing, pitch, following)}
+        onReady={(plane) => { if (can({ type: "reportMap", plane, ok: true })) void send({ type: "reportMap", plane, ok: true }); }}
+        onTrouble={(plane, trouble) => {
+          if (breaksThePlane(trouble.styleLoaded, trouble.tileError, trouble.cancelled) && can({ type: "reportMap", plane, ok: false })) void send({ type: "reportMap", plane, ok: false });
+        }}
+        onPin={pick}
+        onPress={(at) => {
+          const event = { type: "pressMap", lat: Math.round(at.lat * 1e6), lng: Math.round(at.lng * 1e6), now: untimed } as const;
+          if (can(event)) void send(event);
+        }}
+        onPressMove={(pixels) => { if (pixels > panPixels) lift(); }}
+        onPressEnd={lift}
+        onSettled={(view) => void runtime.runPromise(settled(view))}
+        onDragged={() => { if (can({ type: "panMap" })) void send({ type: "panMap" }); }}
+      >
+        {(now === "Browse" || now === "Search") ? (
+          <form data-host-chrome="" onSubmit={(event) => { event.preventDefault(); submit(); }}
+            className="absolute inset-x-3 top-2 z-10 flex in-data-[alpha-launcher]:top-13 min-h-13.5 items-center rounded-full bg-background px-1.25 shadow-md ring-1 ring-border">
+            <AppBack alpha={alpha} />
+            <span className="flex size-11 shrink-0 items-center justify-center"><Search aria-hidden className="size-5.5" /></span>
+            <Input type="search" enterKeyHint="search" aria-label="Search Maps" placeholder="Search" maxLength={300} value={typed}
+              onFocus={() => { if (can({ type: "openSearch" })) void send({ type: "openSearch" }); }}
+              onChange={(event) => typing(event.target.value)}
+              className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-base shadow-none [&::-webkit-search-cancel-button]:appearance-none"
             />
+            {typed && <Button type="button" size="icon" variant="ghost" aria-label="Clear search" onClick={() => typing("")}><X className="size-4.5" /></Button>}
           </form>
-          {can({ type: "locate" }, owner) && <Button variant="outline" onClick={() => void send({ type: "locate" }, owner)}><Crosshair />Your location</Button>}
-          {state.choosingOrigin && state.originSearch.status === "Loading" && <Spinner label="Finding the starting point" />}
-          {state.choosingOrigin && state.candidates.length > 0 && (
-            <ListGroup heading="Start from">
-              {state.candidates.map((place) => (
-                <ListRow key={place.ref} asChild title={place.name} detail={coordinates(place)}>
-                  <button type="button" aria-label={place.name} onClick={() => void send({ type: "chooseOrigin", kind: "ChosenOrigin", point: place }, owner)} />
-                </ListRow>
-              ))}
-            </ListGroup>
-          )}
-          <div role="group" aria-label="Travel mode" className="flex flex-wrap gap-2">
-            {modes.map(({ travel, label }) => (
-              <Button
-                key={travel}
-                size="sm"
-                variant={state.travel === travel ? "primary" : "outline"}
-                aria-pressed={state.travel === travel}
-                disabled={!can({ type: "setTravel", travel, offered: offers(offer, travel) }, owner)}
-                onClick={() => void send({ type: "setTravel", travel, offered: offers(offer, travel) }, owner)}
-              >
-                {label}
-              </Button>
-            ))}
+        ) : (
+          <div data-host-chrome="" className="absolute top-2 left-3 z-10 in-data-[alpha-launcher]:top-13 rounded-full bg-background shadow-md">
+            <AppBack alpha={alpha} />
           </div>
-          {state.route.status === "Loading" && <Spinner label="Planning the route" />}
-          {state.route.status === "Failed" && <Alert variant="warn">No route was found.</Alert>}
-          {state.routes.length > 0 && (
-            <ListGroup heading="Routes">
-              {state.routes.map((route, index) => (
-                <ListRow key={routeName(index)} asChild selected={index === state.chosen} title={`${routeName(index)}, ${minutes(route.seconds)}`} detail={distance(route.meters)}>
-                  <button type="button" aria-label={routeName(index)} aria-pressed={index === state.chosen} onClick={() => { if (can({ type: "chooseRoute", index }, owner)) void send({ type: "chooseRoute", index }, owner); }} />
-                </ListRow>
-              ))}
-            </ListGroup>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {start && guidance.can(start) && <Button onClick={() => void guidance.send(start)}><Navigation />Start</Button>}
-            {can({ type: "swapEnds" }, owner) && !guiding && <Button variant="outline" onClick={() => void send({ type: "swapEnds" }, owner)}>Swap ends</Button>}
-          </div>
-        </section>
-      )}
+        )}
+        <div className="absolute right-4 bottom-4 flex flex-col gap-1">
+          {can({ type: "recenter" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "recenter" })}><LocateFixed />Recenter</Button>}
+          {can({ type: "useMyLocation" }) && <Button size="icon" variant="outline" aria-label="My location" onClick={() => void send({ type: "useMyLocation" })}><Crosshair /></Button>}
+        </div>
+        <div className="absolute bottom-4 left-4">
+          {credits.can({ type: "openInfo" }) && (badgeOnly(state.link)
+            ? <button type="button" aria-label="Google Maps" onClick={() => void credits.send({ type: "openInfo" })}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
+            : <Button size="icon" variant="outline" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></Button>)}
+        </div>
+      </MapView>
+      <div className="pointer-events-none absolute inset-x-3 top-17 bottom-16 in-data-[alpha-launcher]:top-29 z-10 flex flex-col gap-2 overflow-auto *:pointer-events-auto">
+        {state.link.coverage.status === "Failed" && !holding(state.link) && (
+          <Banner variant="warn" action={can({ type: "connect" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "connect" })}>Retry</Button>}>
+            Maps could not be reached.
+          </Banner>
+        )}
+        {holding(state.link) && <Alert variant="warn">{`Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`}</Alert>}
+        {state.link.known && state.link.account === 0 && <Alert variant="info">Sign in to Alpha Cloud to use Maps.</Alert>}
 
-      {plane.state.built && (
-        <footer className="flex items-center gap-2">
-          {google
-            ? plane.can({ type: "openInfo" }) && <Button size="sm" variant="ghost" onClick={() => void plane.send({ type: "openInfo" })}>Google Maps</Button>
-            : plane.can({ type: "openInfo" }) && <Button size="icon" variant="ghost" aria-label="Map credits" onClick={() => void plane.send({ type: "openInfo" })}><Info /></Button>}
-          {plane.can({ type: "retryMap" }) && <Button size="sm" variant="outline" onClick={() => void plane.send({ type: "retryMap" })}>Retry the map</Button>}
-        </footer>
-      )}
-      {plane.state.infoOpen && (
-        <Alert variant="info" role="dialog" aria-label="Map credits">
-          <p>{plane.state.copyrightShown ? plane.state.copyright : connection.state.coverage.kind === "GoogleProvider" ? "Map data from Google" : "Map data from the Maps provider"}</p>
-          <p>Searches and route points are sent to the Maps provider through Alpha Cloud.</p>
-          <Button size="sm" variant="ghost" onClick={() => void plane.send({ type: "closeInfo" })}>Close</Button>
-        </Alert>
-      )}
+        {now === "Navigating" && (
+          <Banner variant={state.trip.rerouting ? "warn" : "info"} action={can({ type: "endGuidance" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "endGuidance" })}>End</Button>}>
+            {state.trip.guidance === "Arrived" ? `Arrived at ${kept?.name ?? spot?.name ?? "your destination"}.` : seen.here === undefined ? "Waiting for your location." : seen.here.approximate ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn === undefined ? "" : `${turn.instruction}${after === undefined ? "" : `, then ${after.instruction}`}`}
+          </Banner>
+        )}
+        {can({ type: "retryMap" }) && (
+          <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "retryMap" })}>Retry</Button>}>The map could not be drawn.</Banner>
+        )}
+        {credits.state.infoOpen && (
+          <Alert variant="info" role="dialog" aria-label="Map credits">
+            <p>{credits.state.copyrightShown ? credits.state.copyright : coverage?.available ? coverage.attribution : "Map data © OpenStreetMap contributors, OpenFreeMap"}</p>
+            {coverage?.available && (
+              <p>{`Searches and route points go to ${coverage.disclosure.recipients.map((r) => `${r.name} (${r.operator})`).join(", ")} through Alpha Cloud, which keeps only the kind of each request and its result.`}</p>
+            )}
+            <Button size="sm" variant="ghost" onClick={() => void credits.send({ type: "closeInfo" })}>Close</Button>
+          </Alert>
+        )}
+
+        {can({ type: "continueDisclosure" }) && !can({ type: "useMyLocation" }) && (now === "Browse" || now === "Directions") && (
+          <Alert variant="info" role="dialog" aria-label="Location">
+            <p>Maps uses your location to show where you are and to plan routes from it. Searches and route points go to the Maps provider; your agent is never told where you are.</p>
+            <Button size="sm" onClick={() => void send({ type: "continueDisclosure" })}>Continue</Button>
+          </Alert>
+        )}
+
+        {now === "Search" && (
+          <>
+            {state.search.status === "Loading" && <Spinner label="Searching" />}
+            {state.search.status === "Failed" && !holding(state.link) && <Alert variant="warn">The search failed.</Alert>}
+            {state.search.status === "Loaded" && state.results === 0 && <Alert variant="info">No places found.</Alert>}
+            {state.results > 0 && (
+              <ListGroup heading="Results" className="bg-background shadow-md">
+                {seen.results.slice(0, state.results).map((place) => {
+                  const found = atlas.spot(place);
+                  return found && (
+                    <ListRow key={place} asChild title={found.name} detail={found.category || found.address} leading={<MapPin />}>
+                      <button type="button" aria-label={found.name} disabled={!can({ type: "pickResult", place })} onClick={() => void send({ type: "pickResult", place })} />
+                    </ListRow>
+                  );
+                })}
+              </ListGroup>
+            )}
+            {state.query === "" && state.recent.length > 0 && (
+              <ListGroup heading="Recent" className="bg-background shadow-md">
+                {state.recent.map((query) => (
+                  <ListRow key={query} asChild title={query}>
+                    <button type="button" aria-label={query} disabled={!can({ type: "search", query, chars: query.length })} onClick={() => { if (!can({ type: "search", query, chars: query.length })) return; setTyped(query); void send({ type: "search", query, chars: query.length }); }} />
+                  </ListRow>
+                ))}
+                {can({ type: "clearRecent" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "clearRecent" })}>Clear</Button>}
+              </ListGroup>
+            )}
+          </>
+        )}
+
+        {!state.keepable && <Alert variant="warn">Saved places could not be read. Existing data has not been replaced.</Alert>}
+        {state.notice !== "NoNotice" && <p role="status" className="text-sm text-muted-foreground">{notices[state.notice]}</p>}
+        {state.copyNotice !== "Uncopied" && <p role="status" className="text-sm text-muted-foreground">{copies[state.copyNotice]}</p>}
+        {state.guideNotice !== "Quiet" && <Alert variant="info">{told[state.guideNotice]}</Alert>}
+
+        {(now === "Browse" || now === "Search") && saved.length > 0 && (
+          <ListGroup heading="Saved" className="bg-background shadow-md">
+            {saved.map((entry) => (
+              <ListRow key={entry.place} asChild title={entry.name} leading={<Star />}>
+                <button type="button" aria-label={entry.name} disabled={!can({ type: "pickSaved", place: entry.place })} onClick={() => void send({ type: "pickSaved", place: entry.place })} />
+              </ListRow>
+            ))}
+          </ListGroup>
+        )}
+
+        {now === "Place" && spot !== undefined && (
+          <section aria-label={kept?.name ?? spot.name} className="mt-auto flex flex-col gap-2 rounded-sheet bg-background p-4 shadow-md">
+            <h2 className="text-lg font-semibold">{kept?.name ?? spot.name}</h2>
+            <p className="text-muted-foreground">{spot.category || "Place"}</p>
+            {spot.address !== undefined && <p>{spot.address}</p>}
+            {spot.hours !== undefined && <p>{spot.hours}</p>}
+            {coverage?.available && saysOutsideCoverage(state, inside) && <p className="text-sm text-muted-foreground">{`This location is outside ${coverage.sources.data} coverage.`}</p>}
+            <div className="flex flex-wrap gap-2">
+              {can({ type: "openDirections" }) && <Button onClick={() => void send({ type: "openDirections" })}><Navigation />Directions</Button>}
+              {can({ type: "handOn", kind: "SharePlace" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 />Share</Button>}
+              {spot.website !== undefined && can({ type: "handOn", kind: "Website" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "Website" })}>Website</Button>}
+              {can({ type: "handOn", kind: "MapsApp" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}>Open in another app</Button>}
+              {spot.phone !== undefined && can({ type: "handOn", kind: "Call" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "Call" })}><Phone />Call</Button>}
+              {spot.phone !== undefined && can({ type: "handOn", kind: "CopyNumber" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "CopyNumber" })}><Copy />Copy number</Button>}
+              {can({ type: "forgetPlace" }) && <Button variant="outline" onClick={() => void send({ type: "forgetPlace" })}>Remove from saved</Button>}
+              {can({ type: "returnToEvent" }) && <Button variant="ghost" onClick={() => void send({ type: "returnToEvent" })}>Back to event</Button>}
+            </div>
+            {can({ type: "namePlace", name: name.trim() || spot.name }) && (
+              <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void send({ type: "namePlace", name: name.trim() || spot.name }); setName(""); }}>
+                <Input aria-label="Name" placeholder={kept?.name ?? spot.name} maxLength={300} value={name} onChange={(event) => setName(event.target.value)} />
+                <Button type="submit" variant="outline"><Star />{kept === undefined ? "Save" : "Rename"}</Button>
+              </form>
+            )}
+            {!room && !googleShown(state) && <p className="text-sm text-muted-foreground">Saved places are full. Remove one before adding another.</p>}
+          </section>
+        )}
+
+        {(now === "Directions" || now === "Navigating") && spot !== undefined && (
+          <section aria-label="Directions" className="flex flex-col gap-2 rounded-sheet bg-background p-4 shadow-md">
+            <h2 className="text-lg font-semibold">{`To ${kept?.name ?? spot.name}`}</h2>
+            {now === "Directions" && (
+              <>
+                <div role="group" aria-label="Travel mode" className="flex flex-wrap gap-2">
+                  {ways.filter(({ travel }) => offers(state.link.offer, travel)).map(({ travel, label }) => (
+                    <Button key={travel} size="sm" variant={state.trip.travel === travel ? "primary" : "outline"} aria-pressed={state.trip.travel === travel}
+                      disabled={!can({ type: "chooseTravel", travel })} onClick={() => void send({ type: "chooseTravel", travel })}>
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+                {can({ type: "useMyLocation" }) && <Button variant="outline" onClick={() => void send({ type: "useMyLocation" })}><Crosshair />From my location</Button>}
+                {can({ type: "findOrigin", query: "start" }) && (
+                  <form onSubmit={(event) => { event.preventDefault(); startFrom(); }}>
+                    <Input aria-label="Starting point" maxLength={300}
+                      placeholder={can({ type: "planFrom", origin: "Coordinates", lat: 0, lng: 0 }) ? "Place, or latitude, longitude" : "Place"}
+                      value={start} onChange={(event) => setStart(event.target.value)} />
+                  </form>
+                )}
+                {state.origins.status === "Loading" && <Spinner label="Finding the starting point" />}
+                {state.origins.status === "Loaded" && state.originsFound === 0 && <p className="text-sm text-muted-foreground">No starting point found.</p>}
+                {[...starts, ...saved.filter((entry) => entry.place !== state.place && !starts.some((found) => found.place === entry.place))].map((entry) => (
+                  can({ type: "startFrom", place: entry.place, lat: entry.spot.at.lat, lng: entry.spot.at.lng }) && (
+                    <Button key={entry.place} size="sm" variant="ghost" onClick={() => void send({ type: "startFrom", place: entry.place, lat: entry.spot.at.lat, lng: entry.spot.at.lng })}>{`From ${entry.name}`}</Button>
+                  )
+                ))}
+                {spot !== undefined && can({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng }) && (
+                  <Button size="sm" variant="outline" onClick={() => void send({ type: "swapEnds", lat: spot.at.lat, lng: spot.at.lng })}><ArrowUpDown />Swap ends</Button>
+                )}
+              </>
+            )}
+            {state.trip.plan.status === "Loading" && <Spinner label="Planning the route" />}
+            {state.trip.plan.status === "Failed" && !holding(state.link) && <Alert variant="warn">No route was found.</Alert>}
+            {now === "Directions" && alternatives.length > 1 ? (
+              <div role="group" aria-label="Routes" className="flex flex-col gap-1">
+                {alternatives.map((option, index) => (
+                  <Button key={index} variant={index === state.chosen ? "primary" : "outline"} aria-pressed={index === state.chosen}
+                    disabled={!can({ type: "chooseRoute", index, turns: Math.max(1, option.turns.length) })}
+                    onClick={() => void send({ type: "chooseRoute", index, turns: Math.max(1, option.turns.length) })}>
+                    {`${index === 0 ? "Recommended" : `Alternative ${index}`}: ${minutes(option.seconds)}, ${distance(option.meters)}`}
+                  </Button>
+                ))}
+              </div>
+            ) : way !== undefined && <p>{`${minutes(way.seconds)}, ${distance(way.meters)}`}</p>}
+            {now === "Navigating" && ahead.length > 0 && (
+              <ListGroup heading="Next">
+                {ahead.slice(0, 3).map((step, at) => <ListRow key={`${state.trip.turn + at}`} title={step.instruction} detail={distance(step.meters)} />)}
+              </ListGroup>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {can({ type: "startGuidance" }) && <Button onClick={() => void send({ type: "startGuidance" })}><Navigation />Start</Button>}
+              {can({ type: "handOn", kind: "EtaShare" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "EtaShare" })}><Share2 />Share arrival</Button>}
+            </div>
+          </section>
+        )}
+
+        {state.question !== "NoQuestion" && state.review.showing && (
+          <Alert variant="info" role="dialog" aria-label={state.question === "ReadPlace" ? "Share this place with your agent" : "Start this route"}>
+            <p>{state.question === "ReadPlace" ? `Your agent asks to read ${spot?.name ?? "this place"}.` : `Your agent proposes this route to ${spot?.name ?? "this place"}.`}</p>
+            <div className="flex gap-2">
+              {can({ type: "approve" }) && <Button size="sm" onClick={() => void send({ type: "approve" })}>{state.question === "ReadPlace" ? "Share" : "Start"}</Button>}
+              {can({ type: "decline" }) && <Button size="sm" variant="ghost" onClick={() => void send({ type: "decline" })}>Not now</Button>}
+            </div>
+          </Alert>
+        )}
+      </div>
     </section>
   );
 }

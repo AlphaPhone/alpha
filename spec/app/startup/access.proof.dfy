@@ -167,6 +167,64 @@ lemma failed_ensures(s: Access, key: app__startup__steps_Key, ticket: int)
 }
 
 
+lemma carriedOver_ensures(s: Access, upTo: int)
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysThePlaceIsWithinTheCount(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysAStepStillReadStalls(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysNothingShowsBeforeAlphaKnowsWhereItRuns(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysWhatIsSavedWasChosen(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysAPromptWaitsOnItsSave(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysNothingWaitsForAnOwnerNotSetUp(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysAReviewIsOfAnOfferedAccess(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysAllSetOnlyAfterTheLastStep(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> alwaysALateAllSetSaysWhy(carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepComingBackReadsEveryAccessAgain(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepTheWalkthroughNeverGoesBack(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepOnlyTheOwnerOrAPregrantMovesTheWalkthrough(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepARestartKeepsProgress(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepAnAnswerChangesOnlyItsAccess(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepAPromptOnlyAfterItsAskingIsSaved(s, "carriedOver", carriedOver(s, upTo).state, carriedOver(s, upTo).out))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepEachRequestAwaitsItsOwnAnswer(s, carriedOver(s, upTo).state, carriedOver(s, upTo).out))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepEveryStepPassedIsSaved(s, carriedOver(s, upTo).state, carriedOver(s, upTo).out))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepANoticeHasACause(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepAReviewLeavesTheWalkthroughAlone(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepAllSetOnlyForANewAccountOrALateError(s, "carriedOver", carriedOver(s, upTo).state))
+  ensures (inv(s) ==> canCarriedOver(s, upTo) ==> stepHomeOnlyAtTheEnd(s, "carriedOver", carriedOver(s, upTo).state, carriedOver(s, upTo).out))
+{
+  if inv(s) && canCarriedOver(s, upTo) {
+    var after := carriedOver(s, upTo);
+    assert after.out[0] in after.out && saves(after.out[0]);
+  }
+}
+
+lemma pass_ensures(s: Access, now: int)
+  ensures (inv(s) ==> canPass(s) ==> alwaysThePlaceIsWithinTheCount(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysAStepStillReadStalls(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysNothingShowsBeforeAlphaKnowsWhereItRuns(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysWhatIsSavedWasChosen(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysAPromptWaitsOnItsSave(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysNothingWaitsForAnOwnerNotSetUp(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysAReviewIsOfAnOfferedAccess(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysAllSetOnlyAfterTheLastStep(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> alwaysALateAllSetSaysWhy(pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepComingBackReadsEveryAccessAgain(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepTheWalkthroughNeverGoesBack(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepOnlyTheOwnerOrAPregrantMovesTheWalkthrough(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepARestartKeepsProgress(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepAnAnswerChangesOnlyItsAccess(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepAPromptOnlyAfterItsAskingIsSaved(s, "pass", pass(s, now).state, pass(s, now).out))
+  ensures (inv(s) ==> canPass(s) ==> stepEachRequestAwaitsItsOwnAnswer(s, pass(s, now).state, pass(s, now).out))
+  ensures (inv(s) ==> canPass(s) ==> stepEveryStepPassedIsSaved(s, pass(s, now).state, pass(s, now).out))
+  ensures (inv(s) ==> canPass(s) ==> stepANoticeHasACause(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepAReviewLeavesTheWalkthroughAlone(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepAllSetOnlyForANewAccountOrALateError(s, "pass", pass(s, now).state))
+  ensures (inv(s) ==> canPass(s) ==> stepHomeOnlyAtTheEnd(s, "pass", pass(s, now).state, pass(s, now).out))
+{
+  if inv(s) && canPass(s) {
+    AdvancedSaves(Choice.Continued, false, s, now);
+    assert pass(s, now).out == advanced(Choice.Continued, false, s, now).out;
+  }
+}
+
 lemma PositionInjective(a: app__startup__steps_Key, b: app__startup__steps_Key)
   ensures app__startup__steps_position(a) == app__startup__steps_position(b) ==> a == b
 {

@@ -1,11 +1,11 @@
-// spec/kit/read.md, "Story: Read from outside"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
+// spec/kit/read.md, "Story: Read from outside"; spec/app/account/index.md, "Story: Have the agent running"; spec/app/platform/index.md, "Story: Talk to the resident agent"; spec/app/platform/index.md, "A request or stream Alpha stops waiting for is withdrawn from the phone, and may still have reached the agent"; spec/app/platform/feed.md, "Story: Follow what my agent does on my screen"
 import { type RuntimeJsonBridge, type RuntimeRequestHeaders, type RuntimeStatus, type RuntimeStreamFrame, RuntimeRequestError, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { BridgeUnavailable } from "@elizaos/os/bridges/bridge"
-import type { AgentEvent, AgentMethod, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
-import { chunkTaken, deliveryOf } from "../../gen/app__platform.effect.vibe"
+import type { AgentEvent, AgentMethod, AgentRecoveryArchive, AgentRecoveryReview, AgentRoute, AgentStatus, AgentStreamData, AgentStreamEnd, AgentTopic, ElizaAgentPlugin } from "@elizaos/os/bridges/definitions/agent"
+import { chunkTaken, deliveryOf, replied } from "../../gen/app__platform.effect.vibe"
 import { Machine as Feed, type FrameKind, machine as feedMachine } from "../../gen/app__platform__feed.effect.vibe"
 import { fresh } from "../runtime/attempts.vibe"
-import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, remoteAt, sse } from "./remote.vibe"
+import { type Failure, type Listening, type Opened, type Remote, type Wired, Refused, Unreachable, Unsent, parsed, patience, refusal, remoteAt, sse } from "./remote.vibe"
 
 module held {
   import { agentClient } from "@elizaos/os/bridges/agent"
@@ -38,6 +38,24 @@ export interface Reached extends Remote {
    * Nothing is replayed; a page that is no phone hears no feed.
    */
   feed(topic: AgentTopic, clientId?: string): Stream.Stream<unknown, Unsent>
+  /** The agent as the phone's host runs it, which the account area starts, stops and brings back after a failure. */
+  readonly life: Life
+}
+
+/**
+ * The agent the phone runs, as eliza's agent service reports and controls it: its status and each change of it,
+ * starting and stopping it, and the records a start that failed kept for the owner's review, archived on the token
+ * that review gave. A page that is no phone reaches an agent it cannot start or stop: it reads that agent's health,
+ * and refuses the rest unsent.
+ */
+export interface Life {
+  status(): AgentStatus!(Unsent | Unreachable)
+  /** Each status the host reports from now on, until the reader stops. */
+  readonly changes: Stream.Stream<AgentStatus, Unsent>
+  start(): AgentStatus!(Unsent | Unreachable)
+  stop(): AgentStatus!(Unsent | Unreachable)
+  review(): AgentRecoveryReview!(Unsent | Unreachable)
+  archive(reviewToken: string): AgentRecoveryArchive!(Unsent | Unreachable)
 }
 
 export service Agent: Reached {}
@@ -146,17 +164,18 @@ function httpBridge(direct: Wired): RuntimeJsonBridge {
  * refusal from a failure. Every request that client cannot carry (a method other than GET and POST, a header, a
  * stream that is not a POST) goes to `direct`.
  */
-function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"]): Reached {
+function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"], life: Life): Reached {
   const runtime = createRuntimeJsonClient({ bridge: () => bridge, ...waits })
   return {
     runtime,
     feed,
+    life,
     effect call(request: HttpClientRequest.HttpClientRequest): unknown!Failure {
       const sent = try plain(request)
       if (Option.isNone(sent)) return try direct.call(request)
       return try tryPromise({
         try: () => runtime.request(sent.value.path, sent.value.body, sent.value.headers),
-        catch: (cause): Failure => cause instanceof RuntimeRequestError ? new Refused({ status: cause.status })
+        catch: (cause): Failure => cause instanceof RuntimeRequestError ? refusal(cause.status, cause.retryAfter)
           : cause instanceof Error && refusedByTheClient.includes(cause.message) ? new Unsent({ cause })
           : new Unreachable({ cause }),
       })
@@ -168,11 +187,30 @@ function over(bridge: RuntimeJsonBridge, direct: Remote, feed: Reached["feed"]):
 /** A page that is no phone: the agent's feeds reach only the phone's own page. */
 const unfed = (topic: AgentTopic) => Stream.fail(new Unsent({ cause: `no ${topic} feed reaches a page that is no phone` }))
 
+/** The agent a page that is no phone reaches: running once its health route says it is ready, and started or stopped by nothing on this side. */
+function reachedOnly(direct: Wired): Life {
+  const refused = (what: string) => Effect.fail(new Unsent({ cause: `a page that is no phone cannot ${what} the agent` }))
+  effect function status(): AgentStatus!(Unsent | Unreachable) {
+    const ready = effect {
+      return (try Schema.decodeUnknownEffect(Health)(try direct.call(HttpClientRequest.get("/api/health")))).ready
+    } catch () => false
+    return { available: true, state: ready ? "running" : "starting", epoch: 0, requestBodyLimit: 0 }
+  }
+  return {
+    status,
+    changes: Stream.empty,
+    start: () => refused("start"),
+    stop: () => refused("stop"),
+    review: () => succeed<AgentRecoveryReview>({ kind: "unavailable" }),
+    archive: () => succeed<AgentRecoveryArchive>({ kind: "unavailable" }),
+  }
+}
+
 /** The agent over HTTP at `base`: in a browser the page's own `/agent`, which the dev server answers, adding the token the page never holds. */
 export function agentAt(base: string) {
   return Layer.effect(Agent, effect {
     const direct = try remoteAt(base)
-    return over(httpBridge(direct), direct, unfed)
+    return over(httpBridge(direct), direct, unfed, reachedOnly(direct))
   })
 }
 
@@ -267,7 +305,7 @@ function plugged(plugin: ElizaAgentPlugin): Remote {
         when Unsent: throw cause;
         default: throw new Unreachable({ cause });
       }
-      if (answered.status < 200 || answered.status >= 300) throw new Refused({ status: answered.status })
+      if (!replied(answered.status)) throw refusal(answered.status, undefined)
       return answered.data
     },
     events(request: HttpClientRequest.HttpClientRequest, listening?: Listening) {
@@ -276,7 +314,7 @@ function plugged(plugin: ElizaAgentPlugin): Remote {
           when Unsent: throw cause;
           default: throw new Unreachable({ cause });
         }
-        if (status < 200 || status >= 300) throw new Refused({ status })
+        if (!replied(status)) throw new Refused({ status })
         return sse(body, listening)
       })
     },
@@ -306,6 +344,22 @@ function pluginBridge(plugin: ElizaAgentPlugin): RuntimeJsonBridge {
     restart: async () => statusOf(await plugin.restart()),
     request: (input) => plugin.request(routed(input)),
     requestStream: (input, signal) => framed(opened(plugin, routed(input)), signal),
+  }
+}
+
+/** The agent the phone's host runs, through eliza's client of the `ElizaAgent` plugin. */
+function hosted(plugin: ElizaAgentPlugin): Life {
+  const asked = <A>(call: () => Promise<A>) => tryPromise({ try: call, catch: undelivered })
+  return {
+    status: () => asked(() => plugin.getStatus()),
+    changes: Stream.callback<AgentStatus, Unsent>((queue) => effect {
+      const listener = try tryPromise({ try: () => plugin.addListener("status", (status) => { Queue.offerUnsafe(queue, status) }), catch: (cause) => new Unsent({ cause }) })
+      try addFinalizer(() => ignore(tryPromise(() => listener.remove())))
+    }),
+    start: () => asked(() => plugin.start()),
+    stop: () => asked(() => plugin.stop()),
+    review: () => asked(() => plugin.reviewRecovery()),
+    archive: (reviewToken: string) => asked(() => plugin.archiveRecovery({ reviewToken })),
   }
 }
 
@@ -376,5 +430,5 @@ function fed(plugin: ElizaAgentPlugin, topic: AgentTopic, clientId: string | und
  */
 export const relayedAgent = Layer.sync(Agent, () => {
   const plugin = client()
-  return over(pluginBridge(plugin), plugged(plugin), (topic: AgentTopic, clientId?: string) => fed(plugin, topic, clientId))
+  return over(pluginBridge(plugin), plugged(plugin), (topic: AgentTopic, clientId?: string) => fed(plugin, topic, clientId), hosted(plugin))
 })

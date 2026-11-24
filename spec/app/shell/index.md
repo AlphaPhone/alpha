@@ -5,7 +5,6 @@ the Apps drawer and Ask Alpha as layers over it. Every other area is shown
 inside the shell and moves through it.
 
 - [Layers](./layers.md): the sheets, menus and dialogs over the page, and what holds the phone
-- [Notices](./notices.md): toasts, their turn and their time, and the notices kept until dismissed
 - [Keyboard and canvas](./keyboard.md): the window without the keyboard, the canvas, text size and Ask Alpha's footprint
 - [Focus](./focus.md): where focus goes when the screen changes under the owner
 - [Gestures](./gestures.md): what a swipe on the page means
@@ -85,7 +84,9 @@ pure def raise(s: Shell, detent: Detent): Shell = { ...s, assistant: detent }
 ### Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top
 
 The full screen lowers to the sheet, and typing or the sheet to the bar. On
-Home with nothing over it there is nothing to go back to.
+bare Home, Android Back keeps Alpha in front while Alpha holds the HOME
+role. Otherwise Android Back moves the task behind the previous one and
+keeps the page for the next visit.
 
 ```quint
 pure def layers(s: Shell): int =
@@ -102,10 +103,38 @@ pure def goBack(s: Shell): Shell =
 
 ### Home leaves every app and closes every layer at once
 
+On Android, HOME, the app icon and a return to Alpha deliver their intents
+to the live page when Android can bring its task forward. If Android
+repeatedly refuses the handoff, subsequent launches proceed in their own
+task.
+
 ```quint
 pure def canGoHome(s: Shell): bool = layers(s) > 0
 
 pure def goHome(s: Shell): Shell = { ...s, trail: List(), drawer: false, assistant: Bar }
+```
+
+### Agent navigation shows an admitted app or Home without lowering Ask Alpha
+
+When the agent navigates during an open conversation or voice session, the
+drawer closes and Ask Alpha stays at its current height so the conversation
+is not interrupted.
+
+```quint
+pure def canAgentOpenView(s: Shell, view: View): bool = available(s, view) and not(showing(s, view))
+
+pure def agentOpenView(s: Shell, view: View): Shell =
+  val grown = s.trail.append(view)
+  { ...s, trail: if (grown.length() > maxTrail) grown.tail() else grown, drawer: false }
+
+pure def canAgentGoHome(s: Shell): bool = s.trail.length() > 0 or s.drawer
+
+pure def agentGoHome(s: Shell): Shell = { ...s, trail: List(), drawer: false }
+
+pure def stepAgentNavigationKeepsAssistant(before: Shell, via: str, after: Shell): bool =
+  (via == "agentOpenView" or via == "agentGoHome") implies (after.assistant == before.assistant and not(after.drawer))
+
+pure def sometimesAgentNavigatesKeepingSheet(s: Shell): bool = s.assistant == Sheet and s.trail.length() > 0
 ```
 
 ### When Alpha opens again the trail is kept, and the drawer and Ask Alpha are closed

@@ -19,6 +19,7 @@ export const meta: ComponentMeta<SettingsGeneralPageProps> = {
     "Not confirmed": { onPhone: true, said: "not-confirmed-its-you" },
     "Screen lock first": { onPhone: true, onErase, said: "set-a-screen-lock" },
     "Android starting": { starting: { target: "wifi-networks" } },
+    "Can set as Home": { onPhone: true, onRequestHome: fn() },
   },
   play: {
     Default: async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -31,5 +32,12 @@ export const meta: ComponentMeta<SettingsGeneralPageProps> = {
     },
     Reviewing: ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).queryByRole("button", { name: "Erase all data" })).toBeNull(),
     "Alpha image": ({ canvasElement }: { canvasElement: HTMLElement }) => expect(within(canvasElement).getByRole("button", { name: "Phone" })).toBeTruthy(),
+    "On the phone": async ({ canvasElement }: { canvasElement: HTMLElement }) => {
+      onOpen.mockClear();
+      const canvas = within(canvasElement);
+      await userEvent.click(canvas.getByRole("button", { name: "Network" }));
+      await userEvent.click(canvas.getByRole("button", { name: "Carrier & SIM setup" }));
+      await expect(onOpen.mock.calls).toEqual([["network"], ["carrier"]]);
+    },
   },
 };

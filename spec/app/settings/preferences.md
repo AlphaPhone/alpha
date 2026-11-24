@@ -85,6 +85,18 @@ pure def canPhoneLookChanged(s: Preferences, look: Look, by: Sender): bool = ans
 pure def phoneLookChanged(s: Preferences, look: Look, by: Sender): Preferences = { ...s, phoneLook: look }
 ```
 
+### Android's status and navigation bars follow the look Alpha draws
+
+On a phone the shell tells Android each time the look drawn changes, and
+never twice in a row for the same look; a browser has no bars to tell.
+
+```quint
+pure def barsDark(s: Preferences): bool = shown(s) == DarkLook
+
+pure def lawTheBarsAreDarkExactlyWhenAlphaIs(theme: Theme, look: Look): bool =
+  barsDark({ ...initial, theme: theme, phoneLook: look }) iff (theme == Dark or (theme == System and look == DarkLook))
+```
+
 ### A choice shows at once and is kept on the phone, one at a time, with ten seconds to be kept
 
 ```quint
@@ -315,6 +327,21 @@ pure def stepTheDocumentIsReadOnlyWhenDue(before: Preferences, via: str, after: 
     (via == "start" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
 ```
 
+### A new phone lets Alpha act without asking first, load images in Inbox, use its location and the Browser page open, and change Gmail and Calendar
+
+Location is on because the launcher already holds the location grant on an
+Alpha image; the owner turns any of these off here, or revokes the grant in
+Android. A recovery restores these, and a choice the previous Alpha lacked
+starts as one of these.
+
+```quint
+type Chosen = { askFirst: bool, images: bool, shares: List[Share] }
+
+pure val newPhone: Chosen = { askFirst: false, images: true, shares: List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits) }
+
+pure def lawANewPhoneAllowsEveryShare(share: Share): bool = newPhone.shares.includes(share) and not(newPhone.askFirst) and newPhone.images
+```
+
 ### What the phone could not read is taken as asking first, loading no images and sharing nothing
 
 The phone reports the document readable, with its values, or not.
@@ -437,7 +464,8 @@ pure def stepAskingStopsOnlyOnTheOwnersWord(before: Preferences, via: str, after
 
 ### When the device preferences cannot be read, the owner can recover them: the phone resets them to its defaults, and they are read again
 
-A recovery not answered in ten seconds is given up and the document is read
+The owner confirms first: a recovery puts back what a new phone has. A
+recovery not answered in ten seconds is given up and the document is read
 again; Alpha says when it did not recover.
 
 ```quint

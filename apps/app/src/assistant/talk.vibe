@@ -1,12 +1,17 @@
 // spec/app/assistant/chats.md, "Story: Find my conversations"; spec/app/assistant/composer.md, "Story: Keep what I am writing"
 import { ConversationRecord } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { Failure, Fix } from "../../gen/app__assistant__reply.ts"
 
 /** One message of the conversation showing, as the agent keeps it. */
 export interface Line {
   readonly id: string
   readonly mine: boolean
   readonly text: string
+  /** The words of the message this one quotes. */
+  readonly quote?: string
+  /** Why a reply the agent keeps did not finish, as its history says, in Alpha's words. */
+  readonly failure?: Failure
 }
 
 /** A search hit: the conversation it is in, by its number, the message, by its number, and what it says. */
@@ -28,6 +33,10 @@ export interface Seen {
   readonly pages: ReadonlyMap<number, ReadonlyArray<Line>>
   /** The reply as it is written, until it ends. */
   readonly reply: string
+  /** What the agent says it is doing until its reply is written: its acknowledgment, its status or the app its tool uses. */
+  readonly label: string
+  /** Why the last reply did not finish, the fix the agent named, and how long the provider asked to wait, or -1. */
+  readonly failure: { readonly kind: Failure; readonly fix: Fix; readonly waitMs: number } | undefined
   /** The text in the composer's box, which its slot keeps. */
   readonly typed: string
   /** The text of a message the slot marks as sending, under review; or the saved copy of a conflict. */
@@ -50,18 +59,23 @@ export interface Board {
   /** The text a send in hand carries, the last text sent, and a send that waits for its conversation to be made. */
   outgoing: string
   lastSent: string
+  /** The id the last message was posted under, as the agent keeps it, or "" where its post never said. */
+  lastSentId: string
   sendWhenMade: boolean
   change(patch: Partial<Seen>): void
   /** The number of the conversation the agent names `record`, given the first time it is seen; its title where one is given. */
   numberOf(record: ConversationRecord, title?: string): number
   known(conversation: number): Known | undefined
-  /** The number of the message the agent names `id`. */
+  /** The number of the message the agent names `id`, given the first time it is seen. */
   messageNumber(id: string): number
+  /** The number given to the message the agent names `id`, or 0 for one never seen. */
+  numbered(id: string): number
   messageId(message: number): string | undefined
   /** The page under `ticket`, and the page of the newest ticket. */
   page(ticket: number): ReadonlyArray<Line>
   latest(): ReadonlyArray<Line>
   append(line: Line): void
+  rename(line: Line, id: string): void
   drop(line: Line): void
 }
 
@@ -95,7 +109,7 @@ export const talk = Layer.effect(Talk, effect {
   const messages: string[] = []
   const listeners = new Set<() => void>()
   let seen: Seen = {
-    pages: new Map(), reply: "", typed: "", saved: "", hits: [],
+    pages: new Map(), reply: "", label: "", failure: undefined, typed: "", saved: "", hits: [],
     titles: new Map(records.map((one, at) => [at + 1, one.title])),
   }
   const keep = () => runFork(ignore(store.set(key, JSON.stringify({ conversations: records.map((one) => ({ id: one.record.id, roomId: one.record.roomId, title: one.title })) }))))
@@ -108,6 +122,7 @@ export const talk = Layer.effect(Talk, effect {
     type: (text) => board.change({ typed: text }),
     outgoing: "",
     lastSent: "",
+    lastSentId: "",
     sendWhenMade: false,
     change: (patch) => {
       seen = { ...seen, ...patch }
@@ -135,12 +150,17 @@ export const talk = Layer.effect(Talk, effect {
       messages.push(id)
       return messages.length
     },
+    numbered: (id) => messages.indexOf(id) + 1,
     messageId: (message) => messages[message - 1],
     page: (ticket) => seen.pages.get(ticket) ?? [],
     latest: () => board.page(Math.max(0, ...seen.pages.keys())),
     append: (line) => {
       const newest = Math.max(0, ...seen.pages.keys())
       board.change({ pages: new Map([...seen.pages, [newest, [...board.page(newest), line]]]) })
+    },
+    rename: (line, id) => {
+      const newest = Math.max(0, ...seen.pages.keys())
+      board.change({ pages: new Map([...seen.pages, [newest, board.page(newest).map((one) => (one === line ? { ...one, id } : one))]]) })
     },
     drop: (line) => {
       const newest = Math.max(0, ...seen.pages.keys())

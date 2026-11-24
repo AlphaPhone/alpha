@@ -1,0 +1,319 @@
+// spec/app/calendar/editor.md, "Story: Write an event"; spec/app/calendar/editor.md, "Story: Keep my draft through a restart"; spec/app/calendar/editor.md, "Story: Never create an event twice"; spec/app/calendar/editor.md, "Story: Delete an event, or answer an invitation"
+import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import * as Editor from "../../gen/app__calendar__editor.effect.vibe"
+import type { Effect as Out, Event, Scope } from "../../gen/app__calendar__editor.effect.vibe"
+import * as View from "../../gen/app__calendar.effect.vibe"
+import * as Held from "../../gen/app__calendar__deletions.effect.vibe"
+import { type Readback, type WriteKind, answerReadback, defaultStart, newEventTarget, readbackSeen } from "../../gen/app__calendar__writing.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { ask, attemptedWith } from "../platform/remote.vibe"
+import type { AndroidCalendarDeletionScope, AndroidCalendarEditorFields, CalendarPick } from "@elizaos/os/bridges/calendar"
+import { PhoneCalendar, type Written } from "../platform/calendar.vibe"
+import { Attempts } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import { type Row, shown } from "./shown.ts"
+import { civilDay, dayStart, feedParams, zone } from "./time.ts"
+
+/** What the owner typed into the form, kept on the phone as it is typed: the spec counts the edits, this holds them. */
+export schema Fields {
+  readonly title: string
+  readonly place: string
+  readonly notes: string
+  readonly begin: number
+  readonly end: number
+  readonly allDay: boolean
+  readonly people: string
+  readonly repeat?: "NoRepeat" | "Daily" | "Weekly" | "Monthly" | "Yearly"
+  readonly calendar?: "Agent" | "Phone"
+}
+
+const rules: Readonly<Record<"Daily" | "Weekly" | "Monthly" | "Yearly", string>> = { Daily: "FREQ=DAILY", Weekly: "FREQ=WEEKLY", Monthly: "FREQ=MONTHLY", Yearly: "FREQ=YEARLY" }
+
+// spec/app/calendar/writing.md, "A new event today starts at the next full hour; on another day it starts at ten"
+/** The form a new event opens with on `day`, at `now`: an hour from the next full hour today, from ten on another day. */
+export function blank(day: number, now: number): Fields {
+  const first = defaultStart(day - civilDay(now), new Date(now).getHours())
+  const begin = dayStart(civilDay(now) + first.offset) + first.hour * 3_600_000
+  return { title: "", place: "", notes: "", begin, end: begin + 3_600_000, allDay: false, people: "" }
+}
+
+// spec/app/calendar/editor.md, "Another owner signing in closes the editor; the old owner's slot keeps its edits"
+/** Where `owner`'s form fields are kept, each owner in a slot of their own, and the creation identity of a create whose outcome is unknown. */
+function formKey(owner: number): string {
+  return `alpha.calendar.form.${owner}`
+}
+const creationKey = "alpha.calendar.creation"
+
+const decodeFields = Schema.decodeUnknownEffect(Schema.fromJsonString(Fields))
+
+/** The fields kept on the phone for `owner`, or a blank form for `day` where none are. */
+export effect function kept(day: number, owner: number): Fields!!(KeyValueStore.KeyValueStore | Time) {
+  const now = try (try Time).latest()
+  const text = (try KeyValueStore.KeyValueStore).get(formKey(owner)) catch () => undefined
+  return text === undefined ? blank(day, now) : (decodeFields(text) catch () => blank(day, now))
+}
+
+/** Keep `fields` on the phone in `owner`'s slot; whether the phone kept them. */
+effect function keep(fields: Fields, owner: number): boolean!!KeyValueStore.KeyValueStore {
+  return ((try KeyValueStore.KeyValueStore).set(formKey(owner), JSON.stringify(fields)) |> Effect.as(%, true)) catch () => false
+}
+
+/** The owner the editor writes for now. */
+effect function owner(): number!!Editor.Machine {
+  return (try (try Editor.Machine).get()).owner
+}
+
+// spec/app/calendar/editor.md, "Each edit is counted and kept on the phone at once, unless the phone failed to keep the draft"
+/** The owner typed into the form: keep it on the phone, then count the edit; a store that refuses says so. */
+export effect function typed(fields: Fields, edit: Event) {
+  const editor = try Editor.Machine
+  if (!(try keep(fields, try owner()))) try contained(editor.send({ type: "keepFailed" }), "saying the draft was not kept")
+  try contained(editor.send(edit), "counting an edit of the event")
+}
+
+// spec/app/calendar/editor.md, "A note or a scan opens a new event already filled in, as edits to review, only when no other draft is kept"
+/** Notes or Scan hand Calendar what they read as an event for `day`: kept as the form's draft, for the owner to review and save. */
+export effect function fromNote(fields: Fields, day: number) {
+  const editor = try Editor.Machine
+  if (!Editor.canFromNote(try editor.get())) return false
+  if (!(try keep(fields, try owner()))) return false
+  return try contained(editor.send({ type: "fromNote", day }), "opening the note's event")
+}
+
+/** An event of the phone as eliza's calendar review picks it. */
+function pickOf(row: Row): CalendarPick {
+  return {
+    event: { id: row.key, calendarId: row.calendarId, title: row.title, body: row.notes, location: row.place, begin: row.begin, end: row.end, allDay: row.allDay, recurring: row.recurring },
+    calendar: { id: row.calendarId, writable: true, local: true },
+  }
+}
+
+function fieldsOf(fields: Fields): AndroidCalendarEditorFields {
+  return { title: fields.title.trim(), body: fields.notes, location: fields.place, begin: fields.begin, end: fields.end }
+}
+
+const refused: Written = { confirmed: false, known: true }
+
+/** Which occurrences eliza's deletion review takes; it has no "this and following". */
+function deletionScope(scope: Scope, recurring: boolean): AndroidCalendarDeletionScope | undefined {
+  return scope === "ThisOne" ? (recurring ? "occurrence" : "event") : scope === "WholeSeries" ? "series" : undefined
+}
+
+const calendarBase = "/api/lifeops/calendar"
+
+/** What a read back of the agent's calendar finds of one event: whether it is there and, for an answer, the owner's reply. */
+schema Found {
+  readonly events: ReadonlyArray<{ readonly id: string; readonly attendees: ReadonlyArray<{ readonly self: boolean; readonly responseStatus: string | null }> }>
+}
+
+// spec/app/calendar/writing.md, "An applied create, change or answer is read back; only a read back that finds it as asked says saved"; spec/app/calendar/writing.md, "An applied deletion is never reported as an event Calendar could not look up"
+/** How a write of `kind` to `row` ended, by what its read back `found`: nothing where the read back failed. */
+function endedBy(found: Found | undefined, row: Row, kind: WriteKind, reply: string): Written {
+  const event = found?.events.find((candidate) => candidate.id === row.key)
+  const readback: Readback = found === undefined ? "ReadbackFailed"
+    : kind === "AnswerKind" ? answerReadback(event !== undefined, event?.attendees.some((person) => person.self && person.responseStatus === reply) ?? false)
+    : event === undefined ? "ReadbackMissing" : "ReadbackFound"
+  const seen = readbackSeen(kind, readback)
+  return seen === "Saved" || seen === "Deleted" || seen === "DeletedByReceipt" ? { confirmed: true, known: true }
+    : seen === "NotDeleted" ? refused : { confirmed: false, known: false }
+}
+
+/** Read `row` back from the agent's calendar after a write of `kind` it confirmed, and say how the write ended. */
+effect function readBackAgent(row: Row, kind: WriteKind, reply: string): Written!!Agent {
+  const urlParams = feedParams(civilDay(row.begin))
+  const found = ask(Agent, HttpClientRequest.get(`${calendarBase}/feed`, { urlParams }), Found) catch () => undefined
+  return endedBy(found, row, kind, reply)
+}
+
+/** Whether the agent filed the write for the owner's approval instead of making it: nothing changed yet, and the approval card says it waits. */
+function filed(body: unknown): boolean {
+  return typeof body === "object" && body !== null && "approvalRequestId" in body
+}
+
+/** A write the agent took as a request for the owner's approval: made only once the owner approves its card. */
+const waiting: Written & { readonly filed: true } = { confirmed: true, known: true, filed: true }
+
+/** The fields of the form as the agent's calendar takes them: an all-day event as whole UTC dates, a timed one as instants in the phone's zone. */
+function agentFields(fields: Fields) {
+  const dated = (ms: number) => { const at = new Date(ms); return new Date(Date.UTC(at.getFullYear(), at.getMonth(), at.getDate())).toISOString() }
+  return {
+    title: fields.title.trim(), location: fields.place,
+    startAt: fields.allDay ? dated(fields.begin) : new Date(fields.begin).toISOString(),
+    endAt: fields.allDay ? dated(fields.end) : new Date(fields.end).toISOString(),
+    isAllDay: fields.allDay, timeZone: zone(),
+  }
+}
+
+// spec/app/calendar/writing.md, "A new event goes to the calendar chosen in the form: the agent's own calendar, or a writable calendar on this phone"; spec/app/calendar/writing.md, "The agent's own calendar holds no repeats, alerts or video rooms"
+/** A new event on the agent's own calendar, sent once under the attempt's key, then read back. */
+effect function createAgent(attempt: number, fields: Fields): Written!!(Agent | Attempts) {
+  const sent = try attemptedWith(Agent, (key) => HttpClientRequest.post(`${calendarBase}/events`) |> HttpClientRequest.bodyJsonUnsafe(%, {
+    ...agentFields(fields), description: fields.notes, idempotencyKey: key,
+  }), attempt)
+  if (filed(sent.body)) return waiting
+  if (!sent.confirmed) return { confirmed: false, known: sent.known }
+  const urlParams = feedParams(civilDay(fields.begin))
+  const listed = ask(Agent, HttpClientRequest.get(`${calendarBase}/feed`, { urlParams }), Created) catch () => undefined
+  const readback: Readback = listed === undefined ? "ReadbackFailed"
+    : listed.events.some((event) => event.title === fields.title.trim() && Date.parse(event.startAt) === Date.parse(agentFields(fields).startAt)) ? "ReadbackFound" : "ReadbackMissing"
+  const seen = readbackSeen("CreateKind", readback)
+  return seen === "Saved" ? { confirmed: true, known: true } : { confirmed: false, known: false }
+}
+
+/** What a read back of the agent's calendar finds of a new event: its title and start. */
+schema Created { readonly events: ReadonlyArray<{ readonly title: string; readonly startAt: string }> }
+
+// spec/app/calendar/writing.md, "An invitation answer is sent only by the invitee, at the version shown, under a key made of the answer and that version"; spec/app/calendar/writing.md, "Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown"
+/** A change, a deletion or an answer to an event of the agent's calendar, sent once at the version shown, then read back. */
+effect function sendAgent(attempt: number, kind: "Update" | "Remove" | "Reply", row: Row, scope: Scope, going: boolean): Written!!(Agent | Attempts | KeyValueStore.KeyValueStore | Editor.Machine | Time) {
+  const event = `${calendarBase}/events/${encodeURIComponent(row.key)}`
+  const recurrenceScope = !row.recurring ? undefined : scope === "WholeSeries" ? "series" : scope === "ThisAndFollowing" ? "this_and_following" : "instance"
+  const scoped = recurrenceScope === undefined ? {} : { recurrenceScope }
+  const reply = going ? "accepted" : "tentative"
+  if (kind === "Reply") {
+    if (!row.answerable) return refused
+    const sent = try attemptedWith(Agent, () => HttpClientRequest.post(`${event}/response`) |> HttpClientRequest.bodyJsonUnsafe(%, {
+      responseStatus: reply, notifyAttendees: false, expectedProviderVersion: row.version, idempotencyKey: `answer:${row.key}:${reply}:${row.version}`,
+    }), attempt)
+    if (filed(sent.body)) return waiting
+    return sent.confirmed ? try readBackAgent(row, "AnswerKind", reply) : { confirmed: sent.confirmed, known: sent.known }
+  }
+  if (kind === "Remove") {
+    if (row.cancel === "NoCancellation" || row.managed) return refused
+    const cancellationMode = row.cancel === "DeclineInvitation" ? "decline_invitation" : "organizer_cancel"
+    const sent = try attemptedWith(Agent, (key) => HttpClientRequest.delete(event, { urlParams: { ...scoped, expectedProviderVersion: row.version, idempotencyKey: key, cancellationMode, notifyAttendees: "false" } }), attempt)
+    if (filed(sent.body)) return waiting
+    return sent.confirmed ? try readBackAgent(row, "DeleteKind", "") : { confirmed: sent.confirmed, known: sent.known }
+  }
+  if (!row.editable) return refused
+  const fields = try kept(0, try owner())
+  const sent = try attemptedWith(Agent, (key) => HttpClientRequest.patch(event) |> HttpClientRequest.bodyJsonUnsafe(%, {
+    ...agentFields(fields), notes: fields.notes, ...scoped, expectedProviderVersion: row.version, idempotencyKey: key,
+  }), attempt)
+  if (filed(sent.body)) return waiting
+  return sent.confirmed ? try readBackAgent(row, "ChangeKind", "") : { confirmed: sent.confirmed, known: sent.known }
+}
+
+// spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"; spec/app/calendar/editor.md, "No create is sent while an earlier one is in doubt, unless the owner asked for a separate event"
+/** Carry out write `attempt`: a create under its own creation identity, a change or a deletion through the phone's review. */
+effect function send(attempt: number, kind: "Create" | "Update" | "Remove" | "Reply", id: number, scope: Scope, going: boolean): Written!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine) {
+  const phone = try PhoneCalendar
+  const fields = try kept(0, try owner())
+  if (kind === "Create") {
+    const view = try (try View.Machine).get()
+    if (newEventTarget(view.connected, fields.calendar === "Phone") === "AgentOwnCalendar") return try createAgent(attempt, fields)
+    const creation = try (try Attempts).key(attempt)
+    try ignore((try KeyValueStore.KeyValueStore).set(creationKey, creation))
+    return try phone.create(fieldsOf(fields), creation, (try (try Editor.Machine).get()).separate)
+  }
+  const row = shown.find(id)
+  if (row === undefined) return refused
+  if (row.source === "Google") return try sendAgent(attempt, kind, row, scope, going)
+  if (kind === "Reply") return refused
+  if (kind === "Update") return try phone.update(pickOf(row), fieldsOf(fields))
+  const which = deletionScope(scope, row.recurring)
+  if (which === undefined) return refused
+  const staged = try phone.stage(pickOf(row), which)
+  if (staged.kind === "editor") {
+    try ignore(phone.open(row.key, row.begin, row.end))
+    return refused
+  }
+  if (staged.kind !== "ready") return refused
+  const time = try Time
+  try time.until((try time.now()) + staged.window)
+  return try phone.dispatch(row.key)
+}
+
+// spec/app/calendar/editor.md, "While a create is in doubt its form waits; checking the phone's receipts finds it or not"; spec/app/calendar/editor.md, "Saving sends the form once, as a new numbered write built on the revision its edits began from"
+/** Whether the phone's receipts say a create was made: one in doubt, or any not yet acknowledged before a new create; a failed read holds the create. */
+effect function receipts(ticket: number): Event!!(PhoneCalendar | KeyValueStore.KeyValueStore) {
+  const phone = try PhoneCalendar
+  if (!phone.present) return { type: "receiptsChecked", ticket, found: false }
+  const creation = (try KeyValueStore.KeyValueStore).get(creationKey) catch () => undefined
+  if (creation === undefined) return { type: "receiptsChecked", ticket, found: false }
+  return effect {
+    const found = try phone.created(creation)
+    return { type: "receiptsChecked", ticket, found } as Event
+  } catch () => ({ type: "receiptsFailed", ticket })
+}
+
+// spec/app/calendar/editor.md, "Such a form is handed to Android Calendar and closes; Alpha writes nothing of it"
+effect function handOff() {
+  const fields = try kept(0, try owner())
+  const people = fields.people.split(",").map((person) => person.trim()).filter((person) => person !== "")
+  const rrule = fields.repeat === undefined || fields.repeat === "NoRepeat" ? {} : { rrule: rules[fields.repeat] }
+  try (try PhoneCalendar).handOff({ ...fieldsOf(fields), allDay: fields.allDay, timeZone: zone(), attendees: people, ...rrule })
+}
+
+// spec/app/calendar/index.md, "A read asked for during a write waits for it, and follows it once"; spec/app/calendar/deletions.md, "A refused send shows the event again; a sent deletion hides it until a read no longer has it unchanged"
+/** How write `attempt` ended; the calendar asks to read its day again, which waits for the write and then shows it or releases its doubt. */
+effect function written(attempt: number, kind: "Create" | "Update" | "Remove" | "Reply", id: number, scope: Scope, going: boolean): Event!!(PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Attempts | Time | Editor.Machine | View.Machine | Held.Machine) {
+  const fields = try kept(0, try owner())
+  const outcome = try send(attempt, kind, id, scope, going)
+  const view = try View.Machine
+  try contained(view.send({ type: "changeCommitted" }), "reading the day again after a write")
+  if ((kind === "Create" || kind === "Update") && outcome.confirmed && !("filed" in outcome)) try contained(view.send({ type: "pickDay", day: civilDay(fields.begin) }), "showing the saved day")
+  if (kind === "Remove") try contained((try Held.Machine).send({ type: "ended", id, done: outcome.confirmed && !("filed" in outcome) }), "telling the deletions how one ended")
+  return { type: "written", attempt, confirmed: outcome.confirmed, known: outcome.known, filed: "filed" in outcome && outcome.filed === true }
+}
+
+function carry(fx: Out): Job<Event, PhoneCalendar | Agent | KeyValueStore.KeyValueStore | Time | Editor.Machine | View.Machine | Held.Machine, []> {
+  return match (fx) {
+    when { tag: "Send", let attempt, let kind, let id, let scope }:
+      answer(`write ${attempt}`, written(attempt, kind, id, scope, false), { type: "written", attempt, confirmed: false, known: false, filed: false });
+    when { tag: "Answer", let attempt, let id, let going }:
+      answer(`answer ${attempt}`, written(attempt, "Reply", id, "ThisOne", going), { type: "written", attempt, confirmed: false, known: false, filed: false });
+    when { tag: "HandOff" }: run("hand off", Effect.ignore(handOff()));
+    when { tag: "CheckReceipts", let ticket }: answer("receipts", receipts(ticket), { type: "receiptsChecked", ticket, found: false });
+    when { tag: "KeepDraft" }:
+      answer("keep", effect {
+        const who = try owner()
+        return (try keep(try kept(0, who), who)) ? ({ type: "draftKept" } as Event) : ({ type: "keepFailed" } as Event)
+      }, { type: "keepFailed" });
+  }
+}
+
+// spec/app/calendar/editor.md, "A read of the event releases the doubt; a form waiting on it then shows the event as it now is"
+/** Each read of either calendar tells the form what it found of the event it edits or holds in doubt. */
+const reread = started(effect {
+  const view = try View.Machine
+  const editor = try Editor.Machine
+  const loaded = Stream.filter(view.changes, (s) => s.phone.status === "Loaded" || s.google.status === "Loaded")
+  try Stream.runForEach(Stream.changesWith(loaded, (a, b) => a.phone.ticket === b.phone.ticket && a.google.ticket === b.google.ticket), effect () => {
+    const form = try editor.get()
+    const state = try view.get()
+    for (const id of new Set([form.target, ...form.latched])) {
+      if (id === 0) continue
+      const row = shown.find(id) ?? shown.lastSeen(id)
+      const source = row?.source === "Phone" ? state.phone : state.google
+      const whole = source.status === "Loaded" && !(row?.source === "Phone" && state.phoneLimited) && row !== undefined && Math.abs(civilDay(row.begin) - state.anchor) <= 31
+      const there = shown.find(id)
+      if (there === undefined && whole) try contained(editor.send({ type: "eventMissing", id }), "telling the form its event is gone")
+      else if (there !== undefined) try contained(editor.send({ type: "eventRead", id, revision: there.revision, whole }), "telling the form what the read found")
+    }
+  })
+}, "following the calendars' reads for the form")
+
+module web {
+  import { Stream } from "effect"
+
+  /** The keys another page of Alpha changed in the store this one shares, as the browser says; none where there is no window. @throws {never} */
+  export function storeChanged(): Stream.Stream<string> {
+    const target = globalThis as unknown as Partial<EventTarget>
+    if (typeof target.addEventListener !== "function") return Stream.empty
+    return Stream.map(Stream.fromEventListener<StorageEvent>(target as EventTarget, "storage"), (changed) => changed.key ?? "")
+  }
+}
+import { storeChanged } from web
+
+// spec/app/calendar/editor.md, "When another copy replaced the kept draft, the owner keeps theirs or takes the other"
+/** Another page of Alpha kept a draft over this one's: the form asks the owner which to keep. */
+const elsewhere = hearing(Stream.filter(storeChanged(), (key) => key.includes("alpha.calendar.form.")), Editor.Machine, (): Event => ({ type: "replacedElsewhere" }))
+
+/** The editor: kept on the phone across restarts, which ends what was in flight; its writes go to the phone's calendar once. */
+export const editor = together(
+  reacting(Editor, { keep: 1, open: [{ type: "restart" }], carry }),
+  reread,
+  elsewhere,
+)

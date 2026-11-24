@@ -1,0 +1,476 @@
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "Starting asks for the microphone the first time, opens it once it is allowed, and holds the speech engine while talking"
+import { type CloudStreamingSpeech, createCloudStreamingSpeech, type CredentialId, type EnvironmentName } from "@elizaos/os/bridges/voice"
+import { fresh } from "../runtime/attempts.vibe"
+import { Agent } from "./agent.vibe"
+import { registered } from "./device.vibe"
+import { ask } from "./remote.vibe"
+
+export type VoiceGrant = "granted" | "denied" | "prompt"
+
+export type VoiceEvent =
+  | { readonly kind: "speechStart"; readonly session: number }
+  | { readonly kind: "speechEnd"; readonly session: number; readonly text: string }
+  | { readonly kind: "transcript"; readonly session: number; readonly text: string; readonly final: boolean }
+  | { readonly kind: "bargeIn"; readonly session: number; readonly echo: boolean }
+  | { readonly kind: "ended"; readonly session: number; readonly reason: string }
+
+export interface SpeechStatus {
+  readonly ready: boolean
+  readonly ttsReady: boolean
+  readonly liveCapture: boolean
+}
+
+export interface RecordedClip {
+  readonly recordingId: string
+}
+
+module capacitor {
+  import { registerPlugin } from "@capacitor/core"
+  import type { ElizaCloudSpeechPlugin } from "@elizaos/os/bridges/definitions/voice"
+  import { type SignInClient, signInClient } from "@elizaos/os/bridges/sign-in"
+
+  export interface ListenerHandle { remove(): Promise<void> }
+
+  export interface LocalVoicePlugin {
+    checkPermissions(): Promise<{ microphone?: string }>
+    requestPermissions(): Promise<{ microphone?: string }>
+    warmSpeechOutput(options: Record<string, never>): Promise<unknown>
+    localSpeechStatus(options: { requestId: string; ttsOnly?: boolean }): Promise<{ ready?: boolean; ttsReady?: boolean }>
+    holdSpeechEngine(options: Record<string, never>): Promise<{ held?: boolean }>
+    releaseSpeechEngineHold(options: Record<string, never>): Promise<unknown>
+    liveCaptureStatus(options: Record<string, never>): Promise<{ available?: boolean }>
+    startLiveCapture(options: { sessionId: string }): Promise<{ started?: boolean; echoCancelled?: boolean }>
+    stopLiveCapture(options: { sessionId: string }): Promise<unknown>
+    synthesizeLocal(options: { requestId: string; text: string; append?: boolean; replace?: boolean }): Promise<{ playbackId?: string }>
+    play(options: { playbackId: string; replace?: boolean }): Promise<unknown>
+    stopPlayback(options: { requestId?: string }): Promise<unknown>
+    startRecording(options: Record<string, never>): Promise<{ recordingId?: string }>
+    stopRecording(options: { recordingId: string }): Promise<{ recordingId?: string }>
+    cancelRecording(options: { recordingId: string }): Promise<unknown>
+    transcribeLocalRecording(options: { requestId: string; recordingId: string }): Promise<{ text?: string }>
+    addListener(event: string, listener: (data: unknown) => void): Promise<ListenerHandle>
+  }
+
+  let made: LocalVoicePlugin | undefined
+  /** @throws {never} */
+  export function localPlugin(): LocalVoicePlugin {
+    return (made ??= registerPlugin<LocalVoicePlugin>("AlphaVoiceCloud"))
+  }
+
+  /** eliza's Cloud speech relay with the methods its TypeScript definition does not list yet: the warm-up and the timing records. */
+  export interface CloudRelay extends ElizaCloudSpeechPlugin {
+    prewarmCloudSpeech(options: { environment: string }): Promise<unknown>
+    cloudStreamTiming(options: Record<string, never>): Promise<unknown>
+  }
+
+  let relay: CloudRelay | undefined
+  /** @throws {never} */
+  export function relayPlugin(): CloudRelay {
+    return (relay ??= registerPlugin<CloudRelay>("ElizaCloudSpeech"))
+  }
+
+  let signIn: SignInClient | undefined
+  /** eliza's client of the phone's sign-in, made once. @throws {never} */
+  export function signInAccounts(): SignInClient {
+    return (signIn ??= signInClient())
+  }
+
+  /** @throws {never} */
+  export function makeAbort(): AbortController {
+    return new AbortController()
+  }
+
+  /** @throws {never} */
+  export function makeSessionGuard(current: () => number, expected: number): () => void {
+    return () => {
+      if (current() !== expected) throw new Error("session-changed")
+    }
+  }
+}
+import { localPlugin, makeAbort, makeSessionGuard, relayPlugin, signInAccounts } from capacitor
+
+export error VoiceBridgeFailed { method: string; cause: unknown }
+
+export service VoiceBridge {
+  available(): boolean!!
+  checkPermission(): VoiceGrant!!
+  requestPermission(): VoiceGrant!!
+  prewarm(network: boolean): void!!Agent
+  streamTimings(): unknown!!
+  probeStatus(ttsOnly: boolean): SpeechStatus!!
+  invalidateCache(): void!!
+  holdEngine(): boolean!!
+  releaseEngineHold(): void!!
+  openMic(session: number, network: boolean): boolean!VoiceBridgeFailed
+  closeMic(session: number): void!VoiceBridgeFailed
+  playSentence(session: number, turn: number, text: string, append: boolean): void!VoiceBridgeFailed
+  hush(turn: number): void!!
+  shut(session: number): boolean!!
+  readonly events: Stream.Stream<VoiceEvent>
+  startRecording(ticket: number): RecordedClip!VoiceBridgeFailed
+  transcribe(ticket: number, network: boolean): string!VoiceBridgeFailed
+  abandon(ticket: number): void!!
+}
+
+const LOCAL_PLUGIN = "AlphaVoiceCloud"
+const CLOUD_STREAM_PLUGIN = "ElizaCloudSpeech"
+/** The cloud the phone signs in to, whose account the relay speaks for. */
+const CLOUD_ENVIRONMENT = "production" as EnvironmentName
+/** How long a background call to the relay, a warm-up or its timing records, may run before it is dropped. */
+const RELAY_WARMUP_BOUND = "5 seconds"
+
+function parseGrant(raw: string | undefined): VoiceGrant {
+  return raw === "granted" ? "granted" : raw === "denied" ? "denied" : "prompt"
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : undefined
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : ""
+}
+
+function asBool(value: unknown): boolean {
+  return value === true
+}
+
+function makeNativeEvents(
+  subscribers: Set<(event: VoiceEvent) => void>,
+  getSession: () => number,
+): Stream.Stream<VoiceEvent> {
+  return Stream.callback<VoiceEvent>((queue) => effect {
+    const forward = (event: VoiceEvent) => { Queue.offerUnsafe(queue, event) }
+    subscribers.add(forward)
+    const handles: Array<{ remove(): Promise<void> }> = []
+    if (registered(LOCAL_PLUGIN)) {
+      const plugin = localPlugin()
+      const register = (name: string, map: (raw: unknown) => VoiceEvent | undefined) =>
+        Effect.orElseSucceed(
+          tryPromise(() => plugin.addListener(name, (raw) => {
+            const mapped = map(raw)
+            if (mapped !== undefined) Queue.offerUnsafe(queue, mapped)
+          })),
+          () => undefined,
+        )
+      const attached = try Effect.all([
+        register("liveCaptureTranscript", (raw) => {
+          const rec = asRecord(raw)
+          const session = getSession()
+          return session > 0 ? { kind: "transcript", session, text: asString(rec?.text), final: asBool(rec?.final) } : undefined
+        }),
+        register("liveCaptureBargeIn", (raw) => {
+          const rec = asRecord(raw)
+          const session = getSession()
+          return session > 0 ? { kind: "bargeIn", session, echo: asBool(rec?.echo) } : undefined
+        }),
+        register("liveCaptureEnded", (raw) => {
+          const rec = asRecord(raw)
+          const session = getSession()
+          return session > 0 ? { kind: "ended", session, reason: asString(rec?.reason) } : undefined
+        }),
+      ], { concurrency: "unbounded" })
+      for (const one of attached) if (one !== undefined) handles.push(one)
+    }
+    try addFinalizer(() => effect {
+      subscribers.delete(forward)
+      for (const one of handles) try ignore(tryPromise(() => one.remove()))
+    })
+  })
+}
+
+/** The id of the key the phone's sign-in holds for the cloud now: the relay speaks only for that key, and refuses any other. */
+effect function signedInKey(accounts: ReturnType<typeof signInAccounts>): CredentialId!VoiceBridgeFailed {
+  const status = try tryPromise({
+    try: () => accounts.status({ environment: CLOUD_ENVIRONMENT }),
+    catch: (cause) => new VoiceBridgeFailed({ method: "status", cause }),
+  })
+  if (status.account.kind !== "signedIn") throw new VoiceBridgeFailed({ method: "status", cause: "signed-out" })
+  return status.account.credentialId
+}
+
+export const phoneVoiceBridge = Layer.effect(VoiceBridge, effect {
+  let cachedStatus: SpeechStatus | undefined
+  let statusFlight: Deferred.Deferred<SpeechStatus> | undefined
+  let prewarmFlight: Deferred.Deferred<void> | undefined
+  let activeSession = 0
+  let cloudStream: CloudStreamingSpeech | undefined
+  let cloudKey: CredentialId | undefined
+  let cloudCapture: { close(): Promise<void>; cancel(): Promise<void> } | undefined
+  let cloudSpeechAbort: AbortController | undefined
+  let activePlaybackRequest: string | undefined
+  const recordings = new Map<number, string>()
+  const eventSubscribers = new Set<(event: VoiceEvent) => void>()
+
+  const publish = (event: VoiceEvent) => {
+    for (const emit of eventSubscribers) emit(event)
+  }
+
+  effect function probeStatus(ttsOnly: boolean): SpeechStatus!! {
+    if (cachedStatus !== undefined && (!ttsOnly ? cachedStatus.ready : cachedStatus.ttsReady || cachedStatus.ready)) {
+      return cachedStatus
+    }
+    if (statusFlight !== undefined) return try Deferred.await(statusFlight)
+    if (!registered(LOCAL_PLUGIN)) {
+      const absent: SpeechStatus = { ready: false, ttsReady: false, liveCapture: false }
+      cachedStatus = absent
+      return absent
+    }
+    const flight = try Deferred.make<SpeechStatus>()
+    statusFlight = flight
+    const plugin = localPlugin()
+    const [localResult, liveResult] = try Effect.all([
+      Effect.orElseSucceed(tryPromise(() => plugin.localSpeechStatus({ requestId: fresh(), ttsOnly })), () => ({ ready: false, ttsReady: false })),
+      Effect.orElseSucceed(tryPromise(() => plugin.liveCaptureStatus({})), () => ({ available: false })),
+    ], { concurrency: "unbounded" })
+    const status: SpeechStatus = {
+      ready: localResult.ready === true,
+      ttsReady: localResult.ttsReady === true || localResult.ready === true,
+      liveCapture: liveResult.available === true,
+    }
+    cachedStatus = status
+    statusFlight = undefined
+    try Deferred.succeed(flight, status)
+    return status
+  }
+
+  effect function prewarm(network: boolean): void!!Agent {
+    if (prewarmFlight !== undefined) {
+      try Deferred.await(prewarmFlight)
+      return
+    }
+    const flight = try Deferred.make<void>()
+    prewarmFlight = flight
+    try ensuring(effect {
+      const warmDevice = registered(LOCAL_PLUGIN)
+        ? Effect.all([
+          ignore(tryPromise(() => localPlugin().warmSpeechOutput({}))),
+          Effect.asVoid(probeStatus(true)),
+        ], { concurrency: "unbounded" })
+        : Effect.void
+      const warmCloud = network
+        ? ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
+        : Effect.void
+      if (network && registered(CLOUD_STREAM_PLUGIN)) {
+        const relay = relayPlugin()
+        const accounts = signInAccounts()
+        fork.detached ignore(timeout(Effect.all([
+          effect { cloudKey = signedInKey(accounts) catch () => undefined },
+          ignore(tryPromise(() => relay.prewarmCloudSpeech({ environment: CLOUD_ENVIRONMENT }))),
+        ], { concurrency: "unbounded" }), RELAY_WARMUP_BOUND))
+      }
+      try Effect.all([warmDevice, warmCloud], { concurrency: "unbounded" })
+    }, effect {
+      prewarmFlight = undefined
+      try Deferred.succeed(flight, undefined)
+    })
+  }
+
+  effect function openMic(session: number, network: boolean): boolean!VoiceBridgeFailed {
+    activeSession = session
+    if (network && registered(CLOUD_STREAM_PLUGIN)) {
+      const currentSession = session
+      const stream = cloudStream ?? createCloudStreamingSpeech({
+        environment: CLOUD_ENVIRONMENT,
+        credentialId: cloudKey ?? (try signedInKey(signInAccounts())),
+        assertCurrent: makeSessionGuard(() => activeSession, currentSession),
+        onInterim: (text) => publish({ kind: "transcript", session: currentSession, text, final: false }),
+      }, relayPlugin())
+      if (activeSession !== currentSession) throw new VoiceBridgeFailed({ method: "startCloudSpeech", cause: "session-changed" })
+      cloudStream = stream
+      const abort = makeAbort()
+      const capture = tryPromise({
+        try: () => stream.listen({
+          signal: abort.signal,
+          onSpeechStart: () => publish({ kind: "speechStart", session: currentSession }),
+          onSpeechEnd: () => undefined,
+          onSegment: (text) => {
+            if (text !== null && text !== "") publish({ kind: "speechEnd", session: currentSession, text })
+          },
+          onEnd: (cause) => publish({ kind: "ended", session: currentSession, reason: cause === undefined ? "ended" : "error" }),
+        }),
+        catch: (cause) => new VoiceBridgeFailed({ method: "startCloudSpeech", cause }),
+      }) catch effect (failure) => {
+        cloudStream = undefined
+        cloudKey = undefined
+        throw failure
+      }
+      cloudCapture = capture
+      return capture.fullDuplex
+    }
+    if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "no-voice-plugin" })
+    const probed = cachedStatus ?? (try probeStatus(true))
+    if (!probed.liveCapture) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "live-capture-unavailable" })
+    const started = try tryPromise({
+      try: () => localPlugin().startLiveCapture({ sessionId: `voice-${session}` }),
+      catch: (cause) => new VoiceBridgeFailed({ method: "startLiveCapture", cause }),
+    })
+    if (started.started === false) throw new VoiceBridgeFailed({ method: "startLiveCapture", cause: "not-started" })
+    return started.echoCancelled === true
+  }
+
+  effect function closeMic(session: number): void!VoiceBridgeFailed {
+    if (cloudCapture !== undefined) {
+      const cap = cloudCapture
+      cloudCapture = undefined
+      try tryPromise({ try: () => cap.close(), catch: (cause) => new VoiceBridgeFailed({ method: "closeCloudSpeech", cause }) })
+      return
+    }
+    if (!registered(LOCAL_PLUGIN)) return
+    try tryPromise({
+      try: () => localPlugin().stopLiveCapture({ sessionId: `voice-${session}` }),
+      catch: (cause) => new VoiceBridgeFailed({ method: "stopLiveCapture", cause }),
+    })
+  }
+
+  effect function playSentence(_session: number, _turn: number, text: string, append: boolean): void!VoiceBridgeFailed {
+    if (cloudStream !== undefined) {
+      const stream = cloudStream
+      const abort = makeAbort()
+      cloudSpeechAbort = abort
+      try tryPromise({
+        try: () => stream.speak(text, abort.signal, () => undefined),
+        catch: (cause) => new VoiceBridgeFailed({ method: "speakCloudSpeech", cause }),
+      })
+      return
+    }
+    if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "synthesizeLocal", cause: "no-voice-plugin" })
+    const requestId = fresh()
+    activePlaybackRequest = requestId
+    const prepared = try tryPromise({
+      try: () => localPlugin().synthesizeLocal({ requestId, text, append, replace: !append }),
+      catch: (cause) => new VoiceBridgeFailed({ method: "synthesizeLocal", cause }),
+    })
+    if (prepared.playbackId !== undefined && prepared.playbackId !== "") {
+      const playbackId = prepared.playbackId
+      try tryPromise({
+        try: () => localPlugin().play({ playbackId, replace: !append }),
+        catch: (cause) => new VoiceBridgeFailed({ method: "play", cause }),
+      })
+    }
+  }
+
+  effect function hush(_turn: number): void!! {
+    cloudSpeechAbort?.abort()
+    cloudSpeechAbort = undefined
+    if (!registered(LOCAL_PLUGIN)) return
+    const requestId = activePlaybackRequest
+    activePlaybackRequest = undefined
+    try ignore(tryPromise(() => localPlugin().stopPlayback(requestId === undefined ? {} : { requestId })))
+  }
+
+  effect function shut(session: number): boolean!! {
+    if (activeSession === session) activeSession = 0
+    cloudSpeechAbort?.abort()
+    cloudSpeechAbort = undefined
+    let confirmed = true
+    if (cloudCapture !== undefined) {
+      const cap = cloudCapture
+      cloudCapture = undefined
+      confirmed = (try (tryPromise(() => cap.cancel()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
+    }
+    if (cloudStream !== undefined) {
+      const stream = cloudStream
+      cloudStream = undefined
+      confirmed = (try (tryPromise(() => stream.stop()) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))) && confirmed
+    }
+    if (registered(LOCAL_PLUGIN)) {
+      const req = activePlaybackRequest
+      activePlaybackRequest = undefined
+      const stopPlay = try (tryPromise(() => localPlugin().stopPlayback(req === undefined ? {} : { requestId: req })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+      const stopCap = try (tryPromise(() => localPlugin().stopLiveCapture({ sessionId: `voice-${session}` })) |> Effect.as(%, true) |> Effect.orElseSucceed(%, () => false))
+      confirmed = stopPlay && stopCap && confirmed
+    }
+    return confirmed
+  }
+
+  return {
+    available: () => sync(() => registered(LOCAL_PLUGIN) || registered(CLOUD_STREAM_PLUGIN)),
+    checkPermission: () => registered(LOCAL_PLUGIN)
+      ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().checkPermissions()), (res) => parseGrant(res.microphone)), (): VoiceGrant => "prompt")
+      : succeed<VoiceGrant>("granted"),
+    requestPermission: () => registered(LOCAL_PLUGIN)
+      ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().requestPermissions()), (res) => parseGrant(res.microphone)), (): VoiceGrant => "denied")
+      : succeed<VoiceGrant>("granted"),
+    prewarm,
+    streamTimings: () => registered(CLOUD_STREAM_PLUGIN)
+      ? Effect.orElseSucceed(timeout(tryPromise(() => relayPlugin().cloudStreamTiming({})), RELAY_WARMUP_BOUND), (): unknown => undefined)
+      : succeed<unknown>(undefined),
+    probeStatus,
+    invalidateCache: () => sync(() => {
+      cachedStatus = undefined
+      cloudKey = undefined
+    }),
+    holdEngine: () => registered(LOCAL_PLUGIN)
+      ? Effect.orElseSucceed(Effect.map(tryPromise(() => localPlugin().holdSpeechEngine({})), (res) => res.held === true), () => false)
+      : succeed(false),
+    releaseEngineHold: () => registered(LOCAL_PLUGIN)
+      ? ignore(tryPromise(() => localPlugin().releaseSpeechEngineHold({})))
+      : Effect.void,
+    openMic,
+    closeMic,
+    playSentence,
+    hush,
+    shut,
+    events: makeNativeEvents(eventSubscribers, () => activeSession),
+    effect startRecording(ticket: number): RecordedClip!VoiceBridgeFailed {
+      if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "startRecording", cause: "no-voice-plugin" })
+      const started = try tryPromise({
+        try: () => localPlugin().startRecording({}),
+        catch: (cause) => new VoiceBridgeFailed({ method: "startRecording", cause }),
+      })
+      const recordingId = started.recordingId ?? `rec-${ticket}`
+      recordings.set(ticket, recordingId)
+      return { recordingId }
+    },
+    effect transcribe(ticket: number, _network: boolean): string!VoiceBridgeFailed {
+      if (!registered(LOCAL_PLUGIN)) throw new VoiceBridgeFailed({ method: "transcribeLocalRecording", cause: "no-voice-plugin" })
+      const recordingId = recordings.get(ticket)
+      if (recordingId === undefined) throw new VoiceBridgeFailed({ method: "stopRecording", cause: "no-recording" })
+      try tryPromise({
+        try: () => localPlugin().stopRecording({ recordingId }),
+        catch: (cause) => new VoiceBridgeFailed({ method: "stopRecording", cause }),
+      })
+      const result = try tryPromise({
+        try: () => localPlugin().transcribeLocalRecording({ requestId: fresh(), recordingId }),
+        catch: (cause) => new VoiceBridgeFailed({ method: "transcribeLocalRecording", cause }),
+      })
+      recordings.delete(ticket)
+      return result.text ?? ""
+    },
+    effect abandon(ticket: number): void!! {
+      const recordingId = recordings.get(ticket)
+      recordings.delete(ticket)
+      if (recordingId === undefined || !registered(LOCAL_PLUGIN)) return
+      try ignore(tryPromise(() => localPlugin().cancelRecording({ recordingId })))
+    },
+  }
+})
+
+export const browserVoiceBridge = Layer.effect(VoiceBridge, effect {
+  let warmedCloud = false
+  return {
+    available: () => succeed(false),
+    checkPermission: () => succeed<VoiceGrant>("granted"),
+    requestPermission: () => succeed<VoiceGrant>("granted"),
+    effect prewarm(network: boolean): void!!Agent {
+      if (!network || warmedCloud) return
+      warmedCloud = true
+      try ignore(ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/cloud/warm"), {}), Schema.Unknown))
+    },
+    streamTimings: () => succeed<unknown>(undefined),
+    probeStatus: () => succeed<SpeechStatus>({ ready: false, ttsReady: false, liveCapture: false }),
+    invalidateCache: () => sync(() => { warmedCloud = false }),
+    holdEngine: () => succeed(false),
+    releaseEngineHold: () => Effect.void,
+    openMic: () => Effect.fail(new VoiceBridgeFailed({ method: "openMic", cause: "browser-no-native-voice" })),
+    closeMic: () => Effect.void,
+    playSentence: () => Effect.void,
+    hush: () => Effect.void,
+    shut: () => succeed(true),
+    events: Stream.empty,
+    startRecording: () => Effect.fail(new VoiceBridgeFailed({ method: "startRecording", cause: "browser-no-native-voice" })),
+    transcribe: () => Effect.fail(new VoiceBridgeFailed({ method: "transcribe", cause: "browser-no-native-voice" })),
+    abandon: () => Effect.void,
+  }
+})

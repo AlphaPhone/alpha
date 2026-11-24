@@ -1,0 +1,252 @@
+// spec/app/phone/voicemail.md, "Story: See my voicemail"; spec/app/phone/voicemail.md, "Story: Listen to a voicemail"; spec/app/phone/voicemail.md, "Story: Read what was said"; spec/app/phone/voicemail.md, "Story: Answer a voicemail"; spec/app/phone/voicemail.md, "Story: Delete a voicemail"
+import type { StagedDeletion } from "@elizaos/os/bridges/action-journal"
+import type { ListedVoicemail, VoicemailId, VoicemailListing } from "@elizaos/os/bridges/phone"
+import { Machine as PhoneMachine, liveCall } from "../../gen/app__phone.effect.vibe"
+import * as Voicemail from "../../gen/app__phone__voicemail.effect.vibe"
+import type { Effect as Out, Event } from "../../gen/app__phone__voicemail.effect.vibe"
+import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { type Job, answer, applying, contained, following, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+
+/** What Voicemail counts, kept beside it: the voicemails last listed, the one open, its audio as a playable source and its transcript. */
+export interface Heard {
+  readonly rows: ReadonlyArray<ListedVoicemail>
+  readonly open: string
+  readonly audio: string
+  readonly transcript: string
+}
+
+const nothing: Heard = { rows: [], open: "", audio: "", transcript: "" }
+
+/** The voicemails behind Voicemail's counts. */
+export service Voicemails {
+  get(): Heard!!
+  set(change: Partial<Heard>): void!!
+}
+
+const voicemails = Layer.sync(Voicemails, () => {
+  let held = nothing
+  return { get: () => sync(() => held), set: (change: Partial<Heard>) => sync(() => { held = { ...held, ...change } }) }
+})
+
+/** The open voicemail as listed, if it still is. */
+effect function opened(): Option.Option<ListedVoicemail>!!Voicemails {
+  const held = try (try Voicemails).get()
+  return Option.fromNullishOr(held.rows.find((row) => row.id === held.open))
+}
+
+// spec/app/phone/voicemail.md, "Only the newest read of the list is shown, and nothing without a carrier"
+// spec/app/phone/index.md, "The Voicemail tab is offered only while the carrier's visual voicemail is ready"
+effect function listed(ticket: number, refresh: boolean): Event!!(Telephony | Voicemails | PhoneMachine | Voicemail.Machine) {
+  const store = try Voicemails
+  const machine = try Voicemail.Machine
+  const listing = (refresh
+    ? telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("ExplicitRead"))
+    : telephony("voicemail", (c) => c.phone.voicemail())) catch () => undefined
+  const carrier = listing?.carrier === "CarrierReady"
+  const voicemails = carrier ? listing?.voicemails ?? [] : []
+  const names = try namesOf("phone", voicemails.map((row) => row.number))
+  const rows = voicemails.map((row) => ({ ...row, cachedName: names.get(row.number) ?? row.cachedName }))
+  const unheard = rows.filter((row) => !row.heard).length
+  const state = try machine.get()
+  const selected = (try store.get()).open
+  if (state.front && state.list.ticket === ticket && state.list.status === "Loading") {
+    try store.set({ rows })
+    if (listing !== undefined) try ignore((try PhoneMachine).send({ type: "voicemailReported", ready: carrier }))
+  }
+  return { type: "listed", ticket, ok: listing !== undefined, carrier, count: rows.length, unheard,
+    stillOpen: selected === "" || rows.some((row) => row.id === selected) }
+}
+
+// spec/app/phone/voicemail.md, "Only the open voicemail's newest audio is taken, and with it a transcript is asked of the phone's own recognizer"
+effect function fetched(ticket: number): Event!!(Telephony | Voicemails | Voicemail.Machine) {
+  const store = try Voicemails
+  const open = try opened()
+  const source = Option.isNone(open) ? "" : effect {
+    const id = open.value.id
+    if (open.value.audio !== "AudioOnPhone") {
+      const ready = try telephony("fetchVoicemailAudio", (c) => c.phone.fetchVoicemailAudio(id))
+      if (ready !== "ready") return ""
+    }
+    const found = try telephony("voicemailAudio", (c) => c.phone.voicemailAudio(id))
+    return `data:${found.mimeType};base64,${found.data}`
+  } catch () => ""
+  const state = try (try Voicemail.Machine).get()
+  const current = (try store.get()).open
+  if (state.open && state.audio.status === "Loading" && state.audio.ticket === ticket && Option.isSome(open) && open.value.id === current) try store.set({ audio: source })
+  return { type: "audioFetched", ticket, ok: source !== "", recognizer: false }
+}
+
+/** The native receipt owns the outcome, even if the staged item is already hidden from the list. */
+effect function settlement(id: number, requested: StagedDeletion): Event!!(Telephony | Time) {
+  const time = try Time
+  for (const delay of [0, 250, 1000, 3000]) {
+    if (delay !== 0) try time.until(requested.expiresAt + delay)
+    const pending = telephony("pending voicemail deletions", (c) => c.deletions.pending()) catch () => undefined
+    const phase = pending?.deletions.find((receipt) => receipt.id === requested.id && receipt.kind === requested.kind)?.phase
+    if (phase === "Deleted") return { type: "removed", id, done: true, known: true }
+    if (phase === "Undone" || phase === "DeletionConflict") return { type: "removed", id, done: false, known: true }
+    if (phase === "UnknownOutcome") break
+  }
+  return { type: "removed", id, done: false, known: false }
+}
+
+// spec/app/phone/voicemail.md, "The phone's answer ends the removal it names"
+effect function removed(id: number): Event!!(Telephony | Voicemails | Time) {
+  const open = try opened()
+  if (Option.isNone(open)) return { type: "removed", id, done: false, known: true }
+  const voicemail: VoicemailId = open.value.id
+  return effect {
+    const answer = try telephony("deleteVoicemail", (c) => c.phone.deleteVoicemail(voicemail))
+    if (answer.status === "queued") return try settlement(id, answer.deletion)
+    return { type: "removed", id, done: false, known: true } satisfies Event
+  } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
+}
+
+// spec/app/phone/voicemail.md, "Call back hands the caller's number to Phone and Message opens Messages with it"
+effect function reached(app: Voicemail.Reach): void!!(Voicemails | PhoneMachine | Callers) {
+  const open = try opened()
+  if (Option.isNone(open) || open.value.number === "") return
+  const number = open.value.number
+  if (app === "Message") try (try Callers).message(number)
+  else try contained((try PhoneMachine).send({ type: "dialVoicemail", number }), "the voicemail callback")
+}
+
+/** Where a number handed out of Phone goes to be written to: Messages, which says how. */
+export service Callers {
+  message(number: string): void!!
+}
+
+function carry(fx: Out): Job<Event, Telephony | Voicemails | PhoneMachine | Voicemail.Machine | Callers | Time, []> {
+  return match (fx) {
+    when { tag: "ReadList", let ticket, let refresh }: answer("list", listed(ticket, refresh), { type: "listed", ticket, ok: false, carrier: false, count: 0, unheard: 0, stillOpen: false });
+    when { tag: "FetchAudio", let ticket }: answer("audio", fetched(ticket), { type: "audioFetched", ticket, ok: false, recognizer: false });
+    when { tag: "TranscribeOnPhone", let ticket }: answer("transcript", succeed<Event>({ type: "transcribed", ticket, ok: false }), { type: "transcribed", ticket, ok: false });
+    when { tag: "MarkHeard" }: run("heard", effect {
+      const open = try opened()
+      if (Option.isSome(open)) try ignore(telephony("markVoicemailHeard", (c) => c.phone.markVoicemailHeard(open.value.id)))
+    });
+    when { tag: "ReachCaller", let app }: run("reach", reached(app));
+    when { tag: "Remove", let id }: answer(`remove ${id}`, removed(id), { type: "removalLost" });
+  }
+}
+
+const observations: Stream.Stream<Promise<VoicemailListing>, never, Telephony> = Stream.callback((queue) => Effect.asVoid(acquireRelease(
+  Effect.orElseSucceed(telephony("observeVoicemail", (c) => c.phone.observeVoicemail((listing) => {
+    void listing.catch(() => undefined)
+    Queue.offerUnsafe(queue, listing)
+  })), () => undefined),
+  (unsubscribe) => (unsubscribe === undefined ? Effect.void : ignore(tryPromise(() => unsubscribe()))),
+)))
+
+const carrierChanged = started(effect {
+  const phone = try PhoneMachine
+  const voicemail = try Voicemail.Machine
+  const front = Stream.changesWith(Stream.map(phone.changes, (state) => state.front), (a, b) => a === b)
+  const first = Stream.fromEffect(telephony("refreshVoicemail", (c) => c.phone.refreshVoicemail("AutomaticRead")) catch () => undefined)
+  const changed = Stream.mapEffect(observations, (listing) => tryPromise(() => listing) catch () => undefined)
+  const watched = Stream.switchMap(front, (showing) => showing ? Stream.concat(first, changed) : Stream.empty)
+  try Stream.runForEach(watched, effect (listing) => {
+    if (listing === undefined || !(try phone.get()).front) return
+    const ready = listing.carrier === "CarrierReady"
+    try contained(phone.send({ type: "voicemailReported", ready }), "visual voicemail")
+    const state = try voicemail.get()
+    if (state.front && ready && state.list.status !== "Loading") try ignore(voicemail.send({ type: "arrived" }))
+    else try contained(voicemail.send({ type: "unheardReported", count: ready ? listing.voicemails.filter((row) => !row.heard).length : 0 }), "unheard voicemail")
+  })
+}, "watching voicemail while Phone is visible")
+
+const machine = reacting(Voicemail, { carry })
+
+const shown = following(PhoneMachine, (phone) => phone.front && phone.tab === "Voicemail", Voicemail.Machine, (showing): Event => (showing ? { type: "show" } : { type: "leave" }))
+
+// spec/app/phone/voicemail.md, "A call that starts pauses playback"
+const calls = following(PhoneMachine, liveCall, Voicemail.Machine, (live): Event | undefined => (live ? { type: "callStarted" } : undefined))
+
+/** The current clip's local playback position and changes. */
+export interface PlaybackPosition {
+  subscribe(wake: () => void): () => void
+  position(): number
+  seek(seconds: number): void
+}
+
+module audio {
+  /** Create the one audio element for voicemail playback. @throws {never} */
+  export function makeAudio(): HTMLAudioElement {
+    return new Audio()
+  }
+  /** Listen only while a playback control is mounted. @throws {never} */
+  export function positionOf(element: HTMLAudioElement): PlaybackPosition {
+    const events = ["timeupdate", "seeking", "seeked", "ended", "emptied"]
+    return {
+      subscribe: (wake) => {
+        for (const kind of events) element.addEventListener(kind, wake)
+        return () => { for (const kind of events) element.removeEventListener(kind, wake) }
+      },
+      position: () => Math.floor(element.currentTime),
+      seek: (seconds) => {
+        if (!Number.isFinite(element.duration) || !Number.isFinite(seconds)) return
+        element.currentTime = Math.max(0, Math.min(seconds, element.duration))
+      },
+    }
+  }
+
+  /** Prepare this clip for playback and seeking without starting it. @throws {never} */
+  export function sourceOf(element: HTMLAudioElement, source: string): void {
+    if (source === "") {
+      if (!element.hasAttribute("src")) return
+      element.removeAttribute("src")
+      element.load()
+    } else if (element.getAttribute("src") !== source) {
+      element.src = source
+      element.preload = "metadata"
+    }
+  }
+
+  /** Pause voicemail playback, resetting to the start when stopped. @throws {never} */
+  export function pauseAudio(element: HTMLAudioElement, reset: boolean): void {
+    element.pause()
+    if (reset) element.currentTime = 0
+  }
+}
+import { makeAudio, pauseAudio, positionOf, sourceOf } from audio
+
+/** The one audio element the open voicemail plays in, outside any screen. */
+export service Player {
+  element(): HTMLAudioElement!!
+  controls(): PlaybackPosition!!
+}
+
+const player = Layer.sync(Player, () => {
+  const element = makeAudio()
+  const controls = positionOf(element)
+  return { element: () => sync(() => element), controls: () => sync(() => controls) }
+})
+
+// spec/app/phone/voicemail.md, "Play needs the audio, and never plays during a call"
+const played = applying(Voicemail.Machine, (state) => ({ front: state.front, open: state.open, ticket: state.audio.ticket, ready: state.open && state.audio.status === "Loaded", playback: state.playback }), effect ({ open, ready, playback }) => {
+  const element = try (try Player).element()
+  const store = try Voicemails
+  const audio = ready ? (try store.get()).audio : ""
+  if (playback !== "Playing") {
+    pauseAudio(element, playback === "Stopped")
+    sourceOf(element, audio)
+    const current = try (try Voicemail.Machine).get()
+    if (!open && !current.open) try store.set({ open: "", audio: "", transcript: "", ...(!current.front ? { rows: [] } : {}) })
+    return
+  }
+  sourceOf(element, audio)
+  promise(() => element.play()) catch effect () => {
+    try ignore((try Voicemail.Machine).send({ type: "pause" }))
+  }
+})
+
+/** The open voicemail's audio reaching its end. */
+const ends: Stream.Stream<Event, never, Player> = Stream.unwrap(effect {
+  const element = try (try Player).element()
+  return Stream.callback<Event>((queue) => sync(() => element.addEventListener("ended", () => { Queue.offerUnsafe(queue, { type: "ended" }) })))
+})
+
+/** Voicemail: resident, so that Home's unheard count and a call starting reach it; its list is read while its tab shows. */
+export const voicemail = together(machine, voicemails, shown, calls, carrierChanged, player, played, hearing(ends, Voicemail.Machine, (event: Event) => event))
+

@@ -9,7 +9,8 @@ Everything is built on [the stack](AGENTS.md#the-stack): Node 26, pnpm, VibeLang
 | Path | Holds |
 |---|---|
 | `apps/` | deployable applications; `apps/app` is Alpha's page: Home, the built-in apps and Ask Alpha, over eliza's agent and cloud (`pnpm eliza` builds the pinned commit once) |
-| `apps/cloud` | `@repo/cloud`: Alpha Cloud, eliza's cloud with Alpha's profile on Cloudflare (`spec/cloud/`): the API and web host Workers, and `pnpm cloud`, the operator command that renders, checks, provisions, deploys and smoke-tests an environment from a private secrets file and reviewed inputs (`apps/cloud/alpha-cloud.env.example`, `.github/workflows/cloud-deploy.yml`) |
+| `apps/site` | `@repo/site`: Alpha's public page (`spec/site/`): `build` writes the static page its deploy uploads to Cloudflare Pages; operating it is in [README.md](README.md#operating-alpha) |
+| `apps/cloud` | `@repo/cloud`: Alpha's side of eliza's cloud (`spec/cloud/`): the profiles, the seed, the cloud route table the app hands eliza's `ElizaCloud` plugin (`elizaCloudRoutes` from `@repo/cloud`), and Alpha's own cloud on Cloudflare, the cut-over candidate: its API and web host Workers and `pnpm cloud`, the operator command that checks, renders, provisions, deploys and smoke-tests an environment from a private secrets file and the operator's completed `profile/candidate.example.json` (`apps/cloud/alpha-cloud.env.example`, `.github/workflows/cloud-deploy.yml`) |
 | `packages/` | what applications share: `@repo/ui` (components), `@repo/design-system` (tokens) |
 | `packages/eliza-harness` | `@repo/eliza-harness`: the pinned eliza checkout (`pnpm eliza`, `pinnedCheckout()`), its cloud and agent started for journeys and `pnpm dev`, the run's owners, and `pnpm no-bun`; an app imports it from `test/` and its configs, and `pinned` from `src/` |
 | `packages/deployment` | `@repo/deployment`: `deployments.json`, the cloud origin, App Link host and profile of each environment (`local`, `staging`, `production`), read by `deployment(name)` |
@@ -130,10 +131,14 @@ errors in subscribers, since Node reports a thrown subscriber error as an uncaug
 
 ## Releasing
 
-Set `version` in the root `package.json`, merge to `main`, and push the tag `v<version>` from it.
-`.github/workflows/release.yml` reuses the `build` task when it runs `pnpm pack`. Then it runs the remaining shard prerequisites
-and `pnpm selftest --only --concurrency=1` with the CI cache keys and attaches the tarball to a GitHub release of that tag.
-A project installs it as [vibestack/README.md, "Using it from another package"](vibestack/README.md#using-it-from-another-package) says.
+Alpha's launcher is released by `.github/workflows/release.yml` over `pnpm release` in `apps/app`
+([spec/release/index.md](spec/release/index.md)). A push to `main` builds an unsigned candidate numbered by its
+run, mirrors it privately and writes its signing plan, whose digest the run's summary shows. Read the plan, then
+dispatch the workflow with the candidate's run id, that digest and the voice qualification evidence: the protected
+`release` environment signs exactly the planned APK, delivers it with a receipt, qualifies it and publishes the APK
+before the manifest. Once the manifest reads back naming the release, run `pnpm release record` with the run's
+ledger and commit the raised floor in `apps/app/aosp/signing/release-signer.json` in a reviewed pull request.
+
 ## Architecture
 
 The spec owns the rules and state; generated code is its runtime contract.

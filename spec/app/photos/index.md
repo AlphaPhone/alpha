@@ -287,7 +287,7 @@ listed, and "Add to album" closes when none of its selection is left.
 ```quint
 pure def canListed(s: Photos, ticket: int, by: Actor): bool = by == Phone and s.visible and R::canAnswer(s.library, ticket)
 
-pure def olderThan(rows: Set[int], than: Set[int]): bool = rows.forall(r => than.forall(o => r < o))
+pure def allOlder(rows: Set[int], than: Set[int]): bool = rows.forall(r => than.forall(o => r < o))
 
 pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int], starred: Set[int], revision: int, more: bool, by: Actor): Done =
   val answered = { ...s, library: R::answer(s.library, ok), locked: false }
@@ -299,7 +299,7 @@ pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int
   val stars = (if (s.paging) s.starred.union(starred) else starred).intersect(whole)
   val kept = s.selected.intersect(whole)
   if (not(ok)) emit(List(), answered)
-  else if (s.paging and (revision != s.revision or not(olderThan(rows, s.rows)))) listing(List(), answered)
+  else if (s.paging and (revision != s.revision or not(allOlder(rows, s.rows)))) listing(List(), answered)
   else emit(List(), {
     ...answered, rows: whole, mine: own, starred: stars, albums: if (items) s.albums else shown,
     more: more and items, revision: revision, selected: kept, selecting: s.selecting and items,
@@ -308,7 +308,7 @@ pure def listed(s: Photos, ticket: int, ok: bool, rows: Set[int], owned: Set[int
 
 pure def stepAPageKeepsWhatWasListed(before: Photos, via: str, after: Photos): bool =
   (via == "listed" and before.paging and after.library.status == R::Loaded)
-    implies (before.rows.subseteq(after.rows) and olderThan(after.rows.exclude(before.rows), before.rows))
+    implies (before.rows.subseteq(after.rows) and allOlder(after.rows.exclude(before.rows), before.rows))
 ```
 
 ### The phone can say its library is locked until the phone is unlocked

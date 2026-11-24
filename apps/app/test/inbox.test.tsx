@@ -16,26 +16,25 @@ import { scene } from "./fakes/scene.ts";
 underAct();
 afterEach(closeAll);
 
-/** The open button of each message row of the list, by its subject. */
-const opens = () => [...document.querySelectorAll("li")].map((row) => [...row.querySelectorAll("button")].find((found) => !found.hasAttribute("aria-pressed") && found.children.length === 3)).filter((found) => found !== undefined);
-const rows = () => opens().map((found) => found.children[1]?.textContent);
+const opens = () => [...document.querySelectorAll<HTMLButtonElement>("ul[aria-label='Email messages'] button")];
+const subjectOf = (button: HTMLButtonElement) => button.querySelector("[data-inbox-subject]")?.textContent;
+const rows = () => opens().map(subjectOf);
 const row = (subject: string) => drawn(() => {
-  const found = opens().find((open) => open.children[1]?.textContent === subject);
+  const found = opens().find((open) => subjectOf(open) === subject);
   if (!found) throw new Error(`no message ${subject}`);
   found.click();
 });
-const choose = (subject: string) => drawn(() => {
-  const found = opens().find((open) => open.children[1]?.textContent === subject)?.parentElement?.querySelector("button[aria-pressed]");
-  if (!(found instanceof HTMLElement)) throw new Error(`cannot choose ${subject}`);
-  found.click();
-});
+const choose = async (subject: string) => {
+  if (!opens().some((open) => open.getAttribute("role") === "checkbox")) await menu("Select emails", "Mail options");
+  await row(subject);
+};
 const confirm = (name: string) => drawn(() => {
   const found = [...document.querySelectorAll("[role=dialog] button, [role=alertdialog] button")].find((one) => one.textContent === name);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${name} in the review`);
   found.click();
 });
-const menu = (item: string) => drawn(() => {
-  button("More actions")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+const menu = (item: string, label = "More actions") => drawn(() => {
+  button(label)?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
 }).then(() => drawn(() => {
   const found = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
   if (!(found instanceof HTMLElement)) throw new Error(`no ${item} in the menu`);
@@ -50,6 +49,16 @@ const write = (name: string, text: string) => drawn(() => {
 const told = () => document.body.textContent ?? "";
 const title = () => document.querySelector("main[aria-label]:not([aria-label=Inbox]), main[aria-label=Inbox]")?.getAttribute("aria-label");
 const step = (name: string) => process.stderr.write(`STEP ${name}\n`);
+const tile = (view: string) => drawn(() => {
+  const found = document.querySelector<HTMLButtonElement>(`[data-home-tile='view:${view}']`);
+  if (!found) throw new Error(`no tile ${view}`);
+  found.click();
+});
+const action = (name: string) => drawn(() => {
+  const found = document.querySelector<HTMLButtonElement>(`button[aria-label='${name}']`);
+  if (!found) throw new Error(`no action ${name}`);
+  found.click();
+});
 const search = (text: string) => fill("Search mail", text).then(() => document.querySelector("form[role=search]")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 
 describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone) => {
@@ -61,7 +70,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     const runtime = inbox.runtime(alpha);
 
     // spec/app/inbox/index.md, "Opening Inbox, and every change to Google access, checks the accounts again, even while a check is out"
-    await press("Inbox");
+    await tile("Inbox");
     await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
     step("1");
     expect([rows().slice(0, 2), rows().length]).toEqual([["Lunch on Friday", "Your tax return"], 25]);
@@ -73,6 +82,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     expect([rows().length, Boolean(button("Load more"))]).toEqual([28, false]);
 
     // spec/app/inbox/index.md, "Choosing a folder or a search reads its first page"
+    await press("Search email");
     await search("tax");
     await until(alpha, runtime, List, (s) => s.selected.query === "tax" && s.list.status === "Loaded");
     step("3");
@@ -81,8 +91,8 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     // spec/app/inbox/index.md, "Back from a search shows its folder without the search, before Back leaves Inbox"
     await hardware("back");
     await until(alpha, runtime, List, (s) => s.selected.query === "" && s.list.status === "Loaded");
-    expect([rows().length, (document.querySelector("input[aria-label='Search mail']") as HTMLInputElement | null)?.value]).toEqual([25, ""]);
-    await press("Spam");
+    expect([rows().length, Boolean(button("Search email")), document.querySelector("input[aria-label='Search mail']")]).toEqual([25, true, null]);
+    await menu("Spam", "More folders");
     await until(alpha, runtime, List, (s) => s.selected.folder === "Spam" && s.list.status === "Loaded");
     step("4");
     expect(rows()).toEqual(["Win a prize"]);
@@ -120,7 +130,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/sending.md, "Archive and Trash are held for the undo window, and only the owner's Undo before it ends sends nothing"
     await choose("Your tax return");
-    await press("Archive");
+    await action("Archive");
     await confirm("Archive");
     await until(alpha, runtime, Changes, (s) => s.undo.holding === "Held");
     step("12");
@@ -133,7 +143,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/inbox/sending.md, "A recorded operation sends its one request, for its own account under that account's grant now, exactly as reviewed: a draft while it is at the revision shown and its hand-over is written to the phone, archive and Trash once the undo window has passed"
     await choose("Your tax return");
-    await press("Archive");
+    await action("Archive");
     await confirm("Archive");
     await later(alpha, 10_000);
     await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
@@ -200,19 +210,19 @@ it("Connect Gmail and keep to its grant (spec/app/inbox/index.md, \"Story: Conne
   expect([rows(), told()]).toEqual([[], expect.stringContaining("Alpha cannot read this mail")]);
 });
 
-it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\"; spec/app/inbox/letter.md, \"Story: Begin a draft\")", async () => {
+it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I reviewed\"; spec/app/inbox/drafts.md, \"Story: Write a message\"; spec/app/inbox/drafts.md, \"Story: Set a draft aside or discard it\"; spec/app/inbox/adding.md, \"Story: Add files and people to my draft\"; spec/app/inbox/suggestion.md, \"Story: Review what is offered into my email\"; spec/app/inbox/sending.md, \"Story: Save my draft to Gmail, or delete it there, knowingly\"; spec/app/inbox/letter.md, \"Story: Begin a draft\")", async () => {
   const world = { ...scene(), phone: false };
   const lunch = world.inbox.mail.find((stored) => stored.card.subject === "Lunch on Friday");
   if (lunch) lunch.files = [{ partId: "2", name: "menu.pdf", mimeType: "application/pdf", size: 3 * 1_048_576, supported: true }];
-  const { alpha } = await open(world);
+  const { alpha, close } = await open(world);
   const runtime = inbox.runtime(alpha);
-  await press("Inbox");
+  await tile("Inbox");
   await until(alpha, runtime, List, (s) => s.list.status === "Loaded" && s.pages === 1);
 
   // spec/app/inbox/drafts.md, "A new message, a reply, a reply to all or a forward begins as [one draft](./letter.md) says; a reply to a message with no usable address is refused and the owner told"
   await row("Your tax return");
   await until(alpha, runtime, Shown, (s) => s.body.status === "Loaded");
-  await press("Reply");
+  await menu("Reply");
   await until(alpha, runtime, Writing, (s) => s.open && s.letter.kind === "Reply" && s.letter.recipients === 1);
 
   // spec/app/inbox/drafts.md, "Every change to the text, recipients or attachments is an edit, counted at once"; spec/app/inbox/drafts.md, "Edits are written to the phone once typing pauses, and no later than the longest wait after a burst began, one write at a time under its own ticket"
@@ -226,6 +236,7 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await until(alpha, runtime, Offering, (s) => s.review.showing && s.target === "ToDraft");
   await confirm("Add");
   await until(alpha, runtime, Offering, (s) => s.used === 1 && s.text === 0);
+  await later(alpha, 10);
   await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
   expect((document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement | null)?.value).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
 
@@ -247,10 +258,14 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   });
   await until(alpha, runtime, Writing, (s) => s.letter.attachments === 1);
   expect(told()).toContain("receipt.txt");
+  await later(alpha, 10);
+  await until(alpha, runtime, Writing, (s) => s.stored && !s.pending && s.write.status === "Loaded");
 
   // spec/app/inbox/sending.md, "Only the owner confirms, only the review of the thing as it is now, while the account's grant allows it and, for a send, it has a valid recipient"
   await press("Send");
   await until(alpha, runtime, Changes, (s) => s.review.showing && s.kind === "Send");
+  expect(document.querySelector('[role=dialog] [aria-label="Message"]')?.textContent).toBe("Thanks, it is all in order.\n\nSee you on Friday.");
+  expect(world.inbox.changes).toEqual(["draft-create Re: Your tax return"]);
   await confirm("Send");
   await until(alpha, runtime, Changes, (s) => s.attempt.outcome === "Confirmed");
   expect([world.inbox.changes.at(-1), world.inbox.attached]).toEqual(["send s2@mail.test Re: Your tax return", ["receipt.txt"]]);
@@ -274,6 +289,28 @@ it("Send a draft I reviewed (spec/app/inbox/sending.md, \"Story: Send a draft I 
   await confirm("Send");
   await until(alpha, runtime, Writing, (s) => !s.open);
   expect([world.inbox.changes.at(-1), world.inbox.forwarded]).toEqual(["send friend@mail.test Fwd: Lunch on Friday", ["g1/2"]]);
+  // spec/app/inbox/drafts.md, "A draft is set aside only once it is wholly kept on the phone, and comes back exactly as it was set aside"
+  await press("Back to the list");
+  await until(alpha, runtime, Shown, (s) => s.message === 0);
+  await press("Compose");
+  await until(alpha, runtime, Writing, (s) => s.open);
+  await fill("Add to To", "unfinished@");
+  await write("Message", "Keep these words.");
+  await hardware("back");
+  await until(alpha, runtime, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
+  await close();
+
+  const again = await open(world);
+  const restored = inbox.runtime(again.alpha);
+  await until(again.alpha, restored, Writing, (s) => !s.open && s.shelf.shelved.length === 1);
+  await press("1 drafts set aside");
+  await press("Keep these words.No recipient");
+  await until(again.alpha, restored, Writing, (s) => s.open);
+  expect([
+    document.querySelector<HTMLInputElement>('input[aria-label="Add to To"]')?.value,
+    document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]')?.value,
+    world.inbox.changes.length,
+  ]).toEqual(["unfinished@", "Keep these words.", 3]);
 });
 
 /** Begin a new message to `to` about `subject`, and wait until the phone keeps it. */

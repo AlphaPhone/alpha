@@ -209,10 +209,11 @@ export function plugIn(plugins: Readonly<Record<string, Faked>>): () => void {
     return id;
   };
   return () => {
+    hearing.clear();
     delete page.androidBridge;
     delete capacitor.PluginHeaders;
     delete capacitor.nativePromise;
-    delete capacitor.nativeCallback;
+    capacitor.nativeCallback = () => "";
   };
 }
 

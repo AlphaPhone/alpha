@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+ <uses-permission android:name="android.permission.READ_CONTACTS" />
+ <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+ <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+ <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+ <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE" tools:ignore="ProtectedPermissions" />
+ <uses-permission android:name="android.permission.READ_SMS" />
+ <uses-permission android:name="android.permission.SEND_SMS" />
+ <uses-permission android:name="android.permission.RECEIVE_SMS" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
+ <uses-permission android:name="android.permission.RECEIVE_MMS" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
+ <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" tools:ignore="PermissionImpliesUnsupportedChromeOsHardware" />
+ <uses-permission android:name="android.permission.CALL_PHONE" />
+ <uses-permission android:name="android.permission.READ_CALL_LOG" />
+ <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+ <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+ <uses-feature android:name="android.hardware.telephony" android:required="false" />
+ <queries>
+  <intent><action android:name="android.intent.action.SENDTO" /><data android:scheme="smsto" /></intent>
+  <package android:name="com.android.systemui" />
+ </queries>
+ <application>
+  <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="portrait" tools:replace="android:screenOrientation">
+   <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.HOME" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+  </activity>
+  <receiver android:name=".AlphaSmsSendReceiver" android:exported="false" />
+  <receiver android:name=".AlphaTelephonySetupReceiver" android:exported="true" android:permission="android.permission.MANAGE_ROLE_HOLDERS" />
+  <service android:name=".AlphaInCallService" android:enabled="false" android:exported="true" android:permission="android.permission.BIND_INCALL_SERVICE">
+   <meta-data android:name="android.telecom.IN_CALL_SERVICE_UI" android:value="true" />
+   <meta-data android:name="android.telecom.IN_CALL_SERVICE_RINGING" android:value="false" />
+   <intent-filter><action android:name="android.telecom.InCallService" /></intent-filter>
+  </service>
+  <activity android:name=".AlphaCallActivity" android:enabled="false" android:exported="false" android:launchMode="singleTop" android:screenOrientation="portrait" android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+  <activity android:name=".AlphaSmsNoticeActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@android:style/Theme.NoDisplay" />
+  <receiver android:name=".AlphaSmsDeliverReceiver" android:enabled="false" android:exported="true" android:permission="android.permission.BROADCAST_SMS">
+   <intent-filter><action android:name="android.provider.Telephony.SMS_DELIVER" /></intent-filter>
+  </receiver>
+  <receiver android:name=".AlphaMmsWapPushReceiver" android:enabled="false" android:exported="true" android:permission="android.permission.BROADCAST_WAP_PUSH">
+   <intent-filter><action android:name="android.provider.Telephony.WAP_PUSH_DELIVER" /><data android:mimeType="application/vnd.wap.mms-message" /></intent-filter>
+  </receiver>
+  <receiver android:name=".AlphaMmsResultReceiver" android:enabled="false" android:exported="false" />
+  <service android:name=".AlphaRespondViaMessageService" android:enabled="false" android:exported="true" android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
+   <intent-filter><action android:name="android.intent.action.RESPOND_VIA_MESSAGE" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /></intent-filter>
+  </service>
+  <activity android:name=".AlphaSmsComposeActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_messages_label" android:windowSoftInputMode="adjustResize">
+   <intent-filter><action android:name="android.intent.action.SENDTO" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="sms" /><data android:scheme="smsto" /></intent-filter>
+  </activity>
+  <provider android:name="ai.eliza.plugins.messages.MmsFileProvider" android:authorities="${applicationId}.mms" android:enabled="false" android:exported="false" android:grantUriPermissions="true" />
+  <activity android:name=".AlphaDialPadActivity" android:enabled="false" android:exported="true" android:theme="@android:style/Theme.DeviceDefault.DayNight" android:label="@string/alpha_phone_label">
+   <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
+   <intent-filter><action android:name="android.intent.action.DIAL" /><category android:name="android.intent.category.DEFAULT" /><data android:scheme="tel" /></intent-filter>
+  </activity>
+ </application>
+</manifest>

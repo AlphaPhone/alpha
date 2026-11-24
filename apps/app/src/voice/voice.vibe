@@ -1,0 +1,455 @@
+// spec/app/voice/index.md, "Story: Hold a spoken conversation"; spec/app/voice/index.md, "The speech pipeline warms on startup, foreground return and account readiness without opening the microphone"; spec/app/voice/index.md, "A reply that needs the owner's review in chat keeps voice listening with the microphone open"; spec/app/voice/index.md, "An active voice conversation may ask the shell to open Home or any admitted screen"; spec/app/shell/index.md, "Agent navigation shows an admitted app or Home without lowering Ask Alpha"; spec/app/voice/index.md, "A spoken reply says a written date, clock time, range and percentage in words"; spec/app/voice/index.md, "A turn Cloud refuses because the account is out of funds ends voice quietly, as Stop does"
+import { ConversationRecord, TurnController } from "@elizaos/agent/client"
+import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Voice from "../../gen/app__voice.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { ask } from "../platform/remote.vibe"
+import { isCloudFundsRefusal } from "../assistant/assistant.vibe"
+import { type VoiceEvent, VoiceBridge } from "../platform/voice.vibe"
+import { fresh } from "../runtime/attempts.vibe"
+import { type Job, answer, contained, due, hearing, reacting, run, started, stream, together, untimed } from "../runtime/reactor.vibe"
+
+const views: ReadonlyArray<Shell.View> = [
+  "Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings",
+]
+
+export function placeOf(view: Shell.View | undefined): number {
+  if (view === undefined) return 1
+  const at = views.indexOf(view)
+  return at >= 0 ? at + 2 : 1
+}
+
+export function viewOfPlace(place: number): Shell.View | undefined {
+  return place >= 2 ? views[place - 2] : undefined
+}
+
+export interface VoiceMemory {
+  conversation: ConversationRecord | undefined
+  heardText: string
+  lastReply: string
+  readonly queuedSentences: string[]
+  dispatchedSentences: number
+  playbackTurn: number
+  playbackEpoch: number
+  readonly playLock: Semaphore.Semaphore
+  reviewNotice: string
+  dictatedText: string
+  enqueueSentence(turn: number, text: string): void
+  dequeueSentence(turn: number): { readonly text: string; readonly append: boolean } | undefined
+  clearQueued(): void
+}
+
+export service VoiceWords {
+  readonly memory: VoiceMemory
+}
+
+export const voiceWords = Layer.effect(VoiceWords, effect {
+  const playLock = try Semaphore.make(1)
+  const memory: VoiceMemory = {
+    conversation: undefined,
+    heardText: "",
+    lastReply: "",
+    queuedSentences: [],
+    dispatchedSentences: 0,
+    playbackTurn: 0,
+    playbackEpoch: 0,
+    playLock,
+    reviewNotice: "",
+    dictatedText: "",
+    enqueueSentence(turn: number, text: string) {
+      if (memory.playbackTurn !== turn) {
+        memory.playbackTurn = turn
+        memory.queuedSentences.length = 0
+        memory.dispatchedSentences = 0
+      }
+      memory.queuedSentences.push(text)
+    },
+    dequeueSentence(turn: number) {
+      if (memory.playbackTurn !== turn) return undefined
+      const text = memory.queuedSentences.shift()
+      if (text === undefined) return undefined
+      const append = memory.dispatchedSentences > 0
+      memory.dispatchedSentences += 1
+      return { text, append }
+    },
+    clearQueued() {
+      memory.playbackEpoch += 1
+      memory.queuedSentences.length = 0
+      memory.dispatchedSentences = 0
+    },
+  }
+  return { memory }
+})
+
+module pure {
+  import { clockWords, meridiemOf, twelveHour } from "../../gen/app__voice.ts"
+
+  const reviewTag = /\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)\b/i
+  const navigateTag = /\[NAVIGATE:([a-zA-Z]+)\]/i
+
+  /** @throws {never} */
+  export function replyNeedsReview(text: string): boolean {
+    return reviewTag.test(text)
+  }
+
+  /** @throws {never} */
+  export function requestedDestination(text: string): string | undefined {
+    const found = navigateTag.exec(text)
+    return found?.[1]
+  }
+
+  /** The reply's speakable text: each run of spaces is one space and each line break is kept as one, so no spoken form joins two lines. @throws {never} */
+  export function speakableText(text: string): string {
+    return text
+      .replace(/\[NAVIGATE:[a-zA-Z]+\]/gi, "")
+      .replace(/\[(APPROVAL|PROPOSAL|REVIEW|DRAFT|CALENDAR_APPROVAL|EMAIL_DRAFT)[^\]]*\]/gi, "")
+      .replace(/:[ \t]*(?=\r?\n)/g, ".")
+      .replace(/\s*\n\s*/g, "\n")
+      .replace(/[^\S\n]+/g, " ")
+      .trimStart()
+  }
+
+  const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+  const ordinals = [
+    "", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth",
+    "eleventh", "twelfth", "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth", "twentieth",
+    "twenty-first", "twenty-second", "twenty-third", "twenty-fourth", "twenty-fifth", "twenty-sixth", "twenty-seventh", "twenty-eighth",
+    "twenty-ninth", "thirtieth", "thirty-first",
+  ]
+  const ones = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+    "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+  const tens = ["", "", "twenty", "thirty", "forty", "fifty"]
+
+  function numberWords(n: number): string {
+    if (n < 20) return ones[n] ?? String(n)
+    return n % 10 === 0 ? tens[n / 10] ?? String(n) : `${tens[Math.floor(n / 10)] ?? ""} ${ones[n % 10] ?? ""}`
+  }
+
+  function namesPattern(names: readonly string[]): string {
+    return names.flatMap((name) => (name.length > 3 ? [name, name.slice(0, 3)] : [name])).flatMap((name) => [name, name.toUpperCase()]).join("|")
+  }
+
+  const weekdayNames = namesPattern(weekdays)
+  const monthNames = `${namesPattern(months)}|Sept|SEPT`
+  const namedDate = new RegExp(
+    String.raw`\b(?:(${weekdayNames})\.?,?[ \t]+)?(${monthNames})\.?[ \t]+(0?[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?![\p{L}\d/-]|[.:]\d)`,
+    "gu",
+  )
+  const clock = String.raw`(?:0?[1-9]|1[0-2])(?::[0-5]\d)?`
+  const bareClock = String.raw`(?:[01]?\d|2[0-3]):[0-5]\d`
+  const meridiem = String.raw`[ \t]*[ap]\.?[ \t]*m(?:\.(?=[ \t]*[,;–—−-]|[ \t]+to[ \t]))?`
+  const rangeSeparator = String.raw`(?:[ \t]*[-–—−][ \t]*|[ \t]+to[ \t]+)`
+  const clockEnd = String.raw`(?![\p{L}\d:/-]|\.\d)`
+  const clockStart = String.raw`(?<![\p{L}\d:+./−-])`
+  const clockRange = new RegExp(String.raw`${clockStart}(?:(${clock}(?:${meridiem})?)${rangeSeparator}(${clock}${meridiem})|(${bareClock})${rangeSeparator}(${bareClock}))${clockEnd}`, "giu")
+  const clockWithMeridiem = new RegExp(String.raw`${clockStart}(${clock}${meridiem})${clockEnd}`, "giu")
+  const bareClockTime = new RegExp(String.raw`${clockStart}${bareClock}${clockEnd}`, "gu")
+  const unfinishedWeekday = new RegExp(String.raw`\b(?:${weekdayNames})\.,?(?:[ \t]+([A-Z][A-Za-z]*)\.?(?:[ \t]+0)?)?[ \t]*$`, "u")
+  const unfinishedMonth = new RegExp(String.raw`\b(?:${monthNames})\.(?:[ \t]+0)?[ \t]*$`, "u")
+  const unfinishedClock = new RegExp(String.raw`${clockStart}${clock}[ \t]*[ap](?:\.|\.?[ \t]*m\.(?:[ \t]+t(?:o)?)?)[ \t]*$`, "iu")
+
+  function hidePeriods(text: string): string {
+    return text.replaceAll(".", "·")
+  }
+
+  /** Returns complete written sentences and how much of the unchanged input they consumed. @throws {never} */
+  export function takeCompleteSentences(buffer: string, final: boolean): { readonly ready: readonly string[]; readonly consumed: number } {
+    const scan = (final ? buffer : buffer
+      .replace(unfinishedWeekday, (tail, month?: string) =>
+        month === undefined || months.some((name) => name.startsWith(month) || name.toUpperCase().startsWith(month)) ? hidePeriods(tail) : tail)
+      .replace(unfinishedMonth, hidePeriods)
+      .replace(unfinishedClock, hidePeriods))
+      .replace(namedDate, hidePeriods)
+      .replace(clockRange, hidePeriods)
+      .replace(clockWithMeridiem, hidePeriods)
+    const ready: string[] = []
+    let consumed = 0
+    for (const boundary of scan.matchAll(/[.!?](?=\s|$)\s*/g)) {
+      if (!final && boundary[0] === "." && boundary.index + 1 === scan.length && /\d/.test(scan.charAt(boundary.index - 1))) break
+      ready.push(buffer.slice(consumed, boundary.index + 1).trim())
+      consumed = boundary.index + boundary[0].length
+    }
+    if (final) {
+      const tail = buffer.slice(consumed).trim()
+      if (tail !== "") ready.push(tail)
+      consumed = buffer.length
+    }
+    return { ready, consumed }
+  }
+
+  function clockSaid(value: string): string {
+    const found = /^(\d{1,2})(?::(\d{2}))?[ \t]*([ap])?/i.exec(value)
+    if (found === null) return value
+    const hour = Number(found[1])
+    const minute = Number(found[2] ?? "0")
+    const written = found[3] === undefined ? "NoMeridiem" : found[3].toLowerCase() === "p" ? "Afternoon" : "Morning"
+    const period = meridiemOf(hour, written)
+    const suffix = period === "Afternoon" ? " P M" : period === "Morning" ? " A M" : ""
+    switch (clockWords(hour, minute, written, found[2] !== undefined)) {
+      case "NoonWord": return "noon"
+      case "MidnightWord": return "midnight"
+      case "HourAndMinutes": return `${numberWords(twelveHour(hour))} ${minute < 10 ? "oh " : ""}${numberWords(minute)}${suffix}`
+      case "HourOClock": return `${numberWords(twelveHour(hour))} o'clock`
+      case "HourAlone": return `${numberWords(twelveHour(hour))}${suffix}`
+    }
+  }
+
+  /** What Alpha says for a sentence of its reply: dates, clock times, ranges and percentages in words. @throws {never} */
+  export function spokenForm(sentence: string): string {
+    return sentence
+      .replace(namedDate, (_, day: string | undefined, month: string, date: string) => {
+        const fullDay = day === undefined ? undefined : weekdays.find((name) => name.toLowerCase().startsWith(day.toLowerCase()))
+        const fullMonth = months.find((name) => name.toLowerCase().startsWith(month.toLowerCase())) ?? month
+        return `${fullDay === undefined ? "" : `${fullDay}, `}${fullMonth} ${ordinals[Number(date)] ?? date}`
+      })
+      .replace(clockRange, (_, from?: string, to?: string, fromBare?: string, toBare?: string) => `${clockSaid(from ?? fromBare ?? "")} to ${clockSaid(to ?? toBare ?? "")}`)
+      .replace(clockWithMeridiem, clockSaid)
+      .replace(bareClockTime, clockSaid)
+      .replace(/(?<![\p{L}\d:./-])(\d{1,2})[ \t]*[-–][ \t]*(\d{1,2})(?![\p{L}\d:/-]|\.\d)/gu, "$1 to $2")
+      .replace(/(?<=\d)[ \t]?%(?![\p{L}\d])/gu, " percent")
+      .replace(/(?<=\p{L}):(?=[ \t]+\S)/gu, ",")
+      .replace(/\s+/g, " ")
+  }
+}
+import { replyNeedsReview, requestedDestination, speakableText, spokenForm, takeCompleteSentences } from pure
+
+function placeForDestination(name: string): number | undefined {
+  const lowered = name.toLowerCase()
+  if (lowered === "home") return 1
+  const matched = views.find((view) => view.toLowerCase() === lowered)
+  return matched === undefined ? undefined : placeOf(matched)
+}
+
+const createdConversation = Schema.Struct({ conversation: Schema.Struct({ ...ConversationRecord.fields, title: Schema.String }) })
+
+effect function ensureConversation(): (ConversationRecord | undefined)!!(Agent | VoiceWords) {
+  const { memory } = try VoiceWords
+  if (memory.conversation !== undefined) return memory.conversation
+  return effect {
+    const created = try ask(Agent, HttpClientRequest.bodyJsonUnsafe(HttpClientRequest.post("/api/conversations"), { title: "Voice" }), createdConversation)
+    const record = { id: created.conversation.id, roomId: created.conversation.roomId } as ConversationRecord
+    memory.conversation = record
+    return record
+  } catch () => undefined
+}
+
+function sendVoiceTurn(session: number, turn: number): Stream.Stream<Voice.Event, never, Agent | VoiceWords> {
+  return Stream.callback<Voice.Event, never, Agent | VoiceWords>((queue) => effect {
+    const { runtime } = try Agent
+    const { memory } = try VoiceWords
+    const record = try ensureConversation()
+    const spoken = memory.heardText.trim()
+    memory.heardText = ""
+    if (record === undefined || spoken === "") {
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+      Queue.endUnsafe(queue)
+      return
+    }
+    const controller = new TurnController(runtime)
+    try ignore(tryPromise(() => controller.bind(record)))
+    let shown = ""
+    let said = 0
+    let navClaimed = false
+    const emitNavigation = (raw: string) => {
+      if (navClaimed) return
+      const target = requestedDestination(raw)
+      if (target === undefined) return
+      const place = placeForDestination(target)
+      if (place === undefined) return
+      navClaimed = true
+      Queue.offerUnsafe(queue, { type: "agentNavigates", session, place })
+    }
+    const say = (sentence: string) => {
+      memory.enqueueSentence(turn, spokenForm(sentence))
+      Queue.offerUnsafe(queue, { type: "sentence", session, turn })
+    }
+    const sayFrom = (written: string, final: boolean) => {
+      const split = takeCompleteSentences(written.slice(said), final)
+      said += split.consumed
+      for (const sentence of split.ready) say(sentence)
+    }
+    const feed = (written: string, provisional: boolean) => {
+      if (provisional) return
+      emitNavigation(written)
+      if (replyNeedsReview(written)) return
+      const clean = speakableText(written)
+      if (clean.length <= shown.length) return
+      shown = clean
+      sayFrom(clean, false)
+    }
+    const result = tryPromise(() => controller.send({ text: spoken }, { stream: { onPreview: feed } })) catch () => undefined
+    if (isCloudFundsRefusal(result)) {
+      memory.lastReply = ""
+      Queue.offerUnsafe(queue, { type: "refusedForFunds", session, turn })
+      Queue.endUnsafe(queue)
+      return
+    }
+    const finalText = result?.kind === "Replied" ? result.reply.text : ""
+    memory.lastReply = finalText
+    emitNavigation(finalText)
+    const asks = replyNeedsReview(finalText)
+    if (asks) {
+      memory.reviewNotice = finalText
+      Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: true })
+      Queue.endUnsafe(queue)
+      return
+    }
+    const full = speakableText(finalText)
+    sayFrom(full.length >= shown.length ? full : shown, true)
+    Queue.offerUnsafe(queue, { type: "replyEnds", session, turn, asks: false })
+    Queue.endUnsafe(queue)
+  })
+}
+
+effect function navigateForVoice(place: number): (Voice.Event | undefined)!!(Shell.Machine | Voice.Machine) {
+  const shell = try Shell.Machine
+  const current = try shell.get()
+  const currentPlace = placeOf(current.trail.at(-1))
+  if (currentPlace === place) return { type: "navigated", place }
+  const target = viewOfPlace(place)
+  const moved = target === undefined
+    ? try contained(shell.send({ type: "agentGoHome" }), "voice navigating home")
+    : try contained(shell.send({ type: "agentOpenView", view: target }), "voice navigating to view")
+  if (moved) return undefined
+  const voice = try (try Voice.Machine).get()
+  return { type: "claimReleased", session: voice.session }
+}
+
+function carryVoice(fx: Voice.Effect): Job<Voice.Event, Agent | VoiceBridge | VoiceWords | Shell.Machine | Voice.Machine, []> {
+  return match (fx) {
+    when { tag: "Prewarm", let network }: run("prewarm", effect { try (try VoiceBridge).prewarm(network) });
+    when { tag: "HoldEngine" }: run("holdEngine", effect { try (try VoiceBridge).holdEngine() });
+    when { tag: "ReleaseEngineHold" }: run("releaseEngineHold", effect { try (try VoiceBridge).releaseEngineHold() });
+    when { tag: "AskMicrophone" }: answer("permission", effect {
+      const grant = try (try VoiceBridge).requestPermission()
+      return { type: "answerPrompt", granted: grant === "granted" }
+    }, { type: "answerPrompt", granted: false });
+    when { tag: "OpenSettings" }: run("openSettings", Effect.void);
+    when { tag: "Listen", let session, let network }: answer("mic", effect {
+      const opened = effect { try (try VoiceBridge).openMic(session, network); return true } catch () => false
+      return opened ? { type: "micOpened", session } : { type: "micFailed", session }
+    }, { type: "micFailed", session });
+    when { tag: "CloseMicrophone", let session }: answer("mic", effect {
+      const closed = effect { try (try VoiceBridge).closeMic(session); return true } catch () => false
+      return closed ? { type: "micClosed", session } : { type: "micCloseFailed", session }
+    }, { type: "micCloseFailed", session });
+    when { tag: "Send", let session, let turn }: stream(`send ${session}:${turn}`, sendVoiceTurn(session, turn), { type: "replyEnds", session, turn, asks: false });
+    when { tag: "Play", let session, let turn }: answer(`play ${session}:${turn}:${fresh()}`, effect {
+      const { memory } = try VoiceWords
+      const epoch = memory.playbackEpoch
+      try Semaphore.withPermit(memory.playLock, effect {
+        if (memory.playbackEpoch !== epoch) return
+        const piece = memory.dequeueSentence(turn)
+        if (piece !== undefined) {
+          try ignore((try VoiceBridge).playSentence(session, turn, piece.text, piece.append))
+        }
+      })
+      return { type: "sentencePlayed", session, turn }
+    }, { type: "sentencePlayed", session, turn });
+    when { tag: "Hush", let turn }: run("hush", effect {
+      (try VoiceWords).memory.clearQueued()
+      try (try VoiceBridge).hush(turn)
+    });
+    when { tag: "Shut", let session }: answer("shut", effect {
+      (try VoiceWords).memory.clearQueued()
+      const confirmed = try (try VoiceBridge).shut(session)
+      return { type: "stopped", confirmed }
+    }, { type: "stopped", confirmed: false });
+    when { tag: "Navigate", let place }: stream("navigate", Stream.unwrap(effect {
+      const immediate = try navigateForVoice(place)
+      return immediate === undefined ? Stream.empty : Stream.succeed(immediate)
+    }), { type: "navigated", place });
+    when { tag: "Record", let ticket }: answer("record", effect {
+      const started = effect { try (try VoiceBridge).startRecording(ticket); return true } catch () => false
+      return started ? { type: "recordingStarted", ticket } : { type: "recordingFailed", ticket, failure: "NoMicrophone" }
+    }, { type: "recordingFailed", ticket, failure: "NoMicrophone" });
+    when { tag: "Transcribe", let ticket, let network }: answer("transcribe", effect {
+      const text = (try VoiceBridge).transcribe(ticket, network) catch () => ""
+      const trimmed = text.trim()
+      if (trimmed !== "") {
+        (try VoiceWords).memory.dictatedText = trimmed
+        return { type: "transcribed", ticket, failure: "NoFailure" } as Voice.Event
+      }
+      return { type: "transcribed", ticket, failure: "NoSpeech" } as Voice.Event
+    }, { type: "transcribed", ticket, failure: "Recognition" });
+    when { tag: "Abandon", let recording }: run("abandon", effect { try (try VoiceBridge).abandon(recording) });
+    when { tag: "Fill" }: run("fill", Effect.void);
+  }
+}
+
+const autoPrewarm = started(effect {
+  const voice = try Voice.Machine
+  try Stream.runForEach(voice.changes, effect (state) => {
+    if (!state.warmed && !state.latched && !state.prompting) {
+      try contained(voice.send({ type: "prewarm", now: untimed }), "prewarming voice")
+    }
+  })
+}, "auto-prewarming voice")
+
+const visibility = started(effect {
+  const device = try Device
+  const bridge = try VoiceBridge
+  const voice = try Voice.Machine
+  try Stream.runForEach(device.visible, effect (shown) => {
+    if (shown) {
+      try bridge.invalidateCache()
+      try contained(voice.send({ type: "returned" }), "voice foreground return")
+    } else {
+      try contained(voice.send({ type: "pageHidden" }), "voice page hidden")
+    }
+  })
+}, "voice visibility")
+
+const navigation = started(effect {
+  const shell = try Shell.Machine
+  const voice = try Voice.Machine
+  let lastPlace: number | undefined
+  try Stream.runForEach(shell.changes, effect (state) => {
+    const place = placeOf(state.trail.at(-1))
+    if (lastPlace === undefined) {
+      lastPlace = place
+      return
+    }
+    if (place === lastPlace) return
+    lastPlace = place
+    try contained(voice.send({ type: "navigated", place }), "voice observing navigation")
+  })
+}, "voice observing shell navigation")
+
+const bridgeEvents = hearing(
+  Stream.unwrap(effect {
+    const bridge = try VoiceBridge
+    const { memory } = try VoiceWords
+    return Stream.map(bridge.events, (event): VoiceEvent => {
+      if (event.kind === "speechEnd" && event.text !== "") memory.heardText = event.text
+      else if (event.kind === "transcript" && event.final && event.text !== "") memory.heardText = event.text
+      return event
+    })
+  }),
+  Voice.Machine,
+  (event): Voice.Event | undefined => match (event) {
+    when { kind: "speechStart", let session }: { type: "speechHeard", session };
+    when { kind: "transcript", let session, let final }: final ? { type: "turnEnded", session } : { type: "speechHeard", session };
+    when { kind: "speechEnd", let session }: { type: "turnEnded", session };
+    when { kind: "bargeIn", let session, let echo }: { type: "bargeIn", session, echo };
+    when { kind: "ended" }: undefined;
+  },
+)
+
+export const voicing = Layer.provideMerge(
+  together(
+    reacting(Voice, {
+      keep: 1,
+      open: [{ type: "restart" }],
+      carry: carryVoice,
+      timers: (v) => (v.retryAt > 0 ? [due("retry", v.retryAt, { type: "retryDue", now: untimed })] : []),
+    }),
+    autoPrewarm,
+    visibility,
+    navigation,
+    bridgeEvents,
+  ),
+  voiceWords,
+)

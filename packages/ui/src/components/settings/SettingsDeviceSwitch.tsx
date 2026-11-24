@@ -1,14 +1,17 @@
-import { Globe, ImageDown } from "lucide-react";
+import { CalendarCog, Globe, Hash, ImageDown, MailCheck, MapPin, PanelTop, Send } from "lucide-react";
 import { SettingsRecoverRow } from "./SettingsRecoverRow.tsx";
 import { SettingsSwitchRow } from "./SettingsSwitchRow.tsx";
 import type { DeviceRead } from "./vocabulary.ts";
 
 export type SettingsDeviceSwitchProps = {
-  /** Which device preference: whether Alpha asks before it acts, or whether Inbox loads images from the web. */
-  setting: "ask-first" | "images";
+  /**
+   * Which device preference: whether Alpha asks before it acts, whether Inbox loads images from the web, or what Alpha
+   * may share with a chat turn or change: the phone's location, the Browser page open, Gmail, Calendar, Telegram and Slack.
+   */
+  setting: "ask-first" | "images" | "agent-location" | "browser-page" | "gmail-changes" | "calendar-edits" | "telegram-context" | "slack-context";
   /** How the phone's read of the device preferences stands; they cannot be changed until it has read them. */
   read: DeviceRead;
-  /** The value read, or the safe one (asking first, loading no images) when the phone could not read. */
+  /** The value read, or the safe one (asking first, loading no images, sharing nothing) when the phone could not read. */
   checked: boolean;
   /** A save is in flight. */
   saving?: boolean;
@@ -23,10 +26,16 @@ export type SettingsDeviceSwitchProps = {
 const settings = {
   "ask-first": { title: "Ask before Alpha acts", detail: "Web, camera, photos", icon: <Globe /> },
   images: { title: "Load images", detail: "From the web, in Inbox", icon: <ImageDown /> },
+  "agent-location": { title: "Location", detail: "With each message to Alpha", icon: <MapPin /> },
+  "browser-page": { title: "Browser page", detail: "The page open, with each message", icon: <PanelTop /> },
+  "gmail-changes": { title: "Gmail changes", detail: "Drafts, labels and sending", icon: <MailCheck /> },
+  "calendar-edits": { title: "Calendar changes", detail: "Events Alpha adds or edits", icon: <CalendarCog /> },
+  "telegram-context": { title: "Telegram screen", detail: "Open chat and recent messages", icon: <Send /> },
+  "slack-context": { title: "Slack screen", detail: "Open channel or thread, with each message", icon: <Hash /> },
 };
 
 /**
- * Ask before Alpha acts, or Load images in Inbox. Locked to the safe value when the device preferences cannot be read,
+ * Ask before Alpha acts, Load images in Inbox, or what Alpha may share and change. Locked to the safe value when the device preferences cannot be read,
  * with the way to recover them.
  * @model spec/app/settings/preferences.md
  */

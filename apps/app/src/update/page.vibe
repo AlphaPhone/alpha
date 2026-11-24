@@ -1,0 +1,121 @@
+// spec/app/update/page.md, "Story: Open Alpha while an update is pending"; spec/app/update/page.md, "Story: Save my work before Alpha updates"; spec/app/update/page.md, "Story: Carry on after the update"
+import * as Page from "../../gen/app__update__page.effect.vibe"
+import type { Effect as Out, Engaged, Event, Settlement } from "../../gen/app__update__page.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
+import * as Updates from "../../gen/app__update.effect.vibe"
+import { Agent } from "../platform/agent.vibe"
+import { Device } from "../platform/device.vibe"
+import { type Ids, LauncherUpdates } from "../platform/launcherUpdates.vibe"
+import { type Job, answer, contained, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
+import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
+import { Said, say } from "../notices/toasts.vibe"
+import { Engagements } from "./activity.vibe"
+import { Names } from "./names.vibe"
+import { holder } from "./updates.vibe"
+
+/** How often Android's activation is read again while one is pending or the page holds. */
+const following = 1000
+
+/** The ids of each activation this page has read, by the number that stands for it. */
+const known = new Map<number, Ids>()
+
+const settlements: Readonly<Record<string, Settlement>> = { installed: "WasInstalled", canceled: "WasCancelled", cancelled: "WasCancelled" }
+
+// spec/app/update/page.md, "When every area has saved its drafts the page answers ready, and otherwise it refuses"; spec/app/update/page.md, "A page is ready for an update only with no voice turn, connection step, call or recording under way, and for a hands-off update only while the phone is still idle"
+effect function flushed(activation: number): Event!!(Updates.Machine | Engagements) {
+  const saved = try (try Engagements).endEdit()
+  const { activity } = try (try Updates.Machine).get()
+  const engaged: Engaged = {
+    voice: activity.voice, connecting: activity.busy, call: activity.call, recording: activity.recording,
+    idle: Updates.ownerIdle(activity) && Updates.phoneQuiet(activity),
+  }
+  return { type: "flushed", activation, saved, engaged }
+}
+
+// spec/app/update/page.md, "A page answers each activation at most once"
+effect function answered(activation: number, ready: boolean): void!!LauncherUpdates {
+  const ids = known.get(activation)
+  if (ids !== undefined) try ignore((try LauncherUpdates).answer(ids, ready))
+}
+
+// spec/app/update/page.md, "Continue update is sent once per tap, never while the last one is still going"
+effect function continued(activation: number): Event!!LauncherUpdates {
+  const ids = known.get(activation)
+  if (ids !== undefined) try ignore((try LauncherUpdates).continueInstall(ids))
+  return { type: "continued" }
+}
+
+// spec/app/update/page.md, "A page reconnects only after a cancelled update it was ready for"
+/** The resident agent, paused for the update Android cancelled, asked for again: eliza's client starts it where it stopped. */
+effect function reconnected(): void!!Agent {
+  const agent = try Agent
+  try ignore(tryPromise(() => agent.runtime.request("/api/health")))
+}
+
+// spec/app/update/page.md, "The refusal is explained only for a manual update this page itself refused"
+effect function told(): void!!(Page.Machine | Toasts.Machine | Said) {
+  const text = Page.noticeText(try (try Page.Machine).get())
+  if (text !== "") try say(text, true)
+}
+
+function carry(fx: Out): Job<Event, LauncherUpdates | Updates.Machine | Engagements | Agent | Page.Machine | Toasts.Machine | Said, []> {
+  return match (fx) {
+    when { tag: "Answer", let activation, let ready }: run(`answer ${activation}`, answered(activation, ready));
+    when { tag: "Flush", let activation }: answer("flush", flushed(activation), { type: "flushed", activation, saved: false, engaged: Page.calm });
+    when { tag: "Continue", let activation }: answer("continue", continued(activation), { type: "continued" });
+    when { tag: "Reconnect", let activation }: run(`reconnect ${activation}`, reconnected());
+    when { tag: "Toast" }: run("toast", told());
+  }
+}
+
+const machine = reacting(Page, { carry })
+
+// spec/app/update/page.md, "A pending update is read for this page, never an older one than the page has taken up"; spec/app/update/page.md, "A page that cannot read the update state holds rather than mount"; spec/app/update/page.md, "The update settles for this page when nothing is pending, or with the outcome of its own activation"
+effect function read(): void!!(LauncherUpdates | Names | Page.Machine) {
+  const page = try Page.Machine
+  const names = try Names
+  const reply = try Effect.option((try LauncherUpdates).activation())
+  if (Option.isNone(reply)) {
+    try ignore(page.send({ type: "unreadable" }))
+    return
+  }
+  const now = reply.value
+  const number = Option.isSome(now.ids) ? try names.number(`activation:${now.ids.value.activationId}`) : (try page.get()).activation
+  if (Option.isSome(now.ids)) known.set(number, now.ids.value)
+  if (now.pending && number > 0) {
+    try ignore(page.send({ type: "read", activation: number, stage: now.paused ? "Paused" : "Preparing", canContinue: now.canContinue, automatic: now.automatic }))
+    return
+  }
+  const ending: Settlement = Option.isSome(now.outcome) ? settlements[now.outcome.value] ?? "WasFailed" : "Gone"
+  try ignore(page.send({ type: "endUpdate", activation: number, ending, resume: now.resume }))
+}
+
+/** Android's activation, read at launch, each time Android says it is ready or settled, and every second while one is pending or the page holds. */
+const followed = started(effect {
+  const page = try Page.Machine
+  const time = try Time
+  const told = Stream.merge((try LauncherUpdates).told, Stream.filter((try Device).visible, (shown) => shown))
+  for (;;) {
+    try read()
+    const state = try page.get()
+    const next = Effect.asVoid(Stream.runHead(told))
+    if (state.activation !== 0 || state.mount !== "Mounted") try race(next, time.until((try time.now()) + following))
+    else try next
+  }
+}, "following Android's activation of an update")
+
+// spec/app/update/page.md, "A mounted page's navigation is frozen exactly while an update is pending"; spec/app/shell/layers.md, "Something holds the phone until it lets go, and each holder holds it once"
+/** The phone held while the page's navigation is frozen or it holds for an update, so Back and Home take nothing; let go after. */
+const holding = started(effect {
+  const layers = try Layers.Machine
+  try Stream.runForEach(Stream.changes(Stream.map((try Page.Machine).changes, Page.holdsThePhone)), effect (held) => {
+    const over = try layers.get()
+    const event: Layers.Event | undefined = held ? (Layers.canHold(over, holder) ? { type: "hold", id: holder } : undefined)
+      : Layers.canRelease(over, holder) ? { type: "release", id: holder } : undefined
+    if (event !== undefined) try ignore(contained(layers.send(event), "holding the phone for an update"))
+  })
+}, "holding the phone while an update is pending")
+
+/** The page's side of an update, from launch: it holds or freezes, saves drafts and answers Android. */
+export const paging = together(machine, followed, holding)

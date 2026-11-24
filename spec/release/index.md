@@ -49,15 +49,46 @@ pure def inFlight(s: Channel): bool = rank(s.stage) >= 1 and rank(s.stage) <= 9
 
 ### A candidate is built only when none is in flight, numbered by a run above every run before it, the floor and the published version
 
-A failed or cancelled run consumes its number.
+A failed or cancelled run consumes its number, and so does a build its
+verification found not distributable.
 
 ```quint
-pure def canBuild(s: Channel, number: int, attempt: int): bool =
+pure def canBuild(s: Channel, number: int, attempt: int, blockers: Blockers): bool =
   not(inFlight(s)) and number > s.lastNumber and number > s.floor and number > s.pointer and attempt >= 1
+    and distributable(blockers)
 
-pure def build(s: Channel, number: int, attempt: int): Channel =
+pure def build(s: Channel, number: int, attempt: int, blockers: Blockers): Channel =
   { ...s, stage: Built, number: number, attempt: attempt, lastNumber: number, plan: 0, reviewed: false, signers: 0,
     rotation: false, deliveredAt: 0, qualifiedAt: 0, uploadedAt: 0, apkVerified: false, pointerRead: false }
+```
+
+### A build is a candidate only when its verification recorded it distributable: no test mocks, the production bundle audit passed, Alpha's one signer, the runtime packaged with its notices, an on-device voice slot, and for an image its platform certificate
+
+The verification of the APKs records, for each one, why it may not be
+distributed. A build with any such reason is never mirrored, signed or
+published. A candidate is built unsigned, so a signer other than Alpha's
+one key blocks it but the missing signature does not; once it is signed,
+its verification must record it signed by that key and distributable
+before it is delivered.
+
+```quint
+type Blockers = {
+  mocks: bool, audit: bool, signer: bool, runtime: bool, notices: bool, voice: bool, platform: bool,
+}
+
+pure val clear: Blockers = {
+  mocks: false, audit: false, signer: false, runtime: false, notices: false, voice: false, platform: false,
+}
+
+pure def distributable(b: Blockers): bool = b == clear
+```
+
+### Any one blocker keeps a build from being a candidate
+
+```quint
+pure def lawAnyBlockerKeepsTheBuildBack(blockers: Blockers): bool =
+  (blockers.mocks or blockers.audit or blockers.signer or blockers.runtime or blockers.notices or blockers.voice or blockers.platform)
+    implies not(distributable(blockers))
 ```
 
 ### A rerun keeps its number and takes a new attempt, before signing only
@@ -168,17 +199,35 @@ pure def qualify(s: Channel, now: int, passed: bool): Channel =
   if (passed) { ...s, stage: Qualified, qualifiedAt: now } else { ...s, stage: Abandoned }
 ```
 
+### An APK is admitted to the channel only as Alpha's launcher, first signed by Alpha's one key, at the candidate's version, not debuggable, of at most 2 GiB, and with only the entries a release may hold
+
+```quint
+type Apk = { launcher: bool, signer: bool, version: int, debuggable: bool, bytes: int, entries: bool }
+
+pure val maxApkBytes = 2147483648
+
+pure def admitted(a: Apk, number: int): bool =
+  a.launcher and a.signer and a.version == number and not(a.debuggable) and a.bytes > 0 and a.bytes <= maxApkBytes and a.entries
+```
+
+### A debuggable APK is never admitted
+
+```quint
+pure def lawADebuggableApkIsRefused(apk: Apk, number: int): bool = apk.debuggable implies not(admitted(apk, number))
+```
+
 ### The APK is uploaded while the receipt is valid, above the floor and the published version; one already on the channel is never overwritten, only reused
 
 A delivery that failed half way is retried with the same candidate: the APK
 it left is read back like a new one, and a damaged one never verifies, so
-that release is abandoned for a higher version.
+that release is abandoned for a higher version. Only an admitted APK is
+uploaded.
 
 ```quint
-pure def canUpload(s: Channel, now: int, existing: bool): bool =
-  s.stage == Qualified and receiptValid(s, now) and s.number > s.floor and s.number > s.pointer
+pure def canUpload(s: Channel, now: int, existing: bool, apk: Apk): bool =
+  s.stage == Qualified and receiptValid(s, now) and s.number > s.floor and s.number > s.pointer and admitted(apk, s.number)
 
-pure def upload(s: Channel, now: int, existing: bool): Channel = { ...s, stage: Uploaded, uploadedAt: now }
+pure def upload(s: Channel, now: int, existing: bool, apk: Apk): Channel = { ...s, stage: Uploaded, uploadedAt: now }
 ```
 
 ### Qualification and upload both happen before the receipt expires
@@ -260,6 +309,26 @@ pure def alwaysRecordedAfterReadBack(s: Channel): bool =
   s.stage == Recorded implies (s.pointerRead and s.floor >= s.number and s.pointer == s.number)
 ```
 
+### Phones read the launcher channel from the stable release of Alpha's repository, eliza-research/alpha, known by its permanent id; APKs kept under the repository's earlier names stay valid
+
+The manifest is `alpha-update-stable.json` under the release tagged
+`app-stable-alphacompute`, and each APK is `alpha-phone-<version>.apk`
+beside it. A manifest still names an APK by an address of
+eliza-research/alphaphone, alphacompute/alpha or alphacompute/alphaphone
+where an earlier writer kept one, and the retired `app-stable` tag is read
+for those phones only.
+
+```quint
+pure val channelRepository = "eliza-research/alpha"
+pure val channelRepositoryId = 1396333361
+pure val channelTag = "app-stable-alphacompute"
+pure val retiredTag = "app-stable"
+pure val channelManifest = "alpha-update-stable.json"
+pure val earlierRepositories = Set("eliza-research/alphaphone", "alphacompute/alpha", "alphacompute/alphaphone")
+
+pure def keptBy(repository: str): bool = repository == channelRepository or earlierRepositories.contains(repository)
+```
+
 ### A manifest read back as naming this release names exactly it
 
 Discovered by the proof: without it, a release could be recorded while the
@@ -298,6 +367,11 @@ pure def sometimesOvertaken(s: Channel): bool = s.stage == Abandoned and s.point
 
 ```quint
 pure val numberValues = Set(70, 76, 77, 78)
+pure val blockersValues = Set(clear).union(Set({ ...clear, mocks: true })).union(Set({ ...clear, voice: true }))
+pure val apkValues =
+  Set({ launcher: true, signer: true, version: 77, debuggable: false, bytes: 4096, entries: true })
+    .union(Set({ launcher: true, signer: true, version: 78, debuggable: false, bytes: 4096, entries: true }))
+    .union(Set({ launcher: true, signer: true, version: 77, debuggable: true, bytes: 4096, entries: true }))
 pure val attemptValues = Set(1, 2)
 pure val signersValues = Set(1, 2)
 pure val nowValues = Set(0, 10, 23, 24, 30)

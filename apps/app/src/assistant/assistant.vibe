@@ -1,18 +1,22 @@
 // spec/app/assistant/index.md, "Story: Ask Alpha something"; spec/app/assistant/index.md, "Story: Stop a reply"
-import { ConversationRecord, TurnController, type TurnResult } from "@elizaos/agent/client"
+import { ConversationRecord, TurnController, encodeTurnContext, learnPeer, notLearned, sendsOptionalFields, statusRead, type TurnReply, type TurnResult } from "@elizaos/agent/client"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
 import * as Conversation from "../../gen/app__assistant.effect.vibe"
 import * as Chats from "../../gen/app__assistant__chats.effect.vibe"
 import * as Composer from "../../gen/app__assistant__composer.effect.vibe"
+import * as Dock from "../../gen/app__assistant__dock.effect.vibe"
+import { zoneOf } from "../../gen/app__assistant__context.effect.vibe"
+import * as Reply from "../../gen/app__assistant__reply.effect.vibe"
+import * as Pages from "../../gen/app__settings.effect.vibe"
 import * as Search from "../../gen/app__assistant__search.effect.vibe"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
+import { stepping } from "../shell/shell.vibe"
 import { Agent } from "../platform/agent.vibe"
 import { ask, outcomeOf } from "../platform/remote.vibe"
 import { Attempts } from "../runtime/attempts.vibe"
-import { type Job, answer, contained, following, hearing, reacting, run, started, stream, tell, together } from "../runtime/reactor.vibe"
+import { type Job, answer, contained, following, hearing, reacting, run, started, stream, tell, together, untimed } from "../runtime/reactor.vibe"
 import { type Board, type Line, Talk, talk } from "./talk.vibe"
 
-/** The assistant's turns, in eliza's own protocol: its `TurnController` over the platform's agent, bound to the conversation showing. */
 service Turns {
   readonly controller: TurnController
 }
@@ -23,15 +27,12 @@ const turns = Layer.effect(Turns, effect {
 })
 
 const titled = Schema.Struct({ ...ConversationRecord.fields, title: Schema.String })
-/** What the agent answers to `GET /api/conversations`, to `POST /api/conversations` and to a fork. */
 const listing = () => Schema.Struct({ conversations: Schema.Array(titled) })
 const made = () => Schema.Struct({ conversation: titled })
-/** A page of a conversation's messages, and a page of search hits, as eliza's history routes give them. */
-const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String })) })
+const page = () => Schema.Struct({ messages: Schema.Array(Schema.Struct({ id: Schema.String, role: Schema.Literals(["user", "assistant"]), text: Schema.String, clientMessageId: Schema.optionalKey(Schema.String), failureKind: Schema.optionalKey(Schema.String) })) })
 const hits = () => Schema.Struct({ results: Schema.Array(Schema.Struct({ conversationId: Schema.NonEmptyString, roomId: Schema.NonEmptyString, messageId: Schema.String, text: Schema.String })) })
 const health = () => Schema.Struct({ ready: Schema.Boolean })
 
-/** A slot of the composer as the phone keeps it: the text, the revision it was saved at, and whether it is marked as sending. */
 const slotted = Schema.fromJsonString(Schema.Struct({ revision: Schema.Int, text: Schema.String, sending: Schema.Boolean }))
 
 const pageSize = 20
@@ -40,7 +41,6 @@ function slotKey(binding: Composer.Binding): string {
   return `alpha/assistant/slot/${binding.owner}/${binding.conversation}@1`
 }
 
-/** Whether the turn and the composer are free, as chats and search ask: what the composer holds in a new conversation moves with it. */
 export function freedom(conversation: Conversation.Conversation, composer: Composer.Composer, chosen: number) {
   return {
     replying: Conversation.inFlight(conversation.turn),
@@ -51,12 +51,11 @@ export function freedom(conversation: Conversation.Conversation, composer: Compo
 // spec/app/assistant/index.md, "The screen is told only to an agent that said, on this connection, that it takes it"
 effect function supported(ticket: number): Conversation.Event!!Agent {
   return effect {
-    try ask(Agent, HttpClientRequest.get("/api/client-devices/capabilities"), Schema.Unknown)
-    return { type: "supported", ticket, ok: true, takes: false }
+    const read = statusRead(try ask(Agent, HttpClientRequest.get("/api/status"), Schema.Unknown))
+    return { type: "supported", ticket, ok: true, takes: sendsOptionalFields(learnPeer(notLearned, read), read) }
   } catch () => ({ type: "supported", ticket, ok: false, takes: false })
 }
 
-/** How a turn ended, as eliza's controller tells it: replied, known never to have left, or, where its post may have reached the agent, lost. */
 function ended(ticket: number, heard: boolean, result: TurnResult | undefined): Conversation.Event {
   if (result === undefined) return { type: "lose", ticket }
   return match (result) {
@@ -68,34 +67,128 @@ function ended(ticket: number, heard: boolean, result: TurnResult | undefined): 
   }
 }
 
+const failures: Readonly<Record<string, Reply.Failure>> = {
+  credential_invalid: "CredentialInvalid", insufficient_credits: "InsufficientCredits", limit_reached: "LimitReached",
+  rate_limited: "LimitReached", provider_issue: "ProviderIssue", timeout: "TimedOut", missing_capability: "MissingCapability",
+  no_provider: "NoProvider", billing_refused: "PlanLimit", subscription_required: "PlanLimit", allowance_exhausted: "PlanLimit",
+}
+
+/** Whether the resident's failed turn carries Cloud's own code for spent allowance and credits. */
+export function isCloudFundsRefusal(result: TurnResult | undefined): boolean {
+  return result?.kind === "AgentFailed" && result.reply?.cloudCode !== undefined
+}
+
+// spec/app/assistant/reply.md, "The settled reply is the whole final answer, shown and spoken, never the acknowledgment"; spec/app/assistant/reply.md, "A failure refused before any output replaces the streamed text; any other failure is added after it"
+function replied(turn: number, result: TurnResult | undefined): Reply.Event {
+  const failed = (said: TurnReply | undefined, code: string): Reply.Event => ({ type: "failed", turn, kind: failures[said?.failureKind ?? code] ?? "OtherFailure" })
+  if (result === undefined) return { type: "failed", turn, kind: "OtherFailure" }
+  return match (result) {
+    when { kind: "Replied", let reply }: reply.failureKind === undefined ? (reply.text === "" ? { type: "decline", turn } : { type: "done", turn, units: reply.text.length }) : failed(reply, reply.failureKind);
+    when { kind: "AgentFailed", let code }: isCloudFundsRefusal(result) ? { type: "failed", turn, kind: "OutOfFunds" } : failed(result.reply, code);
+    when { kind: "StoppedByOwner" }: { type: "stop", turn };
+    default: { type: "failed", turn, kind: "OtherFailure" };
+  }
+}
+
+function fixOf(result: TurnResult | undefined): Reply.Fix {
+  const said = result?.kind === "Replied" || result?.kind === "AgentFailed" ? result.reply?.planAction : undefined
+  return said === "sign-in" ? "SignInFix" : said === "funding" ? "FundingFix" : said === "retry" ? "RetryFix" : "NoFix"
+}
+
+function waitOf(result: TurnResult | undefined): number {
+  const said = result?.kind === "Replied" || result?.kind === "AgentFailed" ? result.reply?.retryAfterMs : undefined
+  return typeof said === "number" ? said : -1
+}
+
+module web {
+  /** @throws {never} */
+  export function zone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone
+  }
+  /** @throws {never} */
+  export function serializer(): { queue: (work: () => Promise<unknown>) => void; drain: () => Promise<unknown> } {
+    let tail: Promise<unknown> = Promise.resolve()
+    return {
+      queue: (work) => { tail = tail.then(work) },
+      drain: () => tail,
+    }
+  }
+}
+import { serializer, zone } from web
+
+function viewOf(showing: Conversation.Showing): string {
+  return match (showing) {
+    when { tag: "App", let view }: view.toLowerCase();
+    default: "home";
+  }
+}
+
+// spec/app/assistant/index.md, "The agent is told the view, the time zone, the day only from Calendar, and whether something is selected"; spec/app/assistant/context.md, "The day and the location go only to a peer that takes them, and a sensitive screen sends no optional field"; spec/app/assistant/context.md, "The time zone told is the one the phone's interface shows, else the one the screen reported, else the one the agent was launched with, else the host's"
+function observed(told: boolean, context: Conversation.Context) {
+  if (!told) return undefined
+  return encodeTurnContext({
+    observation: { view: viewOf(context.showing), revision: context.revision, sensitive: context.sensitive, timeZone: zoneOf(context.zone, "", "", zone()) },
+  }, { optionalFields: true })
+}
+
 // spec/app/assistant/index.md, "Every message asked is posted exactly once, under a new ticket, whoever gave the text, with the screen showing and never a sensitive one"; spec/app/assistant/index.md, "The first word of a reply shows that the agent has the message, and a withdrawal that came too late stops it there"
-function posted(ticket: number): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine> {
-  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine>((queue) => effect {
+// spec/app/assistant/composer.md, "A quoted message goes with the next send, until the owner removes the quote"
+function posted(ticket: number, told: boolean, context: Conversation.Context): Stream.Stream<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine> {
+  return Stream.callback<Conversation.Event, never, Turns | Talk | Chats.Machine | Conversation.Machine | Reply.Machine | Composer.Machine>((queue) => effect {
     const { controller } = try Turns
     const { board } = try Talk
+    const reply = try Reply.Machine
+    const shown = serializer()
+    const show = (event: Reply.Event) => { shown.queue(() => runPromise(ignore(reply.send(event)))) }
     const chats = try (try Chats.Machine).get()
     const known = board.known(chats.chosen)
     const text = board.outgoing
+    const held = (try (try Composer.Machine).get()).held
+    const quoted = held.quote > 0 ? board.latest()[held.quote - 1] : undefined
     if (known === undefined || text === "") {
       Queue.offerUnsafe(queue, { type: "refuse", ticket })
       Queue.endUnsafe(queue)
       return
     }
     if (controller.conversation?.id !== known.record.id) try ignore(tryPromise(() => controller.bind(known.record)))
-    const mine: Line = { id: `sent ${ticket}`, mine: true, text }
+    const mine: Line = { id: `sent ${ticket}`, mine: true, text, ...(quoted === undefined ? {} : { quote: quoted.text }) }
     board.append(mine)
     board.lastSent = text
     let heard = false
-    const preview = (written: string) => {
+    try ignore(reply.send({ type: "begin", turn: ticket }))
+    board.change({ label: "", failure: undefined })
+    const preview = (written: string, provisional: boolean) => {
       if (!heard) Queue.offerUnsafe(queue, { type: "hear", ticket })
       heard = true
-      board.change({ reply: written })
+      board.change({ reply: written, label: "" })
+      show({ type: "token", turn: ticket, units: written.length, provisional })
     }
-    const result = tryPromise(() => controller.send({ text }, { stream: { onPreview: preview } })) catch () => undefined
-    board.change({ reply: "" })
+    const hooks = {
+      onPreview: preview,
+      onAcknowledgment: (said: string) => {
+        board.change({ label: said })
+        show({ type: "acknowledge", turn: ticket, units: said.length })
+      },
+      onStatus: (activity: string) => { if (board.snapshot().reply === "") board.change({ label: activity }) },
+      onTool: (name: string, label: string | undefined) => {
+        show({ type: "toolStarts", turn: ticket })
+        if (board.snapshot().reply === "") board.change({ label: label ?? `Using ${name}` })
+      },
+    }
+    const metadata = { ...observed(told, context), ...(quoted === undefined ? {} : { replyToMessageId: quoted.id }) }
+    const result = tryPromise(() => controller.send({ text, ...(Object.keys(metadata).length === 0 ? {} : { metadata }) }, { stream: hooks })) catch () => undefined
+    board.change({ reply: "", label: "" })
+    board.lastSentId = result !== undefined && "clientMessageId" in result ? result.clientMessageId : ""
+    const ending = replied(ticket, result)
+    if (ending.type === "failed") board.change({ failure: { kind: ending.kind, fix: fixOf(result), waitMs: waitOf(result) } })
+    show(ending)
+    try promise(() => shown.drain())
     const event = ended(ticket, heard, result)
     const finishing = Conversation.canFinish(try (try Conversation.Machine).get(), ticket)
-    if (result?.kind === "Replied" && finishing) board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
+    if (result?.kind === "Replied" && finishing) {
+      if (result.reply.userMessageId !== undefined) board.rename(mine, result.reply.userMessageId)
+      board.append({ id: result.reply.messageId, mine: false, text: result.reply.text })
+    }
     if (event.type === "refuse") board.drop(mine)
     Queue.offerUnsafe(queue, event)
     Queue.endUnsafe(queue)
@@ -110,6 +203,7 @@ effect function aborted(turn: number): Conversation.Event!!Turns {
 }
 
 // spec/app/assistant/index.md, "The read says the reply finished anyway, was stopped for sure, was never recorded, or to look later"
+/** The message is found by the id its turn was posted under, or by its text where the post never said which. */
 effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Chats.Machine) {
   return effect {
     const { board } = try Talk
@@ -117,13 +211,12 @@ effect function checked(recheck: number): Conversation.Event!!(Agent | Talk | Ch
     const known = board.known(chats.chosen)
     if (known === undefined) return { type: "reconcile", ticket: recheck, found: "Unread" }
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`), page())
-    const asked = messages.findLastIndex((one) => one.role === "user" && one.text === board.lastSent)
+    const asked = messages.findLastIndex((one) => one.role === "user" && (board.lastSentId === "" ? one.text === board.lastSent : one.clientMessageId === board.lastSentId))
     const found: Conversation.Found = asked < 0 ? "Unrecorded" : messages.slice(asked + 1).some((one) => one.role === "assistant") ? "Ended" : "Unended"
     return { type: "reconcile", ticket: recheck, found }
   } catch () => ({ type: "reconcile", ticket: recheck, found: "Unread" })
 }
 
-/** The composer's answer to how its message left: committed, or given back ahead of what was typed since. */
 effect function settled(hold: number, sent: boolean): Composer.Event!!Talk {
   const { board } = try Talk
   if (!sent) giveBack(board)
@@ -136,11 +229,11 @@ function giveBack(board: Board) {
   board.outgoing = ""
 }
 
-function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Shell, []> {
+function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Turns | Talk | Chats.Machine | Composer.Machine | Conversation.Machine | Reply.Machine | Shell, []> {
   return match (fx) {
     when { tag: "CheckSupport", let support }: answer("support", supported(support), { type: "supported", ticket: support, ok: false, takes: false });
     when { tag: "Upload", let ticket }: answer("upload", succeed<Conversation.Event>({ type: "uploaded", ticket, ok: false }), { type: "uploaded", ticket, ok: false });
-    when { tag: "Post", let ticket }: stream("post", posted(ticket), { type: "lose", ticket });
+    when { tag: "Post", let ticket, let told, let context }: stream("post", posted(ticket, told, context), { type: "lose", ticket });
     when { tag: "Withdraw" }: run("withdraw", effect {
       const { controller } = try Turns
       try ignore(tryPromise(() => controller.interrupt()))
@@ -155,7 +248,7 @@ function carryTurn(fx: Conversation.Effect): Job<Conversation.Event, Agent | Tur
     when { tag: "Kept", let messages }: run("kept", effect { try contained((try Chats.Machine).send({ type: "kept", messages }), "counting kept messages") });
     when { tag: "Reread" }: run("reread", effect { try contained((try Chats.Machine).send({ type: "reread" }), "reading again") });
     when { tag: "Arrived", let recorded }: run("arrived", effect { try contained((try Composer.Machine).send({ type: "arrived", recorded }), "telling the composer") });
-    when { tag: "Navigate", let turn, let view }: tell("navigate", Shell, [{ type: "openView", view }], { taken: { type: "navigated", ticket: turn, opened: true }, refused: { type: "navigated", ticket: turn, opened: false } });
+    when { tag: "Navigate", let turn, let view }: tell("navigate", Shell, [{ type: "agentOpenView", view }], { taken: { type: "navigated", ticket: turn, opened: true }, refused: { type: "navigated", ticket: turn, opened: false } });
     when { tag: "Navigated" }: run("navigated", Effect.void);
   }
 }
@@ -169,7 +262,8 @@ effect function listed(ticket: number): Chats.Event!!(Agent | Talk) {
   } catch () => ({ type: "listed", ticket, ok: false, ids: [] })
 }
 
-// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"
+// spec/app/assistant/chats.md, "A page of the conversation showing is taken only from the newest asking"; spec/app/assistant/chats.md, "Older or newer messages are read around a message of the conversation showing"
+/** A page of the conversation showing, each message numbered as Alpha first saw it: the page counts up to its highest number, which a scroll names. */
 effect function paged(conversation: number, around: number, ticket: number): Chats.Event!!(Agent | Talk) {
   return effect {
     const { board } = try Talk
@@ -177,18 +271,21 @@ effect function paged(conversation: number, around: number, ticket: number): Cha
     if (known === undefined) return { type: "paged", ticket, ok: false, messages: 0 }
     const pivot = around > 0 ? board.messageId(around) : undefined
     const { messages } = try ask(Agent, HttpClientRequest.get(`/api/conversations/${encodeURIComponent(known.record.id)}/messages`, { urlParams: pivot === undefined ? {} : { around: pivot } }), page())
-    board.change({ pages: new Map([...board.snapshot().pages, [ticket, messages.map((one) => ({ id: one.id, mine: one.role === "user", text: one.text }))]]) })
-    return { type: "paged", ticket, ok: true, messages: messages.length }
+    const next = new Map(board.snapshot().pages)
+    next.set(ticket, messages.map((one) => ({
+      id: one.id, mine: one.role === "user", text: one.text, ...(one.failureKind === undefined ? {} : { failure: failures[one.failureKind] ?? "OtherFailure" }),
+    })))
+    board.change({ pages: next })
+    const numbers = messages.map((one) => board.messageNumber(one.id))
+    return { type: "paged", ticket, ok: true, messages: Math.max(0, ...numbers) }
   } catch () => ({ type: "paged", ticket, ok: false, messages: 0 })
 }
 
-/** A conversation the agent made, under the number Alpha gives it, or how its making ended where it was not. */
 effect function making(ticket: number, request: HttpClientRequest.HttpClientRequest): Chats.Event!!(Agent | Talk | Attempts | Chats.Machine) {
   const chats = try (try Chats.Machine).get()
-  const key = try (try Attempts).key(ticket)
   return effect {
     const { board } = try Talk
-    const { conversation } = try ask(Agent, HttpClientRequest.setHeader(request, "idempotency-key", key), made())
+    const { conversation } = try ask(Agent, request, made())
     return { type: "made", ticket, confirmed: true, known: true, conversation: board.numberOf({ id: conversation.id, roomId: conversation.roomId } as ConversationRecord, conversation.title) }
   } catch (failure) => {
     const { confirmed, known } = outcomeOf(failure)
@@ -216,7 +313,6 @@ function carryChats(fx: Chats.Effect): Job<Chats.Event, Agent | Talk | Chats.Mac
   }
 }
 
-/** What the slot holds: nothing, a draft, a message marked as sending, something that is no slot, or no answer. */
 effect function slotOf(binding: Composer.Binding): { found: Composer.Found; revision: number; text: string }!!KeyValueStore.KeyValueStore {
   const store = try KeyValueStore.KeyValueStore
   return effect {
@@ -317,14 +413,6 @@ function carrySearch(fx: Search.Effect): Job<Search.Event, Agent | Talk | Chats.
   }
 }
 
-module web {
-  /** The time zone the phone is set to. @throws {never} */
-  export function zone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone
-  }
-}
-import { zone } from web
-
 // spec/app/assistant/index.md, "The resident agent says whether it can be reached, and losing it ends the turn in flight honestly"
 const reached = hearing(
   Stream.fromEffect(Effect.orElseSucceed(Effect.map(ask(Agent, HttpClientRequest.get("/api/health"), health()), (one) => one.ready), () => false)),
@@ -332,10 +420,24 @@ const reached = hearing(
   (ready): Conversation.Event => ({ type: "reach", ready }),
 )
 
-// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"
-const looked = following(Shell, (shell) => shell.trail.at(-1), Conversation.Machine, (view): Conversation.Event => ({
-  type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive: false,
-}))
+/** The Settings pages whose screen the agent is never told: the carrier's identifiers (and Passwords once ported). */
+const sensitivePages: ReadonlySet<Pages.Page> = new Set(["CarrierPage"])
+
+// spec/app/assistant/index.md, "A screen that changed takes a new revision and stops the turn in flight; an unchanged one is ignored"; spec/app/assistant/index.md, "A sensitive screen says only that it is sensitive: no selection and no day"
+const looked = started(effect {
+  const shell = try Shell
+  const settings = try Pages.Machine
+  const conversation = try Conversation.Machine
+  let taken: string | undefined
+  try Stream.runForEach(Stream.zipLatest(Stream.zipLatest(shell.changes, settings.changes), conversation.changes), effect ([[shown, pages]]) => {
+    const view = shown.trail.at(-1)
+    const sensitive = view === "Settings" && sensitivePages.has(pages.page)
+    const seen = `${view ?? ""} ${sensitive}`
+    if (seen === taken) return
+    const event: Conversation.Event = { type: "look", showing: view === undefined ? { tag: "Home" } : { tag: "App", view }, zone: zone(), day: 0, selected: false, sensitive }
+    if (!Conversation.enabled(try conversation.get(), event) || (try contained(conversation.send(event), "telling the screen"))) taken = seen
+  })
+}, "telling the screen")
 
 // spec/app/assistant/index.md, "When another conversation is shown, the last turn stays behind with its own"
 const left = following(Chats.Machine, (chats) => chats.chosen, Conversation.Machine, (): Conversation.Event => ({ type: "leave" }))
@@ -360,6 +462,7 @@ const bound = started(effect {
       return
     }
     if (board.sendWhenMade && here > 0 && writing.source === 0 && writing.clear.outcome !== "Sent") {
+      if (writing.slot !== "Open" || writing.draft.sync === "Saving") return
       board.sendWhenMade = false
       const event: Composer.Event = { type: "hold", askable: Conversation.askable(talking) }
       if (Composer.enabled(writing, event)) board.outgoing = board.snapshot().typed
@@ -369,14 +472,46 @@ const bound = started(effect {
   })
 }, "binding the composer")
 
-/** Ask Alpha: the conversation, the chats, the composer and search, kept across restarts but search, over the agent and the phone's store. */
+// spec/app/assistant/dock.md, "A drag released asks the shell once for where it landed, and keeps a sheet's height"; spec/app/assistant/dock.md, "A gesture asks the shell to raise Ask Alpha, to go back a step or two, or nothing; a press that did not move is a tap on its control"; spec/app/assistant/dock.md, "Focusing or tapping the composer on the bar opens Ask Alpha as a sheet"
+function carryDock(fx: Dock.Effect): Job<Dock.Event, Shell, []> {
+  return match (fx) {
+    when { tag: "Raise", let detent }: run("raise", effect { try contained((try Shell).send({ type: "raise", detent }), "raising Ask Alpha") });
+    when { tag: "Lower", let steps }: run("lower", effect {
+      const shell = try Shell
+      for (const _ of Array.from({ length: steps })) try contained(shell.send({ type: "goBack" }), "lowering Ask Alpha")
+    });
+    when { tag: "Tap" }: run("tap", effect {
+      const shell = try Shell
+      const current = try shell.get()
+      for (const ask of Dock.focused(current.assistant)) {
+        if (ask.tag === "Raise") try contained(shell.send({ type: "raise", detent: ask.detent }), "raising Ask Alpha")
+      }
+    });
+  }
+}
+
+// spec/app/assistant/dock.md, "Ask Alpha put away forgets the height its sheet was left at"
+const resting = following(Shell, (shell) => shell.assistant === "Bar", Dock.Machine, (bar): Dock.Event | undefined => (bar ? { type: "putAway", now: untimed } : undefined))
+
+// spec/app/assistant/index.md, "Back closes a review, then search, then a quote or an edit, one at a time; with none of them open Back is the shell's"
+export const assistantBack = effect {
+  const search = try Search.Machine
+  const composer = try Composer.Machine
+  if ((try search.get()).open) return try contained(search.send({ type: "closeSearch" }), "back")
+  if ((try composer.get()).editor.quote > 0) return try contained(composer.send({ type: "unquote" }), "back")
+  return false
+}
+
 export const assisting = Layer.provideMerge(
   together(
     reacting(Conversation, { keep: 1, open: [{ type: "restart" }], carry: carryTurn }),
     reacting(Chats, { keep: 1, open: [{ type: "restart" }], carry: carryChats }),
     reacting(Composer, { keep: 1, open: [{ type: "reopen" }], carry: carryComposer }),
     reacting(Search, { carry: carrySearch }),
-    reached, looked, left, opening, saving, bound,
+    reacting(Reply, {}),
+    reacting(Dock, { carry: carryDock }),
+    stepping("assistant", Search.Machine, (search) => search.open),
+    reached, looked, left, opening, saving, bound, resting,
   ),
   Layer.merge(Layer.fresh(turns), talk),
 )
