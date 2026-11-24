@@ -6,22 +6,28 @@ kept on the phone as they are typed, so a restart loses nothing; a save
 builds on the revision the edits began from; a write is sent once, and one
 whose outcome is unknown holds what depends on it until a read shows what
 happened. People, video calls and alerts are written by Android Calendar,
-never by Alpha. The [calendar](./index.md) shows the events this writes.
+never by Alpha. An answer to an invitation of the agent's calendar goes to
+the agent. What a form may set, and why Save is off, are the
+[writing rules](./writing.md). The [calendar](./index.md) shows the events
+this writes.
 
 ## Story: Write an event
 
 > As the owner, I want to write a new event or change one, its title, its
 > day and time in its time zone, whether it lasts all day, how it repeats and
-> which occurrences a change applies to, and have it saved once.
+> which occurrences a change applies to, and have it saved once, by the
+> account I am signed in to.
 
 ### The editor holds the form and the event it edits, the form's draft and recovery banner, the one write in flight, and what is in doubt
 
 A form is for a new event or for an existing one, on screen or kept aside.
 Its day is a civil date, never an offset from today. Its draft counts the
-owner's edits and the event revision they build on; it is kept on the phone
-unless the phone failed to keep it. One write to the phone's calendar is in
-flight at a time. A create whose outcome is unknown, and the one event whose
-change is unknown, are remembered across a restart.
+owner's edits and the event revision they build on; it is kept on the phone,
+in the slot of the owner signed in (0 is no owner), unless the phone failed
+to keep it. Whether the form has a title is known. One write to the phone's
+calendar is in flight at a time. A create whose outcome is unknown, and the
+one event whose change is unknown, are remembered across a restart. A
+discard or a replace waits for the owner to confirm it.
 
 ```quint
 import draft as D from "../../kit/draft"
@@ -32,18 +38,19 @@ type Form = NoForm | NewEvent | EditEvent
 type Scope = Unchosen | ThisOne | ThisAndFollowing | WholeSeries
 type Banner = NoBanner | Available | Conflict | Failed
 type Write = Create | Update | Remove | Reply
+type Confirm = NoConfirm | ConfirmDiscard | ConfirmReplace
 
 type Editor = {
-  form: Form, shown: bool, target: int, day: int, revision: int,
+  owner: int, form: Form, shown: bool, target: int, day: int, revision: int, titled: bool,
   allDay: bool, start: int, end: int, repeats: bool, scope: Scope, extras: bool,
-  draft: D::Draft, kept: bool, banner: Banner,
+  draft: D::Draft, kept: bool, banner: Banner, confirming: Confirm,
   write: A::Attempt, kind: Write, writing: int,
   unknownCreate: bool, separate: bool, receipts: R::Read, latched: int,
 }
 
 type Effect =
   | Send({ attempt: int, kind: Write, id: int, scope: Scope, base: int })
-  | Answer({ attempt: int, id: int, accept: bool })
+  | Answer({ attempt: int, id: int, going: bool, base: int })
   | HandOff({ id: int, day: int })
   | CheckReceipts({ ticket: int })
   | KeepDraft
@@ -51,9 +58,9 @@ type Effect =
 type Composed = { state: Editor, out: List[Effect] }
 
 pure val initial: Editor = {
-  form: NoForm, shown: false, target: 0, day: 0, revision: 0,
+  owner: 0, form: NoForm, shown: false, target: 0, day: 0, revision: 0, titled: false,
   allDay: false, start: 0, end: 1, repeats: false, scope: Unchosen, extras: false,
-  draft: D::blank, kept: false, banner: NoBanner,
+  draft: D::blank, kept: false, banner: NoBanner, confirming: NoConfirm,
   write: A::plan(0), kind: Create, writing: 0,
   unknownCreate: false, separate: false, receipts: R::unread, latched: 0,
 }
@@ -65,29 +72,39 @@ pure val startValues = Set(0, 1, 2)
 pure val endValues = Set(0, 1, 2)
 pure val attemptValues = Set(1, 2, 3, 4)
 pure val ticketValues = Set(1, 2, 3)
+pure val ownerValues = Set(0, 1, 2)
 
 pure def inFlight(s: Editor): bool = A::canConclude(s.write, s.write.id)
 
 pure def withoutForm(write: A::Attempt, s: Editor): Editor =
-  { ...s, write: write, form: NoForm, shown: false, target: 0, revision: 0, draft: D::blank, kept: false, banner: NoBanner, separate: false }
+  { ...s, write: write, form: NoForm, shown: false, target: 0, revision: 0, titled: false, draft: D::blank, kept: false, banner: NoBanner,
+    confirming: NoConfirm, separate: false }
 ```
 
 ### A new form opens for a day, and an event opens for editing at the revision read, only when no other draft is kept
 
 A kept draft is restored or discarded first, so it is never replaced
-unseen.
+unseen. A new form reads the phone's creation receipts at once: a create is
+sent only after they were read.
 
 ```quint
+pure def opened(day: int, s: Editor): Editor =
+  { ...s, form: NewEvent, shown: true, target: 0, day: day, revision: 0, titled: false, allDay: false, start: 0, end: 1,
+    repeats: false, scope: Unchosen, extras: false, draft: D::blank, kept: false, banner: NoBanner, separate: false }
+
+pure def readingReceipts(receipts: R::Read, s: Editor): Composed =
+  val asked = R::ask(receipts)
+  if (receipts.status == R::Loading) { state: s, out: List() }
+  else { state: { ...s, receipts: asked }, out: List(CheckReceipts({ ticket: asked.ticket })) }
+
 pure def canNewEvent(s: Editor): bool = s.form == NoForm
 
-pure def newEvent(s: Editor, day: int): Editor =
-  { ...s, form: NewEvent, shown: true, target: 0, day: day, revision: 0, allDay: false, start: 0, end: 1,
-    repeats: false, scope: Unchosen, extras: false, draft: D::blank, kept: false, banner: NoBanner, separate: false }
+pure def newEvent(s: Editor, day: int): Composed = readingReceipts(s.receipts, opened(day, s))
 
 pure def canEditEvent(s: Editor, id: int, revision: int): bool = s.form == NoForm and id > 0 and revision >= 0
 
 pure def editEvent(s: Editor, id: int, revision: int, day: int, repeats: bool): Editor =
-  { ...s, form: EditEvent, shown: true, target: id, day: day, revision: revision, allDay: false, start: 0, end: 1,
+  { ...s, form: EditEvent, shown: true, target: id, day: day, revision: revision, titled: true, allDay: false, start: 0, end: 1,
     repeats: repeats, scope: Unchosen, extras: false, draft: { ...D::blank, base: revision }, kept: false,
     banner: NoBanner, separate: false }
 ```
@@ -100,7 +117,7 @@ until the owner saves it.
 ```quint
 pure def canFromNote(s: Editor): bool = s.form == NoForm
 
-pure def fromNote(s: Editor, day: int): Editor = { ...newEvent(s, day), draft: D::edit(D::blank), kept: true }
+pure def fromNote(s: Editor, day: int): Composed = readingReceipts(s.receipts, { ...opened(day, s), titled: true, draft: D::edit(D::blank), kept: true })
 
 pure def sometimesFilledFromANote(s: Editor): bool = s.form == NewEvent and s.draft.edits == 1 and s.write.id == 0 and s.kept
 ```
@@ -116,9 +133,9 @@ pure def typable(s: Editor): bool =
 
 pure def typed(d: D::Draft, edited: Editor): Editor = { ...edited, draft: D::edit(d), kept: edited.banner != Failed }
 
-pure def canEditTitle(s: Editor): bool = typable(s)
+pure def canEditTitle(s: Editor, blank: bool): bool = typable(s)
 
-pure def editTitle(s: Editor): Editor = typed(s.draft, s)
+pure def editTitle(s: Editor, blank: bool): Editor = typed(s.draft, { ...s, titled: not(blank) })
 
 pure def canSetAllDay(s: Editor, allDay: bool): bool = typable(s) and allDay != s.allDay
 
@@ -153,10 +170,13 @@ pure def chooseScope(s: Editor, scope: Scope): Editor = { ...s, scope: scope }
 
 ### Saving sends the form once, as a new numbered write built on the revision its edits began from
 
-Only an edited draft is saved; not while a banner asks the owner something,
-not while another write is in flight, not while a change is in doubt, and a
-new event not while an earlier create is in doubt unless the owner asked
-for a separate event.
+Only an edited draft with a title is saved; not while a banner asks the
+owner something, not while another write is in flight, not while a change
+is in doubt, and a new event only once the phone's creation receipts were
+read, and not while an earlier create is in doubt unless the owner asked
+for a separate event. A receipt read that failed holds the create:
+recovery is unavailable until the receipts are read again. Save says why it
+is off, one reason, in the writing rules' order.
 
 ```quint
 pure def sent(kind: Write, id: int, s: Editor): Composed =
@@ -164,8 +184,8 @@ pure def sent(kind: Write, id: int, s: Editor): Composed =
   { state: { ...s, write: w, kind: kind, writing: id }, out: List(Send({ attempt: w.id, kind: kind, id: id, scope: s.scope, base: s.draft.base })) }
 
 pure def canSave(s: Editor): bool =
-  s.shown and D::canSave(s.draft) and s.banner == NoBanner and not(inFlight(s)) and not(s.extras)
-    and (if (s.form == NewEvent) not(s.unknownCreate) or s.separate
+  s.shown and D::canSave(s.draft) and s.titled and s.banner == NoBanner and not(inFlight(s)) and not(s.extras)
+    and (if (s.form == NewEvent) s.receipts.status == R::Loaded and (not(s.unknownCreate) or s.separate)
          else s.latched == 0 and (not(s.repeats) or s.scope != Unchosen))
 
 pure def save(s: Editor): Composed =
@@ -216,7 +236,8 @@ pure def canWritten(s: Editor, attempt: int): bool = A::canConclude(s.write, att
 pure def written(s: Editor, attempt: int, confirmed: bool, known: bool): Editor =
   val w = A::conclude(s.write, confirmed, known)
   val told = { ...s, write: w }
-  if (w.outcome == A::Confirmed) (if (s.kind == Create or s.kind == Update) withoutForm(w, told) else told)
+  if (w.outcome == A::Confirmed)
+    (if (s.kind == Create or s.kind == Update) withoutForm(w, told) else if (s.kind == Reply) { ...told, latched: s.writing } else told)
   else if (w.outcome == A::Refused)
     (if (s.kind == Create) { ...told, draft: D::keepMine(s.draft) }
      else if (s.kind == Update) { ...told, revision: s.revision + 1, draft: D::collide(s.draft, s.revision + 1) }
@@ -275,7 +296,7 @@ keeps its edits, and only a separate event the owner asks for can be
 created; the owner may also let the doubt go.
 
 ```quint
-pure def canCheckReceipts(s: Editor): bool = s.unknownCreate and s.receipts.status != R::Loading
+pure def canCheckReceipts(s: Editor): bool = (s.unknownCreate or s.receipts.status == R::Failed) and s.receipts.status != R::Loading
 
 pure def checkReceipts(s: Editor): Composed =
   val asked = R::ask(s.receipts)
@@ -290,6 +311,10 @@ pure def receiptsChecked(s: Editor, ticket: int, found: bool): Editor =
   else if (found) (if (waiting) withoutForm(s.write, { ...told, unknownCreate: false }) else { ...told, unknownCreate: false, separate: false })
   else if (waiting) { ...told, draft: D::keepMine(s.draft) }
   else told
+
+pure def canReceiptsFailed(s: Editor, ticket: int): bool = R::canAnswer(s.receipts, ticket)
+
+pure def receiptsFailed(s: Editor, ticket: int): Editor = { ...s, receipts: R::answer(s.receipts, false) }
 
 pure def canLetDoubtGo(s: Editor): bool = s.unknownCreate and not(s.form == NewEvent and s.draft.sync == D::Saving)
 
@@ -327,9 +352,11 @@ pure def alwaysASaveInDoubtHoldsItsForm(s: Editor): bool =
 pure def sometimesSeparateCreateSent(s: Editor): bool = inFlight(s) and s.kind == Create and s.separate
 ```
 
-### A create in doubt can be found
+### A create in doubt can be found, and a failed receipt read can hold a create
 
 ```quint
+pure def sometimesReceiptsUnreadable(s: Editor): bool = s.form == NewEvent and s.receipts.status == R::Failed and D::canSave(s.draft) and s.titled
+
 pure def sometimesDoubtFound(s: Editor): bool = s.receipts.status == R::Loaded and not(s.unknownCreate) and s.write.outcome == A::Unknown
 ```
 
@@ -351,14 +378,28 @@ pure def deleteEvent(s: Editor, id: int, revision: int, scope: Scope, repeating:
     out: List(Send({ attempt: w.id, kind: Remove, id: id, scope: scope, base: revision })) }
 ```
 
-### An invitation is accepted or declined once
+### An invitation is answered Going or Maybe once, at the revision shown, and Decline is the deletion's decline
+
+Going and Maybe are offered, each except the answer already given, only
+where the writing rules offer answers. The answer names the event and its
+revision as shown, so the agent refuses it for any other; a confirmed
+answer counts as saved only once a read of the event shows it, and until
+then the event is held like a change in doubt.
 
 ```quint
-pure def canRespond(s: Editor, id: int): bool = not(s.shown) and not(inFlight(s)) and s.latched == 0 and id > 0
+pure def canRespond(s: Editor, id: int, revision: int, going: bool, offered: bool): bool =
+  not(s.shown) and not(inFlight(s)) and s.latched == 0 and id > 0 and revision >= 0 and offered
 
-pure def respond(s: Editor, id: int, accept: bool): Composed =
+pure def respond(s: Editor, id: int, revision: int, going: bool, offered: bool): Composed =
   val w = A::dispatch(A::record(A::plan(s.write.id + 1)))
-  { state: { ...s, write: w, kind: Reply, writing: id }, out: List(Answer({ attempt: w.id, id: id, accept: accept })) }
+  { state: { ...s, write: w, kind: Reply, writing: id }, out: List(Answer({ attempt: w.id, id: id, going: going, base: revision })) }
+```
+
+### A confirmed answer holds its event until a read shows it
+
+```quint
+pure def stepAnAnswerIsSavedOnlyOnceRead(before: Editor, via: str, after: Editor): bool =
+  (via == "written" and before.kind == Reply and after.write.outcome == A::Confirmed) implies after.latched == before.writing
 ```
 
 ### No change, delete or answer is sent while another change is in doubt
@@ -375,7 +416,7 @@ pure def alwaysNothingIsSentOverAChangeInDoubt(s: Editor): bool = (inFlight(s) a
 ```quint
 pure def sometimesSeriesDeleteSent(s: Editor): bool = inFlight(s) and s.kind == Remove and s.scope != ThisOne
 
-pure def sometimesInvitationAnswered(s: Editor): bool = s.kind == Reply and s.write.outcome == A::Confirmed
+pure def sometimesInvitationAnswered(s: Editor): bool = s.kind == Reply and s.write.outcome == A::Confirmed and s.latched == 0
 ```
 
 ## Story: Know what happened to a change in doubt
@@ -452,7 +493,8 @@ pure def restart(s: Editor): Editor =
   val flying = inFlight(s)
   val w = if (flying) A::conclude(s.write, false, false) else s.write
   val doubted = {
-    ...s, write: w, separate: false,
+    ...s, write: w, separate: false, confirming: NoConfirm,
+    receipts: if (s.receipts.status == R::Loading) R::answer(s.receipts, false) else s.receipts,
     unknownCreate: s.unknownCreate or (flying and s.kind == Create),
     latched: if (flying and s.kind != Create) s.writing else s.latched,
   }
@@ -467,11 +509,11 @@ pure def restart(s: Editor): Editor =
 pure def canRestore(s: Editor, revision: int): bool = s.banner == Available and revision >= s.revision
 
 pure def restore(s: Editor, revision: int): Editor =
-  val shown = { ...s, shown: true, banner: NoBanner }
+  val shown = { ...s, shown: true, banner: NoBanner, confirming: NoConfirm }
   if (s.form == EditEvent and revision != s.revision) { ...shown, revision: revision, draft: D::collide(s.draft, revision) }
   else shown
 
-pure def canDiscard(s: Editor): bool = s.banner == Available
+pure def canDiscard(s: Editor): bool = s.banner == Available and s.confirming == ConfirmDiscard
 
 pure def discard(s: Editor): Editor = withoutForm(s.write, s)
 ```
@@ -501,11 +543,31 @@ pure def replacedElsewhere(s: Editor): Editor = { ...s, banner: Conflict }
 
 pure def canKeepMyDraft(s: Editor): bool = s.banner == Conflict
 
-pure def keepMyDraft(s: Editor): Composed = { state: { ...s, banner: NoBanner }, out: List(KeepDraft) }
+pure def keepMyDraft(s: Editor): Composed = { state: { ...s, banner: NoBanner, confirming: NoConfirm }, out: List(KeepDraft) }
 
-pure def canTakeOtherDraft(s: Editor): bool = s.banner == Conflict
+pure def canTakeOtherDraft(s: Editor): bool = s.banner == Conflict and s.confirming == ConfirmReplace
 
-pure def takeOtherDraft(s: Editor): Editor = { ...s, banner: NoBanner, draft: D::edit(s.draft) }
+pure def takeOtherDraft(s: Editor): Editor = { ...s, banner: NoBanner, confirming: NoConfirm, draft: D::edit(s.draft) }
+
+### Discarding a draft and replacing it with the other copy each wait for the owner to confirm, and can be called off
+
+```quint
+pure def canAskDiscard(s: Editor): bool = s.banner == Available and s.confirming == NoConfirm
+
+pure def askDiscard(s: Editor): Editor = { ...s, confirming: ConfirmDiscard }
+
+pure def canAskReplace(s: Editor): bool = s.banner == Conflict and s.confirming == NoConfirm
+
+pure def askReplace(s: Editor): Editor = { ...s, confirming: ConfirmReplace }
+
+pure def canCallOff(s: Editor): bool = s.confirming != NoConfirm
+
+pure def callOff(s: Editor): Editor = { ...s, confirming: NoConfirm }
+
+pure def alwaysAConfirmationBelongsToItsBanner(s: Editor): bool =
+  (s.confirming == ConfirmDiscard implies s.banner == Available) and (s.confirming == ConfirmReplace implies s.banner == Conflict)
+
+pure def sometimesAskedToConfirm(s: Editor): bool = s.confirming == ConfirmReplace and D::unsaved(s.draft)
 ```
 
 ### A banner belongs to its form: an offered draft is set aside, and a failure or a conflict is over the form shown
@@ -526,12 +588,12 @@ pure def alwaysASetAsideDraftIsKept(s: Editor): bool =
   (s.form != NoForm and not(s.shown)) implies (s.banner == Available and s.kept and D::unsaved(s.draft))
 ```
 
-### Kept edits are lost only by saving, discarding or handing off, or when their event is gone
+### Kept edits are lost only by saving, discarding or handing off, or when their event is gone; another owner signing in leaves them in the old owner's slot
 
 ```quint
 pure def stepKeptEditsAreLostOnlyByChoice(before: Editor, via: str, after: Editor): bool =
   (before.form != NoForm and before.kept and D::unsaved(before.draft) and after.form == NoForm)
-    implies (via == "discard" or via == "handOff" or via == "written" or via == "receiptsChecked" or via == "eventMissing")
+    implies (via == "discard" or via == "handOff" or via == "written" or via == "receiptsChecked" or via == "eventMissing" or via == "ownerChanged")
 ```
 
 ### A draft can be offered back after a restart, fail to be kept, or meet another copy
@@ -542,4 +604,27 @@ pure def sometimesOfferedAfterRestart(s: Editor): bool = s.banner == Available a
 pure def sometimesKeepingFailed(s: Editor): bool = s.banner == Failed and D::unsaved(s.draft)
 
 pure def sometimesAnotherCopy(s: Editor): bool = s.banner == Conflict and s.form == EditEvent
+```
+
+## Story: Keep each account's draft with that account
+
+> As the owner, I want what I typed for one account kept for that account,
+> and nothing typed for one account saved by another.
+
+### Another owner signing in closes the editor; the old owner's slot keeps its edits
+
+The shell keeps each owner's draft in that owner's own slot, so the edits
+are offered back when that owner signs in again. A write in flight ends
+first.
+
+```quint
+pure def canOwnerChanged(s: Editor, owner: int): bool = owner != s.owner and owner >= 0 and not(inFlight(s))
+
+pure def ownerChanged(s: Editor, owner: int): Editor = { ...withoutForm(s.write, s), owner: owner }
+```
+
+### A draft can be set aside when another owner signs in
+
+```quint
+pure def sometimesClosedForAnotherOwner(s: Editor): bool = s.owner == 2 and s.form == NoForm and s.write.outcome == A::Confirmed
 ```

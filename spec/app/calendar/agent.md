@@ -30,7 +30,7 @@ type Query = Events | FreeTime
 type Change = Create | Update | Delete | Respond
 type Reply = NoReply | Going | Maybe | NotGoing
 type Stage = Idle | Awaiting | Sending | ReadingBack
-type Result = NoResult | Done | NotFound | Refused | InDoubt | Declined | Withdrawn
+type Result = NoResult | Done | NotFound | Refused | InDoubt | Declined | Withdrawn | DeletedByReceipt | Unverified
 
 type AgentCalendar = {
   feed: R::Read, query: Query,
@@ -269,6 +269,28 @@ pure def restart(s: AgentCalendar, by: Actor): Acted =
   else if (s.stage == ReadingBack)
     { state: { ...s, check: asked }, out: List(ReadBack({ ticket: asked.ticket, id: s.id })) }
   else { state: s, out: List() }
+```
+
+### A read back that fails leaves a confirmed deletion deleted by its receipt, and any other change sent but unverified
+
+A deletion Google confirmed is never reported as an event Calendar could
+not look up: its receipt, `calendar.event.deleted` at `deleted:<etag>` of
+the event as read before, says it is gone. A create, a change or an answer
+whose read back failed is said to be sent, never saved.
+
+```quint
+pure def canReadBackFailed(s: AgentCalendar, ticket: int, by: Actor): bool = by == World and s.stage == ReadingBack and R::canAnswer(s.check, ticket)
+
+pure def readBackFailed(s: AgentCalendar, ticket: int, by: Actor): Acted =
+  val result = if (s.change == Delete) DeletedByReceipt else Unverified
+  { state: { ...s, check: R::answer(s.check, false), stage: Idle, result: result }, out: List(Report({ result: result })) }
+
+pure def alwaysDeletedByReceiptOnlyWhenConfirmed(s: AgentCalendar): bool =
+  (s.result == DeletedByReceipt or s.result == Unverified) implies (s.write.outcome == A::Confirmed and s.check.status == R::Failed)
+
+pure def sometimesDeletedByReceipt(s: AgentCalendar): bool = s.result == DeletedByReceipt
+
+pure def sometimesUnverified(s: AgentCalendar): bool = s.result == Unverified and s.change == Respond
 ```
 
 ### The agent is told a change is done only after Google confirmed it and it was read back
