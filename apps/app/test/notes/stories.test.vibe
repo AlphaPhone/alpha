@@ -552,6 +552,11 @@ describe("Notes stories", () => {
       // spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"
       const revision = try tryPromise(() => recordNoteOriginFor(plan))
       const target = { sourceId: "notes", sourceRevision: sha, noteId: "plan", revision: revision?.revision ?? sha }
+      // spec/notes/organize.md: a change to saved notes is offered only on a screen that may show it, and always as a review card.
+      const hidden = try organize.admit({ type: "notes_move", target, folder: "Work" }, { view: "notes", sensitive: true }, true, false, false)
+      const folderCard = try organize.admit({ type: "notes_folder_create", name: "Home" }, { view: "notes" }, true, false, false)
+      const restoreCard = try organize.admit({ type: "notes_restore", noteId: "old" }, { view: "notes" }, true, false, false)
+      const unmoved = agent.notes.find((item) => item.id === "plan")?.format?.data.folderId
       const admitted = try organize.admit({ type: "notes_move", target, folder: "Work" }, { view: "notes" }, true, false, false)
       const moved = admitted === undefined ? undefined : try organize.execute(admitted.operation)
       const stale = try organize.execute({ type: "notes_move", target, folder: null })
@@ -562,9 +567,9 @@ describe("Notes stories", () => {
       const restored = try organize.execute({ type: "notes_restore", noteId: "old" })
       const live = try organize.execute({ type: "notes_restore", noteId: "old" })
       try check(() => assert.deepStrictEqual(
-        { made: made.status, exists: exists.summary, direct: admitted?.direct, moved: moved?.status, folder: typeof agent.notes.find((item) => item.id === "plan")?.format?.data.folderId,
+        { made: made.status, exists: exists.summary, hidden, reviewed: [folderCard?.direct, restoreCard?.direct], unmoved, direct: admitted?.direct, moved: moved?.status, folder: typeof agent.notes.find((item) => item.id === "plan")?.format?.data.folderId,
           stale: [stale.status, stale.summary], missing: missing.status, restored: restored.status, live: live.summary },
-        { made: "succeeded", exists: "“work” exists", direct: false, moved: "succeeded", folder: "string",
+        { made: "succeeded", exists: "“work” exists", hidden: undefined, reviewed: [false, false], unmoved: undefined, direct: false, moved: "succeeded", folder: "string",
           stale: ["failed", "Note changed"], missing: "failed", restored: "succeeded", live: "The note is already in Notes." },
       ))
     }
