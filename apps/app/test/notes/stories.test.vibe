@@ -266,11 +266,15 @@ describe("Notes stories", () => {
       // spec/notes/editor.md, "Only a clean draft at the current revision is selected for the agent"
       const clean = try editor.selection()
       try editor.edit({ body: "Steps and more" })
-      const dirty = try editor.selection()
+      const edited = try editor.selection()
+      // A change saved elsewhere moves the revision past the edit's base.
+      agent.revision += 1
+      try (try NotesCollection).refresh()
+      const stale = try editor.selection()
       // spec/notes/editor.md, "Copy draft copies the draft on screen only while it is the same reviewed draft"
       try check(() => assert.deepStrictEqual(
-        { opened, title: draft?.title, clean: clean?.id, revision: clean?.revision, dirty, copy: copyDraftAllowed(true, true, true, true, true), other: copyDraftAllowed(true, true, false, true, true) },
-        { opened: true, title: "Plan", clean: "plan", revision: "1", dirty: undefined, copy: true, other: false },
+        { opened, title: draft?.title, clean: clean?.id, revision: clean?.revision, edited: edited?.id, stale, copy: copyDraftAllowed(true, true, true, true, true), other: copyDraftAllowed(true, true, false, true, true) },
+        { opened: true, title: "Plan", clean: "plan", revision: "1", edited: "plan", stale: undefined, copy: true, other: false },
       ))
     }
   })
