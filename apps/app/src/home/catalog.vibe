@@ -10,13 +10,15 @@ export interface Catalog {
 let current: Catalog = { apps: new Map() }
 const listeners = new Set<() => void>()
 
+function subscribeCatalog(this: void, listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
 /** The phone's apps as last read, for the screens to draw: an external store, which React reads without an effect. */
 export const catalog = {
   snapshot: (): Catalog => current,
-  subscribe(listener: () => void): () => void {
-    listeners.add(listener)
-    return () => { listeners.delete(listener) }
-  },
+  subscribe: subscribeCatalog,
   /** Each app of a reading, which comes before the reading is told to Home. */
   listed(apps: readonly Listed[]): void {
     current = { apps: new Map(apps.map(({ key, app }) => [key, app])) }

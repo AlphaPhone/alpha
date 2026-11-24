@@ -20,33 +20,61 @@ module page {
     if (active.closest("[data-alpha-composer]")) return "Composer"
     return active.matches("input, textarea, [contenteditable=true]") ? "OtherField" : "NoField"
   }
-  /** The text size the page has, as a percent of the browser's own: the owner's text size times the phone's font scale. @throws {never} */
-  export function textScale(): number {
+  /** The hidden probe whose line box follows both the owner's text size and Android WebView's text zoom. */
+  const probeStyle = "position:absolute;left:0;top:0;width:0;overflow:hidden;visibility:hidden;pointer-events:none;margin:0;padding:0;border:0;font-size:6.25rem;line-height:1;white-space:nowrap;contain:layout"
+  /** The text size the page has, as a percent of the browser's own: the probe's height where laid out, else the root font size. @throws {never} */
+  export function textScale(probe?: HTMLElement): number {
+    const height = probe?.offsetHeight ?? 0
+    if (height > 0) return Math.round(height)
     const size = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
     return Number.isFinite(size) && size > 0 ? Math.round(size / 16 * 100) : 100
   }
+  /** Put Ask Alpha's composer away when it still holds focus. @throws {never} */
+  export function blurComposer(): void {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && active.closest("[data-alpha-composer]")) active.blur()
+  }
   /** Each change of the window, of the space above the keyboard, of focus and of the page's text size. @throws {never} */
-  export function watched(heard: (what: "resize" | "focus" | "text") => void): () => void {
-    const resize = () => heard("resize")
-    const focus = () => heard("focus")
-    const text = new MutationObserver(() => heard("text"))
+  export function watched(heard: (what: "resize" | "focus" | "text", probe?: HTMLElement) => void): { probe: HTMLElement | undefined; stop: () => void } {
+    const resize = () => heard("resize", probe)
+    const focus = () => heard("focus", probe)
+    let probe: HTMLElement | undefined
+    let resized: ResizeObserver | undefined
+    if (document.body) {
+      probe = document.createElement("div")
+      probe.setAttribute("aria-hidden", "true")
+      probe.dataset.alphaTextProbe = ""
+      probe.style.cssText = probeStyle
+      probe.textContent = "M"
+      document.body.append(probe)
+      if (typeof ResizeObserver === "function") {
+        resized = new ResizeObserver(() => heard("text", probe))
+        resized.observe(probe)
+      }
+    }
+    const text = new MutationObserver(() => heard("text", probe))
     text.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] })
     window.addEventListener("resize", resize)
     window.visualViewport?.addEventListener("resize", resize)
     document.addEventListener("focusin", focus)
     document.addEventListener("focusout", focus)
-    return () => {
-      window.removeEventListener("resize", resize)
-      window.visualViewport?.removeEventListener("resize", resize)
-      document.removeEventListener("focusin", focus)
-      document.removeEventListener("focusout", focus)
-      text.disconnect()
+    return {
+      probe,
+      stop: () => {
+        window.removeEventListener("resize", resize)
+        window.visualViewport?.removeEventListener("resize", resize)
+        document.removeEventListener("focusin", focus)
+        document.removeEventListener("focusout", focus)
+        text.disconnect()
+        resized?.disconnect()
+        probe?.remove()
+      },
     }
   }
   /** @throws {never} */
   export const paged = (): boolean => typeof window !== "undefined" && typeof document !== "undefined"
 }
-import { focused, measured, paged, textScale, watched } from page
+import { blurComposer, focused, measured, paged, textScale, watched } from page
 
 // spec/app/shell/keyboard.md, "From 150% text a list and its item take one pane each and Calendar shows its day as an agenda; below it, a list splits from a 1000-point canvas, and Calendar shows as many 240-point day columns as fit beside its 76-point times, widened with the text, at most seven"
 // spec/app/shell/keyboard.md, "At the same width, a shorter window while a field has focus is the keyboard; a new width while a field has focus, within a fifth of the height kept, is a rotation, and the width kept stands in for the new height; any other change takes the height measured"
@@ -57,22 +85,28 @@ const followed = started(effect {
   const tell = (event: Event) => contained(canvas.send(event), "the canvas")
   const window0 = measured()
   try tell({ type: "mount", width: window0.width, height: window0.height, launcher: presented.launcher })
-  const scaled = effect () => {
-    const scale = textScale()
+  const scaled = effect (probe?: HTMLElement) => {
+    const scale = textScale(probe)
     if ((try canvas.get()).textScale !== scale) try tell({ type: "measureText", scale })
   }
-  try scaled()
-  const changes = Stream.callback<"resize" | "focus" | "text">((queue) => acquireRelease(sync(() => watched((what) => { Queue.offerUnsafe(queue, what) })), (off) => sync(off)))
-  try Stream.runForEach(changes, effect (what) => {
+  const changes = Stream.callback<readonly ["resize" | "focus" | "text", HTMLElement | undefined]>((queue) => acquireRelease(
+    sync(() => {
+      const listening = watched((what, probe) => { Queue.offerUnsafe(queue, [what, probe] as const) })
+      Queue.offerUnsafe(queue, ["text", listening.probe] as const)
+      return listening.stop
+    }),
+    (off) => sync(off),
+  ))
+  try Stream.runForEach(changes, effect ([what, probe]) => {
     if (what === "focus") {
       const field: Field = focused()
       if ((try canvas.get()).field !== field) try tell({ type: "focusField", focus: field })
       return
     }
-    if (what === "text") return try scaled()
+    if (what === "text") return try scaled(probe)
     const now = measured()
     try tell({ type: "resize", width: now.width, height: now.height, visible: now.visible })
-    try scaled()
+    try scaled(probe)
   })
 }, "the canvas")
 
@@ -82,6 +116,11 @@ const backgrounded = started(effect {
   try Stream.runForEach(Stream.filter((try Device).visible, (shown) => !shown), () => contained(canvas.send({ type: "background" }), "the canvas"))
 }, "the canvas going to the background")
 
+// spec/app/shell/keyboard.md, "Only the composer is put away, and only when it had focus"
+const released = applying(Canvas.Machine, (c) => c.released, effect (count) => {
+  if (count > 0 && paged()) try sync(blurComposer)
+})
+
 // spec/app/shell/keyboard.md, "The canvas is landscape when the window is wider than its height without the keyboard; the launcher lays a portrait phone out at 412 points, and a canvas of 760 or more is wide"
 const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: c.wide, covered: c.covered, split: c.split, agenda: c.agenda }), effect (marks) => {
   const device = try Device
@@ -89,4 +128,4 @@ const marked = applying(Canvas.Machine, (c) => ({ landscape: c.landscape, wide: 
 })
 
 /** The canvas, in memory: measured when the shell mounts and at every change of the window, and marked on the page. */
-export const canvas = together(reacting(Canvas, {}), followed, backgrounded, marked)
+export const canvas = together(reacting(Canvas, {}), followed, backgrounded, released, marked)

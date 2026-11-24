@@ -12,6 +12,10 @@ import { elizaSystem as launcherSystem } from "./launcher.ts";
 import { elizaFiles } from "./files.ts";
 import type { Scene } from "./scene.ts";
 import { alphaCarrierSetup, elizaLocation as settingsLocation, elizaPasswords, elizaReset, elizaSystem as settingsSystem, elizaWiFi } from "./settings.ts";
+import { elizaSystem as launcherSystem } from "./launcher.ts";
+import { elizaFiles } from "./files.ts";
+import type { Scene } from "./scene.ts";
+import { alphaCarrierSetup, elizaPasswords, elizaReset, elizaSystem as settingsSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaDevice } from "./update.ts";
 import { alphaConnection } from "./platform.ts";
@@ -52,6 +56,26 @@ function combinedLocation(world: Scene): Faked {
       ...fromMaps,
       checkPermissions: () => (world.maps.allowed !== "granted" ? fromMaps.checkPermissions() : fromSettings.checkPermissions()),
       requestPermissions: () => (world.maps.allowed !== "granted" ? fromMaps.requestPermissions() : fromSettings.requestPermissions()),
+    };
+  };
+}
+
+/**
+ * Combines Settings' and Home's parts of `ElizaSystem` into one plugin: Settings owns roles, device facts, crash logs
+ * and Alpha's own App info, while Home owns the installed apps, launching one, its App info, the shade and presentation.
+ */
+function combinedSystem(world: Scene): Faked {
+  return (emit) => {
+    const settings = settingsSystem(world.settings)(emit) as Record<string, (arg: unknown) => Promise<unknown>>;
+    const launcher = launcherSystem(world.launcher)(emit) as Record<string, (arg: unknown) => Promise<unknown>>;
+    return {
+      ...settings,
+      ...launcher,
+      getBuildInfo: () => Promise.resolve({ launcher: world.launcher.launcher, version: world.settings.version }),
+      openAppInfo: (target: unknown) =>
+        typeof target === "object" && target !== null && "packageName" in target && target.packageName === "ai.alphacompute.alphaphone"
+          ? settings.openAppInfo(target)
+          : launcher.openAppInfo(target),
     };
   };
 }

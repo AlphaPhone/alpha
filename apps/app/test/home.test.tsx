@@ -166,8 +166,8 @@ describe("Home on a phone", () => {
     expect([toast(), world.launcher.opened.length]).toEqual(["Couldn't open Clock. It's turned off.", 2]);
 
     // spec/app/home/index.md, "A failed reading that takes an installed tile off Home says so"; spec/app/home/index.md, "Home shows a tile only while its app is on this phone; a tile whose app has gone keeps its place and comes back with the app"
-    const clock = world.launcher.apps[0]!;
-    world.launcher.apps = world.launcher.apps.slice(1);
+    const [clock, ...rest] = world.launcher.apps;
+    world.launcher.apps = rest;
     world.launcher.changed();
     await until(alpha, homes, Home.Machine, (h) => !h.installed.apps.includes("org.fixture.clock/org.fixture.clock.Main") && h.installed.read.status === "Loaded");
     expect(tiles()).not.toContain("app:org.fixture.clock/org.fixture.clock.Main");

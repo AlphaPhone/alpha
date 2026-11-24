@@ -2,7 +2,9 @@
 import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
 
 module held {
-  type Bridge = typeof import("@elizaos/os/bridges/system")
+  import type { InstalledApp } from "@elizaos/os/bridges/definitions/system"
+  import type * as SystemBridge from "@elizaos/os/bridges/system"
+  type Bridge = typeof SystemBridge
   let loaded: Promise<Bridge> | undefined
   /**
    * eliza's bridge of the `ElizaSystem` plugin, loaded the first time the phone's launcher is built: loading it
@@ -30,6 +32,8 @@ export type Asked = { readonly done: true } | { readonly done: false; readonly w
 
 /** The phone could not list its apps, or there is no launcher, as in a browser. */
 export error Unlisted { cause: unknown }
+
+error LaunchRefused { cause: unknown }
 
 /**
  * The phone's launcher: what is installed, opening an installed app, and Android's notification
@@ -76,10 +80,10 @@ export const phoneLauncher = Layer.effect(Launcher, effect {
     effect open(app: InstalledApp) {
       const target = { packageName: app.packageName, ...(app.activityName ? { activityName: app.activityName } : {}), ...(app.user ? { user: app.user } : {}) }
       return effect {
-        try tryPromise({ try: () => system.launchApp(target), catch: (cause) => cause })
+        try tryPromise({ try: () => system.launchApp(target), catch: (cause) => new LaunchRefused({ cause }) })
         const done: Asked = { done: true }
         return done
-      } catch (cause) => refused(refusalOf(cause))
+      } catch (error) => refused(refusalOf(error.cause))
     },
     effect shade() {
       const handed = tryPromise(() => system.openNotificationShade()) catch () => undefined
