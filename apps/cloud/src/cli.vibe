@@ -132,7 +132,7 @@ effect function resources(found: Flags, creating: boolean) {
   const path = try Path.Path
   const recorded = found.values.get("resources") ?? path.join(try packageDirectory(), "resources.json")
   const ids = try resourcesOf(recorded)
-  const verified = try provide FetchHttpClient.layer { return try reconciled(environment, table, ids, values.DATABASE_URL, creating) }
+  const verified = try Effect.provide(reconciled(environment, table, ids, values.DATABASE_URL, creating), FetchHttpClient.layer)
   if (creating && found.on.has("write")) try recordResources(recorded, environment, ids[environment], verified)
   return { environment, verified, written: creating && found.on.has("write") }
 }
@@ -158,7 +158,7 @@ effect function database(found: Flags, command: "migrate" | "register" | "prices
 effect function smokeOf(found: Flags) {
   const environment = try environmentOf(found)
   const hosts = alphaHosts(try deploymentTable())[environment]
-  const gates = try provide FetchHttpClient.layer { return try smoke(environment, hosts, alphaCloudName) }
+  const gates = try Effect.provide(smoke(environment, hosts, alphaCloudName), FetchHttpClient.layer)
   return { environment, ready: gates.every((gate) => gate.passed), gates }
 }
 
@@ -179,7 +179,7 @@ export effect function cli(argv: ReadonlyArray<string>) {
     case "deploy": {
       const found = try flags(rest, ["environment", "inputs", "env-file", "component", "resources"])
       const at = { environment: try environmentOf(found), inputs: try required(found, "inputs"), secrets: try required(found, "env-file"), component: try componentOf(found), resources: found.values.get("resources") }
-      return try provide FetchHttpClient.layer { return try deploy(at) }
+      return try Effect.provide(deploy(at), FetchHttpClient.layer)
     }
     case "smoke": {
       const result = try smokeOf(try flags(rest, ["environment"]))

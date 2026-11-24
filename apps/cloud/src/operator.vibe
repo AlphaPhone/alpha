@@ -103,7 +103,7 @@ export effect function settledSecrets(file: string, environment: CloudEnvironmen
   if (read.generated) try writeSecrets(file, settled)
   const signingKey = settled.CLOUD_ENTITLEMENT_KEY
   const publicKey = signingKey ? try (Effect.try(() => entitlementPublicKey(signingKey)) catch effect () => { throw new OperatorFailed({ problem: "CLOUD_ENTITLEMENT_KEY is not a PKCS #8 P-256 key" }) }) : undefined
-  if (read.secrets !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
+  if (read.vault !== "Complete") throw new OperatorFailed({ problem: secretProblems(settled, environment).join("\n") })
   return { values: settled, entitlementPublicKey: publicKey }
 }
 
@@ -164,11 +164,12 @@ const siblingOf = (environment: CloudEnvironment): CloudEnvironment => environme
 /** Checks, and with `creating` completes, an environment's Cloudflare resources against what `resources.json` records. */
 export effect function reconciled(environment: CloudEnvironment, table: Table, resources: Readonly<Record<CloudEnvironment, CloudResources>>, databaseUrl: string | undefined, creating: boolean) {
   const hosts = table[environment].candidate
-  const optional = (name: string) => Config.option(Config.String(name)) catch () => Option.none<string>()
+  const accountId = try (Config.withDefault(Config.String("CLOUDFLARE_ACCOUNT_ID"), "") catch () => "")
+  const token = try (Config.withDefault(Config.String("CLOUDFLARE_API_TOKEN"), "") catch () => "")
   return try reconcileResources({
     ids: resources[environment], sibling: resources[siblingOf(environment)],
     apiHost: new URL(hosts.api).host, webHost: new URL(hosts.web).host, databaseUrl, creating,
-    accountId: Option.getOrUndefined(try optional("CLOUDFLARE_ACCOUNT_ID")), token: Option.getOrUndefined(try optional("CLOUDFLARE_API_TOKEN")),
+    accountId: accountId === "" ? undefined : accountId, token,
   })
 }
 

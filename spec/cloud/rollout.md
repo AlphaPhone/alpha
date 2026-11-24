@@ -17,18 +17,18 @@ before it has passed.
 ### A rollout starts with no secret read, nothing checked and nothing deployed
 
 ```quint
-type Secrets = Unread | Incomplete | Complete
+type Vault = Unread | Incomplete | Complete
 type Resources = Unchecked | Verified | Conflicting
 type Worker = Waiting | Deployed
-type Rollout = { frozen: bool, secrets: Secrets, generated: bool, resources: Resources, rendered: bool, api: Worker, edge: Worker }
+type Rollout = { frozen: bool, vault: Vault, generated: bool, resources: Resources, rendered: bool, api: Worker, edge: Worker }
 
-pure val initial: Rollout = { frozen: false, secrets: Unread, generated: false, resources: Unchecked, rendered: false, api: Waiting, edge: Waiting }
+pure val initial: Rollout = { frozen: false, vault: Unread, generated: false, resources: Unchecked, rendered: false, api: Waiting, edge: Waiting }
 ```
 
 ### A rollout run by CI is frozen before it reads its secrets
 
 ```quint
-pure def canFreeze(r: Rollout): bool = r.secrets == Unread and not(r.frozen)
+pure def canFreeze(r: Rollout): bool = r.vault == Unread and not(r.frozen)
 
 pure def freeze(r: Rollout): Rollout = { ...r, frozen: true }
 ```
@@ -36,17 +36,17 @@ pure def freeze(r: Rollout): Rollout = { ...r, frozen: true }
 ### Reading the secrets generates each missing internal secret once, except in a frozen rollout, and they are complete only when every one is there and fits its environment
 
 ```quint
-pure def canReadSecrets(r: Rollout): bool = r.secrets == Unread
+pure def canReadSecrets(r: Rollout): bool = r.vault == Unread
 
 pure def readSecrets(r: Rollout, internalMissing: bool, providedFit: bool): Rollout =
   val generates = internalMissing and not(r.frozen)
-  { ...r, generated: generates, secrets: if (providedFit and (not(internalMissing) or generates)) Complete else Incomplete }
+  { ...r, generated: generates, vault: if (providedFit and (not(internalMissing) or generates)) Complete else Incomplete }
 ```
 
 ### The Cloudflare resources are checked only once the secrets are complete
 
 ```quint
-pure def canCheckResources(r: Rollout): bool = r.secrets == Complete and r.resources == Unchecked
+pure def canCheckResources(r: Rollout): bool = r.vault == Complete and r.resources == Unchecked
 
 pure def checkResources(r: Rollout, recorded: bool): Rollout = { ...r, resources: if (recorded) Verified else Conflicting }
 ```
@@ -75,10 +75,10 @@ pure def deployEdge(r: Rollout): Rollout = { ...r, edge: Deployed }
 
 ```quint
 pure def alwaysChecksComeInOrder(r: Rollout): bool =
-  (r.rendered implies r.resources == Verified) and (r.resources != Unchecked implies r.secrets == Complete)
+  (r.rendered implies r.resources == Verified) and (r.resources != Unchecked implies r.vault == Complete)
 
 pure def alwaysDeployedOnlyWhenReady(r: Rollout): bool =
-  (r.api == Deployed or r.edge == Deployed) implies (r.secrets == Complete and r.resources == Verified and r.rendered)
+  (r.api == Deployed or r.edge == Deployed) implies (r.vault == Complete and r.resources == Verified and r.rendered)
 ```
 
 ### A frozen rollout generates no secret
@@ -88,7 +88,7 @@ every phone would be signed out.
 
 ```quint
 pure def alwaysFrozenGeneratesNothing(r: Rollout): bool =
-  (r.frozen implies not(r.generated)) and (r.secrets == Unread implies not(r.generated))
+  (r.frozen implies not(r.generated)) and (r.vault == Unread implies not(r.generated))
 ```
 
 ### A rollout can deploy both Workers, and can stop on its secrets or its resources
@@ -96,7 +96,7 @@ pure def alwaysFrozenGeneratesNothing(r: Rollout): bool =
 ```quint
 pure def sometimesBothDeployed(r: Rollout): bool = r.api == Deployed and r.edge == Deployed
 
-pure def sometimesStoppedOnSecrets(r: Rollout): bool = r.secrets == Incomplete
+pure def sometimesStoppedOnSecrets(r: Rollout): bool = r.vault == Incomplete
 
 pure def sometimesStoppedOnResources(r: Rollout): bool = r.resources == Conflicting
 ```

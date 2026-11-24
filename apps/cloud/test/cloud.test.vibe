@@ -158,10 +158,13 @@ describe('Secrets stay private and fit their environment (spec/cloud/rollout.md,
     try fs.writeFileString(file, Object.entries(provided).map(([name, value]) => `${name}=${value}`).join("\n"), { mode: 0o644 })
     try check(() => assert.strictEqual(try (readSecrets(file) catch (failure) => failure._tag), "OperatorFailed"))
     try fs.chmod(file, 0o600)
-    const frozen = try (provide machine() { try (try Machine).send({ type: "freeze" }); return try (settledSecrets(file, "staging") catch (failure) => failure.problem) })
+    const frozen = try Effect.provide(effect {
+      try (try Machine).send({ type: "freeze" })
+      return try (settledSecrets(file, "staging") catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag)
+    }, machine())
     try check(() => assert.ok(typeof frozen === "string" && frozen.includes("CLOUD_SEALING_KEY is missing")))
-    const first = try provide machine() { return try settledSecrets(file, "staging") }
-    const second = try provide machine() { return try settledSecrets(file, "staging") }
+    const first = try Effect.provide(settledSecrets(file, "staging"), machine())
+    const second = try Effect.provide(settledSecrets(file, "staging"), machine())
     try check(() => assert.deepStrictEqual(second.values, first.values))
     try check(() => assert.deepStrictEqual(first.entitlementPublicKey, entitlementPublicKey(first.values.CLOUD_ENTITLEMENT_KEY ?? "")))
     try check(() => assert.deepStrictEqual(Object.keys(workerSecrets(first.values)).sort(), ["CARTESIA_API_KEY", "CEREBRAS_API_KEY", "CLOUD_DIGEST_KEY", "CLOUD_ENTITLEMENT_KEY", "CLOUD_SEALING_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY", "GOOGLE_MAPS_API_KEY", "INFERENCE_API_KEY", "RESEND_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]))
