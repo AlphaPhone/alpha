@@ -31,7 +31,7 @@ import { NotesRecordingOpen } from "../../src/notes/recordingOpen.vibe"
 import { NotesShare } from "../../src/notes/share.vibe"
 import { NotesSources } from "../../src/notes/sources.vibe"
 import { NotesTrash } from "../../src/notes/trash.vibe"
-import { bound, check, home, inNotes, notesOver, until } from "./harness.vibe"
+import { bound, check, home, inNotes, notesOver, told, until } from "./harness.vibe"
 import { DeviceFake, NotesAgentFake } from "./resident-fake.ts"
 
 const start = Date.parse("2026-11-20T10:00:00.000Z")
@@ -397,6 +397,29 @@ describe("Notes stories", () => {
       try check(() => assert.deepStrictEqual(
         { finished, again, claims: device.claims, completed: after.completed, phase: after.phase, voices: agent.notes.filter((item) => item.format?.kind === "voice").length },
         { finished: true, again: false, claims: 1, completed: 1, phase: "PendingEmpty", voices: 1 },
+      ))
+    }
+  })
+
+  it.live("Done on a recording with no audio yet saves nothing and closes without a word (spec/notes/recorder.md, \"Story: Save the recording as one voice note\")", () => effect {
+    const agent = new NotesAgentFake()
+    const device = new DeviceFake()
+    device.silent = true
+    told.length = 0
+    provide notesOver(agent, device) {
+      const recorder = try NotesRecorder
+      const machine = try RecorderMachine
+      const journal = try JournalMachine
+      try bound()
+      try recorder.begin(null, false)
+      // spec/notes/recorder.md, "Done claims the save once, and the recording closes only after its note is confirmed"
+      const finished = try recorder.finish()
+      const state = try machine.get()
+      const pending = try journal.get()
+      try check(() => assert.deepStrictEqual(
+        { finished, phase: state.phase, error: state.error, saved: state.saved, claims: device.claims, native: (device.status as { state?: string }).state,
+          pending: pending.phase, voices: agent.notes.filter((item) => item.format?.kind === "voice").length, said: [...told] },
+        { finished: false, phase: "RecClosed", error: "NoRecError", saved: 0, claims: 0, native: "idle", pending: "PendingEmpty", voices: 0, said: [] },
       ))
     }
   })

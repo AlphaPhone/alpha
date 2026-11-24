@@ -125,6 +125,8 @@ export class DeviceFake {
   claims = 0;
   recordingOpen = false;
   segmentText: string | undefined = "Buy stamps";
+  /** A recording stopped before it held any audio: its stop finishes no segment. */
+  silent = false;
   refuseStart: string | undefined;
   speech: (args: Record<string, unknown>) => unknown = () => ({ text: "Buy stamps", local: false });
   playing: string | undefined;
@@ -182,7 +184,8 @@ export class DeviceFake {
       return this.status;
     }
     if (method === "stopNoteRecording") {
-      this.status = { ...this.status, state: "stopped", stopReason: "user", durationMs: 3000, segments: [{ segmentId: "s1", durationMs: 3000, ...(this.segmentText === undefined ? {} : { text: this.segmentText }) }] };
+      this.status = this.silent ? { ...this.status, state: "stopped", stopReason: "user", durationMs: 0, segments: [] }
+        : { ...this.status, state: "stopped", stopReason: "user", durationMs: 3000, segments: [{ segmentId: "s1", durationMs: 3000, ...(this.segmentText === undefined ? {} : { text: this.segmentText }) }] };
       return this.status;
     }
     if (method === "claimCanonicalNoteSave") {

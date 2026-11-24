@@ -261,8 +261,16 @@ const make = effect {
     if (stopped === undefined || stopped.recordingId !== id || stopped.state !== "stopped") { try send({ type: "voiceSaveFailed" }); return false }
     if (stopped.canonicalSavePending === true && !(try machine.get()).savePending) try send({ type: "claim" })
     try learn(stopped)
-    // spec/notes/recorder.md: a recording with no finished segment once stopped has no audio, so nothing is saved.
-    if ((stopped.segments ?? []).length === 0) { try send({ type: "voiceSaveFailed" }); return false }
+    try send({ type: "progress", segments: (stopped.segments ?? []).length, longEnough: (stopped.durationMs ?? 0) >= 1000 })
+    if ((stopped.segments ?? []).length === 0) {
+      // spec/notes/recorder.md: a recording with no finished segment once stopped has no audio: nothing is saved and it is let go quietly.
+      if ((try send({ type: "noAudio" })) === undefined) { try send({ type: "voiceSaveFailed" }); return false }
+      try record({ type: "discardPending", isOwner: true })
+      try record({ type: "retirePending" })
+      voice("discardNoteRecording", { recordingId: id }) catch () => undefined
+      try close()
+      return false
+    }
     try record({ type: "stopPending" })
     const words = try transcript(stopped.segments ?? [])
     const durationMs = Math.round(stopped.durationMs ?? (try SubscriptionRef.get(display)).durationMs)

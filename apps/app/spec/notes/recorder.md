@@ -127,8 +127,9 @@ pure def sometimesStoppedForStorage(s: Recorder): bool = s.phase == RecStopped a
 
 Done works while the recording records, is paused or is stopped. It stops the recording, lets
 transcription catch up, and saves one canonical voice note with the recording's opaque handle bound to
-the confirmed note; a recording with no finished segment once stopped has no audio, so nothing is saved
-and it stays stopped (legacy `finish`, 9ea3dfd5f). The native recorder records the claim before the
+the confirmed note. A recording with no finished segment once stopped has no audio: nothing is saved, it
+is let go and the recorder closes without a word, as a failed voice action ends (legacy `finish`,
+9ea3dfd5f, said Not saved instead). The native recorder records the claim before the
 note is created, so a lost reply, a retry, a reload or an aborted save never creates the note twice. A
 claimed recording cannot resume or be discarded. A failed save keeps the recording; after a claim the
 owner is asked to check Notes.
@@ -138,11 +139,15 @@ pure def canFinishRecording(s: Recorder): bool = s.owned and holdsRecording(s)
 pure def finishRecording(s: Recorder): Recorder = { ...s, phase: RecFinishing, confirmingDiscard: false }
 pure def canClaim(s: Recorder): bool = s.phase == RecFinishing and not(s.savePending) and s.owned
 pure def claim(s: Recorder): Recorder = { ...s, savePending: true }
-pure def canVoiceSaved(s: Recorder): bool = s.phase == RecFinishing
+pure def canVoiceSaved(s: Recorder): bool = s.phase == RecFinishing and s.segments >= 1
 pure def voiceSaved(s: Recorder): Recorder =
   { ...s, phase: RecClosed, saved: s.saved + 1, segments: 0, transcribed: 0, savePending: false, recording: 0, error: NoRecError, longEnough: false }
 pure def canVoiceSaveFailed(s: Recorder): bool = s.phase == RecFinishing
 pure def voiceSaveFailed(s: Recorder): Recorder = { ...s, phase: RecStopped, error: if (s.savePending) CheckNotes else NotSaved }
+pure def canNoAudio(s: Recorder): bool = s.phase == RecFinishing and s.segments == 0 and not(s.savePending)
+pure def noAudio(s: Recorder): Recorder =
+  { ...s, phase: RecClosed, recording: 0, transcribed: 0, confirmingDiscard: false, longEnough: false, error: NoRecError }
+pure def stepSavedVoiceNoteHasAudio(before: Recorder, via: str, after: Recorder): bool = via == "voiceSaved" implies before.segments >= 1
 pure def alwaysClaimHeldOnlyWhileSaving(s: Recorder): bool =
   s.savePending implies (s.phase == RecFinishing or s.phase == RecStopped or s.phase == RecFailed)
 pure def sometimesSaved(s: Recorder): bool = s.saved >= 1
