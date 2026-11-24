@@ -75,7 +75,13 @@ describe("Home on a phone", () => {
     await until(alpha, homes, Home.Machine, (h) => h.tiles.load.status === "Loaded");
 
     // spec/app/home/index.md, "When the shell moves, what no longer fits closes: anything over Home ends editing, the drawer opening included, and a closed drawer drops its search and menu": the drawer opening reads the apps.
+    world.launcher.unlisted = true;
     await press("Apps");
+    await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Failed");
+
+    // spec/app/home/index.md, "In the open drawer that could not read the apps, Try again reads them once more"
+    world.launcher.unlisted = false;
+    await press("Try again");
     await until(alpha, homes, Home.Machine, (h) => h.installed.read.status === "Loaded");
     expect([Boolean(button("Clock")), Boolean(button("Mail"))]).toEqual([true, true]);
 

@@ -320,6 +320,16 @@ pure def drawer(h: Home): Drawer =
 pure def offersDrawer(h: Home): bool = onPhone(h) and not(h.editing)
 ```
 
+### In the open drawer that could not read the apps, Try again reads them once more
+
+```quint
+pure def canTryAgain(h: Home, shell: S::Shell): bool = shell.drawer and drawer(h) == CannotRead
+
+pure def tryAgain(h: Home, shell: S::Shell): Moved =
+  val installed = P::askApps(h.installed, false)
+  { state: { ...h, installed: installed }, out: asked(installed, h) }
+```
+
 ### The drawer says nothing matches only when something is searched
 
 ```quint

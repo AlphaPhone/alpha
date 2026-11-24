@@ -112,6 +112,7 @@ export function HomePage({ runtime, alpha }: Shown<HomeMachines | Resident>) {
           onOpenMenu={(app) => offered({ type: "openMenu", app, shell: s })?.()}
           onCloseMenu={() => offered({ type: "backOut" })?.()}
           onAddToHome={(app) => offered({ type: "addToHome", tile: { tag: "Installed", app }, shell: s })?.()}
+          onTryAgain={offered({ type: "tryAgain", shell: s })}
           onShowAppInfo={(app) => offered({ type: "showAppInfo", app, shell: s, now: untimed })?.()}
           notice={notice}
         />
