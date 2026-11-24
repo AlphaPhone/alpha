@@ -1,7 +1,7 @@
 // spec/app/files/index.md, "Story: Browse my storage"; spec/app/files/index.md, "Story: Arrange and filter what I see"; spec/app/files/index.md, "Story: Change my files"; spec/app/files/index.md, "Folders come before files in every sort: by name in the phone's order of names, by date the newest first, by size the largest first; choosing the sort again turns the order within the folders and within the files"; spec/app/files/index.md, "The owner sees a listed item's details: what it is, how big it is, when it last changed and where it is; they close when the owner closes them or moves, or when the item is no longer listed"
 import { Alert, AppHeader, Button, Checkbox, Chip, Dialog, DialogContent, DialogTitle, EmptyState, Input, ListGroup, ListRow, Menu, MenuContent, MenuItem, MenuTrigger, Progress, SearchField, Sheet, SheetContent, Spinner } from "@repo/ui";
 import { Effect, Option, type ManagedRuntime } from "effect";
-import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ChevronRight, Download, Ellipsis, File, FileText, Folder, FolderInput, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowDownWideNarrow, ArrowUp, AudioLines, ChevronRight, Download, Ellipsis, File, FileText, Folder, FolderInput, FolderOpen, HardDrive, Image, Info, LayoutGrid, List, Pencil, Plus, RefreshCw, Search, Share2, Trash2, Video, X, type LucideIcon } from "lucide-react";
 import { Fragment, useMemo, useState, type MouseEvent } from "react";
 import type { Machine, Order } from "../../gen/app__files.effect.vibe";
 import { ahead, browse, chosen, detailed, empty, filled } from "../../gen/app__files.ts";
@@ -17,6 +17,8 @@ import type { Time } from "../runtime/time.vibe";
 import { Handles } from "./handles.vibe";
 import type { Machine as PreviewMachine } from "../../gen/app__files__preview.effect.vibe";
 import type { Machine as RecentMachine } from "../../gen/app__files__recent.effect.vibe";
+import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
+import { useMachine as useRecent } from "../../gen/app__files__recent.react.ts";
 import type { Opened } from "./preview.vibe";
 import { Preview, RecentFiles } from "./Preview.tsx";
 import { Trash, Undo } from "./Trash.tsx";
@@ -24,7 +26,7 @@ import { Trash, Undo } from "./Trash.tsx";
 export interface FilesProps {
   /** Provides Files and its Trash, `files` of files.vibe, the numbers of the phone's storage and Alpha's time. */
   alpha: Alpha;
-  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<Machine | TrashMachine | PreviewMachine | RecentMachine | Opened | Handles | Time | Shell, unknown>;
 }
 
 const categories: readonly [Kind, string][] = [["Download", "Downloads"], ["Image", "Images"], ["Video", "Videos"], ["Audio", "Audio"], ["Document", "Documents"]];
@@ -57,6 +59,7 @@ function labelOf(runtime: FilesProps["runtime"], handle: number): string {
  */
 export function Files({ runtime, alpha }: FilesProps) {
   const { state, cause, can, send } = useMachine(runtime);
+  const recent = useRecent(runtime);
   const [text, setText] = useState("");
   const [naming, setNaming] = useState<{ work: Work; name: string } | undefined>(undefined);
   const [kind, setKind] = useState<Kind | undefined>(undefined);
@@ -147,7 +150,9 @@ export function Files({ runtime, alpha }: FilesProps) {
   const showFilter = owner({ type: "searchFor", wanted });
   const refresh = owner({ type: "refresh" });
   const makeFolder = owner({ type: "begin", work: "NewFolder", name: unnamed });
-  const showTools = showFilter || refresh || makeFolder || owner(changeLayout);
+  const pickFile = { type: "openPicker", replacing: 0 } as const;
+  const canPick = atTop && recent.can(pickFile, "Owner");
+  const showTools = showFilter || refresh || makeFolder || owner(changeLayout) || canPick;
   const canDetails = firstPicked !== undefined && picked.length === 1 && owner({ type: "showDetails", target: firstPicked.id });
   return (
     <section aria-label="Files" className="relative flex min-h-0 flex-1 flex-col">
@@ -159,6 +164,7 @@ export function Files({ runtime, alpha }: FilesProps) {
             <Menu>
               <MenuTrigger asChild><Button variant="ghost" size="icon" aria-label={atTop ? "Files tools" : "Files options"}><Ellipsis /></Button></MenuTrigger>
               <MenuContent>
+                {canPick && <MenuItem onSelect={() => void recent.send(pickFile, "Owner")}><FolderOpen />Open and remember a file</MenuItem>}
                 {makeFolder && <MenuItem onSelect={() => setNaming({ work: "NewFolder", name: "" })}><Plus />New folder</MenuItem>}
                 {owner(changeLayout) && <MenuItem onSelect={() => tell(changeLayout)}>{grid ? <List /> : <LayoutGrid />}{grid ? "List" : "Grid"}</MenuItem>}
                 {orders.map(([order, name]) => owner({ type: "sortBy", order }) && (
@@ -208,7 +214,7 @@ export function Files({ runtime, alpha }: FilesProps) {
           {change.sending.outcome === "Refused" && <Alert variant="warn">Android could not open sharing</Alert>}
           {change.stale && <Alert variant="info">The selection changed, so nothing was shared</Alert>}
           <Undo runtime={runtime} />
-          {looked !== "NoFilter" ? (
+          {looked !== "NoFilter" && (
             <div className="flex flex-col gap-2">
               <div className="px-2"><Chip onClear={owner({ type: "clearFilter" }) ? () => tell({ type: "clearFilter" }) : undefined} clearLabel="Clear the filter">
                 {[state.search.filter.anyKind ? "" : kinds.find(([one]) => one === state.search.filter.kind)?.[1] ?? "", state.search.filter.text === "" ? "" : `“${state.search.filter.text}”`].filter(Boolean).join(" · ") || "Everything"}
@@ -217,6 +223,7 @@ export function Files({ runtime, alpha }: FilesProps) {
               {looked === "Nothing" && <EmptyState icon={<Search />} title="Nothing matches" />}
               {looked === "Trouble" && <Alert variant="warn">The search could not finish</Alert>}
               {looked === "Unfinished" && <Alert variant="info">Nothing found in what the phone could search</Alert>}
+              {looked === "Found" && !state.search.complete && <Alert variant="info">Only part of this place could be searched</Alert>}
               {looked === "Found" && (
                 <ListGroup aria-label="Found" surface="plain">
                   {state.search.hits.map((hit) => {
@@ -226,11 +233,12 @@ export function Files({ runtime, alpha }: FilesProps) {
                 </ListGroup>
               )}
             </div>
-          ) : atTop ? (
+          )}
+          {atTop ? (
             <>
               {state.storage.status === "Loading" && <Spinner label="Reading your storage" />}
-              {state.storage.status === "Failed" && <Alert variant="destructive">Your storage cannot be read now</Alert>}
-              {state.storage.status === "Loaded" && (
+              {state.storage.status === "Failed" && <Alert variant="destructive"><span>Your storage cannot be read now</span>{refresh && <Button variant="ghost" size="sm" onClick={() => tell({ type: "refresh" })}>Retry</Button>}</Alert>}
+              {(state.storage.status === "Loaded" || state.volumes.length > 0) && (
                 <>
                   <ListGroup aria-label="Categories" surface="plain">
                     {primary && owner({ type: "openVolume", target: primary.id }) && <ListRow className={rowClass} title="All files" leading={<span className={iconBox}><Folder className="size-5" /></span>} onClick={() => tell({ type: "openVolume", target: primary.id })} />}
@@ -262,7 +270,7 @@ export function Files({ runtime, alpha }: FilesProps) {
               )}
               <RecentFiles runtime={runtime} />
             </>
-          ) : (
+          ) : looked === "NoFilter" && (
             <>
               {shown === "Reading" && state.items.length === 0 && <Spinner label="Reading the folder" />}
               {shown === "Unreachable" && <Alert variant="destructive">This place cannot be read now</Alert>}

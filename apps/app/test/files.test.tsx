@@ -5,6 +5,7 @@ import { Machine as Browser } from "../gen/app__files.effect.vibe";
 import { Machine as Shown } from "../gen/app__files__preview.effect.vibe";
 import { Machine as Recent } from "../gen/app__files__recent.effect.vibe";
 import { Machine as Bin } from "../gen/app__files__trash.effect.vibe";
+import { Machine as Shell } from "../gen/app__shell.effect.vibe";
 import { agentFilter, agentOpen, agentRead, approved, offer, shownAt } from "../src/files/agent.vibe";
 import { showDownloads } from "../src/files/files.vibe";
 import files from "../src/files/index.tsx";
@@ -203,6 +204,16 @@ describe("Files on a phone", () => {
     world.files.stored.push({ volume: "primary", path: "Download/new.txt", directory: false, mimeType: "text/plain", size: 1, modified: 9 });
     await seen(true);
     await until(alpha, runtime, Browser, (s) => s.listing.status === "Loaded" && s.items.length === 3);
+
+    world.files.stored.push({ volume: "primary", path: "song.txt", directory: false, mimeType: "text/plain", size: 3, modified: 10 });
+    await press("Files");
+    await press("SD card");
+    await choose("Filter files");
+    await fill("Filter", "song");
+    await press("Any kind");
+    await press("Filter");
+    await until(alpha, runtime, Browser, (s) => s.search.query.status === "Loaded" && s.search.hits.length === 1);
+    expect(runtime.runSync(Browser.use((m) => m.get())).search.hits.map((hit) => hit.name)).toEqual(["song.mp3"]);
   });
 
   it("Change my files (spec/app/files/index.md, \"Story: Change my files\"; spec/app/files/change.md, \"Story: Change my files\"; spec/app/files/destination.md, \"Story: Choose a destination\"; spec/app/files/change.md, \"Story: Share what I selected\")", async () => {
@@ -301,7 +312,7 @@ describe("Files on a phone", () => {
     expect(paths(world).includes("primary:Download/dunes.jpg")).toBe(true);
   });
 
-  it("Look at a file, and find what I opened lately (spec/app/files/preview.md, \"Story: Look at a file\"; spec/app/files/recent.md, \"Story: Find what I opened lately\")", async () => {
+  it("Look at a file, and find what I opened lately (spec/app/files/preview.md, \"Story: Look at a file\"; spec/app/files/recent.md, \"Story: Find what I opened lately\"; spec/app/files/recent.md, \"Story: Pick a file with the system picker\"; spec/app/files/preview.md, \"Story: Act on the file I am looking at\")", async () => {
     const { alpha, runtime, world } = await onFiles();
     await until(alpha, runtime, Browser, (s) => s.storage.status === "Loaded");
     await press("Internal storage");
@@ -312,9 +323,18 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
     expect(document.querySelector("pre")?.textContent).toBe("The words of notes.txt");
-    await openMenu("File actions");
-    expect(Boolean(menuItem("Ask Alpha"))).toBe(true);
-    await drawn(() => menuItem("Ask Alpha")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    const updated = world.files.stored.find((file) => file.path === "Documents/notes.txt");
+    if (updated) updated.modified = 11;
+    world.files.texts["Documents/notes.txt"] = "These are the revised notes";
+    world.files.changed();
+    await until(alpha, runtime, Shown, (s) => s.revision === 11 && s.content.status === "Loaded");
+    expect(document.querySelector("pre")?.textContent).toBe("These are the revised notes");
+
+    await choose("Ask Alpha", "File actions");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Sheet");
+    await press("Remove notes.txt");
+    await hardware("back");
+    await until(alpha, alpha.runtime, Shell, (s) => s.assistant === "Bar");
     // spec/app/files/preview.md, "The owner closes the viewer, and so does leaving the screen or the phone locking"
     await press("Close");
     await until(alpha, runtime, Shown, (s) => s.viewer === 0);
@@ -359,6 +379,16 @@ describe("Files on a phone", () => {
     await press("notes.txt");
     await until(alpha, runtime, Recent, (s) => s.reaching.status === "Failed" && s.rows.filter((row) => row.grant === 0).length === 1);
     expect(button("notes.txt")).toBeUndefined();
+
+    world.files.stored.push({ volume: "primary", path: "Download/restored.txt", directory: false, mimeType: "text/plain", size: 12, modified: 10 });
+    world.files.selectedByPicker = "Download/restored.txt";
+    await press("Select again: notes.txt");
+    await until(alpha, runtime, Shown, (s) => s.content.status === "Loaded" && s.kind === "Text");
+    expect(document.querySelector("pre")?.textContent).toBe("The words of restored.txt");
+    await hardware("back");
+    await until(alpha, runtime, Shown, (s) => s.viewer === 0);
+    expect(runtime.runSync(Recent.use((m) => m.get())).rows.map((row) => row.origin)).toEqual(["Picked"]);
+
   });
 
   it("Let the agent read my files (spec/app/files/index.md, \"Story: Let the agent read my files\")", async () => {

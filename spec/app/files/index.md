@@ -459,19 +459,23 @@ pure def sometimesBackReturnsWhereTheWalkBegan(s: Files): bool = s.handed and ba
 
 ### The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable
 
-The owner pulls to refresh, or the phone says the storage changed. The
+The owner asks to refresh, or the phone says the storage changed. At the top
+this measures the volumes and categories again. In a folder or category the
 answer keeps the selection that is still listed, and a delete confirmation
 whose items changed stops counting.
 
 ```quint
-pure def canRefresh(s: Files, by: Actor): bool = by != Agent and allowed(s) and s.open and not(atTop(s))
+pure def canRefresh(s: Files, by: Actor): bool = by != Agent and allowed(s) and s.open
 
 pure def refresh(s: Files, by: Actor): Moved =
-  val listing = R::ask(s.listing)
   val search = S::follow(s.search, where(s))
-  { state: { ...s, listing: listing, search: search },
-    out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory }))
-      .concat(if (search.searching) List(Search({ ticket: search.query.ticket, where: where(s), filter: search.filter })) else List()) }
+  val asked = if (search.searching) List(Search({ ticket: search.query.ticket, where: where(s), filter: search.filter })) else List()
+  if (atTop(s)) arrived({ state: { ...s, search: search }, out: asked })
+  else {
+    val listing = R::ask(s.listing)
+    { state: { ...s, listing: listing, search: search },
+      out: List(Look({ ticket: listing.ticket, trail: s.trail, category: s.category, inCategory: s.inCategory })).concat(asked) }
+  }
 
 pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 

@@ -59,23 +59,25 @@ const categories: Partial<Record<Kind, FilesCategory>> = { Download: "downloads"
 /** The volume the phone lists a category from, and searches. */
 const primary = "primary"
 
-/** What the phone's storage is, numbered. */
-effect function itemOf(volume: string, entry: StorageEntry, kind: Kind): Item!!Handles {
-  const numbered = try Handles
-  return {
-    id: try numbered.of({ volume, path: entry.path }),
-    name: entry.name,
-    revision: Math.max(0, Math.trunc(entry.modified)),
-    kind,
-    volume: try numbered.of({ volume, path: "" }),
-    bytes: entry.directory ? 0 : Math.max(0, Math.trunc(entry.size)),
-  }
-}
-
+/** Number the volume and its entries together, preserving the phone's listing order. */
 effect function itemsOf(volume: string, entries: ReadonlyArray<StorageEntry>, kind?: Kind): Item[]!!Handles {
-  const items: Item[] = []
-  for (const entry of entries) items.push(try itemOf(volume, entry, kind ?? kindOf(entry)))
-  return items
+  if (entries.length === 0) return []
+  const numbered = try Handles
+  const [root, ...items] = try numbered.many([{ volume, path: "" }, ...entries.map((entry) => ({ volume, path: entry.path }))])
+  const rows: Item[] = []
+  for (const [index, entry] of entries.entries()) {
+    const id = items[index]
+    if (id === undefined || root === undefined) continue
+    rows.push({
+      id,
+      name: entry.name,
+      revision: Math.max(0, Math.trunc(entry.modified)),
+      kind: kind ?? kindOf(entry),
+      volume: root,
+      bytes: entry.directory ? 0 : Math.max(0, Math.trunc(entry.size)),
+    })
+  }
+  return rows
 }
 
 /** The spot a number names, or none where it names nothing this phone gave. */
@@ -166,6 +168,13 @@ effect function query(where: Where, wanted: Filter): { volume: string; text?: st
 effect function searched(ticket: number, where: Where, wanted: Filter): Event!!(Files | Handles) {
   return effect {
     const { volume, ...asked } = try query(where, wanted)
+    if (volume !== primary) {
+      const path = asked.folder ?? ""
+      const reply = try called("storageList", (plugin) => plugin.storageList({ volume, path }))
+      if (reply.status !== "ready") return failed
+      const entries = (reply.entries ?? []).filter((entry) => containsText(entry.name, wanted.text) && (wanted.anyKind || kindOf(entry) === wanted.kind))
+      return { type: "searched", ticket, ok: true, complete: reply.truncated !== true && !(reply.entries ?? []).some((entry) => entry.directory), entries: try itemsOf(volume, entries) }
+    }
     const reply = try called("storageQuery", (plugin) => plugin.storageQuery(asked))
     if (reply.status !== "ready") return { type: "searched", ticket, ok: false, complete: false, entries: [] }
     const kind = where.inCategory && where.category === "Download" ? "Download" : undefined
@@ -615,7 +624,11 @@ export const showDownloads: void!!(Files | Handles | Browser.Machine | Shell) = 
 
 // spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"; spec/app/files/index.md, "Back closes one layer inside Files: the Move to sheet, the share sheet, the name clash, the delete confirmation, the details, the Trash, the selection and the filter, then goes up the path a step; at the top, or back where another area's walk began, it leaves Files"
 /** Back inside Files: the layer the rules name, closed by its own event. Whether it took one. */
-export const back: boolean!!(Browser.Machine | Shown.Machine) = effect {
+export const back: boolean!!(Browser.Machine | Shown.Machine | Recent.Machine) = effect {
+  const recent = try Recent.Machine
+  if ((try recent.get()).live !== 0) {
+    return effect { try recent.send({ type: "cancelPicker" }, "Owner"); return true } catch () => false
+  }
   const preview = try Shown.Machine
   if (Shown.showing(try preview.get())) {
     return effect { try preview.send({ type: "close" }, "Owner"); return true } catch () => false
