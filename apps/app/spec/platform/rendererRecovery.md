@@ -109,6 +109,8 @@ pure def recreated(r: Recovery): Recovery = { ...r, decision: NoDecision, create
 
 pure def canReload(r: Recovery): bool = r.decision == ShowEscape
 pure def reload(r: Recovery): Recovery = { ...r, decision: NoDecision, createdAt: r.deaths }
+pure def stepARecreatedPageIsCreatedUnderEveryDeath(before: Recovery, via: str, after: Recovery): bool =
+  (via == "recreated" or via == "reload") implies after.createdAt == after.deaths
 
 pure def canAssistantOpened(r: Recovery): bool = r.home
 pure def assistantOpened(r: Recovery): Recovery = { ...r, home: false }

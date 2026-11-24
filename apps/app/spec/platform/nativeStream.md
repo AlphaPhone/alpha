@@ -122,6 +122,8 @@ pure def sometimesInterruptedReply(r: Relay): bool = r.failure == Interrupted an
 ```quint
 pure def canAbort(r: Relay): bool = r.outcome == Open
 pure def abort(r: Relay, timedOut: bool): Relay = failed(if (timedOut) TimedOut else Aborted, false, r)
+pure def stepAnAbortEndsTheRelayUnknown(before: Relay, via: str, after: Relay): bool =
+  via == "abort" implies (after.outcome == Failed and (after.failure == TimedOut or after.failure == Aborted) and not(after.readyRevoked))
 ```
 
 ### A relay that ends removes its listener and cancels a stream it asked for
