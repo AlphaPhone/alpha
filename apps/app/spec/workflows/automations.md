@@ -147,7 +147,9 @@ pure def stepAFailedReadKeepsTheRows(before: Automations, via: str, after: Autom
 An applied answer and a refusal both release it, a refused create included, so a refusal never
 locks new prompts. A lost answer leaves the outcome unknown and the change held. A 4xx answer, a
 definite 404 included, is a refusal released before the list is read again; a 5xx or a reply that
-never came is unknown; a request that was never sent is refused (#1209).
+never came is unknown; a request that was never sent is refused (#1209). A change released by a
+complete re-read or by the owner's Allow another leaves no answer waiting: the unknown answer
+belonged to the change, and with nothing held it is no longer shown.
 
 ```quint
 pure def answerOfStatus(httpStatus: int, delivered: bool): Answer =
@@ -160,7 +162,7 @@ pure def lawADefiniteNotFoundIsARefusal(delivered: bool): bool = answerOfStatus(
 pure def releaseHeld(why: Release, a: Automations): Automations = {
   val h = heldFor(a, a.owner)
   { ...a, held: a.held.select(o => o.owner != a.owner), busy: false, released: why, releasedKind: h.kind,
-    answer: if (why == ByReply) AnswerApplied else if (why == ByRefusal) AnswerRefused else a.answer }
+    answer: if (why == ByReply) AnswerApplied else if (why == ByRefusal) AnswerRefused else NoAnswer }
 }
 pure def canAnswered(a: Automations, id: int, answer: Answer): bool = a.busy and heldFor(a, a.owner).id == id and answer != NoAnswer
 pure def answered(a: Automations, id: int, answer: Answer): Automations =
