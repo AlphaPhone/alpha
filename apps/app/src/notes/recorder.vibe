@@ -133,6 +133,8 @@ const make = effect {
     for (let index = before; index < segments.length; index += 1) try record({ type: "segmentFinished", journaled: true })
     for (const segment of segments) if (segment.text !== undefined && !(try Ref.get(texts)).has(segment.segmentId)) {
       try Ref.update(texts, (known) => new Map([...known, [segment.segmentId, segment.text ?? ""]]))
+      // spec/notes/recordingJournal.md: the text the native journal holds for a finished segment is journaled with it.
+      try record({ type: "textJournaled" })
     }
   }
 

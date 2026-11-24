@@ -360,8 +360,8 @@ describe("Notes stories", () => {
 
   it.live("Every finished segment and its words survive a restart (spec/notes/recordingJournal.md, \"Story: Keep every finished segment of a recording through a crash\")", () => effect {
     const agent = new NotesAgentFake()
+    // The native journal holds the segment's words, as an earlier version kept them: a recording itself sends nothing for transcription.
     const device = new DeviceFake()
-    device.segmentText = undefined
     provide notesOver(agent, device) {
       const recorder = try NotesRecorder
       const journal = try JournalMachine
