@@ -33,7 +33,7 @@ export interface Moved<S, Fx> {
 export interface Steps<S, Ev, M, Refused, Undecoded, By extends ReadonlyArray<unknown>> {
   readonly changes: Stream.Stream<S>
   get(): S!!
-  send(event: Ev, ...by: By): M!Refused
+  send(event: Ev, ...by: NoInfer<By>): M!Refused
   receive(input: unknown, ...by: By): M!Undecoded
 }
 
