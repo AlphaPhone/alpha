@@ -14,10 +14,21 @@ if [[ -f "$jar" ]] && verified "$jar"; then exit 0; fi
 mkdir -p "$(dirname "$jar")"
 partial=$(mktemp "$jar.XXXXXXXX")
 trap 'rm -f "$partial"' EXIT
-curl --fail --silent --show-error --location --retry 5 --retry-all-errors \
-  --connect-timeout 20 --max-time 300 --output "$partial" "https://repo.maven.apache.org/maven2/$relative"
-if ! verified "$partial"; then
-  printf 'Robolectric framework checksum mismatch for %s\n' "$artifact" >&2
-  exit 1
-fi
-mv -f "$partial" "$jar"
+# Hosted runners can hit Maven Central's shared rate limit. Both sources
+# must provide the exact same pinned bytes.
+for repository in https://maven-central.storage-download.googleapis.com/maven2 https://repo.maven.apache.org/maven2; do
+  if ! curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+    --retry 2 --retry-all-errors --connect-timeout 20 --max-time 300 \
+    --output "$partial" "$repository/$relative"; then
+    continue
+  fi
+  if ! verified "$partial"; then
+    printf 'Robolectric framework checksum mismatch for %s\n' "$artifact" >&2
+    exit 1
+  fi
+  mv -f "$partial" "$jar"
+  printf 'Prepared verified Robolectric framework %s\n' "$artifact"
+  exit 0
+done
+printf 'Could not download Robolectric framework %s from the configured repositories\n' "$artifact" >&2
+exit 1

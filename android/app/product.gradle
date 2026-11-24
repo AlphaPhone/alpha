@@ -59,7 +59,7 @@ android {
  testOptions {
   unitTests.all {
    // Robolectric resolves its framework JARs outside Gradle's Maven Central configuration.
-   systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+   systemProperty 'robolectric.dependency.repo.url', 'https://maven-central.storage-download.googleapis.com/maven2'
   }
  }
  buildTypes {
