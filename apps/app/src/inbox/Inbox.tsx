@@ -22,6 +22,9 @@ import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts
 import type { Machine as Writing } from "../../gen/app__inbox__drafts.effect.vibe";
 import { useMachine as useDrafts } from "../../gen/app__inbox__drafts.react.ts";
 import type { Machine as Shell } from "../../gen/app__shell.effect.vibe";
+import type { Machine as Preferences } from "../../gen/app__settings__preferences.effect.vibe";
+import { loadsImages } from "../../gen/app__settings__preferences.ts";
+import { useMachine as usePreferences } from "../../gen/app__settings__preferences.react.ts";
 import { useMachine as useShell } from "../../gen/app__shell.react.ts";
 import { useTimed } from "../runtime/react.ts";
 import { untimed } from "../runtime/reactor.vibe";
@@ -37,7 +40,7 @@ import { linksOf } from "./links.ts";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks, the changes, the shell, and Mail, which holds what Gmail said. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Mail | Time, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Writing | Adding | Incoming | Offering | Offers | Letters | Shell | Preferences | Mail | Time, unknown>;
 }
 
 type Runtime = InboxProps["runtime"];
@@ -158,11 +161,19 @@ function Body({ read, images, view, onReview }: { read: MailMessage; images: boo
   );
 }
 
+// spec/app/inbox/message.md, "Remote images load only after Show images, or when the owner turned on loading them in Settings"
+/** Whether the owner turned on loading images in Inbox, as Settings last read it. */
+function useRemote(runtime: Runtime): boolean {
+  const preferences = usePreferences(runtime).state;
+  return preferences !== undefined && loadsImages(preferences);
+}
+
 /** The message open: its body, links and attachments each reviewed before use, its marks, Archive and Trash, Retry and Ask Alpha. */
 function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list: Mailbox; onRefresh: (() => void) | undefined; onBegin: (beginning: Beginning) => (() => void) | undefined }) {
   const { state, can, send } = useMessage(runtime);
   const marking = useMarks(runtime);
   const changes = useTimed(runtime, useChanges);
+  const remote = useRemote(runtime);
   if (!state || state.message === 0) return null;
   const access = accessOf(list, state.account);
   const read = mailOf(runtime, (mail) => mail.body(state.body.ticket));
@@ -170,10 +181,10 @@ function Opened({ runtime, list, onRefresh, onBegin }: { runtime: Runtime; list:
   const loaded = state.body.status === "Loaded" && read !== undefined;
   const unread = card?.isUnread ?? false;
   const mark = { type: "mark", access, account: state.account, message: state.message, unread: !unread } as const;
-  const retry = { type: "retry", access, remote: false } as const;
-  const reopen = { type: "reopen", access, thread: 1, remote: false } as const;
-  const earlier = { type: "earlier", access, remote: false } as const;
-  const newer = { type: "newer", access, remote: false } as const;
+  const retry = { type: "retry", access, remote } as const;
+  const reopen = { type: "reopen", access, thread: 1, remote } as const;
+  const earlier = { type: "earlier", access, remote } as const;
+  const newer = { type: "newer", access, remote } as const;
   const history = revisionOf(card);
   const changing = (kind: Change) => {
     const event = changeOf(list, kind, [state.message], history);
@@ -266,6 +277,7 @@ export function Inbox({ runtime }: InboxProps) {
   const changes = useTimed(runtime, useChanges);
   const drafts = useDrafts(runtime);
   const shell = useShell(runtime);
+  const remote = useRemote(runtime);
   const [typed, setTyped] = useState<{ text: string; over: string } | undefined>();
   const [choosing, setChoosing] = useState(false);
   const [shelf, setShelf] = useState(false);
@@ -291,7 +303,7 @@ export function Inbox({ runtime }: InboxProps) {
   const today = runtime.runSync(Time.use((time) => time.latest()));
   const checking = state.accounts.status === "Loading";
   const row = ({ message: number, card }: Letter): InboxListRow => {
-    const open = { type: "open", access, account, message: number, thread: 1, remote: false } as const;
+    const open = { type: "open", access, account, message: number, thread: 1, remote } as const;
     const saved = { type: "openSaved", account, message: number, thread: 1, checking, kept: state.saved } as const;
     const opening = message.can(open) ? open : message.can(saved) ? saved : undefined;
     const chosen = state.chosen.includes(number);
