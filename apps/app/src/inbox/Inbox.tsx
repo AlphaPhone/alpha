@@ -1,5 +1,5 @@
 // spec/app/inbox/index.md, "Story: See my mail"; spec/app/inbox/message.md, "Story: Read a message"; spec/app/inbox/marking.md, "Story: Mark mail read or unread"
-import { Alert, Banner, Button, Checkbox, ConfirmDialog, EmptyState, ListRow, SearchField, Spinner, Tabs, TabsList, TabsTrigger, cn } from "@repo/ui";
+import { Alert, Banner, Button, Checkbox, Chip, ConfirmDialog, EmptyState, ListRow, SearchField, Spinner, cn } from "@repo/ui";
 import { Effect, type ManagedRuntime } from "effect";
 import { type ReactNode, useState } from "react";
 import { type Folder, type Mailbox, accessOf, readable } from "../../gen/app__inbox.ts";
@@ -10,12 +10,18 @@ import { useMachine as useMarks } from "../../gen/app__inbox__marking.react.ts";
 import type { Machine as Shown } from "../../gen/app__inbox__message.effect.vibe";
 import { imagesLoad } from "../../gen/app__inbox__message.ts";
 import { useMachine as useMessage } from "../../gen/app__inbox__message.react.ts";
-import { Mail } from "./gmail.vibe";
+import type { Machine as Changes } from "../../gen/app__inbox__sending.effect.vibe";
+import { aside } from "../../gen/app__inbox__sending.ts";
+import { useMachine as useChanges } from "../../gen/app__inbox__sending.react.ts";
+import { useTimed } from "../runtime/react.ts";
+import { untimed } from "../runtime/reactor.vibe";
+import type { Time } from "../runtime/time.vibe";
+import { Mail, revisionOf } from "./gmail.vibe";
 import { linksOf } from "./links.ts";
 
 export interface InboxProps {
   /** Provides the list, the message open and its marks (`mailbox` of mailbox.vibe, `reading` of message.vibe), and Mail, which holds what Gmail said. */
-  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Mail, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<List | Shown | Marks | Changes | Mail | Time, unknown>;
 }
 
 const folders: ReadonlyArray<readonly [Folder, string]> = [
@@ -53,6 +59,55 @@ const marks = {
   NotMarked: "Gmail did not change it",
   Unconfirmed: "Gmail did not confirm the change. Refresh before trying again.",
 } as const;
+
+const kinds = { Archive: "Archive", Trash: "Move to Trash", Unarchive: "Move to Inbox", Untrash: "Take out of Trash" } as const;
+
+/**
+ * Archive, Trash and the restore of the folder shown, for the messages chosen: reviewed, held for Undo, and told
+ * how they ended.
+ */
+function Changing({ runtime, list, onHeld }: { runtime: InboxProps["runtime"]; list: Mailbox; onHeld: () => void }) {
+  const { state, can, send } = useTimed(runtime, useChanges);
+  if (!state) return null;
+  const account = list.selected.account;
+  const access = accessOf(list, account);
+  const messages = [...list.chosen];
+  const history = revisionOf(runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.card(messages[0] ?? 0)))));
+  const restore: keyof typeof kinds | undefined = list.selected.folder === "Archived" ? "Unarchive" : list.selected.folder === "Trashed" ? "Untrash" : undefined;
+  const shown: (keyof typeof kinds)[] = restore ? ["Archive", "Trash", restore] : ["Archive", "Trash"];
+  const offered = shown.map((kind) => ({
+    kind, event: { type: "prepareChange", kind, access, account, messages, revision: list.revision, history, fresh: list.pages > 0 && !list.saved } as const,
+  }));
+  const confirm = { type: "confirm", revision: list.revision, access, now: untimed } as const;
+  const held = state.kind === "Archive" || state.kind === "Trash";
+  const undo = { type: "undo", now: untimed } as const;
+  return (
+    <div className="flex flex-col gap-2 px-4">
+      {state.changed && !state.review.showing && <Alert variant="warn">These emails changed. Select them again.</Alert>}
+      {state.attempt.outcome === "Refused" && !state.changed && <Alert variant="warn">Gmail did not change them</Alert>}
+      {!state.noticed && (
+        <Alert variant="warn">
+          Alpha could not confirm the change
+          {can({ type: "dismissOutcome" }, "Owner") && <Button variant="ghost" size="sm" onClick={() => void send({ type: "dismissOutcome" }, "Owner")}>OK</Button>}
+        </Alert>
+      )}
+      {can(undo, "Owner") && <Banner action={<Button variant="outline" size="sm" autoFocus onClick={() => void send(undo, "Owner")}>Undo</Button>}>{held && state.kind === "Trash" ? "Moved to Trash" : "Archived"}</Banner>}
+      <div className="flex flex-wrap gap-2">
+        {!state.review.showing && offered.map(({ kind, event }) => can(event, "Owner") && <Button key={kind} variant="outline" size="sm" onClick={() => void send(event, "Owner")}>{kinds[kind]}</Button>)}
+      </div>
+      <ConfirmDialog
+        open={state.review.showing && !state.draft}
+        title={`${kinds[state.kind as keyof typeof kinds] ?? ""}: ${state.messages.length} ${state.messages.length === 1 ? "email" : "emails"}?`}
+        confirmLabel={kinds[state.kind as keyof typeof kinds] ?? "OK"}
+        onConfirm={() => {
+          if (!can(confirm, "Owner")) return;
+          void send(confirm, "Owner").then(onHeld);
+        }}
+        onCancel={() => void send({ type: "cancel" }, "Owner")}
+      />
+    </div>
+  );
+}
 
 /** The body of a message with nothing able to run, and its remote images only once they may load. */
 function Body({ html, images, text, links }: { html: string | null; images: boolean; text: string; links: ReactNode }) {
@@ -166,13 +221,15 @@ function Opened({ runtime, list }: { runtime: InboxProps["runtime"]; list: Mailb
 export function Inbox({ runtime }: InboxProps) {
   const { state, cause, can, send } = useList(runtime);
   const message = useMessage(runtime);
+  const changes = useChanges(runtime);
   const [query, setQuery] = useState("");
   if (cause) return <Alert variant="destructive" className="m-4">Alpha could not open Inbox</Alert>;
   if (!state || !message.state) return null;
   const view = message.state;
   const told = view.message === 0 && (view.fault === "Gone" || view.fault === "Revoked") ? <Alert variant="warn">{faults[view.fault]}</Alert> : null;
   if (view.message !== 0) return <Opened runtime={runtime} list={state} />;
-  const letters = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.shown(state))));
+  const set = changes.state ? aside(changes.state) : [];
+  const letters = runtime.runSync(Mail.use((mail) => Effect.sync(() => mail.shown(state)))).filter(({ message: number }) => !set.includes(number));
   const account = state.selected.account;
   const access = accessOf(state, account);
   const checking = state.accounts.status === "Loading";
@@ -190,13 +247,14 @@ export function Inbox({ runtime }: InboxProps) {
       )}
       <div className="px-4">{standing(state)}</div>
       {told && <div className="px-4">{told}</div>}
+      <Changing runtime={runtime} list={state} onHeld={() => void send({ type: "held" })} />
       {readable(state) && (
         <>
-          <Tabs value={state.selected.folder} onValueChange={(folder) => void send({ type: "chooseFolder", folder: folder as Folder })} className="px-4">
-            <TabsList aria-label="Folders" className="overflow-x-auto">
-              {folders.map(([folder, label]) => <TabsTrigger key={folder} value={folder} disabled={!can({ type: "chooseFolder", folder }) && state.selected.folder !== folder}>{label}</TabsTrigger>)}
-            </TabsList>
-          </Tabs>
+          <div role="group" aria-label="Folders" className="flex gap-2 overflow-x-auto px-4">
+            {folders.map(([folder, label]) => (
+              <Chip key={folder} pressed={state.selected.folder === folder} disabled={!can({ type: "chooseFolder", folder }) && state.selected.folder !== folder} onPressedChange={() => void send({ type: "chooseFolder", folder })}>{label}</Chip>
+            ))}
+          </div>
           <form className="px-4" onSubmit={(event) => { event.preventDefault(); if (can(search)) void send(search); }}>
             <SearchField aria-label="Search mail" value={query} onValueChange={setQuery} />
           </form>
