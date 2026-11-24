@@ -91,7 +91,7 @@ export function ledger<S, E extends { readonly type: string }>(rules: Rules<S, E
   const kept = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) as { readonly state?: unknown; readonly taken?: readonly unknown[] } : {};
   const read = kept.state === undefined ? rules.initial : rules.parseState(kept.state);
   if (read === undefined) throw new ReleaseRefused({ message: `${file} holds no state the spec allows` });
-  let state = read;
+  let state: S = read;
   const taken = [...(kept.taken ?? [])];
   return {
     get state() { return state; },
