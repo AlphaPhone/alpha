@@ -1,7 +1,7 @@
-// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "A new account, and an earlier sign-in left unconfirmed, are told for the sign-in that reported them"; spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish"; spec/account/session.md, "Story: Use Cloud only for managed services"
+// spec/account/session.md, "Story: Sign in once for Cloud's managed services"; spec/account/session.md, "A new account, and an earlier sign-in left unconfirmed, are told for the sign-in that reported them"; spec/account/session.md, "Story: Keep my sign-in working until I sign out"; spec/account/session.md, "Story: Hear why a sign-in from the browser did not finish"; spec/account/session.md, "Story: Use Cloud only for managed services"; spec/account/session.md, "A sign-in that completed while Cloud could not be reached is adopted once Cloud names its account"
 import {
   type Account, type IncompleteCode, type RouteKind, type Session, type SessionEffect,
-  Machine as SessionMachine, isSignedIn, restoreRetryMs, routeAdmitted, stored as storedSession
+  Machine as SessionMachine, adoptionOwed, isSignedIn, restoreRetryMs, routeAdmitted, stored as storedSession
 } from "../../gen/account__session.effect.vibe"
 import { Build } from "../platform/build.vibe"
 import { buildCloudEnvironment, environmentName } from "../platform/build-live.vibe"
@@ -97,6 +97,8 @@ export const sessionService = Layer.effect(CloudSession, effect {
   const notices = try PubSub.unbounded<IncompleteNotice>()
   const cloudEnvironment = buildCloudEnvironment(build.info)
   const environment = environmentName(cloudEnvironment)
+  const owedSignIn = try Ref.make<{ readonly credentialId: string; readonly news: SignInNews } | undefined>(undefined)
+  const naming = try Ref.make(false)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -129,23 +131,50 @@ export const sessionService = Layer.effect(CloudSession, effect {
     }
   }
 
-  effect function adopt(news: SignInNews) {
-    const read = try readAccount(native, cloud, environment)
-    if (read === undefined) return
+  effect function settle(read: { readonly account: Account; readonly confirmed: boolean }, news: SignInNews) {
     try send(read.confirmed
       ? { type: "signInCompleted", account: read.account, created: news.created, priorUnconfirmed: news.priorUnconfirmed }
       : { type: "restore", account: read.account, confirmed: false })
   }
 
-  /** A saved key whose account Cloud could not name at startup: asked again after one minute, doubling to fifteen. */
-  effect function restoreLater() {
+  effect function adopt(news: SignInNews) {
+    const read = try readAccount(native, cloud, environment)
+    if (read !== undefined) return try settle(read, news)
+    const held = readIdentity(native, environment) catch () => undefined
+    if (held === undefined) return
+    try Ref.set(owedSignIn, { credentialId: held.credentialId, news })
+    try nameLater()
+  }
+
+  /** Starts asking Cloud again for an account it could not name, unless that is already running. */
+  effect function nameLater() {
+    if (try Ref.getAndSet(naming, true)) return
+    fork.detached ensuring(askAgain(), Ref.set(naming, false))
+  }
+
+  /** A key whose account Cloud could not name, the saved one at startup or a completed sign-in's: asked again after one minute, doubling to fifteen; a sign-in's is adopted with its news while the host still holds its key, nothing else adopted it and no sign-out began. */
+  effect function askAgain() {
     let tries = 0
     while (true) {
       tries = tries + 1
       try sleep(Duration.millis(restoreRetryMs(tries)))
+      const held = readIdentity(native, environment) catch () => undefined
+      if (held === undefined) return
       const s = try machine.get()
+      const owed = try Ref.get(owedSignIn)
+      if (owed !== undefined && owed.credentialId === held.credentialId) {
+        if (!adoptionOwed(true, isSignedIn(s.phase) && s.account.credentialId === owed.credentialId, s.holder === "SigningOut")) {
+          try Ref.set(owedSignIn, undefined)
+          return
+        }
+        const read = try readAccount(native, cloud, environment)
+        if (read !== undefined && read.account.credentialId === owed.credentialId) {
+          try Ref.set(owedSignIn, undefined)
+          return try settle(read, owed.news)
+        }
+        continue
+      }
       if (isSignedIn(s.phase)) return
-      if ((readIdentity(native, environment) catch () => undefined) === undefined) return
       if (s.holder !== "Free") continue
       const read = try readAccount(native, cloud, environment)
       if (read !== undefined) {
@@ -200,7 +229,7 @@ export const sessionService = Layer.effect(CloudSession, effect {
         else unnamed = (readIdentity(native, environment) catch () => undefined) !== undefined
       }
       try send({ type: "startupSettles" })
-      if (unnamed) fork.detached restoreLater()
+      if (unnamed) try nameLater()
       try ensureResident(resident)
       try renewalCheck()
       try.all [

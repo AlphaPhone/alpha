@@ -69,6 +69,27 @@ it.live(`A retained incomplete return is told once startup has settled (spec/acc
   }
 })
 
+// spec/account/session.md, "A sign-in that completed while Cloud could not be reached is adopted once Cloud names its account"
+it.effect(`A sign-in completed while Cloud was unreachable is adopted with its news once Cloud names the account (spec/account/session.md, "Story: Sign in once for Cloud's managed services")`, () => effect {
+  let reachable = false
+  const cloud: Record<string, Answer> = { ...cloudAnswers, "GET /api/v1/user": () => reachable ? cloudAnswers["GET /api/v1/user"] : undefined }
+  provide account([], signedInNative, cloud, { events: { "AlphaCloudSignIn.signInCompleted": [{ accountCreated: true }] } }) {
+    try scoped(effect {
+      const session = try CloudSession
+      fork.scoped session.run()
+      try TestClock.adjust("1 second")
+      const before = try session.current()
+      reachable = true
+      try TestClock.adjust("1 minute")
+      const after = try session.current()
+      try Effect.try(() => assert.deepStrictEqual(
+        { before: before.phase, after: [after.phase, after.account.userId, after.account.credentialId, after.created] },
+        { before: "SignedOut", after: ["SignedIn", "user-1", "key-1", true] },
+      ))
+    })
+  }
+})
+
 // spec/account/session.md, "Story: Use Cloud only for managed services"
 it.live(`Only managed routes leave the phone (spec/account/session.md, "Story: Use Cloud only for managed services")`, () => effect {
   provide account([]) {

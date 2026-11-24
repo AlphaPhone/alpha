@@ -135,6 +135,22 @@ pure def stepACompletedSignInEnsuresTheAgent(before: Session, via: str, after: S
 pure def sometimesSignedIn(s: Session): bool = s.phase == SignedIn and s.generation >= 2
 ```
 
+### A sign-in that completed while Cloud could not be reached is adopted once Cloud names its account
+
+A completed sign-in whose account Cloud could not name, because Cloud could not be reached, is not
+dropped: Cloud is asked again after one minute, doubling to fifteen, as at startup, and the account it
+names is adopted with what the host said of the sign-in (a new account, an earlier sign-in left
+unconfirmed). It stops once the host holds another key or none, once that key was adopted another
+way, or when a sign-out begins.
+
+```quint
+pure def adoptionOwed(sameKeyHeld: bool, alreadyAdopted: bool, signingOut: bool): bool =
+  sameKeyHeld and not(alreadyAdopted) and not(signingOut)
+pure def lawAReplacedKeyIsNeverAdoptedLate(alreadyAdopted: bool, signingOut: bool): bool = not(adoptionOwed(false, alreadyAdopted, signingOut))
+pure def lawNoLateAdoptionDuringSignOut(sameKeyHeld: bool, alreadyAdopted: bool): bool = not(adoptionOwed(sameKeyHeld, alreadyAdopted, true))
+pure def lawAKeyIsAdoptedOnce(sameKeyHeld: bool, signingOut: bool): bool = not(adoptionOwed(sameKeyHeld, true, signingOut))
+```
+
 ### A new account, and an earlier sign-in left unconfirmed, are told for the sign-in that reported them
 
 The host's answer says whether Cloud created the account, and whether the key this sign-in
