@@ -3,7 +3,7 @@ import { MMS_ATTACHMENT_TYPES } from "@elizaos/os/bridges/definitions/messages";
 import type { MessageRow, ThreadRow } from "@elizaos/os/bridges/messages";
 import { Alert, Banner, Button, Chip, ConfirmDialog, EmptyState, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ArrowLeft, ImagePlus, Phone as Call, Send, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ImagePlus, Phone as Call, Send, Sparkles } from "lucide-react";
 import { useState } from "react";
 import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
@@ -152,6 +152,10 @@ function Compose({ runtime }: MessagesProps) {
   const { state, can, send } = composer;
   if (!state || !phone || state.thread === 0) return null;
   const text = runtime.runSync(Drafts.use((drafts) => drafts.text(state.thread)));
+  const conversation = runtime.runSync(Conversations.use((numbering) => numbering.get(state.thread)));
+  const numbers = conversation._tag === "Some" ? conversation.value.addresses : [];
+  const name = titleOf(numbers, runtime.runSync(Inbox.use((inbox) => inbox.get())).names);
+  const addressed = name === numbers.join(", ") ? name : `${name} · ${numbers.join(", ")}`;
   const pictures = runtime.runSync(Drafts.use((drafts) => drafts.pictures()));
   const write = (next: string) => {
     const event = { type: "typeText", empty: next === "" } as const;
@@ -169,7 +173,12 @@ function Compose({ runtime }: MessagesProps) {
       runtime.runSync(prepare(state.thread, state.sims > 1 ? state.sim : null));
       void send(sendNow);
     }}>
-      {state.slot.author === "AlphaWrote" && <p className="text-xs text-muted-foreground">Alpha's draft · not sent</p>}
+      {state.slot.author === "AlphaWrote" && (
+        <div className="flex items-center gap-2" role="group" aria-label={`Message draft to ${addressed}`}>
+          <p className="flex-1 truncate text-xs text-muted-foreground">{`Alpha's draft · To ${addressed}`}</p>
+          {can({ type: "undo" }) && <Button type="button" size="sm" variant="outline" onClick={() => void send({ type: "undo" })}>Don't send</Button>}
+        </div>
+      )}
       {state.slot.draft.sync === "Conflicted" && (
         <Banner variant="warn" action={<>
           {can({ type: "keepMine" }) && <Button size="sm" onClick={() => void send({ type: "keepMine" })}>Keep mine</Button>}
@@ -210,7 +219,6 @@ function Compose({ runtime }: MessagesProps) {
         </label>
         <Textarea className="flex-1" aria-label="Message" placeholder="Text message" value={state.slot.author === "Nobody" ? "" : text} onChange={(event) => write(event.target.value)} />
         {can({ type: "suggest" }) && <Button type="button" variant="ghost" size="icon" aria-label="Let Alpha suggest a reply" onClick={() => void send({ type: "suggest" })}><Sparkles /></Button>}
-        {can({ type: "undo" }) && <Button type="button" variant="ghost" size="icon" aria-label="Undo Alpha's draft" onClick={() => void send({ type: "undo" })}><X /></Button>}
         {can({ type: "handOff", supported: sendNow.supported }) && <Button type="button" variant="outline" onClick={() => void send({ type: "handOff", supported: sendNow.supported })}>Open in messaging app</Button>}
         <Button type="submit" size="icon" aria-label="Send" disabled={!can(sendNow)}><Send /></Button>
       </div>

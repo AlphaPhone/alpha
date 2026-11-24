@@ -60,7 +60,8 @@ describe("Messages on an Alpha image", () => {
     expect([world.telephony.asked, (document.querySelector("textarea[aria-label=Message]") as HTMLTextAreaElement).value, world.telephony.sent]).toEqual([
       [{ participant: "+14155550100", messages: [{ direction: "in", date: 1_700_000_050_000, body: "See you at five" }], truncated: false }], "Five works, see you there", [],
     ]);
-    await press("Undo Alpha's draft");
+    expect(document.querySelector("[role=group][aria-label='Message draft to Maya Chen · +14155550100']")).not.toBeNull();
+    await press("Don't send");
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "Nobody");
     await write("Message", "On my way");
     await until(alpha, alpha.runtime, Composer, (s) => s.slot.author === "OwnerWrote");

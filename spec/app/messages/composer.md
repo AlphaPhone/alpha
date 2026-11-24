@@ -243,10 +243,33 @@ pure def suggested(c: Composer, ticket: int, ok: bool): Composer =
 
 ### Undo takes Alpha's draft away
 
+Alpha's draft is shown addressed, To the conversation's name and number,
+in the composer, where the owner may edit it before Send; it offers Send
+and Don't send. Don't send is this Undo: the draft is left as empty as the
+owner left it, and nothing is sent.
+
 ```quint
 pure def canUndo(c: Composer): bool = c.slot.author == AlphaWrote and not(bound(c))
 
 pure def undo(c: Composer): Composer = { ...c, slot: { author: Nobody, draft: D::edit(c.slot.draft) } }
+```
+
+### The agent's draft goes into the open conversation's draft only while it is empty, and never sends
+
+The agent may ask for a reply to the conversation open on screen, or for a
+draft to a number the owner wrote, whose conversation Messages opens first,
+as a number handed to it. Its text becomes Alpha's draft there, for the
+owner to edit and send. A draft already written, or one held by a send, is
+left as it is, and the agent is told the draft is occupied; with no
+conversation open it is told none is selected.
+
+```quint
+pure def canAgentDrafted(c: Composer, thread: int): bool = c.thread > 0 and thread == c.thread
+
+pure def agentDrafted(c: Composer, thread: int): Composer =
+  if (c.slot.author == Nobody and not(bound(c)))
+    { ...c, slot: { author: AlphaWrote, draft: D::edit(c.slot.draft) }, suggestion: { ...c.suggestion, status: R::Idle } }
+  else c
 ```
 
 ### Alpha writes a draft only where the owner had written nothing, and a draft of Alpha's saved meanwhile replaces the owner's only by the owner's choice
@@ -254,13 +277,14 @@ pure def undo(c: Composer): Composer = { ...c, slot: { author: Nobody, draft: D:
 ```quint
 pure def stepAlphaWritesOnlyAnEmptyDraft(before: Composer, via: str, after: Composer): bool =
   (after.slot.author == AlphaWrote and before.slot.author != AlphaWrote and after.thread == before.thread and via != "restart")
-    implies ((via == "suggested" and before.slot.author == Nobody) or via == "takeSaved")
+    implies (((via == "suggested" or via == "agentDrafted") and before.slot.author == Nobody) or via == "takeSaved")
 ```
 
 ### Alpha's draft can be offered, saved, and undone
 
 ```quint
 pure def sometimesAlphaDraft(c: Composer): bool = c.slot.author == AlphaWrote and settledDraft(c) and c.slot.draft.base > 0
+pure def sometimesAgentDraftWaits(c: Composer): bool = c.slot.author == AlphaWrote and c.suggestion.status == R::Idle and c.suggestion.ticket == 0 and c.thread > 0
 pure def sometimesUndone(c: Composer): bool = c.slot.author == Nobody and c.slot.draft.base > 0 and c.thread > 0 and savedFor(c.thread, c) == AlphaWrote
 ```
 
@@ -336,7 +360,9 @@ pure def handOff(c: Composer, supported: bool): Moved = { state: c, out: List(Op
 ### Only the owner's Send sends: a draft or a picture, with send access, a SIM where there is a choice, and never during a call that may be an emergency call
 
 `clear` is Phone's fact that no call which may be an emergency call is
-live. A send whose outcome is unknown is read back instead.
+live. A send whose outcome is unknown is read back instead. Send goes to
+the open conversation's own numbers, exactly as the phone listed them for
+that conversation, never to a number typed or named elsewhere.
 
 ```quint
 pure def ready(c: Composer, supported: bool, clear: bool): bool =

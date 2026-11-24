@@ -25,7 +25,7 @@ export interface ContactsProps {
 export function Contacts({ runtime }: ContactsProps) {
   const contacts = useContacts(runtime);
   const phone = usePhone(runtime).state;
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => runtime.runSync(Rows.use((rows) => rows.get())).sought);
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
   if (!state || !phone) return null;
