@@ -1,0 +1,65 @@
+// spec/app/home/tiles.md, "Story: Keep my apps on Home"
+import type { Found, Tile } from "../../gen/app__home__tiles.effect.vibe"
+import type { View } from "../../gen/app__shell.effect.vibe"
+
+/** Where Home's tiles are kept. */
+export const savedKey = "alpha.home.tiles"
+
+/** Where an earlier Alpha kept them: its Alpha apps as `alpha:<app>`, and each installed app by its launcher key. */
+const earlierKey = "alpha.launcher.favorites.v1"
+
+/** Today's view of each name an earlier Alpha saved an app of its own under; Clock, Wallet and the assistant are no tile. */
+const earlierViews: Readonly<Record<string, View>> = {
+  phone: "Phone", messages: "Messages", inbox: "Inbox", calendar: "Calendar", browser: "Browser", camera: "Camera",
+  photos: "Photos", maps: "Maps", notes: "Notes", contacts: "Contacts", files: "Files", workflows: "Workflows",
+  automations: "Workflows", settings: "Settings",
+}
+
+const views: ReadonlyArray<View> = ["Phone", "Messages", "Inbox", "Calendar", "Browser", "Camera", "Photos", "Maps", "Notes", "Contacts", "Files", "Workflows", "Settings"]
+
+schema OwnTile { readonly tag: "Own"; readonly view: string }
+schema InstalledTile { readonly tag: "Installed"; readonly app: string }
+schema Saved { readonly version: 1; readonly tiles: (OwnTile | InstalledTile)[] }
+schema Earlier { readonly version: 1 | 2; readonly keys: string[]; readonly defaultPolicy?: string }
+
+/** `tiles` as they are kept. */
+export function written(tiles: ReadonlyArray<Tile>): string {
+  return JSON.stringify({ version: 1, tiles })
+}
+
+function tileOf(tile: OwnTile | InstalledTile): Tile | undefined {
+  if (tile.tag === "Installed") return tile.app === "" ? undefined : { tag: "Installed", app: tile.app }
+  const view = views.find((one) => one === tile.view)
+  return view === undefined ? undefined : { tag: "Own", view }
+}
+
+/** An earlier Alpha's record as today's tiles: its own apps renamed, the ones that left the product dropped, each once. */
+function earlierTiles(record: Earlier): Tile[] {
+  const tiles: Tile[] = []
+  const add = (tile: Tile) => { if (!tiles.some((one) => JSON.stringify(one) === JSON.stringify(tile))) tiles.push(tile) }
+  for (const key of record.keys) {
+    if (key.startsWith("alpha:")) {
+      const view = earlierViews[key.slice("alpha:".length)]
+      if (view !== undefined) add({ tag: "Own", view })
+    } else if (record.version === 1 || record.defaultPolicy !== undefined) add({ tag: "Installed", app: key })
+  }
+  if (record.version === 1) for (const view of views) add({ tag: "Own", view })
+  return tiles
+}
+
+/** What was saved: today's record, else an earlier Alpha's turned into today's tiles, else none. A record that does not parse is unreadable. */
+export effect function parsedTiles(read: (key: string) => (string | undefined)!!): { readonly found: Found; readonly tiles: Tile[] }!! {
+  const today = try read(savedKey)
+  if (today !== undefined) {
+    const record = Schema.decodeUnknownOption(Schema.fromJsonString(Saved))(today)
+    if (Option.isNone(record)) return { found: "Unreadable", tiles: [] }
+    const tiles = record.value.tiles.map(tileOf)
+    if (tiles.some((tile) => tile === undefined)) return { found: "Unreadable", tiles: [] }
+    return { found: "Saved", tiles: tiles.filter((tile) => tile !== undefined) }
+  }
+  const earlier = try read(earlierKey)
+  if (earlier === undefined) return { found: "Missing", tiles: [] }
+  const record = Schema.decodeUnknownOption(Schema.fromJsonString(Earlier))(earlier)
+  if (Option.isNone(record)) return { found: "Unreadable", tiles: [] }
+  return { found: "Saved", tiles: earlierTiles(record.value) }
+}

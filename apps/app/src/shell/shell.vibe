@@ -1,7 +1,8 @@
 // spec/app/shell/index.md, "Story: Move between Home and the apps"
 import * as Shell from "../../gen/app__shell.effect.vibe"
+import * as Layers from "../../gen/app__shell__layers.effect.vibe"
 import { Device } from "../platform/device.vibe"
-import { contained, reacting } from "../runtime/reactor.vibe"
+import { contained, following, reacting } from "../runtime/reactor.vibe"
 
 /** The screens that take Back before the shell does: a screen with a step of its own, such as a thread over its list. */
 export service Backs {
@@ -25,28 +26,66 @@ export effect function taking(place: string, took: () => Promise<boolean>): void
 // spec/app/shell/index.md, "When Alpha opens again the trail is kept, and the drawer and Ask Alpha are closed"
 const kept = reacting(Shell, { keep: 1, open: [{ type: "reopen" }] })
 
-// spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"
-/** Back, from the phone as from the header: the drawer and Ask Alpha close first; then the screen showing may take a step of its own; then the app on top closes. */
-export effect function back(): void!!(Shell.Machine | Backs) {
+// spec/app/shell/layers.md, "Story: Keep a sheet or a dialog above the phone"
+const layered = reacting(Layers, {})
+
+// spec/app/shell/index.md, "Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top"; spec/app/shell/layers.md, "Back goes first to the layer on top; with no layer, a held phone takes Back and Home and closes nothing; then a screen with a step of its own takes Back; otherwise the shell takes them"
+/**
+ * Back, from the phone as from the header: the layer on top first, which its area may take as a step of its own;
+ * nothing while the phone is held; then the screen showing may take a step of its own, Home's menu, Add to Home and
+ * editing included, under Ask Alpha at rest; then the drawer, Ask Alpha by a step and the app on top.
+ */
+export effect function back(): void!!(Shell.Machine | Layers.Machine | Backs) {
   const shell = try Shell.Machine
+  const layers = try Layers.Machine
+  const screens = try Backs
+  const over = try layers.get()
+  const taker = Layers.backTaker(over)
+  if (taker === "ByLayer") {
+    if (!(try screens.take(`layer:${Layers.top(over).id}`))) try contained(layers.send({ type: "back" }), "back")
+    return
+  }
+  if (taker === "ByHold") return
   const state = try shell.get()
   const view = state.trail.at(-1)
-  if (!state.drawer && state.assistant === "Bar" && view !== undefined && (try (try Backs).take(`view:${view}`))) return
+  if (state.assistant === "Bar" && (try screens.take(view === undefined ? "home" : `view:${view}`))) return
   try contained(shell.send({ type: "goBack" }), "back")
 }
 
-// spec/app/shell/index.md, "The phone says what it admits, and an app it no longer admits leaves the trail"; spec/app/shell/index.md, "Home leaves every app and closes every layer at once"
+// spec/app/shell/index.md, "Home leaves every app and closes every layer at once"; spec/app/shell/layers.md, "Home closes every layer, unless the phone is held"
+/** Home, from the phone: nothing while the phone is held; otherwise every layer closes and the shell goes Home. */
+export effect function home(): void!!(Shell.Machine | Layers.Machine) {
+  const layers = try Layers.Machine
+  const over = try layers.get()
+  if (Layers.homeTaker(over) === "ByHold") return
+  if (Layers.canHome(over)) try contained(layers.send({ type: "home" }), "home")
+  try contained((try Shell.Machine).send({ type: "goHome" }), "home")
+}
+
+// spec/app/shell/index.md, "The phone says what it admits, and an app it no longer admits leaves the trail"
+effect function admitted(): void!!(Shell.Machine | Device) {
+  const facts = try (try Device).capabilities()
+  try contained((try Shell.Machine).send({ type: "admit", image: facts.image, contacts: facts.contacts }), "admitting")
+}
+
+/** What the phone admits, read at start and each time Alpha comes back to the front, and the buttons it hands over. */
 const told = Layer.effectDiscard(effect {
   const device = try Device
   const shell = try Shell.Machine
+  const layers = try Layers.Machine
   const pressed = try Backs
-  const facts = try device.capabilities()
-  try contained(shell.send({ type: "admit", image: facts.image, contacts: facts.contacts }), "admitting")
-  try fork.scoped Stream.runForEach(device.buttons, (button) => contained(
-    button === "back" ? Effect.provideService(Effect.provideService(back(), Shell.Machine, shell), Backs, pressed) : shell.send({ type: "goHome" }),
-    `the ${button} button`,
-  ))
+  const provided = <A>(work: A!!(Shell.Machine | Layers.Machine | Backs | Device)) =>
+    Effect.provideService(Effect.provideService(Effect.provideService(Effect.provideService(work, Shell.Machine, shell), Layers.Machine, layers), Backs, pressed), Device, device)
+  try provided(admitted())
+  try fork.scoped Stream.runForEach(Stream.filter(device.visible, (shown) => shown), () => provided(admitted()))
+  try fork.scoped Stream.runForEach(device.buttons, (button) => contained(provided(button === "back" ? back() : home()), `the ${button} button`))
 })
 
-/** The shell, kept across restarts, told what the phone admits and which buttons it hands over. */
-export const shell = Layer.provideMerge(told, Layer.merge(kept, backs))
+// spec/app/shell/layers.md, "A screen says when it has a step of its own to take Back, and when it has none left; its page stays usable"
+/** Tell the layers whether the screen at `place` has a step of its own, each time `fact` reads it from the machine `source` names. */
+export function stepping<IA, A>(place: string, source: Context.Key<IA, { readonly changes: Stream.Stream<A> }>, fact: (a: A) => boolean) {
+  return following(source, fact, Layers.Machine, (has) => ({ type: has ? "offerStep" : "withdrawStep", place } as const))
+}
+
+/** The shell, kept across restarts, with the layers over it, told what the phone admits and which buttons it hands over. */
+export const shell = Layer.provideMerge(told, Layer.mergeAll(kept, layered, backs))

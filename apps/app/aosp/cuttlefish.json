@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "description": "Alpha's Cuttlefish x86_64 phone, the validation target, as eliza's composition reads it (`pnpm aosp stage --target cuttlefish`). A production composition is refused while its host packages and platform certificate are UNSET.",
+  "target": "cuttlefish_x86_64",
+  "sourceProfile": "cuttlefish",
+  "vendorDirectory": "alphaphone",
+  "productName": "alpha_cf_x86_64_phone",
+  "model": "Alpha Phone",
+  "brand": "Alpha",
+  "manufacturer": "Alpha Compute",
+  "releaseConfig": "trunk_staging",
+  "launcher": {
+    "moduleName": "AlphaPhone",
+    "packageName": "ai.alphacompute.alphaphone"
+  },
+  "systemUpdater": false,
+  "firstRun": false,
+  "hostPackages": [
+    { "name": "cuttlefish-base", "version": "UNSET", "sha256": "UNSET" },
+    { "name": "cuttlefish-user", "version": "UNSET", "sha256": "UNSET" }
+  ],
+  "platformCertificateSha256": "UNSET"
+}

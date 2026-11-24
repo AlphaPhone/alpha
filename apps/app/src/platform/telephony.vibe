@@ -1,0 +1,75 @@
+// spec/app/telephony/common.md, "A provider is read only while its view is in front on an unlocked phone with the grant"; spec/app/shell/index.md, "Phone and Messages exist only on an Alpha image, and Contacts only where that image admits it"
+import type { AddressBookClient } from "@elizaos/os/bridges/contacts"
+import type { MessagesClient } from "@elizaos/os/bridges/messages"
+import type { PhoneClient } from "@elizaos/os/bridges/phone"
+
+module held {
+  import { actionJournalPlugin } from "@elizaos/os/bridges/action-journal"
+  import { rejectionCode } from "@elizaos/os/bridges/bridge"
+  import { addressBookPlugin, createAddressBookClient } from "@elizaos/os/bridges/contacts"
+  import { messagesClient, messagesPlugin } from "@elizaos/os/bridges/messages"
+  import { phoneClient, telephonyPlugin } from "@elizaos/os/bridges/phone"
+  function make() {
+    const journal = actionJournalPlugin()
+    return {
+      phone: phoneClient(telephonyPlugin(), journal),
+      messages: messagesClient(messagesPlugin(), journal),
+      contacts: createAddressBookClient({ install: "WritingInstall", plugin: addressBookPlugin(), journal }),
+    }
+  }
+  let made: ReturnType<typeof make> | undefined
+  /** eliza's clients of the image's telephony and contacts plugins, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function clients() {
+    return (made ??= make())
+  }
+  /** The code a plugin rejected a call with, or none for an answer that never came. @throws {never} */
+  export function codeOf(cause: unknown): string | undefined {
+    return rejectionCode(cause)
+  }
+  /** The tag of eliza's typed refusal, such as `RecentCallsRefused`. @throws {never} */
+  export function tagOf(cause: unknown): string {
+    return typeof cause === "object" && cause !== null && "_tag" in cause && typeof cause._tag === "string" ? cause._tag : ""
+  }
+}
+import { clients, codeOf, tagOf } from held
+import { registered } from "./device.vibe"
+
+/** eliza's clients of an Alpha image's telephony: calls, the call log and voicemail; conversations and sends; the address book. */
+export interface TelephonyClients {
+  readonly phone: PhoneClient
+  readonly messages: MessagesClient
+  readonly contacts: AddressBookClient
+}
+
+/** Phone, Messages and Contacts are not on this phone: nothing reached its native side. */
+export error TelephonyAbsent { method: string }
+
+/**
+ * The phone refused, or did not answer. `code` is the plugin's own word where it gave one, and `tag` the name of
+ * eliza's typed refusal; with neither, the answer was lost and the phone may have acted.
+ */
+export error TelephonyRefused { method: string; code: string | undefined; tag: string; cause: unknown }
+
+/** The phone's telephony, through eliza's clients of the image's plugins; absent off the image. */
+export service Telephony {
+  clients(): TelephonyClients!TelephonyAbsent
+}
+
+/** One call of eliza's clients: refused before the phone where there is no image, and typed where the phone refused. */
+export effect function telephony<A>(method: string, run: (clients: TelephonyClients) => Promise<A>): A!(TelephonyAbsent | TelephonyRefused)!Telephony {
+  const found = try (try Telephony).clients()
+  return try tryPromise({
+    try: () => run(found),
+    catch: (cause) => new TelephonyRefused({ method, code: codeOf(cause), tag: tagOf(cause), cause }),
+  })
+}
+
+/** On an Alpha image: eliza's own clients of `ElizaTelephony`, `ElizaContacts` and `ElizaActionJournal`, which the image's host registers. */
+export const phoneTelephony = Layer.succeed(Telephony, {
+  clients: (): TelephonyClients!TelephonyAbsent => registered("ElizaTelephony") ? sync(() => clients()) : Effect.fail(new TelephonyAbsent({ method: "clients" })),
+})
+
+/** In a browser there is no image: every call is refused before anything is asked. */
+export const browserTelephony = Layer.succeed(Telephony, {
+  clients: () => Effect.fail(new TelephonyAbsent({ method: "clients" })),
+})

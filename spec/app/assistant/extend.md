@@ -19,9 +19,9 @@ import draft as D from "../../kit/draft"
 
 pure def dropped(r: R::Read): R::Read = { ...r, status: R::Idle }
 
-pure def lawALeftReadTakesNoAnswer(ticket: int, older: int): bool =
+pure def lawALeftReadTakesNoAnswer(ticket: int, earlier: int): bool =
   val r = dropped(R::ask({ status: R::Loading, ticket: ticket }))
-  not(R::canAnswer(r, older)) and r.ticket == ticket + 1
+  not(R::canAnswer(r, earlier)) and r.ticket == ticket + 1
 ```
 
 ### A save that failed keeps its edits unsaved, to be saved again on the same revision

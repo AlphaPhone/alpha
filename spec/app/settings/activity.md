@@ -75,8 +75,8 @@ packaged with this build, it says so.
 ### The journal is read only while the agent is ready, one read at a time, with ten seconds to answer
 
 ```quint
-pure val readLimit = 10
-pure val atValues = Set(0, 4, 20)
+pure val readLimit = 10000
+pure val atValues = Set(0, 4000, 20000)
 
 pure def askJournal(at: int, s: Activity): Sent =
   val asking = T::ask(s.journal, at, readLimit)
@@ -103,7 +103,7 @@ pure def canActionsRead(s: Activity, reading: int, ok: bool, rows: List[Row]): b
 pure def actionsRead(s: Activity, reading: int, ok: bool, rows: List[Row]): Activity =
   if (ok) { ...s, journal: T::answer(s.journal, true), rows: rows } else { ...s, journal: T::answer(s.journal, false) }
 
-pure val nowValues = Set(0, 4, 20, 40)
+pure val nowValues = Set(0, 4000, 20000, 40000)
 
 pure def canGiveUpOnActions(s: Activity, now: int): bool = T::canGiveUp(s.journal, now)
 

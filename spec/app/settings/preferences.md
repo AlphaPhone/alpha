@@ -1,8 +1,10 @@
 # Preferences
 
-What the owner sets about Alpha itself: its appearance, the size of its
-text, whether Alpha asks before it acts, and whether Inbox loads images
-from the web. Alerts and their channels are Android's: Settings shows what
+What the owner sets about Alpha itself: its appearance and legible text,
+the size of its text, whether Alpha asks before it acts, what it may share
+or change without asking (the phone's location, the Browser page open,
+changes to Gmail and to Calendar), and whether Inbox loads images from the
+web. Alerts and their channels are Android's: Settings shows what
 the phone reports ([Facts](./facts.md)) and opens Android's page for them
 ([Android](./android.md)). Recovering notification data, device roles and
 alert sounds is offered on the [Developer](./developer.md) page.
@@ -27,36 +29,37 @@ type Theme = System | Light | Dark
 type Look = LightLook | DarkLook
 type SizeOutcome = Applied | NotConfirmed | NoTextSize
 type Notice = Quiet | NotSaved | SizeNotConfirmed | SizeUnavailable | NotRecovered
+type Share = AgentLocation | BrowserPage | GmailChanges | CalendarEdits
 
 type Preferences = {
-  theme: Theme, kept: Theme, keeping: T::Timed, phoneLook: Look,
+  theme: Theme, kept: Theme, legible: bool, keptLegible: bool, keeping: T::Timed, phoneLook: Look,
   size: int, sizing: T::Timed, changing: bool,
-  document: T::Timed, askFirst: bool, images: bool,
-  saving: T::Timed, nextAskFirst: bool, nextImages: bool,
+  document: T::Timed, askFirst: bool, images: bool, shares: List[Share],
+  saving: T::Timed, nextAskFirst: bool, nextImages: bool, nextShares: List[Share],
   recovering: T::Timed, notice: Notice,
 }
 
 type Effect =
-  KeepTheme({ keep: int, chosen: Theme })
+  KeepTheme({ keep: int, chosen: Theme, chosenLegible: bool })
   | OpenDisplay
   | SetTextSize({ sizeAsk: int, percent: int })
   | ReadTextSize({ sizeRead: int })
   | ReadDocument({ docRead: int })
-  | SaveDocument({ save: int, saveAskFirst: bool, saveImages: bool })
+  | SaveDocument({ save: int, saveAskFirst: bool, saveImages: bool, saveShares: List[Share] })
   | RecoverDocument({ recovery: int })
 type Changed = { state: Preferences, out: List[Effect] }
 
 pure val initial: Preferences = {
-  theme: Light, kept: Light, keeping: T::unasked, phoneLook: LightLook,
+  theme: Light, kept: Light, legible: false, keptLegible: false, keeping: T::unasked, phoneLook: LightLook,
   size: 0, sizing: T::unasked, changing: false,
-  document: T::unasked, askFirst: true, images: false,
-  saving: T::unasked, nextAskFirst: true, nextImages: false,
+  document: T::unasked, askFirst: true, images: false, shares: List(),
+  saving: T::unasked, nextAskFirst: true, nextImages: false, nextShares: List(),
   recovering: T::unasked, notice: Quiet,
 }
 
-pure val limit = 10
-pure val atValues = Set(0, 4, 20)
-pure val nowValues = Set(0, 4, 20, 40)
+pure val limit = 10000
+pure val atValues = Set(0, 4000, 20000)
+pure val nowValues = Set(0, 4000, 20000, 40000)
 ```
 
 ### Only the owner changes a preference; the agent and the phone cannot
@@ -90,7 +93,20 @@ pure def canChooseTheme(s: Preferences, theme: Theme, at: int, by: Sender): bool
 
 pure def chooseTheme(s: Preferences, theme: Theme, at: int, by: Sender): Changed =
   val asking = T::ask(s.keeping, at, limit)
-  { state: { ...s, theme: theme, keeping: asking, notice: Quiet }, out: List(KeepTheme({ keep: asking.read.ticket, chosen: theme })) }
+  { state: { ...s, theme: theme, keeping: asking, notice: Quiet }, out: List(KeepTheme({ keep: asking.read.ticket, chosen: theme, chosenLegible: s.legible })) }
+```
+
+### Legible text is turned on or off by the owner and kept with the appearance, the same way
+
+Alpha then draws its text in a heavier, more open face.
+
+```quint
+pure def canSetLegible(s: Preferences, legible: bool, at: int, by: Sender): bool =
+  chooses(by) and not(T::busy(s.keeping)) and legible != s.legible
+
+pure def setLegible(s: Preferences, legible: bool, at: int, by: Sender): Changed =
+  val asking = T::ask(s.keeping, at, limit)
+  { state: { ...s, legible: legible, keeping: asking, notice: Quiet }, out: List(KeepTheme({ keep: asking.read.ticket, chosen: s.theme, chosenLegible: legible })) }
 ```
 
 ### A choice that could not be kept in time is taken back, and Alpha says it was not saved
@@ -98,12 +114,12 @@ pure def chooseTheme(s: Preferences, theme: Theme, at: int, by: Sender): Changed
 ```quint
 pure val keepValues = Set(1, 2)
 
-pure def notKept(keeping: T::Timed, s: Preferences): Preferences = { ...s, keeping: keeping, theme: s.kept, notice: NotSaved }
+pure def notKept(keeping: T::Timed, s: Preferences): Preferences = { ...s, keeping: keeping, theme: s.kept, legible: s.keptLegible, notice: NotSaved }
 
 pure def canThemeKept(s: Preferences, keep: int, ok: bool, by: Sender): bool = answers(by) and T::canAnswer(s.keeping, keep)
 
 pure def themeKept(s: Preferences, keep: int, ok: bool, by: Sender): Preferences =
-  if (ok) { ...s, keeping: T::answer(s.keeping, true), kept: s.theme }
+  if (ok) { ...s, keeping: T::answer(s.keeping, true), kept: s.theme, keptLegible: s.legible }
   else notKept(T::answer(s.keeping, false), s)
 
 pure def canGiveUpKeeping(s: Preferences, now: int, by: Sender): bool = answers(by) and T::canGiveUp(s.keeping, now)
@@ -111,11 +127,11 @@ pure def canGiveUpKeeping(s: Preferences, now: int, by: Sender): bool = answers(
 pure def giveUpKeeping(s: Preferences, now: int, by: Sender): Preferences = notKept(T::answer(s.keeping, false), s)
 ```
 
-### Once nothing is being kept, the appearance shown is the one kept
+### Once nothing is being kept, the appearance and legible text shown are the ones kept
 
 ```quint
 pure def alwaysTheAppearanceShownIsKept(s: Preferences): bool =
-  not(T::busy(s.keeping)) implies s.theme == s.kept
+  not(T::busy(s.keeping)) implies (s.theme == s.kept and s.legible == s.keptLegible)
 ```
 
 ### Asked to change the appearance, the agent opens Display and changes nothing
@@ -272,7 +288,12 @@ pure def governed(act: Act): bool = act == WebAction or act == CameraAction or a
 
 ### The device preferences are read when Alpha starts, when Settings opens, and when Alpha comes back while Settings shows, with ten seconds to answer, never while a change or a recovery is in flight
 
-They hold Ask before Alpha acts and Load images in Inbox.
+They hold Ask before Alpha acts, Load images in Inbox, and what Alpha may
+share or change without asking. On a phone updated from the previous
+Alpha, which kept these in a document of its own, the phone reads that
+document, once, while it has none of Alpha's: the choices made there stay,
+and a choice it lacks starts as on a new phone. Alpha never writes the
+previous document.
 
 ```quint
 pure def readAgain(at: int, s: Preferences): Changed =
@@ -294,20 +315,22 @@ pure def stepTheDocumentIsReadOnlyWhenDue(before: Preferences, via: str, after: 
     (via == "start" or ((via == "opened" or via == "resumed" or via == "recovered" or via == "giveUpOnRecovery") and not(T::busy(before.saving))))
 ```
 
-### What the phone could not read is taken as asking first and loading no images
+### What the phone could not read is taken as asking first, loading no images and sharing nothing
 
-The phone reports the document readable, with its two values, or not.
+The phone reports the document readable, with its values, or not.
 
 ```quint
 pure val docReadValues = Set(1, 2, 3)
+pure val sharesValues = Set(List(), List(AgentLocation, BrowserPage), List(AgentLocation, BrowserPage, GmailChanges, CalendarEdits))
+pure val shareValues = Set(AgentLocation, BrowserPage, GmailChanges)
 
-pure def safe(document: T::Timed, s: Preferences): Preferences = { ...s, document: document, askFirst: true, images: false }
+pure def safe(document: T::Timed, s: Preferences): Preferences = { ...s, document: document, askFirst: true, images: false, shares: List() }
 
-pure def canDocumentRead(s: Preferences, docRead: int, readable: bool, askFirst: bool, images: bool, by: Sender): bool =
+pure def canDocumentRead(s: Preferences, docRead: int, readable: bool, askFirst: bool, images: bool, shares: List[Share], by: Sender): bool =
   answers(by) and T::canAnswer(s.document, docRead)
 
-pure def documentRead(s: Preferences, docRead: int, readable: bool, askFirst: bool, images: bool, by: Sender): Preferences =
-  if (readable) { ...s, document: T::answer(s.document, true), askFirst: askFirst, images: images }
+pure def documentRead(s: Preferences, docRead: int, readable: bool, askFirst: bool, images: bool, shares: List[Share], by: Sender): Preferences =
+  if (readable) { ...s, document: T::answer(s.document, true), askFirst: askFirst, images: images, shares: shares }
   else safe(T::answer(s.document, false), s)
 
 pure def canGiveUpOnDocument(s: Preferences, now: int, by: Sender): bool = answers(by) and T::canGiveUp(s.document, now)
@@ -315,7 +338,7 @@ pure def canGiveUpOnDocument(s: Preferences, now: int, by: Sender): bool = answe
 pure def giveUpOnDocument(s: Preferences, now: int, by: Sender): Preferences = safe(T::answer(s.document, false), s)
 
 pure def alwaysAnUnreadDocumentIsSafe(s: Preferences): bool =
-  (s.document.read.status == R::Idle or s.document.read.status == R::Failed) implies (s.askFirst and not(s.images))
+  (s.document.read.status == R::Idle or s.document.read.status == R::Failed) implies (s.askFirst and not(s.images) and s.shares.length() == 0)
 ```
 
 ### Every read of the device preferences ends, answered or given up
@@ -339,26 +362,43 @@ pure def asksBeforeActing(s: Preferences, act: Act): bool =
 pure def loadsImages(s: Preferences): bool = s.document.read.status == R::Loaded and s.images
 ```
 
-### The owner changes Ask before Alpha acts or Load images only once the phone has read them, one save at a time, with ten seconds to save
+### Alpha shares the phone's location or the Browser page open with a chat turn, and changes Gmail or Calendar, only when the phone read that the owner allowed it
+
+Each turn reads this just before it is sent, so the first turn after a
+start reads what the phone kept. A private tab or a sign-in page is never
+shared.
+
+```quint
+pure def allows(s: Preferences, share: Share): bool = s.document.read.status == R::Loaded and s.shares.includes(share)
+
+pure def lawAnUnreadDocumentSharesNothing(share: Share): bool = not(allows(initial, share))
+```
+
+### The owner changes Ask before Alpha acts, Load images or what Alpha may share only once the phone has read them, one save at a time, with ten seconds to save
 
 ```quint
 pure def editable(s: Preferences, by: Sender): bool =
   chooses(by) and s.document.read.status == R::Loaded and not(T::busy(s.saving))
 
-pure def saveDocument(at: int, askFirst: bool, images: bool, s: Preferences): Changed =
+pure def saveDocument(at: int, askFirst: bool, images: bool, shares: List[Share], s: Preferences): Changed =
   val asking = T::ask(s.saving, at, limit)
   {
-    state: { ...s, saving: asking, nextAskFirst: askFirst, nextImages: images, notice: Quiet },
-    out: List(SaveDocument({ save: asking.read.ticket, saveAskFirst: askFirst, saveImages: images })),
+    state: { ...s, saving: asking, nextAskFirst: askFirst, nextImages: images, nextShares: shares, notice: Quiet },
+    out: List(SaveDocument({ save: asking.read.ticket, saveAskFirst: askFirst, saveImages: images, saveShares: shares })),
   }
 
 pure def canSetAskFirst(s: Preferences, askFirst: bool, at: int, by: Sender): bool = editable(s, by) and askFirst != s.askFirst
 
-pure def setAskFirst(s: Preferences, askFirst: bool, at: int, by: Sender): Changed = saveDocument(at, askFirst, s.images, s)
+pure def setAskFirst(s: Preferences, askFirst: bool, at: int, by: Sender): Changed = saveDocument(at, askFirst, s.images, s.shares, s)
 
 pure def canSetImages(s: Preferences, images: bool, at: int, by: Sender): bool = editable(s, by) and images != s.images
 
-pure def setImages(s: Preferences, images: bool, at: int, by: Sender): Changed = saveDocument(at, s.askFirst, images, s)
+pure def setImages(s: Preferences, images: bool, at: int, by: Sender): Changed = saveDocument(at, s.askFirst, images, s.shares, s)
+
+pure def canSetShare(s: Preferences, share: Share, on: bool, at: int, by: Sender): bool = editable(s, by) and on != s.shares.includes(share)
+
+pure def setShare(s: Preferences, share: Share, on: bool, at: int, by: Sender): Changed =
+  saveDocument(at, s.askFirst, s.images, if (on) s.shares.append(share) else s.shares.select(x => x != share), s)
 
 pure def alwaysASaveBuildsOnWhatWasRead(s: Preferences): bool =
   T::busy(s.saving) implies s.document.read.status == R::Loaded
@@ -372,7 +412,7 @@ pure val saveValues = Set(1, 2)
 pure def canDocumentSaved(s: Preferences, save: int, ok: bool, by: Sender): bool = answers(by) and T::canAnswer(s.saving, save)
 
 pure def documentSaved(s: Preferences, save: int, ok: bool, by: Sender): Preferences =
-  if (ok) { ...s, saving: T::answer(s.saving, true), askFirst: s.nextAskFirst, images: s.nextImages }
+  if (ok) { ...s, saving: T::answer(s.saving, true), askFirst: s.nextAskFirst, images: s.nextImages, shares: s.nextShares }
   else { ...s, saving: T::answer(s.saving, false), notice: NotSaved }
 
 pure def canGiveUpOnSaving(s: Preferences, now: int, by: Sender): bool = answers(by) and T::canGiveUp(s.saving, now)
@@ -444,6 +484,13 @@ pure def sometimesActsWithoutAsking(s: Preferences): bool =
   not(asksBeforeActing(s, WebAction)) and s.saving.read.status == R::Loaded and not(s.nextAskFirst)
 ```
 
+### The owner can stop Alpha sharing the Browser page
+
+```quint
+pure def sometimesBrowserPageWithheld(s: Preferences): bool =
+  s.saving.read.status == R::Loaded and not(s.shares.includes(BrowserPage)) and s.shares.includes(AgentLocation)
+```
+
 ### The owner can let images load in Inbox
 
 ```quint
@@ -463,17 +510,22 @@ pure def sometimesNotRecovered(s: Preferences): bool = s.notice == NotRecovered
 > As the owner, I want what I chose to be there when Alpha starts again,
 > and nothing half-done to count.
 
-### Alpha starts with the appearance it kept, or Light when nothing readable was kept, and the phone's look; it reads the text size and the device preferences again, and drops what was in flight
+### Alpha starts with the appearance and legible text it kept, or Light and ordinary text when nothing readable was kept, and the phone's look; it reads the text size and the device preferences again, and drops what was in flight
+
+On a phone updated from the previous Alpha, which kept light, dark or the
+phone's look on its own, the phone reports that as kept while Alpha has
+kept none of its own.
 
 ```quint
 pure def drop(t: T::Timed): T::Timed = if (T::busy(t)) T::answer(t, false) else t
 
 pure def canStart(s: Preferences, by: Sender): bool = answers(by)
 
-pure def start(s: Preferences, at: int, kept: Theme, readable: bool, look: Look, by: Sender): Changed =
+pure def start(s: Preferences, at: int, kept: Theme, keptLegible: bool, readable: bool, look: Look, by: Sender): Changed =
   val theme = if (readable) kept else Light
+  val legible = readable and keptLegible
   val fresh = safe(drop(s.document), {
-    ...s, theme: theme, kept: theme, phoneLook: look, keeping: drop(s.keeping),
+    ...s, theme: theme, kept: theme, legible: legible, keptLegible: legible, phoneLook: look, keeping: drop(s.keeping),
     saving: drop(s.saving), recovering: drop(s.recovering), notice: Quiet,
   })
   val sized = readSize(at, { ...fresh, sizing: drop(s.sizing) })
