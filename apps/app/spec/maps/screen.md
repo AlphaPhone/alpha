@@ -221,8 +221,8 @@ pure def lawAGoogleNumberIsNeverCopied(hasPhone: bool): bool = not(copyOffered(h
 
 ### A place outside every region the provider covers keeps its coordinates and says so
 
-Coordinates are whole millionths of a degree. "This location is outside
-Cloud Maps coverage. Its coordinates are retained."
+Coordinates are retained as whole millionths of a degree. The screen says
+"This location is outside Cloud Maps coverage."
 
 ```quint
 type Region = { west: int, south: int, east: int, north: int }

@@ -6,8 +6,9 @@ that was retired reports nothing. Google content is drawn only on the Google
 raster served through Cloud: it never falls back to the world map, and with
 no raster the screen says the Google map is missing. On a Google map the
 Google Maps badge is the only credit; tapping it opens the full viewport
-copyright, who receives searches and route points, and Enter coordinates.
-Other maps keep their credit links and an information button.
+copyright and who receives searches and route points. Other maps keep their
+credit links and an information button. Coordinates typed into Search still
+drop a pin.
 
 ## Domain
 

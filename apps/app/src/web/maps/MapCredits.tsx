@@ -17,8 +17,6 @@ export type MapCreditsProps = {
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
-  /** Search by typing a latitude and longitude instead of using location. */
-  onCoordinates: () => void;
   /** Android refused location to Maps, so the panel offers its settings. */
   locationDenied: boolean;
   onLocationSettings: () => void;
@@ -36,7 +34,7 @@ export function disclosure(recipients: ReadonlyArray<Recipient>): string {
  * @model spec/maps/plane.md
  * @design design.md
  */
-export function MapCredits({ credits, copyright, attribution, recipients, open, onOpen, onClose, onCoordinates, locationDenied, onLocationSettings }: MapCreditsProps) {
+export function MapCredits({ credits, copyright, attribution, recipients, open, onOpen, onClose, locationDenied, onLocationSettings }: MapCreditsProps) {
   const text = copyright || attribution;
   return (
     <div className="flex flex-col items-start gap-2">
@@ -58,12 +56,9 @@ export function MapCredits({ credits, copyright, attribution, recipients, open, 
           </div>
           {recipients.length > 0 && <p className="text-sm text-muted-foreground">{disclosure(recipients)}</p>}
           <p className="text-sm text-muted-foreground">
-            {locationDenied ? "Allow location in settings, or enter coordinates." : "Location access does not share it with your agent."}
+            {locationDenied ? "Allow location in Settings to show your position." : "Location access does not share it with your agent."}
           </p>
-          <div className="flex flex-wrap gap-2">
-            {locationDenied && <Button variant="secondary" size="sm" onClick={onLocationSettings}>Open settings</Button>}
-            <Button variant="secondary" size="sm" onClick={onCoordinates}>Enter coordinates</Button>
-          </div>
+          {locationDenied && <Button variant="secondary" size="sm" className="self-start" onClick={onLocationSettings}>Open settings</Button>}
         </section>
       )}
     </div>

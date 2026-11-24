@@ -4,7 +4,7 @@ import type { MapCreditsProps } from "./MapCredits.tsx";
 
 export const meta: ComponentMeta<MapCreditsProps> = {
   args: {
-    credits: "BadgeOnly", copyright: "Map data ©2026 Google", attribution: "Google", open: false, onOpen: fn(), onClose: fn(), onCoordinates: fn(),
+    credits: "BadgeOnly", copyright: "Map data ©2026 Google", attribution: "Google", open: false, onOpen: fn(), onClose: fn(),
     locationDenied: false, onLocationSettings: fn(),
     recipients: [{ role: "gateway", name: "Eliza Cloud", operator: "Eliza Labs" }, { role: "search", name: "Google Maps Platform", operator: "Google" }],
   },
@@ -18,7 +18,10 @@ export const meta: ComponentMeta<MapCreditsProps> = {
       await expect(within(canvasElement).queryByRole("button", { name: "Map information" })).toBeNull();
     },
     LocationDenied: async ({ canvasElement, args }) => {
-      await userEvent.click(within(canvasElement).getByRole("button", { name: "Open settings" }));
+      const panel = within(canvasElement).getByRole("region", { name: "Map information" });
+      await expect(within(panel).queryByRole("button", { name: "Enter coordinates" })).toBeNull();
+      await expect(panel).toHaveTextContent("Allow location in Settings to show your position.");
+      await userEvent.click(within(panel).getByRole("button", { name: "Open settings" }));
       await expect(args.onLocationSettings).toHaveBeenCalled();
     },
   },

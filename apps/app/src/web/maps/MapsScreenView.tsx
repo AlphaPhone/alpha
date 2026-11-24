@@ -72,8 +72,8 @@ export function MapsScreenView({ route, onClose, screen, guidance, plane, saved,
   const results = c.results.run === screen.queryRun ? c.results.places : [];
   const candidates = c.originResults.run === screen.originRun ? c.originResults.places : [];
   const savedShown = savedFor(shown, saved) !== undefined;
-  const status = c.message || (shown && outsideShown(c) ? "This location is outside Cloud Maps coverage. Its coordinates are retained." : "")
-    || (plane?.state === "PlaneFailed" ? "Map rendering is unavailable. Retry the map, or use coordinates and saved places." : "");
+  const status = c.message || (shown && outsideShown(c) ? "This location is outside Cloud Maps coverage." : "")
+    || (plane?.state === "PlaneFailed" ? "Map rendering is unavailable. Retry the map or open a saved place." : "");
   const label = basemap === "GoogleRaster" ? "Google Maps" : basemap === "WorldMap" ? "World map" : basemap === "OpenRaster" ? "Cloud map" : "Map";
 
   const mountPlane = useCallback((node: HTMLSpanElement | null) => {
@@ -110,7 +110,6 @@ export function MapsScreenView({ route, onClose, screen, guidance, plane, saved,
           {plane && (
             <MapCredits credits={creditsFor(basemap)} copyright={c.copyright} attribution={coverage?.attribution ?? "OpenFreeMap · © OpenMapTiles · Data from OpenStreetMap"}
               recipients={coverage?.recipients ?? []} open={plane.infoOpen} onOpen={() => act((s) => s.plane.openInfo())} onClose={() => act((s) => s.plane.closeInfo())}
-              onCoordinates={() => act((s) => Effect.andThen(s.plane.closeInfo(), s.screen.enterCoordinates()))}
               locationDenied={locator?.failure === "Denied"} onLocationSettings={() => act((s) => s.handoff.openSettings())} />
           )}
           {!guiding && view !== "DirectionsMode" && (
