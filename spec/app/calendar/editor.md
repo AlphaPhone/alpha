@@ -1,259 +1,532 @@
-# Calendar editor rules
+# Calendar editor
 
-The rules every Calendar form applies before anything is saved: how its time controls move, where
-a new event starts, which events Alpha may change itself and which go to the provider's own editor,
-how a deletion is expressed, and why Save is off. A library: it has no state of its own; the
-[drafts](./drafts.md), [phone calendar writes](./device.md) and [Calendar](./index.md) machines and the
-screen's form use it.
+A new event or a change to one, and every write Alpha makes to the phone's
+calendar: a save, a delete, an answer to an invitation. The form's edits are
+kept on the phone as they are typed, so a restart loses nothing; a save
+builds on the revision the edits began from; a write is sent once, and one
+whose outcome is unknown holds what depends on it until a read shows what
+happened. People, video calls and alerts are written by Android Calendar,
+never by Alpha. The [calendar](./index.md) shows the events this writes.
 
-## Story: Set an event's time with controls that never produce an impossible range
+## Story: Write an event
 
-> As the owner, I want the start and end controls to keep my event inside its day and after its
-> start, and a date change to move the event without changing its length.
+> As the owner, I want to write a new event or change one, its title, its
+> day and time in its time zone, whether it lasts all day, how it repeats and
+> which occurrences a change applies to, and have it saved once.
 
-### Times are civil minutes of the day; the start stays within the day and nudges by fifteen minutes
+### The editor holds the form and the event it edits, the form's draft and recovery banner, the one write in flight, and what is in doubt
+
+A form is for a new event or for an existing one, on screen or kept aside.
+Its day is a civil date, never an offset from today. Its draft counts the
+owner's edits and the event revision they build on; it is kept on the phone
+unless the phone failed to keep it. One write to the phone's calendar is in
+flight at a time. A create whose outcome is unknown, and the one event whose
+change is unknown, are remembered across a restart.
 
 ```quint
-pure def atLeast(value: int, minimum: int): int = if (value < minimum) minimum else value
-pure def atMost(value: int, maximum: int): int = if (value > maximum) maximum else value
-pure def laterStart(start: int): int = atMost(start + 15, 1439)
-pure def earlierStart(start: int): int = atLeast(start - 15, 0)
-pure def lawStartStaysInTheDay(start: int): bool =
-  (start >= 0 and start <= 1439) implies (laterStart(start) <= 1439 and earlierStart(start) >= 0)
+import draft as D from "../../kit/draft"
+import attempt as A from "../../kit/attempt"
+import read as R from "../../kit/read"
+
+type Form = NoForm | NewEvent | EditEvent
+type Scope = Unchosen | ThisOne | ThisAndFollowing | WholeSeries
+type Banner = NoBanner | Available | Conflict | Failed
+type Write = Create | Update | Remove | Reply
+
+type Editor = {
+  form: Form, shown: bool, target: int, day: int, revision: int,
+  allDay: bool, start: int, end: int, repeats: bool, scope: Scope, extras: bool,
+  draft: D::Draft, kept: bool, banner: Banner,
+  write: A::Attempt, kind: Write, writing: int,
+  unknownCreate: bool, separate: bool, receipts: R::Read, latched: int,
+}
+
+type Effect =
+  | Send({ attempt: int, kind: Write, id: int, scope: Scope, base: int })
+  | Answer({ attempt: int, id: int, accept: bool })
+  | HandOff({ id: int, day: int })
+  | CheckReceipts({ ticket: int })
+  | KeepDraft
+
+type Composed = { state: Editor, out: List[Effect] }
+
+pure val initial: Editor = {
+  form: NoForm, shown: false, target: 0, day: 0, revision: 0,
+  allDay: false, start: 0, end: 1, repeats: false, scope: Unchosen, extras: false,
+  draft: D::blank, kept: false, banner: NoBanner,
+  write: A::plan(0), kind: Create, writing: 0,
+  unknownCreate: false, separate: false, receipts: R::unread, latched: 0,
+}
+
+pure val idValues = Set(1, 2)
+pure val revisionValues = Set(0, 1, 2)
+pure val dayValues = Set(0, 1)
+pure val startValues = Set(0, 1, 2)
+pure val endValues = Set(0, 1, 2)
+pure val attemptValues = Set(1, 2, 3, 4)
+pure val ticketValues = Set(1, 2, 3)
+
+pure def inFlight(s: Editor): bool = A::canConclude(s.write, s.write.id)
+
+pure def withoutForm(write: A::Attempt, s: Editor): Editor =
+  { ...s, write: write, form: NoForm, shown: false, target: 0, revision: 0, draft: D::blank, kept: false, banner: NoBanner, separate: false }
 ```
 
-### The duration is at least one minute, and an end at or before the start is refused
+### A new form opens for a day, and an event opens for editing at the revision read, only when no other draft is kept
 
-A date edit changes the chosen day, never the duration.
+A kept draft is restored or discarded first, so it is never replaced
+unseen.
 
 ```quint
-pure def longerEnd(duration: int): int = duration + 15
-pure def shorterEnd(duration: int): int = atLeast(duration - 15, 1)
-pure def endAccepted(start: int, endAt: int): bool = endAt > start
-pure def durationFor(start: int, duration: int, endAt: int): int = if (endAccepted(start, endAt)) endAt - start else duration
-pure def lawDurationStaysPositive(start: int, duration: int, endAt: int): bool =
-  duration >= 1 implies durationFor(start, duration, endAt) >= 1
-pure def lawShorterEndStaysPositive(duration: int): bool = shorterEnd(duration) >= 1
+pure def canNewEvent(s: Editor): bool = s.form == NoForm
+
+pure def newEvent(s: Editor, day: int): Editor =
+  { ...s, form: NewEvent, shown: true, target: 0, day: day, revision: 0, allDay: false, start: 0, end: 1,
+    repeats: false, scope: Unchosen, extras: false, draft: D::blank, kept: false, banner: NoBanner, separate: false }
+
+pure def canEditEvent(s: Editor, id: int, revision: int): bool = s.form == NoForm and id > 0 and revision >= 0
+
+pure def editEvent(s: Editor, id: int, revision: int, day: int, repeats: bool): Editor =
+  { ...s, form: EditEvent, shown: true, target: id, day: day, revision: revision, allDay: false, start: 0, end: 1,
+    repeats: repeats, scope: Unchosen, extras: false, draft: { ...D::blank, base: revision }, kept: false,
+    banner: NoBanner, separate: false }
 ```
 
-### A new event today starts at the next full hour; on another day it starts at ten
+### Each edit is counted and kept on the phone at once, unless the phone failed to keep the draft
 
-The next full hour after 23:00 is tomorrow at midnight.
+Edits wait while a save is in flight and while the owner chooses between
+two drafts.
 
 ```quint
-type DefaultStart = { offset: int, hour: int }
-pure def defaultStart(offset: int, nowHour: int): DefaultStart =
-  if (offset != 0) { offset: offset, hour: 10 }
-  else if (nowHour >= 23) { offset: 1, hour: 0 }
-  else { offset: 0, hour: nowHour + 1 }
-pure def lawDefaultStartIsAnHourOfADay(offset: int, nowHour: int): bool =
-  (nowHour >= 0 and nowHour <= 23) implies (defaultStart(offset, nowHour).hour >= 0 and defaultStart(offset, nowHour).hour <= 23)
+pure def typable(s: Editor): bool =
+  s.shown and s.draft.sync != D::Saving and not(D::canChoose(s.draft)) and (s.banner == NoBanner or s.banner == Failed)
+
+pure def typed(d: D::Draft, edited: Editor): Editor = { ...edited, draft: D::edit(d), kept: edited.banner != Failed }
+
+pure def canEditTitle(s: Editor): bool = typable(s)
+
+pure def editTitle(s: Editor): Editor = typed(s.draft, s)
+
+pure def canSetAllDay(s: Editor, allDay: bool): bool = typable(s) and allDay != s.allDay
+
+pure def setAllDay(s: Editor, allDay: bool): Editor = typed(s.draft, { ...s, allDay: allDay })
+
+pure def canSetRepeats(s: Editor, repeats: bool): bool = typable(s) and repeats != s.repeats
+
+pure def setRepeats(s: Editor, repeats: bool): Editor =
+  typed(s.draft, { ...s, repeats: repeats, scope: if (repeats) s.scope else Unchosen })
 ```
 
-### A form's day follows the calendar date when midnight passes
+### An event ends after it starts
 
-A form opened yesterday for tomorrow is for today.
+The time zone travels with the times; an all-day event spans whole days.
 
 ```quint
-pure def shiftedOffset(offset: int, anchorCivilDay: int, todayCivilDay: int): int = offset + anchorCivilDay - todayCivilDay
-pure def lawNoShiftOnTheSameDay(offset: int, day: int): bool = shiftedOffset(offset, day, day) == offset
+pure def canSetTiming(s: Editor, start: int, end: int): bool = typable(s) and end > start and (start != s.start or end != s.end)
+
+pure def setTiming(s: Editor, start: int, end: int): Editor = typed(s.draft, { ...s, start: start, end: end })
+
+pure def alwaysAnEventEndsAfterItStarts(s: Editor): bool = s.end > s.start
 ```
 
-## Story: Change an event only where Alpha can do it exactly
-
-> As the owner, I want Alpha to save the changes it can make exactly, and to send me to the
-> calendar's own editor for the rest, so that nothing is saved half right.
-
-### Only a versioned event from a provider Alpha writes may be edited here
-
-The agent's own calendar and Google events with a provider version are editable. Microsoft, Apple
-and subscribed calendars are read only, and so is an event without a version.
+### A change to a repeating event says which occurrences it applies to: this one, this and following, or the whole series
 
 ```quint
-type EditorProvider = ElizaProvider | GoogleProvider | MicrosoftProvider | AppleProvider | IcsProvider | DeviceProvider
-type ReadOnlyReason = Editable | VersionMissing | MicrosoftReadOnly | IcsSubscription | AppleReadOnly | DeviceManaged
-pure def editorMutability(provider: EditorProvider, hasVersion: bool): ReadOnlyReason =
-  match provider {
-    | MicrosoftProvider => MicrosoftReadOnly
-    | AppleProvider => AppleReadOnly
-    | IcsProvider => IcsSubscription
-    | DeviceProvider => DeviceManaged
-    | _ => if (hasVersion) Editable else VersionMissing
+pure def canChooseScope(s: Editor, scope: Scope): bool =
+  s.shown and s.form == EditEvent and s.repeats and scope != Unchosen and scope != s.scope and s.draft.sync != D::Saving
+
+pure def chooseScope(s: Editor, scope: Scope): Editor = { ...s, scope: scope }
+```
+
+### Saving sends the form once, as a new numbered write built on the revision its edits began from
+
+Only an edited draft is saved; not while a banner asks the owner something,
+not while another write is in flight, not while a change is in doubt, and a
+new event not while an earlier create is in doubt unless the owner asked
+for a separate event.
+
+```quint
+pure def sent(kind: Write, id: int, s: Editor): Composed =
+  val w = A::dispatch(A::record(A::plan(s.write.id + 1)))
+  { state: { ...s, write: w, kind: kind, writing: id }, out: List(Send({ attempt: w.id, kind: kind, id: id, scope: s.scope, base: s.draft.base })) }
+
+pure def canSave(s: Editor): bool =
+  s.shown and D::canSave(s.draft) and s.banner == NoBanner and not(inFlight(s)) and not(s.extras)
+    and (if (s.form == NewEvent) not(s.unknownCreate) or s.separate
+         else s.latched == 0 and (not(s.repeats) or s.scope != Unchosen))
+
+pure def save(s: Editor): Composed =
+  sent(if (s.form == NewEvent) Create else Update, s.target, { ...s, draft: D::save(s.draft) })
+```
+
+### A write in flight for the form is the shown form's own save: a create for a new event, a change for an existing one
+
+While a delete or an answer is in flight, no form waits on a save.
+Discovered by the proof: without it, a delete could end while a form's save
+was in doubt, with neither holding the other.
+
+```quint
+pure def alwaysASaveInFlightIsTheShownForm(s: Editor): bool =
+  ((inFlight(s) and (s.kind == Create or s.kind == Update))
+    implies (s.shown and s.draft.sync == D::Saving and s.writing == s.target and s.banner == NoBanner))
+    and ((inFlight(s) and s.kind == Create) implies s.form == NewEvent)
+    and ((inFlight(s) and s.kind == Update) implies s.form == EditEvent)
+    and ((inFlight(s) and (s.kind == Remove or s.kind == Reply)) implies s.draft.sync != D::Saving)
+```
+
+### A repeating event's change in flight says which occurrences
+
+```quint
+pure def alwaysARepeatingChangeSaysWhichOccurrences(s: Editor): bool =
+  (inFlight(s) and s.kind == Update and s.repeats) implies s.scope != Unchosen
+```
+
+### Every write takes the next number, and carries it
+
+```quint
+pure def stepAWriteTakesTheNextNumber(before: Editor, after: Editor, out: List[Effect]): bool =
+  out.every(e => match e {
+    | Send(w) => w.attempt == after.write.id and after.write.id == before.write.id + 1
+    | Answer(a) => a.attempt == after.write.id and after.write.id == before.write.id + 1
+    | _ => true
+  })
+```
+
+### A saved form closes; a refused one keeps its edits to save again
+
+A change the phone refused because the event moved on is a conflict for the
+owner to choose.
+
+```quint
+pure def canWritten(s: Editor, attempt: int): bool = A::canConclude(s.write, attempt)
+
+pure def written(s: Editor, attempt: int, confirmed: bool, known: bool): Editor =
+  val w = A::conclude(s.write, confirmed, known)
+  val told = { ...s, write: w }
+  if (w.outcome == A::Confirmed) (if (s.kind == Create or s.kind == Update) withoutForm(w, told) else told)
+  else if (w.outcome == A::Refused)
+    (if (s.kind == Create) { ...told, draft: D::keepMine(s.draft) }
+     else if (s.kind == Update) { ...told, revision: s.revision + 1, draft: D::collide(s.draft, s.revision + 1) }
+     else told)
+  else if (s.kind == Create) { ...told, unknownCreate: true, separate: false }
+  else { ...told, latched: s.writing }
+```
+
+### The form's edits always build on the revision of the event as last read
+
+```quint
+pure def alwaysEditsBuildOnTheEventAsRead(s: Editor): bool = s.draft.base == s.revision
+```
+
+### A form can be saved, and a change to a whole series can be sent
+
+```quint
+pure def sometimesSeriesChangeSent(s: Editor): bool = inFlight(s) and s.kind == Update and s.scope == WholeSeries
+
+pure def sometimesSavedAfterEdits(s: Editor): bool = s.write.outcome == A::Confirmed and s.write.id >= 2 and s.form == NoForm
+```
+
+## Story: Hand Android Calendar what Alpha cannot write
+
+> As the owner, I want an event with people, a video call or alerts handed
+> to Android Calendar to finish, rather than saved without them.
+
+### People, a video call or alerts make the form one for Android Calendar
+
+```quint
+pure def canSetExtras(s: Editor, extras: bool): bool = typable(s) and extras != s.extras
+
+pure def setExtras(s: Editor, extras: bool): Editor = typed(s.draft, { ...s, extras: extras })
+```
+
+### Such a form is handed to Android Calendar and closes; Alpha writes nothing of it
+
+```quint
+pure def canHandOff(s: Editor): bool = s.shown and s.extras and s.draft.sync != D::Saving and s.banner == NoBanner
+
+pure def handOff(s: Editor): Composed = { state: withoutForm(s.write, s), out: List(HandOff({ id: s.target, day: s.day })) }
+
+pure def alwaysNothingWithPeopleOrVideoIsWritten(s: Editor): bool =
+  (inFlight(s) and (s.kind == Create or s.kind == Update)) implies not(s.extras)
+```
+
+## Story: Never create an event twice
+
+> As the owner, I want a new event created once even when the phone never
+> said whether it was, and to choose myself to create a separate one.
+
+### While a create is in doubt its form waits; checking the phone's receipts finds it or not
+
+Found, the event exists and its form closes as saved. Not found, the form
+keeps its edits, and only a separate event the owner asks for can be
+created; the owner may also let the doubt go.
+
+```quint
+pure def canCheckReceipts(s: Editor): bool = s.unknownCreate and s.receipts.status != R::Loading
+
+pure def checkReceipts(s: Editor): Composed =
+  val asked = R::ask(s.receipts)
+  { state: { ...s, receipts: asked }, out: List(CheckReceipts({ ticket: asked.ticket })) }
+
+pure def canReceiptsChecked(s: Editor, ticket: int): bool = R::canAnswer(s.receipts, ticket)
+
+pure def receiptsChecked(s: Editor, ticket: int, found: bool): Editor =
+  val told = { ...s, receipts: R::answer(s.receipts, true) }
+  val waiting = s.form == NewEvent and s.draft.sync == D::Saving and not(inFlight(s))
+  if (not(s.unknownCreate)) told
+  else if (found) (if (waiting) withoutForm(s.write, { ...told, unknownCreate: false }) else { ...told, unknownCreate: false, separate: false })
+  else if (waiting) { ...told, draft: D::keepMine(s.draft) }
+  else told
+
+pure def canLetDoubtGo(s: Editor): bool = s.unknownCreate and not(s.form == NewEvent and s.draft.sync == D::Saving)
+
+pure def letDoubtGo(s: Editor): Editor = { ...s, unknownCreate: false, separate: false }
+```
+
+### "Create a separate event" is offered only beside a create in doubt
+
+```quint
+pure def canCreateSeparately(s: Editor): bool =
+  s.shown and s.form == NewEvent and s.unknownCreate and not(s.separate) and s.draft.sync != D::Saving
+
+pure def createSeparately(s: Editor): Editor = { ...s, separate: true }
+
+pure def alwaysSeparateOnlyWhileACreateIsInDoubt(s: Editor): bool = s.separate implies (s.unknownCreate and s.form == NewEvent)
+```
+
+### No create is sent while an earlier one is in doubt, unless the owner asked for a separate event
+
+```quint
+pure def alwaysNoBlindDuplicate(s: Editor): bool = (inFlight(s) and s.kind == Create and s.unknownCreate) implies s.separate
+```
+
+### A save in doubt holds its form until a read or the receipts show what happened
+
+```quint
+pure def alwaysASaveInDoubtHoldsItsForm(s: Editor): bool =
+  (s.draft.sync == D::Saving and not(inFlight(s)))
+    implies (s.shown and ((s.form == NewEvent and s.unknownCreate) or (s.form == EditEvent and s.latched == s.target)))
+```
+
+### A separate event can be created beside one in doubt
+
+```quint
+pure def sometimesSeparateCreateSent(s: Editor): bool = inFlight(s) and s.kind == Create and s.separate
+```
+
+### A create in doubt can be found
+
+```quint
+pure def sometimesDoubtFound(s: Editor): bool = s.receipts.status == R::Loaded and not(s.unknownCreate) and s.write.outcome == A::Unknown
+```
+
+## Story: Delete an event, or answer an invitation
+
+> As the owner, I want to delete one occurrence, this and the following, or
+> the whole series, and to accept or decline an invitation, each sent once.
+
+### A delete names which occurrences, and only a repeating event offers more than this one
+
+```quint
+pure def canDeleteEvent(s: Editor, id: int, revision: int, scope: Scope, repeating: bool): bool =
+  not(s.shown) and not(inFlight(s)) and s.latched == 0 and id > 0 and revision >= 0
+    and scope != Unchosen and (scope == ThisOne or repeating)
+
+pure def deleteEvent(s: Editor, id: int, revision: int, scope: Scope, repeating: bool): Composed =
+  val w = A::dispatch(A::record(A::plan(s.write.id + 1)))
+  { state: { ...s, write: w, kind: Remove, writing: id },
+    out: List(Send({ attempt: w.id, kind: Remove, id: id, scope: scope, base: revision })) }
+```
+
+### An invitation is accepted or declined once
+
+```quint
+pure def canRespond(s: Editor, id: int): bool = not(s.shown) and not(inFlight(s)) and s.latched == 0 and id > 0
+
+pure def respond(s: Editor, id: int, accept: bool): Composed =
+  val w = A::dispatch(A::record(A::plan(s.write.id + 1)))
+  { state: { ...s, write: w, kind: Reply, writing: id }, out: List(Answer({ attempt: w.id, id: id, accept: accept })) }
+```
+
+### No change, delete or answer is sent while another change is in doubt
+
+The event whose change is unknown is shown as uncertain until the calendar
+reads its day again.
+
+```quint
+pure def alwaysNothingIsSentOverAChangeInDoubt(s: Editor): bool = (inFlight(s) and s.kind != Create) implies s.latched == 0
+```
+
+### A series can be deleted, and an invitation answered
+
+```quint
+pure def sometimesSeriesDeleteSent(s: Editor): bool = inFlight(s) and s.kind == Remove and s.scope != ThisOne
+
+pure def sometimesInvitationAnswered(s: Editor): bool = s.kind == Reply and s.write.outcome == A::Confirmed
+```
+
+## Story: Know what happened to a change in doubt
+
+> As the owner, I want a change whose outcome is unknown shown as uncertain,
+> and released as soon as the calendar reads the event again, never held for
+> ever and never sent twice.
+
+### A read of the event releases the doubt; a form waiting on it then shows the event as it now is
+
+The calendar reads the event's day and finds it at a revision, or finds it
+gone. A form whose save was in doubt keeps its edits: if the event moved on,
+the owner chooses between theirs and the saved one; if not, they are still
+to save. A form with no edits simply follows the event.
+
+```quint
+pure def canEventRead(s: Editor, id: int, revision: int): bool =
+  id > 0 and revision >= 0 and ((s.form == EditEvent and s.target == id) implies revision >= s.revision)
+
+pure def eventRead(s: Editor, id: int, revision: int): Editor =
+  val released = { ...s, latched: if (s.latched == id) 0 else s.latched }
+  val ours = s.form == EditEvent and s.target == id and not(inFlight(s))
+  if (not(ours) or revision == s.revision)
+    (if (ours and s.draft.sync == D::Saving) { ...released, draft: D::keepMine(s.draft) } else released)
+  else if (s.draft.sync == D::Kept) { ...released, revision: revision, draft: { ...s.draft, base: revision } }
+  else { ...released, revision: revision, draft: D::collide(s.draft, revision) }
+
+pure def canEventMissing(s: Editor, id: int): bool = id > 0 and s.latched == id
+
+pure def eventMissing(s: Editor, id: int): Editor =
+  if (s.form == EditEvent and s.target == id and s.draft.sync == D::Saving) withoutForm(s.write, { ...s, latched: 0 })
+  else { ...s, latched: 0 }
+```
+
+### When the event moved on, the owner keeps their changes or takes the saved ones
+
+```quint
+pure def canKeepMyChanges(s: Editor): bool = s.shown and D::canChoose(s.draft)
+
+pure def keepMyChanges(s: Editor): Editor = { ...s, draft: D::keepMine(s.draft) }
+
+pure def canTakeSavedChanges(s: Editor): bool = s.shown and D::canChoose(s.draft)
+
+pure def takeSavedChanges(s: Editor): Editor = { ...s, draft: D::takeSaved(s.draft) }
+```
+
+### A change can be in doubt, and released by a read
+
+```quint
+pure def sometimesChangeInDoubt(s: Editor): bool = s.latched > 0 and s.shown and s.draft.sync == D::Saving
+
+pure def sometimesTheOwnerChooses(s: Editor): bool = D::canChoose(s.draft) and s.write.outcome == A::Unknown
+```
+
+## Story: Keep my draft through a restart
+
+> As the owner, I want what I typed kept on the phone, offered back after a
+> restart or when I return, and told plainly when it could not be kept or
+> when another copy replaced it.
+
+### Closing a form with edits kept on the phone sets it aside, offered back by a banner; otherwise the form is gone
+
+```quint
+pure def canClose(s: Editor): bool = s.shown and s.draft.sync != D::Saving and s.banner != Conflict
+
+pure def close(s: Editor): Editor =
+  if (D::unsaved(s.draft) and s.kept) { ...s, shown: false, banner: Available } else withoutForm(s.write, s)
+```
+
+### A restart forgets what was in memory: a write in flight becomes one in doubt, and kept edits are offered back
+
+```quint
+pure def restart(s: Editor): Editor =
+  val flying = inFlight(s)
+  val w = if (flying) A::conclude(s.write, false, false) else s.write
+  val doubted = {
+    ...s, write: w, separate: false,
+    unknownCreate: s.unknownCreate or (flying and s.kind == Create),
+    latched: if (flying and s.kind != Create) s.writing else s.latched,
   }
-pure def lawUnversionedIsReadOnly(provider: EditorProvider): bool = editorMutability(provider, false) != Editable
+  val draft = if (s.draft.sync == D::Saving) D::keepMine(s.draft) else s.draft
+  if (s.form != NoForm and s.kept and D::unsaved(draft)) { ...doubted, draft: draft, shown: false, banner: Available }
+  else withoutForm(w, doubted)
 ```
 
-### Deleting is an organizer's cancel or an invitee's decline, and nothing when the organizer is unknown
+### The owner restores the draft offered, read against the event as it now is, or discards it
 
 ```quint
-type CancellationMode = OrganizerCancel | DeclineInvitation | RemovePrivateCopy | NoCancellation
-pure def cancellationMode(organizerIsSelf: bool, selfIsAttendee: bool, selfAttendeeOrganizes: bool, organizerIsAccount: bool): CancellationMode =
-  if (organizerIsSelf) OrganizerCancel
-  else if (selfIsAttendee) (if (selfAttendeeOrganizes) OrganizerCancel else DeclineInvitation)
-  else if (organizerIsAccount) OrganizerCancel
-  else NoCancellation
-pure def lawUnknownOrganizerCannotDelete(selfAttendeeOrganizes: bool): bool =
-  cancellationMode(false, false, selfAttendeeOrganizes, false) == NoCancellation
+pure def canRestore(s: Editor, revision: int): bool = s.banner == Available and revision >= s.revision
+
+pure def restore(s: Editor, revision: int): Editor =
+  val shown = { ...s, shown: true, banner: NoBanner }
+  if (s.form == EditEvent and revision != s.revision) { ...shown, revision: revision, draft: D::collide(s.draft, revision) }
+  else shown
+
+pure def canDiscard(s: Editor): bool = s.banner == Available
+
+pure def discard(s: Editor): Editor = withoutForm(s.write, s)
 ```
 
-### An invitee answers Going or Maybe from the invitation; Decline stays the deletion's decline
-
-The owner's answer is the reply of the owner's own attendee who does not organize the event:
-Google's `needsAction`, `accepted`, `tentative` or `declined`, or an imported feed's lowercased
-`PARTSTAT`. The detail says the answer and offers Going and Maybe, each except the one already
-given; Decline stays the deletion's decline, with its Undo window. Answers are offered only for a
-one-off invitation the owner declines rather than cancels, on a writable calendar that is not the
-managed Google calendar, whose answers the agent refuses: those are answered in Google Calendar.
-An answer changes nothing else of the event and goes to the agent once, as
-[Calendar](./index.md) sends it.
+### When the phone cannot keep the draft, a banner says so and Retry keeps it again
 
 ```quint
-type OwnAnswer = NotInvited | AnswerAwaited | AnsweredGoing | AnsweredMaybe | AnsweredDeclined
-pure def ownAnswer(invitee: bool, status: str): OwnAnswer =
-  if (not(invitee)) NotInvited
-  else if (status == "needsAction" or status == "needs-action") AnswerAwaited
-  else if (status == "accepted") AnsweredGoing
-  else if (status == "tentative") AnsweredMaybe
-  else if (status == "declined") AnsweredDeclined
-  else NotInvited
-pure def answersOffered(mode: CancellationMode, answer: OwnAnswer, writable: bool, managed: bool, recurring: bool): bool =
-  mode == DeclineInvitation and answer != NotInvited and writable and not(managed) and not(recurring)
-pure def goingOffered(answer: OwnAnswer, offered: bool): bool = offered and answer != AnsweredGoing
-pure def maybeOffered(answer: OwnAnswer, offered: bool): bool = offered and answer != AnsweredMaybe
-pure def lawOnlyAnInviteeAnswers(mode: CancellationMode, answer: OwnAnswer, writable: bool, managed: bool, recurring: bool): bool =
-  answersOffered(mode, answer, writable, managed, recurring) implies (mode == DeclineInvitation and answer != NotInvited)
-pure def lawTheManagedCalendarIsAnsweredInGoogle(mode: CancellationMode, answer: OwnAnswer, writable: bool, recurring: bool): bool =
-  not(answersOffered(mode, answer, writable, true, recurring))
-pure def lawTheGivenAnswerIsNotOfferedAgain(offered: bool): bool =
-  not(goingOffered(AnsweredGoing, offered)) and not(maybeOffered(AnsweredMaybe, offered))
+pure def canKeepFailed(s: Editor): bool = s.shown and s.banner == NoBanner and s.draft.sync != D::Saving
+
+pure def keepFailed(s: Editor): Editor = { ...s, banner: Failed, kept: false }
+
+pure def canRetryKeeping(s: Editor): bool = s.banner == Failed
+
+pure def retryKeeping(s: Editor): Composed = { state: s, out: List(KeepDraft) }
+
+pure def canDraftKept(s: Editor): bool = s.banner == Failed
+
+pure def draftKept(s: Editor): Editor = { ...s, banner: NoBanner, kept: true }
 ```
 
-### The owner answers Going or Maybe only for a writable one-off invitation that is still as shown
-
-The current invitee, calendar and event version must still match when the
-answer is sent. The answer uses the Calendar response route without
-notifying guests. A managed Google invitation is answered in Google
-Calendar. A reply queued for approval goes to the Calendar
-[approval review](./approvals.md).
+### When another copy replaced the kept draft, the owner keeps theirs or takes the other
 
 ```quint
-pure def invitationAnswerAllowed(mode: CancellationMode, writable: bool, managed: bool, recurring: bool, asShown: bool): bool =
-  mode == DeclineInvitation and writable and not(managed) and not(recurring) and asShown
+pure def canReplacedElsewhere(s: Editor): bool = s.shown and s.kept and s.banner == NoBanner and s.draft.sync != D::Saving
 
-pure def lawAnOrganizerCannotAnswerAnInvitation(writable: bool, managed: bool, recurring: bool, asShown: bool): bool =
-  not(invitationAnswerAllowed(OrganizerCancel, writable, managed, recurring, asShown))
+pure def replacedElsewhere(s: Editor): Editor = { ...s, banner: Conflict }
 
-pure def lawAStaleOrRepeatingInvitationCannotBeAnswered(mode: CancellationMode, writable: bool, managed: bool): bool =
-  not(invitationAnswerAllowed(mode, writable, managed, true, true)) and not(invitationAnswerAllowed(mode, writable, managed, false, false))
+pure def canKeepMyDraft(s: Editor): bool = s.banner == Conflict
+
+pure def keepMyDraft(s: Editor): Composed = { state: { ...s, banner: NoBanner }, out: List(KeepDraft) }
+
+pure def canTakeOtherDraft(s: Editor): bool = s.banner == Conflict
+
+pure def takeOtherDraft(s: Editor): Editor = { ...s, banner: NoBanner, draft: D::edit(s.draft) }
 ```
 
-### A repeating event changes its repeat only for the entire series
+### A banner belongs to its form: an offered draft is set aside, and a failure or a conflict is over the form shown
 
 ```quint
-type RecurrenceScope = NoScope | ThisOccurrence | ThisAndFollowing | EntireSeries
-pure def recurrenceEditAllowed(recurring: bool, changesRecurrence: bool, scope: RecurrenceScope): bool =
-  not(recurring and changesRecurrence) or scope == EntireSeries
-pure def scopeNeeded(recurring: bool, scope: RecurrenceScope): bool = recurring and scope == NoScope
-pure def lawRepeatChangeNeedsSeries(scope: RecurrenceScope): bool =
-  recurrenceEditAllowed(true, true, scope) implies scope == EntireSeries
+pure def alwaysBannersBelongToTheirForm(s: Editor): bool =
+  (s.shown implies s.form != NoForm)
+    and (s.form == NoForm implies s.banner == NoBanner)
+    and (s.banner == Available implies (s.form != NoForm and not(s.shown)))
+    and ((s.banner == Conflict or s.banner == Failed) implies s.shown)
+    and (s.banner == Failed implies not(s.kept))
 ```
 
-### A managed Google event is never deleted here, and its other repeating changes reach one occurrence
-
-The owner deletes or declines it in Google Calendar.
+### A draft is set aside only with edits kept on the phone
 
 ```quint
-pure def managedDeleteOffered(managed: bool): bool = not(managed)
-pure def managedScopeAllowed(managed: bool, scope: RecurrenceScope): bool = not(managed) or scope == ThisOccurrence or scope == NoScope
-pure def lawManagedSeriesWritesOneOccurrence(scope: RecurrenceScope): bool =
-  managedScopeAllowed(true, scope) implies scope != EntireSeries and scope != ThisAndFollowing
+pure def alwaysASetAsideDraftIsKept(s: Editor): bool =
+  (s.form != NoForm and not(s.shown)) implies (s.banner == Available and s.kept and D::unsaved(s.draft))
 ```
 
-### A new event goes to the calendar chosen in the form: the agent's own calendar, or a writable calendar on this phone
-
-The form opens on the agent's own calendar; choosing a calendar on this phone sends the event
-through the phone's own guarded create, which never makes it twice.
+### Kept edits are lost only by saving, discarding or handing off, or when their event is gone
 
 ```quint
-type NewEventTarget = AgentOwnCalendar | PhoneCalendar
-pure def newEventTarget(phoneChosen: bool): NewEventTarget = if (phoneChosen) PhoneCalendar else AgentOwnCalendar
-pure def lawTheFormDefaultsToTheAgentCalendar(phoneChosen: bool): bool = not(phoneChosen) implies newEventTarget(phoneChosen) == AgentOwnCalendar
+pure def stepKeptEditsAreLostOnlyByChoice(before: Editor, via: str, after: Editor): bool =
+  (before.form != NoForm and before.kept and D::unsaved(before.draft) and after.form == NoForm)
+    implies (via == "discard" or via == "handOff" or via == "written" or via == "receiptsChecked" or via == "eventMissing")
 ```
 
-### Guests, alerts and meeting rooms go to Android Calendar; zones, all-day and repeats use the direct save
-
-On the phone a new event with guests, an alert or a video room opens Android Calendar's insert
-screen; one in another zone, all day or repeating uses the reviewed direct save, and an existing
-event of that kind is edited in Android Calendar.
+### A draft can be offered back after a restart, fail to be kept, or meet another copy
 
 ```quint
-type DeviceRoute = DirectSave | OptionsSave | AndroidHandoff | AndroidEditor
-pure def deviceRoute(existing: bool, hasGuests: bool, hasAlert: bool, hasVideo: bool, allDay: bool, otherZone: bool, repeats: bool): DeviceRoute =
-  if (hasGuests or hasAlert or hasVideo) AndroidHandoff
-  else if (allDay or otherZone or repeats) (if (existing) AndroidEditor else OptionsSave)
-  else DirectSave
-pure def lawExistingOptionsEventUsesTheEditor(hasGuests: bool, hasAlert: bool, hasVideo: bool): bool =
-  deviceRoute(true, hasGuests, hasAlert, hasVideo, true, false, false) != OptionsSave
-```
+pure def sometimesOfferedAfterRestart(s: Editor): bool = s.banner == Available and s.write.outcome == A::Unknown
 
-### The agent's own calendar holds no repeats, alerts or video rooms
+pure def sometimesKeepingFailed(s: Editor): bool = s.banner == Failed and D::unsaved(s.draft)
 
-The agent's change of an existing event carries no repeat either, so the form offers no repeat
-choice for an agent Calendar event, and a changed repeat is refused before anything is sent rather
-than reported saved unchanged.
-
-```quint
-pure def agentCalendarAccepts(isAgentCalendar: bool, repeats: bool, hasAlert: bool, hasVideo: bool): bool =
-  not(isAgentCalendar) or not(repeats or hasAlert or hasVideo)
-pure def agentRepeatSendable(isNew: bool, changesRepeat: bool): bool = not(changesRepeat)
-pure def lawARepeatChangeIsNeverSentToTheAgent(isNew: bool): bool = not(agentRepeatSendable(isNew, true))
-```
-
-### Guests need an email each, and existing guests without one cannot be changed here
-
-```quint
-pure def guestsSavable(everyNewGuestHasEmail: bool, someExistingLackEmail: bool, guestListChanged: bool): bool =
-  everyNewGuestHasEmail and not(someExistingLackEmail and guestListChanged)
-```
-
-### An existing event whose timing cannot be shown as a wall-clock span keeps its original time
-
-A span that is zero or negative on the wall clock (a clock change) locks the timing: the form says
-so and only reopening the event allows a timing change.
-
-```quint
-pure def timingLocked(allDay: bool, wallSpanMinutes: int): bool = not(allDay) and wallSpanMinutes <= 0
-pure def timingChangeAllowed(locked: bool, timingChanged: bool): bool = not(locked and timingChanged)
-```
-
-### An agent update to an all-day event must name whole UTC dates
-
-```quint
-pure def agentAllDayUpdateAllowed(allDay: bool, startWholeDay: bool, endWholeDay: bool): bool =
-  not(allDay) or (startWholeDay and endWholeDay)
-```
-
-## Story: Know why Save is off
-
-> As the owner, I want one short reason when an event cannot be saved yet.
-
-### Save is off while loading, while saving, for another account, for an event that changed, and without a title, in that order
-
-```quint
-type SaveBlock = SaveAllowed | WaitLoading | WaitSaving | OtherAccount | CheckEvent | AddTitle
-pure def saveBlock(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool, titleBlank: bool): SaveBlock =
-  if (loading) WaitLoading else if (saving) WaitSaving else if (otherAccount) OtherAccount
-  else if (eventChanged) CheckEvent else if (titleBlank) AddTitle else SaveAllowed
-pure def lawBlankTitleNeverSaves(loading: bool, saving: bool, otherAccount: bool, eventChanged: bool): bool =
-  saveBlock(loading, saving, otherAccount, eventChanged, true) != SaveAllowed
-```
-
-### A missing or repeated wall time is refused, and nothing is saved
-
-When the clocks change, a local time that does not exist or occurs twice is refused with a request
-to choose another time.
-
-```quint
-type WallTime = WallExists | WallMissing | WallTwice
-pure def wallTimeSavable(wall: WallTime): bool = wall == WallExists
+pure def sometimesAnotherCopy(s: Editor): bool = s.banner == Conflict and s.form == EditEvent
 ```

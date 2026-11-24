@@ -1,0 +1,73 @@
+// spec/cloud/index.md, "Story: Know which cloud the app talks to"; spec/cloud/index.md, "Story: Register Alpha's app with the cloud"; spec/cloud/local.md, "The local cloud starts only for a profile whose database, mail, text messages and providers are all on this computer, and stops with every part together"
+import { parseProfile, type CloudProfile, type EnvironmentProfile } from "@elizaos/cloud/profile"
+import { nativeAssetLinks } from "@elizaos/cloud/worker"
+import { registrationOf, type Environment, type Registration, type Statement } from "../gen/cloud.effect.vibe"
+import production from "../profile/production.example.json" with { type: "json" }
+import staging from "../profile/staging.json" with { type: "json" }
+import seed from "../seed/staging.json" with { type: "json" }
+
+/** Alpha's profiles by the name `@repo/deployment` gives each: `staging` runs locally and is the hosted staging's reference, `production` is the example an operator completes. */
+export const profiles = { staging: { file: "profile/staging.json", json: staging as unknown }, production: { file: "profile/production.example.json", json: production as unknown } }
+
+/** The staging seed: Alpha's client, as the local cloud registers it before it serves. */
+export const stagingSeed = seed
+
+/** The profile `name` of `profiles`, accepted by eliza's own `parseProfile`. */
+export effect function profileNamed(name: keyof typeof profiles): CloudProfile!ProfileRefused {
+  const { file, json } = profiles[name]
+  return parseProfile(json) catch effect (refusal) => { throw new ProfileRefused({ file, problem: refusal.problem }) }
+}
+
+/** eliza refused one of Alpha's profiles. */
+export error ProfileRefused { file: string; problem: string }
+
+/** An address on this computer: loopback, by name or number. */
+const onThisComputer = /^(?:https?|wss?):\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d{1,5})?(?:\/|$)/
+
+/** Whether every adapter and provider `settings` names is on this computer: the mail and text messages loopback, each provider at a loopback address. */
+export function loopbackOnly(settings: EnvironmentProfile): boolean {
+  const providers = [
+    settings.billing?.apiUrl,
+    ...(settings.inference?.providers.map((provider) => provider.baseUrl) ?? []),
+    settings.speech?.baseUrl, settings.speech?.realtimeUrl,
+    settings.maps !== undefined && settings.maps.provider !== "none" ? settings.maps.baseUrl : undefined,
+    ...(settings.google === undefined ? [] : [settings.google.accountsUrl, settings.google.tokenUrl, settings.google.revokeUrl, settings.google.jwksUrl, settings.google.apiUrl]),
+  ].filter((url) => url !== undefined)
+  return settings.mail.kind === "loopback" && settings.sms.kind !== "https" && providers.every((url) => onThisComputer.test(url))
+}
+
+/** One registration in the shape eliza's seed and `client apply` file take (`.eliza/packages/cloud/src/operator/clients.vibe`, `ClientEntry`). */
+export function entryOf(registration: Registration) {
+  const line = (url: Registration["signInReturn"]) => `${url.origin}${url.path}`
+  return {
+    clientId: registration.clientId, displayName: registration.displayName, androidPackage: registration.androidPackage,
+    certFingerprints: registration.certFingerprints,
+    signInReturn: line(registration.signInReturn), billingReturn: line(registration.billingReturn),
+  }
+}
+
+/** Alpha's registration of `environment`, whose web origin is the deployment's App Link host. */
+export function registrationAt(environment: Environment, appLinkHost: string): Registration {
+  return registrationOf(environment, `https://${appLinkHost}`)
+}
+
+/** eliza's asset links document (`nativeAssetLinks`) for a registry that holds Alpha's registration alone. */
+export effect function assetLinks(registration: Registration, api: string) {
+  const environment = registration.environment === "Production" ? "production" : "staging"
+  const answer = nativeAssetLinks({
+    CLOUD_ENVIRONMENT: environment, PUBLIC_API_ORIGIN: api, WEB_ORIGIN: registration.signInReturn.origin,
+    NATIVE_CLIENT_REGISTRY: JSON.stringify([{ ...entryOf(registration), environment, enabled: true }]),
+  })
+  return try statementsIn(try tryPromise({ try: () => answer.json() as Promise<unknown>, catch: () => new AssetLinksUnreadable({ status: answer.status }) }))
+}
+
+/** The asset links document was not one. */
+export error AssetLinksUnreadable { status: number }
+
+const Document = Schema.Array(Schema.Struct({ target: Schema.Struct({ package_name: Schema.String, sha256_cert_fingerprints: Schema.Array(Schema.String) }) }))
+
+/** The statements of an asset links document, as the spec reads them. */
+export effect function statementsIn(document: unknown): Statement[]!AssetLinksUnreadable {
+  const read = Schema.decodeUnknownEffect(Document)(document) catch effect () => { throw new AssetLinksUnreadable({ status: 200 }) }
+  return read.map(({ target }) => ({ packageName: target.package_name, fingerprints: [...target.sha256_cert_fingerprints] }))
+}

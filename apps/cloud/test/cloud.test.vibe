@@ -1,0 +1,202 @@
+// spec/cloud/local.md, "Story: Check Alpha's contract on my computer"
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { assert, describe, it } from "@effect/vitest"
+import { createCloudClient } from "@elizaos/cloud/client"
+import { prepared } from "@repo/eliza-harness/checkout"
+import { said } from "@repo/eliza-harness/services"
+import { ChildProcess } from "effect/process"
+import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
+import { assetLinksNameAlpha } from "../gen/cloud.effect.vibe"
+import { Machine, type Gate, gateAt, gates, machine } from "../gen/cloud__local.effect.vibe"
+import { loopbackOnly, profileNamed, stagingSeed, statementsIn } from "../src/alpha.vibe"
+
+module node {
+  import { createHash, randomBytes } from "node:crypto"
+  import http from "node:http"
+  import type { AddressInfo } from "node:net"
+
+  type Plans = Readonly<Record<"plus_monthly" | "pro_monthly", { readonly priceId: string; readonly productId: string }>>
+
+  /**
+   * The payment provider's catalog, read only: what the cloud checks before it serves billing. Payments cost money and
+   * cannot be undone, so the local cloud reads this one; its amounts are eliza's plans (`.eliza/spec/cloud/billing/plans.md`).
+   * @throws {never}
+   */
+  export function catalog(plans: Plans): Promise<{ origin: string; close: () => Promise<void> }> {
+    const cents = { plus_monthly: 3_000, pro_monthly: 10_000 }
+    const monthly = { interval: "month", interval_count: 1, usage_type: "licensed", trial_period_days: null }
+    const listed = new Map<string, object>()
+    for (const [plan, { priceId, productId }] of Object.entries(plans) as [keyof Plans, Plans[keyof Plans]][]) {
+      listed.set(`/v1/products/${productId}`, { object: "product", id: productId, livemode: false, active: true })
+      listed.set(`/v1/prices/${priceId}`, {
+        object: "price", id: priceId, product: productId, unit_amount: cents[plan], currency: "usd", recurring: monthly,
+        type: "recurring", billing_scheme: "per_unit", transform_quantity: null, livemode: false, active: true,
+      })
+    }
+    const server = http.createServer((request, response) => {
+      const found = listed.get(request.url ?? "")
+      response.writeHead(found === undefined ? 404 : 200, { "content-type": "application/json" }).end(JSON.stringify(found ?? { error: { type: "invalid_request_error" } }))
+    })
+    const close = () => new Promise<void>((closed) => { server.close(() => closed()); server.closeAllConnections() })
+    return new Promise((done) => server.listen(0, "127.0.0.1", () => done({ origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, close })))
+  }
+
+  /** Fresh random text, as a device makes for a state or a verifier. @throws {never} */
+  export function random(): string {
+    return randomBytes(32).toString("base64url")
+  }
+
+  /** The S256 challenge of `verifier`. @throws {never} */
+  export function challengeOf(verifier: string): string {
+    return createHash("sha256").update(verifier, "ascii").digest("base64url")
+  }
+}
+import { catalog, challengeOf, random } from node
+
+/** The cloud stopped, or said nothing of serving, before its deadline. */
+error NotServing { output: string }
+
+/** What eliza's client was refused with. */
+error Refusal { cause: unknown }
+
+/** A gate's answer was not what Alpha needs. */
+error GateRefused { gate: Gate; answer: string }
+
+const owner = "owner@alpha.test"
+const alpha = stagingSeed.clients[0]
+
+/**
+ * eliza's own cloud command from the pinned checkout, in a cleared environment (only PATH and HOME), under Alpha's staging
+ * profile and seed, over a PGlite directory of the run, on a port the system gives it: what it serves at, once it says so.
+ */
+effect function serving(cloud: string, run: string) {
+  const spawner = try ChildProcessSpawner
+  const environment = { PATH: try Config.String("PATH"), HOME: try Config.String("HOME") }
+  const child = try spawner.spawn(ChildProcess.make("node", [
+    "--no-warnings", `--env-file=${run}/secrets.env`, "dist/src/main.js", "serve", "--profile", `${run}/profile.json`, "--environment", "staging",
+    "--store", `pglite:${run}/cloud.pglite`, "--seed", `${run}/seed.json`, "--port", "0", "--host", "127.0.0.1",
+  ], { cwd: cloud, env: environment, stdin: "ignore" }))
+  const output = try Ref.make("")
+  const origin = try Deferred.make<string>()
+  try fork.scoped (child.all |> Stream.decodeText(%) |> Stream.runForEach(%, (text) => effect {
+    try Ref.update(output, (before) => before + text)
+    const said = /url: '(http:\/\/127\.0\.0\.1:\d+)'/.exec(try Ref.get(output))
+    if (said !== null) try Deferred.succeed(origin, said[1] ?? "")
+  }))
+  const stopped = effect {
+    try child.exitCode
+    throw new NotServing({ output: try Ref.get(output) })
+  }
+  const served = effect {
+    return timeout(Deferred.await(origin), "180 seconds") catch effect () => { throw new NotServing({ output: try Ref.get(output) }) }
+  }
+  return try raceFirst(served, stopped)
+}
+
+/** Each gate of the local check, in order: what it asks the cloud, and what Alpha needs it to answer. */
+effect function gatesOf(local: string, name: string) {
+  const at = (route: string, body?: unknown, credential?: string) => tryPromise({
+    try: () => said<Record<string, unknown>>(`${local}${route}`, { body, headers: credential === undefined ? {} : { authorization: `Bearer ${credential}` }, within: 20_000 }),
+    catch: (cause) => new GateRefused({ gate: "Health", answer: String(cause) }),
+  })
+  const held = { session: "", key: "" }
+  const binding = { clientId: alpha.clientId, environment: "staging", redirectUri: alpha.signInReturn }
+  return (gate: Gate) => effect {
+    const refuse = (answer: unknown) => new GateRefused({ gate, answer: JSON.stringify(answer) })
+    switch (gate) {
+      case "Health": {
+        const answer = try at("/api/health")
+        if (answer.status !== "ok") throw refuse(answer)
+        return
+      }
+      case "ServiceDocument": {
+        const answer = try at("/api/public/service")
+        if ((answer.service as { name?: string } | undefined)?.name !== name) throw refuse(answer)
+        return
+      }
+      case "SignInMethods": {
+        const answer = try at("/api/v1/auth/methods")
+        if (answer.email !== true) throw refuse(answer)
+        return
+      }
+      case "AssetLinks": {
+        const answer = try at("/.well-known/assetlinks.json")
+        if (!assetLinksNameAlpha(try statementsIn(answer), "Staging")) throw refuse(answer)
+        return
+      }
+      case "EmailedCode": {
+        const verifier = random()
+        try at("/api/v1/auth/email/code/send", { email: owner, clientId: alpha.clientId, codeChallenge: challengeOf(verifier), codeChallengeMethod: "S256" })
+        const mail = try at(`/api/test/inbox/${encodeURIComponent(owner)}`)
+        const code = /\b(\d{6})\b/.exec(String(mail.text))?.[1]
+        if (code === undefined) throw refuse(mail)
+        const signed = try at("/api/v1/auth/email/code/verify", { email: owner, code, clientId: alpha.clientId, codeVerifier: verifier })
+        if (signed.status !== "signed_in" || typeof signed.accessToken !== "string") throw refuse(signed)
+        held.session = signed.accessToken
+        return
+      }
+      case "DeviceKey": {
+        const [verifier, state] = [random(), random()]
+        const granted = try at("/api/v1/app-auth/connect", { ...binding, state, flow: "mobile_pkce", codeChallengeMethod: "S256", codeChallenge: challengeOf(verifier) }, held.session)
+        const redeemed = { ...binding, state, code: granted.code, codeVerifier: verifier }
+        const minted = try at("/api/v1/app-auth/mobile/token", { ...redeemed, grantType: "authorization_code" })
+        const acknowledged = try at("/api/v1/app-auth/mobile/ack", { ...redeemed, credentialId: minted.credentialId, secret: minted.secret })
+        if (acknowledged.status !== "acknowledged" || typeof minted.secret !== "string") throw refuse(acknowledged)
+        held.key = minted.secret
+        return
+      }
+      case "KeyedReads": {
+        const client = createCloudClient({ baseUrl: local, credential: () => held.key })
+        const read = try tryPromise({
+          try: async () => ({ account: await client.account(), entitlement: await client.entitlement(), plans: await client.plans() }),
+          catch: (cause) => refuse(String(cause)),
+        })
+        if (read.account.email !== owner || read.entitlement === "" || read.plans.map((plan) => plan.key).join() !== "plus_monthly,pro_monthly") throw refuse(read)
+        return
+      }
+      case "BillingRefused": {
+        const client = createCloudClient({ baseUrl: local, credential: () => held.key })
+        const refusal = try (tryPromise({ try: () => client.billingPortal(), catch: (cause) => new Refusal({ cause }) }) |> flip(%))
+        if ((refusal.cause as { failure?: { tag?: string } }).failure?.tag !== "CloudCredentialInvalid") throw refuse(String(refusal.cause))
+        return
+      }
+    }
+  }
+}
+
+describe(`Check Alpha's contract on my computer (spec/cloud/local.md, "Story: Check Alpha's contract on my computer")`, () => {
+  it.live("refuses a profile off this computer, then serves Alpha's staging profile through every gate in order", () => effect {
+    const files = try FileSystem.FileSystem
+    const cloud = try Effect.try(() => prepared().cloud)
+    const profile = try profileNamed("staging")
+    const settings = profile.environments.staging
+    const prices = try acquireRelease(tryPromise(() => catalog(settings.billing!.plans)), (opened) => promise(() => opened.close()))
+    const run = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-" })
+    const local = { ...settings, billing: { ...settings.billing!, apiUrl: prices.origin } }
+    try files.writeFileString(`${run}/profile.json`, JSON.stringify({ ...profile, environments: { ...profile.environments, staging: local } }))
+    try files.writeFileString(`${run}/seed.json`, JSON.stringify(stagingSeed))
+    const fixture = try files.readFileString(`${cloud}/test/fixtures/secrets.env`)
+    try files.writeFileString(`${run}/secrets.env`, `${fixture}\nSTRIPE_SECRET_KEY=sk_test_local\nSTRIPE_WEBHOOK_SECRET=whsec_local\n`)
+    provide machine() {
+      const check = try Machine
+      // spec/cloud/local.md, "The local cloud starts only for a profile whose database, mail, text messages and providers are all on this computer, and stops with every part together"
+      const hosted = (try profileNamed("production")).environments.staging
+      const refused = check.send({ type: "start", loopback: loopbackOnly(hosted) }) catch (failure) => failure._tag
+      try Effect.try(() => assert.strictEqual(refused, "Rejected"))
+      try check.send({ type: "start", loopback: loopbackOnly(local) })
+      const origin = try serving(cloud, run)
+      // spec/cloud/local.md, "Each gate is tried only after every gate before it passed; a failed gate ends the check"
+      const pass = try gatesOf(origin, settings.name)
+      try check.send({ type: "beginCheck" })
+      const failures: string[] = []
+      for (let index = 0; index < gates && (try check.get()).checking; index += 1) {
+        const ended = try exit(timeout(pass(gateAt(index)), "60 seconds"))
+        if (Exit.isFailure(ended)) failures.push(`${gateAt(index)}: ${Cause.pretty(ended.cause)}`)
+        try check.send({ type: "gate", ok: Exit.isSuccess(ended) })
+      }
+      const { passed, failed } = try check.get()
+      try Effect.try(() => assert.deepStrictEqual({ passed, failed, failures }, { passed: gates, failed: false, failures: [] }))
+      try check.send({ type: "stop" })
+    }
+  } |> scoped(%) |> Effect.provide(%, NodeServices.layer), 600_000)
+})
