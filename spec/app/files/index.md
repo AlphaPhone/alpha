@@ -45,15 +45,15 @@ type Order = ByDate | ByName | BySize
 type Action = Making | Naming | Moving | Copying | Deleting | Sharing
 type Files = {
   access: P::Grant, supported: bool, open: bool, storage: R::Read, volumes: List[Volume],
-  trail: List[int], inCategory: bool, category: F::Kind, listing: R::Read, items: List[F::Item], picked: List[int], missing: bool,
-  layout: Layout, order: Order, reversed: bool,
+  trail: List[int], inCategory: bool, category: F::Kind, listing: R::Read, items: List[F::Item], partial: bool, picked: List[int], missing: bool,
+  layout: Layout, order: Order, reversed: bool, trash: bool,
   search: S::Search, deleting: V::Review, change: C::Change, sheet: M::Sheet,
 }
 
 pure val initial: Files = {
   access: P::Unasked, supported: true, open: false, storage: R::unread, volumes: List(),
-  trail: List(), inCategory: false, category: F::Other, listing: R::unread, items: List(), picked: List(), missing: false,
-  layout: Rows, order: ByDate, reversed: false,
+  trail: List(), inCategory: false, category: F::Other, listing: R::unread, items: List(), partial: false, picked: List(), missing: false,
+  layout: Rows, order: ByDate, reversed: false, trash: false,
   search: S::initial, deleting: V::unreviewed, change: C::initial, sheet: M::initial,
 }
 ```
@@ -220,7 +220,7 @@ pure def entered(trail: List[int], inCategory: bool, category: F::Kind, s: Files
   val there = { trail: trail, inCategory: inCategory, category: category }
   val reading = s.open and allowed(s)
   val search = if (reading) S::follow(s.search, there) else s.search
-  val placed = { ...s, trail: trail, inCategory: inCategory, category: category, items: List(), picked: List(), missing: false,
+  val placed = { ...s, trail: trail, inCategory: inCategory, category: category, items: List(), partial: false, picked: List(), missing: false, trash: false,
     deleting: V::dismiss(s.deleting), change: C::invalidate(s.change), sheet: M::close(s.sheet), search: search }
   val asked = if (reading and search.searching) List(Search({ ticket: search.query.ticket, where: there, filter: search.filter })) else List()
   if (reading and not(trail.length() == 0 and not(inCategory)))
@@ -243,7 +243,7 @@ pure def canEnter(s: Files, by: Actor): bool = by == Phone and not(s.open)
 pure def enter(s: Files, by: Actor): Moved = arrived(entered(s.trail, s.inCategory, s.category, { ...s, open: true }))
 
 pure def shut(open: bool, s: Files): Moved =
-  { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), listing: F::drop(s.listing), items: List(), picked: List(),
+  { state: { ...s, open: open, storage: F::drop(s.storage), volumes: List(), listing: F::drop(s.listing), items: List(), partial: false, picked: List(),
       search: S::stop(s.search), deleting: V::dismiss(s.deleting), change: C::retire(s.change), sheet: M::close(s.sheet) },
     out: unanswered(s.search) }
 
@@ -334,6 +334,27 @@ pure def stepMovingStartsAfresh(before: Files, via: str, after: Files): bool =
       and (atTop(after) or (after.listing.status == R::Loading and after.listing.ticket == before.listing.ticket + 1)))
 ```
 
+### The top offers the Trash, which shows until the owner goes back or anywhere else
+
+The [Trash](./trash.md) is told whether it shows and whether Alpha may read
+the storage.
+
+```quint
+pure def canOpenTrash(s: Files, by: Actor): bool = by == Owner and browse(s) == AtTop and not(s.trash)
+
+pure def openTrash(s: Files, by: Actor): Files = { ...s, trash: true }
+
+pure def canCloseTrash(s: Files, by: Actor): bool = by == Owner and s.trash
+
+pure def closeTrash(s: Files, by: Actor): Files = { ...s, trash: false }
+
+pure def trashShows(s: Files): bool = s.open and allowed(s) and s.trash
+
+pure def alwaysTheTrashShowsAtTheTop(s: Files): bool = s.trash implies atTop(s)
+
+pure def sometimesTheTrashShows(s: Files): bool = trashShows(s)
+```
+
 ### The place showing is read again when asked, and only its newest answer is taken; a folder that no longer exists brings the owner back to the top and says so, never that the storage is unavailable
 
 The owner pulls to refresh, or the phone says the storage changed. The
@@ -349,18 +370,30 @@ pure def refresh(s: Files, by: Actor): Moved =
 
 pure def canListed(s: Files, ticket: int, by: Actor): bool = by == Phone and R::canAnswer(s.listing, ticket)
 
-pure def listed(s: Files, ticket: int, ok: bool, gone: bool, entries: List[F::Item], by: Actor): Moved =
+pure def listed(s: Files, ticket: int, ok: bool, gone: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
   val items = if (not(ok)) List() else if (s.inCategory) entries.select(i => i.kind == s.category) else entries
   val picked = s.picked.select(id => has(items, id))
   val same = chosen(s) == items.select(i => picked.includes(i.id))
   val back = entered(List(), false, F::Other, s)
   if (not(ok) and gone and not(s.inCategory)) { state: { ...back.state, missing: true }, out: back.out }
-  else { state: { ...s, listing: R::answer(s.listing, ok), items: items, picked: picked,
+  else { state: { ...s, listing: R::answer(s.listing, ok), items: items, partial: ok and not(complete), picked: picked,
       deleting: if (s.deleting.showing and not(same)) V::revise(s.deleting) else s.deleting,
       change: if (picked != s.picked) C::invalidate(s.change) else s.change,
       sheet: if (picked != s.picked) M::close(s.sheet) else s.sheet }, out: List() }
 
 pure def alwaysAMissingFolderIsToldAtTheTop(s: Files): bool = s.missing implies atTop(s)
+```
+
+### A place is called empty only after the phone read all of it; a reading cut short keeps what it read
+
+The phone says when a listing stopped before its end.
+
+```quint
+pure def empty(s: Files): bool = browse(s) == Showing and s.items.length() == 0 and not(s.partial)
+
+pure def alwaysOnlyAReadPlaceIsPartial(s: Files): bool = s.partial implies (s.listing.status == R::Loaded or s.listing.status == R::Loading)
+
+pure def sometimesAPlaceWasReadInPart(s: Files): bool = browse(s) == Showing and s.partial and s.items.length() > 0
 ```
 
 ### A place that was not read lists nothing, and an open place is always being read or read
@@ -395,7 +428,7 @@ pure def sometimesTheStorageIsShown(s: Files): bool = browse(s) == AtTop and s.v
 pure def sometimesTheStorageIsUnavailable(s: Files): bool = browse(s) == AtTop and s.storage.status == R::Failed
 pure def sometimesAFolderWasMissing(s: Files): bool = browse(s) == AtTop and s.missing
 pure def sometimesInACategory(s: Files): bool = browse(s) == Showing and s.inCategory and s.items.length() > 0
-pure def sometimesAnEmptyFolder(s: Files): bool = browse(s) == Showing and not(s.inCategory) and s.items.length() == 0
+pure def sometimesAnEmptyFolder(s: Files): bool = empty(s) and not(s.inCategory)
 pure def sometimesInsideAFolder(s: Files): bool = browse(s) == Showing and s.trail.length() > 1 and s.items.length() > 0
 ```
 
@@ -445,8 +478,8 @@ pure def searchFor(s: Files, wanted: S::Filter, by: Actor): Moved = asking(wante
 
 pure def canSearched(s: Files, ticket: int, by: Actor): bool = by == Phone and S::canSearched(s.search, ticket)
 
-pure def searched(s: Files, ticket: int, ok: bool, entries: List[F::Item], by: Actor): Moved =
-  val search = S::searched(s.search, ticket, ok, entries.select(i => containsText(i.name, s.search.filter.text)))
+pure def searched(s: Files, ticket: int, ok: bool, complete: bool, entries: List[F::Item], by: Actor): Moved =
+  val search = S::searched(s.search, ticket, ok, complete, entries.select(i => containsText(i.name, s.search.filter.text)))
   { state: { ...s, search: search }, out: if (s.search.asker != 0) List(Tell({ request: s.search.asker, ok: ok, items: search.hits })) else List() }
 
 pure def canClearFilter(s: Files, by: Actor): bool = by == Owner and S::canClearFilter(s.search)
@@ -475,6 +508,7 @@ pure def view(s: Files, file: F::Item, by: Actor): Moved =
 ```quint
 pure def sometimesAFilterFoundFilesInAFolder(s: Files): bool = S::finding(s.search) == S::Found and browse(s) == Showing
 pure def sometimesAFilterFoundNothing(s: Files): bool = S::finding(s.search) == S::Nothing
+pure def sometimesAFilterWasCutShort(s: Files): bool = S::finding(s.search) == S::Unfinished
 pure def sometimesAFilterFoundAFileByName(s: Files): bool = S::finding(s.search) == S::Found and s.search.filter.text != ""
 pure def sometimesAFilterFollowedTheOwner(s: Files): bool = S::finding(s.search) == S::Looking and s.trail.length() > 1
 ```
@@ -727,13 +761,18 @@ pure def stepOneRequestPerChange(before: Files, via: str, after: Files, out: Lis
   })
 ```
 
-### The owner opens the share sheet for the selection while none is open, shares from it, and Android says whether it could open it
+### The owner opens the share sheet for a selection of one to a hundred files and no folder while none is open, shares from it, and Android says whether it could open it
 
-Whether an email account is set up is the mail area's fact.
+Whether an email account is set up is the mail area's fact. Android's
+share sheet takes at most a hundred files, and never a folder.
 
 ```quint
+pure val shareMost = 100
+
+pure def shareable(items: List[F::Item]): bool = items.length() > 0 and items.length() <= shareMost and not(items.some(i => i.kind == F::Folder))
+
 pure def canOpenShare(s: Files, mail: bool, by: Actor): bool =
-  by == Owner and browse(s) == Showing and s.picked.length() > 0 and s.change.panel == 0
+  by == Owner and browse(s) == Showing and shareable(chosen(s)) and s.change.panel == 0
 
 pure def openShare(s: Files, mail: bool, by: Actor): Files = { ...s, change: C::openShare(s.change, chosen(s), mail, 0) }
 
@@ -759,7 +798,7 @@ The approvals area shows the owner the request bound to one item, its
 revision and its folder, keeps it, and hands Files the approval with its
 number; a change of several items is several requests. Whether the screen
 is protected is the approvals area's fact, and whether an email account is
-set up the mail area's.
+set up the mail area's. A folder is never shared.
 
 ```quint
 pure def workOf(act: Action): C::Work =
@@ -768,6 +807,7 @@ pure def workOf(act: Action): C::Work =
 pure def runnable(s: Files, act: Action, file: F::Item, folder: int, name: str, dest: C::Place, guarded: bool): bool =
   browse(s) == Showing and not(guarded) and not(s.inCategory) and here(s) == folder
     and (act == Making or s.items.includes(file))
+    and (act != Sharing or shareable(List(file)))
     and (act == Deleting or act == Sharing
       or C::canBegin(s.change, workOf(act), if (act == Making) List() else List(file), names(s), folder, name, dest, 7))
 
