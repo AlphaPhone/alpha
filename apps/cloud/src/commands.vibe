@@ -1,0 +1,150 @@
+// spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"; spec/cloud/provisioning.md, "The steps run in one order, the same for staging and production, each one command"
+import type { CloudEnvironment } from "@elizaos/cloud/profile"
+import { Machine, machine } from "../gen/cloud__rollout.effect.vibe"
+import { ownCloudName } from "../gen/cloud.effect.vibe"
+import { deploy, elizaosCloud, packageDirectory, privateDirectory, profiled, readSecrets, reconciled, recordResources, registrationInto, renderInto, resourcesOf, settledSecrets, workerSecrets, wrangler, type Component } from "./operator.vibe"
+import { candidates } from "./candidate.vibe"
+import { smoke } from "./smoke.vibe"
+
+/** The command line names an unknown command or misses a flag. */
+export error UsageInvalid { message: string }
+/** A public gate of the deployed environment did not pass. */
+export error NotReady { report: string }
+
+/** Every command of Alpha's own cloud on Cloudflare; `check` and `registration` are main's. */
+export const usage = [
+  "usage: node dist/src/main.js check | registration",
+  "     | render|bundle --profile <file> --environment production|staging [--resources <file>] [--out <dir>]",
+  "     | secrets --environment <e> --env-file <file> [--apply] [--frozen] [--resources <file>]",
+  "     | provision --environment <e> --env-file <file> [--write] [--resources <file>]",
+  "     | preflight --environment <e> [--env-file <file>] [--resources <file>]",
+  "     | migrate|register|prices --environment <e> --profile <file> --env-file <file>",
+  "     | deploy --environment <e> --profile <file> --env-file <file> [--component api|edge|all] [--resources <file>]",
+  "     | smoke --environment <e>",
+].join("\n")
+
+interface Flags { readonly values: ReadonlyMap<string, string>; readonly on: ReadonlySet<string> }
+
+effect function flags(args: ReadonlyArray<string>, valued: ReadonlyArray<string>, switches: ReadonlyArray<string> = []): Flags!UsageInvalid {
+  const values = new Map<string, string>()
+  const on = new Set<string>()
+  for (let index = 0; index < args.length; index++) {
+    const name = args[index] ?? ""
+    const key = name.slice(2)
+    if (!name.startsWith("--")) throw new UsageInvalid({ message: usage })
+    if (switches.includes(key)) { on.add(key); continue }
+    const value = args[index + 1]
+    if (value === undefined || !valued.includes(key) || values.has(key)) throw new UsageInvalid({ message: usage })
+    values.set(key, value)
+    index++
+  }
+  return { values, on }
+}
+
+effect function required(found: Flags, name: string): string!UsageInvalid {
+  const value = found.values.get(name)
+  if (value === undefined) throw new UsageInvalid({ message: `--${name} is required\n${usage}` })
+  return value
+}
+
+effect function environmentOf(found: Flags): CloudEnvironment!UsageInvalid {
+  const value = try required(found, "environment")
+  if (value !== "production" && value !== "staging") throw new UsageInvalid({ message: `--environment must be production or staging, not ${value}` })
+  return value
+}
+
+effect function componentOf(found: Flags): Component!UsageInvalid {
+  const value = found.values.get("component") ?? "all"
+  if (value !== "api" && value !== "edge" && value !== "all") throw new UsageInvalid({ message: `--component must be api, edge or all, not ${value}` })
+  return value
+}
+
+effect function render(found: Flags, bundle: boolean) {
+  const environment = try environmentOf(found)
+  const { profile } = try profiled(try required(found, "profile"))
+  const resources = try resourcesOf(found.values.get("resources"))
+  const path = try Path.Path
+  const out = path.resolve(found.values.get("out") ?? path.join(try packageDirectory(), "rendered"))
+  const rendered = try renderInto(out, profile, environment, resources[environment])
+  if (bundle) for (const config of [rendered.api, rendered.edge]) try wrangler(["deploy", "--dry-run", "--config", config, "--outdir", path.join(out, `bundle-${path.basename(config, ".json")}`)])
+  return { ...rendered, bundled: bundle }
+}
+
+effect function secrets(found: Flags) {
+  const environment = try environmentOf(found)
+  const file = try required(found, "env-file")
+  return try scoped(effect {
+    provide machine() {
+      if (found.on.has("frozen")) try (try Machine).send({ type: "freeze" })
+      const settled = try settledSecrets(file, environment)
+      if (found.on.has("apply")) {
+        const resources = try resourcesOf(found.values.get("resources"))
+        const path = try Path.Path
+        const bulk = path.join(try privateDirectory(), "secrets.json")
+        try (try FileSystem.FileSystem).writeFileString(bulk, JSON.stringify(workerSecrets(settled.values)), { mode: 0o600 })
+        try wrangler(["secret", "bulk", bulk, "--name", resources[environment].workerName], resources[environment].accountId)
+      }
+      return { environment, complete: true, applied: found.on.has("apply"), entitlementPublicKey: settled.entitlementPublicKey }
+    }
+  })
+}
+
+effect function resources(found: Flags, creating: boolean) {
+  const environment = try environmentOf(found)
+  const file = found.values.get("env-file")
+  const values = file === undefined ? {} : try readSecrets(file)
+  const path = try Path.Path
+  const recorded = found.values.get("resources") ?? path.join(try packageDirectory(), "resources.json")
+  const ids = try resourcesOf(recorded)
+  const verified = try Effect.provide(reconciled(environment, ids, values.DATABASE_URL, creating), FetchHttpClient.layer)
+  if (creating && found.on.has("write")) try recordResources(recorded, environment, ids[environment], verified)
+  return { environment, verified, written: creating && found.on.has("write") }
+}
+
+effect function database(found: Flags, command: "migrate" | "register" | "prices") {
+  const environment = try environmentOf(found)
+  const values = try readSecrets(try required(found, "env-file"))
+  const { profile } = try profiled(try required(found, "profile"))
+  const store = values.DATABASE_URL
+  if (command !== "prices" && !store) throw new UsageInvalid({ message: "the secrets file has no DATABASE_URL" })
+  return try scoped(effect {
+    const written = try registrationInto(try privateDirectory(), profile, environment)
+    const at = ["--profile", written.profileFile, "--environment", environment]
+    switch (command) {
+      case "migrate": try elizaosCloud(["migrate", ...at, "--store", store], values); break
+      case "register": try elizaosCloud(["client", "apply", "--file", written.file, ...at, "--store", store], values); break
+      case "prices": try elizaosCloud(["prices", "check", ...at], values); break
+    }
+    return { environment, command, clientId: written.clientId }
+  })
+}
+
+effect function smokeOf(found: Flags) {
+  const environment = try environmentOf(found)
+  const candidate = (try candidates())[environment]
+  const gates = try Effect.provide(smoke(environment, { api: candidate.cloud, web: `https://${candidate.appLinkHost}` }, ownCloudName), FetchHttpClient.layer)
+  return { environment, ready: gates.every((gate) => gate.passed), gates }
+}
+
+/** One command of Alpha's own cloud on Cloudflare, by its name and flags; what it did, as JSON for the operator. */
+export effect function operate(command: string | undefined, rest: ReadonlyArray<string>) {
+  switch (command) {
+    case "render": return try render(try flags(rest, ["profile", "environment", "resources", "out"]), false)
+    case "bundle": return try render(try flags(rest, ["profile", "environment", "resources", "out"]), true)
+    case "secrets": return try secrets(try flags(rest, ["environment", "env-file", "resources"], ["apply", "frozen"]))
+    case "provision": return try resources(try flags(rest, ["environment", "env-file", "resources"], ["write"]), true)
+    case "preflight": return try resources(try flags(rest, ["environment", "env-file", "resources"]), false)
+    case "migrate": case "register": case "prices": return try database(try flags(rest, ["environment", "profile", "env-file"]), command)
+    case "deploy": {
+      const found = try flags(rest, ["environment", "profile", "env-file", "component", "resources"])
+      const at = { environment: try environmentOf(found), profile: try required(found, "profile"), secrets: try required(found, "env-file"), component: try componentOf(found), resources: found.values.get("resources") }
+      return try Effect.provide(deploy(at), FetchHttpClient.layer)
+    }
+    case "smoke": {
+      const result = try smokeOf(try flags(rest, ["environment"]))
+      if (!result.ready) throw new NotReady({ report: JSON.stringify(result, null, 2) })
+      return result
+    }
+    default: throw new UsageInvalid({ message: command === undefined ? usage : `unknown command ${command}\n${usage}` })
+  }
+}

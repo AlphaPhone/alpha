@@ -1,4 +1,4 @@
-// spec/cloud/index.md, "Story: Serve one reviewed profile"; spec/cloud/index.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
+// spec/cloud/rollout.md, "Story: Serve one reviewed profile from the API Worker"; spec/cloud/rollout.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry"
 import { cloudWorker, type CloudBindings, type WorkerExecution } from "@elizaos/cloud/worker"
 import { profileUnavailable, readProfileAsset, type AssetFetcher } from "./profile-asset.ts"
 

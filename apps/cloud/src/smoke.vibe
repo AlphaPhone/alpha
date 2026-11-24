@@ -1,17 +1,22 @@
-// spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready"; spec/cloud/rollout.md, "An environment is ready only when each public gate passes: API health, Terms and Privacy, entitlement keys, the app's registration, the plans, the sign-in methods, the App Link file and the return page"
+// spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready"; spec/cloud/rollout.md, "Alpha's own cloud is ready only when each public gate passes: the provisioning smoke reads, then the entitlement keys, Alpha's sign-in configuration, the plans and the sign-in return page on the App Link host"
 import type { CloudEnvironment } from "@elizaos/cloud/profile"
-import type { Hosts } from "../gen/cloud.effect.vibe"
+import { alphaPackage, assetLinksNameAlpha, type Environment } from "../gen/cloud.effect.vibe"
 import { smokeGates, type Gate } from "../gen/cloud__rollout.effect.vibe"
+import { entryOf, registrationAt, statementsIn } from "./alpha.vibe"
 import { jsonOf } from "./json.ts"
 import { publicP256 } from "./keys.ts"
-import { colonFingerprint, releaseSigner } from "./registration.vibe"
-import data from "../deployment.json" with { type: "json" }
 
 /** One gate's outcome: passed, or why not. */
 export interface GateResult {
   readonly gate: Gate
   readonly passed: boolean
   readonly detail: string
+}
+
+/** Where an environment of Alpha's own cloud answers: its API origin and its App Link host's origin. */
+export interface Origins {
+  readonly api: string
+  readonly web: string
 }
 
 interface Answer { readonly status: number; readonly type: string; readonly text: string }
@@ -33,63 +38,57 @@ const complete = (document: unknown) => {
   return typeof found.title === "string" && typeof found.revision === "string" && Array.isArray(found.sections) && found.sections.length > 0
 }
 
+effect function assetLinksFit(text: string, environment: Environment) {
+  const statements = statementsIn(jsonOf(text)) catch () => []
+  return assetLinksNameAlpha(statements, environment)
+}
+
 /** The problem with what a gate's address answered, or undefined when it passes. */
-function judged(gate: Gate, answer: Answer, at: { readonly name: string; readonly redirectUri: string; readonly release: string }): string | undefined {
+effect function judged(gate: Gate, answer: Answer, at: { readonly name: string; readonly environment: Environment; readonly signInReturn: string }) {
   const body = parsed(answer.text)
   switch (gate) {
-    case "ApiHealth": return answer.text.trim().startsWith("{") ? undefined : "expected a JSON health answer"
-    case "ServiceDocuments": {
+    case "ApiHealth": return body.status === "ok" ? undefined : "expected the health answer"
+    case "ServiceDocument": {
       const service = parsed(JSON.stringify(body.service ?? null))
-      return body.success === true && service.name === at.name && complete(service.terms) && complete(service.privacy) ? undefined : "expected Alpha Cloud's Terms and Privacy"
+      return service.name === at.name && complete(service.terms) && complete(service.privacy) ? undefined : `expected ${at.name}'s Terms and Privacy`
     }
-    case "EntitlementKeys": return Array.isArray(body.keys) && body.keys.length > 0 && body.keys.every(publicP256) ? undefined : "expected a nonempty set of public P-256 entitlement keys"
-    case "AppRegistration": return body.clientId === data.client.clientId && body.redirectUri === at.redirectUri && body.codeChallengeMethod === "S256" ? undefined : "expected Alpha Phone's client, callback and S256"
-    case "Plans": return Array.isArray(body.plans) && ["plus_monthly", "pro_monthly"].every((key) => (body.plans as ReadonlyArray<unknown>).some((plan) => parsed(JSON.stringify(plan)).key === key)) ? undefined : "expected the Plus and Pro plans"
-    case "SignInMethods": {
-      if (!["email", "sms", "google"].every((name) => typeof body[name] === "boolean")) return "expected the sign-in methods {email, sms, google}"
-      const missing = ["email", "google"].filter((name) => body[name] !== true)
-      return missing.length === 0 ? undefined : `${missing.join(" and ")} sign-in not offered`
-    }
+    case "SignInMethods": return body.email === true ? undefined : "the emailed code is not offered"
     case "AssetLinks": {
       if (!/^application\/json\b/i.test(answer.type)) return "not application/json"
-      const statements = jsonOf(answer.text)
-      const granted = Array.isArray(statements) && statements.some((statement) => {
-        const found = parsed(JSON.stringify(statement))
-        const target = parsed(JSON.stringify(found.target ?? null))
-        return Array.isArray(found.relation) && found.relation.includes("delegate_permission/common.handle_all_urls") && target.namespace === "android_app"
-          && target.package_name === data.client.androidPackage && Array.isArray(target.sha256_cert_fingerprints) && target.sha256_cert_fingerprints.includes(at.release)
-      })
-      return granted ? undefined : `${data.client.androidPackage} is not granted to the release certificate`
+      return (try assetLinksFit(answer.text, at.environment)) ? undefined : `${alphaPackage} is not named with this environment's signers alone`
     }
-    case "CallbackPage": {
-      const callback = new URL(at.redirectUri)
-      const intent = `intent://${callback.host}${callback.pathname}#Intent;scheme=https;package=${data.client.androidPackage};end`
-      return /^text\/html\b/i.test(answer.type) && answer.text.includes(`href="${intent}"`) ? undefined : "expected the return page for Alpha Phone"
+    case "EntitlementKeys": return Array.isArray(body.keys) && body.keys.length > 0 && body.keys.every(publicP256) ? undefined : "expected a nonempty set of public P-256 entitlement keys"
+    case "SignInConfiguration": return body.clientId === alphaPackage && body.redirectUri === at.signInReturn && body.codeChallengeMethod === "S256" ? undefined : "expected Alpha's client, its return and S256"
+    case "Plans": return Array.isArray(body.plans) && ["plus_monthly", "pro_monthly"].every((key) => (body.plans as ReadonlyArray<unknown>).some((plan) => parsed(JSON.stringify(plan)).key === key)) ? undefined : "expected the Plus and Pro plans"
+    case "ReturnPage": {
+      const signIn = new URL(at.signInReturn)
+      const intent = `intent://${signIn.host}${signIn.pathname}#Intent;scheme=https;package=${alphaPackage};end`
+      return /^text\/html\b/i.test(answer.type) && answer.text.includes(`href="${intent}"`) ? undefined : "expected the page that returns to Alpha"
     }
   }
 }
 
-function addressOf(gate: Gate, hosts: Hosts, environment: CloudEnvironment, redirectUri: string): string {
+function addressOf(gate: Gate, origins: Origins, environment: CloudEnvironment, signInReturn: string): string {
   switch (gate) {
-    case "ApiHealth": return `${hosts.api}/api/health`
-    case "ServiceDocuments": return `${hosts.api}/api/public/service`
-    case "EntitlementKeys": return `${hosts.api}/api/v1/subscription/entitlement-keys`
-    case "AppRegistration": return `${hosts.api}/api/v1/app-auth/mobile/config?${new URLSearchParams({ clientId: data.client.clientId, environment, redirectUri })}`
-    case "Plans": return `${hosts.api}/api/v1/subscriptions/plans`
-    case "SignInMethods": return `${hosts.api}/api/v1/auth/methods`
-    case "AssetLinks": return `${hosts.web}/.well-known/assetlinks.json`
-    case "CallbackPage": return redirectUri
+    case "ApiHealth": return `${origins.api}/api/health`
+    case "ServiceDocument": return `${origins.api}/api/public/service`
+    case "SignInMethods": return `${origins.api}/api/v1/auth/methods`
+    case "AssetLinks": return `${origins.web}/.well-known/assetlinks.json`
+    case "EntitlementKeys": return `${origins.api}/api/v1/subscription/entitlement-keys`
+    case "SignInConfiguration": return `${origins.api}/api/v1/app-auth/mobile/config?${new URLSearchParams({ clientId: alphaPackage, environment, redirectUri: signInReturn })}`
+    case "Plans": return `${origins.api}/api/v1/subscriptions/plans`
+    case "ReturnPage": return signInReturn
   }
 }
 
 /** Each public gate of a deployed environment, in the spec's order, read without a credential. */
-export effect function smoke(environment: CloudEnvironment, hosts: Hosts, name: string) {
-  const redirectUri = hosts.web + data.returns.signIn
-  const release = try colonFingerprint(releaseSigner.signerSha256)
+export effect function smoke(environment: CloudEnvironment, origins: Origins, name: string) {
+  const which: Environment = environment === "production" ? "Production" : "Staging"
+  const signInReturn = entryOf(registrationAt(which, new URL(origins.web).host)).signInReturn
   const results: GateResult[] = []
   for (const gate of smokeGates) {
-    const answer = try fetched(addressOf(gate, hosts, environment, redirectUri))
-    const problem = typeof answer === "string" ? answer : answer.status !== 200 ? `HTTP ${answer.status}` : judged(gate, answer, { name, redirectUri, release })
+    const answer = try fetched(addressOf(gate, origins, environment, signInReturn))
+    const problem = typeof answer === "string" ? answer : answer.status !== 200 ? `HTTP ${answer.status}` : try judged(gate, answer, { name, environment: which, signInReturn })
     results.push({ gate, passed: problem === undefined, detail: problem ?? "HTTP 200" })
   }
   return results

@@ -1,9 +1,9 @@
-// spec/cloud/index.md, "Story: Render a deployment only when it is provisioned"
+// spec/cloud/rollout.md, "Story: Render a deployment only when it is provisioned"; spec/cloud/rollout.md, "The API Worker's bindings repeat its profile's origins and database, and its registry is Alpha's registration of that environment"
 import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
-import { alphaModel, renderAccepted, renderProblems, type ResourceId } from "../gen/cloud.effect.vibe"
+import type { Registration } from "../gen/cloud.effect.vibe"
+import { renderAccepted, renderProblems, type ResourceId } from "../gen/cloud__rollout.effect.vibe"
+import { entryOf } from "./alpha.vibe"
 import { sha256Hex } from "./digest.ts"
-import type { EnvironmentInputs } from "./profile.vibe"
-import { registryVariable, type SeedClient } from "./registration.vibe"
 
 /** `apps/cloud/resources.json`: one environment's Cloudflare account, zone, Worker name and database binding. */
 export interface CloudResources {
@@ -13,12 +13,12 @@ export interface CloudResources {
   readonly hyperdriveId: string
 }
 
-/** A resource id is unprovisioned, a host lies outside the zone, the inputs lack a worker block, or an Eliza Cloud host leaked in. */
+/** A resource id is unprovisioned, a host lies outside the zone, or a host of the shipped Eliza Cloud leaked in. */
 export error RenderRefused { problem: string }
 
 const elizaHost = /(?:^|[^a-z0-9-])((?:[a-z0-9-]+\.)*(?:eliza\.app|elizacloud\.ai))(?![a-z0-9.-])/i
 
-/** The first deployed Eliza Cloud host the text names, if any. */
+/** The first host of the shipped Eliza Cloud the text names, if any. */
 export function leakedElizaHost(text: string): string | undefined {
   return elizaHost.exec(text)?.[1]
 }
@@ -49,39 +49,31 @@ export interface RenderPaths {
   readonly assets: string
 }
 
-/** The plain variables of one environment's API Worker. */
-export function apiVars(profile: CloudProfile, environment: CloudEnvironment, inputs: EnvironmentInputs, client: SeedClient): Readonly<Record<string, string>> {
+/** The NATIVE_CLIENT_REGISTRY eliza's Worker reads: Alpha's registration of the environment, enabled, exactly as `client apply` writes it. */
+export function registryVariable(registration: Registration, environment: CloudEnvironment): string {
+  return JSON.stringify([{ ...entryOf(registration), environment, enabled: true }])
+}
+
+/** The plain variables of one environment's API Worker: its profile's origins and database, Alpha's registration, and the plan the Worker sells. */
+export function apiVars(profile: CloudProfile, environment: CloudEnvironment, registration: Registration): Readonly<Record<string, string>> {
   const settings = profile.environments[environment]
-  const worker = inputs.worker
-  const plan = worker?.plan ?? "plus_monthly"
+  const plan = settings.billing?.plans.plus_monthly
+  const signIn = entryOf(registration).signInReturn
   return {
     CLOUD_PROFILE_SHA256: sha256Hex(profileText(profile)),
     CLOUD_ENVIRONMENT: environment,
     PUBLIC_API_ORIGIN: settings.api,
     WEB_ORIGIN: settings.web,
     CLOUD_IDENTITY_DIGEST: settings.databaseIdentity,
-    NATIVE_CLIENT_REGISTRY: registryVariable(client, environment),
-    NATIVE_CLIENT_ID: client.clientId,
-    NATIVE_AUTH_CALLBACK: client.signInReturn,
+    NATIVE_CLIENT_REGISTRY: registryVariable(registration, environment),
+    NATIVE_CLIENT_ID: registration.clientId,
+    NATIVE_AUTH_CALLBACK: signIn,
     EMAIL_FROM: `${settings.name} <${settings.mailSender}>`,
-    GOOGLE_CLIENT_ID: inputs.google.clientId,
-    GOOGLE_CONNECT_CLIENT_ID: inputs.google.serverClientId,
-    INFERENCE_BASE_URL: settings.inference?.providers[0]?.baseUrl ?? "",
-    CHAT_MODEL: alphaModel,
-    CHAT_UPSTREAM_MODEL: alphaModel,
-    EMBEDDING_MODEL: worker?.embeddingModel ?? "",
-    EMBEDDING_UPSTREAM_MODEL: worker?.embeddingUpstreamModel ?? "",
-    CHAT_INPUT_MICROS_PER_1K: String(worker?.chatInputMicrosPer1k ?? 0),
-    CHAT_OUTPUT_MICROS_PER_1K: String(worker?.chatOutputMicrosPer1k ?? 0),
-    EMBEDDING_INPUT_MICROS_PER_1K: String(worker?.embeddingInputMicrosPer1k ?? 0),
-    MAX_COMPLETION_TOKENS: String(worker?.maxCompletionTokens ?? 0),
-    CARTESIA_VOICE_ID: inputs.speech.defaultVoiceId,
-    SPEECH_STT_MICROS_PER_SECOND: String(inputs.speech.microsPerSecond),
-    SPEECH_TTS_MICROS_PER_CHARACTER: String(inputs.speech.microsPerCharacter),
-    SPEECH_DAILY_SESSION_LIMIT: String(worker?.speechDailySessionLimit ?? 0),
-    STRIPE_PLAN: plan,
-    STRIPE_PRICE_ID: inputs.billing.plans[plan].priceId,
-    STRIPE_PRODUCT_ID: inputs.billing.plans[plan].productId,
+    GOOGLE_CLIENT_ID: settings.google?.clientId ?? "",
+    GOOGLE_CONNECT_CLIENT_ID: settings.google?.clientId ?? "",
+    STRIPE_PLAN: "plus_monthly",
+    STRIPE_PRICE_ID: plan?.priceId ?? "",
+    STRIPE_PRODUCT_ID: plan?.productId ?? "",
   }
 }
 
@@ -91,14 +83,10 @@ export function edgeVars(profile: CloudProfile, environment: CloudEnvironment): 
   return { CLOUD_ENVIRONMENT: environment, PUBLIC_API_ORIGIN: settings.api, WEB_ORIGIN: settings.web }
 }
 
-/** Why one environment cannot be rendered for these resources and inputs, in order; empty when it can. */
-export function problemsRendering(profile: CloudProfile, environment: CloudEnvironment, resources: CloudResources, inputs: EnvironmentInputs) {
+/** Why one environment cannot be rendered for these resources, in order; empty when it can. */
+export function problemsRendering(profile: CloudProfile, environment: CloudEnvironment, resources: CloudResources) {
   const settings = profile.environments[environment]
-  return renderProblems(
-    resourceId(resources.accountId), resourceId(resources.hyperdriveId),
-    inZone(hostOf(settings.api), resources.zone), inZone(hostOf(settings.web), resources.zone),
-    inputs.worker !== undefined,
-  )
+  return renderProblems(resourceId(resources.accountId), resourceId(resources.hyperdriveId), inZone(hostOf(settings.api), resources.zone), inZone(hostOf(settings.web), resources.zone))
 }
 
 function filled(value: unknown, tokens: Readonly<Record<string, unknown>>): unknown {
@@ -119,13 +107,13 @@ export interface RenderedEnvironment {
   readonly profile: string
 }
 
-/** Renders both Workers of one environment from their templates, refused while a resource is unprovisioned or an Eliza Cloud host leaks in. */
-export effect function renderEnvironment(templates: { readonly api: unknown; readonly edge: unknown }, profile: CloudProfile, environment: CloudEnvironment, resources: CloudResources, inputs: EnvironmentInputs, client: SeedClient, paths: RenderPaths): RenderedEnvironment!RenderRefused {
-  const problems = problemsRendering(profile, environment, resources, inputs)
+/** Renders both Workers of one environment from their templates, refused while a resource is unprovisioned or a host of the shipped Eliza Cloud leaks in. */
+export effect function renderEnvironment(templates: { readonly api: unknown; readonly edge: unknown }, profile: CloudProfile, environment: CloudEnvironment, resources: CloudResources, registration: Registration, paths: RenderPaths): RenderedEnvironment!RenderRefused {
+  const problems = problemsRendering(profile, environment, resources)
   const settings = profile.environments[environment]
   const shared = { workerName: resources.workerName, accountId: resources.accountId, hyperdriveId: resources.hyperdriveId, apiHost: hostOf(settings.api), webHost: hostOf(settings.web) }
   const rendered = {
-    api: filled(templates.api, { ...shared, main: paths.apiMain, assetsDirectory: paths.assets, vars: apiVars(profile, environment, inputs, client) }),
+    api: filled(templates.api, { ...shared, main: paths.apiMain, assetsDirectory: paths.assets, vars: apiVars(profile, environment, registration) }),
     edge: filled(templates.edge, { ...shared, main: paths.edgeMain, vars: edgeVars(profile, environment) }),
     profile: profileText(profile),
   }

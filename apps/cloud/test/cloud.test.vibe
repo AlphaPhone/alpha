@@ -1,4 +1,4 @@
-// spec/cloud/local.md, "Story: Check Alpha's contract on my computer"
+// spec/cloud/local.md, "Story: Check Alpha's contract on my computer"; spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "Story: Reach my account's services from the app"; spec/cloud/rollout.md, "Story: Deploy an environment without reading a secret into the repository"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { createCloudClient } from "@elizaos/cloud/client"
@@ -8,7 +8,23 @@ import { ChildProcess } from "effect/process"
 import { ChildProcessSpawner } from "effect/process/ChildProcessSpawner"
 import { assetLinksNameAlpha } from "../gen/cloud.effect.vibe"
 import { Machine, type Gate, gateAt, gates, machine } from "../gen/cloud__local.effect.vibe"
-import { loopbackOnly, profileNamed, stagingSeed, statementsIn } from "../src/alpha.vibe"
+import { Machine as Rollout, machine as rollout } from "../gen/cloud__rollout.effect.vibe"
+import { entryOf, loopbackOnly, profileNamed, stagingSeed, statementsIn } from "../src/alpha.vibe"
+import { candidateProblems, candidates } from "../src/candidate.vibe"
+import { reconcileResources } from "../src/cloudflare.vibe"
+import { operate } from "../src/commands.vibe"
+import { sha256Hex } from "../src/digest.ts"
+import { edgeRouteOf, edgeWorker, type EdgeEnv } from "../src/edge.vibe"
+import { EdgeHeaders, EdgeRequest, EdgeResponse, forwardedHeaders } from "../src/edge-platform.ts"
+import { entitlementPublicKey } from "../src/keys.ts"
+import { generated, profiled, readSecrets, recordResources, registrationOn, secretProblems, settledSecrets, workerSecrets } from "../src/operator.vibe"
+import { PROFILE_ASSET, readProfileAsset } from "../src/profile-asset.ts"
+import { elizaCloudRoutes, tableProblems } from "../src/routes.vibe"
+import { smoke } from "../src/smoke.vibe"
+import { alphaCloudWorker } from "../src/worker.vibe"
+import { leakedElizaHost, problemsRendering, renderEnvironment } from "../src/wrangler.vibe"
+import { startCloudflare } from "./fakes/cloudflare.ts"
+import resources from "./fixtures/resources.json" with { type: "json" }
 
 module node {
   import { createHash, randomBytes } from "node:crypto"
@@ -198,5 +214,202 @@ describe(`Check Alpha's contract on my computer (spec/cloud/local.md, "Story: Ch
       try Effect.try(() => assert.deepStrictEqual({ passed, failed, failures }, { passed: gates, failed: false, failures: [] }))
       try check.send({ type: "stop" })
     }
+  } |> scoped(%) |> Effect.provide(%, NodeServices.layer), 600_000)
+})
+
+const holds = (assertion: () => void) => Effect.try(assertion)
+
+describe(`Alpha's own cloud waits, ready, for the cutover (spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover")`, () => {
+  it.effect("accepts the candidate's profile at the candidates' hosts with Alpha's services and model, and refuses one that strays", () => effect {
+    const hosts = try candidates()
+    const profile = try profileNamed("candidate")
+    try holds(() => assert.deepStrictEqual(candidateProblems(profile, hosts), []))
+    const production = profile.environments.production
+    const strayed = { ...profile, environments: { ...profile.environments, production: {
+      ...production, capabilities: production.capabilities.filter((capability) => capability !== "maps"),
+      inference: { ...production.inference!, models: production.inference!.models.map((model) => ({ ...model, defaultMaxTokens: 4096 })) },
+    } } }
+    try holds(() => assert.deepStrictEqual(candidateProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production"]))
+    try holds(() => assert.deepStrictEqual(candidateProblems(profile, { production: hosts.production, staging: hosts.production }).length > 0, true))
+    const shipped = try (profiled("profile/staging.json") catch (failure) => failure._tag)
+    try holds(() => assert.strictEqual(shipped, "CandidateRefused"))
+  } |> Effect.provide(%, NodeServices.layer))
+})
+
+describe(`Alpha's screens reach the cloud through eliza's policy (spec/cloud/index.md, "Story: Reach my account's services from the app")`, () => {
+  it.effect("loads every route of Alpha's table, refuses a sign-in or session route, and covers eliza's managed Gmail client", () => effect {
+    try holds(() => assert.deepStrictEqual(tableProblems(), []))
+    const [group] = elizaCloudRoutes
+    try holds(() => assert.deepStrictEqual(group?.routes.find((route) => route.path === "/api/v1/eliza/google/status"), { method: "GET", path: "/api/v1/eliza/google/status", query: [{ key: "side", accepts: { kind: "any" } }, { key: "grantId", accepts: { kind: "any" } }] }))
+    const refused = tableProblems([
+      { verb: "Get", path: "/api/public/service", query: [] },
+      { verb: "Post", path: "/api/v1/subscriptions/cancel", query: [] },
+      { verb: "Get", path: "/api/v1/nowhere", query: [] },
+    ])
+    try holds(() => assert.deepStrictEqual(refused, [
+      "GET /api/public/service: belongs to sign-in",
+      "POST /api/v1/subscriptions/cancel: needs an account session",
+      "GET /api/v1/nowhere: matches 0 of eliza's device routes",
+    ]))
+    const files = try FileSystem.FileSystem
+    const client = try files.readFileString(`${(try Effect.try(() => prepared())).root}/packages/plugin-inbox/src/client/index.vibe`)
+    const google = "/api/v1/eliza/google"
+    const sent = [...client.matchAll(/`\$\{(google|inbox)\}([^`?]*)(?:\?\$\{query\((\{[^`]*?\})\)\})?`/gs)].map((found) => ({
+      path: (found[1] === "google" ? google : `${google}/gmail/inbox-v1`) + found[2].replace(/\$\{encodeURIComponent\(\w+\)\}/g, "{}"),
+      keys: [...new Set([...(found[3] ?? "").matchAll(/(?:^|[{,])\s*([A-Za-z]+)(?=\s*[:,}])/g)].map((key) => key[1]))].sort(),
+    }))
+    const listed = (group?.routes ?? []).map((route) => ({ path: route.path.replace(/\{\w+\}/g, "{}"), keys: ("query" in route ? route.query.map((rule) => rule.key) : []).sort() }))
+    try holds(() => assert.ok(sent.length >= 13, `found ${sent.length} paths of the managed Gmail client`))
+    try holds(() => assert.deepStrictEqual(sent.filter((want) => !listed.some((have) => have.path === want.path && have.keys.join() === want.keys.join())), []))
+  } |> Effect.provide(%, NodeServices.layer))
+})
+
+const templates = {
+  api: { name: "{{workerName}}", assets: { directory: "{{assetsDirectory}}", binding: "ASSETS" }, routes: [{ pattern: "{{apiHost}}", custom_domain: true }], hyperdrive: [{ binding: "HYPERDRIVE", id: "{{hyperdriveId}}" }], vars: "{{vars}}" },
+  edge: { name: "{{workerName}}-edge", routes: [{ pattern: "{{webHost}}", custom_domain: true }], services: [{ binding: "API", service: "{{workerName}}" }], vars: "{{vars}}" },
+}
+const paths = { apiMain: "../dist/src/worker.js", edgeMain: "../dist/src/edge.js", assets: "./assets.production" }
+
+describe(`Alpha's own cloud is rendered only when provisioned (spec/cloud/rollout.md, "Story: Render a deployment only when it is provisioned")`, () => {
+  it.effect("renders both Workers of a provisioned environment on the candidate's hosts, refuses a placeholder resource, and catches a shipped Eliza Cloud host", () => effect {
+    const profile = try profileNamed("candidate")
+    const registration = registrationOn(profile, "production")
+    const rendered = try renderEnvironment(templates, profile, "production", resources.production, registration, paths)
+    const api = rendered.api as { name: string; routes: ReadonlyArray<{ pattern: string }>; vars: Record<string, string> }
+    const edge = rendered.edge as { routes: ReadonlyArray<{ pattern: string }>; services: ReadonlyArray<{ service: string }>; vars: Record<string, string> }
+    try holds(() => assert.deepStrictEqual([api.routes[0]?.pattern, edge.routes[0]?.pattern, edge.services[0]?.service], ["api.alphacompute.cc", "cloud.alphacompute.cc", api.name]))
+    // spec/cloud/rollout.md, "The API Worker's bindings repeat its profile's origins and database, and its registry is Alpha's registration of that environment"
+    const settings = profile.environments.production
+    try holds(() => assert.deepStrictEqual(
+      [api.vars.PUBLIC_API_ORIGIN, api.vars.WEB_ORIGIN, api.vars.CLOUD_IDENTITY_DIGEST, JSON.parse(api.vars.NATIVE_CLIENT_REGISTRY ?? "[]"), api.vars.CLOUD_PROFILE_SHA256, api.vars.CLOUD_PROFILE],
+      [settings.api, settings.web, settings.databaseIdentity, [{ ...entryOf(registration), environment: "production", enabled: true }], sha256Hex(rendered.profile), undefined]))
+    try holds(() => assert.deepStrictEqual(edge.vars, { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: settings.api, WEB_ORIGIN: settings.web }))
+    try holds(() => assert.ok(!JSON.stringify(rendered).includes('STRIPE_SECRET_KEY":')))
+    try holds(() => assert.deepStrictEqual(problemsRendering(profile, "staging", resources.staging), ["DatabaseUnprovisioned"]))
+    const staging = try (renderEnvironment(templates, profile, "staging", resources.staging, registrationOn(profile, "staging"), paths) catch (failure) => failure._tag)
+    try holds(() => assert.strictEqual(staging, "RenderRefused"))
+    try holds(() => assert.deepStrictEqual([leakedElizaHost("https://api.eliza.app/x"), leakedElizaHost("https://api.alphacompute.cc")], ["api.eliza.app", undefined]))
+  })
+})
+
+describe(`The API Worker serves one reviewed profile (spec/cloud/rollout.md, "Story: Serve one reviewed profile from the API Worker")`, () => {
+  it.effect(`serves only the profile its assets hold under the pinned digest, and asks the caller to retry otherwise (spec/cloud/rollout.md, "The API Worker serves only while the profile in its assets is the text its pinned digest names, and otherwise asks the caller to retry")`, () => effect {
+    const profile = JSON.stringify({ version: 1, name: "Alpha Cloud" })
+    const holding = (text: string | undefined) => ({ fetch: (request: Request) => Promise.resolve(new URL(request.url).pathname === `/${PROFILE_ASSET}` && text !== undefined ? new EdgeResponse(text) : new EdgeResponse("Not Found", { status: 404 })) })
+    const read = (text: string | undefined, pinned: string) => tryPromise(() => readProfileAsset(holding(text), pinned))
+    try holds(() => assert.strictEqual(try read(profile, sha256Hex(profile)), profile))
+    try holds(() => assert.strictEqual(try read(`${profile} `, sha256Hex(profile)), undefined))
+    try holds(() => assert.strictEqual(try read(undefined, sha256Hex(profile)), undefined))
+    try holds(() => assert.strictEqual(try read(profile, ""), undefined))
+    const env = { CLOUD_PROFILE_SHA256: sha256Hex(profile), ASSETS: holding(undefined) } as unknown as Parameters<typeof alphaCloudWorker.fetch>[1]
+    const answer = try tryPromise(() => alphaCloudWorker.fetch(new EdgeRequest("https://api.alphacompute.cc/api/health"), env))
+    try holds(() => assert.deepStrictEqual([answer.status, answer.headers.get("retry-after")], [503, "30"]))
+  })
+})
+
+describe(`The web host returns the owner to the app (spec/cloud/rollout.md, "Story: Bring me back to the app when its link did not open")`, () => {
+  const env: EdgeEnv = { CLOUD_ENVIRONMENT: "production", PUBLIC_API_ORIGIN: "https://api.alphacompute.cc", WEB_ORIGIN: "https://cloud.alphacompute.cc", API: { fetch: () => Promise.reject(new Error("unreachable")) } }
+
+  it.effect("hands its own addresses to the API Worker as the web host, answers its health, and refuses every other address", () => effect {
+    const routeOf = (address: string) => edgeRouteOf(new URL(address), env)
+    const signIn = routeOf("https://cloud.alphacompute.cc/alphaphone/auth/callback?state=x")
+    try holds(() => assert.deepStrictEqual([signIn.route, signIn.target?.href], ["Forward", "https://api.alphacompute.cc/alphaphone/auth/callback?state=x"]))
+    try holds(() => assert.deepStrictEqual(["https://cloud.alphacompute.cc/health", "https://other.alphacompute.cc/x", "http://cloud.alphacompute.cc/x", "https://user:pass@cloud.alphacompute.cc/"].map((address) => routeOf(address).route), ["Health", "NotFound", "NotFound", "NotFound"]))
+    const seen: string[] = []
+    const api = { fetch: (request: Request) => { seen.push(`${request.url} ${request.headers.get("x-forwarded-host") ?? ""}`); return Promise.resolve(EdgeResponse.json({ ok: true })) } }
+    const answered = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://cloud.alphacompute.cc/.well-known/assetlinks.json"), { ...env, API: api }))
+    try holds(() => assert.deepStrictEqual([answered.status, seen], [200, ["https://api.alphacompute.cc/.well-known/assetlinks.json cloud.alphacompute.cc"]]))
+    const down = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://cloud.alphacompute.cc/alphaphone/auth/callback"), env))
+    try holds(() => assert.deepStrictEqual([down.status, down.headers.get("retry-after")], [503, "30"]))
+    const refused = try tryPromise(() => edgeWorker.fetch(new EdgeRequest("https://elsewhere.example/alphaphone/auth/callback"), env))
+    try holds(() => assert.strictEqual(refused.status, 404))
+  })
+
+  it.effect(`names the web host it was asked for and passes no forwarding or hop-by-hop header (spec/cloud/rollout.md, "The API Worker is told the web host it was asked for, and gets none of the caller's forwarding or hop-by-hop headers")`, () => effect {
+    const sent = try Effect.try(() => forwardedHeaders(new EdgeHeaders({ host: "cloud.alphacompute.cc", "x-forwarded-host": "evil.example", forwarded: "host=evil.example", connection: "keep-alive", accept: "text/html" }), "cloud.alphacompute.cc"))
+    try holds(() => assert.deepStrictEqual(Object.fromEntries(sent), { accept: "text/html", "x-forwarded-host": "cloud.alphacompute.cc", "x-forwarded-proto": "https" }))
+  })
+})
+
+const provided = { DATABASE_URL: "postgres://alpha:secret@db.example:5432/alpha", RESEND_API_KEY: "re_x", GOOGLE_CLIENT_SECRET: "g", GOOGLE_CONNECT_CLIENT_SECRET: "g", STRIPE_SECRET_KEY: "sk_test_x", STRIPE_WEBHOOK_SECRET: "whsec_x", CEREBRAS_API_KEY: "c", CARTESIA_API_KEY: "k", GOOGLE_MAPS_API_KEY: "m" }
+
+describe(`Secrets stay private and fit their environment (spec/cloud/rollout.md, "Story: Keep every secret private and fitting its environment")`, () => {
+  it.effect("refuses a secrets file inside the checkout or readable by others, generates internal keys once and never in a frozen rollout, and refuses a test payment key in production", () => effect {
+    const files = try FileSystem.FileSystem
+    const path = try Path.Path
+    const directory = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-secrets-" })
+    const file = path.join(directory, "staging.env")
+    try files.writeFileString(file, Object.entries(provided).map(([name, value]) => `${name}=${value}`).join("\n"), { mode: 0o644 })
+    try holds(() => assert.strictEqual(try (readSecrets(file) catch (failure) => failure._tag), "OperatorFailed"))
+    try files.chmod(file, 0o600)
+    const frozen = try Effect.provide(effect {
+      try (try Rollout).send({ type: "freeze" })
+      return try (settledSecrets(file, "staging") catch (failure) => failure._tag === "OperatorFailed" ? failure.problem : failure._tag)
+    }, rollout())
+    try holds(() => assert.ok(typeof frozen === "string" && frozen.includes("CLOUD_SEALING_KEY is missing")))
+    const first = try Effect.provide(settledSecrets(file, "staging"), rollout())
+    const second = try Effect.provide(settledSecrets(file, "staging"), rollout())
+    try holds(() => assert.deepStrictEqual(second.values, first.values))
+    try holds(() => assert.deepStrictEqual(first.entitlementPublicKey, entitlementPublicKey(first.values.CLOUD_ENTITLEMENT_KEY ?? "")))
+    try holds(() => assert.deepStrictEqual(Object.keys(workerSecrets(first.values)).sort(), ["CARTESIA_API_KEY", "CEREBRAS_API_KEY", "CLOUD_DIGEST_KEY", "CLOUD_ENTITLEMENT_KEY", "CLOUD_SEALING_KEY", "EMAIL_CODE_SECRET", "GOOGLE_CLIENT_SECRET", "GOOGLE_CONNECT_CLIENT_SECRET", "GOOGLE_CONNECT_TOKEN_KEY", "GOOGLE_MAPS_API_KEY", "RESEND_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]))
+    try holds(() => assert.deepStrictEqual(secretProblems(first.values, "production"), ["STRIPE_SECRET_KEY must be a live key in production"]))
+    try holds(() => assert.deepStrictEqual(secretProblems({ ...generated(provided), RESEND_API_KEY: "https://api.eliza.app" }, "staging"), ["RESEND_API_KEY names a deployed Eliza Cloud host"]))
+    const inside = path.join(path.dirname(import.meta.dirname), "inside.env")
+    try holds(() => assert.strictEqual(try (readSecrets(inside) catch (failure) => failure._tag), "OperatorFailed"))
+    const usage = try (operate("deploy", ["--environment", "staging"]) catch (failure) => failure._tag)
+    try holds(() => assert.strictEqual(usage, "UsageInvalid"))
+  } |> scoped(%) |> Effect.provide(%, NodeServices.layer))
+})
+
+describe(`Provisioning creates only what is missing (spec/cloud/rollout.md, "Story: Create an environment's Cloudflare resources once")`, () => {
+  it.effect("creates the database binding once, finds it again by name on a rerun, records it, and refuses a binding that is not the one recorded", () => effect {
+    const account = resources.production.accountId
+    const cloudflare = try acquireRelease(tryPromise(() => startCloudflare({ account, zone: "alphacompute.cc", token: "cf-token" })), (started) => promise(() => started.stop()))
+    const files = try FileSystem.FileSystem
+    const path = try Path.Path
+    const ids = { ...resources.staging }
+    const at = { ids, sibling: resources.production, apiHost: "api-staging.alphacompute.cc", webHost: "cloud-staging.alphacompute.cc", databaseUrl: provided.DATABASE_URL, accountId: account, token: "cf-token", base: cloudflare.base }
+    const preflight = try (reconcileResources({ ...at, creating: false }) catch (failure) => failure.problem)
+    try holds(() => assert.strictEqual(preflight, "record the account and Hyperdrive IDs (provision --write) before deploying"))
+    const created = try reconcileResources({ ...at, creating: true })
+    const again = try reconcileResources({ ...at, creating: true })
+    try holds(() => assert.deepStrictEqual([cloudflare.hyperdrives.length, again, cloudflare.hyperdrives[0]?.caching.disabled], [1, created, true]))
+    try holds(() => assert.notStrictEqual(created.hyperdriveId, ids.hyperdriveId))
+    const directory = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-resources-" })
+    const file = path.join(directory, "resources.json")
+    try files.writeFileString(file, JSON.stringify(resources))
+    try recordResources(file, "staging", ids, created)
+    const recorded = (JSON.parse(try files.readFileString(file)) as typeof resources).staging
+    try holds(() => assert.deepStrictEqual(recorded, created))
+    try holds(() => assert.deepStrictEqual(try reconcileResources({ ...at, ids: created, creating: false }), created))
+    const foreign = try (reconcileResources({ ...at, ids: { ...created, hyperdriveId: "c".repeat(32) }, creating: false }) catch (failure) => failure.problem)
+    try holds(() => assert.strictEqual(foreign, "the Hyperdrive alpha-test-api-staging-db is not the one recorded"))
+  } |> scoped(%) |> Effect.provide(%, [NodeServices.layer, FetchHttpClient.layer]), 30_000)
+})
+
+describe(`A deployed environment is ready when every public gate passes (spec/cloud/rollout.md, "Story: Tell whether a deployed environment is ready")`, () => {
+  it.live("serves the candidate's staging profile from eliza's own cloud command, and every gate passes through the API host and the web host Worker", () => effect {
+    const files = try FileSystem.FileSystem
+    const cloud = try Effect.try(() => prepared().cloud)
+    const profile = try profileNamed("candidate")
+    const settings = profile.environments.staging
+    const prices = try acquireRelease(tryPromise(() => catalog(settings.billing!.plans)), (opened) => promise(() => opened.close()))
+    const run = try files.makeTempDirectoryScoped({ prefix: "alpha-cloud-candidate-" })
+    const local = { ...settings, mail: { kind: "loopback" as const }, billing: { ...settings.billing!, apiUrl: prices.origin } }
+    try files.writeFileString(`${run}/profile.json`, JSON.stringify({ ...profile, environments: { ...profile.environments, staging: local } }))
+    try files.writeFileString(`${run}/seed.json`, JSON.stringify({ clients: [entryOf(registrationOn(profile, "staging"))] }))
+    const fixture = try files.readFileString(`${cloud}/test/fixtures/secrets.env`)
+    try files.writeFileString(`${run}/secrets.env`, [fixture, ...Object.entries({ ...provided, STRIPE_SECRET_KEY: "sk_test_local" }).filter(([name]) => name !== "DATABASE_URL").map(([name, value]) => `${name}=${value}`)].join("\n") + "\n")
+    const origin = try serving(cloud, run)
+    const api = (request: Request) => globalThis.fetch(`${origin}${new URL(request.url).pathname}${new URL(request.url).search}`, { method: request.method, headers: request.headers, redirect: "manual" })
+    const edge: EdgeEnv = { CLOUD_ENVIRONMENT: "staging", PUBLIC_API_ORIGIN: settings.api, WEB_ORIGIN: settings.web, API: { fetch: api } }
+    const reach: typeof globalThis.fetch = (input, init) => {
+      const request = new Request(input, init)
+      const url = new URL(request.url)
+      return url.origin === settings.web ? edgeWorker.fetch(request, edge) : url.origin === settings.api ? api(request) : Promise.reject(new TypeError(`no such host in this run: ${url.origin}`))
+    }
+    const gates = try (smoke("staging", { api: settings.api, web: settings.web }, settings.name) |> Effect.provide(%, FetchHttpClient.layer) |> Effect.provideService(%, FetchHttpClient.Fetch, reach))
+    try holds(() => assert.deepStrictEqual(gates.filter((gate) => !gate.passed), []))
+    try holds(() => assert.strictEqual(gates.length, 8))
   } |> scoped(%) |> Effect.provide(%, NodeServices.layer), 600_000)
 })
