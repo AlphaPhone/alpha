@@ -6,7 +6,7 @@ import type { Tab } from "../../gen/app__photos.effect.vibe";
 import { useMachine } from "../../gen/app__photos.react.ts";
 import { useMachine as useViewer } from "../../gen/app__photos__viewer.react.ts";
 import { running } from "../../gen/app__photos__changes.ts";
-import { type PhotosProps, albumOf, lengthOf, seenOf } from "./shown.ts";
+import { type PhotosProps, albumOf, latestOf, lengthOf, sections, seenOf } from "./shown.ts";
 import { Viewer } from "./Viewer.tsx";
 
 const counted = (n: number) => (n === 1 ? "1 item" : `${n} items`);
@@ -37,7 +37,7 @@ export function Photos({ runtime }: PhotosProps) {
       {state.selecting ? (
         <div className="flex items-center gap-2">
           {owner({ type: "endSelect" }) && <Button variant="ghost" size="icon" aria-label="Cancel selection" onClick={() => tell({ type: "endSelect" })}><X /></Button>}
-          <h2 className="flex-1 text-lg font-semibold">{state.selected.length === 0 ? "Select items" : `${counted(state.selected.length)} selected`}</h2>
+          <h2 className="flex-1 text-lg font-semibold">{state.selected.length === 0 ? "Select" : String(state.selected.length)}</h2>
           {owner({ type: "selectAll" }) && state.selected.length < state.rows.length && <Button variant="ghost" size="sm" onClick={() => tell({ type: "selectAll" })}>Select all</Button>}
         </div>
       ) : (
@@ -69,7 +69,7 @@ export function Photos({ runtime }: PhotosProps) {
 
       {state.selecting && (
         <div role="toolbar" aria-label="Change the selection" className="flex gap-2">
-          {owner({ type: "favouriteSelected" }) && <Button variant="secondary" size="sm" onClick={() => tell({ type: "favouriteSelected" })}><Heart />{state.selected.every((photo) => state.starred.includes(photo)) ? "Unfavourite" : "Favourite"}</Button>}
+          {owner({ type: "favouriteSelected" }) && <Button variant="secondary" size="sm" onClick={() => tell({ type: "favouriteSelected" })}><Heart />{state.selected.every((photo) => state.starred.includes(photo)) ? "Remove from favorites" : "Add to favorites"}</Button>}
           {owner({ type: "shareSelected" }) && <Button variant="secondary" size="sm" onClick={() => tell({ type: "shareSelected" })}><Share2 />Share</Button>}
           {owner({ type: "trashSelected" }) && <Button variant="destructive" size="sm" onClick={() => tell({ type: "trashSelected" })}><Trash2 />Delete</Button>}
         </div>
@@ -85,7 +85,7 @@ export function Photos({ runtime }: PhotosProps) {
             }} />
           </form>
           <div className="flex gap-2">
-            {([["Favorites", "Favourites"], ["Videos", "Videos"]] as const).map(([to, name]) => {
+            {([["Favorites", "Favorites"], ["Videos", "Videos"]] as const).map(([to, name]) => {
               const on = state.filter === to;
               const event = filter(on ? "Everything" : to);
               return <Chip key={to} pressed={on} disabled={!owner(event)} onPressedChange={() => tell(event)}>{name}</Chip>;
@@ -120,7 +120,7 @@ export function Photos({ runtime }: PhotosProps) {
       ) : state.library.status === "Loading" && rows.length === 0 ? (
         <Spinner label="Loading photos" className="self-center" />
       ) : rows.length === 0 && state.library.status === "Loaded" ? (
-        <EmptyState icon={<ImageOff />} title={!items ? "No albums yet" : state.filter === "Matching" ? "Nothing matches" : state.filter === "Favorites" ? "No favourites yet" : state.filter === "Videos" ? "No videos yet" : "No photos yet"} />
+        <EmptyState icon={<ImageOff />} title={!items ? "No albums yet" : state.filter === "Matching" ? "Nothing matches" : state.filter === "Favorites" ? "No favorites yet" : state.filter === "Videos" ? "No videos yet" : "No photos yet"} />
       ) : !items ? (
         <ul aria-label="Albums" className="grid grid-cols-2 gap-3">
           {rows.map((album) => {
@@ -137,29 +137,39 @@ export function Photos({ runtime }: PhotosProps) {
           })}
         </ul>
       ) : (
-        <ul aria-label="Listed" className="-mx-4 grid grid-cols-4 gap-0.5">
-          {rows.map((photo) => {
-            const seen = seenOf(runtime, photo)?.item;
-            const toggle = { type: "toggle", photo } as const;
-            const view = { type: "openItem", photo, listed: true, secure: state.secure, only: state.only, reviewing: false } as const;
-            const video = seen?.kind === "video";
-            const tap = state.selecting ? (owner(toggle) ? () => tell(toggle) : undefined) : viewer.state && viewer.can(view, "Owner") ? () => void viewer.send(view, "Owner") : undefined;
-            const taken = seen ? new Date(seen.date).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : "";
-            return (
-              <li key={photo}>
-                <MediaTile
-                  src={seen?.image}
-                  label={`${video ? "Video" : "Photo"}${taken ? `, ${taken}` : ""}`}
-                  duration={video ? lengthOf(Math.round((seen?.duration ?? 0) / 100)) : undefined}
-                  favourite={state.starred.includes(photo)}
-                  selected={state.selecting ? state.selected.includes(photo) : undefined}
-                  onClick={tap}
-                  disabled={tap === undefined}
-                />
-              </li>
-            );
-          })}
-        </ul>
+        <div aria-label="Listed" className="-mx-4 flex flex-col gap-1">
+          {sections(rows, (photo) => seenOf(runtime, photo)?.item.date, latestOf(runtime)).map(({ heading, photos }) => (
+            <section key={`${heading} ${photos[0]}`} aria-label={heading}>
+              <div className="flex items-baseline justify-between gap-2 px-4 pt-2.5 pb-2">
+                <h2 className="text-base font-semibold">{heading}</h2>
+                <span className="text-sm text-muted-foreground">{photos.length}</span>
+              </div>
+              <ul className="grid grid-cols-4 gap-0.5">
+                {photos.map((photo) => {
+                  const seen = seenOf(runtime, photo)?.item;
+                  const toggle = { type: "toggle", photo } as const;
+                  const view = { type: "openItem", photo, listed: true, secure: state.secure, only: state.only, reviewing: false } as const;
+                  const video = seen?.kind === "video";
+                  const tap = state.selecting ? (owner(toggle) ? () => tell(toggle) : undefined) : viewer.state && viewer.can(view, "Owner") ? () => void viewer.send(view, "Owner") : undefined;
+                  const taken = seen ? new Date(seen.date).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" }) : "";
+                  return (
+                    <li key={photo}>
+                      <MediaTile
+                        src={seen?.image}
+                        label={`${video ? "Video" : "Photo"}${taken ? `, ${taken}` : ""}`}
+                        duration={video ? lengthOf(Math.round((seen?.duration ?? 0) / 100)) : undefined}
+                        favourite={state.starred.includes(photo)}
+                        selected={state.selecting ? state.selected.includes(photo) : undefined}
+                        onClick={tap}
+                        disabled={tap === undefined}
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
       )}
       {owner({ type: "loadMore" }) && <Button variant="outline" className="self-center" onClick={() => tell({ type: "loadMore" })}>Show more</Button>}
       <Viewer runtime={runtime} rows={rows} />

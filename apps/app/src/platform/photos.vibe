@@ -3,12 +3,12 @@ import type { PhotosClient } from "@elizaos/os/bridges/media"
 import { registered } from "./device.vibe"
 
 module held {
-  import { photosClient } from "@elizaos/os/bridges/media"
+  import { photosClient, photosPlugin } from "@elizaos/os/bridges/media"
 
   let made: ReturnType<typeof photosClient> | undefined
-  /** eliza's client of the plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
-  export function client(): ReturnType<typeof photosClient> {
-    return (made ??= photosClient())
+  /** eliza's client of Alpha's plugin, made once: Capacitor registers a plugin a single time for the life of the page. @throws {never} */
+  export function client(name: string): ReturnType<typeof photosClient> {
+    return (made ??= photosClient(photosPlugin(name), name))
   }
 }
 import { client } from held
@@ -17,9 +17,10 @@ import { client } from held
 export error PhotosFailed { method: string; cause: unknown }
 
 /**
- * The phone's photo library: eliza's client of its `ElizaPhotos` plugin, which reads what Android permits, Alpha's
- * own captures and the trash, and asks Android for each change, or none where the page is no phone or its host did
- * not register the plugin. `changed` says each time the phone saw the library change.
+ * The phone's photo library: eliza's client of `AlphaPhotos`, Alpha's fork of eliza's `PhotosPlugin` that the host
+ * registers (`MainActivity.java`), which reads what Android permits, Alpha's own captures and the trash, and asks
+ * Android for each change, or none where the page is no phone or its host did not register the plugin.
+ * `changed` says each time the phone saw the library change.
  */
 export service Photos {
   readonly client: Option.Option<PhotosClient>
@@ -33,12 +34,12 @@ export effect function called<A>(method: string, call: (client: PhotosClient) =>
   return try tryPromise({ try: () => call(client.value), catch: (cause) => new PhotosFailed({ method, cause }) })
 }
 
-const name = "ElizaPhotos"
+const name = "AlphaPhotos"
 
-/** The phone: eliza's client of `ElizaPhotos` where the host registered it, and its `libraryChanged` events. */
+/** The phone: eliza's client of `AlphaPhotos` where the host registered it, and its `libraryChanged` events. */
 export const phonePhotos = Layer.sync(Photos, () => {
   if (!registered(name)) return { client: Option.none(), changed: Stream.empty }
-  const photos = client()
+  const photos = client(name)
   const changed = Stream.callback<void>((queue) => acquireRelease(
     promise(() => photos.onLibraryChanged(() => { Queue.offerUnsafe(queue, undefined) })),
     (handle) => promise(() => handle.remove()),

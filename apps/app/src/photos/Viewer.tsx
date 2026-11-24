@@ -2,7 +2,7 @@
 import { Alert, Button, Dialog, DialogContent, DialogTitle, Spinner } from "@repo/ui";
 import { ChevronLeft, ChevronRight, Heart, Info, Share2, Trash2, X } from "lucide-react";
 import { useMachine } from "../../gen/app__photos__viewer.react.ts";
-import { type PhotosProps, lengthOf, seenOf } from "./shown.ts";
+import { type PhotosProps, headingOf, latestOf, lengthOf, seenOf } from "./shown.ts";
 
 /** The size of a file as the owner reads it. */
 function sized(bytes: number): string {
@@ -31,13 +31,15 @@ export function Viewer({ runtime, rows }: PhotosProps & { rows: readonly number[
   const toNewer = swipe(newer);
   const toOlder = swipe(older);
   const zoom = { type: "zoomTo", level: state.zoom === 1 ? 2 : 1 } as const;
+  const noun = video ? "video" : "photo";
+  const when = seen ? `${headingOf(seen.date, latestOf(runtime))} ${new Date(seen.date).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}` : "";
   return (
     <Dialog open onOpenChange={(opened) => { if (!opened && owner(close)) tell(close); }}>
       <DialogContent aria-describedby={undefined} className="flex h-full max-h-none w-full max-w-none flex-col gap-3 rounded-none bg-background p-3">
         <div className="flex items-center gap-1">
-          {owner(close) && <Button variant="ghost" size="icon" aria-label="Close" onClick={() => tell(close)}><X /></Button>}
-          <DialogTitle className="flex-1 truncate text-base">{seen ? new Date(seen.date).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : video ? "Video" : "Photo"}</DialogTitle>
-          {owner({ type: "toggleInfo" }) && <Button variant="ghost" size="icon" aria-label="Info" aria-pressed={state.info} onClick={() => tell({ type: "toggleInfo" })}><Info /></Button>}
+          {owner(close) && <Button variant="ghost" size="icon" aria-label={`Back from ${noun}`} onClick={() => tell(close)}><X /></Button>}
+          <DialogTitle className="flex-1 truncate text-base">{when || (video ? "Video" : "Photo")}</DialogTitle>
+          {owner({ type: "toggleInfo" }) && <Button variant="ghost" size="icon" aria-label={video ? "Video info" : "Photo info"} aria-pressed={state.info} onClick={() => tell({ type: "toggleInfo" })}><Info /></Button>}
         </div>
         <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
           {state.gone ? (
@@ -69,14 +71,14 @@ export function Viewer({ runtime, rows }: PhotosProps & { rows: readonly number[
             {seen.folder ? <><dt className="text-muted-foreground">Folder</dt><dd className="truncate">{seen.folder}</dd></> : null}
           </dl>
         )}
-        <div role="toolbar" aria-label="Change this item" className="flex justify-around">
+        <div role="toolbar" aria-label="Photo actions" className="flex justify-around">
+          {owner({ type: "share" }) && <Button variant="ghost" size="icon" aria-label={`Share ${noun}`} onClick={() => tell({ type: "share" })}><Share2 /></Button>}
           {owner({ type: "toggleFavourite" }) && (
-            <Button variant="ghost" aria-pressed={state.favourite} onClick={() => tell({ type: "toggleFavourite" })}>
-              <Heart className={state.favourite ? "fill-current" : undefined} />{state.favourite ? "Unfavourite" : "Favourite"}
+            <Button variant="ghost" size="icon" aria-label={state.favourite ? "Remove from favorites" : "Add to favorites"} aria-pressed={state.favourite} onClick={() => tell({ type: "toggleFavourite" })}>
+              <Heart className={state.favourite ? "fill-current" : undefined} />
             </Button>
           )}
-          {owner({ type: "share" }) && <Button variant="ghost" onClick={() => tell({ type: "share" })}><Share2 />Share</Button>}
-          {owner(trash) && <Button variant="ghost" onClick={() => tell(trash)}><Trash2 />Delete</Button>}
+          {owner(trash) && <Button variant="ghost" size="icon" aria-label={`Delete ${noun}`} onClick={() => tell(trash)}><Trash2 /></Button>}
         </div>
       </DialogContent>
     </Dialog>

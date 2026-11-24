@@ -22,7 +22,7 @@ export service Library {
   album(number: number): Option.Option<OwnedAlbum>!!
   revision(): number!!
   moved(): number!!
-  cursor(): MediaCursor | undefined!!
+  cursor(): (MediaCursor | undefined)!!
   leaveOff(next: MediaCursor | null): void!!
 }
 

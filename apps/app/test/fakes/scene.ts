@@ -10,6 +10,7 @@ import { type SampleScene, sampleRoutes, sampleScene } from "./sample.ts";
 import { type LauncherScene, launcherScene } from "./launcher.ts";
 import { type SettingsScene, settingsScene } from "./settings.ts";
 import { type FilesScene, filesScene } from "./files.ts";
+import { type PhotosScene, photosScene } from "./photos.ts";
 import { type TelephonyScene, telephonyRoutes, telephonyScene } from "./telephony.ts";
 import { type UpdateScene, updateScene } from "./update.ts";
 import { type VoiceScene, voiceScene } from "./voice.ts";
@@ -28,6 +29,7 @@ export interface Scene {
   readonly inbox: InboxScene;
   readonly calendar: CalendarScene;
   readonly files: FilesScene;
+  readonly photos: PhotosScene;
   readonly maps: MapsScene;
   readonly telephony: TelephonyScene;
   readonly platform: PlatformScene;
@@ -45,6 +47,7 @@ export function scene(): Scene {
     inbox: inboxScene(),
     calendar: calendarScene(),
     files: filesScene(),
+    photos: photosScene(),
     maps: mapsScene(),
     telephony: telephonyScene(),
     platform: platformScene(),
