@@ -49,13 +49,13 @@ export service Speech {
   /** The channels at this moment. */
   get(): SpeechChains!!
   /** Speak a reply or a reading on `channel`, on the route in use, on the phone when a network route fails before audio. */
-  speak(text: string, channel: Channel, options?: SpeakOptions): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  speak(text: string, channel: Channel, options?: SpeakOptions): (void)!(SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped)
   /** Speak already planned reply pieces in order, telling `played` after each; on the phone they carry `voiceTurnId`, the phone trial of the turn they answer. */
-  speakPieces(pieces: readonly string[], played: () => void!!, voiceTurnId?: string): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  speakPieces(pieces: readonly string[], played: () => void!!, voiceTurnId?: string): (void)!(SpeechUnavailable | SpeechInterrupted | SpeechNotStopped)
   /** Play the page the owner reviewed from its one-use token, synthesized only on the phone, on the reading channel. */
-  speakReviewed(readingToken: string, binding: ReadingBinding): void!SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  speakReviewed(readingToken: string, binding: ReadingBinding): (void)!(SpeechUnavailable | SpeechInterrupted | SpeechNotStopped)
   /** Speak a reading on `channel` with the phone's own voice only, whatever the route in use. */
-  speakOnPhone(text: string, channel: Channel): void!SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped
+  speakOnPhone(text: string, channel: Channel): (void)!(SpeechRefused | SpeechUnavailable | SpeechInterrupted | SpeechNotStopped)
   /** Stop what `channel` is saying now. */
   stop(channel: Channel): void!!
   /** Whether voice may enter now, given an open recording. */

@@ -25,17 +25,17 @@ effect function decoded<A>(path: string, schema: Schema.Codec<A, unknown>, data:
 /** The owner's conversations on the resident agent. */
 export service Conversations {
   /** The published conversations, most recently updated first. */
-  list(): readonly ConversationRow[]!AgentUnreachable | UnreadableAnswer
+  list(): (readonly ConversationRow[])!(AgentUnreachable | UnreadableAnswer)
   /** A new, empty conversation. */
-  create(): ConversationRow!AgentUnreachable | UnreadableAnswer
+  create(): (ConversationRow)!(AgentUnreachable | UnreadableAnswer)
   /** The newest page of a conversation, or the page before a cursor. */
-  history(id: string, before?: { readonly before: number; readonly beforeId?: string }): { readonly messages: readonly HistoryRow[]; readonly hasMore: boolean }!AgentUnreachable | UnreadableAnswer | NotAConversation
+  history(id: string, before?: { readonly before: number; readonly beforeId?: string }): ({ readonly messages: readonly HistoryRow[]; readonly hasMore: boolean })!(AgentUnreachable | UnreadableAnswer | NotAConversation)
   /** The messages around one message, for a search hit. */
-  around(id: string, message: string): readonly HistoryRow[]!AgentUnreachable | UnreadableAnswer | NotAConversation
+  around(id: string, message: string): (readonly HistoryRow[])!(AgentUnreachable | UnreadableAnswer | NotAConversation)
   /** One page of search hits across every conversation. */
-  search(query: string, offset: number): readonly SearchHit[]!AgentUnreachable | UnreadableAnswer
+  search(query: string, offset: number): (readonly SearchHit[])!(AgentUnreachable | UnreadableAnswer)
   /** A fork of a conversation at the owner's own message, whose stored text must be what the owner saw. */
-  branch(id: string, message: string, requestId: string, expectedText: string): ConversationRow!AgentUnreachable | UnreadableAnswer | NotAConversation
+  branch(id: string, message: string, requestId: string, expectedText: string): (ConversationRow)!(AgentUnreachable | UnreadableAnswer | NotAConversation)
 }
 
 /** Conversations over the resident's local API. */

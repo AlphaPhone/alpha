@@ -27,19 +27,19 @@ export type AlphaDraftPlaced = "drafted" | "none-selected" | "occupied" | "unava
 /** The draft slots' effects: the reviewed send, its receipts, Alpha's draft and the pictures. */
 export service DraftSends {
   /** The owner's Send tap on the bar, the draft bubble or the strip: one reviewed SMS or MMS. */
-  send(thread: string): SendProblem | undefined!!
+  send(thread: string): (SendProblem | undefined)!!
   /** Read back a send's journal record after Android reported it changed. */
   reconcile(operationId: string): void!!
   /** Read back every bound operation, as a return to Messages does. */
   reconcileAll(): void!!
   /** Hand the draft to the system messaging app instead, where the owner sends it. */
-  handoff(thread: string): SmsHandoffReport | undefined!!
+  handoff(thread: string): (SmsHandoffReport | undefined)!!
   /** Add a number to the new message's recipients. */
   addRecipient(number: string): void!!
   /** Alpha's draft into a conversation's slot, addressed to exactly its recipients; it never sends. */
   placeAlphaDraft(thread: string, recipients: readonly string[], text: string): AlphaDraftPlaced!!
   /** Attach a picture the owner chose. */
-  addPicture(thread: string, contentType: string, bytes: Uint8Array): "added" | "too-many" | "unsupported" | "too-large"!!
+  addPicture(thread: string, contentType: string, bytes: Uint8Array): ("added" | "too-many" | "unsupported" | "too-large")!!
   /** Take a picture off the draft. */
   removePicture(thread: string, pictureName: string): void!!
 }

@@ -30,9 +30,9 @@ export type NotesFailure = NotesUnavailable | NotesRefused | NotesInvalid
 export service NotesClient {
   readState(): NotesSnapshot!NotesFailure
   interact(capability: NotesCapability, params: Record<string, unknown>): NotesInteractResult!NotesFailure
-  eraseTrash(review: NotesTrashErase): EraseReply!NotesFailure | TrashRetentionOff
-  readCleanups(): readonly NotesTrashRecordingCleanup[]!NotesFailure | TrashRetentionOff
-  completeCleanup(receipt: NotesTrashRecordingCleanup): boolean!NotesFailure | TrashRetentionOff
+  eraseTrash(review: NotesTrashErase): (EraseReply)!(NotesFailure | TrashRetentionOff)
+  readCleanups(): (readonly NotesTrashRecordingCleanup[])!(NotesFailure | TrashRetentionOff)
+  completeCleanup(receipt: NotesTrashRecordingCleanup): (boolean)!(NotesFailure | TrashRetentionOff)
 }
 
 /** What a rejected client promise means: unavailable, refused, or an invalid reply. */

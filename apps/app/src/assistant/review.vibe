@@ -82,9 +82,9 @@ export service DeviceReview {
   /** Approve a card the owner tapped; `fromStage` when the comms bar already approved it on the comms stage. */
   approve(card: ProposalCard, fromStage?: boolean): Approval!!
   /** The card last drawn for `proposalId`, such as the comms bar's open proposal, or undefined. */
-  cardOf(proposalId: string): ProposalCard | undefined!!
+  cardOf(proposalId: string): (ProposalCard | undefined)!!
   /** Run the device proposal bound to exactly this workflow run and step, once, after the owner approved the step in Workflows and the agent admitted it; undefined when none is pending or it already ran. */
-  workflowStep(runId: string, stepId: string): Approval | undefined!!
+  workflowStep(runId: string, stepId: string): (Approval | undefined)!!
   /** Decline a card; nothing runs. */
   decline(card: ProposalCard): ProposalCard!!
   /** Mark a card whose review time passed. */

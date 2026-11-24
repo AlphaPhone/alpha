@@ -29,7 +29,7 @@ const make = effect {
   const handoff = try NotesHandoff
   const machine = try OpenMachine
 
-  effect function send(event: OpenEvent): RecordingOpen | undefined!! {
+  effect function send(event: OpenEvent): (RecordingOpen | undefined)!! {
     return try (machine.send(event) catch () => undefined)
   }
 

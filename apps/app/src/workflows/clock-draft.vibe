@@ -15,7 +15,7 @@ export service WorkflowClockDraft {
   /** Hand the alarm the owner set to Clock's draft and show Clock's review; false when it is not a valid alarm or Clock offers no review. */
   prepare(request: AlarmRequest): boolean!!
   /** Approve the reviewed draft and hand it to Clock once: "opened" or "unknown" after a handoff, "failed" when the save was retired. */
-  approve(): "opened" | "unknown" | "failed" | "refused"!!
+  approve(): ("opened" | "unknown" | "failed" | "refused")!!
   /** What Clock answered a handoff made outside this service. */
   handedOver(opened: boolean): void!!
 }

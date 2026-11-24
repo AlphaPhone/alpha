@@ -11,5 +11,5 @@ export service Cloud {
   /** The Cloud base the build was configured with. */
   readonly base: string
   /** One JSON request; its data is untrusted until a schema decodes it. */
-  json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): unknown!CloudUnavailable | CloudSignedOut
+  json(method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: unknown): (unknown)!(CloudUnavailable | CloudSignedOut)
 }

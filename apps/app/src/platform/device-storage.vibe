@@ -19,7 +19,7 @@ export service DeviceStorage {
   /** Holds the value stored under `key` (the whole stored key, such as `ownerKey(owner, "notes")`) that is not a state, first keeping it apart so the area may start fresh; false when it could not be kept and stays unheld. */
   hold(key: string): boolean!!
   /** The value kept apart for a held `key`, as it was stored; undefined when none is kept. */
-  held(key: string): string | undefined!!
+  held(key: string): (string | undefined)!!
   /** The owner reviewed a held value: only its kept copy is removed, never what the area saved since. */
   resolve(key: string): void!StorageRefused
   /** Removes everything kept in the bound owner's namespace; startup waits until it has. */

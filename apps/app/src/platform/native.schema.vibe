@@ -78,7 +78,7 @@ export schema InferenceFailure {
 }
 
 /** `ElizaNetworkPolicy.getMeteredHint`: Android's metered flag, null where it could not tell. */
-export schema MeteredHint { readonly metered: Schema.NullOr(Schema.Boolean) }
+export schema MeteredHint { readonly metered: boolean | null }
 
 /** An `ElizaAgent` `agentEvent`: one event of a subscription, its end, or its failure. */
 export schema FeedEvent { readonly id: string; readonly kind: "event" | "end" | "failed"; readonly event?: Schema.Unknown; readonly code?: string }
@@ -90,7 +90,7 @@ export schema RecoveryReview { readonly kind: "reviewable" | "unavailable"; read
 export schema RecoveryArchive { readonly kind: "archived" | "unavailable"; readonly archivedCount?: Schema.Int }
 
 /** `AlphaActionJournal.get` without a scope: the device-execution entry for one proposal, null when the journal holds none. */
-export schema DeviceJournalRead { readonly entry: Schema.NullOr(Schema.Unknown) }
+export schema DeviceJournalRead { readonly entry: unknown }
 
 /** `AlphaActionJournal.edit`: whether the compare-and-set at the expected revision replaced the entry. */
 export schema DeviceJournalEdit { readonly kept: boolean }
@@ -153,13 +153,13 @@ export schema PageContextRefusal = "page-changed" | "private-tab" | "not-public"
 export schema Keyguard { readonly locked: boolean }
 
 /** `ElizaSecureStore.get`: the slot's value, absent or null when the slot is empty. */
-export schema SecureSlotRead { readonly value?: Schema.NullOr(Schema.String) }
+export schema SecureSlotRead { readonly value?: string | null }
 
 /** `ElizaSecureStore.compareAndExchange`: whether the slot still held the expected value and now holds the new one. */
 export schema SecureSlotExchange { readonly exchanged: boolean }
 
 /** `AlphaConnection.secureRead`: what the earlier Alpha kept in one of its encrypted slots, null when it kept nothing there. */
-export schema LegacySlotRead { readonly value?: Schema.NullOr(Schema.String) }
+export schema LegacySlotRead { readonly value?: string | null }
 
 /** `AlphaConnection.secureCompareExchange`: whether the earlier Alpha's slot held the expected value and was replaced. */
 export schema LegacySlotExchange { readonly status: "saved" | "conflict" }

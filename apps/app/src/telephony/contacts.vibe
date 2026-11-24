@@ -41,9 +41,9 @@ export service ContactsView {
   /** An approved Alpha contact action wrote, or may have: read again, and hold writes when unconfirmed. */
   alphaWrote(unconfirmed: boolean): void!!
   /** The open contact as Alpha may read it: null when none is open, "unavailable" when it cannot be read whole. */
-  readSelected(): OpenContactRead | null | "unavailable"!!
+  readSelected(): (OpenContactRead | null | "unavailable")!!
   /** Whether a Contacts query lists anyone, without showing it. */
-  matches(query: string): boolean | undefined!!
+  matches(query: string): (boolean | undefined)!!
 }
 
 /** A listed contact; an incomplete one carries no content. */

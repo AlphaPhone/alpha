@@ -47,9 +47,9 @@ function methodOf(method: HttpMethod): Method {
 /** The agent's owner routes Workflows reads and writes, each checked before it is sent. */
 export service WorkflowApi {
   /** One request; its answer is untrusted until a schema decodes it. */
-  request(method: HttpMethod, path: string, body?: unknown): unknown!NotSent | AgentRefused | AgentUnavailable
+  request(method: HttpMethod, path: string, body?: unknown): (unknown)!(NotSent | AgentRefused | AgentUnavailable)
   /** Who the agent answers for now. */
-  scope(): OwnerScope!AgentRefused | AgentUnavailable | Unrecognized
+  scope(): (OwnerScope)!(AgentRefused | AgentUnavailable | Unrecognized)
   /** plugin-workflow's receipt-checked client over these routes. */
   readonly workflow: WorkflowClient
   /** plugin-workflow's hosted digest routes over these routes. */

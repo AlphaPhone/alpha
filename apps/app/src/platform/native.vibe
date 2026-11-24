@@ -11,7 +11,7 @@ export service Native {
   /** Whether `plugin` is registered in this build and on this device. */
   available(plugin: string): boolean!!
   /** One call of `method` on `plugin`; its result is untrusted until a schema decodes it. */
-  invoke(plugin: string, method: string, args?: unknown): unknown!NativeUnavailable | NativeFailed
+  invoke(plugin: string, method: string, args?: unknown): (unknown)!(NativeUnavailable | NativeFailed)
   /** The events `plugin` emits under `event`, for as long as the stream is consumed. */
   listen(plugin: string, event: string): Stream.Stream<unknown, NativeUnavailable>
 }

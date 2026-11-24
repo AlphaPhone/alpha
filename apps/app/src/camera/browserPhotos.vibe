@@ -101,7 +101,7 @@ function digestOf(data: string): string {
 export const browserPhotoStore = Layer.effect(PhotoStore, effect {
   const store = try KeyValueStore.KeyValueStore
   const changes = try PubSub.unbounded<void>()
-  const provide = <A, E>(program: A!E | KeyValueStore.KeyValueStore) => Effect.provideService(program, KeyValueStore.KeyValueStore, store)
+  const provide = <A, E>(program: A!E!KeyValueStore.KeyValueStore) => Effect.provideService(program, KeyValueStore.KeyValueStore, store)
   effect function edit<A>(method: string, change: (library: Library) => { readonly next: Library; readonly answer: A }) {
     const library = try provide(load())
     const { next, answer } = change(library)

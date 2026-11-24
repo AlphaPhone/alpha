@@ -15,7 +15,7 @@ export service ResidentControl {
   /** The connection as spec/platform/resident.md keeps it, then each change of it. */
   readonly changes: Stream.Stream<ResidentConnection>
   /** The verified session, where there is one. */
-  session(): ResidentSession | undefined!!
+  session(): (ResidentSession | undefined)!!
   /** The owner's Cloud account changed: rebind the running agent under a new generation. */
   refreshAccount(): void!ResidentUnavailable
   /** Stops the agent and waits until the service confirms it stopped. */
