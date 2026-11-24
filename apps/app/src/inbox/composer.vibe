@@ -71,11 +71,16 @@ export service Letters {
   load(): boolean!!
   forget(draft: number): void!!
   clear(): void!!
+  /** Gmail's copy of a draft, by the number the rules know it by: its draft id and the digest Gmail holds it at. */
+  copy(gmail: number): { readonly id: string; readonly digest: string } | undefined
+  /** Number Gmail's copy `id`, saved at `digest`. */
+  copied(id: string, digest: string): number
 }
 
 export const letters = Layer.effect(Letters, effect {
   const store = try KeyValueStore.KeyValueStore
   let held: Record<string, Words> = readWords(store.get(key) catch () => undefined) ?? {}
+  const copies = new Map<number, { readonly id: string; readonly digest: string }>()
   const kept = effect () => {
     const written = store.set(key, JSON.stringify(held)) catch () => false
     return written !== false
@@ -101,7 +106,14 @@ export const letters = Layer.effect(Letters, effect {
     },
     effect clear() {
       held = {}
+      copies.clear()
       try ignore(kept())
+    },
+    copy: (gmail: number) => copies.get(gmail),
+    copied(id: string, digest: string) {
+      const number = copies.size + 1
+      copies.set(number, { id, digest })
+      return number
     },
   }
 })

@@ -43,6 +43,27 @@ effect function sent(attempt: number, account: number, draft: number): Event!!(A
   return { type: "answered", attempt, done: ended.done, matches: ended.known, gmail: 0 }
 }
 
+// spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
+/** The draft `draft` saved to Gmail's Drafts, over its copy `gmail` where it has one, or that copy deleted, once, under the attempt's own key. */
+effect function drafted(attempt: number, kind: Kind, account: number, draft: number, gmail: number): Event!!(Attempts | Cloud | Mail | Letters) {
+  const letters = try Letters
+  const words = letters.words(draft)
+  const copy = letters.copy(gmail)
+  if (kind !== "SaveDraft" && copy === undefined) return { type: "answered", attempt, done: false, matches: true, gmail: 0 }
+  const ended = kind === "DeleteDraft"
+    ? try operate(attempt, account, { kind: "draft-delete", draftId: copy?.id ?? "", expectedDigest: copy?.digest ?? "", confirmPermanentDelete: true })
+    : try operate(attempt, account, {
+      kind: kind === "SaveDraft" ? "draft-create" : "draft-replace", mode: words.mode, to: words.to, cc: words.cc, bcc: words.bcc, subject: words.subject, bodyText: words.text,
+      ...(words.answers === undefined ? {} : { replyMessageId: words.answers }),
+      ...(copy === undefined || kind === "SaveDraft" ? {} : { draftId: copy.id, expectedDigest: copy.digest }),
+      ...(words.files.length === 0 ? {} : { attachments: words.files.map(({ name, mimeType, data }) => ({ name, mimeType, dataBase64: data })) }),
+    })
+  const id = ended.result?.["draftId"]
+  const digest = ended.result?.["providerDigest"]
+  const saved = ended.done && kind !== "DeleteDraft" && typeof id === "string" && typeof digest === "string" ? letters.copied(id, digest) : 0
+  return { type: "answered", attempt, done: ended.done && (kind === "DeleteDraft" || saved !== 0), matches: ended.known, gmail: saved }
+}
+
 /** Tell the composer `event` about the draft an operation was handed. */
 const toDraft = (event: DraftEvent) => effect { try ignore((try Drafts.Machine).send(event, "World")) }
 
@@ -50,6 +71,12 @@ function carry(fx: Out): Job<Event, Cloud | Mail | Letters | Inbox.Machine | Dra
   return match (fx) {
     when { tag: "Request", kind: "Send", let attempt, let access, let draft }:
       answer(`request ${attempt}`, sent(attempt, access.account, draft), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "SaveDraft", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, drafted(attempt, "SaveDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "ReplaceDraft", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, drafted(attempt, "ReplaceDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
+    when { tag: "Request", kind: "DeleteDraft", let attempt, let access, let draft, let gmail }:
+      answer(`request ${attempt}`, drafted(attempt, "DeleteDraft", access.account, draft, gmail), { type: "replyLost", attempt }, "World");
     when { tag: "Request", let attempt, let kind, let access, let messages }:
       answer(`request ${attempt}`, changed(attempt, kind, access.account, messages), { type: "replyLost", attempt }, "World");
     // spec/app/inbox/index.md, "Messages handed to an operation are no longer chosen; once a change to the account's mail ends the first page is read again, and when its outcome is unknown the list says it may be out of date until Refresh"

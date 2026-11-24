@@ -88,8 +88,12 @@ export function Compose({ runtime, list }: ComposeProps) {
   });
   const kept = state.stored && flushed(state);
   const sending = { type: "prepare", kind: "Send", access, letter, kept, again: false } as const;
+  // spec/app/inbox/sending.md, "Story: Save my draft to Gmail, or delete it there, knowingly"
+  const saving = { type: "prepare", kind: letter.gmail === 0 ? "SaveDraft" : "ReplaceDraft", access, letter, kept, again: false } as const;
+  const deleting = { type: "prepare", kind: "DeleteDraft", access, letter, kept, again: false } as const;
   const confirm = { type: "confirm", revision: letter.revision, access, now: untimed } as const;
-  const reviewing = ops.state.review.showing && ops.state.draft === draft && ops.state.kind === "Send";
+  const reviewed = ops.state.kind === "Send" || ops.state.kind === "SaveDraft" || ops.state.kind === "ReplaceDraft" || ops.state.kind === "DeleteDraft";
+  const reviewing = ops.state.review.showing && ops.state.draft === draft && reviewed;
   const outcome = outcomeOf(ops.state, letter);
   const aside = { type: "setAside" } as const;
   // spec/app/inbox/adding.md, "A file is attached to the draft open only once the picker gives one that fits within the room its account leaves; one too large, unreadable or without room is refused and said so"
@@ -130,12 +134,14 @@ export function Compose({ runtime, list }: ComposeProps) {
         sent={letter.sent === 0 ? "none" : letter.sent === letter.revision ? "already" : "earlier"}
         onKeepAgain={can({ type: "keepAgain" }, "World") ? () => void send({ type: "keepAgain" }, "World") : undefined}
         onSend={ops.can(sending, "Owner") ? () => void ops.send(sending, "Owner") : undefined}
+        onSaveToGmail={ops.can(saving, "Owner") ? () => void ops.send(saving, "Owner") : undefined}
+        onDeleteGmailCopy={ops.can(deleting, "Owner") ? () => void ops.send(deleting, "Owner") : undefined}
         onSetAside={can(aside, "Owner") ? () => void send(aside, "Owner") : undefined}
         onDiscard={can({ type: "askDiscard" }, "Owner") ? () => void send({ type: "askDiscard" }, "Owner") : undefined}
       />
       <InboxDraftReview
         open={reviewing}
-        operation="send"
+        operation={ops.state.kind === "SaveDraft" ? "save" : ops.state.kind === "ReplaceDraft" ? "replace" : ops.state.kind === "DeleteDraft" ? "deleteCopy" : "send"}
         from={from}
         to={words.to.map((address) => ({ address, valid: acceptable(address) }))}
         cc={words.cc.map((address) => ({ address, valid: acceptable(address) }))}

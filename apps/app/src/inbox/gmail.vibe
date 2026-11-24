@@ -253,11 +253,13 @@ export interface Changed {
   readonly known: boolean
   /** The cloud refused it because the owner's sign-in had expired. */
   readonly expired: boolean
+  /** What Gmail reported it did, where it did it. */
+  readonly result?: Readonly<Record<string, unknown>>
 }
 
 function endedAs(operation: MailOperation): Changed {
   const state = operation.receipt.state
-  return state === "succeeded" ? { done: true, known: true, expired: false } : state === "rejected" ? { done: false, known: true, expired: false } : { done: false, known: false, expired: false }
+  return state === "succeeded" ? { done: true, known: true, expired: false, result: operation.receipt.providerResult ?? {} } : state === "rejected" ? { done: false, known: true, expired: false } : { done: false, known: false, expired: false }
 }
 
 /** Whether eliza's client threw because the owner's cloud sign-in is no longer valid. */
