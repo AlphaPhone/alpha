@@ -141,6 +141,8 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
   let live: LiveVoiceSession | undefined
   let current: VoiceStart | undefined
   let lastCause: unknown
+  // The speech relay's funding refusal that ended this conversation's capture, when it was one; open() clears it.
+  let fundsCause: unknown
   let capturing = false
   let pendingTyped: (() => void!!) | undefined
   let pendingChat: (() => boolean) | undefined
@@ -180,7 +182,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         if (try send({ type: "stop", media: true })) try retire(true)
         return
       }
-      if (outOfFundsCode(facts.code)) return try fundsStop()
+      if (fundsCause !== undefined && fundsCause === lastCause) return try fundsStop()
       const transient = facts.status === 503 || facts.status === 429
       try send({ type: "sessionFailed", transient, longWait: (facts.retryAfterSeconds ?? 0) > LONG_WAIT_SECONDS })
       if ((try held.get()).shown === "Retrying") {
@@ -196,6 +198,11 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   function follows(): void {
     run(follow())
+  }
+
+  /** The relay's refusal when Cloud's own code on it says the plan allowance and credits are used up. */
+  function fundsRefusal(cause: unknown): unknown {
+    return outOfFundsCode(refusalOf(cause, 0).code) ? cause : undefined
   }
 
   // spec/voice/conversation.md, "Out of plan allowance and credits ends voice quietly as Stop does, and the chat gets the one line".
@@ -286,6 +293,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     }
     const capture = tryPromise({ try: () => session.relay.listen(handlers), catch: (cause: unknown) => cause }) catch (cause) => {
       lastCause = cause
+      fundsCause = fundsRefusal(cause)
       return undefined
     }
     if (capture === undefined) return events.failed(lastCause)
@@ -302,6 +310,7 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     capturing = false
     session.capture = undefined
     lastCause = failure
+    fundsCause = fundsRefusal(failure)
     emit(envelope(session.sessionId, session.turn, "error"))
     events.failed(lastCause)
   }
@@ -375,10 +384,6 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
     if (outcome.kind === "Failed") {
       lastCause = { code: outcome.code }
       throw new Error("The agent's voice reply failed.")
-    }
-    if (outcome.kind === "Done" && outOfFundsCode(outcome.failureKind)) {
-      lastCause = { code: outcome.failureKind }
-      throw new Error("The agent's voice reply was refused out of funds.")
     }
     if (outcome.kind === "Done") {
       const awaitingReview = "awaitingReview" in outcome && outcome.awaitingReview === true
@@ -474,7 +479,6 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
         const reply = ensuring(answerOf(start.conversationId, body, ack, microphoneClear, signal), sync(() => signal.removeEventListener("abort", retireCue))) catch effect (error) => {
           try ack.cancel()
           if (cue === ack) cue = undefined
-          if (outOfFundsCode(refusalOf(lastCause, 0).code)) run(fundsStop())
           throw error
         }
         if (signal.aborted) {
@@ -525,6 +529,9 @@ export const conversationService = Layer.effect(VoiceConversation, effect {
 
   effect function open(start: VoiceStart, route: Route) {
     const sessionId = `live-${newId()}`
+    // A cause from an earlier conversation or attempt never decides this one's failure.
+    lastCause = undefined
+    fundsCause = undefined
     const transcripts = effect {
       for try (const event of feeds.voice()) emit({ type: "event", event })
     }

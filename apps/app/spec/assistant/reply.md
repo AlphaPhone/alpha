@@ -224,26 +224,6 @@ pure def lawAFixNeverResendsTheMessage(fix: OwnerFix): bool = not(resendsOnItsOw
 pure val waitMsValues = Set(-1, 0, 999, 2400, 120000)
 ```
 
-### Out of plan allowance and credits is one fixed chat line, the same for a typed turn and Talk, with Manage plan
-
-Cloud's own code for it reaches the phone as the reply's
-`insufficient_credits` (Eliza reads Cloud's `insufficient_credits` and
-`allowance_exhausted` alike). A typed turn's line says "You’re out of plan
-allowance and credits, so I couldn’t reply."; a voice conversation it ends
-(`spec/voice/conversation.md`) posts "You’re out of plan allowance and
-credits, so Talk stopped." to the chat it went to. Either adds "Your
-allowance resets on <month> <day>." only while the plan Alpha last read
-names a reset still ahead, and carries Manage plan. It is an ordinary
-transcript entry, never spoken, never a toast and never near the
-composer.
-
-```quint
-type FundsSurface = TypedTurnRefused | TalkStopped
-pure def outOfFunds(kind: FailureKind): bool = kind == InsufficientCredits
-pure def lawOutOfFundsOffersManagePlanInPlaceOfTheReply(kind: FailureKind): bool =
-  outOfFunds(kind) implies (offersManagePlan(kind) and refusedBeforeOutput(kind))
-```
-
 ### A settled reply carries a plan card only for plan, retry, sign-in or provider, and the billing card is Manage plan
 
 ```quint
