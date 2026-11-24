@@ -23,6 +23,7 @@
     "@elizaos/agent": "link:../../.eliza/packages/agent",
     "@elizaos/cloud": "link:../../.eliza/packages/cloud",
     "@elizaos/os": "link:../../.eliza/packages/os",
+    "@elizaos/plugin-inbox": "link:../../.eliza/packages/plugin-inbox",
     "@elizaos/plugin-notes": "link:../../.eliza/packages/plugin-notes",
     "@elizaos/plugin-workflow": "link:../../.eliza/packages/plugin-workflows",
     "@repo/design-system": "workspace:*",
