@@ -70,7 +70,7 @@ function recorder(name: string, calls: string[], answers: Record<string, unknown
 }
 
 const build = (variant: "launcher" | "aosp" | "browser" = "launcher") => Layer.succeed(Build, { info: { version: "1.4.0", variant, testMocks: false } })
-const idleFacts = { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: true, signInUntouched: true, call: false }
+const idleFacts = { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: true, signInUntouched: true, call: false, recording: false }
 const activity = (call: boolean) => Layer.succeed(Activity, {
   updateIdleFacts: () => effect { return { ...idleFacts, call } },
   keepDrafts: () => effect { return true },
@@ -529,6 +529,24 @@ it.effect("Let Android finish an update without losing what I typed (spec/settin
       },
     ))
   }
+})
+
+// spec/settings/updates.md, "Android's activation is acknowledged once, after the page has kept its drafts"
+it.effect("Never install over an open recording (spec/settings/updates.md, \"Story: Let Android finish an update without losing what I typed\")", () => effect {
+  const run = (recording: boolean) => effect {
+    const { calls, native } = android({
+      "AlphaDevice.updateState": { pending: true, phase: "preparing", activationId: "act-1", bridgeId: "bridge-1" },
+      "AlphaDevice.activateUpdate": {},
+    })
+    const facts = Layer.succeed(Activity, { updateIdleFacts: () => effect { return { ...idleFacts, recording } }, keepDrafts: () => effect { return true } })
+    provide Layer.provideMerge(updates, Layer.mergeAll(quietNotices, memoryStore, native, build(), facts)) {
+      try (try Updates).watchActivation(() => effect { return true })
+      return calls.filter((c) => c.name === "AlphaDevice.activateUpdate").map((c) => (c.args as { ready: boolean }).ready)
+    }
+  }
+  const quiet = try run(false)
+  const recording = try run(true)
+  try Effect.try(() => assert.deepStrictEqual({ quiet, recording }, { quiet: [true], recording: [false] }))
 })
 
 // spec/settings/updates.md, "While Android holds an activation the phone is held, and a refused update the owner started says why"

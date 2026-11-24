@@ -116,25 +116,28 @@ pure def mayAllowAutomatic(u: Updates): bool = u.permission == PermissionRequire
 ### The phone is idle only on resting Home with nothing typed, open, recording or in flight
 
 An untouched sign-in card, at its first step with nothing typed and nothing in flight, is not
-activity, so a signed-out phone still updates.
+activity, so a signed-out phone still updates. A recording is open while the Notes recorder holds a
+recording (starting, recording, paused, stopped or being saved) or a dictation into a draft is open.
 
 ```quint
 type IdleFacts = {
   home: bool, viewOpen: bool, voiceOff: bool, voiceInactive: bool, typing: bool, chatResting: bool,
   editor: bool, drawer: bool, shade: bool, homeEdit: bool, review: bool, connectionBusy: bool,
-  signInOpen: bool, signInUntouched: bool, call: bool,
+  signInOpen: bool, signInUntouched: bool, call: bool, recording: bool,
 }
 pure def updateIdle(idleFacts: IdleFacts): bool =
   idleFacts.home and not(idleFacts.viewOpen) and idleFacts.voiceOff and idleFacts.voiceInactive and not(idleFacts.typing) and idleFacts.chatResting
     and not(idleFacts.editor) and not(idleFacts.drawer) and not(idleFacts.shade) and not(idleFacts.homeEdit) and not(idleFacts.review)
     and not(idleFacts.connectionBusy) and (not(idleFacts.signInOpen) or idleFacts.signInUntouched) and not(idleFacts.call)
+    and not(idleFacts.recording)
 pure def lawAnUntouchedSignInCardIsIdle(idleFacts: IdleFacts): bool =
   updateIdle({ ...idleFacts, signInOpen: false }) implies updateIdle({ ...idleFacts, signInOpen: true, signInUntouched: true })
 pure def lawACallIsNeverIdle(idleFacts: IdleFacts): bool = not(updateIdle({ ...idleFacts, call: true }))
+pure def lawAnOpenRecordingIsNeverIdle(idleFacts: IdleFacts): bool = not(updateIdle({ ...idleFacts, recording: true }))
 pure val idleFactsValues = Set(
-  { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: false, signInUntouched: false, call: false },
-  { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: true, signInUntouched: true, call: true },
-  { home: false, viewOpen: true, voiceOff: false, voiceInactive: true, typing: true, chatResting: false, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: true, signInOpen: true, signInUntouched: false, call: false })
+  { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: false, signInUntouched: false, call: false, recording: false },
+  { home: true, viewOpen: false, voiceOff: true, voiceInactive: true, typing: false, chatResting: true, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: false, signInOpen: true, signInUntouched: true, call: true, recording: false },
+  { home: false, viewOpen: true, voiceOff: false, voiceInactive: true, typing: true, chatResting: false, editor: false, drawer: false, shade: false, homeEdit: false, review: false, connectionBusy: true, signInOpen: true, signInUntouched: false, call: false, recording: true })
 ```
 
 ### A hands-off install needs idle, no pending install, Android's permission and a bound offer
@@ -185,7 +188,8 @@ pure def alwaysFailuresAreBounded(u: Updates): bool = u.failures >= 0 and u.fail
 ### Android's activation is acknowledged once, after the page has kept its drafts
 
 A page that could not keep its drafts acknowledges that it is not ready, and Android cancels. An
-update the owner started is ready only while no voice turn, connection step or call is in flight; a
+update the owner started is ready only while no voice turn, connection step, call or open Notes or
+chat recording is in flight; a
 hands-off one only while the phone is still idle as a hands-off install needs. Android's ready and
 settled events, and the app's start, each read the activation again, and while Android holds an
 activation (preparing, paused or continuing) Alpha reads it again every second, so Continue shows as
@@ -203,9 +207,10 @@ pure def continueInstall(u: Updates): Updates = { ...u, activation: Continuing }
 pure val activationReadMs = 1000
 pure def followsActivation(u: Updates): bool = u.activation == Preparing or u.activation == Paused or u.activation == Continuing
 pure def activationReady(idleFacts: IdleFacts, automatic: bool): bool =
-  if (automatic) updateIdle(idleFacts) else idleFacts.voiceInactive and not(idleFacts.connectionBusy) and not(idleFacts.call)
+  if (automatic) updateIdle(idleFacts) else idleFacts.voiceInactive and not(idleFacts.connectionBusy) and not(idleFacts.call) and not(idleFacts.recording)
 pure def lawAHandsOffActivationNeedsIdle(idleFacts: IdleFacts): bool = activationReady(idleFacts, true) implies updateIdle(idleFacts)
 pure def lawNoActivationIsReadyOnACall(idleFacts: IdleFacts, automatic: bool): bool = not(activationReady({ ...idleFacts, call: true }, automatic))
+pure def lawNoActivationIsReadyWhileRecording(idleFacts: IdleFacts, automatic: bool): bool = not(activationReady({ ...idleFacts, recording: true }, automatic))
 pure val automaticValues = Set(true, false)
 pure def alwaysContinueOnlyWhenPaused(u: Updates): bool = u.canContinue implies u.activation == Paused
 pure def alwaysAPendingActivationBlocksInstall(u: Updates): bool = (u.activation == Preparing or u.activation == Paused) implies u.pending

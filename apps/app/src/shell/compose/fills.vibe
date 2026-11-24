@@ -17,6 +17,8 @@ import { mapsRelayPort } from "../../maps/agent.vibe"
 import type { ResidentHeaders } from "../../platform/resident.vibe"
 import { MapsHandoff } from "../../maps/handoff.vibe"
 import { CallWatch } from "../../telephony/call-bar.vibe"
+import { Machine as NotesRecorderMachine } from "../../../gen/notes__recorder.effect.vibe"
+import { Dictation } from "../../voice/dictation.vibe"
 import { TelephonyBridges } from "../../telephony/bridges.vibe"
 import { messagesShareTarget } from "../../telephony/share.vibe"
 import { replyChanges } from "../../workflows/layer.vibe"
@@ -44,14 +46,19 @@ export function enrolledDeviceHeaders(headers: ResidentHeaders | undefined): Res
   return id === undefined || key === undefined ? {} : { "x-eliza-device-id": id, "x-eliza-device-key": key }
 }
 
-/** The idle facts of the areas after the shell: a call from Telephony, connection work and the sign-in card from Account. */
+/** The idle facts of the areas after the shell: a call from Telephony, connection work and the sign-in card from Account, and an open recording from the Notes recorder and chat dictation. */
 export const idleFill = Layer.effectDiscard(effect {
   const idle = try IdleSources
   const calls = try CallWatch
   const bindings = try AccountBindings
+  const notesRecorder = try NotesRecorderMachine
+  const dictation = try Dictation
   try idle.fill(() => effect {
     const account = try bindings.idle()
-    return { call: try calls.live(), ...account }
+    const notes = (try notesRecorder.get()).phase
+    const chat = (try dictation.get()).stage
+    // spec/settings/updates.md, "The phone is idle only on resting Home with nothing typed, open, recording or in flight"
+    return { call: try calls.live(), ...account, recording: (notes !== "RecClosed" && notes !== "RecFailed") || chat !== "Closed" }
   })
 })
 

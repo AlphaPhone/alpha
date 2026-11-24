@@ -40,6 +40,7 @@ export const activityLive = Layer.effect(Activity, effect {
         signInOpen: quiet.signInOpen,
         signInUntouched: quiet.signInUntouched,
         call: quiet.call,
+        recording: quiet.recording,
       } satisfies IdleFacts
     },
     effect keepDrafts() {

@@ -20,12 +20,13 @@ export service ShellMail {
   fill(sender: MailSender): void!!
 }
 
-/** The idle facts other areas own: a call, Cloud connection work and the sign-in card. */
+/** The idle facts other areas own: a call, Cloud connection work, the sign-in card and an open Notes or chat recording. */
 export interface QuietFacts {
   readonly call: boolean
   readonly connectionBusy: boolean
   readonly signInOpen: boolean
   readonly signInUntouched: boolean
+  readonly recording: boolean
 }
 
 /** A reader of the idle facts other areas own. */
@@ -39,7 +40,7 @@ export service IdleSources {
   fill(source: QuietSource): void!!
 }
 
-const QUIET: QuietFacts = { call: false, connectionBusy: false, signInOpen: false, signInUntouched: true }
+const QUIET: QuietFacts = { call: false, connectionBusy: false, signInOpen: false, signInUntouched: true, recording: false }
 
 /** The mail port: refuses as unsent until Inbox fills it. */
 export const shellMailLive = Layer.effect(ShellMail, effect {
@@ -67,6 +68,7 @@ export const idleSourcesLive = Layer.effect(IdleSources, effect {
           connectionBusy: facts.connectionBusy || read.connectionBusy,
           signInOpen: facts.signInOpen || read.signInOpen,
           signInUntouched: facts.signInUntouched && read.signInUntouched,
+          recording: facts.recording || read.recording,
         }
       }
       return facts
