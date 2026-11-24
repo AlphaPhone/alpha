@@ -1,20 +1,26 @@
 // spec/app/contacts/index.md, "Story: Browse my contacts"; spec/app/contacts/index.md, "Story: Give Alpha access to my contacts"; spec/app/contacts/index.md, "Story: Look at one contact"; spec/app/contacts/index.md, "Story: Add or change a contact"; spec/app/contacts/index.md, "Story: Delete a contact"; spec/app/contacts/index.md, "Story: Know what happened to my change"
-import { Alert, Banner, Button, Chip, ConfirmDialog, EmptyState, Input, ListGroup, ListRow, SearchField, Spinner, Textarea } from "@repo/ui";
+import { Alert, AppHeader, Banner, Button, Chip, ConfirmDialog, EmptyState, Input, ListGroup, ListRow, SearchField, Spinner, Tabs, TabsContent, Textarea } from "@repo/ui";
 import type { ManagedRuntime } from "effect";
-import { ArrowLeft, MessageSquare, Phone as Call, Plus, Star } from "lucide-react";
+import { ArrowLeft, ChevronLeft, MessageSquare, Phone as Call, Plus, Star } from "lucide-react";
 import { useState } from "react";
 import type { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe";
 import { accessNeeded, listFailed, listedEmpty, noMatches, pending, refused, shown, uncertain } from "../../gen/app__contacts.ts";
 import { useMachine as useContacts } from "../../gen/app__contacts.react.ts";
-import type { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe";
+import type { Machine as PhoneMachine, Tab } from "../../gen/app__phone.effect.vibe";
 import { clear } from "../../gen/app__phone.ts";
 import { useMachine as usePhone } from "../../gen/app__phone.react.ts";
+import type { Machine as VoicemailMachine } from "../../gen/app__phone__voicemail.effect.vibe";
+import { useMachine as useVoicemail } from "../../gen/app__phone__voicemail.react.ts";
+import { useMachine as useShell } from "../../gen/app__shell.react.ts";
+import type { Alpha } from "../runtime/area.tsx";
+import { PhoneTabs } from "../phone/PhoneTabs.tsx";
 import { type Form, Rows, blankForm, sheetOf } from "./contacts.vibe";
 import { CommsBar, type CommsServices } from "../phone/CommsBar.tsx";
 
 export interface ContactsProps {
   /** Provides Contacts' machine, resident, Phone's, for whether a call may be an emergency call, and what Contacts counts. */
-  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | PhoneMachine | Rows | CommsServices, unknown>;
+  runtime: ManagedRuntime.ManagedRuntime<ContactsMachine | PhoneMachine | VoicemailMachine | Rows | CommsServices, unknown>;
+  alpha: Alpha;
 }
 
 /**
@@ -22,9 +28,12 @@ export interface ContactsProps {
  * open Phone or Messages with the number filled in; nothing is dialled or sent here.
  * @model spec/app/contacts/index.md
  */
-export function Contacts({ runtime }: ContactsProps) {
+export function Contacts({ runtime, alpha }: ContactsProps) {
   const contacts = useContacts(runtime);
-  const phone = usePhone(runtime).state;
+  const dialer = usePhone(runtime);
+  const phone = dialer.state;
+  const shell = useShell(runtime);
+  const voicemail = useVoicemail(runtime).state;
   const [query, setQuery] = useState(() => runtime.runSync(Rows.use((rows) => rows.get())).sought);
   if (contacts.cause) return <Alert variant="destructive" className="m-4">Alpha could not open Contacts</Alert>;
   const { state, can, send } = contacts;
@@ -38,9 +47,19 @@ export function Contacts({ runtime }: ContactsProps) {
     if (can(event)) void send(event);
   };
   const safe = clear(phone);
-  if (state.form !== "Shut") return <Editor runtime={runtime} />;
-  return (
-    <section aria-label="Contacts" className="flex flex-col gap-3 p-4">
+  const canBack = shell.can({ type: "goBack" });
+  const back = canBack ? () => void alpha.back() : undefined;
+  const phoneTabs = shell.state?.trail.at(-2) === "Phone" && !state.opened && state.form === "Shut";
+  const select = async (tab: string) => {
+    if (tab === "Contacts" || !canBack) return;
+    const event = { type: "pickTab", tab: tab as Tab } as const;
+    if (dialer.can(event)) await dialer.send(event);
+    await shell.send({ type: "goBack" });
+  };
+  const header = <AppHeader title="Contacts" leading={back && <Button variant="ghost" size="icon" aria-label="Back" onClick={back}><ChevronLeft /></Button>} />;
+  if (state.form !== "Shut") return <>{header}<Editor runtime={runtime} /></>;
+  const content = (
+    <section aria-label="Contacts" className="flex flex-col gap-3 px-4 pt-2">
       {pending(state) && <Banner>Contact change pending</Banner>}
       {uncertain(state) && <Banner variant="warn" action={can({ type: "refresh" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "refresh" })}>Refresh</Button>}>Outcome unknown: refresh</Banner>}
       {accessNeeded(state) && (
@@ -78,10 +97,17 @@ export function Contacts({ runtime }: ContactsProps) {
       <CommsBar runtime={runtime} />
     </section>
   );
+  if (!phoneTabs) return <>{header}{content}</>;
+  return (
+    <Tabs value="Contacts" onValueChange={(value) => void select(value)} className="min-h-0 flex-1 gap-0">
+      <PhoneTabs title="Contacts" contacts voicemail={phone.voicemail} unheard={(voicemail?.unheard ?? 0) > 0} onBack={back} />
+      <TabsContent value="Contacts" className="min-h-0 flex-1 overflow-y-auto">{content}</TabsContent>
+    </Tabs>
+  );
 }
 
 /** One contact as the phone holds it now. */
-function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
+function Card({ runtime, safe }: Pick<ContactsProps, "runtime"> & { safe: boolean }) {
   const { state, can, send } = useContacts(runtime);
   if (!state) return null;
   const card = runtime.runSync(Rows.use((rows) => rows.get())).card;
@@ -128,7 +154,7 @@ function Card({ runtime, safe }: ContactsProps & { safe: boolean }) {
 }
 
 /** The form that adds a contact or changes one: a name, several numbers and addresses, and notes where they are available. */
-function Editor({ runtime }: ContactsProps) {
+function Editor({ runtime }: Pick<ContactsProps, "runtime">) {
   const { state, can, send } = useContacts(runtime);
   const phone = usePhone(runtime).state;
   if (!state || !phone) return null;

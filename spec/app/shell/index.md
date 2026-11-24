@@ -84,7 +84,9 @@ pure def raise(s: Shell, detent: Detent): Shell = { ...s, assistant: detent }
 ### Back closes one layer: the drawer, then Ask Alpha by a step, then the app on top
 
 The full screen lowers to the sheet, and typing or the sheet to the bar. On
-Home with nothing over it there is nothing to go back to.
+bare Home, Android Back keeps Alpha in front while Alpha holds the HOME
+role. Otherwise Android Back moves the task behind the previous one and
+keeps the page for the next visit.
 
 ```quint
 pure def layers(s: Shell): int =
@@ -100,6 +102,11 @@ pure def goBack(s: Shell): Shell =
 ```
 
 ### Home leaves every app and closes every layer at once
+
+On Android, HOME, the app icon and a return to Alpha deliver their intents
+to the live page when Android can bring its task forward. If Android
+repeatedly refuses the handoff, subsequent launches proceed in their own
+task.
 
 ```quint
 pure def canGoHome(s: Shell): bool = layers(s) > 0
