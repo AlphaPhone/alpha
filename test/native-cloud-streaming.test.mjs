@@ -114,6 +114,34 @@ test('old-turn drain is bounded: a lost final replaces the transport muted and t
  assert.equal(g.removed,1);g.emit({sessionId:C,type:'speech-end',text:'late'});assert.deepEqual(g.events,[]);
 });
 
+// While the old transport's native stop is still pending its id is still current, so only the
+// closing guard keeps its last events (a late turn start, a socket error) out of the session.
+// A reply still playing at the bound is never cut off by a replacement: the close rejects instead.
+test('a transport being replaced is unheard until its stop confirms; a reply playing at the bound keeps its transport',async t=>{
+ t.mock.timers.enable({apis:['setTimeout']});
+ const settle=async()=>{for(let i=0;i<20;i++)await Promise.resolve();};
+ let acknowledge;const f=fixture({stop:()=>new Promise(resolve=>acknowledge=resolve)});
+ const capture=await f.speech.listen(f.handlers),A=f.id;f.emit({type:'speech-start'});
+ let settled;const closing=capture.close().then(()=>settled='closed',error=>settled=error.message);
+ await settle();t.mock.timers.tick(2500);await settle();assert.equal(f.native.at(-1),`stop ${A}`);
+ f.emit({sessionId:A,type:'speech-start'});f.emit({sessionId:A,type:'transcript',text:'late'});
+ f.emit({sessionId:A,type:'error',code:'expired'});await settle();
+ acknowledge();await closing;const B=f.id;
+ assert.equal(settled,'closed');assert.notEqual(B,A);assert.equal(f.native.at(-1),`start ${B} muted`);
+ assert.deepEqual(f.events,['start','end',null],'nothing from the stopping transport reaches the session');assert.deepEqual(f.interim,[]);
+ await f.speech.listen(f.handlers);assert.equal(f.native.at(-1),`unmute ${B}`,'the late start did not make the next listen drain again');
+ f.emit({type:'speech-start'});f.emit({type:'speech-end',text:'Yes'});assert.deepEqual(f.events,['start','end',null,'start','end','Yes']);
+ const ending=f.speech.stop();acknowledge();await ending;
+
+ const g=fixture(),held=await g.speech.listen(g.handlers),C=g.id;
+ const reply=g.speech.speak('Finalized reply.',new AbortController().signal,()=>{}).catch(error=>error);await settle();
+ g.emit({type:'audio-start',utteranceId:g.speaks[0].utteranceId});g.emit({type:'speech-start'});
+ const refused=assert.rejects(held.close(),/could not settle the capture during playback/);
+ await settle();t.mock.timers.tick(2500);await refused;
+ assert.deepEqual(g.native,[`start ${C} open`,`unmute ${C}`,`mute ${C}`],'no stop and no new transport under a playing reply');
+ await g.speech.stop();await reply;
+});
+
 test('first PCM starts playback before completion; unrelated completion cannot settle speech',async()=>{
  const f=fixture();await f.speech.listen(f.handlers);let started=0,finished=false;
  const pending=f.speech.speak('Finalized reply.',new AbortController().signal,()=>started++).then(()=>finished=true);
