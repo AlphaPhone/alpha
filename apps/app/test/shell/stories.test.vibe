@@ -16,6 +16,7 @@ import { Machine as ToastsMachine } from "../../gen/shell__toasts.effect.vibe"
 import { BrowserAgent, BrowserOpenRefused } from "../../src/browser/agent.vibe"
 import { layer as browserLayer } from "../../src/browser/layer.vibe"
 import { BrowserTabs } from "../../src/browser/session.vibe"
+import { curTab } from "../../gen/browser__session.effect.vibe"
 import { browserPagesFromBrowser } from "../../src/assistant/fills.vibe"
 import { callsTo, fakeHost, report, settledTabs } from "../browser/fakes.vibe"
 import { MailComposer } from "../../src/inbox/composer.vibe"
@@ -147,8 +148,8 @@ describe("Navigation (spec/shell/navigation.md, \"Story: Go back one step at a t
     }
   })
 
-  it.live("Talk stays on in Browser through the agent's open, a redirect of its tab and a late failed load, and the next turn names the page shown then (spec/voice/conversation.md, \"Story: Keep talking on a screen the agent opens for me\")", () => effect {
-    // spec/shell/navigation.md, "Voice stays on through an app opened or shown again in front; only Back, Home, stopping voice or a boot closes it"
+  it.live("Talk stays on over Browser through the agent's open in its tab, a redirect and a late failed load, and the next turn names the page shown then (spec/voice/conversation.md, \"Story: Keep talking on a screen the agent opens for me\")", () => effect {
+    // spec/shell/navigation.md, "The app in front opened again keeps voice and its revision, and a page inside Browser is not a new screen"
     const fake = try fakeHost({ answers: { keyguard: () => ({ locked: false }) } })
     const live = Layer.provideMerge(browserLayer, Layer.provideMerge(shell, Layer.mergeAll(fake.base, memoryStore, resident, journal)))
     try scoped(effect {
@@ -159,28 +160,41 @@ describe("Navigation (spec/shell/navigation.md, \"Story: Go back one step at a t
         const pages = try browserPagesFromBrowser
         try settledTabs(tabs)
         const session = (try callsTo(fake.calls, "browsingState"))[0]?.args.session as string
+        // What the assistant's follower keys a screen change on (app, route, revision), and whether voice runs.
         const screen = effect {
           const nav = try navigation.get()
-          return { app: nav.app, voice: nav.voice, revision: nav.revision }
+          return { app: nav.app, route: nav.places.find((place) => place.app === nav.app)?.route ?? "", voice: nav.voice, revision: nav.revision }
         }
+        const page = effect {
+          const state = try tabs.get()
+          const picked = try pages.selected()
+          return { tab: picked?.id, revision: picked?.revision, url: curTab(state).page.url }
+        }
+        try navigation.open("browser")
         try navigation.send({ type: "startVoice" })
+        const talking = try screen
         const opened = try agent.openApproved("https://example.test/slow", false)
         try report(fake.events, session, { id: opened.tab, sequence: 1, navigation: "1", url: "https://example.test/slow", loading: true })
         try opened.present
         const shown = try screen
-        const before = try pages.selected()
-        // The device resolves a redirect in the same tab after Browser came forward.
+        const first = try page
+        // The device resolves a redirect in the same tab after the open was shown.
         try report(fake.events, session, { id: opened.tab, sequence: 2, navigation: "2", url: "https://m.example.test/landing", title: "Landing", loading: false, committed: true })
         const redirected = try screen
-        const after = try pages.selected()
-        // A later load in that tab fails long after it began.
+        const landed = try page
+        // A later load in that tab fails long after it began: the tab shows that failed address, which is no readable page, so the
+        // next turn names no Browser tab rather than the landing page it left.
         try report(fake.events, session, { id: opened.tab, sequence: 3, navigation: "3", url: "https://m.example.test/next", loading: false, committed: false, error: "net::ERR_TIMED_OUT" })
         const failed = try screen
+        const after = try page
         try Effect.try(() => assert.deepStrictEqual({
-          shown: [shown.app, shown.voice], redirected, failed,
-          sameTab: before !== undefined && after !== undefined && before.id === after.id, newPage: before?.revision !== after?.revision,
+          talking: [talking.app, talking.voice], shown, redirected, failed,
+          sameTab: first.tab !== undefined && first.tab.endsWith(`:${opened.tab}`) && landed.tab === first.tab, newPage: landed.revision !== first.revision,
+          urls: [landed.url, after.url], afterFailure: after.tab,
         }, {
-          shown: ["browser", true], redirected: shown, failed: shown, sameTab: true, newPage: true,
+          talking: ["browser", true], shown: talking, redirected: talking, failed: talking,
+          sameTab: true, newPage: true,
+          urls: ["https://m.example.test/landing", "https://m.example.test/next"], afterFailure: undefined,
         }))
       }
     })

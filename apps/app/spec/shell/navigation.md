@@ -322,19 +322,17 @@ pure def alwaysHomeKeepsItsBar(s: Nav): bool = keepsItsBar(s.app == "", s.chat)
 pure def sometimesVoiceOverConversation(s: Nav): bool = s.voice and s.chat == Full
 ```
 
-### Voice stays on through an app opened or shown again in front; only Back, Home, stopping voice or a boot closes it
+### The app in front opened again keeps voice and its revision, and a page inside Browser is not a new screen
 
-Opening an app, opening the app in front again, a sheet, a hold or a hidden page change nothing of
-voice here (a hidden page retires voice through the conversation, spec/voice/conversation.md). So
-Browser brought forward with the page an applied open loaded, and every later page of that tab (a
-redirect, a load that fails late, a navigation the agent caused), keep Talk on. The app opened again
-in front keeps its revision: a new page inside Browser is not a new screen.
+Opening the app already in front again, as Browser is when an applied open loads a page in the tab
+it shows, changes neither voice nor the revision. A later page of that tab (a redirect, a load that
+fails late, a page the agent caused) is inside Browser and does not reach navigation at all. So Talk
+running over Browser keeps running through them; the next turn carries the page shown as it is sent
+(spec/assistant/context.md). This rule says nothing of an app opened over another one.
 
 ```quint
-pure def stepOnlyBackHomeStopOrBootClosesVoice(before: Nav, via: str, after: Nav): bool =
-  (before.voice and not(after.voice)) implies (via == "nativeBack" or via == "goHome" or via == "stopVoice" or via == "boot")
-pure def stepReopeningTheAppInFrontKeepsItsRevision(before: Nav, via: str, after: Nav): bool =
-  (via == "openApp" and before.app == after.app) implies after.revision == before.revision
+pure def stepReopeningTheAppInFrontKeepsVoiceAndItsRevision(before: Nav, via: str, after: Nav): bool =
+  (via == "openApp" and before.app == after.app) implies (after.voice == before.voice and after.revision == before.revision)
 pure def sometimesVoiceOverAnOpenApp(s: Nav): bool = s.voice and s.app != ""
 ```
 
