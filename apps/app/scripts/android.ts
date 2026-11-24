@@ -99,7 +99,7 @@ function refuseOn(problems: readonly Problem[]) {
 
 /** Alpha's agent pack (apps/agent), built from the pinned eliza for the production cloud. */
 export function buildPack() {
-  run("pnpm", ["--filter", "@repo/agent", "build"], { cwd: root });
+  run(process.execPath, [join(root, "vibestack/spec.ts"), "tasks", "@repo/agent#build"], { cwd: root });
 }
 
 const packBundle = () => join(agentPack, "dist/bundle");
@@ -126,7 +126,7 @@ export async function stageRuntime(): Promise<string> {
 
 /** The page, built with the test mocks off, and the record that says so. */
 export function buildWeb() {
-  run("pnpm", ["run", "build"], { cwd: app });
+  run(process.execPath, [join(root, "vibestack/spec.ts"), "tasks", "@repo/app#build"], { cwd: root });
   writeJson(join(app, androidPaths.web, "build-flags.json"), { testMocks: false });
 }
 
