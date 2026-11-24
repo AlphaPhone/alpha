@@ -97,6 +97,7 @@ export async function flagOffAndroid(page: Page, options: FlagOffOptions = {}) {
     const navigation=()=>fixtureNavigation??=(window as any).createNativeNavigationFixture(id,agentId,f);
     const request = async (method: string, path: string, body: any, headers: Record<string, string>, owner?: unknown): Promise<{ status: number; data: unknown }> => {
       const navigationResult=navigation().request(method,path,body,headers,owner);if(navigationResult)return navigationResult;
+      if (path === '/api/notes/trash/recordings' && method === 'GET') return ok({success:true,data:[]});
       // Mounted canonical views probe these sources; this native fixture provides none.
       if (method === 'GET' && ['/api/notes/state', '/api/lifeops/calendar/feed', '/api/lifeops/calendar/calendars', '/api/lifeops/calendar/next-context'].includes(path.split('?')[0])) return { status: 503, data: { error: 'Canonical records unavailable in this fixture' } };
       if (path === '/api/auth/me') return ok({ identity: { id, kind: 'owner' }, access: { role: 'OWNER', mode: 'local' } });
@@ -476,16 +477,17 @@ export async function expectNoDevelopmentSurface(page: Page) {
 /** Existing-installation fixtures seed UI progress only. OS/plugin grants remain independent.
  * The record's format follows the platform: the browser reads version 1 (four steps), Android
  * reads version 4 (seven steps). Specs often install `androidBridge` in a later init script, so
- * the native record is written when the bridge is installed rather than when this script runs. */
-export async function seedCompletedAccessSetup(page: Page) {
-  await page.addInitScript(()=>{
+ * the native record is written when the bridge is installed. Android compositions without
+ * a bridge specify the platform explicitly. */
+export async function seedCompletedAccessSetup(page: Page, platform?: 'android') {
+  await page.addInitScript(platform=>{
     const w=window as any;
     const seed=(native:boolean)=>localStorage.setItem('alpha:startup-permission-walkthrough:v1',JSON.stringify(native?{version:4,status:'completed',step:7}:{version:1,status:'completed',step:4}));
-    if('androidBridge' in w){seed(true);return;}
+    if(platform==='android'||w.androidBridge){seed(true);return;}
     seed(false);
     let bridge:unknown;
-    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(true);}});
-  });
+    Object.defineProperty(w,'androidBridge',{configurable:true,enumerable:true,get:()=>bridge,set:(value:unknown)=>{bridge=value;seed(Boolean(value));}});
+  },platform);
 }
 /** Dismiss the explicit post-auth Ready card; quiet restoration of completed setup opens no card.
  * Waits for one of the two outcomes: the Ready card is showing, or no panel and completed setup is stored. */

@@ -6,7 +6,7 @@ for (const theme of ['light', 'dark']) {
     await expect(page.getByRole('button', { name: 'Morning brief Spoken rundown of your day, weekdays at 7', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Weekly review One-page recap of your week, Fridays at 5', exact: true })).toBeVisible();
     await expect(page.getByText('Protect focus', { exact: true })).toHaveCount(0);
-    await expect(page.getByText('Receipts to Files', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('Receipts to Files', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Add to Workflows', exact: true }).click();
     await page.getByRole('button', { name: 'Edit When step', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Message trigger', exact: true })).toHaveCount(0);

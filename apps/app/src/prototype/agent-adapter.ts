@@ -2432,7 +2432,8 @@ export function installAgentAdapter(Component: Shell, views: Shell) {
       }
       const speechText=typeof emailOutcome==='string'?emailOutcome:smsReview==='draft'?'Who should get this text? Say their full name or choose a recipient on your phone.'
         :smsReview==='addressed-draft'?'Your draft is ready. Review it on your phone. You can confirm by voice.'
-        :smsReview==='send'?'Review the text on your phone. You can confirm by voice or tap Send.'
+        // Playback must not repeat the confirmation's words, or the spoken "Send the text" reads as echo.
+        :smsReview==='send'?'The message is ready for review. You can confirm by voice.'
         :smsReview==='recipient'?'Choose the recipient on your phone before sending.'
         :spokenActionReply(text,presentedReply,emailCardReady);
       return {requestId:turnId,conversationId:identity.conversationId,userMessageId:reply.userMessageId,assistantMessageId:reply.messageId,text:presentedReply.text,...(speechText===presentedReply.text?{}:{speechText}),complete:!review,...(review?{reviewRequired:true}:{}),...(awaiting?.length?{awaitingUserInput:{proposalId:awaiting[0].id,digest:awaiting[0].readReply!.digest}}:{})};

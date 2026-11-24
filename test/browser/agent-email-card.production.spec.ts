@@ -267,14 +267,21 @@ async function editCrewDraft(page: Page) {
     await expect(row).toBeInViewport({ ratio: 1 });
     expect(await row.evaluate((item) => item.scrollWidth <= item.clientWidth)).toBe(true);
   }
-  // Each keystroke shows at once and is kept: nothing is dropped while the edit is saved.
-  await to.press('End');
+  // Place the caret explicitly because End moves differently across platforms.
+  // Each keystroke must still survive the draft's save and rerender.
+  await to.focus();
+  await to.evaluate((field: HTMLInputElement) => {
+    field.setSelectionRange(field.value.length, field.value.length);
+  });
   await to.pressSequentially(', owner@example.invalid');
   await expect(to).toHaveValue(shown.to.join(', '));
   await expect(listed.getByRole('listitem')).toHaveText(shown.to);
   await expect(draft.getByText('4 recipients', { exact: true })).toBeVisible();
   const body = draft.getByRole('textbox', { name: 'Email body' });
-  await body.press('ControlOrMeta+End');
+  await body.focus();
+  await body.evaluate((field: HTMLTextAreaElement) => {
+    field.setSelectionRange(field.value.length, field.value.length);
+  });
   await body.pressSequentially(' And the blue notebook.');
   await expect(body).toHaveValue(shown.bodyText);
   return draft;

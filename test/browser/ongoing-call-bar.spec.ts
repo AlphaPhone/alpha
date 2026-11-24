@@ -42,9 +42,11 @@ test.describe('Alpha image: ongoing call bar', () => {
     await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 42_000}]);
     await expect(bar(page)).toContainText(/On call · 0:4[2-4]/);
     await expect(page.getByRole('button', {name: /^Return to call, On call · 0:4\d$/})).toBeVisible();
-    // A ringing call is an incoming call, with no clock.
+    // Android owns the incoming alert. Once answered, the current call gets the bar.
     await setCalls(page, [{id: 'call-2', state: 'ringing', connectedAt: null}]);
-    await expect(bar(page)).toContainText('Incoming call');
+    await expect(bar(page)).toHaveCount(0);
+    await setCalls(page, [{id: 'call-2', state: 'active', connectedAt: Date.now()}]);
+    await expect(bar(page)).toContainText(/On call/);
   });
 
   // Owner report (v609): the remote side hung up just as the owner tapped the bar; the bar vanished,
@@ -92,15 +94,14 @@ test.describe('Alpha image: ongoing call bar', () => {
     await expect(bar(page)).toHaveCount(0, {timeout: 4_000});
   });
 
-  test('a new call during the Call ended moment shows at once', async ({page}) => {
+  test('an incoming call clears the app bar during the Call ended moment', async ({page}) => {
     await setupTelephony(page);
     await setCalls(page, [{id: 'call-1', state: 'active', connectedAt: Date.now() - 5_000}]);
     await expect(bar(page)).toContainText(/On call/);
     await setCalls(page, []);
     await expect(bar(page)).toContainText('Call ended');
     await setCalls(page, [{id: 'call-2', state: 'ringing', connectedAt: null}]);
-    await expect(bar(page)).toContainText('Incoming call');
-    await expect(page.getByRole('button', {name: 'Decline', exact: true})).toBeVisible();
+    await expect(bar(page)).toHaveCount(0);
   });
 
   test('End call disconnects the shown call and the bar goes when Telecom removes it', async ({page}) => {
@@ -121,15 +122,19 @@ test.describe('Alpha image: ongoing call bar', () => {
     await expect.poll(async () => await bar(page).textContent(), {timeout: 5_000}).not.toBe(first);
   });
 
-  test('a held call and a ringing call name their state; a ringing call offers Decline', async ({page}) => {
+  test('a held call bar returns once the incoming alert is gone', async ({page}) => {
     await setupTelephony(page);
     await setCalls(page, [{id: 'call-1', state: 'held', connectedAt: Date.now() - 10_000}]);
     await expect(bar(page)).toContainText('On hold');
     await expect(page.getByRole('button', {name: 'End call', exact: true})).toBeVisible();
-    await setCalls(page, [{id: 'call-2', state: 'ringing', connectedAt: null}]);
-    await expect(bar(page)).toContainText('Incoming call');
-    await page.getByRole('button', {name: 'Decline', exact: true}).click();
-    expect(await inputs(page)).toEqual([['endCall', {id: 'call-2'}]]);
+    await setCalls(page, [
+      {id: 'call-1', state: 'held', connectedAt: Date.now() - 10_000},
+      {id: 'call-2', state: 'ringing', connectedAt: null},
+    ]);
+    await expect(bar(page)).toHaveCount(0);
+    await setCalls(page, [{id: 'call-1', state: 'held', connectedAt: Date.now() - 10_000}]);
+    await expect(bar(page)).toContainText('On hold');
+    expect(await inputs(page)).toEqual([]);
   });
 
   test('the bar sits below the native top inset', async ({page}) => {

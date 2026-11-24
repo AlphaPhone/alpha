@@ -3,6 +3,8 @@ import {presentDeviceRecordOperation} from '../../apps/app/src/runtime/device-re
 import { returnToApps } from './app-navigation';
 import { test, expect } from '@playwright/test';
 
+test.use({timezoneId:'UTC'});
+
 // Real renderer, pairing, connection controller, proposal parser and journal
 // orchestration and real browser reminder storage/review. Connection and journal
 // boundaries are controlled fixtures; no real agent or external service is used.
@@ -16,9 +18,7 @@ for (const { target: version, mode } of cases) {
   const v2 = version === 'v2';
   test(v2 ? (mode === 'snooze-alert' ? 'browser assistant v2 alert action: snooze' : `browser assistant v2 no-alert action: ${mode}`) : `browser assistant reminder action: ${mode}`, async ({ page }) => {
     await page.addInitScript(({ v2, mode }) => {
-      const w = window as any, store = new Map(), alert = !v2 || mode === 'snooze-alert';
-      const timing = v2 ? { alertMinutes: alert ? 0 : null } : {};
-      if(!localStorage.getItem('alpha.browser.reminders.v1'))localStorage.setItem('alpha.browser.reminders.v1',JSON.stringify({sourceRevision:'b'.repeat(64),reminders:[{id:'selected-reminder',title:'Selected private reminder',body:'Private reminder details',at:Date.parse('2026-10-02T13:00:00Z'),dueAt:Date.parse('2026-10-02T13:00:00Z'),...timing,status:alert?'scheduled':'pending',occurrenceId:'initial-occurrence',revision:'c'.repeat(64),mode:alert?'inexact':'none',createdAt:Date.now(),...(mode==='recurring-complete'?{recurrence:{rule:'daily',zone:'UTC',date:'2026-10-02',time:'13:00',leadMinutes:0}}:{})}]}));
+      const w = window as any, store = new Map();
       const agentId = '12345678-1234-4234-8234-123456789abc';
       const fixture = w.recoveryFixture = { posts: 0, lists: 0, decisions: 0, claims: 0, receipts: 0, effects: 0, journal: [] as string[], proposal: null as any };
       const methods = (names: string[]) => names.map(name => ({ name, rtype: 'promise' }));
@@ -95,7 +95,26 @@ for (const { target: version, mode } of cases) {
     await local.getByRole('button', { name: 'Connect local agent', exact: true }).click();
     await page.locator('.alpha-connection-scrim').waitFor({ state: 'detached' });
     await returnToApps(page);
-    await page.getByRole('button',{name:'Calendar',exact:true}).click();
+    await page.evaluate(async ({ v2, mode }) => {
+      const { reminderDocument } = await import('/src/browser/reminder-store.ts');
+      const alert = !v2 || mode === 'snooze-alert';
+      const dueAt = Date.parse('2026-10-02T13:00:00Z');
+      const reminder = {
+        id: 'selected-reminder', title: 'Selected private reminder', body: 'Private reminder details',
+        at: dueAt, dueAt, ...(v2 ? { alertMinutes: alert ? 0 : null } : {}),
+        status: alert ? 'scheduled' : 'pending', occurrenceId: 'initial-occurrence',
+        revision: 'c'.repeat(64), mode: alert ? 'inexact' : 'none', createdAt: Date.now(),
+        ...(mode === 'recurring-complete' ? {
+          recurrence: { rule: 'daily', zone: 'UTC', date: '2026-10-02', time: '13:00', leadMinutes: 0 },
+        } : {}),
+      };
+      await reminderDocument.edit(
+        () => ({ sourceRevision: 'b'.repeat(64), reminders: [] as typeof reminder[] }),
+        data => { data.reminders.push(reminder); },
+      );
+      window.dispatchEvent(new Event('alpha:reminders-document-changed'));
+    }, { v2, mode });
+    await page.getByRole('button',{name:'Calendar',exact:true}).press('Enter');
     await page.getByRole('button',{name:/^Selected private reminder,/}).click();
     await expect.poll(()=>page.evaluate(()=>document.documentElement.dataset.activeView)).toBe('calendar');
     await page.getByRole('button',{name:'Type',exact:true}).click();
