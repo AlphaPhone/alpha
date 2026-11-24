@@ -39,6 +39,7 @@ export const mounts: readonly Mount[] = [
   at("view:Phone", () => import("./phone/index.tsx")),
   at("view:Messages", () => import("./messages/index.tsx")),
   at("view:Contacts", () => import("./contacts/index.tsx")),
+  at("view:Workflows", () => import("./workflows/index.tsx")),
   at("overlay", () => import("./phone/strip.tsx")),
   at("settings/phone", () => import("./phone/settingsDetails.tsx")),
   at("overlay", () => import("./contacts/requestCard.tsx")),
