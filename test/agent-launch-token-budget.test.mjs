@@ -35,11 +35,12 @@ test('the pinned runtime sends no output cap and keeps references stable without
   assert.doesNotMatch(swap, /ELIZA_SECRET_SWAP_STABLE_REFERENCES/);
 });
 
-// A launch variable may only shorten a rate-limit hold (spec/agent/models/binding.md, "A host may
-// shorten how long a rate limit holds the account"); the phone sets none (first test), so the pinned
-// runtime's own handling of a refused step decides how long a turn waits.
-test('the pinned runtime reads the Cerebras rate-limit hold only as a launch override', () => {
+// No launch setting changes a rate-limit hold (spec/agent/models/binding.md, "A rate limit holds the
+// account for the provider's whole retry time, and for at most 4 s on a Cerebras own-key endpoint"); the
+// phone sets none (first test), so the pinned runtime's own bound decides how long a turn waits.
+test('the pinned runtime bounds a Cerebras own-key rate-limit hold itself, with no launch override', () => {
   const binding = read('vendor/eliza/packages/agent/src/models/binding.vibe');
-  assert.match(binding, /holdSettings = \["OPENAI_RATE_LIMIT_MAX_HOLD_SECONDS", "CEREBRAS_RATE_LIMIT_MAX_HOLD_SECONDS"\]/);
-  assert.match(binding, /maxHold: rateLimitHold\(launch\.environment\)/);
+  assert.doesNotMatch(binding, /RATE_LIMIT_MAX_HOLD_SECONDS|holdSettings|rateLimitHold/);
+  assert.match(binding, /cerebrasRoute = launch\.model\.backend === "own-key" && onCerebras\(launch\.model\.ownKeyBaseUrl\)/);
+  assert.match(read('vendor/eliza/spec/agent/models/binding.md'), /pure val maxHoldMs = 4000/);
 });
