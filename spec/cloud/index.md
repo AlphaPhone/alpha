@@ -117,6 +117,19 @@ pure def registrationOf(environment: Environment, web: str): Registration = {
 }
 ```
 
+### No return lies on the API origin, which serves no page
+
+eliza's registry refuses one (`spec/cloud/nativeClients/registry.md`, "A
+registration is accepted only when the registry stays valid and no return
+lies on the API origin, and it never changes how another client is
+admitted"), so a registration whose web origin is its cloud's API origin
+could never be applied.
+
+```quint
+pure def returnsOffApi(registration: Registration, api: str): bool =
+  registration.signInReturn.origin != api and registration.billingReturn.origin != api
+```
+
 ### An environment's asset links hold exactly one statement for Alpha's package, naming that environment's signers
 
 ```quint
@@ -162,6 +175,17 @@ pure val ownCapabilities: List[str] = List("inference", "speech", "maps", "manag
 
 pure def offersAlphasServices(name: str, audience: str, capabilities: List[str]): bool =
   name == ownCloudName and audience == alphaPackage and capabilities == ownCapabilities
+```
+
+### Alpha's own cloud mails each sign-in code from its own address on Alpha's zone
+
+The sender is `noreply@alphacompute.cc` in both environments, the address the
+mail provider verified for Alpha's zone.
+
+```quint
+pure val ownMailSender = "noreply@alphacompute.cc"
+
+pure def mailsAsAlpha(sender: str): bool = sender == ownMailSender
 ```
 
 ### Chat on Alpha's own cloud is Alpha's model, and a request that names no cap is quoted and sent at the longest reply its provider generates

@@ -7,9 +7,9 @@
     "node": ">=26"
   },
   "exports": {
-    "./routes": {
-      "types": "./dist/src/routes.d.ts",
-      "default": "./dist/src/routes.js"
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
     }
   },
   "scripts": {

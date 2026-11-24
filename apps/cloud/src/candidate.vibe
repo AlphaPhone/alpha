@@ -1,7 +1,8 @@
 // spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover"; spec/cloud/index.md, "The candidates of production and staging share no host"; spec/cloud/index.md, "The candidate's profile answers at the candidate's cloud and keeps its returns on the candidate's App Link host"; spec/cloud/index.md, "Alpha's own cloud offers inference, speech, maps, managed Google and billing, under Alpha's name, its entitlements for Alpha's package"; spec/cloud/index.md, "Chat on Alpha's own cloud is Alpha's model, and a request that names no cap is quoted and sent at the longest reply its provider generates"
 import type { CloudEnvironment, CloudProfile } from "@elizaos/cloud/profile"
 import { deployment } from "@repo/deployment"
-import { candidateProfileFits, candidatesSeparate, chatModelFits, offersAlphasServices, type Hosts } from "../gen/cloud.effect.vibe"
+import { candidateProfileFits, candidatesSeparate, chatModelFits, mailsAsAlpha, offersAlphasServices, returnsOffApi, type Hosts } from "../gen/cloud.effect.vibe"
+import { registrationAt } from "./alpha.vibe"
 
 /** `@repo/deployment` names no hosted row for an environment. */
 export error CandidateUnknown { environment: string }
@@ -16,7 +17,7 @@ export effect function candidates(): Record<CloudEnvironment, Hosts>!CandidateUn
   return { production: try candidateOf("production"), staging: try candidateOf("staging") }
 }
 
-/** Every rule of Alpha's own cloud that `profile` breaks for the candidates `hosts`, one line each: its hosts, its name, services and audience, and its chat model. */
+/** Every rule of Alpha's own cloud that `profile` breaks for the candidates `hosts`, one line each: its hosts, its name, services and audience, its mail sender, its returns and its chat model. */
 export function candidateProblems(profile: CloudProfile, hosts: Record<CloudEnvironment, Hosts>): ReadonlyArray<string> {
   const problems: string[] = []
   if (!candidatesSeparate(hosts.production, hosts.staging)) problems.push("the production and staging candidates share a host")
@@ -27,6 +28,9 @@ export function candidateProblems(profile: CloudProfile, hosts: Record<CloudEnvi
       problems.push(`${environment}: the profile answers at ${settings.api} for ${settings.web}, and the candidate is ${candidate.cloud} for ${candidate.appLinkHost}`)
     if (!offersAlphasServices(settings.name, settings.entitlementAudience, [...settings.capabilities]))
       problems.push(`${environment}: the profile is not Alpha's own cloud, with its name, its services and Alpha's package as the audience`)
+    if (!mailsAsAlpha(settings.mailSender)) problems.push(`${environment}: the profile mails from ${settings.mailSender}, not Alpha's own address`)
+    if (!returnsOffApi(registrationAt(environment === "production" ? "Production" : "Staging", candidate.appLinkHost), settings.api))
+      problems.push(`${environment}: a return of Alpha's registration lies on the API origin ${settings.api}`)
     const models = settings.inference?.models ?? []
     if (models.length !== 1 || !models.every((model) => chatModelFits(model.id, model.upstreamModel, model.defaultMaxTokens ?? 0)))
       problems.push(`${environment}: chat is not Alpha's model at the longest reply its provider generates`)

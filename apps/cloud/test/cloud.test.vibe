@@ -221,7 +221,7 @@ describe(`Check Alpha's contract on my computer (spec/cloud/local.md, "Story: Ch
 const holds = (assertion: () => void) => Effect.try(assertion)
 
 describe(`Alpha's own cloud waits, ready, for the cutover (spec/cloud/index.md, "Story: Keep Alpha's own cloud ready for the cutover")`, () => {
-  it.effect("accepts the candidate's profile at the candidates' hosts with Alpha's services and model, and refuses one that strays", () => effect {
+  it.effect("accepts the candidate's profile at the candidates' hosts with Alpha's services, sender and model, and refuses one that strays", () => effect {
     const hosts = try candidates()
     const profile = try profileNamed("candidate")
     try holds(() => assert.deepStrictEqual(candidateProblems(profile, hosts), []))
@@ -229,9 +229,10 @@ describe(`Alpha's own cloud waits, ready, for the cutover (spec/cloud/index.md, 
     const [model] = production.inference!.models
     const strayed: typeof profile = { ...profile, environments: { ...profile.environments, production: {
       ...production, capabilities: production.capabilities.filter((capability) => capability !== "maps"),
+      mailSender: "sign-in@mail.alphacompute.invalid",
       inference: { ...production.inference!, models: [{ ...model, defaultMaxTokens: 4096 }] },
     } } }
-    try holds(() => assert.deepStrictEqual(candidateProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production"]))
+    try holds(() => assert.deepStrictEqual(candidateProblems(strayed, hosts).map((problem) => problem.split(":")[0]), ["production", "production", "production"]))
     try holds(() => assert.deepStrictEqual(candidateProblems(profile, { production: hosts.production, staging: hosts.production }).length > 0, true))
     const shipped = (profiled("profile/staging.json") catch (failure) => failure._tag)
     try holds(() => assert.strictEqual(shipped, "CandidateRefused"))

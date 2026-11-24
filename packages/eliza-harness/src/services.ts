@@ -50,7 +50,7 @@ const base64url = (bytes: Buffer) => bytes.toString("base64url");
 /** The one model the local cloud offers, as the agent's launch and the cloud's profile both name it. */
 const model = "alpha-chat";
 /** Alpha as the cloud's staging registry knows it: the client a device signs in as. */
-const client = { clientId: "ai.alpha.phone", displayName: "Alpha", androidPackage: "ai.alpha.phone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
+const client = { clientId: "ai.alphacompute.alphaphone", displayName: "Alpha", androidPackage: "ai.alphacompute.alphaphone", certFingerprints: [Array.from({ length: 32 }, () => "AA").join(":")] };
 
 /** A directory only this user reads, as the agent demands of its state. */
 function owned(directory: string) {
@@ -277,8 +277,8 @@ export async function startCloud(state: string, emails: readonly string[], credi
     },
     inference: { providers: [{ id: "scripted", baseUrl: `${provider.origin}/v1`, apiKeyEnv: "CLOUD_UPSTREAM_KEY" }], models: [{ id: model, provider: "scripted", upstreamModel: model, vision: false, defaultMaxTokens: 1024 }] },
   };
-  const signInReturn = `${web}/apps/alpha/sign-in`;
-  const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/apps/alpha/billing`, connectReturn: `${web}/apps/alpha/connect` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
+  const signInReturn = `${web}/alphaphone/auth/callback`;
+  const seed = { clients: [{ ...client, signInReturn, billingReturn: `${web}/alphaphone/billing/return` }], prices: [{ modelId: model, inputPer1K: 150, outputPer1K: 600 }] };
   const secrets = file("secrets.env", `${fixture("secrets.env")}\nCLOUD_UPSTREAM_KEY=${providerKey}\nSTRIPE_SECRET_KEY=${paymentKey}\nSTRIPE_WEBHOOK_SECRET=whsec_local\n`);
   const deployment = ["--profile", file("profile.json", JSON.stringify(profile)), "--environment", "staging", "--store", `pglite:${path.join(home, "cloud.pglite")}`];
   const port = await freePort();

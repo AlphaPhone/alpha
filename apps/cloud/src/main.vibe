@@ -2,7 +2,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { deployment } from "@repo/deployment"
-import { assetLinksNameAlpha, candidateApart, profileFits, type Environment } from "../gen/cloud.effect.vibe"
+import { assetLinksNameAlpha, candidateApart, profileFits, returnsOffApi, type Environment } from "../gen/cloud.effect.vibe"
 import { commandOf, taskAt, total } from "../gen/cloud__provisioning.effect.vibe"
 import { assetLinks, entryOf, loopbackOnly, profileNamed, registrationAt, stagingSeed } from "./alpha.vibe"
 import { candidateProblems, candidates } from "./candidate.vibe"
@@ -47,6 +47,7 @@ effect function check() {
     const profile = { api: settings.api, webHost: settings.web.replace(/^https:\/\//, "") }
     if (!profileFits(row, profile)) problems.push(`${name}: the profile answers at ${profile.api} for ${profile.webHost}, and @repo/deployment at ${row.cloud} for ${row.appLinkHost}`)
     if (!candidateApart(row, row.cutoverCandidate)) problems.push(`${name}: the cut-over candidate names a host of the cloud it would replace`)
+    if (!returnsOffApi(registration, settings.api)) problems.push(`${name}: a return of Alpha's registration lies on the API origin ${settings.api}`)
     const statements = try assetLinks(registration, settings.api)
     if (!assetLinksNameAlpha(statements, environment)) problems.push(`${name}: the asset links do not name Alpha's package with the ${name} signers alone`)
     if (environment === "Staging" && JSON.stringify(stagingSeed.clients) !== JSON.stringify([entryOf(registration)])) problems.push("seed/staging.json is not Alpha's staging registration")
