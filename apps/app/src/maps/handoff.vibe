@@ -89,6 +89,9 @@ function canShowMaps(s: ShellState): boolean {
   return s.native && s.live && !s.hidden && !s.suspended && !s.assistantWindow && !s.connectionOpen && s.home && !s.secure && !s.shaded
 }
 
+/** The steps of the notification open that can start a read of its record. */
+type OpenStep = { readonly type: "flush" } | { readonly type: "tapNotification" } | { readonly type: "readSettles"; readonly ok: boolean; readonly found: boolean }
+
 /** Hand-offs over their machines, the screen and the native plugins. */
 export const handoffLayer = Layer.effect(MapsHandoff, effect {
   const native = try Native
@@ -131,18 +134,24 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
       : read.status !== "ready" ? "ReadUnknown" as const : matches === 1 ? "EventFound" as const : matches === 0 ? "EventMissing" as const : "EventAmbiguous" as const
   }
 
+  /** Taps, flushes and settled reads, the only steps that start a read, go one at a time, so each sees only its own change. */
+  const stepping = try Semaphore.make(1)
+  effect function step(event: OpenStep) {
+    return try Semaphore.withPermit(stepping, effect {
+      const before = try opens.get()
+      const after = opens.send(event) catch () => undefined
+      return { started: after !== undefined && after.checking && after.reads > before.reads, opened: after !== undefined && after.opened > before.opened }
+    })
+  }
+
   /** Send `event` to the open; when that step starts a read of the notification's record, read it, and any read its reply starts. */
   effect function readOpen(event: { readonly type: "flush" } | { readonly type: "tapNotification" }) {
-    const reads = (try opens.get()).reads
-    let s = opens.send(event) catch () => undefined
-    let started = s !== undefined && s.checking && s.reads > reads
-    while (s !== undefined && started) {
-      const before = s
+    let s = try step(event)
+    while (s.started) {
       const raw = native.invoke("AlphaMapsTransport", "consumeNavigationOpen") catch () => undefined
       const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(NavigationOpen)(raw) catch () => undefined)
-      s = opens.send({ type: "readSettles", ok: read !== undefined, found: read?.open === true }) catch () => undefined
-      if (s && s.opened > before.opened) try shell.open("maps")
-      started = s !== undefined && s.checking && s.reads > before.reads
+      s = try step({ type: "readSettles", ok: read !== undefined, found: read?.open === true })
+      if (s.opened) try shell.open("maps")
     }
   }
 
