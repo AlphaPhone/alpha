@@ -139,25 +139,21 @@ the one eliza's runtime client read from the agent's refusal. Every other
 refusal keeps only its status.
 
 ```quint
-type Advice = NoAdvice | WaitSeconds(int)
-
 pure val maxWaitSeconds = 86400
 
-pure def adviceOf(status: int, given: bool, seconds: int): Advice =
-  if (status == 429 and given and seconds >= 0 and seconds <= maxWaitSeconds) WaitSeconds(seconds) else NoAdvice
+pure def waitAdvised(status: int, given: bool, seconds: int): bool =
+  status == 429 and given and seconds >= 0 and seconds <= maxWaitSeconds
 
 pure val statusValues = Set(200, 401, 429, 503)
 pure val secondsValues = Set(-1, 0, 30, 86401)
 
 pure def lawAWaitIsAdvisedOnlyOn429(status: int, given: bool, seconds: int): bool =
-  adviceOf(status, given, seconds) != NoAdvice implies status == 429
+  waitAdvised(status, given, seconds) implies status == 429
 
-pure def lawAnAdvisedWaitIsWithinADay(status: int, given: bool, seconds: int): bool = match adviceOf(status, given, seconds) {
-  | WaitSeconds(s) => s >= 0 and s <= maxWaitSeconds
-  | NoAdvice => true
-}
+pure def lawAnAdvisedWaitIsWithinADay(status: int, given: bool, seconds: int): bool =
+  waitAdvised(status, given, seconds) implies (seconds >= 0 and seconds <= maxWaitSeconds)
 
-pure def lawAnUngivenWaitIsNeverAdvised(status: int, seconds: int): bool = adviceOf(status, false, seconds) == NoAdvice
+pure def lawAnUngivenWaitIsNeverAdvised(status: int, seconds: int): bool = not(waitAdvised(status, false, seconds))
 ```
 
 ## Story: Send while my phone has a network
