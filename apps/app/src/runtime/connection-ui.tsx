@@ -2409,13 +2409,13 @@ export const connectionController = {
   getResidentReadingBinding(){return active?.kind==='resident'&&state.session?{execution:'device' as const,ownerId:state.session.ownerId,sessionId:state.session.sessionId}:null;},
   /** Pre-warm: the resident agent opens its Cloud inference connection with one no-model request
    * (POST /api/cloud/warm) when the owner is about to talk: foreground, chat opened, typing started,
-   * Talk, or a new connection while visible. Once per INFERENCE_WARM_INTERVAL_MS; advisory, so a failure is ignored
+   * Talk, a new connection or a network return while visible. Once per INFERENCE_WARM_INTERVAL_MS; advisory, so a failure is ignored
    * and nothing is retried or scheduled. Skipped while offline, while the resident has no Cloud
    * binding (signed out or a plan notice), and while a turn is in flight, so it never queues
    * ahead of the owner's own request. */
   warmInference(){
     const selected=active,now=Date.now();
-    if(selected?.kind!=='resident'||!state.session||now-lastInferenceWarm<INFERENCE_WARM_INTERVAL_MS)return;
+    if(document.hidden||selected?.kind!=='resident'||!state.session||now-lastInferenceWarm<INFERENCE_WARM_INTERVAL_MS)return;
     if(sending||state.inferenceOffline||state.residentPlanNotice||(residentCloudFlow()&&!state.cloudAccount))return;
     lastInferenceWarm=now;
     void selected.remote.request('/api/cloud/warm',{},AbortSignal.timeout(10000)).catch(()=>{});
@@ -2461,12 +2461,12 @@ export const connectionController = {
   open() { update({ open: true, automaticRestore:false, purpose:'agent', error: state.kind === 'recovering' ? state.error : '' }); },
   /** Observed connectivity. Android uses its native active network; browsers use window events.
    * Offline retracts readiness and refuses sends to the resident;
-   * local apps are untouched. Coming back online only allows sends again; the next return may check
-   * the plan inside the once-a-minute limit (recheckPlanOnReturn). */
+   * local apps are untouched. Coming back online reopens the existing warm-up opportunity. */
   networkChanged(online: boolean) {
     if (online === !state.inferenceOffline) return;
     update({ inferenceOffline: !online });
     if (!online) { networkLostUnder = planCheckScope(); retractReadiness(); }
+    else connectionController.warmInference();
   },
   openCloudAccount(){
     update({open:true,automaticRestore:false,purpose:'cloud-account',membershipDismissed:false,message:'',error:''});

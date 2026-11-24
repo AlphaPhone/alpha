@@ -223,7 +223,7 @@ public class AlphaBrowserPlugin extends Plugin {
  /** Kept separate from dispatch so resolver changes cannot bypass page/owner checks. */
  private java.util.function.Function<Intent,java.util.List<android.content.pm.ResolveInfo>> externalBrowserResolver =
   intent->getContext().getPackageManager().queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY|android.content.pm.PackageManager.GET_RESOLVED_FILTER);
- private static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
+ private static class Tab { BrowserReadingWorld readingWorld; BrowserBlobCapture capture; String findQuery; /** Latest main-frame request or redirect target (any thread). */ volatile String pendingMain; /** Main-frame start address before any document history updates. */ String startedMain; /** Origin of a submitted HTTP sign-in whose result is pending; Save waits for it. */ String authSaveOrigin; int authAttempts; boolean passkeys; String id, profile, opener, url = "", error = "", finishedUrl = "", lastCommittedUrl = ""; WebView web; TabFrame frame; TextView message; /** Engine-attested login fields (null when the WebView cannot attest field origins). */ BrowserLoginFields fields; boolean priv, handedOff, loading, dead, committed, autofillEnabled; int httpStatus, autofillVirtualId=View.NO_ID; long navigation; Runnable timeout; }
  /** Credentials stay in the framework/provider and the remote document. No bridge API
   * reads fields or replaces Chromium's frame-specific webDomain metadata. The only addition
   * is the committed top-level origin, which the password provider requires to equal the
@@ -343,6 +343,7 @@ public class AlphaBrowserPlugin extends Plugin {
   if(t.readingWorld!=null&&!startedCallback)t.readingWorld.invalidate();
   t.navigation++;if(fileTab==t)cancelFile();
   clearTimeout(t); t.loading=true; t.committed=false; t.error=""; t.httpStatus=0; t.finishedUrl="";
+  t.startedMain=startedCallback?t.url:null;
   t.web.setVisibility(View.INVISIBLE); t.message.setText(AlphaBrowserCopy.LOADING); t.message.setVisibility(View.VISIBLE);
   t.timeout=()->{if(t.loading&&!t.dead)fail(t,"This page is taking too long. Check your connection, then reload from the menu.");};
   navigationHandler.postDelayed(t.timeout,30000);
@@ -388,6 +389,10 @@ public class AlphaBrowserPlugin extends Plugin {
     profileRetirement.edit().putString(retiredName,"purged-awaiting-process-cleanup").apply();
    }); } catch(Exception unavailable) { retiredProfiles.put(retiredName,"pending"); }
   });
+ }
+ private static boolean currentDocumentUrl(Tab t,String visible) {
+  return t.startedMain!=null && t.startedMain.equals(t.pendingMain)
+      && BrowserWebOrigin.sameOrigin(t.startedMain,visible);
  }
  private boolean safe(String value) {
   try { Uri u = Uri.parse(value); return ("https".equalsIgnoreCase(u.getScheme()) || "http".equalsIgnoreCase(u.getScheme())) && u.getHost() != null && u.getUserInfo() == null && !value.contains("\n") && !value.contains("\r"); } catch (Exception e) { return false; }
@@ -462,11 +467,27 @@ public class AlphaBrowserPlugin extends Plugin {
     @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { if (r.isForMainFrame()) t.pendingMain=r.getUrl().toString(); if (r.isForMainFrame() && !safe(r.getUrl().toString())) return new WebResourceResponse("text/plain","UTF-8",new java.io.ByteArrayInputStream(new byte[0])); return null; }
     @Override public void onPageStarted(WebView v, String url, Bitmap icon) { if (!safe(url)) { fail(t,"This address type is not supported."); return; } t.url=url; if(t.readingWorld!=null)t.readingWorld.pageStarted(url); loading(t,true); emit(t); }
     @Override public void onPageCommitVisible(WebView v, String url) {
-     if (!t.error.isEmpty() || !url.equals(v.getUrl())) return;
+     String visible=v.getUrl();
+     if (!t.error.isEmpty()) return;
+     // The page can change its own address before this callback. The original main-frame
+     // request must still own the tab before the host adopts the engine's new address.
+     if (!url.equals(visible) && (!t.loading || t.committed || !url.equals(t.startedMain)
+        || !currentDocumentUrl(t,visible))) return;
      if (WebViewCompat.getWebViewRenderProcess(v) == null) { fail(t,"Isolated browser renderer is unavailable."); return; }
-     clearTimeout(t); t.lastCommittedUrl=url; t.committed=true; t.loading=!(url.equals(t.finishedUrl) || v.getProgress()==100); t.url=url; t.message.setVisibility(View.GONE); t.web.setVisibility(View.VISIBLE); finishAuthSave(t,url); syncAutofill(t); emit(t);
+     clearTimeout(t); t.lastCommittedUrl=visible; t.committed=true; t.loading=!(visible.equals(t.finishedUrl) || v.getProgress()==100); t.url=visible; t.message.setVisibility(View.GONE); t.web.setVisibility(View.VISIBLE); finishAuthSave(t,visible); syncAutofill(t); emit(t);
     }
-    @Override public void onPageFinished(WebView v, String url) { if (!t.error.isEmpty() || !safe(url) || !url.equals(t.url)) return; t.finishedUrl=url; if(t.committed) { clearTimeout(t); t.loading=false; syncAutofill(t); emit(t); } }
+    @Override public void onPageFinished(WebView v, String url) {
+     if (!t.error.isEmpty() || !safe(url)) return;
+     boolean changed=!url.equals(t.url);
+     if (changed && (!url.equals(v.getUrl()) || !currentDocumentUrl(t,url))) return;
+     t.finishedUrl=url;
+     if (!t.committed) return;
+     if (changed) {
+      // A later history update retires bindings to the earlier address.
+      disableAutofill(t); t.navigation++; t.url=url; t.lastCommittedUrl=url;
+     }
+     clearTimeout(t); t.loading=false; syncAutofill(t); emit(t);
+    }
     @Override public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler handler, String host, String realm) { httpAuth(t,handler,host,realm); }
     @Override public void onReceivedSslError(WebView v, SslErrorHandler handler, SslError error) { handler.cancel(); fail(t,"Secure connection failed. The certificate was not accepted."); }
     @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) { if (r.isForMainFrame()) { if (config().debugLogging) android.util.Log.w(config().logTag, "Main-frame network failure code=" + e.getErrorCode()); fail(t,"Page could not load. Check the address and connection, then reload."); } }
