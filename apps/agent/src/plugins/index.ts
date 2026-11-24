@@ -59,8 +59,3 @@ export const alphaAppsModule: ModuleFactory<never> = (context: ModuleContext) =>
 };
 
 export { AlphaAppsStore } from "./store.ts";
-export type {
-  ClockAlarmPhase, ClockAlarmRecord, ClockSnapshot, ClockSound, ClockTimerRecord, ClockTimerStatus,
-  ReminderItemRecord, ReminderListColor, ReminderListIcon, ReminderListRecord, ReminderPriority,
-  ReminderRecurrence, RemindersSnapshot, ReminderSubtaskRecord, WorldCityRecord,
-} from "./types.ts";

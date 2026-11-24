@@ -1,5 +1,5 @@
 // spec/app/reminders/recurrence.md, "Story: Repeat reminders cleanly across months and leap years"
-import { type CivilDate, type Repeat, daysInMonth, nextOccurrence, validDate } from "../../gen/app__reminders__recurrence.ts";
+import { type CivilDate, type Repeat, nextOccurrence, validDate } from "../../gen/app__reminders__recurrence.ts";
 
 /** Wire recurrence rule shared between Reminders UI and the resident agent. */
 export type ReminderRecurrence = "none" | "daily" | "weekdays" | "weekly" | "monthly" | "yearly";
@@ -129,18 +129,6 @@ export function inputTimeToMinute(value: string): number | null {
 
 const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 
-/** Human-readable recurrence label. */
-export function formatRecurrence(recurrence: ReminderRecurrence): string {
-  switch (recurrence) {
-    case "none": return "Never";
-    case "daily": return "Daily";
-    case "weekdays": return "Every weekday";
-    case "weekly": return "Weekly";
-    case "monthly": return "Monthly";
-    case "yearly": return "Yearly";
-  }
-}
-
 /** Format a due date and optional time relative to `nowMs`. */
 export function formatRelativeDue(dueDate: string | null, dueMinute: number | null, nowMs: number, overdue: boolean): string {
   const parsed = parseCivilDate(dueDate);
@@ -154,9 +142,4 @@ export function formatRelativeDue(dueDate: string | null, dueMinute: number | nu
     : `${monthNames[parsed.month - 1]} ${parsed.day}${parsed.year !== civilDateAt(nowMs).year ? `, ${parsed.year}` : ""}`;
   const timePart = dueMinute !== null ? ` ${formatMinuteOfDay(dueMinute)}` : "";
   return overdue ? `Overdue · ${dateLabel}${timePart}` : `${dateLabel}${timePart}`;
-}
-
-/** Days in the month of a `YYYY-MM-DD` date, delegating to the verified spec. */
-export function monthLength(year: number, month: number): number {
-  return daysInMonth(year, month);
 }

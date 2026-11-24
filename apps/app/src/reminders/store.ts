@@ -74,13 +74,6 @@ export interface ReminderFilterState {
 /** Chronological section bucket for the Scheduled smart view. */
 export type ScheduledBucket = "Overdue" | "Today" | "Tomorrow" | "Upcoming";
 
-/** A reminder item together with its numeric spec id and computed overdue status. */
-export interface DecoratedReminder {
-  readonly item: ReminderItemRecord;
-  readonly specId: number;
-  readonly overdue: boolean;
-}
-
 /** Default Reminders list constant. */
 export const DEFAULT_LIST_ID = "default";
 

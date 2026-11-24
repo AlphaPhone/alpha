@@ -72,7 +72,7 @@ export effect function createAlarm(draft: AlarmDraft): number!!(Alarms.Machine |
   return nextId
 }
 
-effect function loadAlarm(id: number): { readonly machine: Alarms.Machine; readonly now: number; readonly current: Alarm | undefined }!!(Alarms.Machine | Time) {
+effect function loadAlarm(id: number): { readonly machine: Context.Service.Shape<typeof Alarms.Machine>; readonly now: number; readonly current: Alarm | undefined }!!(Alarms.Machine | Time) {
   const machine = try Alarms.Machine
   const now = try (try Time).now()
   const current = (try machine.get()).items.find((item) => item.id === id)

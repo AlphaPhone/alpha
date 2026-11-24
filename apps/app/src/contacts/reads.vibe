@@ -2,7 +2,7 @@
 import { type DeviceOperation, readResult } from "@elizaos/agent/operations"
 import { Machine as Shell } from "../../gen/app__shell.effect.vibe"
 import { Machine as ContactsMachine } from "../../gen/app__contacts.effect.vibe"
-import { type Opened, readOf, senderSaid } from "../../gen/app__contacts__agent.ts"
+import { type Opened, readOf, senderSaid } from "../../gen/app__contacts__agent.effect.vibe"
 import { Machine as MessagesMachine } from "../../gen/app__messages.effect.vibe"
 import { Machine as ComposerMachine } from "../../gen/app__messages__composer.effect.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
@@ -123,7 +123,7 @@ effect function shown(query: string): unknown!!(Telephony | Rows | ContactsMachi
 
 // spec/app/messages/composer.md, "The agent's draft goes into the open conversation's draft only while it is empty, and never sends"
 /** `body` as Alpha's draft in the conversation open on screen, or, with `number`, in that number's conversation, which Messages opens first. */
-effect function drafted(body: string, number: string | undefined): "drafted" | "none-selected" | "occupied" | "unavailable"!!(ComposerMachine | MessagesMachine | Drafts | Callers | Conversations) {
+effect function drafted(body: string, number: string | undefined): ("drafted" | "none-selected" | "occupied" | "unavailable")!!(ComposerMachine | MessagesMachine | Drafts | Callers | Conversations) {
   const composer = try ComposerMachine
   if (number !== undefined) {
     const thread = try (try Conversations).of({ id: "", addresses: [number] })

@@ -41,7 +41,6 @@ import { useMachine as useRemindersMachine } from "../../gen/app__reminders.reac
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { useTimed } from "../runtime/react.ts";
 import { Time } from "../runtime/time.vibe";
-import { AlertBanner } from "./AlertBanner.tsx";
 import { beginEditReminder, beginNewReminder } from "./editor.vibe";
 import { DeleteListDialog, ListEditorDialog } from "./ListEditorDialog.tsx";
 import { formatRelativeDue, quickDatePresets } from "./recurrence.ts";
@@ -840,14 +839,6 @@ export function Reminders({ runtime }: Shown<Resident | RemindersMachines>) {
       >
         This permanently removes all {counts.CompletedView} completed {counts.CompletedView === 1 ? "reminder" : "reminders"}.
       </ConfirmDialog>
-
-      <AlertBanner
-        runtime={runtime}
-        onOpenItem={(itemId) => {
-          const target = snapshot.items.find((item) => item.id === itemId);
-          if (target) openEditEditor(target);
-        }}
-      />
     </>
   );
 }

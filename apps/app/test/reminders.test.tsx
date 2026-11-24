@@ -11,6 +11,7 @@ import { agentAt } from "../src/platform/agent.vibe";
 import { cloudAt } from "../src/platform/cloud.vibe";
 import { pagePlatform } from "../src/platform/platform.vibe";
 import { type NativeRemindersPort, setNativeRemindersPort } from "../src/reminders/alerts.vibe";
+import alertOverlayArea from "../src/reminders/alertOverlay.tsx";
 import remindersArea from "../src/reminders/index.tsx";
 import { advanceDueDate, civilDateAt, dueInstantMs, formatCivilDate, formatRelativeDue } from "../src/reminders/recurrence.ts";
 import {
@@ -150,7 +151,8 @@ function makeFakeAgentReminders(initialNowMs: number): { readonly recorder: Agen
 
 const withReminders = [
   ...only("home", "notice"),
-  at("view:Notes", () => Promise.resolve({ default: remindersArea })),
+  at("view:Reminders", () => Promise.resolve({ default: remindersArea })),
+  at("overlay", () => Promise.resolve({ default: alertOverlayArea })),
 ];
 
 function makePlatform(nowMs: number, agentHttp: Layer.Layer<HttpClient.HttpClient>) {
@@ -185,16 +187,20 @@ describe("Reminders recurrence laws", () => {
 describe("Reminders full journeys", () => {
   const baseNow = Date.UTC(2026, 4, 15, 13, 0, 0);
 
-  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
-  it("organizes smart lists, custom lists (rename + reassign/cascade delete), search and editor creation", async () => {
-    const world = { ...scene(), now: baseNow };
+  async function launchReminders(nowMs: number) {
+    const world = { ...scene(), now: nowMs };
     const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now);
     const platform = makePlatform(world.now, agentHttp);
-    const { alpha } = await openOver(platform, withReminders);
-    const runtime = remindersArea.runtime(alpha);
+    const opened = await openOver(platform, withReminders);
+    const runtime = remindersArea.runtime(opened.alpha);
+    await press("Reminders");
+    await until(opened.alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
+    return { world, recorder, platform, ...opened, runtime };
+  }
 
-    await press("Notes");
-    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
+  // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"
+  it("organizes smart lists, custom lists (rename + reassign/cascade delete), search and editor creation", async () => {
+    const { world, recorder, alpha, runtime } = await launchReminders(baseNow);
     expect(document.body.textContent).toContain("Today");
     expect(document.body.textContent).toContain("Scheduled");
     expect(document.body.textContent).toContain("Reminders");
@@ -259,14 +265,7 @@ describe("Reminders full journeys", () => {
   // spec/app/reminders/index.md, "Completing a reminder holds a five-second Undo snapshot and advances a repeating reminder to its next due day"
   // spec/app/reminders/index.md, "Deleting a reminder hides it immediately and holds it for five seconds before committing the deletion"
   it("advances recurring completion with 5s Undo and holds delete for 5s before committing to agent", async () => {
-    const world = { ...scene(), now: baseNow };
-    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now);
-    const platform = makePlatform(world.now, agentHttp);
-    const { alpha } = await openOver(platform, withReminders);
-    const runtime = remindersArea.runtime(alpha);
-
-    await press("Notes");
-    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
+    const { world, recorder, alpha, runtime } = await launchReminders(baseNow);
 
     const today = formatCivilDate(civilDateAt(world.now));
     const expectedNext = advanceDueDate(today, "daily");
@@ -315,7 +314,6 @@ describe("Reminders full journeys", () => {
 
   // spec/app/reminders/alerts.md, "Story: Alert on due reminders and act from the banner"
   it("fires due reminder alert on time (never early), snoozes 10m and completes from banner, and syncs chat updates across restarts", async () => {
-    const world = { ...scene(), now: baseNow };
     const armed: { readonly id: string; readonly at: number }[] = [];
     const nativePort: NativeRemindersPort = {
       schedule: (input) => { armed.push({ id: input.id, at: input.at }); return Promise.resolve(); },
@@ -326,14 +324,8 @@ describe("Reminders full journeys", () => {
     };
     setNativeRemindersPort(nativePort);
 
-    const { recorder, layer: agentHttp } = makeFakeAgentReminders(world.now);
-    const platform = makePlatform(world.now, agentHttp);
-    const first = await openOver(platform, withReminders);
-    const { alpha } = first;
-    const runtime = remindersArea.runtime(alpha);
-
-    await press("Notes");
-    await until(alpha, runtime, RemindersMachine.Machine, (s) => s.sync.status === "Loaded");
+    const first = await launchReminders(baseNow);
+    const { world, recorder, platform, alpha, runtime } = first;
 
     const fireAt = world.now + 10 * 60_000;
     const fireDate = formatCivilDate(civilDateAt(fireAt));

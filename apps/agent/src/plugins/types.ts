@@ -1,6 +1,6 @@
 // spec/agent/index.md, "Story: Run Alpha's agent on the phone"
 import type { AgentPlugin } from "@elizaos/agent";
-import type { LocalRoute, RouteInput } from "@elizaos/agent/routes";
+import type { LocalRoute } from "@elizaos/agent/routes";
 
 /** Alarm chime tone identifiers shared with the Clock app. */
 export type ClockSound = "radar" | "chime" | "pulse" | "gentle" | "classic";
@@ -140,9 +140,6 @@ export type AgentRuntimeLike = Parameters<AgentAction["handler"]>[0];
 
 /** Route definition derived from eliza's agent routes contract. */
 export type AgentRoute = LocalRoute;
-
-/** Route handler input derived from eliza's agent routes contract. */
-export type AgentRouteInput = RouteInput;
 
 /** Minimal interface for the notification runtime service when registered. */
 export interface NotificationServiceLike {

@@ -271,7 +271,7 @@ export effect function syncClockNow(): boolean!!(Agent | Alarms.Machine | Timers
 }
 
 /** Push the current local Clock snapshot to the resident agent's `/api/alpha/clock` endpoint. */
-export effect function pushClockSnapshot(): boolean!!(Agent | Alarms.Machine | Timers.Machine | World.Machine | Time) {
+effect function pushClockSnapshot(): boolean!!(Agent | Alarms.Machine | Timers.Machine | World.Machine | Time) {
   const now = try (try Time).now()
   const alarmState = try (try Alarms.Machine).get()
   const timerState = try (try Timers.Machine).get()

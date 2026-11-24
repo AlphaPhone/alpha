@@ -46,8 +46,7 @@ const DraftSchema = Schema.fromJsonString(Schema.Struct({
   revision: Schema.Int,
 }))
 
-/** Create a clean default draft for a new reminder in `listId`. */
-export function blankEditorFields(listId = DEFAULT_LIST_ID): ReminderEditorFields {
+function blankEditorFields(listId = DEFAULT_LIST_ID): ReminderEditorFields {
   return {
     itemId: null,
     title: "",
@@ -64,8 +63,7 @@ export function blankEditorFields(listId = DEFAULT_LIST_ID): ReminderEditorField
   }
 }
 
-/** Populate editor fields from an existing reminder item. */
-export function fieldsFromItem(item: ReminderItemRecord): ReminderEditorFields {
+function fieldsFromItem(item: ReminderItemRecord): ReminderEditorFields {
   return {
     itemId: item.id,
     title: item.title,
@@ -106,7 +104,7 @@ export const editorDraftStore = {
 }
 
 /** Persist the current draft fields in `KeyValueStore` for restart recovery. */
-export effect function persistEditorDraft(fields: ReminderEditorFields): void!!KeyValueStore.KeyValueStore {
+effect function persistEditorDraft(fields: ReminderEditorFields): void!!KeyValueStore.KeyValueStore {
   editorDraftStore.set(fields)
   const serialized = Effect.try(() => JSON.stringify(fields)) catch () => undefined
   if (serialized !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(draftKey, serialized))

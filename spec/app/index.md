@@ -15,7 +15,9 @@ rules.
 - [Calendar](./calendar/): the agenda of the phone's and the agent's calendars, an event, its form and reviewed writes
 - [Files](./files/): shared storage, folders, selections and approved changes
 - [Ask Alpha](./ask/): one conversation with the resident agent
-- [Reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
+- [Clock](./clock/): alarms, timers, world clock, stopwatch, ringing alerts and agent sync
+- [Reminders](./reminders/): smart views, custom lists, due dates, recurrence, priorities, due alerts, snooze, undo and agent sync
+- [Sample reminders](./sample/): the sample area, which only its own journeys mount: a read, a feed, an undo window and an attempt outside
 - [Text size](./sample/size.md): the second sample, which only its own journeys mount: senders, an opening that asks the phone, the phone's signals and a page-wide effect
 - [Maps](./maps/): search, places, directions, guidance and the map, over Cloud Maps
 - [Phone](./phone/): calls, voicemail, phone details and Home cards, on an Alpha image

@@ -1,10 +1,9 @@
 // spec/app/reminders/index.md, "Story: Organize reminders across smart views and custom lists"; spec/app/reminders/editor.md, "Story: Create or edit a reminder with safe validation and draft recovery"
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import * as RemindersMachine from "../../gen/app__reminders.effect.vibe";
 import * as EditorMachine from "../../gen/app__reminders__editor.effect.vibe";
 import { area } from "../runtime/area.tsx";
 import { Reminders } from "./Reminders.tsx";
-import { remindersResident } from "./reminders.vibe";
 
 const back = Effect.gen(function* () {
   const editor = yield* EditorMachine.Machine;
@@ -19,5 +18,5 @@ const back = Effect.gen(function* () {
   return false;
 });
 
-/** Reminders area entry point, wiring the desk, editor, and resident due-time alert machines. */
-export default area(remindersResident, Reminders, { back });
+/** Reminders area entry point: its desk, editor, and due-time alert machines are resident. */
+export default area(Layer.empty, Reminders, { back });

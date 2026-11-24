@@ -221,16 +221,7 @@ describe("Clock journeys", () => {
 
     // spec/app/clock/alarms.md, "A ringing alarm that goes unanswered for ten minutes auto-silences and is marked missed"
     await press("Add alarm");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
-    await pressOnTop("Increase minute");
+    for (let step = 0; step < 10; step++) await pressOnTop("Increase minute");
     await fill("Alarm label", "One-off tea");
     await pressOnTop("Save");
     await waitFor(Alarms.Machine, (s) => s.items.length === 2);

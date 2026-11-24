@@ -8,6 +8,7 @@ import { agendaFrom } from "../home/cards.vibe"
 import * as Toasts from "../../gen/app__notices__toasts.effect.vibe"
 import { Said, offer, say, withdraw } from "../notices/toasts.vibe"
 import { Agent } from "../platform/agent.vibe"
+import { PhoneReminders } from "../platform/reminders.vibe"
 import { ask, attemptedWith } from "../platform/remote.vibe"
 import { type Attempts, fresh } from "../runtime/attempts.vibe"
 import { type Job, answer, contained, due, reacting, started, stop, together, untimed } from "../runtime/reactor.vibe"
@@ -131,7 +132,7 @@ function pushToHomeAgenda(snapshot: RemindersSnapshot, hiddenIds: ReadonlySet<st
   agendaFrom.reminders(dated)
 }
 
-effect function persistAndBroadcast(snapshot: RemindersSnapshot, nowMs: number): void!!(KeyValueStore.KeyValueStore | Alerts.Machine) {
+effect function persistAndBroadcast(snapshot: RemindersSnapshot, nowMs: number): void!!(KeyValueStore.KeyValueStore | Alerts.Machine | PhoneReminders) {
   const view = remindersStore.replace(snapshot)
   const encoded = Effect.try(() => JSON.stringify(view.snapshot)) catch () => undefined
   if (encoded !== undefined) try ignore((try KeyValueStore.KeyValueStore).set(snapshotKey, encoded))
@@ -139,7 +140,7 @@ effect function persistAndBroadcast(snapshot: RemindersSnapshot, nowMs: number):
   try syncAlertsWithSnapshot(view.snapshot, nowMs)
 }
 
-effect function syncMachineFromSnapshot(snapshot: RemindersSnapshot, nowMs: number): void!!(Reminders.Machine | Alerts.Machine | KeyValueStore.KeyValueStore) {
+effect function syncMachineFromSnapshot(snapshot: RemindersSnapshot, nowMs: number): void!!(Reminders.Machine | Alerts.Machine | KeyValueStore.KeyValueStore | PhoneReminders) {
   try persistAndBroadcast(snapshot, nowMs)
   const machine = try Reminders.Machine
   const today = civilDayNumber(nowMs)
@@ -147,7 +148,7 @@ effect function syncMachineFromSnapshot(snapshot: RemindersSnapshot, nowMs: numb
   if (Reminders.canSetToday(before, today)) try contained(machine.send({ type: "setToday", day: today }), "advancing reminders today")
 }
 
-effect function fetchSnapshot(ticket: number): Event!!(Agent | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Reminders.Machine) {
+effect function fetchSnapshot(ticket: number): Event!!(Agent | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Reminders.Machine | PhoneReminders) {
   const now = try (try Time).now()
   return effect {
     const raw = try ask(Agent, HttpClientRequest.get("/api/alpha/reminders"), SnapshotSchema)
@@ -194,7 +195,7 @@ effect function flushWrite(attemptId: number): Event!!(Agent | Attempts) {
   return { type: "writeAnswered", attemptId, confirmed: outcome.confirmed, known: outcome.known }
 }
 
-effect function commitDeleteWrite(attemptId: number, itemSpecId: number): Event!!(Agent | Attempts | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+effect function commitDeleteWrite(attemptId: number, itemSpecId: number): Event!!(Agent | Attempts | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const held = activeUndo
   if (held !== undefined && held.kind === "delete") {
     activeUndo = undefined
@@ -218,7 +219,7 @@ effect function commitDeleteWrite(attemptId: number, itemSpecId: number): Event!
   return { type: "writeAnswered", attemptId, confirmed: outcome.confirmed, known: outcome.known }
 }
 
-function carry(fx: Out): Job<Event, Agent | Attempts | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Reminders.Machine | Toasts.Machine | Said, []> {
+function carry(fx: Out): Job<Event, Agent | Attempts | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Reminders.Machine | Toasts.Machine | Said | PhoneReminders, []> {
   return match (fx) {
     when { tag: "SyncFetch", let ticket }: answer("sync", fetchSnapshot(ticket), { type: "synced", ticket, ok: false });
     when { tag: "WriteItem", let attemptId }: answer(`write:${attemptId}`, flushWrite(attemptId), { type: "writeAnswered", attemptId, confirmed: false, known: false });
@@ -234,7 +235,7 @@ function timers(state: Reminders.Reminders) {
     : []
 }
 
-effect function settlePendingUndoBeforeWrite(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time) {
+effect function settlePendingUndoBeforeWrite(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time | PhoneReminders) {
   const machine = try Reminders.Machine
   const cur = try machine.get()
   if (cur.undo.holding === "Held" && cur.write.outcome !== "Sent") {
@@ -247,7 +248,7 @@ effect function settlePendingUndoBeforeWrite(): void!!(Reminders.Machine | Toast
   }
 }
 
-effect function undoHeldAction(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time) {
+effect function undoHeldAction(): void!!(Reminders.Machine | Toasts.Machine | Said | KeyValueStore.KeyValueStore | Alerts.Machine | Time | PhoneReminders) {
   const machine = try Reminders.Machine
   const held = activeUndo
   if (held === undefined) return
@@ -278,7 +279,7 @@ effect function undoHeldAction(): void!!(Reminders.Machine | Toasts.Machine | Sa
   try say(`Restored “${held.prior.title}”`)
 }
 
-effect function captureUndo(): (void!!)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+effect function captureUndo(): (void!!)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const layer = Layer.mergeAll(
     Layer.succeed(Reminders.Machine, try Reminders.Machine),
     Layer.succeed(KeyValueStore.KeyValueStore, try KeyValueStore.KeyValueStore),
@@ -286,6 +287,7 @@ effect function captureUndo(): (void!!)!!(Reminders.Machine | KeyValueStore.KeyV
     Layer.succeed(Time, try Time),
     Layer.succeed(Toasts.Machine, try Toasts.Machine),
     Layer.succeed(Said, try Said),
+    Layer.succeed(PhoneReminders, try PhoneReminders),
   )
   return Effect.provide(undoHeldAction(), layer)
 }
@@ -318,7 +320,7 @@ export interface CreateReminderInput {
 }
 
 /** Create a new reminder item, update local store/Home/Alerts, and sync with the agent. */
-export effect function createReminderItem(input: CreateReminderInput): (ReminderItemRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function createReminderItem(input: CreateReminderInput): (ReminderItemRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const title = input.title.trim()
   if (title === "") return undefined
   try settlePendingUndoBeforeWrite()
@@ -391,7 +393,7 @@ function replaceItemInSnapshot(current: RemindersSnapshot, updated: ReminderItem
   }
 }
 
-effect function prepareItemEdit(id: string): ({ readonly current: RemindersSnapshot; readonly existing: ReminderItemRecord; readonly now: number } | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+effect function prepareItemEdit(id: string): ({ readonly current: RemindersSnapshot; readonly existing: ReminderItemRecord; readonly now: number } | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   try settlePendingUndoBeforeWrite()
   const current = remindersStore.snapshot().snapshot
   const existing = current.items.find((item) => item.id === id)
@@ -405,7 +407,7 @@ effect function commitItemWrite(
   updated: ReminderItemRecord,
   now: number,
   req: PendingRequest,
-): ({ readonly machine: Context.Service.Shape<typeof Reminders.Machine>; readonly itemSpecId: number })!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine) {
+): ({ readonly machine: Context.Service.Shape<typeof Reminders.Machine>; readonly itemSpecId: number })!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | PhoneReminders) {
   const machine = try Reminders.Machine
   const state = try machine.get()
   pendingWrites.set(state.write.id + 1, req)
@@ -413,8 +415,7 @@ effect function commitItemWrite(
   return { machine, itemSpecId: remindersStore.specIdForItem(updated.id) }
 }
 
-/** Update an existing reminder item from the editor or inline actions. */
-export effect function updateReminderItem(id: string, patch: Partial<CreateReminderInput>): (ReminderItemRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+effect function updateReminderItem(id: string, patch: Partial<CreateReminderInput>): (ReminderItemRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const ctx = try prepareItemEdit(id)
   if (ctx === undefined) return undefined
   const { current, existing, now } = ctx
@@ -463,7 +464,7 @@ export effect function updateReminderItem(id: string, patch: Partial<CreateRemin
 }
 
 /** Save the current Editor draft (creating or updating the reminder) and settle the Editor machine. */
-export effect function saveReminderDraft(): (ReminderItemRecord | undefined)!!(Reminders.Machine | Editor.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function saveReminderDraft(): (ReminderItemRecord | undefined)!!(Reminders.Machine | Editor.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const editor = try Editor.Machine
   const fields: ReminderEditorFields = editorDraftStore.snapshot()
   const state = try editor.get()
@@ -491,7 +492,7 @@ export effect function saveReminderDraft(): (ReminderItemRecord | undefined)!!(R
 }
 
 /** Toggle completion of a reminder: recurring items advance to their next date, and a 5s Undo toast is offered. */
-export effect function toggleReminderComplete(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function toggleReminderComplete(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const ctx = try prepareItemEdit(id)
   if (ctx === undefined) return
   const { current, existing, now } = ctx
@@ -515,7 +516,7 @@ export effect function toggleReminderComplete(id: string): void!!(Reminders.Mach
 }
 
 /** Toggle the flagged state of a reminder item. */
-export effect function toggleReminderFlag(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function toggleReminderFlag(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const ctx = try prepareItemEdit(id)
   if (ctx === undefined) return
   const { current, existing, now } = ctx
@@ -525,7 +526,7 @@ export effect function toggleReminderFlag(id: string): void!!(Reminders.Machine 
 }
 
 /** Delete a reminder item immediately from view and hold for 5 seconds with an Undo toast. */
-export effect function deleteReminderItem(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function deleteReminderItem(id: string): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const ctx = try prepareItemEdit(id)
   if (ctx === undefined) return
   const { current, existing, now } = ctx
@@ -541,7 +542,7 @@ export effect function deleteReminderItem(id: string): void!!(Reminders.Machine 
 }
 
 /** Clear all completed reminders from the local store and agent. */
-export effect function clearCompletedReminders(): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Agent | Toasts.Machine | Said) {
+export effect function clearCompletedReminders(): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Agent | Toasts.Machine | Said | PhoneReminders) {
   try settlePendingUndoBeforeWrite()
   const current = remindersStore.snapshot().snapshot
   const completed = current.items.filter((item) => item.completed)
@@ -556,34 +557,8 @@ export effect function clearCompletedReminders(): void!!(Reminders.Machine | Key
   try say(`Cleared ${completed.length} completed ${completed.length === 1 ? "reminder" : "reminders"}`)
 }
 
-/** Snooze a reminder until `snoozedUntilMs` and re-arm its resident alert. */
-export effect function snoozeReminderItem(id: string, snoozedUntilMs: number): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
-  const ctx = try prepareItemEdit(id)
-  if (ctx === undefined) return
-  const { current, existing, now } = ctx
-  const updated: ReminderItemRecord = { ...existing, snoozedUntilMs, revision: existing.revision + 1, updatedAtMs: now }
-  const { machine, itemSpecId } = try commitItemWrite(current, updated, now, { kind: "snoozeItem", id, snoozedUntilMs })
-  if (itemSpecId > 0) {
-    const dueDay = civilDayFromString(updated.dueDate) ?? civilDayNumber(now)
-    try contained(machine.send({
-      type: "updateItem",
-      itemId: itemSpecId,
-      spec: {
-        listId: Math.max(1, remindersStore.specIdForList(updated.listId)),
-        hasDue: updated.dueDate !== null,
-        dueDay,
-        hasDueTime: updated.dueMinute !== null,
-        dueMinute: updated.dueMinute ?? 0,
-        repeat: recurrenceToSpec(updated.recurrence),
-        priority: priorityToSpec(updated.priority),
-        flagged: updated.flagged,
-      },
-    }), "snoozing reminder")
-  }
-}
-
 /** Create a custom list with name, semantic color, and icon. */
-export effect function createReminderList(name: string, color: ReminderListColor, icon: ReminderListIcon): (ReminderListRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function createReminderList(name: string, color: ReminderListColor, icon: ReminderListIcon): (ReminderListRecord | undefined)!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const trimmed = name.trim()
   if (trimmed === "") return undefined
   try settlePendingUndoBeforeWrite()
@@ -608,7 +583,7 @@ export effect function createReminderList(name: string, color: ReminderListColor
 }
 
 /** Rename or restyle an existing custom list. */
-export effect function updateReminderList(id: string, name: string, color: ReminderListColor, icon: ReminderListIcon): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function updateReminderList(id: string, name: string, color: ReminderListColor, icon: ReminderListIcon): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   const trimmed = name.trim()
   if (trimmed === "") return
   try settlePendingUndoBeforeWrite()
@@ -626,7 +601,7 @@ export effect function updateReminderList(id: string, name: string, color: Remin
 }
 
 /** Delete a custom list, either reassigning its items to the default Reminders list or deleting them. */
-export effect function deleteReminderList(id: string, mode: DeleteMode): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said) {
+export effect function deleteReminderList(id: string, mode: DeleteMode): void!!(Reminders.Machine | KeyValueStore.KeyValueStore | Alerts.Machine | Time | Toasts.Machine | Said | PhoneReminders) {
   try settlePendingUndoBeforeWrite()
   const current = remindersStore.snapshot().snapshot
   const target = current.lists.find((list) => list.id === id)
