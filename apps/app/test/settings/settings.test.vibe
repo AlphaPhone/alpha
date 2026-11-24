@@ -373,8 +373,8 @@ it.effect("Pause or turn off listening and see what the listener did (spec/setti
   const voice = Layer.succeed(VoiceRoute, { privacy: () => effect { return "OnPhone" as const } } as never)
   const listener = Layer.succeed(Listener, {
     status: () => effect { return reading },
-    pause: () => effect { return { ...status("ListeningOn", true), confirmed } },
-    turnOff: () => effect { return { ...status("ListeningOff", false), confirmed } },
+    pause: () => effect { return { ...status("ListeningOn", true), confirmed, status: status("ListeningOn", true) } },
+    turnOff: () => effect { return { ...status("ListeningOff", false), confirmed, status: status("ListeningOff", false) } },
     openSettings: () => effect { return true },
   } as never)
   provide Layer.provideMerge(privacyRow, Layer.mergeAll(privacyMachine(), voice, listener)) {

@@ -1,6 +1,6 @@
 // spec/notes/organize.md, "Story: Let the agent start and stop a voice note"; spec/notes/organize.md, "A recording receipt says what the recorder did"; spec/notes/organize.md, "A move applies only to the note revision the owner reviewed, into a folder that exists"; spec/notes/organize.md, "A folder is created once by name, and only a folder that reads back counts"; spec/notes/organize.md, "A restore brings back the newest Recently deleted copy of that note through the Trash restore"
 import {
-  NOTES_LIST_FILTER_CAPABILITY, NOTES_ORGANIZE_CAPABILITY, NOTES_RECORD_CAPABILITY, type NotesDeviceContext, type NotesOrganizeOperation,
+  NOTES_LIST_FILTER_CAPABILITY, NOTES_LOCAL_RECORD_CAPABILITY, NOTES_ORGANIZE_CAPABILITY, NOTES_RECORD_CAPABILITY, type NotesDeviceContext, type NotesOrganizeOperation,
   decodeNotesOrganizeOperation, describeNotesOrganizeOperation, notesOrganizeContextAllowed, notesOrganizeOffered, notesOrganizeRunsDirectly,
 } from "@elizaos/plugin-notes/organize"
 import type { NoteJson } from "@elizaos/plugin-notes/types"
@@ -32,7 +32,8 @@ export service NotesOrganize {
 const statusOf = (status: ReceiptStatus): OrganizeReceipt["status"] =>
   status === "ReceiptSucceeded" ? "succeeded" : status === "ReceiptFailed" ? "failed" : "unknown"
 
-const capabilityList = [NOTES_RECORD_CAPABILITY, NOTES_ORGANIZE_CAPABILITY, NOTES_LIST_FILTER_CAPABILITY] as const
+/** The Notes capabilities the phone advertises: `notes.local-record.v1` rides on every device request (enrollment's base capabilities), so the organise operations it pairs with `notes.organize.v1` are offered here too. */
+const capabilityList = [NOTES_RECORD_CAPABILITY, NOTES_ORGANIZE_CAPABILITY, NOTES_LOCAL_RECORD_CAPABILITY, NOTES_LIST_FILTER_CAPABILITY] as const
 
 /** The organisation executor over the Notes services. */
 export const organizeLayer = Layer.effect(NotesOrganize, effect {

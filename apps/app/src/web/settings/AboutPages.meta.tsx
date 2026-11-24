@@ -12,7 +12,7 @@ export const meta: ComponentMeta<AboutPagesProps> = {
     nav: { ...nav, page: "About" }, facts: general.facts, native: true, diagnostics: problems, onOpen: none, onOpenLicence: none, onAppInfo: none, onActivity: none,
     aboutActs: { readLog: none, askClear: none, cancelClear: none, clear: none, exportReport: none, loadLicences: none },
   },
-  states: {
+  examples: {
     ProblemLog: { nav: { ...nav, page: "Problems" } },
     ClearFailed: { nav: { ...nav, page: "Problems" }, diagnostics: { ...problems, clearFailed: true } },
     ExportFailed: { diagnostics: { ...problems, exportState: "ExportFailed" } },

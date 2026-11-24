@@ -323,7 +323,7 @@ it.live(`Back from the chooser the owner opened while signed out closes sign-in 
       const presentation = try AccountPresentation
       fork.scoped session.run()
       fork.scoped signIn.run()
-      try until(session.changes, (s) => s.startupResolved)
+      try until(signIn.changes, (s) => s.startupResolved && s.hostFixed)
       try signIn.open()
       const opened = try found(try until(signIn.changes, (s) => s.screen === "Choose" && s.methods.known))
       // spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"

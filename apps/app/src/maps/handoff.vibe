@@ -89,6 +89,9 @@ function canShowMaps(s: ShellState): boolean {
   return s.native && s.live && !s.hidden && !s.suspended && !s.assistantWindow && !s.connectionOpen && s.home && !s.secure && !s.shaded
 }
 
+/** The steps of the notification open that can start a read of its record. */
+type OpenStep = { readonly type: "flush" } | { readonly type: "tapNotification" } | { readonly type: "readSettles"; readonly ok: boolean; readonly found: boolean }
+
 /** Hand-offs over their machines, the screen and the native plugins. */
 export const handoffLayer = Layer.effect(MapsHandoff, effect {
   const native = try Native
@@ -131,21 +134,31 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
       : read.status !== "ready" ? "ReadUnknown" as const : matches === 1 ? "EventFound" as const : matches === 0 ? "EventMissing" as const : "EventAmbiguous" as const
   }
 
-  effect function flushOpen() {
-    const s = opens.send({ type: "flush" }) catch () => undefined
-    if (!s?.checking) return
-    const before = s.opened
-    const raw = native.invoke("AlphaMapsTransport", "consumeNavigationOpen") catch () => undefined
-    const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(NavigationOpen)(raw) catch () => undefined)
-    const after = opens.send({ type: "readSettles", ok: read !== undefined, found: read?.open === true }) catch () => undefined
-    if (after && after.opened > before) try shell.open("maps")
-    if (after?.checking) try flushOpen()
+  /** Taps, flushes and settled reads, the only steps that start a read, go one at a time, so each sees only its own change. */
+  const stepping = try Semaphore.make(1)
+  effect function step(event: OpenStep) {
+    return try Semaphore.withPermit(stepping, effect {
+      const before = try opens.get()
+      const after = opens.send(event) catch () => undefined
+      return { started: after !== undefined && after.checking && after.reads > before.reads, opened: after !== undefined && after.opened > before.opened }
+    })
+  }
+
+  /** Send `event` to the open; when that step starts a read of the notification's record, read it, and any read its reply starts. */
+  effect function readOpen(event: { readonly type: "flush" } | { readonly type: "tapNotification" }) {
+    let s = try step(event)
+    while (s.started) {
+      const raw = native.invoke("AlphaMapsTransport", "consumeNavigationOpen") catch () => undefined
+      const read = raw === undefined ? undefined : (Schema.decodeUnknownEffect(NavigationOpen)(raw) catch () => undefined)
+      s = try step({ type: "readSettles", ok: read !== undefined, found: read?.open === true })
+      if (s.opened) try shell.open("maps")
+    }
   }
 
   fork.detached Stream.runForEach(shell.states, (state) => effect {
     const ready = canShowMaps(state)
     if ((try opens.get()).ready !== ready) opens.send({ type: "setReady", on: ready }) catch () => undefined
-    if (ready) try flushOpen()
+    if (ready) try readOpen({ type: "flush" })
     const inMaps = state.view === "maps"
     const r = try returns.get()
     if (r.inMaps && !inMaps) returns.send({ type: "leaveMaps" }) catch () => undefined
@@ -256,10 +269,7 @@ export const handoffLayer = Layer.effect(MapsHandoff, effect {
       if (notice) try content.update((c) => ({ ...c, message: notice, ...(after.notice === "EventMoved" || after.notice === "EventChanged" ? { eventOrigin: undefined } : {}) }))
     },
     returnOffered: Stream.map(returns.changes, offered),
-    effect notificationTapped() {
-      opens.send({ type: "tapNotification" }) catch () => undefined
-      try flushOpen()
-    },
+    notificationTapped: () => readOpen({ type: "tapNotification" }),
     effect goneHome() {
       opens.send({ type: "cancelOpen" }) catch () => undefined
       native.invoke("AlphaMapsTransport", "clearNavigationOpen") catch () => undefined

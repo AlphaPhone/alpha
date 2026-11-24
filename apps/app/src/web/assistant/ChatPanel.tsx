@@ -1,4 +1,4 @@
-// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"
+// spec/assistant/reply.md, "Story: Read a reply with its cards"; spec/assistant/send.md, "Story: Send a message and know what happened to it"; spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/search.md, "Story: Find something I said in an earlier chat"; spec/assistant/recovery.md, "Restart is offered only while the resident is refused and holds a reviewable recovery, once per tap"; spec/maps/cards.md, "A tap sends one answer while the composer is quiet; a draft or an edit says why it waits; a failed send asks again"; spec/assistant/reply.md, "A failed reply offers the fix the agent named, and a rate limit shows its live wait, never retrying the message"; spec/assistant/send.md, "A dictated draft sent exactly as inserted is timed as a voice turn, and its reply is never spoken"; spec/voice/conversation.md, "A reply that needs review stops voice with the microphone off and says it waits in the chat"
 import { Effect } from "effect";
 import { useState } from "react";
 import { initial as draftsStart } from "../../../gen/assistant__draft.ts";
@@ -67,7 +67,9 @@ export function ChatPanel({ open, onTalk }: ChatPanelProps) {
   const [busyCard, setBusyCard] = useState<string | undefined>(undefined);
   const decide = (card: ProposalCard, work: Effect.Effect<Row, unknown, DeviceReview | Composer>) => {
     setBusyCard(card.proposalId);
-    perform(Effect.flatMap(work, (row) => Effect.flatMap(Effect.service(Composer), (composer) => composer.replaceRow(row))))
+    // spec/voice/conversation.md, "A reply that needs review …": settling a card while voice waits for review ends voice.
+    perform(Effect.flatMap(work, (row) => Effect.andThen(Effect.flatMap(Effect.service(Composer), (composer) => composer.replaceRow(row)),
+      Effect.flatMap(Effect.service(VoiceConversation), (voice) => voice.reviewSettled()))))
       .finally(() => setBusyCard(undefined));
   };
   const approve = (card: ProposalCard) => decide(card, Effect.flatMap(Effect.service(DeviceReview), (review) => Effect.map(review.approve(card), (done) => ({ kind: "card", id: `card:${card.proposalId}`, card: done.card } satisfies Row))));

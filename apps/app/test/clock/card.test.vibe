@@ -32,7 +32,7 @@ describe("Reminder cards (spec/clock/agentReview.md)", () => {
   it.effect("a body that only repeats the title is dropped, and an update that keeps the timing says so", () => effect {
     const repeated = try owned({ type: "reminder_create", fields: { title: "Stretch", body: " stretch ", schedule } })
     try Effect.try(() => assert.strictEqual(describeOwned(repeated, zone).detail.split("\n")[1], "Due October 28, 2026 at 10:52 PM PDT (America/Los_Angeles)."))
-    const target = { sourceId: "s1", sourceRevision: "r1", reminderId: "rem1", occurrenceId: "o1", revision: "v1" }
+    const target = { sourceId: "s1", sourceRevision: "a".repeat(64), reminderId: "rem1", occurrenceId: "o1", revision: "b".repeat(64) }
     const kept = try owned({ type: "reminder_update", target, fields: { title: "Stretch", body: "Stretch" } })
     try Effect.try(() => assert.strictEqual(describeOwned(kept, zone).detail, "“Stretch”\nTiming unchanged."))
   })

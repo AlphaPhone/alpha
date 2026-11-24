@@ -99,6 +99,7 @@ export function deviceReviewOf(step: (runId: string, stepId: string) => Approval
     agentChanged: () => Effect.void,
     approve: (card) => succeed({ card }),
     cardOf: () => succeed(undefined),
+    tappable: () => succeed(false),
     workflowStep: (runId: string, stepId: string) => sync(() => step(runId, stepId)),
     decline: (card) => succeed(card),
     expire: (card) => succeed(card),

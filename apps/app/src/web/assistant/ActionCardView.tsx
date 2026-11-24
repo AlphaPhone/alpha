@@ -1,4 +1,4 @@
-// spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"
+// spec/assistant/approvals.md, "Story: Approve an action card once, from wherever it is shown"; spec/voice/conversation.md, "A reply whose only card is one addressed text keeps voice listening and says the text is ready"; spec/assistant/approvals.md, "Story: Decline or let a card expire"; spec/assistant/approvals.md, "Decline runs nothing and works during an emergency call; Approve waits until the call ends"; spec/assistant/review.md, "A card that acts on a set it lists is offered only once it listed a non-empty set on this phone, and approved only from the latest review that listed it"
 import { Check, Clock, X } from "lucide-react";
 import type { PointerEvent } from "react";
 import { canTapApprove, canTapDecline, initial } from "../../../gen/assistant__approvals.ts";
@@ -32,7 +32,7 @@ const settledTitles: Partial<Record<ProposalCard["state"], string>> = {
 };
 
 /**
- * One action the agent proposed: Approve, or Decline as a visible second button; settled cards say what happened.
+ * One action the agent proposed: Approve (Send for an addressed text), or Decline as a visible second button; settled cards say what happened.
  * @model spec/assistant/approvals.md
  */
 export function ActionCardView({ card, emergency, busy, now, onApprove, onDecline, onOpen }: ActionCardViewProps) {
@@ -40,6 +40,7 @@ export function ActionCardView({ card, emergency, busy, now, onApprove, onDeclin
   const approvable = canTapApprove(routes) && !busy;
   const declinable = canTapDecline(routes) && !busy;
   const settled = settledTitles[card.state];
+  const approveLabel = card.addressedText === true ? "Send" : "Approve";
   const expiry = approvalExpiryText(card.expiresAt, now, undefined);
   const detail = card.state === "ExpiredCard" ? copy.reviewExpired : card.state === "UnavailableCard" || card.state === "ReplacedCard" ? copy.reviewUnavailable : card.summary ?? card.detail;
   return (
@@ -56,7 +57,7 @@ export function ActionCardView({ card, emergency, busy, now, onApprove, onDeclin
       {settled === undefined && expiry !== "" && <p className="flex items-center gap-1 font-mono text-xs uppercase text-muted-foreground"><Clock aria-hidden className="size-3" />{expiry}</p>}
       {settled === undefined && (
         <CardFooter className="gap-2">
-          <Button onClick={() => onApprove(card)} onPointerDown={keepFocus} disabled={!approvable} aria-label={emergency ? copy.emergency : `Approve ${card.title}`}><Check aria-hidden className="size-4" />Approve</Button>
+          <Button onClick={() => onApprove(card)} onPointerDown={keepFocus} disabled={!approvable} aria-label={emergency ? copy.emergency : card.addressedText === true ? "Send this text" : `Approve ${card.title}`}><Check aria-hidden className="size-4" />{approveLabel}</Button>
           <Button variant="outline" onClick={() => onDecline(card)} onPointerDown={keepFocus} disabled={!declinable} aria-label={`Decline ${card.title}`}><X aria-hidden className="size-4" />Decline</Button>
           {card.destination !== undefined && onOpen !== undefined && <Button variant="ghost" onClick={() => onOpen(card)} onPointerDown={keepFocus} disabled={busy} aria-label={`Open what ${card.title} is about`}>Open</Button>}
         </CardFooter>

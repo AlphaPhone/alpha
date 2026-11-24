@@ -4,8 +4,9 @@ import { cn, focusRing } from "../../lib/cn.ts";
 
 export type RadioGroupProps = ComponentProps<typeof RadioGroupPrimitive.Root>;
 
-export function RadioGroup({ className, ...props }: RadioGroupProps) {
-  return <RadioGroupPrimitive.Root className={cn("grid gap-2", className)} {...props} />;
+/** A disabled group refuses a click on itself as its disabled choices do: Radix leaves the group's own element clickable. */
+export function RadioGroup({ className, onClick, ...props }: RadioGroupProps) {
+  return <RadioGroupPrimitive.Root className={cn("grid gap-2", className)} onClick={props.disabled ? undefined : onClick} {...props} />;
 }
 
 export type RadioGroupItemProps = ComponentProps<typeof RadioGroupPrimitive.Item>;

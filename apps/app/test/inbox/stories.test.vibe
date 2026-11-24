@@ -8,23 +8,23 @@ import { composerRef } from "../../src/inbox/operations.vibe"
 import { senderImageFacts } from "../../src/inbox/text.ts"
 import { emailShareTarget } from "../../src/inbox/shareTarget.vibe"
 import { InboxAccounts, Mailbox, MailComposer, MailOperations, MailSelection, MailNoticesShell, MailSuggestions, Reader, SavedMail, inboxBack } from "../../src/inbox/layer.vibe"
-import { base64, calls, grantA, grantB, inboxApp, mailCloud, readMessage, settle, zeroDigest } from "./support.vibe"
+import { base64, calls, grantA, grantB, inboxApp, mailCloud, readMessage, settle } from "./support.vibe"
 import { losingAnswer } from "./lost.ts"
 
 const row1 = { id: "m1", threadId: "t-m1", sender: "Bo <bo@example.com>", senderAddress: "bo@example.com", subject: "Subject m1", snippet: "About m1", receivedAt: "2026-11-21T09:30:00Z", unread: true, starred: false, attached: false }
 
-/** A send ledger for request `r-send` whose dispatch either answers or is lost after it landed. */
-function sendRoutes(log: ReturnType<typeof calls>, lose: boolean) {
+/** A send ledger for request `r-send` whose dispatch either answers or is lost after it landed; its answers name the review digest Gmail reviewed the send under, as Cloud's do. */
+function sendRoutes(log: ReturnType<typeof calls>, lose: boolean, digest: string) {
   let state = "prepared"
   return {
     "POST /api/v1/eliza/google/gmail/inbox-v1/operations/r-send/dispatch": losingAnswer(() => {
       log.cloud.push("dispatch")
       state = "succeeded"
-      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: zeroDigest, state, providerResult: { messageId: "sent-1" }, rejectionCode: null } }
+      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: digest, state, providerResult: { messageId: "sent-1" }, rejectionCode: null } }
     }, () => lose),
     "GET /api/v1/eliza/google/gmail/inbox-v1/operations/r-send": () => {
       log.cloud.push("receipt")
-      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: zeroDigest, state, providerResult: state === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null } }
+      return { version: 1, providerExactlyOnce: false, receipt: { requestId: "r-send", kind: "send", reviewDigest: digest, state, providerResult: state === "succeeded" ? { messageId: "sent-1" } : null, rejectionCode: null } }
     },
   }
 }
@@ -315,7 +315,7 @@ it.live("Continue a Gmail draft here as a local draft bound to it", () => effect
 it.live("Keep the copies a sent email leaves behind honest: a draft edited after Send stays", () => effect {
   const log = calls()
   const digest = try sha256Hex(JSON.stringify(sendReview))
-  provide inboxApp(log, mailCloud(log, sendRoutes(log, true), { review: sendReview, digest })) {
+  provide inboxApp(log, mailCloud(log, sendRoutes(log, true, digest), { review: sendReview, digest })) {
     const mailbox = try Mailbox
     const composer = try MailComposer
     const operations = try MailOperations
@@ -393,7 +393,7 @@ it.live("Email a file from Files: it starts a new draft that opens in Inbox, and
 it.live("Clean up after a send and say Sent once: a recheck of the same receipt stays quiet", () => effect {
   const log = calls()
   const digest = try sha256Hex(JSON.stringify(sendReview))
-  provide inboxApp(log, mailCloud(log, sendRoutes(log, false), { review: sendReview, digest })) {
+  provide inboxApp(log, mailCloud(log, sendRoutes(log, false, digest), { review: sendReview, digest })) {
     const mailbox = try Mailbox
     const composer = try MailComposer
     const operations = try MailOperations
@@ -415,7 +415,7 @@ it.live("Clean up after a send and say Sent once: a recheck of the same receipt 
 it.live("An email edited while Gmail reviewed it is not sent: its review is discarded and nothing is dispatched", () => effect {
   const log = calls()
   const digest = try sha256Hex(JSON.stringify(sendReview))
-  provide inboxApp(log, mailCloud(log, sendRoutes(log, false), { review: sendReview, digest })) {
+  provide inboxApp(log, mailCloud(log, sendRoutes(log, false, digest), { review: sendReview, digest })) {
     const mailbox = try Mailbox
     const operations = try MailOperations
     try settle(mailbox.changes, (m) => m.phase === "ListReady")
