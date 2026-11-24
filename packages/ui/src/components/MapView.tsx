@@ -5,6 +5,8 @@ import { type ReactNode, useCallback, useRef, useState } from "react";
 import { cn } from "../lib/cn.ts";
 import { Button } from "./Button.tsx";
 
+maplibregl.setWorkerCount(1);
+
 /** A point of the map in degrees. */
 export interface MapPoint {
   lat: number;
