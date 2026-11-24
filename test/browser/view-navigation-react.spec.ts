@@ -56,7 +56,8 @@ async function ready(page:Page,scenario='valid',target='notes'){
     }});
   }
  },scenario);
- const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill(scenario==='saved-note'?'Open the note called Taco Night Groceries.':'Open '+(target==='automations'?'Workflows':target));await input.press('Enter');
+ // A topic reference ("about …") reaches the agent; "called <title>" opens locally (owner-request.ts).
+ const input=page.getByRole('textbox',{name:'Ask Alpha',exact:true});await input.fill(scenario==='saved-note'?'Open the note about taco night groceries.':'Open '+(target==='automations'?'Workflows':target));await input.press('Enter');
 }
 test('promoted prepared receipt crosses actual React chat, current-client claim and committed Notes acknowledgment',async({page},info)=>{
  await ready(page);await expect(page.locator('html')).toHaveAttribute('data-active-view','notes');await expect(page.getByRole('heading',{name:'Notes',exact:true})).toBeVisible();await expect.poll(()=>page.evaluate(()=>(window as any).promotedViewFixture.acks.length)).toBe(1);const f=await page.evaluate(()=>(window as any).promotedViewFixture);expect(f.sent).toHaveLength(1);expect(f.sent[0].metadata.uiView).toBe('chat');expect(f.sent[0].metadata.viewClientId).toMatch(/^[a-f0-9-]{36}$/);expect(f.claims).toHaveLength(1);expect(f.acks[0]).toMatchObject({shown:'notes',heading:true,body:{success:true,result:{switched:true},claimId:'owned-renderer-claim'}});expect(Object.keys(f.acks[0].body).sort()).toEqual(['claimId','clientId','installationId','requestId','result','success','viewId','viewType']);await page.screenshot({path:'test-results/promoted-view-react/notes-committed.png',animations:'disabled'});
