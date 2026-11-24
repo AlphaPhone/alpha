@@ -2,12 +2,10 @@
 import { Effect } from "effect";
 import { useState, type ReactNode } from "react";
 import { useMachine } from "../../../gen/voice__conversation.react.ts";
-import { disclosedFor, initial, startable } from "../../../gen/voice__conversation.ts";
-import { sendsOf, type Route } from "../../../gen/voice__route.ts";
+import { disclosedFor, initial } from "../../../gen/voice__conversation.ts";
+import type { Route } from "../../../gen/voice__route.ts";
 import { VoiceConversation, type VoiceStart } from "../../voice/conversation.vibe";
-import { ConversationPanel } from "./ConversationPanel.tsx";
-import { noticeText } from "./messages.ts";
-import { SpeechDisclosure } from "./SpeechDisclosure.tsx";
+import { ConversationControlView } from "./ConversationControlView.tsx";
 import { act, readNow } from "../shell/services.ts";
 import { runtime } from "./runtime.ts";
 
@@ -15,7 +13,7 @@ import { runtime } from "./runtime.ts";
 export type ConversationControlProps = VoiceStart;
 
 /**
- * The conversation voice control the assistant dock mounts: Talk, the disclosure network voice needs first, and the running conversation's controls.
+ * The conversation voice control the assistant dock mounts, over the runtime: Talk, the disclosure network voice needs first, and the running conversation's controls.
  * @model spec/voice/conversation.md
  */
 export function ConversationControl(start: ConversationControlProps) {
@@ -29,24 +27,20 @@ export function ConversationControl(start: ConversationControlProps) {
     else run((c) => c.start(start));
   };
   return (
-    <>
-      <ConversationPanel
-        conversation={state}
-        onTalk={talk}
-        onStop={() => run((c) => c.stop())}
-        onStopSpeaking={() => run((c) => c.stopSpeaking())}
-        onMute={(muted) => run((c) => c.mute(muted))}
-      />
-      <SpeechDisclosure
-        route={asking}
-        sends={asking === undefined ? undefined : sendsOf(asking)}
-        onDismiss={() => setAsking(undefined)}
-        onContinue={() => {
-          setAsking(undefined);
-          run((c) => Effect.andThen(c.disclose(), c.start(start)));
-        }}
-      />
-    </>
+    <ConversationControlView
+      conversation={state}
+      asking={asking}
+      placement="dock"
+      onTalk={talk}
+      onStop={() => run((c) => c.stop())}
+      onStopSpeaking={() => run((c) => c.stopSpeaking())}
+      onMute={(muted) => run((c) => c.mute(muted))}
+      onDismiss={() => setAsking(undefined)}
+      onContinue={() => {
+        setAsking(undefined);
+        run((c) => Effect.andThen(c.disclose(), c.start(start)));
+      }}
+    />
   );
 }
 
@@ -73,30 +67,21 @@ export function useVoiceTalk(request: () => void): VoiceTalk {
     if (!disclosedFor(state, route)) setAsking(route);
     else request();
   };
-  const notice = noticeText(state.notice);
   const view = (
-    <>
-      {!startable(state.shown)
-        ? (
-          <ConversationPanel
-            conversation={state}
-            onTalk={talk}
-            onStop={() => run((c) => c.stop())}
-            onStopSpeaking={() => run((c) => c.stopSpeaking())}
-            onMute={(muted) => run((c) => c.mute(muted))}
-          />
-        )
-        : notice !== undefined && <p role="status" data-voice-notice={state.notice} className="px-4 text-sm text-muted-foreground">{notice}</p>}
-      <SpeechDisclosure
-        route={asking}
-        sends={asking === undefined ? undefined : sendsOf(asking)}
-        onDismiss={() => setAsking(undefined)}
-        onContinue={() => {
-          setAsking(undefined);
-          run((c) => Effect.andThen(c.disclose(), Effect.sync(request)));
-        }}
-      />
-    </>
+    <ConversationControlView
+      conversation={state}
+      asking={asking}
+      placement="chat"
+      onTalk={talk}
+      onStop={() => run((c) => c.stop())}
+      onStopSpeaking={() => run((c) => c.stopSpeaking())}
+      onMute={(muted) => run((c) => c.mute(muted))}
+      onDismiss={() => setAsking(undefined)}
+      onContinue={() => {
+        setAsking(undefined);
+        run((c) => Effect.andThen(c.disclose(), Effect.sync(request)));
+      }}
+    />
   );
   return { talk, view };
 }
