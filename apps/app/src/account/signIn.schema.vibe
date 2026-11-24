@@ -1,4 +1,4 @@
-// spec/account/signIn.md, "Email works while readiness is unknown; Google and text messages need their own readiness"; spec/account/signIn.md, "A second verification the host kept after its wait ended is offered once the host resumes it"; spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"; spec/account/signIn.md, "Terms are the service's published plain text, or nothing"
+// spec/account/signIn.md, "Email works while readiness is unknown; Google and text messages need their own readiness"; spec/account/signIn.md, "A second verification the host kept after its wait ended is offered once the host resumes it"; spec/account/session.md, "A signed-in account is the one Cloud named for the saved key"; spec/account/signIn.md, "Terms are the service's published plain text, or nothing"; spec/account/signIn.md, "Back ends the step in flight, then the code step, then the dialog; the required page keeps its chooser"
 
 /** The host's `status()` answer: which methods are ready, and whether a saved key awaits Cloud's confirmation. */
 export schema HostStatus {
@@ -56,6 +56,11 @@ export schema ReadinessChanged {
   phone: boolean
   google: boolean
   activationPending?: boolean
+}
+
+/** `credentialIdentity` as the host answers it: the saved key's local generation, or null with none saved; never the key. */
+export schema HeldKey {
+  credentialId: string | null
 }
 
 /** The installed key's local generation and expiry; never the key. */

@@ -186,6 +186,7 @@ The list is grouped by who acts next. Items the owner must decide are marked **O
 - AppLifecycle's `Net` has no unvalidated state, so sign-in still reads `ElizaSystem.getNetworkStatus` once per lifecycle change for `internetValidated`. A flip with no other App change is not seen until the next return to the app.
 - Not verified: that the owner route table admits `/api/client-devices/{register,context,view-profile}`, and that upstream's context `subjectUserId` equals the resident's `/api/auth/me` owner or the Cloud userId.
 - Not verified: the import cycle account/enrollment → shell/assistantHost (`DeviceCapabilities`) → account/bindings → account/enrollment. Every reference is lazy, inside layer bodies.
+- `CredentialIdentity` (`src/account/signIn.schema.vibe`) requires `expiresAt`, but the Android host's `credentialIdentity` answers only `environment` and `credentialId` (null with no key). Every session read of the saved key (`readIdentity` in `src/account/session.vibe`: startup restore, adoption after a sign-in, the revoke check) therefore fails to decode on the phone. Back after a code (develop 23f73b6a7) compares keys through its own `HeldKey` schema, but the adoption it triggers still goes through `readIdentity`. Make `expiresAt` optional and take it from the sign-in answer or the renewal, or have the host answer it.
 
 ## Inbox, Notes and Telephony (carry-over)
 

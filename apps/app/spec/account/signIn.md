@@ -171,7 +171,7 @@ pure def canTapGoogle(s: SignIn): bool =
 pure def tapGoogle(s: SignIn): SignInStep =
   { state: { ...s, work: GoogleWork, screen: GoogleWait, fault: NoFault, prefill: false, priorKey: s.storedKey, hostCommitted: false, readinessOwner: false },
     out: List(StartGoogle) }
-pure def canHostCommitsKey(s: SignIn): bool = s.work == GoogleWork and not(s.hostCommitted)
+pure def canHostCommitsKey(s: SignIn): bool = (s.work == GoogleWork or s.work == Verifying) and not(s.hostCommitted)
 pure def hostCommitsKey(s: SignIn): SignIn = { ...s, storedKey: s.storedKey + 1, hostCommitted: true }
 pure def signedInFrom(key: int, s: SignIn): SignIn =
   { ...s, work: NoWork, screen: ScreenClosed, fault: NoFault, signedIn: true, opened: false, attempt: 0, stale: false, address: false, prefill: false, storedKey: key, adoptedKey: key, hostCommitted: false }
@@ -191,7 +191,8 @@ pure def backDuringGoogle(s: SignIn): SignInStep =
   else { state: { ...s, work: NoWork, screen: Choose, fault: NoFault, prefill: false }, out: List(CancelAttempt) }
 pure def mayReopenGoogle(s: SignIn): bool = s.work == GoogleWork and s.screen == GoogleWait and not(s.commitBoundary and s.hostCommitted)
 pure def sometimesGoogleReopenable(s: SignIn): bool = mayReopenGoogle(s) and s.storedKey == s.priorKey
-pure def alwaysAStoredKeyIsNeverHidden(s: SignIn): bool = s.storedKey != s.adoptedKey implies (s.work == GoogleWork and s.hostCommitted)
+pure def alwaysAStoredKeyIsNeverHidden(s: SignIn): bool =
+  s.storedKey != s.adoptedKey implies ((s.work == GoogleWork or s.work == Verifying) and s.hostCommitted)
 pure def sometimesAdoptedByBack(s: SignIn): bool = s.adoptedByBack and s.screen == ScreenClosed and s.adoptedKey == s.storedKey
 pure def sometimesCommittedAttemptSurvivesBack(s: SignIn): bool = s.commitBoundary and s.work == GoogleWork and s.hostCommitted
 pure def sometimesGoogleSecondFactor(s: SignIn): bool = s.screen == FactorStep and s.priorKey == s.storedKey and s.attempts == 1 and not(s.address)
@@ -222,6 +223,11 @@ pure def sometimesRetainedFactorShown(s: SignIn): bool = s.screen == FactorStep 
 ### A code is sent before it is asked for, and a resend the host did not take keeps the earlier code
 
 A send or resend starts a cooldown the host sets; the screen offers no resend until it ends.
+A phone number goes to the host in E.164, the only form it takes, and the code step shows it in
+that form: spaces, dashes, dots and parentheses are dropped and a leading + is kept, an
+international 00 prefix becomes +, and a bare ten-digit number, or eleven digits starting with 1,
+is read as +1. Anything else is sent without its separators and the host refuses it; no country is
+guessed for it, and letters or other symbols are kept so the number is refused, not rewritten.
 
 ```quint
 pure def canSubmitAddress(s: SignIn): bool =
@@ -262,8 +268,9 @@ pure def sometimesDrafted(s: SignIn): bool = s.drafted and s.screen == Choose an
 ### A wrong code keeps the step, a spent code leaves only Resend, and any other failure returns to the choice
 
 A second verification continues under the same attempt; a passkey factor cannot be completed in
-Alpha. Every other failure, an unreachable Cloud included, returns to the method choice with the
-address filled in when the step was reached from one. An answer is taken only for the attempt it
+Alpha. As with Google, the host stores the new key before its verification call answers. Every
+other failure, an unreachable Cloud included, returns to the method choice with the address filled
+in when the step was reached from one. An answer is taken only for the attempt it
 was sent for: one that arrives after Back or after a newer code is dropped.
 
 ```quint
@@ -271,13 +278,15 @@ type VerifyOutcome = CodeAccepted | CodeNeedsFactor({ codeFactor: FactorKind }) 
 pure val verifiedValues = Set(CodeAccepted, CodeNeedsFactor({ codeFactor: SmsFactor }), CodeWrong, CodeUsedUp, CodeFailed)
 pure def canVerify(s: SignIn): bool =
   (s.screen == CodeStep or (s.screen == FactorStep and s.factor != PasskeyFactor)) and s.work == NoWork and not(s.stale) and reachable(s.net)
-pure def verify(s: SignIn): SignInStep = { state: { ...s, work: Verifying, fault: NoFault }, out: List(VerifyCode) }
+pure def verify(s: SignIn): SignInStep =
+  { state: { ...s, work: Verifying, fault: NoFault, priorKey: s.storedKey, hostCommitted: false }, out: List(VerifyCode) }
 pure def isFactorOutcome(v: VerifyOutcome): bool = match v { | CodeNeedsFactor(f) => true | _ => false }
 pure val attemptValues = Set(1, 2, 3)
 pure def canVerifyEnds(s: SignIn, verified: VerifyOutcome, attempt: int): bool =
   s.work == Verifying and attempt == s.attempt and (isFactorOutcome(verified) implies s.screen == CodeStep)
+    and ((verified == CodeAccepted) iff s.hostCommitted)
 pure def verifyEnds(s: SignIn, verified: VerifyOutcome, attempt: int): SignInStep = match verified {
-  | CodeAccepted => { state: signedInFrom(s.storedKey + 1, s), out: List(Adopted) }
+  | CodeAccepted => { state: signedInFrom(s.storedKey, s), out: List(Adopted) }
   | CodeNeedsFactor(f) => { state: { ...s, work: NoWork, screen: FactorStep, factor: f.codeFactor }, out: List() }
   | CodeWrong => { state: { ...s, work: NoWork, fault: WrongCode }, out: List() }
   | CodeUsedUp => if (s.screen == CodeStep) { state: { ...s, work: NoWork, stale: true, fault: CodeSpent }, out: List() }
@@ -305,7 +314,12 @@ pure def sometimesSignedInWithACode(s: SignIn): bool = s.signedIn and s.adoptedK
 
 During a check, Back ends it, and an owner's check still ensures the agent; on the required or
 first-run page the check ends on its chooser, offering email while readiness is unknown, so the page
-is never left blank. During a send or a verification it cancels that attempt. On the required or first-run page showing its chooser with
+is never left blank. During a send or a verification it cancels that attempt; a verification
+whose key the host already stored is adopted instead, on either host, since Back can arrive after
+the host stored the key and before its answer. Alpha reads the key held before the verification
+starts and again once the cancelled verification has unwound (at most two seconds), and adopts a
+key other than the one held before; when the key held before cannot be read, nothing is adopted.
+On the required or first-run page showing its chooser with
 nothing pending, Back changes nothing. In the Account app, Back from the chooser of a sign-in the owner
 opened while signed out closes it and leaves Account too, since nothing of Account is behind it.
 
@@ -322,6 +336,8 @@ pure def back(s: SignIn): SignInStep = {
     { state: if (page) { ...ended, screen: Choose } else { ...ended, screen: ScreenClosed, opened: false, prefill: false },
       out: if (s.automatic) List() else List(EnsureResident) }
   else if (s.work == SavingOwnKeys) { state: { ...s, work: NoWork }, out: List() }
+  else if (s.work == Verifying and s.hostCommitted)
+    { state: { ...signedInFrom(s.storedKey, s), adoptedByBack: true }, out: List(CancelAttempt, Adopted) }
   else if (s.work != NoWork) { state: chooserFrom(fill, s), out: List(CancelAttempt) }
   else if (s.screen == CodeStep or s.screen == FactorStep) { state: chooserFrom(fill, s), out: List(CancelAttempt) }
   else if (page) { state: s, out: List() }
@@ -331,6 +347,11 @@ pure def stepTheRequiredPageKeepsItsChooser(before: SignIn, via: str, after: Sig
   (via == "back" and entryOf(before) == RequiredEntry and before.work == NoWork and before.screen == Choose) implies after == before
 pure def alwaysAShownPageHasAChooserOrACheck(s: SignIn): bool =
   (isPage(entryOf(s)) and s.latch and s.work != SavingOwnKeys) implies (s.screen != ScreenClosed or s.work == Probing)
+pure def stepBackAfterAStoredCodeKeyAdoptsIt(before: SignIn, via: str, after: SignIn, out: List[SignInEffect]): bool =
+  (via == "back" and before.work == Verifying and before.hostCommitted)
+    implies (after.signedIn and after.adoptedKey == before.storedKey and out.includes(Adopted))
+// Only a verification is adopted by Back behind a commit boundary: Google keeps its committed attempt running there.
+pure def sometimesCodeKeyAdoptedByBack(s: SignIn): bool = s.adoptedByBack and s.commitBoundary and s.signedIn
 pure def sometimesBackClosedTheDialog(s: SignIn): bool = entryOf(s) == NoEntry and s.probes >= 1 and s.work == NoWork and s.screen == ScreenClosed and not(s.signedIn)
 ```
 

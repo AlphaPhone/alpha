@@ -103,6 +103,7 @@ export function platform(calls: Calls, native: Record<string, Answer>, cloud: Re
       invoke: (plugin: string, method: string, args?: unknown) => {
         calls.push({ name: `${plugin}.${method}`, args })
         const found = answer(native, `${plugin}.${method}`, args)
+        if (Effect.isEffect(found)) return found as Effect.Effect<unknown, NativeFailed>
         if (found === undefined) return Effect.fail(new NativeFailed({ plugin, method, message: "absent" }))
         if (refused(found)) return Effect.fail(new NativeFailed({ plugin, method, message: "refused", code: found.refuse }))
         return Effect.succeed(found)

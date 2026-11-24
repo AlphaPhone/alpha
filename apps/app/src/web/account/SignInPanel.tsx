@@ -5,6 +5,7 @@ import {
   type CodeMethod, type Fault, type SignIn, canBack, canBackDuringGoogle, canChooseMethod, canOwnKeysStart, canOwnerOpens, canResend,
   canSubmitAddress, canTapGoogle, canVerify, entryOf, isPage, mayReopenGoogle, methodReady,
 } from "../../../gen/account__signIn.ts";
+import { normalizeSignInPhone } from "../../account/sign-in-phone.ts";
 import type { ServiceInfo } from "../../account/signIn.vibe";
 import { Alert, Button, Input, Label, Spinner } from "../components/ui/index.ts";
 import { cn } from "../lib/cn.ts";
@@ -136,7 +137,7 @@ export function SignInPanel({ signIn, serviceName, terms, android = false, onRet
           <p className="flex items-center gap-2 text-muted-foreground">
             {signIn.screen === "FactorStep" ? <ShieldCheck aria-hidden className="size-4" /> : phone ? <Phone aria-hidden className="size-4" /> : <Mail aria-hidden className="size-4" />}
             <span className="sr-only">{signIn.screen === "FactorStep" ? "Verification code" : "Code sent to"}</span>
-            {signIn.screen === "CodeStep" && <strong className="text-foreground">{address}</strong>}
+            {signIn.screen === "CodeStep" && <strong className="text-foreground">{phone ? normalizeSignInPhone(address) : address.trim()}</strong>}
           </p>
           {signIn.screen === "FactorStep" && signIn.factor === "PasskeyFactor" ? (
             <Alert variant="warn">Passkeys can’t be used in Alpha</Alert>

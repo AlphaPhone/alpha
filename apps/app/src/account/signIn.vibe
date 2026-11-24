@@ -13,9 +13,13 @@ import { Resident } from "../platform/resident.vibe"
 import { freshKey } from "./deployment.ts"
 import { ensureResident } from "./inference.vibe"
 import { CloudSession, noNews, newsOf, type SignInNews } from "./session.vibe"
-import { CodeStarted, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
+import { normalizeSignInPhone } from "./sign-in-phone.ts"
+import { CodeStarted, HeldKey, HostStatus, MfaRequired, MfaResumed, NetworkStatus, ReadinessChanged, ServiceAnswer, SignInAnswer } from "./signIn.schema.vibe"
 
 const plugin = "AlphaCloudSignIn"
+
+/** How long Back waits for a cancelled verification to unwind before it reads the stored key. */
+const verifyUnwindMs = 2000
 
 /** The deployment's published Terms and Privacy, as the screen shows them. */
 export type ServiceInfo = ServiceAnswer["service"]
@@ -65,6 +69,11 @@ export function methodsOf(status: HostStatus): Methods {
   return { known, google: known && status.google === true, email: known && status.email === true, phone: known && status.phone === true }
 }
 
+/** The address as the host takes it: a phone number in E.164 (spec/account/signIn.md), an email address trimmed. */
+export function sentForm(method: CodeMethod, typed: string): string {
+  return method === "PhoneCode" ? normalizeSignInPhone(typed) : typed.trim()
+}
+
 /** How a refused verification reads on the code step. */
 export function verifyRefusal(code: string | undefined): VerifyOutcome {
   if (code === "invalid-code") return { tag: "CodeWrong" }
@@ -95,6 +104,9 @@ export const signInService = Layer.effect(SignInScreen, effect {
   const news = try Ref.make<SignInNews>(noNews)
   const epoch = try Ref.make(0)
   const retained = try Ref.make<MfaRequired | undefined>(undefined)
+  // The key held when the running verification began, for Back; undefined when it could not be read.
+  const heldBefore = try Ref.make<{ readonly credentialId: string | null } | undefined>(undefined)
+  const verifying = try Ref.make(false)
 
   effect function send(event: Parameters<typeof machine.send>[0]) {
     const step = machine.send(event) catch () => undefined
@@ -193,6 +205,14 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try send(resending ? { type: "resendEnds", accepted: started !== undefined } : { type: "sendEnds", accepted: started !== undefined })
   }
 
+  /** The key the host holds now; undefined when it cannot be read. */
+  effect function heldKey() {
+    const read = effect {
+      return try Schema.decodeUnknownEffect(HeldKey)(try native.invoke(plugin, "credentialIdentity", { environment }))
+    } catch () => undefined
+    return read
+  }
+
   effect function runVerify() {
     const turn = try begin()
     const s = try machine.get()
@@ -201,20 +221,50 @@ export const signInService = Layer.effect(SignInScreen, effect {
     try Ref.update(typed, (t) => ({ ...t, code: "" }))
     try Ref.set(news, noNews)
     const method = s.screen === "FactorStep" ? "verifyMfa" : methodNames[s.method].verify
-    const verified = try held(effect {
-      const call = Effect.map(native.invoke(plugin, method, { attemptId: attempt, code }), (value) => ({ ok: true as const, value }))
-      const result = call catch (error) => ({ ok: false as const, code: error._tag === "NativeFailed" ? error.code : undefined })
-      if (!result.ok) return verifyRefusal(result.code)
-      const answer = Schema.decodeUnknownEffect(SignInAnswer)(result.value) catch () => undefined
-      if (answer === undefined) return { tag: "CodeFailed" } as VerifyOutcome
-      if (answer.status === "authenticated") {
-        try Ref.set(news, newsOf(answer))
-        return { tag: "CodeAccepted" } as VerifyOutcome
-      }
-      if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
-      return { tag: "CodeNeedsFactor", codeFactor: factorOf(answer.method) } as VerifyOutcome
-    })
+    // The host stores the key before its answer: Back compares the key held before with the one it then finds.
+    try Ref.set(heldBefore, undefined)
+    try Ref.set(verifying, true)
+    const verified = try ensuring(effect {
+      try Ref.set(heldBefore, try heldKey())
+      const outcome = try held(effect {
+        const call = Effect.map(native.invoke(plugin, method, { attemptId: attempt, code }), (value) => ({ ok: true as const, value }))
+        const result = call catch (error) => ({ ok: false as const, code: error._tag === "NativeFailed" ? error.code : undefined })
+        if (!result.ok) return verifyRefusal(result.code)
+        const answer = Schema.decodeUnknownEffect(SignInAnswer)(result.value) catch () => undefined
+        if (answer === undefined) return { tag: "CodeFailed" } as VerifyOutcome
+        if (answer.status === "authenticated") {
+          try Ref.set(news, newsOf(answer))
+          if (try stillCurrent(turn)) try send({ type: "hostCommitsKey" })
+          return { tag: "CodeAccepted" } as VerifyOutcome
+        }
+        if (answer.attemptId !== undefined) try Ref.set(attemptId, answer.attemptId)
+        return { tag: "CodeNeedsFactor", codeFactor: factorOf(answer.method) } as VerifyOutcome
+      })
+      return outcome
+    }, Ref.set(verifying, false))
     if (try stillCurrent(turn)) try send({ type: "verifyEnds", verified, attempt: s.attempt })
+  }
+
+  /**
+   * Back during a verification: the host may have stored the key before Back arrived. The attempt is
+   * cancelled, its call given up to two seconds to unwind, and a key other than the one held before
+   * it is reported as committed, so Back adopts it instead of hiding it behind the chooser.
+   */
+  effect function settleCancelledVerify() {
+    const before = try Ref.get(heldBefore)
+    if (before === undefined) return
+    try Ref.update(epoch, (n) => n + 1)
+    native.invoke(plugin, "cancel", { requestId: try Ref.get(requestId) }) catch () => undefined
+    let waited = 0
+    while ((try Ref.get(verifying)) && waited < verifyUnwindMs) {
+      try sleep(Duration.millis(10))
+      waited = waited + 10
+    }
+    const after = try heldKey()
+    const stored = after?.credentialId ?? null
+    if (stored === null || stored === before.credentialId) return
+    const s = try machine.get()
+    if (enabled(s, { type: "hostCommitsKey" })) try send({ type: "hostCommitsKey" })
   }
 
   effect function offerRetained() {
@@ -323,11 +373,11 @@ export const signInService = Layer.effect(SignInScreen, effect {
       if (canTapGoogle(try machine.get())) try send({ type: "tapGoogle" })
     },
     effect submit(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      try Ref.set(typed, { address: sentForm((try machine.get()).method, address), code: "" })
       try send({ type: "submitAddress" })
     },
     effect resend(address: string) {
-      try Ref.set(typed, { address: address.trim(), code: "" })
+      try Ref.set(typed, { address: sentForm((try machine.get()).method, address), code: "" })
       try send({ type: "resend" })
     },
     effect verify(code: string) {
@@ -336,6 +386,7 @@ export const signInService = Layer.effect(SignInScreen, effect {
     },
     effect back() {
       const before = try machine.get()
+      if (before.work === "Verifying") try settleCancelledVerify()
       if (before.work === "GoogleWork") try send({ type: "backDuringGoogle" })
       else try send({ type: "back" })
       const after = try machine.get()
