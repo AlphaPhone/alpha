@@ -115,8 +115,9 @@ public class DrawTest {
   home_patch=(branding/'home-back-keyboard.patch').read_text()
   self.assertIn('<bool name="config_alpha_home_back_only">false</bool>',home_patch)
   settings=ET.parse(branding/'overlay/packages/apps/Settings/res/values/alpha-navigation.xml').getroot()
-  # Three-button mode is the default, so its Settings label and the gesture description stay AOSP's own,
-  # which describe Back, Home and Recents; Alpha names only its gesture mode.
+  # Fresh setup selects gestures and three-button mode stays the fallback and a Settings option, so its
+  # label and the gesture description stay AOSP's own, which describe Back, Home and Recents;
+  # Alpha names only its gesture mode.
   self.assertEqual({n.attrib['name']:n.text for n in settings.findall('string')},
    {'edge_to_edge_navigation_title':'Alpha gestures','gesture_settings_activity_title':'Alpha gestures'})
   overlay=ET.parse(branding/'overlay/frameworks/base/packages/SystemUI/res/values/alpha-navigation.xml').getroot()
@@ -125,7 +126,8 @@ public class DrawTest {
   self.assertEqual([n.text for n in overlay.findall('string')if n.attrib.get('name')=='config_navBarLayout'],[],'Android default Back/Home/Recents layout')
   self.assertEqual(len(list(overlay)),2,'no navigation dimensions, button colors or other controls overridden')
   framework=ET.parse(branding/'overlay/frameworks/base/core/res/res/values/config.xml').getroot()
-  self.assertEqual([n.text for n in framework.findall('integer')if n.attrib.get('name')=='config_navBarInteractionMode'],['0'])
+  self.assertEqual([n.text for n in framework.findall('integer')if n.attrib.get('name')=='config_navBarInteractionMode'],['0'],
+   'three-button is the pre-setup fallback; Provision selects gestures on fresh setup')
   self.assertFalse([n for n in framework.findall('dimen')if n.attrib['name'].startswith('navigation_bar')],'Android navigation-mode dimensions apply')
 
 if __name__=='__main__':unittest.main(verbosity=2)
