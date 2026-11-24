@@ -7,7 +7,7 @@ import { conversation } from "./fixtures.ts";
 const chat = (
   <ChatPanelView
     rows={conversation} typing={false} text="" files={[]} canSend={false} unsettled={false} canFork cloud="Eliza Cloud" emergency={false}
-    now={Date.UTC(2030, 0, 1, 12, 0)} restartOffered={false} restartBusy={false} searching={false}
+    now={Date.UTC(2030, 0, 1, 12, 0)} restartOffer={{ kind: "none" }} restartBusy={false} searching={false}
     onQuote={fn()} onEdit={fn()} onApprove={fn()} onDecline={fn()} onOpenCard={fn()} onChoose={fn()} onPlan={fn()} onOpenRun={fn()} onEmail={fn()}
     onText={fn()} onSend={fn()} onStop={fn()} onTalk={fn()} onAttach={fn()} onRemoveFile={fn()} onClearTarget={fn()} onReviewUnsettled={fn()}
     onSearch={fn()} onNewChat={fn()} onActivity={fn()}
