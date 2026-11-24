@@ -117,7 +117,7 @@ export const layer = Layer.effect(MailComposer, effect {
     return machine.send(event) catch () => undefined
   }
 
-  effect function mine() {
+  effect function boundDrafts() {
     const s = try machine.get()
     return accountOf(s.owner, s)
   }
@@ -126,7 +126,7 @@ export const layer = Layer.effect(MailComposer, effect {
     return try Semaphore.withPermit(writing, effect {
       const w = try Ref.getAndSet(waiting, undefined)
       if (w === undefined) return undefined
-      const open = (try mine()).open
+      const open = (try boundDrafts()).open
       if (!hasDraft(open)) return undefined
       const next = { ...open, fields: w.fields, pendingTo: w.pendingTo }
       const done = try send({ type: "edit", id: open.id, revision: open.revision, edits: w.fields, pendingTo: w.pendingTo, bytes: jsonBytes(next) })
@@ -145,7 +145,23 @@ export const layer = Layer.effect(MailComposer, effect {
     return try write()
   }
 
+  /** Binds the composer to the selected account when the selection moved, writing the waiting edit to the account it was typed for first. */
+  effect function follow() {
+    const key = try accounts.selectedKey()
+    if (key === (try machine.get()).owner) return
+    try flush()
+    if (key === "") try send({ type: "unbind" })
+    else try send({ type: "bind", owner: key })
+  }
+
+  /** The selected account's drafts, bound first. */
+  effect function mine() {
+    try follow()
+    return try boundDrafts()
+  }
+
   effect function start(draft: Draft): (ComposerRefusal | undefined)!! {
+    try follow()
     try flush()
     const s = try machine.get()
     if (s.owner === "") return "no-account"
@@ -162,7 +178,7 @@ export const layer = Layer.effect(MailComposer, effect {
 
   effect function attach(file: PickedFile): (ComposerRefusal | Admission | undefined)!! {
     try flush()
-    const open = (try mine()).open
+    const open = (try boundDrafts()).open
     if (!hasDraft(open)) return "not-ready"
     const checked = tryPromise({ try: () => checkMailFile(file.name, file.mimeType, file.dataBase64), catch: (cause) => cause }) catch () => "name-or-encoding" as const
     if (isRefusal(checked)) return checked
@@ -177,7 +193,7 @@ export const layer = Layer.effect(MailComposer, effect {
   }
 
   effect function hide() {
-    if (!(try mine()).composing) return false
+    if (!(try boundDrafts()).composing) return false
     try flush()
     return (try send({ type: "hideComposer" })) !== undefined
   }
@@ -201,14 +217,7 @@ export const layer = Layer.effect(MailComposer, effect {
   }
 
   fork.scoped (effect {
-    for try (const _ of accounts.changes) {
-      const key = try accounts.selectedKey()
-      const s = try machine.get()
-      if (key === s.owner) continue
-      try flush()
-      if (key === "") try send({ type: "unbind" })
-      else try send({ type: "bind", owner: key })
-    }
+    for try (const _ of accounts.changes) try follow()
   })
 
   return {
@@ -223,9 +232,10 @@ export const layer = Layer.effect(MailComposer, effect {
       return try start(try fresh(fields))
     },
     effect reply(mode: "ReplyMode" | "ReplyAllMode" | "ForwardMode") {
+      try follow()
       const r = try reader.get()
       if (r.phase !== "BodyShown") return "not-ready"
-      const a = try mine()
+      const a = try boundDrafts()
       if (hasDraft(a.open) && a.open.fields.replyMessage === r.body.id && a.open.fields.mode === modeNames[mode]) {
         try send({ type: "resume" })
         return undefined
@@ -268,7 +278,7 @@ export const layer = Layer.effect(MailComposer, effect {
     flush,
     attach,
     effect pickAndAttach() {
-      const open = (try mine()).open
+      const open = (try boundDrafts()).open
       if (!hasDraft(open)) return "not-ready"
       const policy = (try journal.get()).capabilities.policy
       const room = Math.max(0, Math.min(policy.maximumOutgoing, 10) - open.fields.files.length - open.fields.forward.parts.length)
@@ -281,10 +291,10 @@ export const layer = Layer.effect(MailComposer, effect {
       return undefined
     },
     effect back(): ComposerBack!! {
-      if (!(try mine()).composing) return { taken: false }
+      if (!(try boundDrafts()).composing) return { taken: false }
       const refusal = try flush()
       if (refusal !== undefined) return { taken: true, refusal }
-      const a = try mine()
+      const a = try boundDrafts()
       if (!hasDraft(a.open)) return { taken: (try hide()) }
       if (!meaningful(a.open)) {
         try send({ type: "setAside", shelfBytes: 0 })
@@ -301,13 +311,14 @@ export const layer = Layer.effect(MailComposer, effect {
       try send({ type: "resume" })
     },
     effect openShelved(id: string, confirmed: boolean) {
+      try follow()
       try flush()
       const done = try send({ type: "openShelved", id, confirmed })
       return done === undefined ? "changed" : undefined
     },
     effect deleteShelved(picks: DraftPick[]) {
       try flush()
-      const a = try mine()
+      const a = try boundDrafts()
       if (hasDraft(a.open)) {
         const shelved = try send({ type: "setAside", shelfBytes: jsonBytes([...a.shelf, a.open]) })
         if (shelved === undefined) return false
@@ -315,6 +326,7 @@ export const layer = Layer.effect(MailComposer, effect {
       return (try send({ type: "deleteShelved", picks })) !== undefined
     },
     effect transfer(grant: string) {
+      try follow()
       const refusal = try flush()
       if (refusal !== undefined) return refusal
       const current = try accounts.owner()
@@ -329,6 +341,7 @@ export const layer = Layer.effect(MailComposer, effect {
       return undefined
     },
     effect openGmailDraft(row: DraftRow, confirmed: boolean) {
+      try follow()
       try flush()
       const grant = (try accounts.get()).selected
       const d = gmail.draft(grant, row.draftId) catch () => undefined
@@ -342,23 +355,24 @@ export const layer = Layer.effect(MailComposer, effect {
     effect send() {
       const refusal = try flush()
       if (refusal !== undefined) return refusal
-      const open = (try mine()).open
+      const open = (try boundDrafts()).open
       if (!hasDraft(open)) return "not-ready"
       if (open.pendingTo !== "" || ![...open.fields.toList, ...open.fields.ccList, ...open.fields.bccList].every(literalMailAddress)) return "unclear-recipient"
       return try operations.sendDraft(open, undefined, effect {
         try flush()
-        const now = (try mine()).open
+        const now = (try boundDrafts()).open
         return hasDraft(now) ? composerRef(now) : undefined
       })
     },
     effect saveToGmail() {
       const refusal = try flush()
       if (refusal !== undefined) return refusal
-      const open = (try mine()).open
+      const open = (try boundDrafts()).open
       if (!hasDraft(open)) return "not-ready"
       return try operations.saveGmailDraft(open)
     },
     effect shareFile(first: PickedFile, again: PickedFile, token: string) {
+      try follow()
       const s = try machine.get()
       const a = accountOf(s.owner, s)
       const checked = tryPromise({ try: () => checkMailFile(first.name, first.mimeType, first.dataBase64), catch: (cause) => cause }) catch () => "name-or-encoding" as const
@@ -371,6 +385,7 @@ export const layer = Layer.effect(MailComposer, effect {
       return refusal === undefined ? "FileAdded" : refusal === "drafts-full" ? "DraftsFull" : "NotReady"
     },
     effect token() {
+      try follow()
       return (try machine.get()).owner
     }
   }
