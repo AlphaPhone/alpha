@@ -144,6 +144,7 @@ export const layer = Layer.effect(Mailbox, effect {
 
   effect function showSelection(folder: Folder, query: string) {
     const a = try accounts.get()
+    try reader.bindAccount(a.selected)
     if (a.selected === "") {
       try send({ type: "detach" })
       return

@@ -28,6 +28,8 @@ export interface LinkReview { readonly href: string; readonly host: string; read
 export service Reader {
   readonly changes: Stream.Stream<ReaderState>
   get(): ReaderState!!
+  /** Binds the reader to the mailbox account, closing the previous message and attachment. */
+  bindAccount(account: string): void!!
   /** Opens a listed message: from this phone's saved mail while the accounts are the saved ones, otherwise read whole from Gmail. */
   open(row: MailRow): void!!
   /** Closes the open message; false when none was open. */
@@ -163,9 +165,16 @@ export const layer = Layer.effect(Reader, effect {
     try send({ type: "threadRead", visit, thread })
   }
 
+  effect function bindAccount(account: string) {
+    if ((try send({ type: "bind", account })) === undefined) return
+    try Ref.set(file, undefined)
+    native.invoke("AlphaMailAttachments", "cancel") catch () => undefined
+  }
+
   effect function open(row: MailRow) {
-    try send({ type: "preferenceRead", on: try preferences.loadsMailImages() })
     const a = try accounts.get()
+    if (a.selected === "" || (try machine.get()).account !== a.selected) return
+    try send({ type: "preferenceRead", on: try preferences.loadsMailImages() })
     const header: MailHeader = row
     try Ref.set(file, undefined)
     native.invoke("AlphaMailAttachments", "cancel") catch () => undefined
@@ -194,6 +203,7 @@ export const layer = Layer.effect(Reader, effect {
   return {
     changes: machine.changes,
     get: () => machine.get(),
+    bindAccount,
     open,
     effect close() {
       if ((try machine.get()).phase === "Closed") return false
