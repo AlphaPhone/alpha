@@ -230,9 +230,12 @@ pure def stepOnlyAnAccountChangeRetiresAProvider(before: Connection, via: str, a
 
 ### A failed read is tried again
 
-Alpha retries on its own while the account is signed in.
+Alpha retries on its own, 30 seconds after the failure, while the account
+is signed in.
 
 ```quint
+pure val retryMs = 30000
+
 pure def leadsToAFailedReadIsTriedAgain(c: Connection, later: Connection): bool =
   (c.account != 0 and c.coverage.status == R::Failed) implies
     (later.coverage.status != R::Failed or later.account != c.account)

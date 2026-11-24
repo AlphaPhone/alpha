@@ -99,12 +99,12 @@ export const atlas = {
     listeners.add(listener)
     return () => { listeners.delete(listener) }
   },
-  /** The number of `spot`: the one its provider's id already has, or a new one. */
+  // spec/app/maps/places.md, "A saved place keeps its name, its coordinates and the provider's identity of it, and nothing else"
+  /** The number of `spot`: the one the same place already has (its provider's id, or for a pin its coordinates), or a new one never given before. */
   numberOf(spot: Spot): number {
-    const key = spot.id === "" ? "" : `${spot.providerId}/${spot.id}`
-    const known = key === "" ? undefined : byProvider.get(key)
-    const number = known ?? next++
-    if (key !== "") byProvider.set(key, number)
+    const key = spot.id === "" ? `@${spot.at.lat},${spot.at.lng}` : `${spot.providerId}/${spot.id}`
+    const number = byProvider.get(key) ?? next++
+    byProvider.set(key, number)
     change({ spots: new Map(current.spots).set(number, { ...current.spots.get(number), ...spot }) })
     return number
   },
@@ -155,6 +155,11 @@ export const atlas = {
     const made = `maps_${fresh()}`
     handles.set(place, made)
     return made
+  },
+  // spec/app/maps/index.md, "A place's details are read from its provider once it is on the card, and shown only while it still is"
+  /** Maps left the screen: what providers said of places beyond their names, positions and identities is forgotten. */
+  forgetDetails(): void {
+    change({ spots: new Map([...current.spots].map(([place, { address: _address, phone: _phone, website: _website, hours: _hours, ...kept }]) => [place, kept])) })
   },
   /** Everything of the last account, which another account never sees. */
   forget(): void {

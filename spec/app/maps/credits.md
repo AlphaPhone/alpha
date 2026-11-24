@@ -99,16 +99,18 @@ pure def lawFollowingHidesTheCompass(bearing: int, pitch: int): bool = not(compa
 
 Every map Alpha draws, the world map and the Cloud rasters alike, covers the
 world, so the camera treats them alike. Guidance following the phone owns
-the camera. Otherwise a new route is fitted into view up to street zoom
+the camera, at street zoom (16) or closer. Otherwise a new route is fitted into view up to street zoom
 (17); a newly picked place is centred at zoom 14 above the sheets; and a new
 set of result pins, with no place picked and no route, is fitted into view
-up to zoom 14. Leaving guidance turns the map north up again. Anything else
+up to zoom 14. What is fitted keeps 48 pixels clear on every side. Leaving guidance turns the map north up again. Anything else
 keeps the camera where the owner left it.
 
 ```quint
 type Aim = KeepCamera | CenterOnPlace | FitResults | FitRoute | FollowPhone
 
 pure val placeZoom = 14
+pure val followZoom = 16
+pure val fitPadding = 48
 pure val resultsMaxZoom = 14
 pure val routeMaxZoom = 17
 

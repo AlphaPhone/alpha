@@ -24,6 +24,22 @@ module held {
 }
 import { type Stopped, plugin } from held
 
+module voice {
+  /** `text` read aloud by the page's speech synthesis, cutting off whatever it was reading: whether the page has one. @throws {never} */
+  export function said(text: string): boolean {
+    const synthesis = globalThis.speechSynthesis
+    if (synthesis === undefined || typeof globalThis.SpeechSynthesisUtterance !== "function") return false
+    synthesis.cancel()
+    synthesis.speak(new globalThis.SpeechSynthesisUtterance(text))
+    return true
+  }
+  /** Whatever the page's speech synthesis is reading, stopped. @throws {never} */
+  export function hushed(): void {
+    globalThis.speechSynthesis?.cancel()
+  }
+}
+import { hushed, said } from voice
+
 /** How the notification of a journey ended it: Stop pressed on it, or Android lost the service. */
 export type Ended = { readonly journey: number; readonly by: "notification" | "lost" }
 
@@ -40,6 +56,10 @@ export service Navigation {
   opened(): boolean!!
   /** Each journey whose service Android ended. */
   readonly ended: Stream.Stream<Ended>
+  /** An instruction of guidance read aloud, in place of the one being read. */
+  say(text: string): void!!
+  /** Guidance's reading stopped. */
+  hush(): void!!
 }
 
 const sessionOf = (journey: number) => `alpha-maps-${journey}`
@@ -70,6 +90,8 @@ export const phoneNavigation = Layer.sync(Navigation, () => {
         (handle) => promise(() => handle.remove()),
       )
     }),
+    say: (text: string) => sync(() => { said(text) }),
+    hush: () => sync(hushed),
   }
 })
 
@@ -81,4 +103,6 @@ export const browserNavigation = Layer.succeed(Navigation, {
   stop: () => Effect.void,
   opened: () => succeed(false),
   ended: Stream.empty,
+  say: (text: string) => sync(() => { said(text) }),
+  hush: () => sync(hushed),
 })

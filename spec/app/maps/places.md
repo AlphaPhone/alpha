@@ -109,8 +109,9 @@ pure def lawAPlaceIsItself(one: Kept): bool = samePlace(one, one)
 
 A saved place of another provider, or of a Google provider, is shown under
 its name and can be removed, but is restricted as Google content is and is
-never a starting point: the owner reads "Enter a saved place or latitude,
-longitude as the starting point."
+never offered as a starting point. With no starting point the owner can
+use, the directions read "Choose your location, a saved place or a place by
+its name as the starting point."
 
 ```quint
 pure def servedHere(provider: str, serving: str, google: bool): bool =

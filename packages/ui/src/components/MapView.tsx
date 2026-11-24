@@ -87,16 +87,23 @@ export interface MapViewProps {
   /** What sits over the map: its credits and its controls. */
   children?: ReactNode;
   className?: string;
+  /** The least zoom the camera follows the phone at. */
+  followZoom?: number;
+  /** The pixels kept clear on every side of what the camera fits. */
+  fitPadding?: number;
 }
 
 let protocols = 0;
 
-function styleOf(style: MapStyle, protocol: string): string | StyleSpecification {
+function styleOf(style: MapStyle, protocol: string, land: string): string | StyleSpecification {
   if (style.kind === "vector") return style.url;
   return {
     version: 8,
     sources: { cloud: { type: "raster", tiles: [`${protocol}://tiles/{z}/{x}/{y}`], tileSize: style.tileSize, minzoom: style.minZoom, maxzoom: style.maxZoom } },
-    layers: [{ id: "cloud-raster", type: "raster", source: "cloud" }],
+    layers: [
+      { id: "land", type: "background", paint: { "background-color": land } },
+      { id: "cloud-raster", type: "raster", source: "cloud" },
+    ],
   };
 }
 
@@ -152,12 +159,12 @@ function paint(map: MapLibre, painted: Painted, props: MapViewProps, onPin: (key
   const camera = props.camera;
   if (camera.kind === "keep" || camera.key === painted.camera) return;
   painted.camera = camera.key;
-  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), 16.5), duration: 500 });
+  if (camera.kind === "follow") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: Math.max(map.getZoom(), props.followZoom ?? 16), duration: 500 });
   else if (camera.kind === "centre") map.easeTo({ center: [camera.at.lng, camera.at.lat], zoom: camera.zoom, duration: 0 });
   else if (camera.kind === "northUp") map.easeTo({ bearing: 0, pitch: 0, duration: 350 });
   else if (camera.points.length > 0) {
     const bounds = camera.points.reduce((b, p) => b.extend([p.lng, p.lat]), new maplibregl.LngLatBounds());
-    map.fitBounds(bounds, { padding: 48, maxZoom: camera.maxZoom, duration: 350 });
+    map.fitBounds(bounds, { padding: props.fitPadding ?? 48, maxZoom: camera.maxZoom, duration: 350 });
   }
 }
 
@@ -195,7 +202,7 @@ export function MapView(props: MapViewProps) {
     let styleLoaded = false;
     try {
       instance = new maplibregl.Map({
-        container: node, style: styleOf(chosen, protocol), center: [0, 20], zoom: 1.5, attributionControl: false,
+        container: node, style: styleOf(chosen, protocol, getComputedStyle(node).getPropertyValue("--muted") || "transparent"), center: [0, 20], zoom: 1.5, attributionControl: false,
         ...(chosen.kind === "raster" ? { minZoom: chosen.minZoom, maxZoom: chosen.maxZoom } : {}),
       });
     } catch {

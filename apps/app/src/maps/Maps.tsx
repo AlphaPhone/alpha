@@ -1,6 +1,6 @@
 // spec/app/maps/index.md, "Story: Move between the screen's modes"; spec/app/maps/index.md, "Story: Search for a place"; spec/app/maps/index.md, "Story: Look at a place"; spec/app/maps/index.md, "Story: Get directions"; spec/app/maps/index.md, "Story: Navigate"; spec/app/maps/index.md, "Story: Use my location"; spec/app/maps/index.md, "Story: Let the agent help with Maps"; spec/app/maps/credits.md, "Story: See the map for what I am looking at"
 import { Alert, Banner, Button, Input, ListGroup, ListRow, type MapCamera, type MapStyle, MapView, SearchField, Spinner } from "@repo/ui";
-import { ArrowUpDown, Copy, Crosshair, Info, LocateFixed, MapPin, Navigation, Phone, Share2, Star } from "lucide-react";
+import { ArrowUpDown, ChevronDown, ChevronUp, Copy, Crosshair, Info, Link, LocateFixed, Mail, MapPin, Navigation, Phone, Share2, Star } from "lucide-react";
 import { useState, useSyncExternalStore } from "react";
 import type { Resident, Shown } from "../runtime/area.tsx";
 import { untimed } from "../runtime/reactor.vibe";
@@ -9,9 +9,10 @@ import { followsThePhone, googleShown, mode, panPixels, saysOutsideCoverage } fr
 import type { CopyNotice, GuideNotice, Maps as State, SavedNotice } from "../../gen/app__maps.ts";
 import type { Machine as ScreenMachine } from "../../gen/app__maps.effect.vibe";
 import { useMachine as useCredits } from "../../gen/app__maps__credits.react.ts";
-import { breaksThePlane, cameraAim, compassShown, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
+import { breaksThePlane, cameraAim, compassShown, fitPadding, followZoom, northUpAfterGuidance, placeZoom, resultsMaxZoom, routeMaxZoom } from "../../gen/app__maps__credits.ts";
 import type { Machine as CreditsMachine } from "../../gen/app__maps__credits.effect.vibe";
 import { badgeOnly, holding } from "../../gen/app__maps__connection.ts";
+import type { Wait } from "../../gen/app__maps__connection.ts";
 import { offers } from "../../gen/app__maps__navigation.ts";
 import type { Travel } from "../../gen/app__maps__navigation.ts";
 import { hasRoom } from "../../gen/app__maps__places.ts";
@@ -40,7 +41,31 @@ const told: Record<GuideNotice, string> = {
   StoppedFromNotification: "Navigation stopped from the notification.",
   PausedAway: "Navigation paused while the app is in the background. Tap Start to resume.",
   AccountChanged: "The Maps account changed. Navigation ended.",
+  RerouteKept: "Rerouting needs a precise, up-to-date location. The current route was kept.",
 };
+
+// spec/app/maps/connection.md, "A wait Cloud names holds every Maps request back until it ends: a rate limit for at most a day, a spent allowance for at most 400 days, and any other wait one minute"
+/** What the owner reads while Cloud's wait holds Maps: Alpha's sentence around Cloud's number. */
+function waitText(wait: Wait, seconds: number): string {
+  if (wait === "AllowanceSpent") {
+    const days = Math.max(1, Math.ceil(seconds / 86_400));
+    return `You have used your Maps allowance for this period. It resets in ${days} ${days === 1 ? "day" : "days"}.`;
+  }
+  if (wait === "RateLimited") {
+    const minutes = Math.max(1, Math.ceil(seconds / 60));
+    return `Maps request limit reached. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+  }
+  return "Maps request limit reached. Try again later.";
+}
+
+// spec/app/maps/index.md, "The card shares the place or the arrival time, opens its website, or opens it in the phone's maps app"
+/** The line under a place's name: its provider's most specific category, or what kind of place of the phone it is, or none. */
+function subtitleOf(spot: Spot, saved: boolean): string | undefined {
+  if (saved) return "Saved on this device";
+  if (spot.category !== "") return spot.category;
+  if (spot.providerId === "" && spot.id === "") return "Selected location";
+  return undefined;
+}
 
 const copies: Record<CopyNotice, string> = { Uncopied: "", NumberCopied: "Number copied", CopyFailed: "Couldn't copy" };
 
@@ -97,9 +122,14 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
   });
   const kept = saved.find((entry) => entry.place === state.place);
   const following = followsThePhone(state) && seen.here !== undefined;
+  // spec/app/maps/connection.md, "Google's content is drawn only on Google's own map, whose only credit is the Google Maps badge"
+  const googleMissing = state.link.google && tiles === undefined;
   const style: MapStyle = state.link.basemap === "Cloud" && tiles !== undefined
     ? { kind: "raster", tileSize: tiles.tileSize, minZoom: tiles.minZoom, maxZoom: tiles.maxZoom, tile: (z, x, y, signal) => runtime.runPromise(tile(z, x, y, signal)) }
     : { kind: "vector", url: worldStyle };
+  const mapHeight = state.sheet === "Full" ? "h-40" : state.sheet === "Half" ? "h-72" : "h-96";
+  const lower = state.sheet === "Full" ? "Half" : "Peek";
+  const raise = state.sheet === "Peek" ? "Half" : "Full";
   const shownPins = now === "Search" ? seen.results.slice(0, state.results) : state.place !== 0 ? [state.place] : [];
   const pins = shownPins.flatMap((place) => {
     const found = atlas.spot(place);
@@ -121,12 +151,8 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
     const query = recentOf(state.recent, text.trim());
     if (can({ type: "typeQuery", query, now: untimed })) void send({ type: "typeQuery", query, now: untimed });
   };
-  const startAt = pointIn(start);
   const startFrom = () => {
-    if (startAt !== undefined && can({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng })) {
-      return void send({ type: "planFrom", origin: "Coordinates", lat: startAt.lat, lng: startAt.lng });
-    }
-    if (startAt === undefined && can({ type: "findOrigin", query: start.trim() })) void send({ type: "findOrigin", query: start.trim() });
+    if (can({ type: "findOrigin", query: start.trim() })) void send({ type: "findOrigin", query: start.trim() });
   };
   const starts = state.originsFound > 0 ? seen.origins.slice(0, state.originsFound).flatMap((place) => {
     const found = atlas.spot(place);
@@ -148,12 +174,18 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
           Maps could not be reached.
         </Banner>
       )}
-      {holding(state.link) && <Alert variant="warn">{`Maps request limit reached. Try again in ${Math.max(1, Math.ceil(state.link.held / 60))} minutes.`}</Alert>}
+      {holding(state.link) && <Alert variant="warn">{waitText(state.link.wait, state.link.held)}</Alert>}
+      {state.link.unoffered && <Alert variant="info">Maps unavailable</Alert>}
       {state.link.known && state.link.account === 0 && <Alert variant="info">Sign in to Alpha Cloud to use Maps.</Alert>}
 
       {now === "Navigating" && (
-        <Banner variant={state.trip.rerouting ? "warn" : "info"} action={can({ type: "endGuidance" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "endGuidance" })}>End</Button>}>
-          {state.trip.guidance === "Arrived" ? `Arrived at ${kept?.name ?? spot?.name ?? "your destination"}.` : seen.here === undefined ? "Waiting for your location." : seen.here.approximate ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn === undefined ? "" : `${turn.instruction}${after === undefined ? "" : `, then ${after.instruction}`}`}
+        <Banner variant={state.trip.rerouting ? "warn" : "info"} action={(
+          <div className="flex gap-1">
+            {can({ type: "recenter" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "recenter" })}><LocateFixed />Recenter</Button>}
+            {can({ type: "endGuidance" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "endGuidance" })}>End</Button>}
+          </div>
+        )}>
+          {state.trip.guidance === "Arrived" ? `Arrived at ${kept?.name ?? spot?.name ?? "your destination"}.` : seen.here === undefined ? "Waiting for your location." : state.imprecise || seen.here.approximate ? "Turn guidance needs a precise, up-to-date location." : state.trip.rerouting ? "Finding a new route" : turn === undefined ? "" : `${turn.instruction}${after === undefined ? "" : `, then ${after.instruction}`}`}
         </Banner>
       )}
 
@@ -170,7 +202,10 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
         </form>
       )}
 
-      <MapView
+      {googleMissing ? <Alert variant="warn" role="img" aria-label="Map">The Google map is missing.</Alert> : <MapView
+        className={mapHeight}
+        followZoom={followZoom}
+        fitPadding={fitPadding}
         label={spot === undefined ? "Map" : `Map of ${spot.name}`}
         surface={state.link.plane}
         style={style}
@@ -194,7 +229,6 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
         onDragged={() => { if (can({ type: "panMap" })) void send({ type: "panMap" }); }}
       >
         <div className="absolute right-2 bottom-2 flex flex-col gap-1">
-          {can({ type: "recenter" }) && <Button size="sm" variant="outline" onClick={() => void send({ type: "recenter" })}><LocateFixed />Recenter</Button>}
           {can({ type: "useMyLocation" }) && <Button size="icon" variant="outline" aria-label="My location" onClick={() => void send({ type: "useMyLocation" })}><Crosshair /></Button>}
         </div>
         <div className="absolute bottom-2 left-2">
@@ -202,13 +236,24 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
             ? <button type="button" aria-label="Google Maps" onClick={() => void credits.send({ type: "openInfo" })}><img src={googleMaps} alt="Google Maps" width={98} height={18} /></button>
             : <Button size="icon" variant="outline" aria-label="Map credits" onClick={() => void credits.send({ type: "openInfo" })}><Info /></Button>)}
         </div>
-      </MapView>
+      </MapView>}
+      {(can({ type: "resize", sheet: raise }) || can({ type: "resize", sheet: lower })) && (
+        <div role="group" aria-label="Sheet" className="flex justify-center gap-2">
+          {can({ type: "resize", sheet: raise }) && <Button size="sm" variant="ghost" aria-label="Raise the sheet" onClick={() => void send({ type: "resize", sheet: raise })}><ChevronUp /></Button>}
+          {can({ type: "resize", sheet: lower }) && <Button size="sm" variant="ghost" aria-label="Lower the sheet" onClick={() => void send({ type: "resize", sheet: lower })}><ChevronDown /></Button>}
+        </div>
+      )}
       {can({ type: "retryMap" }) && (
         <Banner variant="warn" action={<Button size="sm" variant="outline" onClick={() => void send({ type: "retryMap" })}>Retry</Button>}>The map could not be drawn.</Banner>
       )}
       {credits.state.infoOpen && (
         <Alert variant="info" role="dialog" aria-label="Map credits">
-          <p>{credits.state.copyrightShown ? credits.state.copyright : coverage?.available ? coverage.attribution : "Map data © OpenStreetMap contributors, OpenFreeMap"}</p>
+          {credits.state.copyrightShown ? <p>{credits.state.copyright}</p> : coverage?.available ? <p>{coverage.attribution}</p> : (
+            <p>
+              {"Map data © "}<a className="underline" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a>
+              {", "}<a className="underline" href="https://openfreemap.org" target="_blank" rel="noopener noreferrer">OpenFreeMap</a>
+            </p>
+          )}
           {coverage?.available && (
             <p>{`Searches and route points go to ${coverage.disclosure.recipients.map((r) => `${r.name} (${r.operator})`).join(", ")} through Alpha Cloud, which keeps only the kind of each request and its result.`}</p>
           )}
@@ -271,13 +316,15 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
       {now === "Place" && spot !== undefined && (
         <section aria-label={kept?.name ?? spot.name} className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold">{kept?.name ?? spot.name}</h2>
-          <p className="text-muted-foreground">{spot.category || "Place"}</p>
+          {subtitleOf(spot, kept !== undefined) !== undefined && <p className="text-muted-foreground">{subtitleOf(spot, kept !== undefined)}</p>}
           {spot.address !== undefined && <p>{spot.address}</p>}
           {spot.hours !== undefined && <p>{spot.hours}</p>}
           {coverage?.available && saysOutsideCoverage(state, inside) && <p className="text-sm text-muted-foreground">{`This location is outside ${coverage.sources.data} coverage.`}</p>}
           <div className="flex flex-wrap gap-2">
             {can({ type: "openDirections" }) && <Button onClick={() => void send({ type: "openDirections" })}><Navigation />Directions</Button>}
             {can({ type: "handOn", kind: "SharePlace" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "SharePlace" })}><Share2 />Share</Button>}
+            {can({ type: "handOn", kind: "EmailPlace" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "EmailPlace" })}><Mail />Email</Button>}
+            {can({ type: "handOn", kind: "CopyLink" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "CopyLink" })}><Link />Copy link</Button>}
             {spot.website !== undefined && can({ type: "handOn", kind: "Website" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "Website" })}>Website</Button>}
             {can({ type: "handOn", kind: "MapsApp" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "MapsApp" })}>Open in another app</Button>}
             {spot.phone !== undefined && can({ type: "handOn", kind: "Call" }) && <Button variant="outline" onClick={() => void send({ type: "handOn", kind: "Call" })}><Phone />Call</Button>}
@@ -311,8 +358,7 @@ export function Maps({ runtime }: Shown<ScreenMachine | CreditsMachine | Residen
               {can({ type: "useMyLocation" }) && <Button variant="outline" onClick={() => void send({ type: "useMyLocation" })}><Crosshair />From my location</Button>}
               {can({ type: "findOrigin", query: "start" }) && (
                 <form onSubmit={(event) => { event.preventDefault(); startFrom(); }}>
-                  <Input aria-label="Starting point" maxLength={300}
-                    placeholder={can({ type: "planFrom", origin: "Coordinates", lat: 0, lng: 0 }) ? "Place, or latitude, longitude" : "Place"}
+                  <Input aria-label="Starting point" maxLength={300} placeholder="Place"
                     value={start} onChange={(event) => setStart(event.target.value)} />
                 </form>
               )}
