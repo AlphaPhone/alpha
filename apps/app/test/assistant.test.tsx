@@ -19,13 +19,13 @@ afterEach(closeAll);
 /** Ask Alpha in full, alone at its place: the journeys draw no other screen. */
 const mounts: Mount[] = [{ at: "assistant", load: () => import("../src/assistant/index.tsx") }];
 
-const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span")?.textContent);
+const lines = () => [...document.querySelectorAll("section[aria-label='Ask Alpha'] [role=log] article")].map((line) => line.querySelector("span:not([aria-hidden])")?.textContent);
 const rows = (list: string) => document.querySelector(`section[aria-label='${list}'] > div`)?.children.length ?? 0;
 
 /** Write `text` in the composer, as the owner types it. */
 async function write(text: string) {
   const { act } = await import("react");
-  await act(async () => {
+  act(() => {
     const box = document.querySelector<HTMLTextAreaElement>("textarea[aria-label='Message Alpha']");
     if (!box) throw new Error("no composer");
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(box, text);
@@ -36,32 +36,40 @@ async function write(text: string) {
 /** Open the menu of the message that says `text` and choose `item`, as the owner does with the keyboard. */
 async function onMessage(text: string, item: string) {
   const { act } = await import("react");
-  await act(async () => {
+  act(() => {
     const found = [...document.querySelectorAll("[role=log] article button")].find((one) => one.textContent === text);
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no message ${text}`);
     found.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   });
-  await act(async () => {
+  act(() => {
     const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
     if (!(chosen instanceof HTMLElement)) throw new Error(`no ${item} for ${text}`);
     chosen.click();
   });
 }
 
-/** Open the list of conversations, from the conversation's name. */
-async function chatsList() {
+/** Choose `item` from the chat actions beside the composer, as the owner does with the keyboard. */
+async function chatAction(item: string) {
   const { act } = await import("react");
-  await act(async () => {
-    const found = [...document.querySelectorAll("button")].find((one) => one.getAttribute("aria-label")?.startsWith("Chats, "));
-    if (!(found instanceof HTMLButtonElement)) throw new Error("no chats control");
-    found.click();
+  act(() => {
+    const trigger = document.querySelector("button[aria-label='Chat actions']");
+    if (!(trigger instanceof HTMLButtonElement)) throw new Error("no chat actions");
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  });
+  act(() => {
+    const chosen = [...document.querySelectorAll("[role=menuitem]")].find((one) => one.textContent === item);
+    if (!(chosen instanceof HTMLElement)) throw new Error(`no chat action ${item}`);
+    chosen.click();
   });
 }
+
+/** Open the list of conversations, from the chat actions. */
+const chatsList = () => chatAction("Chat history");
 
 /** Click the row of the list named `list` whose text starts with `text`. */
 async function row(list: string, text: string) {
   const { act } = await import("react");
-  await act(async () => {
+  act(() => {
     const found = [...document.querySelectorAll(`section[aria-label='${list}'] button`)].find((one) => one.textContent?.startsWith(text));
     if (!(found instanceof HTMLButtonElement)) throw new Error(`no row ${text} in ${list}`);
     found.click();
@@ -171,7 +179,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
     await until(alpha, runtime, Composer, (s) => s.slot === "Open");
 
     // spec/app/assistant/search.md, "Words are searched from the first hit, and empty words are not searched"
-    await press("Search chats");
+    await chatAction("Search chat");
     await fill("Search chats", "friday");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Loaded" && s.words === "friday");
     expect(rows("Results")).toBe(2);
@@ -184,7 +192,7 @@ describe.each([["a browser", false], ["a phone", true]])("in %s", (_where, phone
 
     // spec/app/assistant/search.md, "Only the newest asking's hits are shown, a page at a time, after those already shown": a search that fails says so.
     world.ask.searchDown = true;
-    await press("Search chats");
+    await chatAction("Search chat");
     await fill("Search chats", "noon");
     await until(alpha, runtime, Search, (s) => s.hits.status === "Failed");
     expect(document.body.textContent).toContain("Search did not finish");
