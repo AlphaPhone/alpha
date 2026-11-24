@@ -1,5 +1,5 @@
 // spec/inbox/reader.md, "Story: Read a message and its conversation"; spec/inbox/reader.md, "Story: Mark mail read or unread"; spec/inbox/reader.md, "Story: Open an attachment as the exact file that was sent"; spec/inbox/reader.md, "Story: Trust what a formatted email shows me"; spec/inbox/attachments.md, "Story: Hand an attachment to another app"
-import { type Event as ReaderEvent, type Reader as ReaderState, type MailHeader, type MailBody, type MailPart, type MailLink, type ReviewedFile, type SavePhase, Machine as ReaderMachine, opaqueSaveOffered, linkOpens, askable } from "../../gen/inbox__reader.effect.vibe"
+import { type Event as ReaderEvent, type Reader as ReaderState, type MailHeader, type MailBody, type MailPart, type MailLink, type ReviewedFile, type SavePhase, Machine as ReaderMachine, opaqueSaveOffered, linkOpens, askable, rechecksAccount } from "../../gen/inbox__reader.effect.vibe"
 import type { MailRow } from "../../gen/inbox__mailbox.ts"
 import { Machine as MailboxMachine } from "../../gen/inbox__mailbox.effect.vibe"
 import { Machine as JournalMachine } from "../../gen/inbox__operations.effect.vibe"
@@ -138,7 +138,7 @@ export const layer = Layer.effect(Reader, effect {
     }
     if (receipt === undefined) {
       try send({ type: "readUnconfirmed", visit: s.visit })
-      if (expired && explicit) try accounts.refresh()
+      if (rechecksAccount(explicit, expired)) try accounts.refresh()
       return
     }
     try send({ type: "readChanged", visit: s.visit, unread, historyId: receipt.historyId })
@@ -190,6 +190,12 @@ export const layer = Layer.effect(Reader, effect {
     if (shown.body.unread) try setRead(false, false)
     try loadThread(visit)
   }
+
+  fork.scoped (effect {
+    for try (const a of accounts.changes) {
+      if ((try machine.get()).account !== a.selected) try send({ type: "bind", account: a.selected })
+    }
+  })
 
   return {
     changes: machine.changes,

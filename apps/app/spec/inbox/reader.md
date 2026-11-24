@@ -168,6 +168,18 @@ pure def stepAnUnconfirmedMessageIsNeverReadAutomatically(before: Reader, after:
 pure def sometimesUnconfirmedRemembered(s: Reader): bool = s.unconfirmed != List() and s.phase == BodyShown
 ```
 
+### An explicit read change that finds the sign-in expired re-checks the account
+
+When the owner's own read change finds the Cloud sign-in expired, the account is checked again, so
+the Inbox asks them to sign in; an automatic one only remembers the message as unconfirmed.
+
+```quint
+pure def rechecksAccount(explicit: bool, expired: bool): bool = explicit and expired
+pure def lawAnAutomaticChangeNeverRechecksTheAccount(expired: bool): bool = not(rechecksAccount(false, expired))
+pure def lawAnExpiredExplicitChangeRechecksTheAccount(explicit: bool): bool = rechecksAccount(explicit, true) iff explicit
+pure val expiredValues = Set(true, false)
+```
+
 ## Story: Open an attachment as the exact file that was sent
 
 > As the owner, I want to preview or save an attachment knowing it is exactly the file Gmail holds

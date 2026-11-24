@@ -156,6 +156,24 @@ it.live("Read a message and its conversation, and never mark it read again after
   }
 })
 
+// spec/inbox/reader.md, "An explicit read change that finds the sign-in expired re-checks the account"
+it.live("A read change that finds the sign-in expired re-checks the account only when the owner asked for it", () => effect {
+  const log = calls()
+  provide inboxApp(log, mailCloud(log, {}, { status: { "POST /api/v1/eliza/google/gmail/inbox-v1/operations": 401 } })) {
+    const mailbox = try Mailbox
+    const reader = try Reader
+    const operations = try MailOperations
+    try settle(mailbox.changes, (m) => m.phase === "ListReady")
+    try settle(operations.changes, (j) => j.capabilities.known)
+    const before = log.reloads.length
+    try reader.open(row1)
+    const automatic = log.reloads.length - before
+    try reader.setRead(false, true)
+    const explicit = log.reloads.length - before - automatic
+    try Effect.try(() => assert.deepStrictEqual({ automatic, rechecked: explicit > 0, tried: log.cloud.filter((c) => c === "prepare mark-read").length }, { automatic: 0, rechecked: true, tried: 2 }))
+  }
+})
+
 // spec/inbox/reader.md, "Story: Open an attachment as the exact file that was sent"; spec/inbox/attachments.md, "Opening or saving hands over only the reviewed bytes, and only a confirmed result is reported as done"
 it.live("Open an attachment as the exact bytes, and never offer a save again after an unconfirmed one", () => effect {
   const log = calls()

@@ -46,15 +46,16 @@ export interface Calls {
   readonly filled: MailSender[]
   readonly assistant: unknown[]
   readonly attention: { readonly unread: number; readonly more: boolean; readonly connected: boolean }[]
+  readonly reloads: string[]
 }
 
 /** Empty call lists. */
 export function calls(): Calls {
-  return { cloud: [], connected: [], opened: [], native: [], filled: [], assistant: [], attention: [] }
+  return { cloud: [], connected: [], opened: [], native: [], filled: [], assistant: [], attention: [], reloads: [] }
 }
 
 /** Managed Gmail for `grantA`: capabilities, an inbox page, a whole message, a one-page thread, drafts and an operation ledger. */
-export function mailCloud(log: Calls, routes: { readonly [route: string]: unknown } = {}, options: { readonly review?: Record<string, unknown>; readonly digest?: string; readonly kinds?: readonly string[] } = {}) {
+export function mailCloud(log: Calls, routes: { readonly [route: string]: unknown } = {}, options: { readonly review?: Record<string, unknown>; readonly digest?: string; readonly kinds?: readonly string[]; readonly status?: { readonly [route: string]: number } } = {}) {
   const ledger = new Map<string, { review: Record<string, unknown>; digest: string; state: string; kind: string }>()
   const inbox = "GET /api/v1/eliza/google/gmail/inbox-v1"
   return fakeCloud({
@@ -87,7 +88,7 @@ export function mailCloud(log: Calls, routes: { readonly [route: string]: unknow
       return { version: 1, providerExactlyOnce: false, review: entry.review, receipt: { requestId, kind: entry.kind, reviewDigest: entry.digest, state: entry.state, providerResult: null, rejectionCode: null } }
     },
     ...routes,
-  })
+  }, options.status === undefined ? {} : { status: options.status })
 }
 
 /** The account area, shell, assistant, browser, files and settings as the Inbox sees them: one signed-in owner with two Gmail accounts. */
@@ -99,7 +100,7 @@ export function neighbors(log: Calls, options: { readonly mailImages?: boolean; 
   const session = { ...sessionInitial, phase: "SignedIn" as const, generation: 1, account: { userId: "u1", organizationId: "org1", credentialId: "key-1", expiresAt: Date.now() + 86400000 } }
   return Layer.mergeAll(
     Layer.succeed(CloudSession, { changes: Stream.make(session), notices: Stream.empty, current: () => succeed(session), owner: () => succeed(1), ownerKey: (key: string) => succeed(`alpha/1/${key}`), run: () => Effect.void, adopt: () => Effect.void, attempt: () => Effect.void, signOut: () => succeed(true), rejected: () => Effect.void, admit: () => Effect.void } as unknown as CloudSession.Shape),
-    Layer.succeed(GoogleAccounts, { changes: Stream.empty, accounts: Stream.make(rows), list: () => succeed(rows), run: () => Effect.void, open: () => Effect.void, close: () => Effect.void, reload: () => Effect.void, connect: (capabilities: unknown) => sync(() => { log.connected.push(capabilities) }), connectCalendar: () => Effect.void, allowCalendar: () => Effect.void, cancel: () => Effect.void, disconnect: () => Effect.void, showCache: () => Effect.void, prepareReview: () => Effect.void } as unknown as GoogleAccounts.Shape),
+    Layer.succeed(GoogleAccounts, { changes: Stream.empty, accounts: Stream.make(rows), list: () => succeed(rows), run: () => Effect.void, open: () => Effect.void, close: () => Effect.void, reload: () => sync(() => { log.reloads.push("accounts") }), connect: (capabilities: unknown) => sync(() => { log.connected.push(capabilities) }), connectCalendar: () => Effect.void, allowCalendar: () => Effect.void, cancel: () => Effect.void, disconnect: () => Effect.void, showCache: () => Effect.void, prepareReview: () => Effect.void } as unknown as GoogleAccounts.Shape),
     Layer.succeed(Navigation, {
       changes: Stream.empty, open: (app: string) => sync(() => { log.opened.push(app); return true }),
       openLayer: () => succeed(true), closeLayer: () => succeed(true)
