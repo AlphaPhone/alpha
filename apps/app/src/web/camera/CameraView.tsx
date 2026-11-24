@@ -1,4 +1,4 @@
-// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"
+// spec/camera/viewfinder.md, "Story: Take photos"; spec/camera/viewfinder.md, "Story: Record videos"; spec/camera/viewfinder.md, "Story: Recover when the camera is denied or stops"; spec/camera/focus.md, "Story: Focus where I tap"; spec/camera/viewfinder.md, "Photo mode offers 4:3 or 16:9 when the bound camera lists both, and a new ratio restarts the preview with it"
 import { Camera as CameraIcon, ChevronLeft, CameraOff, Flashlight, FlashlightOff, Grid3x3, MicOff, RefreshCcw, Timer, Zap, ZapOff } from "lucide-react";
 import { useRef } from "react";
 import type { Camera, Event } from "../../../gen/camera__viewfinder.ts";
@@ -25,6 +25,8 @@ export interface CameraActions {
   cycleTimer(): void;
   /** The framing grid on or off. */
   toggleGrid(): void;
+  /** The photo aspect ratio 4:3 or 16:9. */
+  cycleAspect(): void;
   /** Video's light on or off. */
   toggleLight(): void;
   /** Focus at a point of the viewfinder, each coordinate from 0 to 1. */
@@ -130,6 +132,11 @@ export function CameraView({ camera, said, can, browser, actions }: CameraViewPr
           <Button variant="ghost" size="icon" aria-label={camera.timer ? `Timer ${camera.timer} seconds` : "Timer off"} aria-pressed={camera.timer > 0} onClick={actions.cycleTimer}>
             <Timer />
             {camera.timer > 0 && <span className="font-mono text-xs">{camera.timer}</span>}
+          </Button>
+        )}
+        {photo && can({ type: "cycleAspect" }) && (
+          <Button variant="ghost" size="icon" className="w-auto min-w-9 px-2 font-mono text-xs" aria-label={`Aspect ratio ${camera.aspect === "Aspect16x9" ? "16:9" : "4:3"}`} onClick={actions.cycleAspect}>
+            {camera.aspect === "Aspect16x9" ? "16:9" : "4:3"}
           </Button>
         )}
         {can({ type: "toggleGrid" }) && <Button variant="ghost" size="icon" aria-label="Framing grid" aria-pressed={camera.grid} onClick={actions.toggleGrid}><Grid3x3 /></Button>}
