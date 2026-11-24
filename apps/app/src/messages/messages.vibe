@@ -1,8 +1,9 @@
 // spec/app/messages/index.md, "Story: See my conversations"; spec/app/messages/index.md, "Story: Read a conversation"; spec/app/messages/index.md, "Story: Act on a message"; spec/app/messages/index.md, "Story: Start a new message"
 import * as KeyValueStore from "effect/persistence/KeyValueStore"
+import type { StagedDeletion } from "@elizaos/os/bridges/action-journal"
 import type { AddressBookContact } from "@elizaos/os/bridges/contacts"
 import { threadIdOf } from "@elizaos/os/bridges/definitions/messages"
-import type { MessageCursor, MessageRow, ThreadCursor, ThreadId, ThreadRow } from "@elizaos/os/bridges/messages"
+import type { MessageCursor, MessageDeleteReference, MessageRow, ThreadCursor, ThreadId, ThreadRow } from "@elizaos/os/bridges/messages"
 import type { PhoneNumber } from "@elizaos/os/bridges/phone"
 import { Machine as Shell, showing } from "../../gen/app__shell.effect.vibe"
 import * as Messages from "../../gen/app__messages.effect.vibe"
@@ -11,7 +12,10 @@ import { CarrierSetup } from "../platform/carrier.vibe"
 import { registered } from "../platform/device.vibe"
 import { SystemSettings } from "../platform/systemSettings.vibe"
 import { Telephony, TelephonyRefused, namesOf, telephony } from "../platform/telephony.vibe"
+import { Machine as Toasts } from "../../gen/app__notices__toasts.effect.vibe"
+import { Said, offer, withdraw } from "../notices/toasts.vibe"
 import { type Job, Whole, answer, contained, hearing, reacting, run, started, together } from "../runtime/reactor.vibe"
+import { Time } from "../runtime/time.vibe"
 import { Dialer, grantOf, prefilled } from "../phone/phone.vibe"
 import { Machine as PhoneMachine } from "../../gen/app__phone.effect.vibe"
 import { Callers } from "../phone/voicemail.vibe"
@@ -95,13 +99,14 @@ export interface Texts {
   readonly messages: ReadonlyArray<MessageRow>
   readonly messagesNext: MessageCursor | undefined
   readonly chosen: string
+  readonly deleteTarget: MessageDeleteReference | undefined
   readonly choices: ReadonlyArray<AddressBookContact>
   readonly choicesNext: string | undefined
   readonly typed: string
   readonly names: ReadonlyMap<string, string>
 }
 
-const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messages: [], messagesNext: undefined, chosen: "", choices: [], choicesNext: undefined, typed: "", names: new Map() }
+const empty: Texts = { threads: [], threadsNext: undefined, sought: "", messages: [], messagesNext: undefined, chosen: "", deleteTarget: undefined, choices: [], choicesNext: undefined, typed: "", names: new Map() }
 
 /** A conversation's title: the contacts' names for its numbers, and a number no contact holds as it is. */
 export function titleOf(addresses: ReadonlyArray<string>, names: ReadonlyMap<string, string>): string {
@@ -204,14 +209,46 @@ effect function chosen(): Option.Option<MessageRow>!!Inbox {
   return Option.fromNullishOr(held.messages.find((row) => row.id === held.chosen))
 }
 
+/** A staged receipt is the authority for whether the delete happened, until Android settles it. */
+effect function settledDeletion(id: number, staged: StagedDeletion): Event!!(Telephony | Time | Toasts | Said) {
+  const time = try Time
+  for (const delay of [0, 250, 1000, 3000]) {
+    if (delay !== 0) {
+      try time.until(staged.expiresAt + delay)
+      if (delay === 250) try withdraw("messages", id)
+    }
+    const pending = telephony("pending message deletion", (c) => c.deletions.pending()) catch () => undefined
+    const phase = pending?.deletions.find((record) => record.id === staged.id && record.kind === staged.kind)?.phase
+    if (phase === "Deleted") return { type: "removed", id, done: true, known: true }
+    if (phase === "Undone" || phase === "DeletionConflict") return { type: "removed", id, done: false, known: true }
+    if (phase === "UnknownOutcome") break
+  }
+  return { type: "removed", id, done: false, known: false }
+}
+
 // spec/app/messages/index.md, "The phone's answer ends the removal it names, and the conversation is read again unless it was refused"
-effect function removed(id: number): Event!!(Telephony | Inbox) {
-  const row = try chosen()
-  if (Option.isNone(row)) return { type: "removed", id, done: false, known: true }
-  const one = row.value
+effect function removed(id: number): Event!!(Telephony | Inbox | Messages.Machine | Time | Toasts | Said) {
+  const inbox = try Inbox
+  const one = (try inbox.get()).deleteTarget
+  if (one === undefined) return { type: "removed", id, done: false, known: true }
+  const machine = try Messages.Machine
   return effect {
-    const answered = try telephony("deleteMessage", (c) => c.messages.deleteMessage({ id: one.id, kind: one.kind, threadId: one.threadId, date: one.date }))
-    return { type: "removed", id, done: answered.status === "queued" || answered.status === "not-found", known: true } satisfies Event
+    const answered = try telephony("deleteMessage", (c) => c.messages.deleteMessage(one))
+    if (answered.status !== "queued") return { type: "removed", id, done: answered.status === "not-found", known: true } satisfies Event
+    const staged = answered.deletion
+    const client = try (try Telephony).clients()
+    try offer("Message deletion queued", "messages", id, effect {
+      const outcome = tryPromise(() => client.deletions.undo(staged)) catch () => undefined
+      if (outcome?.kind === "Kept") {
+        try inbox.set({ deleteTarget: undefined })
+        try ignore(machine.send({ type: "removed", id, done: false, known: true }))
+        try ignore(machine.send({ type: "arrived" }))
+      }
+    })
+    try ignore(machine.send({ type: "arrived" }))
+    const outcome = try settledDeletion(id, staged)
+    try withdraw("messages", id)
+    return outcome
   } catch (failure) => ({ type: "removed", id, done: false, known: !(failure instanceof TelephonyRefused && failure.code === undefined && failure.tag === "") } satisfies Event)
 }
 
@@ -232,12 +269,12 @@ effect function called(thread: number): void!!(Conversations | Dialer | PhoneMac
 }
 
 /** The messaging app, opened on the conversation's numbers, for what Alpha cannot show or send. */
-export effect function elsewhere(thread: number): void!!(Telephony | Conversations) {
+export effect function elsewhere(thread: number, body = ""): void!!(Telephony | Conversations) {
   const to = (try numbers(thread)) as PhoneNumber[]
-  try ignore(telephony("composeSms", (c) => c.messages.composeSms({ recipients: to, body: "", subscriptionId: null })))
+  try ignore(telephony("composeSms", (c) => c.messages.composeSms({ recipients: to, body, subscriptionId: null })))
 }
 
-function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages.Machine | SystemSettings | CarrierSetup | Dialer | PhoneMachine | Shell, []> {
+function carry(fx: Out): Job<Event, Telephony | Inbox | Conversations | Messages.Machine | SystemSettings | CarrierSetup | Dialer | PhoneMachine | Shell | Time | Toasts | Said, []> {
   return match (fx) {
     when { tag: "ReadThreads", let ticket, let further }: answer("list", threadsRead(ticket, further), { type: "threadsRead", ticket, ok: false, grant: "Unasked", count: 0, further: false });
     when { tag: "ReadConversation", let ticket, let thread, let further }: answer("page", pageRead(ticket, thread, further), { type: "pageRead", ticket, ok: false, grant: "Unasked", seen: { rows: 0, failed: 0, partial: 0 }, further: false, unreadShown: false, role: false });

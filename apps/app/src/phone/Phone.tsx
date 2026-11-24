@@ -143,7 +143,7 @@ export function Phone({ runtime, alpha }: PhoneProps) {
                   <span className="truncate">{dialer.matched}</span><span className="shrink-0 text-muted-foreground tabular-nums">{displayNumber(dialer.matchedNumber)}</span>
                 </Button>
               )}
-              {state.typed === "Dialable" && !state.carrier && <p role="status" className="text-center text-sm text-muted-foreground">No mobile network. Emergency calls only.</p>}
+              {state.typed === "Dialable" && !state.carrier && <p role="status" className="text-center text-sm text-muted-foreground">Only emergency calls are available.</p>}
             </div>
             <div role="group" aria-label="Keypad" className="grid shrink-0 grid-cols-3 justify-items-center gap-x-3 gap-y-[calc(var(--dial-key)*.15)] px-9">
               {keys.map(([key, letters]) => (

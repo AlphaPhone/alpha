@@ -16,25 +16,33 @@ public final class AlphaCallStatePlugin extends Plugin {
 
  @Override public void load() {
   super.load();
-  watch = new AlphaCallStateWatch(getContext(), () -> notifyListeners("callState", payload(AlphaCallState.read(getContext()), true)));
+  watch = new AlphaCallStateWatch(getContext(), () -> notifyListeners("callState", current(true)));
   watch.ensure();
  }
 
  /** The current reading; also retries the listener, so a phone-state grant after start is followed. */
  @PluginMethod public void callState(PluginCall call) {
   boolean watching = watch != null && watch.ensure();
-  call.resolve(payload(AlphaCallState.read(getContext()), watching));
+  call.resolve(current(watching));
  }
 
- static JSObject payload(AlphaCallState.Reading reading, boolean watching) {
+ private JSObject current(boolean watching) {
+  return payload(AlphaCallState.read(getContext()), watching, AlphaCallState.carrierReady(getContext()));
+ }
+
+ static JSObject payload(AlphaCallState.Reading reading, boolean watching, Boolean carrier) {
   JSObject out = new JSObject();
   out.put("inCall", reading.inCall == null ? JSObject.NULL : reading.inCall);
   out.put("emergency", reading.emergency == null ? JSObject.NULL : reading.emergency);
   out.put("emergencyLive", reading.emergencyLive());
   out.put("watching", watching);
+  if (carrier != null) out.put("carrier", carrier);
   return out;
  }
 
- @Override protected void handleOnResume() { super.handleOnResume(); if (watch != null) watch.ensure(); }
+ @Override protected void handleOnResume() {
+  super.handleOnResume();
+  notifyListeners("callState", current(watch != null && watch.ensure()));
+ }
  @Override protected void handleOnDestroy() { if (watch != null) watch.stop(); super.handleOnDestroy(); }
 }
