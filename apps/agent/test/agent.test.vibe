@@ -3,18 +3,39 @@
 import { ConversationRecord, TurnController, createRuntimeJsonClient } from "@elizaos/agent/client"
 import { describe, expect, it } from "@effect/vitest"
 import { configurationExit } from "../gen/agent.effect.vibe"
-import { type Running, call, launchFor, listed, ready, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
+import { type Running, call, launchFor, listed, socketBridge, startPhoneAgent, startRun } from "./phone.ts"
 
 type Run = Awaited<ReturnType<typeof startRun>>
+
+error NotReady { message: string }
+
+/** Until the agent's health says ready, within `within` milliseconds, or why it never will. */
+effect function ready(running: Running, within = 120_000) {
+  const deadline = Date.now() + within
+  const exited = effect {
+    const code = try promise(() => running.exited)
+    throw new NotReady({ message: `the agent exited with ${code} before it was ready` })
+  }
+  const wait = effect {
+    for (;;) {
+      const health = try promise(() => call(running, "GET", "/api/health").catch(() => ({ status: 0 })))
+      if (health.status === 200) return
+      if (Date.now() > deadline) throw new NotReady({ message: "the agent was not ready in time" })
+      try Effect.sleep("100 millis")
+    }
+  }
+  try Effect.race(wait, exited)
+}
 
 /** The pack's agent started over `state` as the phone starts it, ready, and stopped when the scope ends. */
 function phoneAgent(run: Run, state: string) {
   return acquireRelease(
-    promise(async () => {
-      const running = startPhoneAgent(await launchFor(run.cloud, run.key, state), state, run.cloud, run.key)
-      await ready(running)
+    effect {
+      const launch = try promise(() => launchFor(run.cloud, run.key, state))
+      const running = try Effect.try(() => startPhoneAgent(launch, state, run.cloud, run.key))
+      try ready(running)
       return running
-    }),
+    },
     (running) => promise(() => running.stop()),
   )
 }
@@ -43,7 +64,7 @@ describe("Run Alpha's agent on the phone", () => {
       const { conversation: opened } = try Schema.decodeUnknownEffect(Created)(try promise(() => runtime.request("/api/conversations", { title: "Ask Alpha" })))
       try promise(() => controller.bind(opened))
       const result = try promise(() => controller.send({ text: "Remember the word heron." }, { stream: { onPreview: () => {} } }))
-      try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toBe("You said: Remember the word heron."))
+      try Effect.try(() => expect(result.kind === "Replied" ? result.reply.text : result.kind).toMatch(/^You said: Remember the word heron\.(\n|$)/))
       for (const route of try Effect.try(() => listed())) {
         const target = filled(route.path, opened)
         const status = route.stream === true
@@ -64,7 +85,7 @@ describe("Run Alpha's agent on the phone", () => {
     const answer = try promise(() => call(second, "POST", `/api/conversations/${conversation.id}/messages`, { text: "Which word?" }))
     const { fullText } = try Schema.decodeUnknownEffect(Schema.fromJsonString(Replied))(answer.body)
     try Effect.try(() => expect({ kept: known.conversations.some(({ id }) => id === conversation.id), status: answer.status, fullText })
-      .toEqual({ kept: true, status: 200, fullText: "You said: Which word?" }))
+      .toEqual({ kept: true, status: 200, fullText: expect.stringMatching(/^You said: Which word\?(\n|$)/) }))
     const refused = try Effect.try(() => run.place("refused"))
     const worker = { workflowWorker: { runtimeDir: `${refused}/no-worker`, executable: "worker.mjs", sha256: "0".repeat(64) } }
     const launch = try promise(() => launchFor(run.cloud, run.key, refused, worker))

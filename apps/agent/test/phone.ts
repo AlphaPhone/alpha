@@ -146,16 +146,3 @@ export function socketBridge(running: Running): RuntimeJsonBridge {
     requestStream: (input) => streamed(running, input.path, input.body),
   };
 }
-
-/** Until the agent's health says ready, within `within` milliseconds, or why it never will. */
-export async function ready(running: Running, within = 120_000) {
-  const deadline = Date.now() + within;
-  let ended: number | null | undefined;
-  void running.exited.then((code) => { ended = code; });
-  for (;;) {
-    if (ended !== undefined) throw new Error(`the agent exited with ${ended} before it was ready`);
-    if ((await call(running, "GET", "/api/health").catch(() => ({ status: 0 }))).status === 200) return;
-    if (Date.now() > deadline) throw new Error("the agent was not ready in time");
-    await new Promise((done) => setTimeout(done, 100));
-  }
-}

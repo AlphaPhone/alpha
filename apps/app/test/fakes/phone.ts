@@ -40,7 +40,14 @@ const base64 = (bytes: Uint8Array) => btoa(Array.from(bytes, (one) => String.fro
 export function elizaAgent(agent: Answering): Faked {
   return plugin<ElizaAgentPlugin, AgentEvents>((emit) => {
     const calls = new Map<string, AbortController>();
-    const status = (): Promise<AgentStatus> => Promise.resolve({ available: true, state: "running", epoch: 1, requestBodyLimit: 1_048_576 });
+    let state: "running" | "stopped" = "running";
+    const status = (): AgentStatus => ({ available: true, state, epoch: 1, requestBodyLimit: 1_048_576 });
+    const set = (next: "running" | "stopped"): Promise<AgentStatus> => {
+      state = next;
+      const now = status();
+      emit("status", now);
+      return Promise.resolve(now);
+    };
     function asked({ method, path, body, headers }: AgentRequest, id: string) {
       if (typeof method !== "string" || typeof path !== "string" || !path.startsWith("/api/")) throw rejection("RouteRefused");
       if (id === "" || calls.has(id)) throw rejection("IdInUse");
@@ -84,10 +91,10 @@ export function elizaAgent(agent: Answering): Faked {
       return Promise.resolve({ aborted: call !== undefined });
     };
     return {
-      getStatus: status,
-      start: status,
-      stop: status,
-      restart: status,
+      getStatus: () => Promise.resolve(status()),
+      start: () => set("running"),
+      stop: () => set("stopped"),
+      restart: () => set("running"),
       async request(options: AgentRequest) {
         const id = options.id ?? crypto.randomUUID();
         try {

@@ -1,13 +1,15 @@
 import { elizaCalendar } from "./calendar.ts";
-import { elizaLocation } from "./maps.ts";
+import { elizaLocation as mapsLocation } from "./maps.ts";
 import { type Faked, elizaAgent, elizaCloud, elizaSecureStore, present } from "./phone.ts";
 import type { Answering } from "./routes.ts";
-import { elizaSystem } from "./launcher.ts";
+import { elizaSystem as launcherSystem } from "./launcher.ts";
 import { elizaFiles } from "./files.ts";
 import type { Scene } from "./scene.ts";
-import { alphaCarrierSetup, elizaLocation, elizaPasswords, elizaReset, elizaSystem, elizaWiFi } from "./settings.ts";
+import { alphaCarrierSetup, elizaLocation as settingsLocation, elizaPasswords, elizaReset, elizaSystem as settingsSystem, elizaWiFi } from "./settings.ts";
 import { telephonyPlugins } from "./telephony.ts";
 import { alphaConnection } from "./platform.ts";
+
+const both = (a: Faked, b: Faked): Faked => (emit) => ({ ...a(emit), ...b(emit) });
 
 /**
  * The plugins the fake phone's host registers, by the names their `@CapacitorPlugin` gives: one line per plugin, and
@@ -21,16 +23,13 @@ export function plugins(world: Scene, services: { readonly agent: Answering; rea
     ElizaSecureStore: elizaSecureStore(world.secrets, world.slots),
     ElizaCalendar: elizaCalendar(world.calendar),
     ElizaFiles: elizaFiles(world.files),
-    ElizaLocation: elizaLocation(world.maps, () => world.now),
-    ...(world.image ? { ElizaTelephony: present, ElizaContacts: present } : {}),
-    ElizaSystem: elizaSystem(world.launcher),
-    ElizaSystem: elizaSystem(world.settings),
-    ElizaLocation: elizaLocation(world.settings),
+    ElizaLocation: both(settingsLocation(world.settings), mapsLocation(world.maps, () => world.now)),
+    ElizaSystem: both(settingsSystem(world.settings), launcherSystem(world.launcher)),
     ElizaReset: elizaReset(world.settings),
     ElizaWiFi: elizaWiFi(world.settings),
     ElizaPasswords: elizaPasswords(world.settings),
     AlphaCarrierSetup: alphaCarrierSetup(world.settings),
-    ...(world.image ? telephonyPlugins(world.telephony) : {}),
+    ...(world.image ? { ElizaTelephony: present, ElizaContacts: present, ...telephonyPlugins(world.telephony) } : {}),
     AlphaConnection: alphaConnection(world.platform),
   };
 }
