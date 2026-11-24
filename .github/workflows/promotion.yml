@@ -138,6 +138,7 @@ jobs:
         run: |
           pnpm -s build:upstream
           pnpm -s gen
+          pnpm --filter @alphacompute/alphaphone-app -s tokens
           pnpm --filter @alphacompute/alphaphone-app exec vite build --outDir ../../../../test-results/test-mocks-web
           node scripts/write-build-flags.ts test-results/test-mocks-web
           node --conditions=eliza-source --import vibelang/register scripts/audit-production-bundle.ts test-results/test-mocks-web --expect-test-mocks

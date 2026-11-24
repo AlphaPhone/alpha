@@ -43,13 +43,13 @@ if(needsDevelopment)process.env.ELIZA_DEV_ALLOW_TEST_MOCKS='1';
 const browserTestCloudProfile=join(tmpdir(),`alpha-browser-cloud-test-${randomUUID()}`);
 const development={
   // The development server explicitly opts into test mocks, fixtures and device controls.
-  command: `pnpm --filter @alphacompute/alphaphone-app exec vite --host 127.0.0.1 --port ${port} --strictPort`, url: `http://127.0.0.1:${port}`, reuseExistingServer: false, timeout: webServerTimeout,
+  command: `pnpm --filter @alphacompute/alphaphone-app run dev --port ${port} --strictPort`, url: `http://127.0.0.1:${port}`, reuseExistingServer: false, timeout: webServerTimeout,
   env: { ELIZA_DEV_ALLOW_TEST_MOCKS: '1', ALPHA_BROWSER_CLOUD_PROFILE: browserTestCloudProfile, ALPHA_VITE_CACHE_SCOPE: String(port) },
 };
 const production={
   // A flag-off production build served by vite preview: no mocks, fixtures or developer surfaces.
   // It is written outside web-dist so it never replaces a release or test-mocks build.
-  command: `pnpm --filter @alphacompute/alphaphone-app exec vite build --outDir ../../../../${productionOutput} && node scripts/write-build-flags.ts ${productionOutput} && node scripts/audit-production-bundle.ts ${productionOutput} && pnpm --filter @alphacompute/alphaphone-app exec vite preview --outDir ../../../../${productionOutput} --host 127.0.0.1 --port ${productionPort} --strictPort`,
+  command: `pnpm --filter @alphacompute/alphaphone-app -s tokens && pnpm --filter @alphacompute/alphaphone-app exec vite build --outDir ../../../../${productionOutput} && node scripts/write-build-flags.ts ${productionOutput} && node scripts/audit-production-bundle.ts ${productionOutput} && pnpm --filter @alphacompute/alphaphone-app exec vite preview --outDir ../../../../${productionOutput} --host 127.0.0.1 --port ${productionPort} --strictPort`,
   url: `http://127.0.0.1:${productionPort}`, reuseExistingServer: false, timeout: webServerTimeout,
   env: { ELIZA_DEV_ALLOW_TEST_MOCKS: '', VITE_LOCAL_AGENT: '', ALPHA_VITE_CACHE_SCOPE: String(productionPort) },
 };
