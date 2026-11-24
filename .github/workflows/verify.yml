@@ -4,6 +4,7 @@ name: Verify
 # is promoted to main; authors run them locally before finalising a pull request.
 on:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
