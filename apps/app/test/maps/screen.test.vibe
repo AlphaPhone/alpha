@@ -18,6 +18,8 @@ import { ferry, fixAt, harness, pier, until } from "./fakes.vibe"
 
 const open = { id: "alpha-osm", data: "OpenStreetMap" }
 const google = { id: "eliza-cloud-google", data: "Google Maps" }
+/** Across the bay from the ferry, outside the area a copyright asked at the ferry covers. */
+const oakland = { latitude: 37.8044, longitude: -122.2712 }
 
 /** A place picked from a search for "pier", with its details settled. */
 effect function pickedPier() {
@@ -183,7 +185,7 @@ it.live("The copyright shown is the latest reply for the view, and a failed one 
     try plane.settled(ferry, 14, 400, 800)
     const shown = try until(machine.changes, (s) => s.copyrightShown)
     try Ref.set(h.refuseNext, 1)
-    try plane.settled(pier, 14, 400, 800)
+    try plane.settled(oakland, 14, 400, 800)
     const failed = try until(machine.changes, (s) => s.copyrightFailed)
     const got1 = try (try MapsContent).get()
     try Effect.try(() => assert.deepStrictEqual(
