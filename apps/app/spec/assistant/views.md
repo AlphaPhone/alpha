@@ -1,9 +1,9 @@
 # Views
 
 The views the agent opens on this phone and the commands it gives inside
-them. A turn tells the agent which renderer it may deliver to
-(`viewClientId`, `viewDelivery: "completed-action"` and the view in front,
-`uiView`) unless the screen is private. A reply whose action results
+them. A typed turn tells the agent which renderer it may deliver to
+(`viewClientId`, `viewDelivery: "completed-action"`, the view in front,
+and `uiView`) unless the screen is private. A reply whose action results
 prepared a view (`navigationPrepared` with a `navigationBinding` for this
 renderer) is delivered by the owner-bound claim of the agent's view routes:
 `POST /api/views/interact-claim` with the binding, then exactly one
@@ -66,10 +66,11 @@ pure def lawMapsIsNeverClaimedTwice(known: bool): bool = not(assistantClaims("ma
 
 ### A claimed saved Notes editor confirms only the note that is shown
 
-An observed turn advertises `saved-note-v1` for its own renderer. For a prepared
-Notes editor the renderer asks for that claim protocol. The saved note ID
+An observed typed turn advertises `voiceUi.uiNotesEditor: "saved-note-v1"`
+for its own renderer. For a prepared Notes editor the renderer asks for that
+claim protocol. The saved note ID
 comes from the claim, and the one success result names it only while the same
-session shows that editor. An absent record, an open dirty draft, or a
+session shows that editor. An absent record, another note's unsaved edit, or a
 changed screen before the switch leaves the claim without a success.
 
 ```quint

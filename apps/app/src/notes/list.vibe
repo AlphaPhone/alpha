@@ -1,5 +1,5 @@
-// spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"; spec/notes/list.md, "A record is shown as its kind only when it carries that kind's data"; spec/notes/list.md, "A row carries only an opaque recording handle, checked against its own recording"; spec/notes/list.md, "A row is shown when it matches every part of the filter"; spec/notes/list.md, "A Notes route opens one note or shows one list filter, and the plain list otherwise"; spec/notes/list.md, "A default title takes the next number after the highest one in use, Trash included"; spec/notes/list.md, "Only a named, quoted or plainly titled note opens locally; a relative reference goes to the agent"; spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
-import { itemMark, nextDefaultNumber, opensLocally, routeAsk, rowMatches, shownKind, shownOrder, voiceAudioValid, type NoteKind } from "../../gen/notes__list.effect.vibe"
+// spec/notes/list.md, "The list holds every row once, pinned rows first, then by time, ties in stored order"; spec/notes/list.md, "A record is shown as its kind only when it carries that kind's data"; spec/notes/list.md, "A row carries only an opaque recording handle, checked against its own recording"; spec/notes/list.md, "A row is shown when it matches every part of the filter"; spec/notes/list.md, "A Notes route opens one note or shows one list filter, and the plain list otherwise"; spec/notes/list.md, "A default title takes the next number after the highest one in use, Trash included"; spec/notes/list.md, "A checked item is written with an [x] mark, and an unchecked item that looks marked gets an empty mark"
+import { itemMark, nextDefaultNumber, routeAsk, rowMatches, shownKind, shownOrder, voiceAudioValid, type NoteKind } from "../../gen/notes__list.effect.vibe"
 import { authoredNoteText } from "@elizaos/plugin-notes/format"
 import { projectNoteForModel, reconstructNoteContent, type NoteFormat, type StickyNote } from "@elizaos/plugin-notes/types"
 
@@ -258,32 +258,4 @@ export function checklistItems(body: string): CheckItem[] {
     const mark = checkMark.exec(text)
     return mark ? { t: text.slice(mark[0].length).trim(), done: mark[1] !== " " } : { t: text, done: false }
   })
-}
-
-/** The owner's words of a turn, without the wake word and politeness. */
-export function ownerCommand(text: string): string {
-  return text.trim().replace(/^(?:(?:hey )?alpha[,\s]+)?(?:(?:could|can|would) you\s+)?(?:please\s+)?/i, "")
-}
-
-function unquote(text: string): string {
-  return text.trim().replace(/^(?:"([\s\S]*)"|“([\s\S]*)”)$/, (_match, straight: string | undefined, curly: string | undefined) => straight ?? curly ?? "")
-}
-
-/** The title a request opens locally, or undefined when it stays with the agent. */
-export function namedNoteOpenRequest(text: string): string | undefined {
-  const request = ownerCommand(text).replace(/[.!?]+$/, "").trim()
-  const command = request.replace(/^(?:(?:in|from) (?:the )?notes(?: app)?[, ]+|(?:go|switch) to (?:the )?notes(?: app)? and )/i, "")
-  const named = /^(?:open|show)(?: me)? (?:the |my )?note (?:called|named|titled) (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
-  const quoted = /^(?:open|show)(?: me)? ((?:the |my )?note )?(".+"|“.+”)( in (?:the )?notes(?: app)?)?$/i.exec(command)
-  const quotedTitle = quoted && (request !== command || quoted[1] || quoted[3]) ? quoted[2] : undefined
-  const shorthand = /^(?:open|show)(?: me)? (?:the |my )?(.+?) note(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
-    ?? /^(?:open|show)(?: me)? (?:the |my )?note (.+?)(?: in (?:the )?notes(?: app)?)?$/i.exec(command)
-    ?? /^open (.+?) in (?:the )?notes(?: app)?$/i.exec(command)
-  const target = named?.[1] ?? quotedTitle ?? shorthand?.[1]
-  const reference = (target ?? "").replace(/^(?:a|an|the|my) /i, "").replace(/ (?:note|one)$/i, "")
-  const generic = /^(?:a|an|the|my|this|that|it|new|(?:new )?(?:empty|blank)|any|another|some|first|last|latest|newest|oldest|(?:most |least )?recent|previous|note|one)$/i.test(reference)
-  const relative = /^(?:(?:i|you|we) )?(?:just|last|(?:most )?recently) (?:made|wrote|created|saved|edited|updated|opened)$/i.test(reference)
-  const title = unquote(target ?? "").trim()
-  const hasTitle = title !== "" && !/[\r\n]/.test(title)
-  return opensLocally(named !== null, quotedTitle !== undefined, generic, relative, hasTitle) ? title : undefined
 }

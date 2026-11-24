@@ -171,8 +171,12 @@ export const assistantHostLive = Layer.effect(AssistantHost, effect {
       if (owner === undefined || !(try current)) return false
       const before = try notes.current()
       if (before?.owner !== owner || !before.snapshot.notes.some((note) => note.id === id)) try notes.refresh()
-      if (!(try current) || (try session.ownerKey("notes")) !== owner || (try notes.current())?.owner !== owner) return false
-      if (!(try notesEditor.openClaimedNote(id))) return false
+      const fresh = effect {
+        if (!(try current) || (try session.ownerKey("notes")) !== owner) return false
+        const held = try notes.current()
+        return held?.owner === owner && held.snapshot.notes.some((note) => note.id === id)
+      }
+      if (!(try notesEditor.openClaimedNote(id, fresh))) return false
       if (!(try current)) return (try shownSavedNote()) === id
       return try openView("notes", id)
     },

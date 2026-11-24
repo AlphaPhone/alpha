@@ -5,6 +5,7 @@ import { textCreationAllowed } from "../../gen/notes__collection.effect.vibe"
 import {
   type Editor, type Event as EditorEvent, Machine as EditorMachine, dirty, leavePlan, machine as editorMachine, selectionCurrent,
 } from "../../gen/notes__editor.effect.vibe"
+import { agentOpensNote, noteOpenWaitMs } from "../../gen/notes__list.effect.vibe"
 import type { NotesFailure } from "./client.vibe"
 import { NotesBusy, NotesCollection, NotesRetired, type OwnedSnapshot } from "./collection.vibe"
 import { NotesDrafts } from "./drafts.vibe"
@@ -46,7 +47,7 @@ export service NotesEditor {
   draft(): (DraftContent | undefined)!!
   openNote(id: string): boolean!!
   /** Open a claimed saved note without saving an edit or leaving a pending review. */
-  openClaimedNote(id: string): boolean!!
+  openClaimedNote(id: string, current: Effect.Effect<boolean>): boolean!!
   newNote(kind: "text" | "list", folderId?: string): boolean!!
   edit(patch: DraftPatch): boolean!!
   save(): boolean!!
@@ -295,11 +296,18 @@ const make = effect {
     unsaved: Stream.fromPubSub(unsaved),
     draft: () => SubscriptionRef.get(content),
     openNote,
-    effect openClaimedNote(id: string) {
+    // spec/notes/list.md, "The agent opens the one saved note I named, and never over another note's unsaved edit"
+    effect openClaimedNote(id: string, current: Effect.Effect<boolean>) {
+      if (!(try current)) return false
+      if (!(try machine.get()).known.includes(id)) {
+        const known = timeout(Stream.runHead(Stream.filter(machine.changes, (state) => state.known.includes(id))), noteOpenWaitMs) catch () => undefined
+        if (known === undefined || known._tag === "None") return false
+      }
+      if (!(try current)) return false
       const state = try machine.get()
-      if (state.saving || state.review || state.mutation !== "NoMutation" || dirty(state)) return false
-      if (state.present && state.draftId === id) return selectionCurrent(state)
-      return try openNote(id)
+      const alreadyOpen = state.present && state.draftId === id
+      if (state.saving || state.review || state.mutation !== "NoMutation" || !agentOpensNote(alreadyOpen, dirty(state))) return false
+      return alreadyOpen ? selectionCurrent(state) : try openNote(id)
     },
     effect newNote(kind: "text" | "list", folderId?: string) {
       if (!(try leave())) return false
