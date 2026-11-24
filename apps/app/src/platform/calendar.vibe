@@ -5,6 +5,12 @@ import { registered } from "./device.vibe"
 module held {
   import { calendarClient, calendarPlugin } from "@elizaos/os/bridges/calendar"
   import type { AndroidCalendarEditorFields, CalendarClient } from "@elizaos/os/bridges/calendar"
+  import { rendererDeletionClock } from "@elizaos/os/bridges/deletion-window"
+
+  /** How long, by the clock eliza's deletion window keeps, until `expiresElapsed`. @throws {never} */
+  export function untilElapsed(expiresElapsed: number): number {
+    return Math.max(0, expiresElapsed - rendererDeletionClock().elapsed)
+  }
 
   /**
    * The calls of eliza's `ElizaCalendar` plugin that its typed client does not name yet: a create under a creation
@@ -28,7 +34,7 @@ module held {
     return calendarPlugin() as unknown as Creations
   }
 }
-import { type Creations, client, creations } from held
+import { type Creations, client, creations, untilElapsed } from held
 
 /** The phone's calendar could not be read or written: the plugin refused, or did not answer. */
 export error CalendarUnread { cause: unknown }
@@ -62,7 +68,9 @@ export service PhoneCalendar {
   create(fields: AndroidCalendarEditorFields, creationId: string, separate: boolean): Written!!
   created(creationId: string): boolean!CalendarUnread
   update(pick: CalendarPick, fields: AndroidCalendarEditorFields): Written!!
+  /** Stage the deletion through the phone's review: how many milliseconds its Undo window has left, or none where the review refused it. */
   stage(pick: CalendarPick, scope: AndroidCalendarDeletionScope): Option.Option<number>!!
+  /** Send a staged deletion once its window is over; one the review still holds is refused, and nothing is sent. */
   dispatch(id: string): Written!!
 }
 
@@ -107,12 +115,14 @@ export const phoneCalendar = Layer.sync(PhoneCalendar, () => {
       if (inspected.kind !== "ready") return Option.none<number>()
       const deadline = await review.stageDeletion(inspected.ticket)
       staged.set(pick.event.id, review)
-      return Option.some(deadline.expiresAt)
+      return Option.some(untilElapsed(deadline.expiresElapsed))
     }), () => Option.none<number>()),
     dispatch: (id: string) => Effect.orElseSucceed(tryPromise(async (): Promise<Written> => {
       const review = staged.get(id)
       staged.delete(id)
-      return review === undefined ? refused : writtenOf(await review.dispatchDeletion())
+      if (review === undefined) return refused
+      const dispatched = await review.dispatchDeletion().then(writtenOf, (cause: unknown) => (typeof cause === "object" && cause !== null && "_tag" in cause && cause._tag === "CalendarNotAllowed" ? refused : lost))
+      return dispatched
     }), () => lost),
   }
 })

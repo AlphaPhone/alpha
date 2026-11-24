@@ -89,7 +89,8 @@ effect function send(attempt: number, kind: "Create" | "Update" | "Remove" | "Re
   if (which === undefined) return refused
   const staged = try phone.stage(pickOf(row), which)
   if (Option.isNone(staged)) return refused
-  try (try Time).until(staged.value)
+  const time = try Time
+  try time.until((try time.now()) + staged.value)
   return try phone.dispatch(row.key)
 }
 
